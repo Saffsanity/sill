@@ -1,0 +1,80 @@
+import Foundation
+import Network
+import StreamProtocol
+
+/// Advertises _winstream._tcp over Bonjour and pushes messages to every connected client.
+/// Slow clients drop delta frames rather than building a queue (that queue is latency).
+final class StreamServer {
+    private final class Client {
+        let connection: NWConnection
+        var inflight = 0
+        var needsKeyframe = true
+        init(_ c: NWConnection) { connection = c }
+    }
+
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "winstream.net", qos: .userInteractive)
+    private var clients: [ObjectIdentifier: Client] = [:]
+    private var lastParameterSets: Data?
+    var onClientConnected: (() -> Void)?
+
+    init(serviceType: String = "_winstream._tcp") throws {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.includePeerToPeer = true
+        listener = try NWListener(using: params)
+        listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
+        listener.stateUpdateHandler = { state in
+            if case .failed(let e) = state { print("Listener failed: \(e)"); exit(1) }
+        }
+        listener.newConnectionHandler = { [weak self] c in self?.accept(c) }
+    }
+
+    func start() { listener.start(queue: queue) }
+
+    private func accept(_ connection: NWConnection) {
+        let client = Client(connection)
+        let id = ObjectIdentifier(connection)
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                print("Client connected: \(connection.endpoint)")
+                self?.onClientConnected?()
+            case .failed, .cancelled:
+                print("Client left: \(connection.endpoint)")
+                self?.clients[id] = nil
+            default: break
+            }
+        }
+        clients[id] = client
+        connection.start(queue: queue)
+    }
+
+    /// Thread-safe: hops onto the network queue.
+    func broadcast(_ message: StreamMessage) {
+        let data = message.serialized()
+        queue.async { [self] in
+            if message.kind == .parameterSets { lastParameterSets = data }
+            for client in clients.values where client.connection.state == .ready {
+                if message.kind == .frame {
+                    if client.needsKeyframe {
+                        guard message.isKeyframe, let ps = lastParameterSets else { continue }
+                        send(ps, to: client)
+                        client.needsKeyframe = false
+                    } else if client.inflight > 2 && !message.isKeyframe {
+                        continue   // drop the delta; the next keyframe will resync
+                    }
+                }
+                send(data, to: client)
+            }
+        }
+    }
+
+    private func send(_ data: Data, to client: Client) {
+        client.inflight += 1
+        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+            client?.inflight -= 1
+        })
+    }
+}
