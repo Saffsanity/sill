@@ -35,7 +35,7 @@ final class StreamClient: ObservableObject {
 
     private var browser: NWBrowser?
     private var connection: NWConnection?
-    private let queue = DispatchQueue(label: "winstream.net", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var frameCounter = 0
     private var frameAgeMs = 0
     private var lastParameterSets: ParameterSets?
@@ -44,7 +44,7 @@ final class StreamClient: ObservableObject {
     func startBrowsing() {
         let params = NWParameters()
         params.includePeerToPeer = true
-        let browser = NWBrowser(for: .bonjour(type: "_winstream._tcp", domain: nil), using: params)
+        let browser = NWBrowser(for: .bonjour(type: "_sill._tcp", domain: nil), using: params)
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             DispatchQueue.main.async { self?.hosts = Array(results) }
         }

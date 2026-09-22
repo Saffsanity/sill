@@ -6,7 +6,7 @@ import CoreMedia
 /// The coordinator stops and restarts it whenever the client picks a different source.
 final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
-    private let queue = DispatchQueue(label: "winstream.capture", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "sill.capture", qos: .userInteractive)
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
     /// The stream ended on its own (window closed, permission revoked). Called on an SCK thread.
     var onStopped: ((Error) -> Void)?

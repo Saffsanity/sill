@@ -1,8 +1,10 @@
-# winstream
+# Sill
 
 Open-source, free app that streams individual Mac app windows to iPhone and iPad
 (designed for iPhone Duo first), with a free Mac companion. Tip jar, no
 subscription, no servers. Read `docs/BRIEF.md` before doing product-level work.
+
+Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
@@ -29,7 +31,7 @@ with the stopwatch-photo method in the README when convenient and record it here
 - Mac host builds and runs from `swift build -c release`: window listing,
   ScreenCaptureKit capture, VideoToolbox HEVC encode, Bonjour advertisement,
   TCP fan-out to clients.
-- iOS client is a real Xcode project (`iOSClient/WinStream.xcodeproj`), builds
+- iOS client is a real Xcode project (`iOSClient/Sill.xcodeproj`), builds
   clean, runs on Noah's iPad Mini (the test device: iPad scalability plus a
   Duo-like aspect ratio).
 - End to end verified on Wi-Fi: ~58 fps captured, encoded and sent with zero
@@ -52,19 +54,19 @@ with the stopwatch-photo method in the README when convenient and record it here
 ## Layout
 
 - `Package.swift` — SwiftPM. `StreamProtocol` (shared wire format, iOS + macOS)
-  and `WinStreamHost` (macOS CLI executable).
+  and `SillHost` (macOS CLI executable).
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
-- `Sources/WinStreamHost/` — `StreamCoordinator` (main actor; owns the pipeline,
+- `Sources/SillHost/` — `StreamCoordinator` (main actor; owns the pipeline,
   switches sources on client request, brings the picked app forward),
   `WindowCatalog` (polls on-screen windows, thumbnails via SCScreenshotManager,
   app icons, installed apps), `WindowCapture` (ScreenCaptureKit), `HEVCEncoder`
-  (VideoToolbox), `StreamServer` (Network.framework + Bonjour `_winstream._tcp`,
+  (VideoToolbox), `StreamServer` (Network.framework + Bonjour `_sill._tcp`,
   both directions), `Stats` (per-second counters), `main.swift` (knobs: fps,
   scale, bitrate, prioritizeSpeed).
-- `iOSClient/` — `WinStream.xcodeproj` and its sources: `StreamClient`
+- `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient`
   (Bonjour, connection, message parsing), `StreamScreen` (top bar with live
   thumbnails + app drawer, built to the design boards), `HEVCDisplayView`,
   `ContentView` (connect screen). `Info.plist` has the local network + Bonjour
@@ -76,13 +78,13 @@ with the stopwatch-photo method in the README when convenient and record it here
 
 ```
 swift build -c release
-swift run -c release WinStreamHost              # nothing streams until the iOS app picks a window
-swift run -c release WinStreamHost Safari       # optional: preselect a matching window
+swift run -c release SillHost              # nothing streams until the iOS app picks a window
+swift run -c release SillHost Safari       # optional: preselect a matching window
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.
 First run prompts for Screen Recording (grant to Terminal or whatever launched it).
-iOS side: open `iOSClient/WinStream.xcodeproj`, set your team, run on a real
+iOS side: open `iOSClient/Sill.xcodeproj`, set your team, run on a real
 device on the same Wi-Fi.
 
 ## Conventions

@@ -64,6 +64,12 @@ fixed order, badge on windows with open dialogs); leftmost searchable app
 drawer; rightmost full-desktop button; side rail or auto-hide bar in landscape;
 never span the Duo crease in half-folded posture.
 
+## Name
+
+Sill. A window sill: the ledge a window sits on. Chosen 2026-09-22 over
+Casement, Folio, Nomos; checked the App Store for collisions (only a small
+unrelated "Sill." social app).
+
 ## Scope
 
 v1 objective: ship a free app that streams single Mac windows over LAN and
@@ -100,5 +106,4 @@ Costs: $99/yr developer account, domain, optionally a Duo for testing.
 ## Open questions
 
 - Hours per week Noah can really commit.
-- App name.
 - Apache-2.0 vs MPL-2.0.

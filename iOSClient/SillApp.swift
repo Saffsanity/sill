@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct WinStreamApp: App {
+struct SillApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -1,4 +1,4 @@
-# winstream — latency spike
+# Sill — latency spike
 
 Milestone 1 of the Mac window streaming app: capture one Mac window with
 ScreenCaptureKit, hardware-encode it to HEVC, push it over the local network,
@@ -13,7 +13,7 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
 
 ```
 cd winstream
-swift run -c release WinStreamHost Safari
+swift run -c release SillHost Safari
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
@@ -24,17 +24,17 @@ selected, the default build system fails to start; `swift build -c release
 --build-system native` works there as a fallback. First run: macOS asks for Screen Recording for Terminal
 (or Xcode, if you run it from there). Grant it, run again.
 
-Knobs are at the top of `Sources/WinStreamHost/main.swift`: fps, scale,
+Knobs are at the top of `Sources/SillHost/main.swift`: fps, scale,
 bitrate, prioritizeSpeed. Start at the defaults, change one at a time.
 
 ## iOS client (5 minutes)
 
-1. Open `iOSClient/WinStream.xcodeproj`. It already links the local
+1. Open `iOSClient/Sill.xcodeproj`. It already links the local
    `StreamProtocol` package (this folder), sets Swift 5 language mode for the
    spike, and carries an `Info.plist` with `NSLocalNetworkUsageDescription` and
-   `NSBonjourServices = [_winstream._tcp]`.
+   `NSBonjourServices = [_sill._tcp]`.
 2. Target → Signing & Capabilities → pick your team. Change the bundle
-   identifier if `com.winstream.WinStream` collides with something.
+   identifier if `me.saffer.sill` collides with something.
 3. Run on a real device on the same Wi-Fi. Tap the Mac's name.
 
 The project is a plain Xcode project checked in by hand: four source files,

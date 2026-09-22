@@ -6,7 +6,7 @@
 	<string>Finds your Mac on the local network.</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_winstream._tcp</string>
+		<string>_sill._tcp</string>
 	</array>
 </dict>
 </plist>

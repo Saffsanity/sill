@@ -26,7 +26,7 @@ Task { @MainActor in
         let c = try StreamCoordinator(fps: fps, scale: scale, bitrate: bitrate, prioritizeSpeed: prioritizeSpeed)
         coordinator = c
         await c.start(preselect: preselect)
-        print("\(c.catalog.infos.count) windows on screen. Advertising _winstream._tcp on the local network.")
+        print("\(c.catalog.infos.count) windows on screen. Advertising _sill._tcp on the local network.")
         if c.active == .none { print("Nothing is streaming yet: pick a window from the iOS app. Ctrl-C to stop.") }
         Stats.shared.startPrinting()
     } catch {

@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "winstream",
+    name: "Sill",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "StreamProtocol", targets: ["StreamProtocol"]),
-        .executable(name: "WinStreamHost", targets: ["WinStreamHost"]),
+        .executable(name: "SillHost", targets: ["SillHost"]),
     ],
     targets: [
         .target(name: "StreamProtocol"),
-        .executableTarget(name: "WinStreamHost", dependencies: ["StreamProtocol"]),
+        .executableTarget(name: "SillHost", dependencies: ["StreamProtocol"]),
     ]
 )

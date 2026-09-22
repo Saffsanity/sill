@@ -2,7 +2,7 @@ import Foundation
 import Network
 import StreamProtocol
 
-/// Advertises _winstream._tcp over Bonjour and pushes messages to every connected client.
+/// Advertises _sill._tcp over Bonjour and pushes messages to every connected client.
 /// Slow clients drop delta frames rather than building a queue (that queue is latency).
 final class StreamServer {
     private final class Client {
@@ -13,7 +13,7 @@ final class StreamServer {
     }
 
     private let listener: NWListener
-    private let queue = DispatchQueue(label: "winstream.net", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
     /// A client finished connecting. Called on the network queue.
@@ -21,7 +21,7 @@ final class StreamServer {
     /// A message from a client (selectSource, launchApp). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection) -> Void)?
 
-    init(serviceType: String = "_winstream._tcp") throws {
+    init(serviceType: String = "_sill._tcp") throws {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         let params = NWParameters(tls: nil, tcp: tcp)
