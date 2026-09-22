@@ -3,8 +3,17 @@ import Foundation
 /// Wire format shared by the Mac host and the iOS client.
 /// Header (14 bytes, big endian): kind(1) timestamp(8, Double) isKeyframe(1) payloadLength(4)
 public enum StreamMessageKind: UInt8 {
+    // Host → client: video
     case parameterSets = 0   // payload: ParameterSets.encoded()
     case frame = 1           // payload: one HEVC access unit, length-prefixed NALs (hvcC style)
+    // Host → client: window switcher catalog (see Switcher.swift)
+    case windowList = 2      // JSON WindowList; sent on connect and whenever windows or the active source change
+    case thumbnail = 3       // ImageBlob: windowID(4) + JPEG, refreshed every second or two per window
+    case appIcon = 4         // ImageBlob: bundleID + PNG, once per app
+    case appList = 5         // JSON [AppInfo]: installed apps for the drawer's "All apps"
+    // Client → host
+    case selectSource = 6    // JSON StreamSource: what to stream
+    case launchApp = 7       // JSON LaunchApp: open an installed app; its first window gets selected
 }
 
 public struct StreamHeader {

@@ -2,40 +2,19 @@ import Foundation
 import ScreenCaptureKit
 import CoreMedia
 
-/// Captures one Mac window with ScreenCaptureKit and hands out 420f pixel buffers.
+/// Runs one ScreenCaptureKit stream (a window or a display) and hands out 420f pixel buffers.
+/// The coordinator stops and restarts it whenever the client picks a different source.
 final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "winstream.capture", qos: .userInteractive)
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    /// The stream ended on its own (window closed, permission revoked). Called on an SCK thread.
+    var onStopped: ((Error) -> Void)?
 
-    /// Picks the first on-screen window whose app name or title contains `match` (case-insensitive).
-    /// With no match given, prints the list and picks the frontmost app's first window.
-    static func findWindow(matching match: String?) async throws -> SCWindow {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let candidates = content.windows.filter { w in
-            guard let app = w.owningApplication, w.frame.width > 100, w.frame.height > 100 else { return false }
-            return app.bundleIdentifier != Bundle.main.bundleIdentifier
-        }
-        print("On-screen windows:")
-        for w in candidates {
-            print("  \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "(untitled)")  \(Int(w.frame.width))×\(Int(w.frame.height))")
-        }
-        if let match = match?.lowercased() {
-            if let w = candidates.first(where: {
-                ($0.owningApplication?.applicationName.lowercased().contains(match) ?? false) ||
-                ($0.title?.lowercased().contains(match) ?? false)
-            }) { return w }
-            throw CaptureError.noWindow("Nothing matched \"\(match)\"")
-        }
-        guard let w = candidates.first else { throw CaptureError.noWindow("No windows on screen") }
-        return w
-    }
-
-    func start(window: SCWindow, scale: CGFloat, fps: Int) async throws {
-        let filter = SCContentFilter(desktopIndependentWindow: window)
+    func start(filter: SCContentFilter, width: Int, height: Int, fps: Int) async throws {
         let config = SCStreamConfiguration()
-        config.width = evenPixels(window.frame.width * scale)
-        config.height = evenPixels(window.frame.height * scale)
+        config.width = width
+        config.height = height
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
@@ -49,8 +28,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() async {
-        try? await stream?.stopCapture()
-        stream = nil
+        guard let stream else { return }
+        self.stream = nil
+        try? await stream.stopCapture()
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -67,13 +47,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        print("Capture stopped: \(error.localizedDescription)")
-        exit(1)
-    }
-
-    enum CaptureError: Error, CustomStringConvertible {
-        case noWindow(String)
-        var description: String { if case .noWindow(let s) = self { return s }; return "capture error" }
+        guard stream === self.stream else { return }   // a stream we already replaced
+        self.stream = nil
+        onStopped?(error)
     }
 }
 

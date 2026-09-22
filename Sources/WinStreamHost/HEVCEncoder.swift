@@ -5,6 +5,8 @@ import StreamProtocol
 
 /// Hardware HEVC encoder tuned for low latency: real time, no B-frames, long GOP.
 final class HEVCEncoder {
+    let width: Int
+    let height: Int
     private var session: VTCompressionSession?
     private var forceKeyframe = false
     /// Most recent captured frame. ScreenCaptureKit only delivers frames when the window repaints,
@@ -17,6 +19,8 @@ final class HEVCEncoder {
     var onEncoded: ((_ data: Data, _ isKeyframe: Bool, _ parameterSets: ParameterSets?) -> Void)?
 
     init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool) throws {
+        self.width = width
+        self.height = height
         var s: VTCompressionSession?
         let status = VTCompressionSessionCreate(
             allocator: nil, width: Int32(width), height: Int32(height),

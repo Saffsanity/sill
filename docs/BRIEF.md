@@ -78,8 +78,8 @@ address.
 Out: hole punching, multi-window, layout customization, audio, AV1.
 
 Milestones (solo, ~10 hrs/week; halve at 20):
-1. Latency spike, capture→encode→decode — 2–3 wks  ← NOW
-2. Input and window control — 3–5 wks
+1. Latency spike, capture→encode→decode — done 2026-09-22 (streams to iPad Mini; latency number still to record)
+2. Input and window control — 3–5 wks  ← NOW
 3. Virtual display and scaling — 2–4 wks
 4. Client UI and Duo layouts — 4–6 wks
 5. Pairing, encryption, reconnect — 2–4 wks
