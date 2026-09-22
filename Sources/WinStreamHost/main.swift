@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import StreamProtocol
 
 // Knobs for the latency spike. Change, rebuild, measure.
@@ -9,7 +10,13 @@ let prioritizeSpeed = false       // Apple: trades quality for encode speed; try
 
 let match = CommandLine.arguments.dropFirst().first
 
-Task {
+// ScreenCaptureKit talks to the window server through CoreGraphics, which must be
+// initialized on the main thread before any other thread touches it. In a CLI tool
+// nothing does that for us, so prime it here and keep stream setup on the main actor.
+// Otherwise SCStream aborts with "Assertion failed: (did_initialize), CGS_REQUIRE_INIT".
+_ = CGMainDisplayID()
+
+Task { @MainActor in
     do {
         let window = try await WindowCapture.findWindow(matching: match)
         let width = evenPixels(window.frame.width * scale)

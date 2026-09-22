@@ -20,8 +20,9 @@ build errors in the CoreMedia/VideoToolbox calls and just fix them.
 - `Sources/WinStreamHost/` — `WindowCapture` (ScreenCaptureKit), `HEVCEncoder`
   (VideoToolbox), `StreamServer` (Network.framework + Bonjour `_winstream._tcp`),
   `main.swift` (knobs: fps, scale, bitrate, prioritizeSpeed).
-- `iOSClient/` — files to drop into an Xcode iOS App project (see README).
-  Not yet an Xcode project; creating one is a fine first task.
+- `iOSClient/` — `WinStream.xcodeproj` plus its four sources, `Info.plist`
+  (local network + Bonjour keys) and an asset catalog. The project depends on
+  this folder as a local package for `StreamProtocol`. Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
@@ -30,9 +31,11 @@ build errors in the CoreMedia/VideoToolbox calls and just fix them.
 swift build -c release
 swift run -c release WinStreamHost <app name or window title>
 ```
+Needs Xcode as the active developer directory with its license accepted; with
+Command Line Tools only, add `--build-system native`.
 First run prompts for Screen Recording (grant to Terminal or whatever launched it).
-iOS side: Xcode, real device, same Wi-Fi. Info.plist needs
-`NSLocalNetworkUsageDescription` and `NSBonjourServices = [_winstream._tcp]`.
+iOS side: open `iOSClient/WinStream.xcodeproj`, set your team, run on a real
+device on the same Wi-Fi.
 
 ## Conventions
 

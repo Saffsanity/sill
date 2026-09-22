@@ -69,7 +69,7 @@ final class HEVCDisplayView: UIView {
                                         sampleBufferOut: &sample) == noErr, let sample else { return }
 
         // Show each frame as soon as it decodes instead of scheduling by timestamp.
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? NSArray,
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as NSArray?,
            let first = attachments.firstObject as? NSMutableDictionary {
             first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
         }

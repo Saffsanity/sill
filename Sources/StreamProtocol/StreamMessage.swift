@@ -97,7 +97,7 @@ extension Data {
     func readBigEndian<T: FixedWidthInteger>(_ type: T.Type, at offset: Int) -> T {
         var v: T = 0
         let start = startIndex + offset
-        Swift.withUnsafeMutableBytes(of: &v) { dst in
+        _ = Swift.withUnsafeMutableBytes(of: &v) { dst in
             copyBytes(to: dst, from: start..<(start + MemoryLayout<T>.size))
         }
         return T(bigEndian: v)

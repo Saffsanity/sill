@@ -17,26 +17,28 @@ swift run -c release WinStreamHost Safari
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
-of on-screen windows. First run: macOS asks for Screen Recording for Terminal
+of on-screen windows. `swift build` needs Xcode selected as the developer
+directory (`sudo xcode-select -s /Applications/Xcode.app`) with its license
+accepted (`sudo xcodebuild -license accept`). With only the Command Line Tools
+selected, the default build system fails to start; `swift build -c release
+--build-system native` works there as a fallback. First run: macOS asks for Screen Recording for Terminal
 (or Xcode, if you run it from there). Grant it, run again.
 
 Knobs are at the top of `Sources/WinStreamHost/main.swift`: fps, scale,
 bitrate, prioritizeSpeed. Start at the defaults, change one at a time.
 
-## iOS client (10 minutes)
+## iOS client (5 minutes)
 
-1. Xcode → New Project → iOS App, SwiftUI. Name it `WinStream`.
-2. Delete the generated `ContentView.swift` and `WinStreamApp.swift`. Drag the
-   four files from `iOSClient/` into the project.
-3. File → Add Package Dependencies → Add Local → pick this `winstream` folder.
-   Link the `StreamProtocol` library to the app target.
-4. Target → Info, add:
-   - `Privacy - Local Network Usage Description` (`NSLocalNetworkUsageDescription`): "Finds your Mac on the local network."
-   - `Bonjour services` (`NSBonjourServices`), array with one item: `_winstream._tcp`
-5. If the project defaults to Swift 6 strict concurrency, set the target's
-   Swift Language Version to Swift 5 for the spike. Thread safety here is by
-   hand and documented in the comments.
-6. Run on a real device on the same Wi-Fi. Tap the Mac's name.
+1. Open `iOSClient/WinStream.xcodeproj`. It already links the local
+   `StreamProtocol` package (this folder), sets Swift 5 language mode for the
+   spike, and carries an `Info.plist` with `NSLocalNetworkUsageDescription` and
+   `NSBonjourServices = [_winstream._tcp]`.
+2. Target → Signing & Capabilities → pick your team. Change the bundle
+   identifier if `com.winstream.WinStream` collides with something.
+3. Run on a real device on the same Wi-Fi. Tap the Mac's name.
+
+The project is a plain Xcode project checked in by hand: four source files,
+an asset catalog, and the package reference. Nothing else.
 
 ## Measuring latency
 
