@@ -16,6 +16,13 @@ let match = CommandLine.arguments.dropFirst().first
 // Otherwise SCStream aborts with "Assertion failed: (did_initialize), CGS_REQUIRE_INIT".
 _ = CGMainDisplayID()
 
+// The pipeline lives as long as the process. These are globals on purpose: as locals inside the
+// Task below they were released the moment setup finished, which silently stopped the SCStream
+// after its first frame.
+var encoder: HEVCEncoder?
+var server: StreamServer?
+var capture: WindowCapture?
+
 Task { @MainActor in
     do {
         let window = try await WindowCapture.findWindow(matching: match)
@@ -27,6 +34,9 @@ Task { @MainActor in
         let encoder = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: prioritizeSpeed)
         let server = try StreamServer()
         let capture = WindowCapture()
+        WinStreamHost.encoder = encoder
+        WinStreamHost.server = server
+        WinStreamHost.capture = capture
 
         server.onClientConnected = { encoder.requestKeyframe() }
         encoder.onEncoded = { data, isKey, parameterSets in
@@ -41,6 +51,7 @@ Task { @MainActor in
         server.start()
         try await capture.start(window: window, scale: scale, fps: fps)
         print("Advertising _winstream._tcp on the local network. Open the iOS app. Ctrl-C to stop.")
+        Stats.shared.startPrinting()
     } catch {
         print("Error: \(error)")
         print("If this is a permissions error: System Settings › Privacy & Security › Screen Recording, enable Terminal, then run again.")

@@ -59,12 +59,14 @@ final class StreamServer {
             for client in clients.values where client.connection.state == .ready {
                 if message.kind == .frame {
                     if client.needsKeyframe {
-                        guard message.isKeyframe, let ps = lastParameterSets else { continue }
+                        guard message.isKeyframe, let ps = lastParameterSets else { Stats.shared.bump("net.waitKey"); continue }
                         send(ps, to: client)
                         client.needsKeyframe = false
                     } else if client.inflight > 2 && !message.isKeyframe {
+                        Stats.shared.bump("net.dropped")
                         continue   // drop the delta; the next keyframe will resync
                     }
+                    Stats.shared.bump("net.sent")
                 }
                 send(data, to: client)
             }

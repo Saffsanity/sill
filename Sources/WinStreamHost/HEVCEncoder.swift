@@ -7,6 +7,10 @@ import StreamProtocol
 final class HEVCEncoder {
     private var session: VTCompressionSession?
     private var forceKeyframe = false
+    /// Most recent captured frame. ScreenCaptureKit only delivers frames when the window repaints,
+    /// so a client that connects while the window is static would otherwise never get a keyframe.
+    private var lastFrame: CVPixelBuffer?
+    /// Serializes encode() calls from the capture queue and requestKeyframe() from the network queue.
     private let lock = NSLock()
 
     /// Called on VideoToolbox's callback thread with one access unit (length-prefixed NALs).
@@ -40,21 +44,31 @@ final class HEVCEncoder {
         if let session { VTCompressionSessionInvalidate(session) }
     }
 
-    /// Next frame becomes a keyframe (call when a client connects).
+    /// Next frame becomes a keyframe (call when a client connects). If we already have a frame,
+    /// re-encode it immediately so the client sees the window even if it never repaints.
     func requestKeyframe() {
-        lock.lock(); forceKeyframe = true; lock.unlock()
+        lock.lock()
+        forceKeyframe = true
+        let last = lastFrame
+        lock.unlock()
+        if let last { encode(last, pts: CMClockGetTime(CMClockGetHostTimeClock())) }
     }
 
+    /// Called on the capture queue with ScreenCaptureKit's host-clock timestamps, and from
+    /// requestKeyframe() on the network queue. The lock covers the VT call so those never overlap;
+    /// the output handler runs later on VideoToolbox's own thread, outside the lock.
     func encode(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         guard let session else { return }
-        lock.lock()
+        lock.lock(); defer { lock.unlock() }
+        lastFrame = pixelBuffer
         let props: CFDictionary? = forceKeyframe ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
         forceKeyframe = false
-        lock.unlock()
 
         VTCompressionSessionEncodeFrame(session, imageBuffer: pixelBuffer, presentationTimeStamp: pts,
                                         duration: .invalid, frameProperties: props, infoFlagsOut: nil) { [weak self] status, _, sampleBuffer in
-            guard status == noErr, let sampleBuffer, let self else { return }
+            guard let self else { return }
+            guard status == noErr, let sampleBuffer else { Stats.shared.bump("enc.error"); return }
+            Stats.shared.bump("enc.out")
             self.handle(sampleBuffer)
         }
     }

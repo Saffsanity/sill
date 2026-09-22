@@ -54,12 +54,15 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen,
-              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+        guard type == .screen else { return }
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let statusRaw = attachments.first?[.status] as? Int,
-              let status = SCFrameStatus(rawValue: statusRaw), status == .complete,
-              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
-        else { return }   // .idle frames (nothing changed) are skipped, which is what we want
+              let status = SCFrameStatus(rawValue: statusRaw)
+        else { Stats.shared.bump("cap.noStatus"); return }
+        // .idle frames (nothing changed) are skipped, which is what we want.
+        guard status == .complete else { Stats.shared.bump(status == .idle ? "cap.idle" : "cap.status\(statusRaw)"); return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { Stats.shared.bump("cap.noPixels"); return }
+        Stats.shared.bump("cap.complete")
         onFrame?(pixelBuffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 
