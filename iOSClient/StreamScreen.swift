@@ -33,10 +33,14 @@ enum Palette {
 struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
+    @State private var keyboardShown = false
+    /// The bar's Keyboard button drives the overlay's first responder through this.
+    @State private var overlay = InputOverlayProxy()
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(client: client, drawerOpen: $drawerOpen)
+            TopBar(client: client, drawerOpen: $drawerOpen, keyboardShown: $keyboardShown,
+                   toggleKeyboard: { overlay.toggleKeyboard() })
             contentArea
         }
         .background(Color.black)
@@ -56,12 +60,21 @@ struct StreamScreen: View {
         ZStack(alignment: .topLeading) {
             Color.black
 
-            StreamView(client: client)
-                .background(Palette.panel)
-                .clipShape(streamShape)
-                .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-                .padding(8)
+            ZStack {
+                StreamView(client: client)
+                // Same frame as the video, so a touch maps straight onto the streamed frame.
+                InputOverlay(videoSize: client.videoSize,
+                             send: { client.sendInput($0) },
+                             proxy: overlay,
+                             isKeyboardShown: $keyboardShown)
+            }
+            .background(Palette.panel)
+            .clipShape(streamShape)
+            .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+            .padding(8)
 
+            // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
+            // closes the drawer instead of clicking the Mac.
             if drawerOpen {
                 Color.black.opacity(0.58)
                     .contentShape(Rectangle())
@@ -87,6 +100,8 @@ struct StreamScreen: View {
 private struct TopBar: View {
     @ObservedObject var client: StreamClient
     @Binding var drawerOpen: Bool
+    @Binding var keyboardShown: Bool
+    let toggleKeyboard: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -114,6 +129,19 @@ private struct TopBar: View {
                     Text("1.0×")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Palette.barLabel)
+                }
+            }
+
+            BarButton(open: keyboardShown,
+                      accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                      action: toggleKeyboard) {
+                VStack(spacing: 4) {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 22))
+                        .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
+                    Text("Keyboard")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(keyboardShown ? Palette.accent : Palette.barLabel)
                 }
             }
 

@@ -13,6 +13,22 @@ final class HEVCDisplayView: UIView {
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
 
+    /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
+    /// Input needs it: touches are normalized against the video, not against this view.
+    var onVideoSize: ((CGSize) -> Void)?
+
+    /// Where `resizeAspect` actually draws a `videoSize` frame inside `bounds`: the same letterboxed
+    /// rect the layer uses, which is what maps a touch to a fraction of the frame.
+    /// Returns `.zero` while the video size is unknown, so callers can tell "no video" from "top left".
+    static func videoRect(in bounds: CGRect, videoSize: CGSize) -> CGRect {
+        guard videoSize.width > 0, videoSize.height > 0, bounds.width > 0, bounds.height > 0 else { return .zero }
+        let scale = min(bounds.width / videoSize.width, bounds.height / videoSize.height)
+        let size = CGSize(width: videoSize.width * scale, height: videoSize.height * scale)
+        return CGRect(x: bounds.minX + (bounds.width - size.width) / 2,
+                      y: bounds.minY + (bounds.height - size.height) / 2,
+                      width: size.width, height: size.height)
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
@@ -39,6 +55,9 @@ final class HEVCDisplayView: UIView {
         guard status == noErr, let desc else { print("format description failed: \(status)"); return }
         formatDescription = desc
         waitingForKeyframe = true
+        let dimensions = CMVideoFormatDescriptionGetDimensions(desc)
+        let size = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
+        DispatchQueue.main.async { [weak self] in self?.onVideoSize?(size) }
         // Remove the last frame too: switching sources should show black until the new keyframe,
         // not the previous window frozen in place.
         displayLayer.flushAndRemoveImage()
@@ -91,6 +110,7 @@ struct StreamView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> HEVCDisplayView {
         let view = HEVCDisplayView(frame: .zero)
+        view.onVideoSize = { [weak client] size in client?.videoSize = size }
         client.onParameterSets = { ps in view.apply(ps) }
         client.onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view

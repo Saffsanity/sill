@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import QuartzCore
 import UIKit
 import StreamProtocol
 
@@ -18,6 +19,10 @@ final class StreamClient: ObservableObject {
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
     @Published var icons: [String: UIImage] = [:]      // by bundle ID
     @Published var apps: [AppInfo] = []                // installed apps, for "All apps"
+
+    /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
+    /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
+    @Published var videoSize: CGSize = .zero
 
     var onParameterSets: ((ParameterSets) -> Void)? {
         didSet {
@@ -41,12 +46,28 @@ final class StreamClient: ObservableObject {
     private var lastParameterSets: ParameterSets?
     private var fpsTimer: Timer?
 
+    // Pointer-move coalescing, all touched on `queue` only.
+    private static let moveInterval = 0.008   // 125 Hz ceiling; a Pencil can report at 120+ Hz
+    private var pendingMove: InputEvent?
+    private var lastMoveAt = 0.0              // CACurrentMediaTime
+    private var moveFlushScheduled = false
+
     func startBrowsing() {
         let params = NWParameters()
         params.includePeerToPeer = true
         let browser = NWBrowser(for: .bonjour(type: "_sill._tcp", domain: nil), using: params)
         browser.browseResultsChangedHandler = { [weak self] results, _ in
-            DispatchQueue.main.async { self?.hosts = Array(results) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.hosts = Array(results)
+                // The Mac we were talking to came back (its Bonjour record vanished when the host
+                // died and reappeared when it restarted): reconnect without being asked.
+                if !self.connected, self.connection == nil, let wanted = self.reconnectTo,
+                   let again = self.hosts.first(where: { Self.serviceName(of: $0) == wanted }) {
+                    self.status = "Reconnecting to \(wanted)…"
+                    self.connect(to: again)
+                }
+            }
         }
         browser.stateUpdateHandler = { [weak self] state in
             if case .failed(let e) = state { DispatchQueue.main.async { self?.status = "Browse failed: \(e)" } }
@@ -55,7 +76,20 @@ final class StreamClient: ObservableObject {
         self.browser = browser
     }
 
+    /// Bonjour instance name of the Mac we are connected to (or were, if it dropped).
+    private var hostName = "Mac"
+    /// Set when the Mac went away on its own; cleared by an explicit disconnect().
+    private var reconnectTo: String?
+
+    static func serviceName(of result: NWBrowser.Result) -> String {
+        if case .service(let name, _, _, _) = result.endpoint { return name }
+        return "\(result.endpoint)"
+    }
+
     func connect(to result: NWBrowser.Result) {
+        let name = Self.serviceName(of: result)
+        hostName = name
+        status = "Connecting to \(name)…"
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         let params = NWParameters(tls: nil, tcp: tcp)
@@ -65,35 +99,64 @@ final class StreamClient: ObservableObject {
             guard let self else { return }
             switch state {
             case .ready:
-                DispatchQueue.main.async { self.connected = true; self.status = "Connected"; self.startFpsTimer() }
+                DispatchQueue.main.async {
+                    self.reconnectTo = nil
+                    self.connected = true
+                    self.status = "Connected to \(name)"
+                    self.startFpsTimer()
+                }
                 self.readHeader()
+            case .waiting(let e):
+                print("connection waiting: \(e)")
+                DispatchQueue.main.async { self.status = "Waiting for \(name)…" }
             case .failed(let e):
-                DispatchQueue.main.async { self.connected = false; self.status = "Failed: \(e)" }
+                print("connection failed: \(e)")
+                self.connectionLost(c)
             case .cancelled:
-                DispatchQueue.main.async { self.connected = false; self.status = "Disconnected" }
+                // Either disconnect() cancelled it (state already cleaned up) or the host closed it.
+                self.connectionLost(c)
             default:
-                DispatchQueue.main.async { self.status = "\(state)" }
+                break
             }
         }
         c.start(queue: queue)
         connection = c
     }
 
+    /// The user chose to leave. No reconnect.
     func disconnect() {
-        connection?.cancel()
+        reconnectTo = nil
+        let c = connection
         connection = nil
-        queue.async { self.lastParameterSets = nil }
+        c?.cancel()
+        tearDown(status: "Looking for Macs on this network")
+    }
+
+    /// The Mac went away (host quit, Wi-Fi dropped, connection reset). Back to the connect screen with
+    /// a plain message, and remember the Mac so we rejoin when it shows up again. Any thread.
+    private func connectionLost(_ c: NWConnection) {
         DispatchQueue.main.async {
-            self.fpsTimer?.invalidate()
-            self.fpsTimer = nil
-            self.connected = false
-            self.macName = ""
-            self.windows = []
-            self.active = .none
-            self.thumbnails = [:]
-            self.icons = [:]
-            self.apps = []
+            guard self.connection === c else { return }   // stale callback from a connection we already replaced
+            self.connection = nil
+            self.reconnectTo = self.hostName
+            self.tearDown(status: "\(self.hostName) disconnected. It will reconnect when the Mac is back.")
         }
+    }
+
+    /// Clears everything the session owned. Main thread.
+    private func tearDown(status: String) {
+        queue.async { self.lastParameterSets = nil; self.pendingMove = nil }
+        fpsTimer?.invalidate()
+        fpsTimer = nil
+        connected = false
+        self.status = status
+        macName = ""
+        windows = []
+        active = .none
+        thumbnails = [:]
+        icons = [:]
+        apps = []
+        videoSize = .zero
     }
 
     // MARK: - Client → host
@@ -108,6 +171,51 @@ final class StreamClient: ObservableObject {
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
 
+    /// Send one input event to the Mac. Safe to call from the main thread; the work hops to the
+    /// network queue, which is serial, so the host sees events in the order they were produced.
+    ///
+    /// Each event is its own small TCP message (noDelay is on), which is fine at click and keystroke
+    /// rates. Pointer moves are not: a Pencil drag reports at 120+ Hz, so moves are coalesced to one
+    /// every 8 ms, keeping only the latest position — an intermediate cursor position is worthless
+    /// once a newer one exists, and queuing them would add latency to everything behind them.
+    /// Nothing else is ever dropped, and a down/up/scroll/text/key first flushes any move still
+    /// waiting, so the cursor is always where it should be before the button goes down.
+    func sendInput(_ event: InputEvent) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            guard case .pointer(.move, _, _) = event else {
+                self.flushPendingMove()
+                self.send(.input, Wire.encode(event))
+                return
+            }
+            let now = CACurrentMediaTime()
+            let due = self.lastMoveAt + Self.moveInterval
+            if now >= due {
+                self.pendingMove = nil
+                self.lastMoveAt = now
+                self.send(.input, Wire.encode(event))
+            } else {
+                self.pendingMove = event   // replaces any older pending move
+                if !self.moveFlushScheduled {
+                    self.moveFlushScheduled = true
+                    self.queue.asyncAfter(deadline: .now() + (due - now)) { [weak self] in
+                        guard let self else { return }
+                        self.moveFlushScheduled = false
+                        self.flushPendingMove()
+                    }
+                }
+            }
+        }
+    }
+
+    /// On `queue`.
+    private func flushPendingMove() {
+        guard let move = pendingMove else { return }
+        pendingMove = nil
+        lastMoveAt = CACurrentMediaTime()
+        send(.input, Wire.encode(move))
+    }
+
     private func send(_ kind: StreamMessageKind, _ payload: Data) {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970,
                                     isKeyframe: false, payload: payload)
@@ -117,9 +225,13 @@ final class StreamClient: ObservableObject {
     // MARK: - Host → client
 
     private func readHeader() {
-        connection?.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, error in
-            guard let self, let data, let header = StreamMessage.parseHeader(data) else {
-                if let error { DispatchQueue.main.async { self?.status = "Read error: \(error)" } }
+        guard let c = connection else { return }
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            guard let data, let header = StreamMessage.parseHeader(data) else {
+                // EOF (the host closed cleanly) or a read error: both mean the Mac is gone.
+                if let error { print("read error: \(error)") }
+                if isComplete || error != nil { self.connectionLost(c) }
                 return
             }
             self.readPayload(header)

@@ -14,6 +14,7 @@ public enum StreamMessageKind: UInt8 {
     // Client → host
     case selectSource = 6    // JSON StreamSource: what to stream
     case launchApp = 7       // JSON LaunchApp: open an installed app; its first window gets selected
+    case input = 8           // JSON InputEvent: pointer, scroll, text or key aimed at the streamed source (see Input.swift)
 }
 
 public struct StreamHeader {

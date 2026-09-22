@@ -17,8 +17,10 @@ final class StreamCoordinator {
     let server: StreamServer
     let catalog = WindowCatalog()
     let capture = WindowCapture()
+    let injector = InputInjector()
     private var encoder: HEVCEncoder?
     private(set) var active: StreamSource = .none
+    private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
     private let macName = Host.current().localizedName ?? "Mac"
@@ -57,6 +59,7 @@ final class StreamCoordinator {
 
     /// `preselect` is the optional command-line match; without it nothing streams until a client picks.
     func start(preselect: String?) async {
+        InputInjector.ensureAccessibility()   // prompts once; input is dropped silently without it
         catalog.start()
         server.start()
         await catalog.refreshWindows()
@@ -82,9 +85,41 @@ final class StreamCoordinator {
             NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
+        case .input:
+            guard let event = Wire.decode(InputEvent.self, from: message.payload),
+                  let rect = currentSourceRect() else { return }
+            injector.apply(event, in: rect)
         default:
             break
         }
+    }
+
+    // MARK: Where input lands
+
+    /// The active source's rectangle on screen, in CG global points (top-left origin), which is
+    /// what the injector maps the client's fractions onto. Nil when nothing is streaming, so
+    /// input that arrives between sources is dropped rather than poked at the wrong window.
+    private func currentSourceRect() -> CGRect? {
+        switch active {
+        case .none:
+            return nil
+        case .desktop:
+            return catalog.display?.frame
+        case .window(let id):
+            // The catalog only refreshes every 2 s, so ask the window server for live bounds —
+            // but cache them briefly, or a 120 Hz Pencil drag hits it on every single event.
+            let now = CFAbsoluteTimeGetCurrent()
+            if let cached = rectCache, cached.id == id, now - cached.at < 0.1 { return cached.rect }
+            guard let rect = Self.liveBounds(of: id) ?? catalog.window(id: id)?.frame else { return nil }
+            rectCache = (id, rect, now)
+            return rect
+        }
+    }
+
+    private static func liveBounds(of id: CGWindowID) -> CGRect? {
+        guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
+              let bounds = list.first?[kCGWindowBounds as String] as? NSDictionary else { return nil }
+        return CGRect(dictionaryRepresentation: bounds as CFDictionary)
     }
 
     // MARK: Source switching
@@ -95,7 +130,8 @@ final class StreamCoordinator {
         defer { switching = false }
 
         await capture.stop()
-        encoder = nil                       // deinit invalidates the VT session
+        rectCache = nil
+        encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
 
         let filter: SCContentFilter
