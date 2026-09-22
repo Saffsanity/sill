@@ -39,7 +39,9 @@ final class HEVCDisplayView: UIView {
         guard status == noErr, let desc else { print("format description failed: \(status)"); return }
         formatDescription = desc
         waitingForKeyframe = true
-        displayLayer.flush()
+        // Remove the last frame too: switching sources should show black until the new keyframe,
+        // not the previous window frozen in place.
+        displayLayer.flushAndRemoveImage()
     }
 
     func enqueue(_ data: Data, isKeyframe: Bool) {

@@ -5,29 +5,51 @@ struct ContentView: View {
     @StateObject private var client = StreamClient()
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            StreamView(client: client)
-                .ignoresSafeArea()
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if client.connected {
+                StreamScreen(client: client)
+            } else {
+                ConnectScreen(client: client)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { client.startBrowsing() }
+    }
+}
 
-            VStack(alignment: .leading, spacing: 10) {
-                if client.connected {
-                    Text("\(client.fps) fps · frame age ≈ \(client.frameAgeMs) ms")
-                        .font(.caption.monospacedDigit())
-                    Button("Disconnect") { client.disconnect() }
-                        .font(.caption)
-                } else {
-                    Text(client.status).font(.caption)
-                    ForEach(client.hosts, id: \.self) { host in
-                        Button(name(of: host)) { client.connect(to: host) }
-                            .buttonStyle(.borderedProminent)
+/// Before a Mac is picked: the Bonjour results as drawer-style rows.
+struct ConnectScreen: View {
+    @ObservedObject var client: StreamClient
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Connect to a Mac")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.text)
+                .padding(.horizontal, 10)
+
+            Text(client.status)
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+
+            ForEach(client.hosts, id: \.self) { host in
+                DrawerRow(height: 50, highlighted: false, title: name(of: host), trailing: nil,
+                          action: { client.connect(to: host) }) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white)
                     }
+                    .frame(width: 32, height: 32)
                 }
             }
-            .padding(10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .padding()
         }
-        .onAppear { client.startBrowsing() }
+        .frame(width: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func name(of result: NWBrowser.Result) -> String {
