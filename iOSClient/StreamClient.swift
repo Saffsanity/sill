@@ -24,6 +24,17 @@ final class StreamClient: ObservableObject {
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
     @Published var videoSize: CGSize = .zero
 
+    /// The one display view for the whole session. Landscape and portrait both host it, so a
+    /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
+    /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
+    private(set) lazy var displayView: HEVCDisplayView = {
+        let view = HEVCDisplayView(frame: .zero)
+        view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        onParameterSets = { ps in view.apply(ps) }
+        onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
+        return view
+    }()
+
     var onParameterSets: ((ParameterSets) -> Void)? {
         didSet {
             // The display view is only created once the UI switches to the stream screen, which
@@ -157,6 +168,7 @@ final class StreamClient: ObservableObject {
         icons = [:]
         apps = []
         videoSize = .zero
+        displayView.clear()
     }
 
     // MARK: - Client → host

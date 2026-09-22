@@ -69,6 +69,14 @@ final class HEVCDisplayView: UIView {
         displayLayer.flushAndRemoveImage()
     }
 
+    /// Session over: drop the picture and forget the format so the next Mac starts clean.
+    func clear() {
+        formatDescription = nil
+        lastParameterSets = nil
+        waitingForKeyframe = true
+        displayLayer.flushAndRemoveImage()
+    }
+
     func enqueue(_ data: Data, isKeyframe: Bool) {
         guard let desc = formatDescription else { return }
         if waitingForKeyframe {
@@ -114,11 +122,11 @@ final class HEVCDisplayView: UIView {
 struct StreamView: UIViewRepresentable {
     let client: StreamClient
 
+    /// Hosts the client's single display view. SwiftUI may build the new layout's host before it
+    /// dismantles the old one, so detach the view from wherever it was first.
     func makeUIView(context: Context) -> HEVCDisplayView {
-        let view = HEVCDisplayView(frame: .zero)
-        view.onVideoSize = { [weak client] size in client?.videoSize = size }
-        client.onParameterSets = { ps in view.apply(ps) }
-        client.onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
+        let view = client.displayView
+        view.removeFromSuperview()
         return view
     }
 
