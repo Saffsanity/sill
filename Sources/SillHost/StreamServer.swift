@@ -7,7 +7,8 @@ import StreamProtocol
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
-        var inflight = 0
+        var inflight = 0          // every message still unacknowledged (backpressure for delta drops)
+        var inflightFrames = 0    // video frames only (dead-peer detection; the catalog burst is ~120 messages)
         var needsKeyframe = true
         init(_ c: NWConnection) { connection = c }
     }
@@ -27,6 +28,12 @@ final class StreamServer {
     init(serviceType: String = "_sill._tcp") throws {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
+        // A client that vanishes without closing (app killed, Wi-Fi gone) would otherwise stay
+        // "ready" until TCP gives up minutes later, eating a keyframe per drop. Probe it instead.
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 5
+        tcp.keepaliveInterval = 2
+        tcp.keepaliveCount = 3
         let params = NWParameters(tls: nil, tcp: tcp)
         params.includePeerToPeer = true
         listener = try NWListener(using: params)
@@ -71,7 +78,10 @@ final class StreamServer {
     func send(_ message: StreamMessage, to connection: NWConnection) {
         let data = message.serialized()
         queue.async { [self] in
-            guard let client = clients[ObjectIdentifier(connection)] else { return }
+            guard let client = clients[ObjectIdentifier(connection)] else {
+                print("send: no client for \(connection.endpoint) (\(clients.count) known)")
+                return
+            }
             send(data, to: client)
         }
     }
@@ -79,15 +89,24 @@ final class StreamServer {
     /// Client → host messages share the same framing. Small and rare, so read them one at a time.
     private func receiveLoop(_ client: Client) {
         let c = client.connection
-        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
-            guard let self, let data, let header = StreamMessage.parseHeader(data) else { return }
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            guard let data, let header = StreamMessage.parseHeader(data) else {
+                // EOF or a read error: the client closed (or was killed). Nothing else would notice
+                // while no frames are being sent, so cancel here; the state handler prints and forgets it.
+                if isComplete || error != nil { c.cancel() }
+                return
+            }
             let deliver = { (payload: Data) in
                 self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
                 self.receiveLoop(client)
             }
             if header.payloadLength == 0 { deliver(Data()); return }
-            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, _, _ in
-                guard let data else { return }
+            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
+                guard let data else {
+                    if isComplete || error != nil { c.cancel() }
+                    return
+                }
                 deliver(data)
             }
         }
@@ -116,15 +135,25 @@ final class StreamServer {
                     }
                     Stats.shared.bump("net.sent")
                 }
-                send(data, to: client)
+                send(data, to: client, isFrame: message.kind == .frame)
             }
         }
     }
 
-    private func send(_ data: Data, to client: Client) {
+    /// Roughly 1.5 s of video frames still unacknowledged means the peer stopped reading. Treat it as gone.
+    private static let deadInflightFrames = 90
+
+    private func send(_ data: Data, to client: Client, isFrame: Bool = false) {
+        if isFrame && client.inflightFrames > Self.deadInflightFrames {
+            print("Client not draining, dropping: \(client.connection.endpoint)")
+            client.connection.cancel()   // its state handler removes it from `clients`
+            return
+        }
         client.inflight += 1
+        if isFrame { client.inflightFrames += 1 }
         client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
             client?.inflight -= 1
+            if isFrame { client?.inflightFrames -= 1 }
         })
     }
 }

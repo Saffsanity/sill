@@ -43,9 +43,10 @@ final class StreamCoordinator {
         server.onClientConnected = { [weak self] connection in
             Task { @MainActor in
                 guard let self else { return }
-                self.encoder?.requestKeyframe()
+                // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
+                self.encoder?.requestKeyframe()
             }
         }
         server.onKeyframeNeeded = { [weak self] in
@@ -232,6 +233,7 @@ final class StreamCoordinator {
 
     private func sendCatalog(to connection: NWConnection) {
         let now = Date().timeIntervalSince1970
+        print("Catalog → \(connection.endpoint): \(catalog.infos.count) windows, \(catalog.allIcons.count) icons, \(catalog.installedApps.count) apps")
         server.send(listMessage(), to: connection)
         for (id, png) in catalog.allIcons {
             server.send(StreamMessage(kind: .appIcon, timestamp: now, isKeyframe: false,

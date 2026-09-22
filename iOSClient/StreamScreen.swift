@@ -29,6 +29,36 @@ enum Palette {
     static let iconFallback = Color(hex: 0x3A3D44) // two-letter app badge
 }
 
+// MARK: - Layout selection
+
+/// Which layout a screen gets, decided from its size in points alone: no device check, no idiom,
+/// so an iPad at an odd split size and an iPhone each get the layout their dimensions deserve.
+/// The numbers are written for the iPhone Duo and its four postures:
+///
+/// * inner display, unfolded landscape — 1000×710 → `.innerLandscape` (top bar over the stream)
+/// * inner display, portrait or half-folded — 710×1000 → `.innerPortrait` (stream over controls)
+/// * outer display, on its side — 710×500 → `.outerLandscape`
+/// * outer display, upright — 500×710 → `.outerPortrait`
+///
+/// The outer display is not a different app: it is the same two layouts at compact sizes, because
+/// the posture only changed how much room there is, not what the screen is for. The thresholds sit
+/// between those sizes with room to spare — 600 separates the 500 pt outer width from the 710 pt
+/// inner one, and 560 the 500 pt outer height from the inner 710.
+enum DuoLayout {
+    case innerLandscape, innerPortrait, outerPortrait, outerLandscape
+
+    /// Narrower than this and taller than wide: the outer display held upright.
+    static let outerMaxWidth: CGFloat = 600
+    /// Shorter than this and wider than tall: the outer display on its side.
+    static let outerMaxHeight: CGFloat = 560
+
+    static func of(_ size: CGSize) -> DuoLayout {
+        if size.height > size.width, size.width < outerMaxWidth { return .outerPortrait }
+        if size.width > size.height, size.height < outerMaxHeight { return .outerLandscape }
+        return size.width > size.height ? .innerLandscape : .innerPortrait
+    }
+}
+
 // MARK: - Screen
 
 struct StreamScreen: View {
@@ -52,16 +82,18 @@ struct StreamScreen: View {
     #endif
 
     var body: some View {
-        // Wider than tall is the laptop-lid layout (bar on top); taller than wide is the folded
-        // half-and-half one. Nothing here is a device check: an iPhone in portrait gets the same
-        // split, just smaller.
+        // Which layout, and at which size — see `DuoLayout` for the thresholds and the Duo posture
+        // behind each one.
         GeometryReader { geo in
-            if geo.size.width > geo.size.height {
-                landscape
-            } else {
-                PortraitStreamScreen(client: client, drawerOpen: $drawerOpen,
-                                     keyboardShown: $keyboardShown, latched: $latched,
-                                     overlay: overlay)
+            switch DuoLayout.of(geo.size) {
+            case .innerLandscape:
+                landscape(bar: .regular)
+            case .outerLandscape:
+                landscape(bar: .compact)
+            case .innerPortrait:
+                portrait(metrics: .regular)
+            case .outerPortrait:
+                portrait(metrics: .compact)
             }
         }
         .background(Color.black)
@@ -75,12 +107,19 @@ struct StreamScreen: View {
         }
     }
 
-    private var landscape: some View {
+    private func landscape(bar: BarMetrics) -> some View {
         VStack(spacing: 0) {
-            TopBar(client: client, drawerOpen: $drawerOpen, keyboardShown: $keyboardShown,
+            TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
+                   keyboardShown: $keyboardShown,
                    toggleKeyboard: { overlay.toggleKeyboard() })
             contentArea
         }
+    }
+
+    private func portrait(metrics: PortraitMetrics) -> some View {
+        PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
+                             keyboardShown: $keyboardShown, latched: $latched,
+                             overlay: overlay)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -128,88 +167,119 @@ struct StreamScreen: View {
 
 // MARK: - Top bar
 
+/// The landscape top bar's numbers. The inner display gets the Main board's roomy bar; the outer
+/// display gets the Laptop board's compact one, which is 8 pt shorter and tighter all round — on a
+/// 500 pt tall screen the bar is a sixth of everything there is, so every point it gives back is a
+/// point of Mac. The compact bar also drops the Aa placeholder, exactly as the Laptop board does:
+/// with this little room, an inert control is the first thing that should go.
+struct BarMetrics {
+    let height: CGFloat
+    let padding: CGFloat
+    let gap: CGFloat
+    let buttonWidth: CGFloat
+    let buttonHeight: CGFloat
+    let buttonSpacing: CGFloat      // between a button's icon and its label
+    let thumbWidth: CGFloat
+    let thumbHeight: CGFloat
+    let thumbRadius: CGFloat
+    let thumbSpacing: CGFloat
+    let thumbPad: CGFloat
+    let thumbFade: Double
+    let showsTextSize: Bool
+
+    static let regular = BarMetrics(height: 86, padding: 22, gap: 12,
+                                    buttonWidth: 66, buttonHeight: 66, buttonSpacing: 4,
+                                    thumbWidth: 104, thumbHeight: 66, thumbRadius: 10,
+                                    thumbSpacing: 16, thumbPad: 10, thumbFade: 0.86,
+                                    showsTextSize: true)
+
+    static let compact = BarMetrics(height: 78, padding: 14, gap: 12,
+                                    buttonWidth: 64, buttonHeight: 58, buttonSpacing: 3,
+                                    thumbWidth: 92, thumbHeight: 58, thumbRadius: 9,
+                                    thumbSpacing: 14, thumbPad: 10, thumbFade: 0.88,
+                                    showsTextSize: false)
+}
+
 private struct TopBar: View {
     @ObservedObject var client: StreamClient
+    let metrics: BarMetrics
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
     let toggleKeyboard: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            BarButton(open: drawerOpen,
-                      accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                      action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } }) {
-                VStack(spacing: 4) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 22))
-                        .foregroundStyle(drawerOpen ? Palette.accent : Palette.text)
-                    Text("Apps")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(drawerOpen ? Palette.accent : Palette.barLabel)
+        HStack(spacing: metrics.gap) {
+            button(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
+                   accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
+                   action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } })
+
+            WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
+                        radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
+                        pad: metrics.thumbPad, fade: metrics.thumbFade)
+
+            if metrics.showsTextSize {
+                // Milestone 3 lives here: scaling the streamed window's text. Present, inert.
+                BarButton(open: false, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                          accessibilityLabel: "Text size, currently 1.0 times", action: {}) {
+                    VStack(spacing: 2) {
+                        Text("Aa")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(Palette.text)
+                        Text("1.0×")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.barLabel)
+                    }
                 }
             }
 
-            WindowStrip(client: client)
+            button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
+                   accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                   action: toggleKeyboard)
 
-            // Milestone 3 lives here: scaling the streamed window's text. Present, inert.
-            BarButton(open: false, accessibilityLabel: "Text size, currently 1.0 times", action: {}) {
-                VStack(spacing: 2) {
-                    Text("Aa")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Palette.text)
-                    Text("1.0×")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.barLabel)
-                }
-            }
-
-            BarButton(open: keyboardShown,
-                      accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
-                      action: toggleKeyboard) {
-                VStack(spacing: 4) {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: 22))
-                        .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
-                    Text("Keyboard")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(keyboardShown ? Palette.accent : Palette.barLabel)
-                }
-            }
-
-            BarButton(open: client.active == .desktop,
-                      accessibilityLabel: "Show the full Mac desktop",
-                      action: { client.select(.desktop) }) {
-                VStack(spacing: 4) {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 22))
-                        .foregroundStyle(client.active == .desktop ? Palette.accent : Palette.text)
-                    Text("Desktop")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(client.active == .desktop ? Palette.accent : Palette.barLabel)
-                }
-            }
+            button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
+                   accessibilityLabel: "Show the full Mac desktop",
+                   action: { client.select(.desktop) })
         }
-        .frame(height: 86)
-        .padding(.horizontal, 22)
+        .frame(height: metrics.height)
+        .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.
         .background(Palette.bar.ignoresSafeArea(edges: .top))
     }
+
+    private func button(open: Bool, symbol: String, label: String, accessibilityLabel: String,
+                        action: @escaping () -> Void) -> some View {
+        BarButton(open: open, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                  accessibilityLabel: accessibilityLabel, action: action) {
+            VStack(spacing: metrics.buttonSpacing) {
+                Image(systemName: symbol)
+                    .font(.system(size: 22))
+                    .foregroundStyle(open ? Palette.accent : Palette.text)
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+            }
+        }
+    }
 }
 
-/// A bar button: 66×66 in the landscape top bar, 64×58 in the portrait window bar.
+/// A bar button: 66×66 in the roomy top bar, 64×58 in the compact one and the portrait window bar,
+/// 56×50 with a 14 pt radius in the outer display's portrait bar.
 struct BarButton<Content: View>: View {
     let open: Bool
     let width: CGFloat
     let height: CGFloat
+    let radius: CGFloat
     let accessibilityLabel: String
     let action: () -> Void
     let content: () -> Content
 
-    init(open: Bool, width: CGFloat = 66, height: CGFloat = 66, accessibilityLabel: String,
+    init(open: Bool, width: CGFloat = 66, height: CGFloat = 66, radius: CGFloat = 16,
+         accessibilityLabel: String,
          action: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
         self.open = open
         self.width = width
         self.height = height
+        self.radius = radius
         self.accessibilityLabel = accessibilityLabel
         self.action = action
         self.content = content
@@ -219,7 +289,7 @@ struct BarButton<Content: View>: View {
         Button(action: action) {
             content()
                 .frame(width: width, height: height)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(open ? Palette.controlOpen : Palette.control))
         }
         .buttonStyle(.plain)
@@ -229,15 +299,21 @@ struct BarButton<Content: View>: View {
 
 // MARK: - Window thumbnails
 
-/// The live window thumbnails. Defaults are the landscape top bar's numbers; portrait's bar is
-/// tighter (92×58, gap 14, fade at 88%), so the size travels as parameters.
+/// The live window thumbnails. Defaults are the roomy top bar's numbers; the compact bars are
+/// tighter (92×58 gap 14 fade 88%, and 80×50 radius 8 gap 12 with a 22 pt badge on the outer
+/// display), so every size travels as a parameter and the thumbnail, its badge and its active halo
+/// stay one view in every posture.
 struct WindowStrip: View {
     @ObservedObject var client: StreamClient
     var width: CGFloat = 104
     var height: CGFloat = 66
     var radius: CGFloat = 10
     var spacing: CGFloat = 16
+    /// Room above and below for the badge (6 pt out) and the active halo (5 pt out), which the
+    /// ScrollView would otherwise clip. It is also what makes the strip as tall as its bar.
+    var pad: CGFloat = 10
     var fade: Double = 0.86
+    var badge: CGFloat = 24
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -247,11 +323,11 @@ struct WindowStrip: View {
                                     image: client.thumbnails[window.id],
                                     icon: client.icons[window.bundleID],
                                     isActive: client.active == .window(window.id),
-                                    width: width, height: height, radius: radius,
+                                    width: width, height: height, radius: radius, badge: badge,
                                     action: { client.select(.window(window.id)) })
                 }
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, pad)
             .padding(.horizontal, 8)
         }
         .frame(maxWidth: .infinity)
@@ -270,6 +346,7 @@ private struct WindowThumbnail: View {
     let width: CGFloat
     let height: CGFloat
     let radius: CGFloat
+    let badge: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -289,8 +366,9 @@ private struct WindowThumbnail: View {
                             .padding(-5)
                     }
                 }
-                // The badge does not scale with the thumbnail; it is the app's identity, not chrome.
-                .overlay(alignment: .bottomLeading) { badge.offset(x: -6, y: 6) }
+                // The badge barely scales with the thumbnail; it is the app's identity, not chrome,
+                // so it only shrinks once, to 22 pt, on the outer display's smallest bar.
+                .overlay(alignment: .bottomLeading) { appBadge.offset(x: -6, y: 6) }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(window.appName) window: \(window.title)" + (isActive ? ", showing now" : ""))
@@ -309,12 +387,16 @@ private struct WindowThumbnail: View {
         }
     }
 
-    private var badge: some View {
-        AppIcon(image: icon, name: window.appName, size: 24, radius: 7, fontSize: 10)
+    /// The app icon, with a 2 pt bar-coloured ring around it so it cuts through the thumbnail's
+    /// edge and its halo instead of sitting on top of them.
+    private var appBadge: some View {
+        let corner = (badge * 0.29).rounded()      // 7 at 24 pt, 6 at 22
+        return AppIcon(image: icon, name: window.appName, size: badge, radius: corner,
+                       fontSize: (badge * 0.42).rounded())
             .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: corner + 2, style: .continuous)
                     .fill(Palette.bar)
-                    .frame(width: 28, height: 28)
+                    .frame(width: badge + 4, height: badge + 4)
             }
     }
 }

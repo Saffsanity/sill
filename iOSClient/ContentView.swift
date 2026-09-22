@@ -1,5 +1,6 @@
 import SwiftUI
 import Network
+import StreamProtocol
 
 struct ContentView: View {
     @StateObject private var client = StreamClient()
@@ -7,7 +8,9 @@ struct ContentView: View {
     var body: some View {
         #if DEBUG
         if let spec = LayoutHarness.Spec.fromLaunchArguments {
-            LayoutHarness(spec: spec)
+            // The harness gets the app's own client so `-SillLive 1` can put a real session inside
+            // the fake screen; without that argument it never touches it.
+            LayoutHarness(spec: spec, live: client)
         } else {
             app
         }
@@ -38,9 +41,19 @@ struct ContentView: View {
 /// Duo's screens — 1000×710 for the unfolded inner display, 710×1000 for portrait and the folded
 /// laptop posture, 500×710 and 710×500 for the outer display.
 ///
-/// Only a launch argument turns it on: `-SillLayout 1000x710`, optionally with `-SillDrawer 1` and
-/// `-SillKeyboard 1`. Launch arguments land in `NSArgumentDomain`, which is not persisted, so a
-/// normal launch is exactly the app it was before. None of this is built in Release.
+/// Only a launch argument turns it on. The whole contract:
+///
+/// * `-SillLayout 1000x710` — required; the fake screen's size in points.
+/// * `-SillDrawer 1` — start with the app drawer open.
+/// * `-SillKeyboard 1` — start with the software keyboard shown.
+/// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
+///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
+///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
+///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
+///
+/// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
+/// exactly the app it was before. None of this is built in Release.
 ///
 /// The fake screen is a fixed frame centred on black with a 1 pt #333 ring so its bounds are
 /// visible in a screenshot. The ring sits *outside* the frame, so the interior is exactly W×H.
@@ -52,6 +65,9 @@ struct LayoutHarness: View {
         let size: CGSize
         let drawerOpen: Bool
         let keyboardShown: Bool
+        let live: Bool
+        /// What the mock should be streaming. Ignored when `live`.
+        let mockActive: StreamSource
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -62,19 +78,36 @@ struct LayoutHarness: View {
                   width > 0, height > 0 else { return nil }
             return Spec(size: CGSize(width: width, height: height),
                         drawerOpen: defaults.bool(forKey: "SillDrawer"),
-                        keyboardShown: defaults.bool(forKey: "SillKeyboard"))
+                        keyboardShown: defaults.bool(forKey: "SillKeyboard"),
+                        live: defaults.bool(forKey: "SillLive"),
+                        mockActive: mockActive(defaults.string(forKey: "SillActive")))
+        }
+
+        private static func mockActive(_ raw: String?) -> StreamSource {
+            switch raw?.lowercased() {
+            case "none": return .none
+            case "desktop": return .desktop
+            case let value?: return UInt32(value).map { StreamSource.window($0) } ?? .window(102)
+            case nil: return .window(102)
+            }
         }
     }
 
     let spec: Spec
-    @StateObject private var client = MockCatalog.client()
+    /// The app's real client, used only when `-SillLive 1` was passed.
+    @ObservedObject var live: StreamClient
+    @StateObject private var mock: StreamClient
+
+    init(spec: Spec, live: StreamClient) {
+        self.spec = spec
+        self.live = live
+        _mock = StateObject(wrappedValue: MockCatalog.client(active: spec.mockActive))
+    }
 
     var body: some View {
         ZStack {
             Color.black
-            StreamScreen(client: client,
-                         drawerOpen: spec.drawerOpen,
-                         keyboardShown: spec.keyboardShown)
+            screen
                 .frame(width: spec.size.width, height: spec.size.height)
                 .clipped()
                 .padding(1)
@@ -84,6 +117,26 @@ struct LayoutHarness: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
+        .onAppear { if spec.live { live.startBrowsing() } }
+    }
+
+    @ViewBuilder private var screen: some View {
+        if spec.live {
+            ZStack {
+                Color.black
+                if live.connected {
+                    StreamScreen(client: live,
+                                 drawerOpen: spec.drawerOpen,
+                                 keyboardShown: spec.keyboardShown)
+                } else {
+                    ConnectScreen(client: live)
+                }
+            }
+        } else {
+            StreamScreen(client: mock,
+                         drawerOpen: spec.drawerOpen,
+                         keyboardShown: spec.keyboardShown)
+        }
     }
 }
 #endif

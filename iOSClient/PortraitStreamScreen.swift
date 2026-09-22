@@ -72,22 +72,70 @@ enum HIDKey {
 
 // MARK: - Screen
 
+/// Everything the portrait layout sizes, at the inner display's size and the outer display's.
+///
+/// The outer display is the same screen, not a different one: same 50/50 split, same three rows in
+/// the same order. It is only 500 pt wide, so the numbers shrink — but nothing shrinks below a
+/// 44 pt touch target, which is what forces the one real change: eleven caps do not fit across
+/// 472 pt at 44 pt each, so the key row folds into two rows of six and five.
+struct PortraitMetrics {
+    let padTop: CGFloat
+    let padSide: CGFloat
+    let padBottom: CGFloat
+    let rowGap: CGFloat
+
+    let barHeight: CGFloat
+    let buttonWidth: CGFloat
+    let buttonHeight: CGFloat
+    let buttonRadius: CGFloat
+    let buttonIcon: CGFloat
+    let buttonSpacing: CGFloat
+
+    let thumbWidth: CGFloat
+    let thumbHeight: CGFloat
+    let thumbRadius: CGFloat
+    let thumbSpacing: CGFloat
+    let thumbPad: CGFloat
+    let thumbFade: Double
+    let badge: CGFloat
+
+    let capHeight: CGFloat
+    let keyGap: CGFloat
+    let keyRowGap: CGFloat
+    /// Whether the key row folds into two.
+    let splitKeys: Bool
+
+    var keyBlockHeight: CGFloat { splitKeys ? capHeight * 2 + keyRowGap : capHeight }
+
+    /// The Laptop board at the inner display's 710×1000.
+    static let regular = PortraitMetrics(
+        padTop: 12, padSide: 14, padBottom: 22, rowGap: 10,
+        barHeight: 78, buttonWidth: 64, buttonHeight: 58, buttonRadius: 16,
+        buttonIcon: 22, buttonSpacing: 3,
+        thumbWidth: 92, thumbHeight: 58, thumbRadius: 9, thumbSpacing: 14, thumbPad: 10,
+        thumbFade: 0.88, badge: 24,
+        capHeight: 48, keyGap: 8, keyRowGap: 8, splitKeys: false)
+
+    /// The same thing on the outer display's 500×710.
+    static let compact = PortraitMetrics(
+        padTop: 10, padSide: 14, padBottom: 16, rowGap: 10,
+        barHeight: 62, buttonWidth: 56, buttonHeight: 50, buttonRadius: 14,
+        buttonIcon: 20, buttonSpacing: 3,
+        thumbWidth: 80, thumbHeight: 50, thumbRadius: 8, thumbSpacing: 12, thumbPad: 6,
+        thumbFade: 0.88, badge: 22,
+        capHeight: 44, keyGap: 8, keyRowGap: 8, splitKeys: true)
+}
+
 /// Portrait: the "Laptop mode, half folded" board. The upper half is the streamed window on its
 /// own, touched directly like in landscape; the lower half is the machine you drive it with —
 /// window bar, key row, trackpad — the way a folded laptop's bottom half carries them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
+    var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
     @Binding var latched: KeyModifiers
     let overlay: InputOverlayProxy
-
-    // The board's lower half: padding 12 / 14 / 22, 10 between the three rows, a 78 pt bar.
-    private static let padTop: CGFloat = 12
-    private static let padSide: CGFloat = 14
-    private static let padBottom: CGFloat = 22
-    private static let rowGap: CGFloat = 10
-    private static let barHeight: CGFloat = 78
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
@@ -116,8 +164,8 @@ struct PortraitStreamScreen: View {
                         .frame(maxHeight: .infinity)
                         .padding(.leading, 22)
                         // Hangs from just under the window bar, so the button that opened it stays visible.
-                        .padding(.top, half + Self.padTop + Self.barHeight + 8)
-                        .padding(.bottom, Self.padBottom)
+                        .padding(.top, half + metrics.padTop + metrics.barHeight + 8)
+                        .padding(.bottom, metrics.padBottom)
                         .transition(.opacity)
                 }
             }
@@ -147,78 +195,124 @@ struct PortraitStreamScreen: View {
     // MARK: Lower half
 
     private var controls: some View {
-        VStack(spacing: Self.rowGap) {
+        VStack(spacing: metrics.rowGap) {
             windowBar
-            KeyRow(latched: $latched, keyboardShown: keyboardShown,
+            KeyRow(metrics: metrics, latched: $latched, keyboardShown: keyboardShown,
                    send: { client.sendInput($0) },
                    toggleKeyboard: { overlay.toggleKeyboard() })
             Trackpad(send: { client.sendInput($0) },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })
         }
-        .padding(.top, Self.padTop)
-        .padding(.horizontal, Self.padSide)
-        .padding(.bottom, Self.padBottom)
+        .padding(.top, metrics.padTop)
+        .padding(.horizontal, metrics.padSide)
+        .padding(.bottom, metrics.padBottom)
     }
 
     /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
     /// Keyboard or Aa button: the keyboard moved into the key row and Aa is not in this layout.
     private var windowBar: some View {
         HStack(spacing: 12) {
-            BarButton(open: drawerOpen, width: 64, height: 58,
+            barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
                       accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                      action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } }) {
-                VStack(spacing: 3) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 22))
-                        .foregroundStyle(drawerOpen ? Palette.accent : Palette.text)
-                    Text("Apps")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(drawerOpen ? Palette.accent : Palette.barLabel)
-                }
-            }
+                      action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } })
 
-            WindowStrip(client: client, width: 92, height: 58, radius: 9, spacing: 14, fade: 0.88)
+            WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
+                        radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
+                        pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge)
 
-            BarButton(open: client.active == .desktop, width: 64, height: 58,
+            barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
                       accessibilityLabel: "Show the full Mac desktop",
-                      action: { client.select(.desktop) }) {
-                VStack(spacing: 3) {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 22))
-                        .foregroundStyle(client.active == .desktop ? Palette.accent : Palette.text)
-                    Text("Desktop")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(client.active == .desktop ? Palette.accent : Palette.barLabel)
-                }
+                      action: { client.select(.desktop) })
+        }
+        .frame(height: metrics.barHeight)
+    }
+
+    private func barButton(open: Bool, symbol: String, label: String, accessibilityLabel: String,
+                           action: @escaping () -> Void) -> some View {
+        BarButton(open: open, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                  radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
+                  action: action) {
+            VStack(spacing: metrics.buttonSpacing) {
+                Image(systemName: symbol)
+                    .font(.system(size: metrics.buttonIcon))
+                    .foregroundStyle(open ? Palette.accent : Palette.text)
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(open ? Palette.accent : Palette.barLabel)
             }
         }
-        .frame(height: Self.barHeight)
     }
 }
 
 // MARK: - Key row
 
+/// One cap in the key row, as data, so the same eleven can be laid out as one row or two.
+private enum Key {
+    /// A key that types itself: the cap's text, its HID usage, its accessibility label.
+    case press(String, UInt16, String)
+    /// An arrow: SF Symbol, HID usage, label.
+    case arrow(String, UInt16, String)
+    /// A latching modifier: cap text, the bit it holds, its name.
+    case modifier(String, KeyModifiers, String)
+    /// The software keyboard toggle.
+    case keyboard
+}
+
 /// The keys a Mac needs that a software keyboard does not offer: escape, tab, the four arrows, the
-/// four modifiers, and the keyboard itself. Eleven equal caps, 48 pt tall.
+/// four modifiers, and the keyboard itself. Eleven equal caps across the screen at 48 pt tall —
+/// or, on the outer display where eleven 44 pt caps do not fit across 472 pt, six and then five.
 private struct KeyRow: View {
+    let metrics: PortraitMetrics
     @Binding var latched: KeyModifiers
     let keyboardShown: Bool
     let send: (InputEvent) -> Void
     let toggleKeyboard: () -> Void
 
+    private static let all: [Key] = [
+        .press("esc", HIDKey.escape, "Escape"),
+        .press("tab", HIDKey.tab, "Tab"),
+        .modifier("ctrl", .control, "Control"),
+        .modifier("opt", .option, "Option"),
+        .modifier("cmd", .command, "Command"),
+        .modifier("shift", .shift, "Shift"),
+        .arrow("chevron.left", HIDKey.leftArrow, "Left arrow"),
+        .arrow("chevron.down", HIDKey.downArrow, "Down arrow"),
+        .arrow("chevron.up", HIDKey.upArrow, "Up arrow"),
+        .arrow("chevron.right", HIDKey.rightArrow, "Right arrow"),
+        .keyboard,
+    ]
+
+    /// One row of eleven, or the split: the six that name a key, then the four arrows and the
+    /// keyboard. The break falls where the row changes job, not merely where it runs out of width.
+    private var rows: [[Key]] {
+        guard metrics.splitKeys else { return [Self.all] }
+        return [Array(Self.all.prefix(6)), Array(Self.all.suffix(5))]
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            cap(open: false, label: "Escape", action: { press(HIDKey.escape) }) { text("esc") }
-            cap(open: false, label: "Tab", action: { press(HIDKey.tab) }) { text("tab") }
-            latchKey("ctrl", .control, label: "Control")
-            latchKey("opt", .option, label: "Option")
-            latchKey("cmd", .command, label: "Command")
-            latchKey("shift", .shift, label: "Shift")
-            arrow("chevron.left", HIDKey.leftArrow, label: "Left arrow")
-            arrow("chevron.down", HIDKey.downArrow, label: "Down arrow")
-            arrow("chevron.up", HIDKey.upArrow, label: "Up arrow")
-            arrow("chevron.right", HIDKey.rightArrow, label: "Right arrow")
+        VStack(spacing: metrics.keyRowGap) {
+            ForEach(rows.indices, id: \.self) { row in
+                HStack(spacing: metrics.keyGap) {
+                    ForEach(rows[row].indices, id: \.self) { index in
+                        key(rows[row][index])
+                    }
+                }
+                .frame(height: metrics.capHeight)
+            }
+        }
+        .frame(height: metrics.keyBlockHeight)
+    }
+
+    @ViewBuilder private func key(_ key: Key) -> some View {
+        switch key {
+        case .press(let title, let usage, let label):
+            cap(open: false, label: label, action: { press(usage) }) { text(title) }
+        case .arrow(let symbol, let usage, let label):
+            arrow(symbol, usage, label: label)
+        case .modifier(let title, let flag, let label):
+            latchKey(title, flag, label: label)
+        case .keyboard:
             cap(open: keyboardShown,
                 label: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
                 action: toggleKeyboard) {
@@ -227,7 +321,6 @@ private struct KeyRow: View {
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
         }
-        .frame(height: 48)
     }
 
     // MARK: Caps

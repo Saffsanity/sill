@@ -51,13 +51,17 @@ enum MockCatalog {
     ]
 
     /// A client populated as if a Mac had just sent its whole catalog. Main thread.
-    static func client() -> StreamClient {
+    ///
+    /// `active` is what the Mac would be streaming: the default is Code's window, as the boards
+    /// draw it. `.none` is the state a fresh connection starts in — nothing picked yet, so the app
+    /// drawer opens by itself — which the harness asks for with `-SillActive none`.
+    static func client(active: StreamSource = .window(102)) -> StreamClient {
         let client = StreamClient()
         client.connected = true
         client.status = "Connected to Mac mini"
         client.macName = "Mac mini"
         client.windows = mockWindows
-        client.active = .window(102)          // Code, the second window
+        client.active = active
         client.apps = mockApps
         client.videoSize = CGSize(width: 2800, height: 1800)
 
