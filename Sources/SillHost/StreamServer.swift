@@ -20,6 +20,9 @@ final class StreamServer {
     var onClientConnected: ((NWConnection) -> Void)?
     /// A message from a client (selectSource, launchApp). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection) -> Void)?
+    /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
+    /// rather than in up to 4 s. Called on the network queue.
+    var onKeyframeNeeded: (() -> Void)?
 
     init(serviceType: String = "_sill._tcp") throws {
         let tcp = NWProtocolTCP.Options()
@@ -95,6 +98,8 @@ final class StreamServer {
         let data = message.serialized()
         queue.async { [self] in
             if message.kind == .parameterSets { lastParameterSets = data }
+            var wantKeyframe = false
+            defer { if wantKeyframe { onKeyframeNeeded?() } }
             for client in clients.values where client.connection.state == .ready {
                 if message.kind == .frame {
                     if client.needsKeyframe {
@@ -102,8 +107,12 @@ final class StreamServer {
                         send(ps, to: client)
                         client.needsKeyframe = false
                     } else if client.inflight > 2 && !message.isKeyframe {
+                        // Drop the delta. Every later delta references it, so this client now waits for
+                        // a keyframe (sending deltas anyway is what showed up as flicker on the iPad).
                         Stats.shared.bump("net.dropped")
-                        continue   // drop the delta; the next keyframe will resync
+                        client.needsKeyframe = true
+                        wantKeyframe = true
+                        continue
                     }
                     Stats.shared.bump("net.sent")
                 }

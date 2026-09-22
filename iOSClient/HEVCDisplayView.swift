@@ -12,6 +12,7 @@ final class HEVCDisplayView: UIView {
 
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
+    private var lastParameterSets: Data?
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
@@ -38,6 +39,11 @@ final class HEVCDisplayView: UIView {
 
     /// Thread-safe: AVSampleBufferDisplayLayer's enqueue/flush are documented as safe off main.
     func apply(_ ps: ParameterSets) {
+        // The host repeats the parameter sets with every keyframe. Only a real change (a new source,
+        // a resize) needs a new format description and a blank layer; a repeat must not flicker.
+        let encoded = ps.encoded()
+        if encoded == lastParameterSets, formatDescription != nil { return }
+        lastParameterSets = encoded
         let buffers = ps.sets.map { set -> UnsafeMutablePointer<UInt8> in
             let p = UnsafeMutablePointer<UInt8>.allocate(capacity: set.count)
             set.copyBytes(to: p, count: set.count)

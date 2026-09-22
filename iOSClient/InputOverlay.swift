@@ -15,6 +15,12 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// or hides (including when the user dismisses it themselves).
     var onKeyboardShownChange: ((Bool) -> Void)?
 
+    /// Modifiers the portrait key row is holding down for the next keystroke. Empty in landscape
+    /// unless the user latched one before rotating.
+    var latchedModifiers: KeyModifiers = []
+    /// Fires once a latch has been spent, so the key row can un-highlight itself.
+    var onModifiersConsumed: (() -> Void)?
+
     /// Pan translation already turned into scroll, so each callback sends only the new delta.
     private var lastPanTranslation: CGPoint = .zero
 
@@ -187,9 +193,51 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// this view holds no text of its own.
     var hasText: Bool { true }
 
-    func insertText(_ text: String) { send(.text(text)) }
+    // The latched-modifier rule, which decides which of the two keyboard paths a character takes:
+    //
+    //   • Shift alone changes what character the software keyboard produces, and it already did:
+    //     `insertText` receives the shifted text. So a shift latch sends plain `.text`, exactly
+    //     like ordinary typing. (It earns its keep on the arrows and on clicks, where it rides
+    //     along in the modifier bits instead.)
+    //
+    //   • Control, option and command never produce characters on a Mac — they make shortcuts —
+    //     and the software keyboard has no way to express them. While one of them is latched a
+    //     typed character therefore goes out as a raw `.key` down/up carrying the latched bits
+    //     (⌘S), not as `.text`, which is the same split the hardware-key path makes below.
+    //
+    // Either way the latch is spent afterwards: it is a one-shot, like a sticky key.
 
-    func deleteBackward() { send(.text("\u{8}")) }
+    func insertText(_ text: String) {
+        if !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1,
+           let character = text.first, let usage = HIDKey.usage(for: character) {
+            sendLatched(usage)
+            return
+        }
+        send(.text(text))
+        consumeLatch()
+    }
+
+    func deleteBackward() {
+        if !latchedModifiers.isDisjoint(with: .shortcutMakers) {
+            sendLatched(HIDKey.deleteBackward)
+            return
+        }
+        send(.text("\u{8}"))
+        consumeLatch()
+    }
+
+    /// One key, down and up, carrying the latched modifier bits, then the latch is spent.
+    private func sendLatched(_ usage: UInt16) {
+        send(.key(hidUsage: usage, down: true, modifiers: latchedModifiers.rawValue))
+        send(.key(hidUsage: usage, down: false, modifiers: latchedModifiers.rawValue))
+        consumeLatch()
+    }
+
+    private func consumeLatch() {
+        guard !latchedModifiers.isEmpty else { return }
+        latchedModifiers = []
+        onModifiersConsumed?()
+    }
 
     /// Show or hide the software keyboard.
     func toggleKeyboard() {
@@ -269,6 +317,8 @@ struct InputOverlay: UIViewRepresentable {
     let send: (InputEvent) -> Void
     let proxy: InputOverlayProxy
     @Binding var isKeyboardShown: Bool
+    var latchedModifiers: KeyModifiers = []
+    var onModifiersConsumed: () -> Void = {}
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -279,6 +329,10 @@ struct InputOverlay: UIViewRepresentable {
     func updateUIView(_ uiView: InputOverlayView, context: Context) {
         uiView.videoSize = videoSize
         uiView.send = send
+        uiView.latchedModifiers = latchedModifiers
+        // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
+        // so writing the binding here needs no hop.
+        uiView.onModifiersConsumed = onModifiersConsumed
         uiView.onKeyboardShownChange = { shown in
             // Hops to the next runloop turn: resigning can happen inside a SwiftUI update
             // (a teardown, say), and writing the binding there is a "modifying state during

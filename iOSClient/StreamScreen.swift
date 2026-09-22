@@ -23,6 +23,7 @@ enum Palette {
     static let barLabel = Color(hex: 0xC4C9D1)     // the 11pt labels under the bar icons
     static let muted = Color(hex: 0xA4ABB5)        // section headers, window counts, placeholder
     static let panel = Color(hex: 0x1F2126)        // the stream panel behind the video
+    static let trackpad = Color(hex: 0x101215)     // the portrait trackpad's well
     static let thumbBody = Color(hex: 0x26282D)    // thumbnail placeholder
     static let thumbTitleBar = Color(hex: 0x34373D)
     static let iconFallback = Color(hex: 0x3A3D44) // two-letter app badge
@@ -34,14 +35,24 @@ struct StreamScreen: View {
     @ObservedObject var client: StreamClient
     @State private var drawerOpen = false
     @State private var keyboardShown = false
+    /// Modifiers held down by the portrait key row until the next key, character or click uses
+    /// them. Lives up here so rotating the iPad does not drop a half-typed shortcut.
+    @State private var latched: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
 
     var body: some View {
-        VStack(spacing: 0) {
-            TopBar(client: client, drawerOpen: $drawerOpen, keyboardShown: $keyboardShown,
-                   toggleKeyboard: { overlay.toggleKeyboard() })
-            contentArea
+        // Wider than tall is the laptop-lid layout (bar on top); taller than wide is the folded
+        // half-and-half one. Nothing here is a device check: an iPhone in portrait gets the same
+        // split, just smaller.
+        GeometryReader { geo in
+            if geo.size.width > geo.size.height {
+                landscape
+            } else {
+                PortraitStreamScreen(client: client, drawerOpen: $drawerOpen,
+                                     keyboardShown: $keyboardShown, latched: $latched,
+                                     overlay: overlay)
+            }
         }
         .background(Color.black)
         .ignoresSafeArea(edges: .bottom)
@@ -51,6 +62,14 @@ struct StreamScreen: View {
         }
         .onChange(of: client.active) { _, source in
             withAnimation(.easeOut(duration: 0.18)) { drawerOpen = (source == .none) }
+        }
+    }
+
+    private var landscape: some View {
+        VStack(spacing: 0) {
+            TopBar(client: client, drawerOpen: $drawerOpen, keyboardShown: $keyboardShown,
+                   toggleKeyboard: { overlay.toggleKeyboard() })
+            contentArea
         }
     }
 
@@ -66,7 +85,9 @@ struct StreamScreen: View {
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
                              proxy: overlay,
-                             isKeyboardShown: $keyboardShown)
+                             isKeyboardShown: $keyboardShown,
+                             latchedModifiers: latched,
+                             onModifiersConsumed: { latched = [] })
             }
             .background(Palette.panel)
             .clipShape(streamShape)
@@ -165,15 +186,20 @@ private struct TopBar: View {
     }
 }
 
-private struct BarButton<Content: View>: View {
+/// A bar button: 66×66 in the landscape top bar, 64×58 in the portrait window bar.
+struct BarButton<Content: View>: View {
     let open: Bool
+    let width: CGFloat
+    let height: CGFloat
     let accessibilityLabel: String
     let action: () -> Void
     let content: () -> Content
 
-    init(open: Bool, accessibilityLabel: String, action: @escaping () -> Void,
-         @ViewBuilder content: @escaping () -> Content) {
+    init(open: Bool, width: CGFloat = 66, height: CGFloat = 66, accessibilityLabel: String,
+         action: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
         self.open = open
+        self.width = width
+        self.height = height
         self.accessibilityLabel = accessibilityLabel
         self.action = action
         self.content = content
@@ -182,7 +208,7 @@ private struct BarButton<Content: View>: View {
     var body: some View {
         Button(action: action) {
             content()
-                .frame(width: 66, height: 66)
+                .frame(width: width, height: height)
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(open ? Palette.controlOpen : Palette.control))
         }
@@ -193,17 +219,25 @@ private struct BarButton<Content: View>: View {
 
 // MARK: - Window thumbnails
 
-private struct WindowStrip: View {
+/// The live window thumbnails. Defaults are the landscape top bar's numbers; portrait's bar is
+/// tighter (92×58, gap 14, fade at 88%), so the size travels as parameters.
+struct WindowStrip: View {
     @ObservedObject var client: StreamClient
+    var width: CGFloat = 104
+    var height: CGFloat = 66
+    var radius: CGFloat = 10
+    var spacing: CGFloat = 16
+    var fade: Double = 0.86
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
+            HStack(spacing: spacing) {
                 ForEach(client.windows) { window in
                     WindowThumbnail(window: window,
                                     image: client.thumbnails[window.id],
                                     icon: client.icons[window.bundleID],
                                     isActive: client.active == .window(window.id),
+                                    width: width, height: height, radius: radius,
                                     action: { client.select(.window(window.id)) })
                 }
             }
@@ -212,7 +246,7 @@ private struct WindowStrip: View {
         }
         .frame(maxWidth: .infinity)
         .mask(LinearGradient(stops: [.init(color: .black, location: 0),
-                                     .init(color: .black, location: 0.86),
+                                     .init(color: .black, location: fade),
                                      .init(color: .clear, location: 1)],
                              startPoint: .leading, endPoint: .trailing))
     }
@@ -223,23 +257,30 @@ private struct WindowThumbnail: View {
     let image: UIImage?
     let icon: UIImage?
     let isActive: Bool
+    let width: CGFloat
+    let height: CGFloat
+    let radius: CGFloat
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             preview
-                .frame(width: 104, height: 66)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .frame(width: width, height: height)
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                .overlay(alignment: .bottomLeading) { badge.offset(x: -6, y: 6) }
                 .overlay {
+                    // The active halo sits under the app badge: the badge's bar-coloured ring then
+                    // reads as cutting through the halo, instead of the halo slicing across the icon.
+                    // It follows the thumbnail's own radius so both sizes keep the same 3 pt gap.
                     if isActive {
-                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        RoundedRectangle(cornerRadius: radius + 5, style: .continuous)
                             .strokeBorder(Palette.accent, lineWidth: 2)
                             .padding(-5)
                     }
                 }
+                // The badge does not scale with the thumbnail; it is the app's identity, not chrome.
+                .overlay(alignment: .bottomLeading) { badge.offset(x: -6, y: 6) }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(window.appName) window: \(window.title)" + (isActive ? ", showing now" : ""))
@@ -303,7 +344,7 @@ private struct OpenApp: Identifiable {
     var id: String { bundleID }
 }
 
-private struct AppDrawer: View {
+struct AppDrawer: View {
     @ObservedObject var client: StreamClient
     @Binding var drawerOpen: Bool
     @State private var search = ""

@@ -18,7 +18,18 @@ final class StreamCoordinator {
     let catalog = WindowCatalog()
     let capture = WindowCapture()
     let injector = InputInjector()
-    private var encoder: HEVCEncoder?
+    private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
+    /// The current encoder, readable off the main actor: the network queue asks it for a keyframe
+    /// after dropping a delta. A lock instead of an actor hop keeps that request immediate.
+    private let encoderBox = EncoderBox()
+    private final class EncoderBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: HEVCEncoder?
+        var current: HEVCEncoder? {
+            get { lock.lock(); defer { lock.unlock() }; return value }
+            set { lock.lock(); value = newValue; lock.unlock() }
+        }
+    }
     private(set) var active: StreamSource = .none
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
@@ -36,6 +47,10 @@ final class StreamCoordinator {
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
             }
+        }
+        server.onKeyframeNeeded = { [weak self] in
+            // Network queue → encoder lock; requestKeyframe re-encodes the last frame right away.
+            self?.encoderBox.current?.requestKeyframe()
         }
         server.onMessage = { [weak self] message, _ in
             Task { @MainActor in await self?.handle(message) }
