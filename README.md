@@ -42,10 +42,17 @@ an asset catalog, and the package reference. Nothing else.
 
 ## Measuring latency
 
-Open a millisecond stopwatch web page in the streamed window (search "online
-stopwatch milliseconds"). Photograph the Mac screen and the phone screen in
-one shot; the difference is glass-to-glass latency. The "frame age" overlay is
-a rough live number that relies on both clocks being NTP-synced.
+The host logs what each connected device sees, once a second:
+`client iPad (iPad14,1): 53 fps, frame age 8 ms, rtt 7 ms`. Frame age is the
+host's encode-output timestamp to the device receiving the frame (clocks assumed
+synced); RTT is a ping round trip. Measured 2026-09-22 on 5 GHz Wi-Fi: frame age
+8–10 ms, RTT 6–9 ms. Capture, encode, decode and display add roughly 30–50 ms
+more, so glass-to-glass is about 40–60 ms.
+
+For the true glass-to-glass number, open a millisecond stopwatch page in the
+streamed window, photograph the Mac and the device in one shot, and subtract.
+In a DEBUG build, `-SillHUD 1` overlays fps, frame age, RTT and frame size on
+the device.
 
 Targets: under 60 ms on 5 GHz Wi-Fi is the v1 bar. Under 40 ms is Mirage-class.
 

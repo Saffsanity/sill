@@ -70,6 +70,16 @@ struct StreamScreen: View {
     @State private var latched: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
+    /// The Aa button's text scale, device points per Mac point; nil leaves the Mac window alone.
+    /// Up here, like `latched`, so it survives rotation and both layouts share it.
+    @State private var textScale: Double? = nil
+    /// The stream panel's size in points, reported by whichever layout is showing.
+    @State private var panelSize: CGSize = .zero
+    /// The viewport send waiting out its debounce, if any.
+    @State private var pendingViewport: Task<Void, Never>? = nil
+
+    /// What the Aa button cycles through. Off first: the Mac window is left alone until asked.
+    static let textScaleSteps: [Double?] = [nil, 1.0, 1.25, 1.5, 0.8]
 
     #if DEBUG
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
@@ -101,17 +111,55 @@ struct StreamScreen: View {
         .onAppear {
             // A fresh connection streams nothing: the Mac no longer picks a window, the iPad does.
             if client.active == .none { drawerOpen = true }
+            sendViewport()
         }
         .onChange(of: client.active) { _, source in
             withAnimation(.easeOut(duration: 0.18)) { drawerOpen = (source == .none) }
+            // The host sizes a window as it selects it, from the last viewport it has; this repeat
+            // is for a host that restarted, or a window that was picked from the Mac's side.
+            sendViewport()
         }
+        .onChange(of: client.connected) { _, up in
+            if up { sendViewport() }
+        }
+        // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
+        .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
+        // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
+        .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+    }
+
+    // MARK: Viewport
+
+    /// Tells the host the panel size and text scale, now or after `delay` seconds. A newer call
+    /// replaces a pending one, so a burst of changes sends only the last. Nothing goes out until the
+    /// panel has been measured, or while disconnected.
+    private func sendViewport(after delay: Double = 0) {
+        pendingViewport?.cancel()
+        pendingViewport = Task { @MainActor in
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+                if Task.isCancelled { return }
+            }
+            guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
+            client.sendViewport(Viewport(width: Double(panelSize.width),
+                                         height: Double(panelSize.height),
+                                         scale: textScale))
+        }
+    }
+
+    private func cycleTextScale() {
+        let steps = Self.textScaleSteps
+        let index = steps.firstIndex(of: textScale) ?? 0
+        textScale = steps[(index + 1) % steps.count]
     }
 
     private func landscape(bar: BarMetrics) -> some View {
         VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
-                   toggleKeyboard: { overlay.toggleKeyboard() })
+                   textScale: textScale,
+                   toggleKeyboard: { overlay.toggleKeyboard() },
+                   cycleTextScale: cycleTextScale)
             contentArea
         }
     }
@@ -119,7 +167,8 @@ struct StreamScreen: View {
     private func portrait(metrics: PortraitMetrics) -> some View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
                              keyboardShown: $keyboardShown, latched: $latched,
-                             overlay: overlay)
+                             overlay: overlay,
+                             onPanelSize: { panelSize = $0 })
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -141,6 +190,8 @@ struct StreamScreen: View {
             .background(Palette.panel)
             .clipShape(streamShape)
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+            // The panel itself, inside the padding: the size the host fits the Mac window to.
+            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
             .padding(8)
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
@@ -170,8 +221,9 @@ struct StreamScreen: View {
 /// The landscape top bar's numbers. The inner display gets the Main board's roomy bar; the outer
 /// display gets the Laptop board's compact one, which is 8 pt shorter and tighter all round — on a
 /// 500 pt tall screen the bar is a sixth of everything there is, so every point it gives back is a
-/// point of Mac. The compact bar also drops the Aa placeholder, exactly as the Laptop board does:
-/// with this little room, an inert control is the first thing that should go.
+/// point of Mac. The compact bar also drops the Aa button, exactly as the Laptop board does: with
+/// this little room, a setting you change once is the first thing that should go. The scale it set
+/// still applies there; it lives in `StreamScreen`, not in the bar.
 struct BarMetrics {
     let height: CGFloat
     let padding: CGFloat
@@ -205,7 +257,9 @@ private struct TopBar: View {
     let metrics: BarMetrics
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
+    let textScale: Double?
     let toggleKeyboard: () -> Void
+    let cycleTextScale: () -> Void
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -218,14 +272,18 @@ private struct TopBar: View {
                         pad: metrics.thumbPad, fade: metrics.thumbFade)
 
             if metrics.showsTextSize {
-                // Milestone 3 lives here: scaling the streamed window's text. Present, inert.
+                // Text size: the host resizes the Mac window to the panel divided by this scale, so
+                // a bigger number means a smaller Mac window and bigger text here. Off leaves the
+                // window as it is (and does not put it back).
                 BarButton(open: false, width: metrics.buttonWidth, height: metrics.buttonHeight,
-                          accessibilityLabel: "Text size, currently 1.0 times", action: {}) {
+                          accessibilityLabel: textScale.map { "Text size, \(Self.scaleLabel($0)) times" }
+                              ?? "Text size, off",
+                          action: cycleTextScale) {
                     VStack(spacing: 2) {
                         Text("Aa")
                             .font(.system(size: 19, weight: .semibold))
                             .foregroundStyle(Palette.text)
-                        Text("1.0×")
+                        Text(textScale.map { Self.scaleLabel($0) + "×" } ?? "Off")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Palette.barLabel)
                     }
@@ -246,6 +304,12 @@ private struct TopBar: View {
         .background(Palette.bar.ignoresSafeArea(edges: .top))
     }
 
+    /// 1.0, 1.25, 1.5, 0.8: two decimals, less a trailing zero, but never fewer than one.
+    static func scaleLabel(_ scale: Double) -> String {
+        let text = String(format: "%.2f", scale)
+        return text.hasSuffix("0") ? String(text.dropLast()) : text
+    }
+
     private func button(open: Bool, symbol: String, label: String, accessibilityLabel: String,
                         action: @escaping () -> Void) -> some View {
         BarButton(open: open, width: metrics.buttonWidth, height: metrics.buttonHeight,
@@ -259,6 +323,23 @@ private struct TopBar: View {
                     .foregroundStyle(open ? Palette.accent : Palette.barLabel)
             }
         }
+    }
+}
+
+// MARK: - Spotlight
+
+/// Spotlight on the Mac: exactly ⌘Space, down then up. Whatever modifiers are latched never join
+/// it — the button means Spotlight, not "space with whatever happens to be held".
+enum Spotlight {
+    /// The sparkle magnifier where the system has it. The Apps button already uses the plain
+    /// magnifier, so the fallback must still look different from it.
+    static let symbol: String = UIImage(systemName: "sparkle.magnifyingglass") != nil
+        ? "sparkle.magnifyingglass" : "magnifyingglass.circle"
+
+    static func press(send: (InputEvent) -> Void) {
+        let space: UInt16 = 0x2C
+        send(.key(hidUsage: space, down: true, modifiers: KeyModifiers.command.rawValue))
+        send(.key(hidUsage: space, down: false, modifiers: KeyModifiers.command.rawValue))
     }
 }
 

@@ -23,6 +23,9 @@ final class StreamClient: ObservableObject {
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
     @Published var videoSize: CGSize = .zero
+    /// Round trip to the host in ms, from a ping every second while connected. -1 until measured.
+    @Published var rttMs: Int = -1
+    private var pingTimer: Timer?
 
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
@@ -53,7 +56,12 @@ final class StreamClient: ObservableObject {
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var frameCounter = 0
-    private var frameAgeMs = 0
+    /// Frames received in the last second (main thread). Counts frames discarded while waiting for a keyframe too.
+    @Published var fps = 0
+    /// Host encode-output timestamp → received here, sampled every 15th frame. Assumes synced clocks;
+    /// it is the transport part of latency, not glass-to-glass.
+    @Published var frameAgeMs = 0
+    private var latestFrameAgeMs = 0   // network queue copy, published from the 1 s timer
     private var lastParameterSets: ParameterSets?
     private var fpsTimer: Timer?
 
@@ -115,6 +123,7 @@ final class StreamClient: ObservableObject {
                     self.connected = true
                     self.status = "Connected to \(name)"
                     self.startFpsTimer()
+                    self.startPingTimer()
                 }
                 self.readHeader()
             case .waiting(let e):
@@ -159,6 +168,12 @@ final class StreamClient: ObservableObject {
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil }
         fpsTimer?.invalidate()
         fpsTimer = nil
+        pingTimer?.invalidate()
+        pingTimer = nil
+        rttMs = -1
+        fps = 0
+        frameAgeMs = 0
+        queue.async { self.frameCounter = 0; self.latestFrameAgeMs = 0 }
         connected = false
         self.status = status
         macName = ""
@@ -192,6 +207,12 @@ final class StreamClient: ObservableObject {
     /// once a newer one exists, and queuing them would add latency to everything behind them.
     /// Nothing else is ever dropped, and a down/up/scroll/text/key first flushes any move still
     /// waiting, so the cursor is always where it should be before the button goes down.
+    /// Any client → host message. Extensions (viewport, client stats) use this; frames never go this way.
+    func send(_ kind: StreamMessageKind, payload: Data) {
+        let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
+        connection?.send(content: message.serialized(), completion: .contentProcessed { _ in })
+    }
+
     func sendInput(_ event: InputEvent) {
         queue.async { [weak self] in
             guard let self else { return }
@@ -276,8 +297,7 @@ final class StreamClient: ObservableObject {
             onFrame?(data, header.isKeyframe)
             frameCounter += 1
             if frameCounter % 15 == 0 {
-                // Approximate: both devices' clocks are NTP-synced, so this is glass-to-glass minus decode/display.
-                frameAgeMs = Int((Date().timeIntervalSince1970 - header.timestamp) * 1000)
+                latestFrameAgeMs = Int((Date().timeIntervalSince1970 - header.timestamp) * 1000)
             }
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
@@ -300,6 +320,11 @@ final class StreamClient: ObservableObject {
         case .appList:
             guard let apps = Wire.decode([AppInfo].self, from: data) else { return }
             DispatchQueue.main.async { self.apps = apps }
+        case .pong:
+            guard data.count >= 8 else { return }
+            let sent = Double(bitPattern: data.readBigEndianUInt64())
+            let rtt = Int((Date().timeIntervalSince1970 - sent) * 1000)
+            DispatchQueue.main.async { self.rttMs = rtt }
         default:
             break // client → host kinds, and anything a newer host invents
         }
@@ -312,9 +337,31 @@ final class StreamClient: ObservableObject {
             self.queue.async {
                 let n = self.frameCounter
                 self.frameCounter = 0
-                // No overlay in the UI any more; the console is where the numbers live.
-                print("client: \(n) fps · frame age ≈ \(self.frameAgeMs) ms")
+                let age = self.latestFrameAgeMs
+                DispatchQueue.main.async { self.fps = n; self.frameAgeMs = age }
             }
         }
+    }
+}
+
+extension StreamClient {
+    private func startPingTimer() {
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, let connection = self.connection else { return }
+            var payload = Data(capacity: 8)
+            var v = Date().timeIntervalSince1970.bitPattern.bigEndian
+            Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
+            let message = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
+            connection.send(content: message.serialized(), completion: .contentProcessed { _ in })
+        }
+    }
+}
+
+private extension Data {
+    func readBigEndianUInt64() -> UInt64 {
+        var v: UInt64 = 0
+        _ = Swift.withUnsafeMutableBytes(of: &v) { copyBytes(to: $0, from: startIndex..<(startIndex + 8)) }
+        return UInt64(bigEndian: v)
     }
 }

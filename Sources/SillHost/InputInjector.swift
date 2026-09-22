@@ -43,6 +43,8 @@ final class InputInjector {
             scroll(at: point(x, y, in: rect), dx: dx * rect.width, dy: dy * rect.height)
         case .text(let string):
             type(string)
+        case .scrollGesture(let phase, let x, let y):
+            scrollGesture(phase, at: point(x, y, in: rect))
         case .key(let hidUsage, let down, let modifiers):
             key(hidUsage: hidUsage, down: down, modifiers: modifiers)
         }
@@ -113,16 +115,176 @@ final class InputInjector {
     /// (positive scrolls left, so the content slides right), so neither value is negated. The
     /// system's natural-scrolling preference flips the hardware driver's deltas, not ours, so a
     /// synthetic event means the same thing whichever way the Mac is set.
+    ///
+    /// Inside a gesture the delta is stamped with the phase the Mac expects from a trackpad (see
+    /// `ScrollState`); outside one it goes out exactly as before, a bare pixel wheel event.
     private func scroll(at location: CGPoint, dx: Double, dy: Double) {
-        guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
-                                  wheel1: Int32(clamping: Int(dy.rounded())),
-                                  wheel2: Int32(clamping: Int(dx.rounded())),
-                                  wheel3: 0) else { return }
-        // A scroll event carries its own location; without it the scroll lands wherever the
-        // cursor happens to be rather than under the client's finger.
-        event.location = location
-        event.post(tap: .cghidEventTap)
+        // The wheel fields are whole points. Carry the rounding remainder into the next event, or
+        // a slow drag (and the end of every momentum tail) made of sub-point steps scrolls nothing.
+        // Int(Double) traps on NaN, infinity and anything past Int's range, so a malformed delta
+        // from the wire is dropped and a huge one clamped before converting.
+        guard dx.isFinite, dy.isFinite else { return }
+        let limit = Double(Int32.max)
+        let exact = CGPoint(x: dx + scrollRemainder.x, y: dy + scrollRemainder.y)
+        let wheel1 = min(max(exact.y.rounded(), -limit), limit)
+        let wheel2 = min(max(exact.x.rounded(), -limit), limit)
+        scrollRemainder = CGPoint(x: exact.x - wheel2, y: exact.y - wheel1)
+        if abs(scrollRemainder.x) >= 1 || abs(scrollRemainder.y) >= 1 { scrollRemainder = .zero }  // after a clamp
+        let w1 = Int32(wheel1), w2 = Int32(wheel2)
+
+        switch scrollState {
+        case .idle:
+            postScroll(at: location, wheel1: w1, wheel2: w2, phase: nil, momentum: nil)
+        case .gesture(let begun):
+            postScroll(at: location, wheel1: w1, wheel2: w2,
+                       phase: begun ? .changed : .began, momentum: nil)
+            scrollState = .gesture(begun: true)
+        case .momentum(let begun):
+            postScroll(at: location, wheel1: w1, wheel2: w2,
+                       phase: nil, momentum: begun ? .continuous : .begin)
+            scrollState = .momentum(begun: true)
+        }
+        lastScrollLocation = location
+        rearmScrollWatchdog()
         Stats.shared.bump("in.scroll")
+    }
+
+    /// Where the scroll gesture in progress is. One at a time: the client has one scroll surface
+    /// in use, and its gestures never overlap (it ends momentum before beginning a new gesture).
+    ///
+    /// A Mac trackpad scroll is not a stream of wheel ticks but a phased gesture, and AppKit keys
+    /// its behaviour off the phases: it rubber-bands past an edge only while a gesture is under
+    /// way, springs back on Ended unless momentum follows, and treats momentum events as the
+    /// coast after lift-off. The client brackets its deltas with `.scrollGesture` messages; this
+    /// turns them into the phase fields:
+    ///
+    ///   began          → nothing yet; the first delta goes out as kCGScrollPhaseBegan (1)
+    ///   deltas         → kCGScrollPhaseChanged (2)
+    ///   ended          → one zero-delta event, kCGScrollPhaseEnded (4)
+    ///   momentumBegan  → nothing yet; the first delta is kCGMomentumScrollPhaseBegin (1)
+    ///   deltas         → kCGMomentumScrollPhaseContinue (2), scroll phase 0
+    ///   momentumEnded  → one zero-delta event, kCGMomentumScrollPhaseEnd (3)
+    ///
+    /// A boundary with no delta inside it (a gesture that never moved) posts nothing, so the Mac
+    /// never sees an Ended without its Began.
+    private enum ScrollState {
+        case idle                     // bare wheel deltas: an older client, or a lone tick
+        case gesture(begun: Bool)     // fingers down; begun once the Began event is out
+        case momentum(begun: Bool)    // fingers up, client-generated coast
+    }
+
+    private var scrollState = ScrollState.idle
+    private var scrollRemainder = CGPoint.zero
+    /// Where the last scroll event went, for the closing event the watchdog posts.
+    private var lastScrollLocation = CGPoint.zero
+    private var scrollWatchdog: Task<Void, Never>?
+
+    /// A gesture or coast whose closing message never comes (the client dropped off mid-scroll)
+    /// would leave the Mac's content stretched past its edge indefinitely. If a gesture goes this
+    /// long with no traffic it is closed here. Fingers resting mid-scroll send nothing, so the
+    /// gesture limit is generous; momentum ticks at 60 Hz, so a half-second gap means it died.
+    private static let gestureIdleTimeout: Double = 2
+    private static let momentumIdleTimeout: Double = 0.5
+
+    private func scrollGesture(_ phase: ScrollPhase, at location: CGPoint) {
+        Stats.shared.bump("in.scrollPhase")
+        switch phase {
+        case .began:
+            closeScroll(at: location)   // defensive: anything still open ends first
+            scrollState = .gesture(begun: false)
+            scrollRemainder = .zero
+        case .ended:
+            if case .gesture(begun: true) = scrollState {
+                postScroll(at: location, wheel1: 0, wheel2: 0, phase: .ended, momentum: nil)
+            }
+            scrollState = .idle
+        case .momentumBegan:
+            closeScroll(at: location)
+            scrollState = .momentum(begun: false)
+        case .momentumEnded:
+            if case .momentum(begun: true) = scrollState {
+                postScroll(at: location, wheel1: 0, wheel2: 0, phase: nil, momentum: .end)
+            }
+            scrollState = .idle
+        }
+        lastScrollLocation = location
+        rearmScrollWatchdog()
+    }
+
+    /// Posts the closing event for whatever phase is open, then goes idle.
+    private func closeScroll(at location: CGPoint) {
+        switch scrollState {
+        case .gesture(begun: true):
+            postScroll(at: location, wheel1: 0, wheel2: 0, phase: .ended, momentum: nil)
+        case .momentum(begun: true):
+            postScroll(at: location, wheel1: 0, wheel2: 0, phase: nil, momentum: .end)
+        default:
+            break
+        }
+        scrollState = .idle
+    }
+
+    private func rearmScrollWatchdog() {
+        scrollWatchdog?.cancel()
+        let timeout: Double
+        switch scrollState {
+        case .idle: scrollWatchdog = nil; return
+        case .gesture: timeout = Self.gestureIdleTimeout
+        case .momentum: timeout = Self.momentumIdleTimeout
+        }
+        // Main actor, inherited from this method: the state it touches is never shared.
+        scrollWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.scrollWentQuiet()
+        }
+    }
+
+    /// Closes the open phase on the Mac but keeps the gesture's shape, un-begun: if the client
+    /// was only resting and deltas resume, they start a fresh Began (or momentum Begin) rather
+    /// than continuing a phase the Mac has already seen end.
+    private func scrollWentQuiet() {
+        let state = scrollState
+        closeScroll(at: lastScrollLocation)
+        switch state {
+        case .gesture: scrollState = .gesture(begun: false)
+        case .momentum: scrollState = .momentum(begun: false)
+        case .idle: break
+        }
+        Stats.shared.bump("in.scrollTimeout")
+    }
+
+    /// One scroll-wheel CGEvent. With neither phase set it is the plain pixel wheel event this
+    /// injector always sent; with either, the trackpad fields go on top.
+    ///
+    /// What the pixel-unit constructor already fills in (checked by reading the fields back):
+    /// IsContinuous = 1, PointDeltaAxis1/2 = wheel1/2, DeltaAxis1/2 = a line count, and
+    /// FixedPtDeltaAxis1/2 = the same motion in *lines* (pixels / 10, 16.16 fixed point — 7 px
+    /// reads back as 0.7). So:
+    ///   • IsContinuous and PointDelta are set explicitly anyway: they are what makes this a
+    ///     precise trackpad scroll to AppKit (`hasPreciseScrollingDeltas`, `scrollingDeltaY`), and
+    ///     the gesture must not depend on a constructor default.
+    ///   • FixedPtDelta is deliberately left as the constructor made it. It backs NSEvent's legacy
+    ///     line-based `deltaY`; writing the point deltas there would inflate that tenfold for
+    ///     every app still reading it. (`setDoubleValueField` would do the 16.16 conversion if it
+    ///     ever needs setting — CGEventField exposes all of these in Swift, nothing is missing.)
+    private func postScroll(at location: CGPoint, wheel1: Int32, wheel2: Int32,
+                            phase: CGScrollPhase?, momentum: CGMomentumScrollPhase?) {
+        guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                                  wheel1: wheel1, wheel2: wheel2, wheel3: 0) else { return }
+        // A scroll event carries its own location; without it the scroll lands wherever the
+        // cursor happens to be rather than under the client's finger. Every event, the closing
+        // zero-delta ones included, so the whole gesture is routed to the same window.
+        event.location = location
+        if phase != nil || momentum != nil {
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(wheel1))
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(wheel2))
+            // Exactly one of the two is non-zero: momentum events carry scroll phase 0.
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase?.rawValue ?? 0))
+            event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(momentum?.rawValue ?? 0))
+        }
+        event.post(tap: .cghidEventTap)
     }
 
     // MARK: Text

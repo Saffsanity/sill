@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import Combine
 import CoreMedia
 import SwiftUI
 import StreamProtocol
@@ -17,6 +18,12 @@ final class HEVCDisplayView: UIView {
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
     var onVideoSize: ((CGSize) -> Void)?
+
+    #if DEBUG
+    /// The `-SillHUD 1` readout and its subscriptions to the client. nil unless that argument is set.
+    private var hud: DiagnosticsHUDView?
+    private var hudSubscriptions = Set<AnyCancellable>()
+    #endif
 
     /// Where `resizeAspect` actually draws a `videoSize` frame inside `bounds`: the same letterboxed
     /// rect the layer uses, which is what maps a touch to a fraction of the frame.
@@ -36,6 +43,37 @@ final class HEVCDisplayView: UIView {
         displayLayer.videoGravity = .resizeAspect
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        #if DEBUG
+        if let hud {
+            // Rotation reparents this view into a new SwiftUI host; keep the readout above anything
+            // added since and pinned to the new bounds.
+            bringSubviewToFront(hud)
+            hud.place(in: bounds)
+        }
+        #endif
+    }
+
+    #if DEBUG
+    /// Shows the diagnostics readout fed by `client`, when launched with `-SillHUD 1`. Idempotent:
+    /// the view is shared across layouts, so every re-host calls this and only the first one counts.
+    func attachDiagnostics(to client: StreamClient) {
+        guard DiagnosticsHUDView.isEnabled, hud == nil else { return }
+        let hud = DiagnosticsHUDView(frame: .zero)
+        addSubview(hud)
+        self.hud = hud
+        // [weak hud]: the view owns the subscriptions, the subscriptions must not own the view.
+        Publishers.CombineLatest4(client.$fps, client.$frameAgeMs, client.$rttMs, client.$videoSize)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak hud] fps, age, rtt, size in
+                hud?.update(fps: fps, frameAgeMs: age, rttMs: rtt, videoSize: size)
+            }
+            .store(in: &hudSubscriptions)
+        setNeedsLayout()
+    }
+    #endif
 
     /// Thread-safe: AVSampleBufferDisplayLayer's enqueue/flush are documented as safe off main.
     func apply(_ ps: ParameterSets) {
@@ -127,6 +165,9 @@ struct StreamView: UIViewRepresentable {
     func makeUIView(context: Context) -> HEVCDisplayView {
         let view = client.displayView
         view.removeFromSuperview()
+        #if DEBUG
+        view.attachDiagnostics(to: client)
+        #endif
         return view
     }
 

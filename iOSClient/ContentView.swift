@@ -4,8 +4,15 @@ import StreamProtocol
 
 struct ContentView: View {
     @StateObject private var client = StreamClient()
+    /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
+    /// harness's `-SillLive 1` session, which runs on this same client.
+    @StateObject private var statsReporter = ClientStatsReporter()
 
     var body: some View {
+        root.onAppear { statsReporter.attach(to: client) }
+    }
+
+    @ViewBuilder private var root: some View {
         #if DEBUG
         if let spec = LayoutHarness.Spec.fromLaunchArguments {
             // The harness gets the app's own client so `-SillLive 1` can put a real session inside
@@ -51,6 +58,8 @@ struct ContentView: View {
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
 ///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
+/// * `-SillHUD 1` — not a harness argument, but it combines with these: the fps / frame age / RTT
+///   readout on the display view (see `DiagnosticsHUDView`). It works with or without the harness.
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.

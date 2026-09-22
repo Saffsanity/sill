@@ -85,8 +85,8 @@ Out: hole punching, multi-window, layout customization, audio, AV1.
 
 Milestones (solo, ~10 hrs/week; halve at 20):
 1. Latency spike, capture→encode→decode — done 2026-09-22 (streams to iPad Mini; latency number still to record)
-2. Input and window control — 3–5 wks  ← NOW
-3. Virtual display and scaling — 2–4 wks
+2. Input and window control — done 2026-09-22 (latency ≈ 40–60 ms glass-to-glass, estimated from 8–10 ms transport)
+3. Virtual display and scaling — 2–4 wks  ← NOW (AX-resize fallback shipped; virtual display probed OK on macOS 27)
 4. Client UI and Duo layouts — 4–6 wks
 5. Pairing, encryption, reconnect — 2–4 wks
 6. Shipping: notarization, permission onboarding, TestFlight, review — 2–3 wks
@@ -99,7 +99,10 @@ Costs: $99/yr developer account, domain, optionally a Duo for testing.
    where it's weak.
 2. Latency kills it. Mitigation: milestone 1 before anything else.
 3. Fragile Mac side (private virtual-display API, TCC prompts change yearly).
-   Mitigation: real-window fallback.
+   Mitigation: real-window fallback. 2026-09-22: `CGVirtualDisplay` probed
+   working on macOS 27.0 (17 selectors present, HiDPI mode, SCK captures it,
+   window keeps repainting off-screen). The companion is Developer ID, not Mac
+   App Store, which Accessibility-based input already required.
 4. App Review under 4.2.7. Mitigation: early TestFlight build.
 5. Revenue ceiling is low by design (tips). Fine, adoption is the goal.
 

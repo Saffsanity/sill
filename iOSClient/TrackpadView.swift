@@ -92,6 +92,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 
     private var lastTranslation: CGPoint = .zero
     private var panTouches = 0
+    /// True while two fingers are scrolling: between the `.scrollGesture(.began)` and `.ended`
+    /// this view sent.
+    private var scrolling = false
+    /// Pad velocity at the last two-finger callback. When one finger of two lifts first the scroll
+    /// ends there, and the recognizer's velocity at that moment is polluted by the centroid jump.
+    private var scrollVelocity: CGPoint = .zero
+    /// The coast after a two-finger flick. Shared engine with the direct-touch overlay.
+    private let momentum = ScrollMomentum()
     /// True between a long press's start and the finger lifting: the button is down and moves drag.
     private var dragging = false
     /// Modifier bits currently pressed down around a click, so the ups can mirror the downs.
@@ -146,22 +154,34 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 
     /// One or two fingers. The touch count is re-read every callback, so dropping a second finger
     /// onto the pad mid-stroke turns a move into a scroll without lifting off first.
+    ///
+    /// Two fingers are a Mac-trackpad scroll gesture: `.began` when the second finger is down,
+    /// deltas, `.ended` when either finger lifts, then momentum if it was a flick. One finger only
+    /// moves the pointer and leaves a coasting scroll alone, as on a Mac.
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began:
             lastTranslation = .zero
             panTouches = gesture.numberOfTouches
+            if panTouches >= 2 { beginScroll() }
         case .changed:
             let translation = gesture.translation(in: self)
             guard gesture.numberOfTouches == panTouches else {
                 // A finger joined or left: rebase, or the jump in the translation becomes a jolt.
                 panTouches = gesture.numberOfTouches
                 lastTranslation = translation
+                if panTouches >= 2, !scrolling {
+                    beginScroll()
+                } else if panTouches < 2, scrolling {
+                    // Fingers rarely lift together, so this is usually the flick's lift-off.
+                    endScroll(momentumVelocity: scrollVelocity)
+                }
                 return
             }
             let dx = translation.x - lastTranslation.x
             let dy = translation.y - lastTranslation.y
             lastTranslation = translation
+            if panTouches >= 2 { scrollVelocity = gesture.velocity(in: self) }
             guard dx != 0 || dy != 0 else { return }
             if panTouches >= 2 {
                 guard bounds.width > 0, bounds.height > 0 else { return }
@@ -171,10 +191,63 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             } else {
                 moveCursor(dx: dx, dy: dy)
             }
+        case .ended:
+            if scrolling { endScroll(momentumVelocity: gesture.velocity(in: self)) }
+            lastTranslation = .zero
+            panTouches = 0
         default:
+            // Cancelled or failed: the system took the touches, so close the gesture but no coast.
+            if scrolling { endScroll(momentumVelocity: nil) }
             lastTranslation = .zero
             panTouches = 0
         }
+    }
+
+    /// A new two-finger gesture ends any coast still running first (its `.momentumEnded` goes out
+    /// before this `.began`), so the host never has two scrolls open.
+    private func beginScroll() {
+        momentum.stop()
+        scrolling = true
+        scrollVelocity = .zero
+        send(.scrollGesture(.began, x: cursor.x, y: cursor.y))
+    }
+
+    /// Closes the gesture and, given a lift-off velocity fast enough to be a flick, coasts. The
+    /// coast stays at the cursor where the scroll ended, even if one finger then moves the
+    /// pointer: the Mac routes a whole gesture, momentum included, to the view it began in.
+    private func endScroll(momentumVelocity velocity: CGPoint?) {
+        scrolling = false
+        let at = cursor
+        send(.scrollGesture(.ended, x: at.x, y: at.y))
+        guard let velocity else { return }
+        // Begin and end capture the send closure rather than self, so the end still goes out if
+        // this view is torn down mid-coast.
+        let send = self.send
+        momentum.start(
+            velocity: velocity,
+            onBegin: { send(.scrollGesture(.momentumBegan, x: at.x, y: at.y)) },
+            onStep: { [weak self] step in
+                // Converted to frame fractions exactly as live two-finger deltas are.
+                guard let self, self.bounds.width > 0, self.bounds.height > 0 else { return }
+                self.send(.scroll(x: at.x, y: at.y,
+                                  dx: step.x / self.bounds.width, dy: step.y / self.bounds.height))
+            },
+            onEnd: { send(.scrollGesture(.momentumEnded, x: at.x, y: at.y)) })
+    }
+
+    /// Two fingers resting on the pad stop a coasting scroll, as on a Mac trackpad, before the pan
+    /// has even recognized. One finger does not: that is the pointer, and it may move freely
+    /// while the content coasts.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        let down = event?.touches(for: self)?
+            .filter { $0.phase != .ended && $0.phase != .cancelled }.count ?? 0
+        if down >= 2 { momentum.stop() }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { momentum.stop() }
     }
 
     @objc private func handleTap() { click(down: .leftDown, up: .leftUp) }

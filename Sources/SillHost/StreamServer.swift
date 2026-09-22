@@ -10,6 +10,7 @@ final class StreamServer {
         var inflight = 0          // every message still unacknowledged (backpressure for delta drops)
         var inflightFrames = 0    // video frames only (dead-peer detection; the catalog burst is ~120 messages)
         var needsKeyframe = true
+        var lastStatsPrint = 0.0  // CFAbsoluteTime of the last clientStats line, to rate-limit the log
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -24,6 +25,8 @@ final class StreamServer {
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
     /// rather than in up to 4 s. Called on the network queue.
     var onKeyframeNeeded: (() -> Void)?
+    /// Number of connected clients changed. Called on the network queue. Zero means the host can idle.
+    var onClientCountChanged: ((Int) -> Void)?
 
     init(serviceType: String = "_sill._tcp") throws {
         let tcp = NWProtocolTCP.Options()
@@ -57,11 +60,14 @@ final class StreamServer {
                 self?.onClientConnected?(connection)
             case .failed, .cancelled:
                 print("Client left: \(connection.endpoint)")
-                self?.clients[id] = nil
+                guard let self else { return }
+                self.clients[id] = nil
+                self.onClientCountChanged?(self.clients.count)
             default: break
             }
         }
         clients[id] = client
+        onClientCountChanged?(clients.count)
         connection.start(queue: queue)
     }
 
@@ -98,7 +104,22 @@ final class StreamServer {
                 return
             }
             let deliver = { (payload: Data) in
-                self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                if header.kind == .ping {
+                    // Echo straight back from the network queue: the round trip should measure the
+                    // network and nothing else.
+                    self.send(StreamMessage(kind: .pong, timestamp: header.timestamp, isKeyframe: false, payload: payload).serialized(), to: client)
+                } else if header.kind == .clientStats {
+                    // What the device sees, printed here so the latency number is in the Mac's log.
+                    // The client reports every second; every other report (~2 s) is enough. The gate
+                    // is 1.5 s, not 2, so arrival jitter on a 1 s cadence cannot stretch it to 3 s.
+                    let now = CFAbsoluteTimeGetCurrent()
+                    if now - client.lastStatsPrint >= 1.5, let stats = Wire.decode(ClientStats.self, from: payload) {
+                        client.lastStatsPrint = now
+                        print("client \(stats.device): \(stats.fps) fps, frame age \(stats.frameAgeMs) ms, rtt \(stats.rttMs) ms")
+                    }
+                } else {
+                    self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
+                }
                 self.receiveLoop(client)
             }
             if header.payloadLength == 0 { deliver(Data()); return }

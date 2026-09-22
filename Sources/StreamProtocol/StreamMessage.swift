@@ -15,6 +15,10 @@ public enum StreamMessageKind: UInt8 {
     case selectSource = 6    // JSON StreamSource: what to stream
     case launchApp = 7       // JSON LaunchApp: open an installed app; its first window gets selected
     case input = 8           // JSON InputEvent: pointer, scroll, text or key aimed at the streamed source (see Input.swift)
+    case viewport = 9        // JSON Viewport: the client's stream panel size and wanted scale (see Viewport.swift)
+    case ping = 10           // client → host: 8 bytes, client clock (Double, BE) — echoed back as pong for RTT
+    case pong = 11           // host → client: the ping payload, unchanged
+    case clientStats = 12    // client → host: JSON ClientStats once a second, so the host log shows the far end
 }
 
 public struct StreamHeader {

@@ -23,6 +23,11 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     /// Pan translation already turned into scroll, so each callback sends only the new delta.
     private var lastPanTranslation: CGPoint = .zero
+    /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
+    /// never sent for a pan that could not begin (no video yet).
+    private var scrollGestureOpen = false
+    /// The coast after a flick.
+    private let momentum = ScrollMomentum()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -111,24 +116,67 @@ final class InputOverlayView: UIView, UIKeyInput {
         _ = sendPointer(.rightUp, at: point, clamped: false)
     }
 
-    /// Finger pan: scrolling, not dragging. Deltas are fractions of the video rect, natural sign
-    /// (finger down = content down = positive dy), and one event per callback.
+    /// Finger pan: scrolling, not dragging, shaped like a Mac trackpad gesture so the Mac
+    /// rubber-bands at the edges and coasts after a flick:
+    /// `.began` → one `.scroll` per callback → `.ended`, then maybe momentum (`startMomentum`).
+    /// Deltas are fractions of the video rect, natural sign (finger down = content down =
+    /// positive dy).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let rect = videoRect
-        guard rect.width > 0, rect.height > 0 else { return }
         switch gesture.state {
         case .began:
             lastPanTranslation = .zero
+            // A new pan while the last flick is still coasting ends the coast first, so the Mac
+            // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
+            momentum.stop()
+            guard let p = normalized(gesture.location(in: self), clamped: true) else { return }
+            send(.scrollGesture(.began, x: p.x, y: p.y))
+            scrollGestureOpen = true
         case .changed:
+            guard rect.width > 0, rect.height > 0 else { return }
             let translation = gesture.translation(in: self)
             let dx = (translation.x - lastPanTranslation.x) / rect.width
             let dy = (translation.y - lastPanTranslation.y) / rect.height
             lastPanTranslation = translation
             guard dx != 0 || dy != 0, let p = normalized(gesture.location(in: self), clamped: true) else { return }
             send(.scroll(x: p.x, y: p.y, dx: Double(dx), dy: Double(dy)))
+        case .ended, .cancelled:
+            lastPanTranslation = .zero
+            guard scrollGestureOpen else { return }
+            scrollGestureOpen = false
+            let p = normalized(gesture.location(in: self), clamped: true) ?? (x: 0.5, y: 0.5)
+            send(.scrollGesture(.ended, x: p.x, y: p.y))
+            // Only a real lift coasts. A cancel means the system took the touch (an alert, a
+            // system gesture), and flinging the Mac's content then would be a surprise.
+            if gesture.state == .ended { startMomentum(velocity: gesture.velocity(in: self), at: p) }
         default:
             lastPanTranslation = .zero
         }
+    }
+
+    /// The coast after a flick, at the point the finger lifted. Steps are converted to fractions
+    /// of the video rect exactly as live pan deltas are, so the coast continues at the speed the
+    /// content was moving under the finger.
+    private func startMomentum(velocity: CGPoint, at p: (x: Double, y: Double)) {
+        // Begin and end capture the send closure rather than self, so the end still goes out if
+        // this view is torn down mid-coast.
+        let send = self.send
+        momentum.start(
+            velocity: velocity,
+            onBegin: { send(.scrollGesture(.momentumBegan, x: p.x, y: p.y)) },
+            onStep: { [weak self] step in
+                guard let self else { return }
+                let rect = self.videoRect
+                guard rect.width > 0, rect.height > 0 else { return }
+                self.send(.scroll(x: p.x, y: p.y,
+                                  dx: Double(step.x / rect.width), dy: Double(step.y / rect.height)))
+            },
+            onEnd: { send(.scrollGesture(.momentumEnded, x: p.x, y: p.y)) })
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { momentum.stop() }
     }
 
     /// Pencil hover (and a trackpad pointer): cursor only, no buttons.
@@ -148,6 +196,9 @@ final class InputOverlayView: UIView, UIKeyInput {
     // events are built straight from the touches.
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Any new touch stops a coasting flick, the way touching a moving list does on iOS (and
+        // before the Pencil clicks on content that is still sliding).
+        momentum.stop()
         guard let touch = touches.first(where: { $0.type == .pencil }) else {
             super.touchesBegan(touches, with: event); return
         }
@@ -339,5 +390,97 @@ struct InputOverlay: UIViewRepresentable {
             // view update" warning waiting to happen.
             DispatchQueue.main.async { isKeyboardShown = shown }
         }
+    }
+}
+
+// MARK: - Scroll momentum
+
+/// The coast after a flicked scroll, generated here because the Mac will not make one: macOS adds
+/// momentum in its trackpad driver, below the point where injected CGEvents enter, so a synthetic
+/// gesture that ends simply stops. After a fast enough lift this emits one delta per display frame,
+/// starting at the lift-off velocity and decaying exponentially, until the step is too small to
+/// matter or `stop()` is called (a new touch).
+///
+/// Steps are in the owner's view points; the owner converts them to frame fractions exactly as it
+/// does live pan deltas and brackets the run with `.momentumBegan` / `.momentumEnded` via the
+/// callbacks. One run at a time: `start` stops any run still going (firing its end) first, and
+/// `stop` always fires the end of a run that was going, so the host never sees an unclosed coast.
+///
+/// Main thread only (display link and gesture callbacks).
+final class ScrollMomentum: NSObject {
+    /// Lift-off speed, in points per second, below which a pan just stops. Anything slower is a
+    /// placement, not a flick — roughly where UIScrollView's own coast stops being noticeable.
+    private static let minimumSpeed: CGFloat = 150
+    /// The rate the decay is defined at, and the rate the link is pinned to: a 120 Hz display
+    /// would otherwise double the message rate for no visible gain on a 60 fps stream.
+    private static let tickRate: Double = 60
+    /// Velocity kept per 1/60 s tick. At 0.96 a coast travels ≈ 0.42 s × lift-off speed, and a
+    /// typical 1000–3000 pt/s flick coasts for ~1.6–2.1 s before `stopBelow` (a gentle 300 pt/s
+    /// one for ~1.1 s), inside the 1.5–2.5 s tail of a Mac trackpad. By the same arithmetic 0.95
+    /// gives ~1.3–1.7 s, short of it, and 0.97 ~2.2–2.8 s, past it. Tune here after trying it.
+    private static let decayPerTick: Double = 0.96
+    /// Stop once a tick would move less than this many points: past here the tail is invisible,
+    /// and still sending it would only hold the Mac's gesture open.
+    private static let stopBelow: Double = 0.3
+
+    private var link: CADisplayLink?
+    /// Points per second, decaying.
+    private var velocity = CGPoint.zero
+    private var lastTimestamp: CFTimeInterval = 0
+    private var onStep: ((CGPoint) -> Void)?
+    private var onEnd: (() -> Void)?
+
+    /// Starts a coast if `velocity` (points per second, from the pan recognizer) is a flick, and
+    /// does nothing otherwise. `onBegin` and the first step fire straight away, so the momentum
+    /// follows the gesture's end without waiting a frame, as a real trackpad's does.
+    func start(velocity: CGPoint, onBegin: () -> Void,
+               onStep: @escaping (CGPoint) -> Void, onEnd: @escaping () -> Void) {
+        stop()
+        guard hypot(velocity.x, velocity.y) > Self.minimumSpeed else { return }
+        self.velocity = velocity
+        self.onStep = onStep
+        self.onEnd = onEnd
+        onBegin()
+        let tick = 1 / Self.tickRate
+        onStep(CGPoint(x: velocity.x * tick, y: velocity.y * tick))
+
+        // The link retains this object until it is invalidated, which `stop` always does, and a
+        // run always ends on its own within a few seconds.
+        let link = CADisplayLink(target: self, selector: #selector(advance))
+        let rate = Float(Self.tickRate)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: rate, maximum: rate, preferred: rate)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        lastTimestamp = CACurrentMediaTime()
+    }
+
+    /// Ends the run in progress, if any, firing its `onEnd`. Safe to call at any time.
+    func stop() {
+        guard let link else { return }
+        link.invalidate()
+        self.link = nil
+        let end = onEnd
+        onStep = nil
+        onEnd = nil
+        end?()
+    }
+
+    @objc private func advance(_ link: CADisplayLink) {
+        // Real elapsed time rather than an assumed 1/60 s, so a skipped frame does not slow the
+        // coast; clamped so a long stall (the app switcher) cannot turn into one big jump.
+        let now = link.targetTimestamp
+        let dt = min(now - lastTimestamp, 0.1)
+        guard dt > 0 else { return }
+        lastTimestamp = now
+
+        let decay = CGFloat(pow(Self.decayPerTick, dt * Self.tickRate))
+        velocity.x *= decay
+        velocity.y *= decay
+        // The stop rule is per 60 Hz tick whatever the actual frame interval was.
+        guard Double(hypot(velocity.x, velocity.y)) / Self.tickRate >= Self.stopBelow else {
+            stop()
+            return
+        }
+        onStep?(CGPoint(x: velocity.x * dt, y: velocity.y * dt))
     }
 }

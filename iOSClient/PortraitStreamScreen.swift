@@ -76,8 +76,8 @@ enum HIDKey {
 ///
 /// The outer display is the same screen, not a different one: same 50/50 split, same three rows in
 /// the same order. It is only 500 pt wide, so the numbers shrink — but nothing shrinks below a
-/// 44 pt touch target, which is what forces the one real change: eleven caps do not fit across
-/// 472 pt at 44 pt each, so the key row folds into two rows of six and five.
+/// 44 pt touch target, which is what forces the one real change: twelve caps do not fit across
+/// 472 pt at 44 pt each, so the key row folds into two rows of six.
 struct PortraitMetrics {
     let padTop: CGFloat
     let padSide: CGFloat
@@ -136,6 +136,8 @@ struct PortraitStreamScreen: View {
     @Binding var keyboardShown: Bool
     @Binding var latched: KeyModifiers
     let overlay: InputOverlayProxy
+    /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
+    let onPanelSize: (CGSize) -> Void
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
@@ -189,6 +191,8 @@ struct PortraitStreamScreen: View {
         .background(Palette.panel)
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+        // Measured inside the padding, as in landscape: the panel the video is drawn in.
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)
         .padding(8)
     }
 
@@ -199,7 +203,8 @@ struct PortraitStreamScreen: View {
             windowBar
             KeyRow(metrics: metrics, latched: $latched, keyboardShown: keyboardShown,
                    send: { client.sendInput($0) },
-                   toggleKeyboard: { overlay.toggleKeyboard() })
+                   toggleKeyboard: { overlay.toggleKeyboard() },
+                   showSpotlight: client.active == .desktop)
             Trackpad(send: { client.sendInput($0) },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })
@@ -247,7 +252,7 @@ struct PortraitStreamScreen: View {
 
 // MARK: - Key row
 
-/// One cap in the key row, as data, so the same eleven can be laid out as one row or two.
+/// One cap in the key row, as data, so the same twelve can be laid out as one row or two.
 private enum Key {
     /// A key that types itself: the cap's text, its HID usage, its accessibility label.
     case press(String, UInt16, String)
@@ -257,17 +262,23 @@ private enum Key {
     case modifier(String, KeyModifiers, String)
     /// The software keyboard toggle.
     case keyboard
+    /// Spotlight on the Mac: always exactly ⌘Space, whatever is latched.
+    case spotlight
 }
 
 /// The keys a Mac needs that a software keyboard does not offer: escape, tab, the four arrows, the
-/// four modifiers, and the keyboard itself. Eleven equal caps across the screen at 48 pt tall —
-/// or, on the outer display where eleven 44 pt caps do not fit across 472 pt, six and then five.
+/// four modifiers, the keyboard itself and Spotlight. Twelve equal caps across the screen at 48 pt
+/// tall, ≈49 pt wide at 710 pt — or, on the outer display where twelve 44 pt caps do not fit
+/// across 472 pt, six and then six, 72 pt wide at 500 pt.
 private struct KeyRow: View {
     let metrics: PortraitMetrics
     @Binding var latched: KeyModifiers
     let keyboardShown: Bool
     let send: (InputEvent) -> Void
     let toggleKeyboard: () -> Void
+    /// Spotlight's panel is its own Mac window, so it only shows up in the stream while the whole
+    /// desktop is the source. Anywhere else the key would be a cap that does something invisible.
+    let showSpotlight: Bool
 
     private static let all: [Key] = [
         .press("esc", HIDKey.escape, "Escape"),
@@ -281,13 +292,19 @@ private struct KeyRow: View {
         .arrow("chevron.up", HIDKey.upArrow, "Up arrow"),
         .arrow("chevron.right", HIDKey.rightArrow, "Right arrow"),
         .keyboard,
+        .spotlight,
     ]
 
-    /// One row of eleven, or the split: the six that name a key, then the four arrows and the
-    /// keyboard. The break falls where the row changes job, not merely where it runs out of width.
+    /// One row of twelve, or the split: the six that name a key, then the four arrows, the
+    /// keyboard and Spotlight. The break falls where the row changes job, not merely where it runs
+    /// out of width.
+    private var keys: [Key] {
+        showSpotlight ? Self.all : Self.all.filter { if case .spotlight = $0 { return false } else { return true } }
+    }
+
     private var rows: [[Key]] {
-        guard metrics.splitKeys else { return [Self.all] }
-        return [Array(Self.all.prefix(6)), Array(Self.all.suffix(5))]
+        guard metrics.splitKeys else { return [keys] }
+        return [Array(keys.prefix(6)), Array(keys.dropFirst(6))]
     }
 
     var body: some View {
@@ -319,6 +336,14 @@ private struct KeyRow: View {
                 Image(systemName: "keyboard")
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
+            }
+        case .spotlight:
+            // Latched modifiers do not join ⌘Space, but the tap still spends them.
+            cap(open: false, label: "Open Spotlight on the Mac",
+                action: { Spotlight.press(send: send); latched = [] }) {
+                Image(systemName: Spotlight.symbol)
+                    .font(.system(size: 19))
+                    .foregroundStyle(Palette.text)
             }
         }
     }

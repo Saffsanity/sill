@@ -8,23 +8,54 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
-Milestone 2, input and window control. The phone can see the Mac; now it has to
-drive it. Scope from `docs/BRIEF.md`: touch, keyboard and Pencil-as-pointer,
-delivered to the Mac as CGEvents aimed at the streamed window. That needs:
+Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
 
-- A client→host direction in `StreamProtocol` (today it is host→client only).
-  Same 14-byte header, new message kinds for pointer, scroll, key and text.
-- An input injector on the host (CGEvent posting, coordinates mapped from the
-  streamed frame to the window's screen rect). Needs Accessibility permission
-  on top of Screen Recording; the first-run prompt story matters.
-- Window control: bring the target window to front on connect, follow it when
-  it moves, and survive a resize (the encoder is still fixed to the launch
-  size; a resize means recreating the VT session and sending new parameter
-  sets).
+- **Fallback (shipped):** the Aa button in the landscape bar cycles Off → 1.0× →
+  1.25× → 1.5× → 0.8×. The client sends its stream-panel size and wanted scale
+  (`Viewport`); the host resizes the real Mac window through Accessibility
+  (`WindowSizer`) to panel ÷ scale points, so text renders at that scale on the
+  device. Off leaves the Mac window alone and never restores.
+- **Virtual display (probed, not adopted):** `VirtualDisplayProbe` proved on
+  macOS 27.0 that the private `CGVirtualDisplay` API creates a HiDPI display,
+  ScreenCaptureKit lists and captures it, a window moved there by Accessibility
+  keeps repainting (59 fps while off the real screen), and destroy is clean.
+  `Sources/SillHost/VirtualDisplay.swift` is the wrapper, unused so far. To adopt:
+  SillHost must run an `NSApplication` event loop (not `dispatchMain`) or the
+  creating process never sees the display's modes; create one display per
+  device at the device's point size at 2×; move the picked window onto it; capture
+  the display with `SCContentFilter(display:including:)`; move the window back on
+  deselect. This removes the occlusion freeze and unblocks two-window mode.
+  Private API: the Mac companion is Developer ID distribution, never Mac App
+  Store (Accessibility input already rules that out).
 
-Still owed from milestone 1: the glass-to-glass latency number. Noah judged the
-stream "fast and high quality" on the iPad Mini and chose to move on; measure it
-with the stopwatch-photo method in the README when convenient and record it here.
+Still open: the unexplained one-off stall where new clients received no catalog
+(2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
+
+## Milestone 2 (input and window control) — done 2026-09-22
+
+- Client → host input: tap/click, finger pan → scroll with trackpad gesture
+  phases and client-generated momentum (host sets CGEvent scroll/momentum
+  phases so apps rubber-band and fling), long-press right-click, Pencil as the
+  mouse with hover, software keyboard as Unicode text, hardware keys and
+  ⌘/⌃/⌥ chords as HID usages. Portrait laptop layout: stream on top, key row
+  (esc, tab, latching modifiers, arrows, keyboard; Spotlight = ⌘Space only while
+  the Desktop is the source, since Spotlight's panel is its own window) and a
+  relative trackpad. Picked app is brought forward; window follows moves;
+  resize restarts the pipeline.
+- Latency, measured 2026-09-22 on 5 GHz Wi-Fi to the iPad mini via the client
+  stats the host logs: frame age (host encode → device receive) 8–10 ms,
+  ping RTT 6–9 ms with rare spikes. Adding capture (≤1 refresh), encode and
+  decode+display (1–2 refreshes) puts glass-to-glass at roughly 40–60 ms,
+  within the v1 bar. Not photographed with the stopwatch method yet.
+- Host footprint (release build, `ps`): idle with no client 0.0 % CPU, 36 MB,
+  one heartbeat line per 30 s and no ScreenCaptureKit calls; connected with
+  nothing selected 0.0–0.1 %; streaming a Retina window ~3 %. Capture stops when
+  the last client leaves.
+- Diagnostics: `-SillHUD 1` (DEBUG) overlays fps · frame age · rtt · frame size
+  on the device; the client reports the same to the host every second and the
+  host prints `client <device>: …`.
+- Learned: `_AXUIElementGetWindow` is private, so AX windows are matched by
+  title then frame; apps enforce minimum sizes, the host streams what it got.
 
 ## Milestone 1 (latency spike) — done 2026-09-22
 
@@ -60,18 +91,27 @@ with the stopwatch-photo method in the README when convenient and record it here
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
 - `Sources/SillHost/` — `StreamCoordinator` (main actor; owns the pipeline,
-  switches sources on client request, brings the picked app forward),
-  `WindowCatalog` (polls on-screen windows, thumbnails via SCScreenshotManager,
-  app icons, installed apps), `WindowCapture` (ScreenCaptureKit), `HEVCEncoder`
-  (VideoToolbox), `StreamServer` (Network.framework + Bonjour `_sill._tcp`,
-  both directions), `Stats` (per-second counters), `main.swift` (knobs: fps,
-  scale, bitrate, prioritizeSpeed).
-- `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient`
-  (Bonjour, connection, message parsing), `StreamScreen` (top bar with live
-  thumbnails + app drawer, built to the design boards), `HEVCDisplayView`,
-  `ContentView` (connect screen). `Info.plist` has the local network + Bonjour
-  keys. The project depends on this folder as a local package for
-  `StreamProtocol`. Swift 5 language mode.
+  switches sources on client request, brings the picked app forward, applies
+  viewports, stops capture when the last client leaves), `WindowCatalog` (polls
+  windows and thumbnails only while a client is connected; icons; installed
+  apps in the background), `WindowCapture` (ScreenCaptureKit), `HEVCEncoder`
+  (VideoToolbox), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
+  directions, keepalive, dead-client eviction, ping echo, client-stats print),
+  `InputInjector` (CGEvents: pointer, scroll with phases, text, HID keys),
+  `WindowSizer` (Accessibility resize for the Aa scale), `VirtualDisplay`
+  (private-API wrapper, unused yet), `Stats` (1 s lines while active, 30 s
+  heartbeat when idle), `main.swift` (knobs).
+- `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
+  Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
+- `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour,
+  connection, parsing, reconnect, ping, generic `send`), `StreamScreen`
+  (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
+  selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
+  layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
+  Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
+  display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
+  `StreamClient+Viewport`, `ContentView` (connect screen + DEBUG harness),
+  `MockCatalog` (harness data). Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
@@ -86,6 +126,10 @@ Command Line Tools only, add `--build-system native`.
 First run prompts for Screen Recording (grant to Terminal or whatever launched it).
 iOS side: open `iOSClient/Sill.xcodeproj`, set your team, run on a real
 device on the same Wi-Fi.
+Debug harness (simulator, no Duo simulator exists yet): launch arguments
+`-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
+(outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
+`-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay).
 
 ## Conventions
 

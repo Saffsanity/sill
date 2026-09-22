@@ -22,7 +22,17 @@ public enum InputEvent: Codable, Hashable {
     /// matching keys; everything else is typed as Unicode.
     case text(String)
 
+    /// Scroll gesture boundaries, so the Mac sees a trackpad-like gesture (rubber-banding, and
+    /// momentum after the fingers lift) rather than a bare wheel. Sent around `.scroll` deltas:
+    /// began → deltas… → ended, then optionally momentumBegan → deltas… → momentumEnded, with the
+    /// client generating the decaying momentum deltas itself.
+    case scrollGesture(ScrollPhase, x: Double, y: Double)
+
     /// A key by USB HID usage (UIKeyboardHIDUsage.rawValue on iOS) with UIKeyModifierFlags bits,
     /// which are the same bit positions as CGEventFlags for shift/control/option/command.
     case key(hidUsage: UInt16, down: Bool, modifiers: UInt64)
+}
+
+public enum ScrollPhase: String, Codable {
+    case began, ended, momentumBegan, momentumEnded
 }

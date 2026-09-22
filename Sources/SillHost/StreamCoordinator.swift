@@ -18,6 +18,7 @@ final class StreamCoordinator {
     let catalog = WindowCatalog()
     let capture = WindowCapture()
     let injector = InputInjector()
+    let sizer = WindowSizer()
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
     /// The current encoder, readable off the main actor: the network queue asks it for a keyframe
     /// after dropping a delta. A lock instead of an actor hop keeps that request immediate.
@@ -30,10 +31,20 @@ final class StreamCoordinator {
             set { lock.lock(); value = newValue; lock.unlock() }
         }
     }
-    private(set) var active: StreamSource = .none
+    private(set) var active: StreamSource = .none {
+        didSet {
+            if case .window(let id) = active { catalog.activeWindowID = id } else { catalog.activeWindowID = nil }
+        }
+    }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// The client's last stream panel size and text scale. One stream, so with several clients
+    /// the last one to report wins.
+    private var viewport: Viewport?
+    /// A viewport that came in mid-switch, when `active` still names the old source: applied once
+    /// the switch is done, so a rotation during a restart is not lost.
+    private var viewportArrivedWhileSwitching = false
     private let macName = Host.current().localizedName ?? "Mac"
 
     init(fps: Int, scale: CGFloat, bitrate: Int, prioritizeSpeed: Bool) throws {
@@ -52,6 +63,19 @@ final class StreamCoordinator {
         server.onKeyframeNeeded = { [weak self] in
             // Network queue → encoder lock; requestKeyframe re-encodes the last frame right away.
             self?.encoderBox.current?.requestKeyframe()
+        }
+        server.onClientCountChanged = { [weak self] count in
+            Task { @MainActor in
+                guard let self else { return }
+                self.catalog.clientCount = count          // the catalog idles itself at 0
+                // Nobody is watching: stop capturing and encoding. The next client picks afresh.
+                if count == 0, self.active != .none { await self.select(.none) }
+            }
+        }
+        catalog.onInstalledAppsReady = { [weak self] apps in
+            guard let self else { return }
+            self.server.broadcast(StreamMessage(kind: .appList, timestamp: Date().timeIntervalSince1970,
+                                                isKeyframe: false, payload: Wire.encode(apps)))
         }
         server.onMessage = { [weak self] message, _ in
             Task { @MainActor in await self?.handle(message) }
@@ -105,6 +129,11 @@ final class StreamCoordinator {
             guard let event = Wire.decode(InputEvent.self, from: message.payload),
                   let rect = currentSourceRect() else { return }
             injector.apply(event, in: rect)
+        case .viewport:
+            guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
+            viewport = v
+            if switching { viewportArrivedWhileSwitching = true; return }
+            await applyViewportToActiveWindow()
         default:
             break
         }
@@ -138,6 +167,36 @@ final class StreamCoordinator {
         return CGRect(dictionaryRepresentation: bounds as CFDictionary)
     }
 
+    // MARK: Fitting the window to the client
+
+    /// Resizes the streamed window to the client's panel at its text scale, if one is set and the
+    /// window is not already there. Returns the size the window actually took, or nil if nothing
+    /// changed. Mac points throughout: the panel in device points divided by the scale (device
+    /// points per Mac point). Scale nil means leave the window alone, and nothing ever restores
+    /// an earlier size on its own.
+    private func fitToViewport(_ window: SCWindow) -> CGSize? {
+        guard let v = viewport, let textScale = v.scale, textScale > 0, v.width > 0, v.height > 0 else { return nil }
+        let target = CGSize(width: (v.width / textScale).rounded(), height: (v.height / textScale).rounded())
+        let current = Self.liveBounds(of: window.windowID)?.size ?? window.frame.size
+        if abs(current.width - target.width) <= 2, abs(current.height - target.height) <= 2 { return nil }
+        guard let actual = sizer.resize(window: window, to: target) else { return nil }
+        // Asked again for a size the app already refused (its minimum): nothing moved.
+        guard abs(actual.width - current.width) >= 1 || abs(actual.height - current.height) >= 1 else { return nil }
+        Stats.shared.bump("win.resized")
+        print("Resized \(window.owningApplication?.applicationName ?? "?") to \(Int(actual.width))×\(Int(actual.height)) pt "
+              + "(asked \(Int(target.width))×\(Int(target.height)) for a \(Int(v.width))×\(Int(v.height)) panel at \(textScale)×)")
+        return actual
+    }
+
+    /// A new viewport while a window streams. The encoder is fixed to the old size, but the
+    /// catalog's resize check (`windowsChanged`) already restarts the pipeline when the window's
+    /// size changes; refreshing now just saves waiting up to two seconds for its next poll.
+    /// The desktop and nothing-streaming ignore viewports.
+    private func applyViewportToActiveWindow() async {
+        guard case .window(let id) = active, let w = catalog.window(id: id) else { return }
+        if fitToViewport(w) != nil { await catalog.refreshWindows() }
+    }
+
     // MARK: Source switching
 
     func select(_ source: StreamSource) async {
@@ -161,7 +220,12 @@ final class StreamCoordinator {
         case .window(let id):
             guard let w = catalog.window(id: id) else { active = .none; broadcastList(); return }
             filter = SCContentFilter(desktopIndependentWindow: w)
-            width = evenPixels(w.frame.width * scale); height = evenPixels(w.frame.height * scale)
+            // Fit the window to the client's panel before capture starts, so the stream comes up
+            // at the new size instead of restarting once the catalog notices. `w` is a snapshot
+            // with the old frame; the window server has the new one.
+            var size = w.frame.size
+            if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
+            width = evenPixels(size.width * scale); height = evenPixels(size.height * scale)
             describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")"
             // Covered windows stop repainting on macOS, so bring the app forward as the client picks it.
             // NSRunningApplication.activate is a no-op from a non-frontmost process since macOS 14;
@@ -198,6 +262,12 @@ final class StreamCoordinator {
             active = .none
         }
         broadcastList()
+        if viewportArrivedWhileSwitching {
+            viewportArrivedWhileSwitching = false
+            // After this switch has returned (and `switching` is false again), against the source
+            // that is now active.
+            Task { @MainActor in await self.applyViewportToActiveWindow() }
+        }
     }
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
