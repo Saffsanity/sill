@@ -41,6 +41,16 @@ struct StreamScreen: View {
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
 
+    #if DEBUG
+    /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
+    /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
+    init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false) {
+        self.client = client
+        _drawerOpen = State(initialValue: drawerOpen)
+        _keyboardShown = State(initialValue: keyboardShown)
+    }
+    #endif
+
     var body: some View {
         // Wider than tall is the laptop-lid layout (bar on top); taller than wide is the folded
         // half-and-half one. Nothing here is a device check: an iPhone in portrait gets the same
