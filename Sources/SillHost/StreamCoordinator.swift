@@ -572,8 +572,11 @@ final class StreamCoordinator {
         // under --virtual-display. Otherwise the active app is read off the window list: the owner
         // of the topmost layer-0 window. Covered = another app's window under the click point.
         let point = injectorProbePoint(event)
-        let cover = staged ? nil : point.flatMap { Self.topmostWindow(at: $0) }
+        let cover = point.flatMap { Self.topmostWindow(at: $0) }
         let covered = cover != nil && cover?.id != id            // any other window over the spot, same app or not
+        // On the virtual display a cover is a stranger (a window left there by an earlier run):
+        // move it off, then the click lands.
+        if staged, covered { stage.evictForeignWindows() }
         let notActive = needsFocus && Self.activePID(trustAppKit: virtualDisplay) != pid
         guard notActive || covered else { return }
         // A failed activation must not stall every later interaction: one attempt per 2 s.

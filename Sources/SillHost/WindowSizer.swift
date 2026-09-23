@@ -88,6 +88,34 @@ final class WindowSizer {
     /// coordinator's job, through Launch Services). Used by the regular path when another app's
     /// window covers the spot the device clicked: otherwise the click lands on the cover, and a
     /// covered window stops repainting anyway. Never called on select.
+    /// The Accessibility window of `pid` whose frame is `rect` (a stranger found on the virtual
+    /// display through the window list), or nil.
+    static func axWindow(pid: pid_t, frame rect: CGRect) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+              let candidates = value as? [AXUIElement] else { return nil }
+        for c in candidates { AXUIElementSetMessagingTimeout(c, 0.5) }
+        return candidates.first { c in
+            guard let f = frame(of: c) else { return false }
+            return abs(f.minX - rect.minX) <= frameTolerance && abs(f.minY - rect.minY) <= frameTolerance
+                && abs(f.width - rect.width) <= frameTolerance && abs(f.height - rect.height) <= frameTolerance
+        }
+    }
+
+    /// Moves a window's top-left corner (CG global points).
+    static func setPosition(_ element: AXUIElement, _ origin: CGPoint) -> AXError { set(element, position: origin) }
+
+    /// A frame of `size` centred below the main display's menu bar: home for a window whose real
+    /// home is unknown or was itself on a virtual display.
+    static func homeFrame(size: CGSize) -> CGRect {
+        let main = CGDisplayBounds(CGMainDisplayID())
+        let menuBar: CGFloat = 33
+        let w = min(size.width, main.width), h = min(size.height, main.height - menuBar)
+        return CGRect(x: (main.midX - w / 2).rounded(), y: (main.minY + menuBar + (main.height - menuBar - h) / 2).rounded(), width: w, height: h)
+    }
+
     /// Close, minimize or toggle full screen on a window, as its own traffic lights would.
     static func perform(_ action: WindowCommand.Action, element: AXUIElement) -> Bool {
         switch action {

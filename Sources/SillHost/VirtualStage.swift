@@ -249,7 +249,7 @@ final class VirtualStage {
         // unauthorized process once a virtual display exists, so never create one without it.
         guard AXIsProcessTrusted() else { throw Failure.accessibilityOff }
         guard CGPreflightScreenCaptureAccess() else { throw Failure.screenRecordingOff }
-        let p: WindowSizer.Placement
+        var p: WindowSizer.Placement
         if let current = placement, current.windowID == window.windowID {
             p = current                                       // same window: keep its original frame
         } else if let fresh = sizer.placement(for: window) {
@@ -263,7 +263,20 @@ final class VirtualStage {
 
         // (4) The display.
         try await ensureDisplay(atLeast: envelope)
-        guard display != nil else { throw Failure.neverOnline }
+        guard let d = display else { throw Failure.neverOnline }
+
+        // (4b) A home on the virtual display is no home (a window left there by an earlier run
+        // would be "restored" right back): give it one on the main display instead.
+        if p.originalFrame.intersects(CGDisplayBounds(d.displayID)) {
+            let home = WindowSizer.homeFrame(size: p.originalFrame.size)
+            print("\(p.appName) — \(p.title) was found on the virtual display; its home is now \(Self.fmt(home))")
+            p = WindowSizer.Placement(windowID: p.windowID, pid: p.pid, element: p.element, originalFrame: home,
+                                      appName: p.appName, title: p.title)
+        }
+
+        // (4c) Nothing else may sit on the display: a stranger there covers the staged window and
+        // takes its clicks (a Claude window left behind by an earlier run did, 2026-09-23).
+        evictForeignWindows(keeping: p.windowID)
 
         // (5) From here on the host owns the window. Record that *before* the first move: the
         // settle loop and the grow path below suspend (up to seconds), and a teardown that runs
@@ -502,6 +515,40 @@ final class VirtualStage {
         Stats.shared.bump("vd.created")
         print("Virtual display \(d.widthPt)×\(d.heightPt) pt @2× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
               + "listed by ScreenCaptureKit after \(Self.ms(since: t1)) ms, menu bar \(Int(menuInset)) pt\(insetMeasured ? "" : " (assumed)")")
+    }
+
+    /// Sends every window that is not `keeping` off the virtual display to the main display.
+    /// Full-screen strangers cannot be moved and are only reported; the system's probe windows
+    /// and anything too small to be a real window are ignored.
+    func evictForeignWindows(keeping: CGWindowID? = nil) {
+        guard let d = display else { return }
+        let bounds = CGDisplayBounds(d.displayID)
+        let keep = keeping ?? placement?.windowID
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return }
+        for info in list {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let id = info[kCGWindowNumber as String] as? CGWindowID, id != keep,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
+                  let b = info[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: b as CFDictionary),
+                  rect.width >= 100, rect.height >= 100, rect.intersects(bounds) else { continue }
+            let name = (info[kCGWindowName as String] as? String) ?? ""
+            if name.lowercased().contains("layerprobe") { continue }
+            let owner = (info[kCGWindowOwnerName as String] as? String) ?? "?"
+            guard let ax = WindowSizer.axWindow(pid: pid, frame: rect) else {
+                print("A \(owner) window sits on the virtual display and could not be matched to move it")
+                continue
+            }
+            if WindowSizer.isFullScreen(ax) {
+                print("A \(owner) window is full screen on the virtual display; it cannot be moved from here")
+                continue
+            }
+            let home = WindowSizer.homeFrame(size: rect.size)
+            let err = WindowSizer.setPosition(ax, home.origin)
+            print("Moved a \(owner) window off the virtual display to \(Self.fmt(home)) (\(WindowSizer.axErrorName(err)))")
+            Stats.shared.bump("vd.evicted")
+        }
     }
 
     /// A full-screen window cannot be put back where it was: take it out of full screen first and
