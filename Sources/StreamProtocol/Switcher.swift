@@ -46,6 +46,14 @@ public struct LaunchApp: Codable {
     public init(bundleID: String) { self.bundleID = bundleID }
 }
 
+/// Client → host: what the bar's long-press menu asks of a window, the three traffic lights.
+public struct WindowCommand: Codable {
+    public enum Action: String, Codable { case close, minimize, fullScreen }
+    public var id: UInt32
+    public var action: Action
+    public init(id: UInt32, action: Action) { self.id = id; self.action = action }
+}
+
 /// JSON payloads. Everything here is small and infrequent; frames never go through JSON.
 public enum Wire {
     public static func encode<T: Encodable>(_ value: T) -> Data {

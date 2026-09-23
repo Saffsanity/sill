@@ -19,6 +19,11 @@ public enum StreamMessageKind: UInt8 {
     case ping = 10           // client → host: 8 bytes, client clock (Double, BE) — echoed back as pong for RTT
     case pong = 11           // host → client: the ping payload, unchanged
     case clientStats = 12    // client → host: JSON ClientStats once a second, so the host log shows the far end
+    case tick = 13           // host → client, empty: keeps the device's Wi-Fi radio out of power save while a
+                             // session is live (an idle downlink dozes and every next packet waits up to ~300 ms)
+    case cursorShape = 14    // host → client: CursorShapeBlob, the Mac's current cursor image, whenever it changes
+    case windowCommand = 15  // client → host: JSON WindowCommand — close, minimize or full-screen a window (the bar's long-press menu)
+    case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
 public struct StreamHeader {
@@ -54,7 +59,10 @@ public struct StreamMessage {
     }
 
     public static func parseHeader(_ data: Data) -> StreamHeader? {
-        guard data.count >= headerLength, let kind = StreamMessageKind(rawValue: data[data.startIndex]) else { return nil }
+        guard data.count >= headerLength else { return nil }
+        // A kind this build does not know is skipped by the reader, not a reason to stop reading:
+        // an older device must keep working against a newer host and the other way round.
+        let kind = StreamMessageKind(rawValue: data[data.startIndex]) ?? .unknown
         let ts = Double(bitPattern: data.readBigEndian(UInt64.self, at: 1))
         let key = data[data.startIndex + 9] == 1
         let len = Int(data.readBigEndian(UInt32.self, at: 10))

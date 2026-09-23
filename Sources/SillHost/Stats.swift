@@ -106,4 +106,10 @@ final class Stats {
         let who = clients == 1 ? "1 client" : "\(clients) clients"
         print("[1s] " + (line.isEmpty ? "nothing captured" : line) + " · " + who)
     }
+
+    /// One-shot print of every counter, for the self-test.
+    func dump() {
+        lock.lock(); let snapshot = counts; lock.unlock()
+        print("   stats: " + snapshot.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: "  "))
+    }
 }

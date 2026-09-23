@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import StreamProtocol
 
 /// The portrait trackpad: the well, its dot grid, the hint, and the touch surface itself.
@@ -9,6 +10,11 @@ import StreamProtocol
 /// pointer is; the wire format is unchanged, an absolute position in frame coordinates.
 struct Trackpad: View {
     let send: (InputEvent) -> Void
+    /// Writes the client-drawn pointer, `StreamClient.localPointer`: a fraction of the frame, nil
+    /// to hide it.
+    let setLocalPointer: (CGPoint?) -> Void
+    /// Reads it back, so the pad carries on from wherever something else left the pointer.
+    let currentLocalPointer: () -> CGPoint?
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
 
@@ -18,7 +24,9 @@ struct Trackpad: View {
         ZStack {
             Palette.trackpad
             DotGrid().allowsHitTesting(false)
-            TrackpadView(send: send, latched: latched, onModifiersConsumed: onModifiersConsumed)
+            TrackpadView(send: send, setLocalPointer: setLocalPointer,
+                         currentLocalPointer: currentLocalPointer,
+                         latched: latched, onModifiersConsumed: onModifiersConsumed)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -61,13 +69,24 @@ private struct DotGrid: View {
 
 struct TrackpadView: UIViewRepresentable {
     let send: (InputEvent) -> Void
+    let setLocalPointer: (CGPoint?) -> Void
+    let currentLocalPointer: () -> CGPoint?
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
 
-    func makeUIView(context: Context) -> TrackpadSurface { TrackpadSurface(frame: .zero) }
+    func makeUIView(context: Context) -> TrackpadSurface {
+        let view = TrackpadSurface(frame: .zero)
+        // The pointer closures go in before the first update as well: the surface reads the shared
+        // pointer as it joins the window, and that need not wait for `updateUIView`.
+        view.setLocalPointer = setLocalPointer
+        view.currentLocalPointer = currentLocalPointer
+        return view
+    }
 
     func updateUIView(_ uiView: TrackpadSurface, context: Context) {
         uiView.send = send
+        uiView.setLocalPointer = setLocalPointer
+        uiView.currentLocalPointer = currentLocalPointer
         uiView.latchedModifiers = latched
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
@@ -77,18 +96,45 @@ struct TrackpadView: UIViewRepresentable {
 
 final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     var send: (InputEvent) -> Void = { _ in }
+    /// Writes the client-drawn pointer (`StreamClient.localPointer`: a fraction of the frame, nil
+    /// hides it). Called with the virtual cursor on every move, click and drag, so the sprite
+    /// follows the finger at touch rate rather than a network round trip behind it, which is where
+    /// the Mac's own cursor in the video is. Deliberately not cleared when the pad leaves the
+    /// screen: the store outlives a rotation.
+    var setLocalPointer: (CGPoint?) -> Void = { _ in }
+    /// Reads the store back. See `adoptSharedPointer`.
+    var currentLocalPointer: () -> CGPoint? = { nil }
     /// Modifiers the key row is holding for the next click. Cleared here when one is spent.
     var latchedModifiers: KeyModifiers = []
     var onModifiersConsumed: (() -> Void)?
 
     /// The virtual cursor, in frame coordinates (0…1), starting in the middle. Clamped, so pushing
-    /// past an edge parks the pointer there instead of losing it.
+    /// past an edge parks the pointer there instead of losing it. Still the source of truth for
+    /// where a click lands; the shared store only re-seeds it (`adoptSharedPointer`).
     private var cursor = CGPoint(x: 0.5, y: 0.5)
 
     /// How far the pointer travels for a full swipe across the pad. The client does not know the
     /// Mac's size, so a real trackpad's pt-for-pt acceleration is not available to copy; 1.25
     /// frames per swipe lands close enough to reach any corner in one comfortable stroke.
     private static let travel: CGFloat = 1.25
+
+    // One-finger pointer motion: the tracker, from touch-down.
+
+    private let tracker = FingerTracker(target: nil, action: nil)
+    /// How far a finger travels from where it landed before the pointer starts to follow. Small
+    /// enough to feel instant, big enough that a clean tap clicks without nudging the pointer
+    /// first. Past it the whole distance from touch-down counts, so no travel is lost to it.
+    private static let trackSlop: CGFloat = 2
+    /// Where the tracked finger was at the last move turned into pointer motion (its touch-down
+    /// point until it clears the slop), in this view's points.
+    private var trackLast: CGPoint = .zero
+    /// True once the tracked finger has cleared the slop.
+    private var trackLive = false
+    /// Set when the pan turned this stroke into a two-finger scroll; cleared when the tracker begins
+    /// the next stroke. Backs up the tracker's own second-finger check (`FingerTracker`).
+    private var trackSuspended = false
+
+    // Two-finger scrolling, and one-finger motion whenever the tracker is not driving: the pan.
 
     private var lastTranslation: CGPoint = .zero
     private var panTouches = 0
@@ -105,12 +151,31 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// Modifier bits currently pressed down around a click, so the ups can mirror the downs.
     private var held: KeyModifiers = []
 
+    /// The click you feel, as on a Force Touch trackpad: `.rigid` is the stock impact closest to
+    /// its short, hard tick. It fires for a click and for arming and releasing a drag, never for a
+    /// move, a scroll or a coast. iPads have no Taptic Engine; there every call is a silent no-op,
+    /// which is UIKit's doing, so there is deliberately no device check here.
+    private let clickHaptic = UIImpactFeedbackGenerator(style: .rigid)
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         isOpaque = false
         isMultipleTouchEnabled = true
 
+        // One finger moves the pointer from its first point of travel; see `FingerTracker`. It only
+        // watches (cancelsTouchesInView off), so it takes nothing from the recognizers below or
+        // from touchesBegan.
+        tracker.addTarget(self, action: #selector(handleTrack))
+        tracker.minimumPressDuration = 0
+        tracker.allowableMovement = .greatestFiniteMagnitude
+        tracker.cancelsTouchesInView = false
+        tracker.delegate = self
+        addGestureRecognizer(tracker)
+
+        // Two fingers scroll. The pan moves the pointer with one finger only when the tracker is
+        // not driving, typically after a scroll when one finger of the two lifts and the other
+        // carries on, as it can on a Mac.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         pan.minimumNumberOfTouches = 1
         pan.maximumNumberOfTouches = 2
@@ -128,7 +193,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(twoFingerTap)
 
         // Press and hold, then drag: the left button goes down and stays down, so a window or a
-        // selection can be dragged from the pad. It has to run alongside the pan, which is what
+        // selection can be dragged from the pad. It has to run alongside the tracker, which is what
         // actually moves the pointer while the button is held.
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
         longPress.minimumPressDuration = 0.45
@@ -148,8 +213,54 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         guard bounds.width > 0, bounds.height > 0 else { return }
         cursor.x = min(max(cursor.x + dx / bounds.width * Self.travel, 0), 1)
         cursor.y = min(max(cursor.y + dy / bounds.height * Self.travel, 0), 1)
-        // No rate limit needed here: sendInput coalesces moves to one every 8 ms.
+        // The local sprite first, since it is the feedback the finger is waiting for; then the
+        // Mac, whose cursor still has to follow for clicks to land there. No rate limit needed
+        // here: sendInput coalesces moves to one every 8 ms.
+        setLocalPointer(cursor)
         send(.pointer(.move, x: cursor.x, y: cursor.y))
+    }
+
+    /// Re-seeds the virtual cursor from the shared pointer, when there is one to show. Something
+    /// else may have moved the pointer since this pad last did: a Pencil over the stream, or the
+    /// pad this one replaced across a rotation. Carrying on from there keeps the next move from
+    /// jumping back to the pad's stale idea of it, and makes a tap click where the pointer is seen.
+    /// A hidden pointer (nil) leaves the cursor where it is.
+    private func adoptSharedPointer() {
+        guard let shared = currentLocalPointer() else { return }
+        cursor = CGPoint(x: min(max(shared.x, 0), 1), y: min(max(shared.y, 0), 1))
+    }
+
+    /// True while the tracker owns one-finger motion: its finger is down, and the stroke has not
+    /// become a two-finger one. Otherwise the pan moves the pointer.
+    private var trackerDriving: Bool {
+        (tracker.state == .began || tracker.state == .changed)
+            && !tracker.sawSecondFinger && !trackSuspended
+    }
+
+    /// One finger, from touch-down: the pointer follows as soon as the finger clears the slop.
+    /// Once a second finger joins, this stroke's motion belongs to the pan (scroll, then one-finger
+    /// moves after a lift, with its own rebase) until every finger is up.
+    @objc private func handleTrack() {
+        switch tracker.state {
+        case .began:
+            trackSuspended = false
+            trackLive = false
+            trackLast = tracker.location(in: self)
+        case .changed:
+            guard trackerDriving else { return }
+            let location = tracker.location(in: self)
+            if !trackLive {
+                guard hypot(location.x - trackLast.x, location.y - trackLast.y) > Self.trackSlop else { return }
+                trackLive = true
+            }
+            let dx = location.x - trackLast.x
+            let dy = location.y - trackLast.y
+            trackLast = location
+            guard dx != 0 || dy != 0 else { return }
+            moveCursor(dx: dx, dy: dy)
+        default:
+            trackLive = false
+        }
     }
 
     /// One or two fingers. The touch count is re-read every callback, so dropping a second finger
@@ -157,13 +268,26 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     ///
     /// Two fingers are a Mac-trackpad scroll gesture: `.began` when the second finger is down,
     /// deltas, `.ended` when either finger lifts, then momentum if it was a flick. One finger only
-    /// moves the pointer and leaves a coasting scroll alone, as on a Mac.
+    /// moves the pointer and leaves a coasting scroll alone, as on a Mac — and only when the
+    /// tracker is not already doing it, which it normally is: the pan begins ~10 pt into a stroke,
+    /// the tracker at touch-down.
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
         case .began:
-            lastTranslation = .zero
             panTouches = gesture.numberOfTouches
-            if panTouches >= 2 { beginScroll() }
+            if panTouches >= 2 {
+                lastTranslation = .zero
+                beginScroll()
+            } else {
+                // The pan has already held back its ~10 pt of hysteresis. Rebase past it, and if
+                // this stroke is the pan's to drive, move by it now instead of as a jump on the
+                // next callback.
+                let translation = gesture.translation(in: self)
+                lastTranslation = translation
+                if !trackerDriving, translation != .zero {
+                    moveCursor(dx: translation.x, dy: translation.y)
+                }
+            }
         case .changed:
             let translation = gesture.translation(in: self)
             guard gesture.numberOfTouches == panTouches else {
@@ -188,7 +312,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // Natural sign, same as the direct-touch overlay: fingers down, content down.
                 send(.scroll(x: cursor.x, y: cursor.y,
                              dx: dx / bounds.width, dy: dy / bounds.height))
-            } else {
+            } else if !trackerDriving {
                 moveCursor(dx: dx, dy: dy)
             }
         case .ended:
@@ -208,6 +332,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func beginScroll() {
         momentum.stop()
         scrolling = true
+        // From here the tracker must not move the pointer under the scroll, even if UIKit never
+        // showed it the second finger.
+        trackSuspended = true
         scrollVelocity = .zero
         send(.scrollGesture(.began, x: cursor.x, y: cursor.y))
     }
@@ -242,12 +369,21 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         super.touchesBegan(touches, with: event)
         let down = event?.touches(for: self)?
             .filter { $0.phase != .ended && $0.phase != .cancelled }.count ?? 0
+        // The first finger of a new stroke: carry on from wherever the pointer is now.
+        if down == touches.count { adoptSharedPointer() }
+        // Spin the Taptic Engine up now, so a tap's click lands without its start-up delay.
+        clickHaptic.prepare()
         if down >= 2 { momentum.stop() }
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop() }
+        if window == nil {
+            // The shared pointer is left alone: it outlives this view across a rotation.
+            momentum.stop()
+        } else {
+            adoptSharedPointer()
+        }
     }
 
     @objc private func handleTap() { click(down: .leftDown, up: .leftUp) }
@@ -259,11 +395,17 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         switch gesture.state {
         case .began:
             dragging = true
+            // Firmer than a click: the button is now held down.
+            clickHaptic.impactOccurred(intensity: 1.0)
+            setLocalPointer(cursor)
             pressModifiers()
             send(.pointer(.leftDown, x: cursor.x, y: cursor.y))
         case .ended, .cancelled, .failed:
             guard dragging else { return }
             dragging = false
+            // Softer: the button coming back up.
+            clickHaptic.impactOccurred(intensity: 0.5)
+            setLocalPointer(cursor)
             send(.pointer(.leftUp, x: cursor.x, y: cursor.y))
             releaseModifiers()
             consumeLatch()
@@ -275,6 +417,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// The click itself carries no position beyond the cursor and no modifiers: pointer events have
     /// no modifier field at all, which is why the latched ones are pressed around it below.
     private func click(down: PointerAction, up: PointerAction) {
+        clickHaptic.impactOccurred(intensity: 0.8)
+        setLocalPointer(cursor)
         pressModifiers()
         send(.pointer(down, x: cursor.x, y: cursor.y))
         send(.pointer(up, x: cursor.x, y: cursor.y))
@@ -309,5 +453,33 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         guard !latchedModifiers.isEmpty else { return }
         latchedModifiers = []
         onModifiersConsumed?()
+    }
+}
+
+// MARK: - Finger tracker
+
+/// A long press that begins at touch-down (`minimumPressDuration` 0) and never fails on travel
+/// (`allowableMovement` unbounded): a one-finger tracker with no hysteresis. A pan recognizer holds
+/// back ~10 pt before it begins, which on a trackpad is a dead patch at the start of every stroke
+/// followed by a jump; this reports the finger from its first point of travel.
+///
+/// It also records whether a second finger landed while it was tracking. What UIKit's long press
+/// does with a touch beyond `numberOfTouchesRequired` (adopt it, ignore it, end) is not specified,
+/// so the count is taken here, from the view's own touches, before the superclass sees the new one.
+private final class FingerTracker: UILongPressGestureRecognizer {
+    private(set) var sawSecondFinger = false
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let view,
+           let down = event.touches(for: view)?.filter({ $0.phase != .ended && $0.phase != .cancelled }),
+           down.count >= 2 {
+            sawSecondFinger = true
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func reset() {
+        super.reset()
+        sawSecondFinger = false
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import CoreGraphics
 import ApplicationServices
 import Darwin
@@ -29,6 +30,7 @@ final class InputInjector {
     /// `.hidSystemState` merges with the real HID state, so a modifier physically held on the Mac
     /// still applies to an injected click. Keyboard events below set their flags explicitly anyway.
     private let source = CGEventSource(stateID: .hidSystemState)
+    private var lastMoveArrival: CFTimeInterval = 0   // jitter probe, see apply()
     private var left = ButtonState()
     private var right = ButtonState()
 
@@ -38,6 +40,18 @@ final class InputInjector {
         remindAboutAccessibilityIfNeeded()
         switch event {
         case .pointer(let action, let x, let y):
+            // Jitter probe: how evenly do pointer moves arrive? A Pencil or trackpad drag should
+            // land every 8–16 ms; buckets above that are the stutter the device user feels.
+            if action == .move {
+                let now = CACurrentMediaTime()
+                let gap = now - lastMoveArrival
+                lastMoveArrival = now
+                if gap < 1.0 {
+                    if gap > 0.100 { Stats.shared.bump("in.gap>100ms") }
+                    else if gap > 0.050 { Stats.shared.bump("in.gap>50ms") }
+                    else if gap > 0.025 { Stats.shared.bump("in.gap>25ms") }
+                }
+            }
             pointer(action, at: point(x, y, in: rect))
         case .scroll(let x, let y, let dx, let dy):
             scroll(at: point(x, y, in: rect), dx: dx * rect.width, dy: dy * rect.height)
@@ -303,6 +317,11 @@ final class InputInjector {
                       let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { continue }
                 down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
                 up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+                // No modifiers, explicitly: the character carries its own case, and an event made
+                // from this source after a ⌘Space (the Spotlight key) could otherwise inherit ⌘,
+                // which Spotlight's field ignores (typing into Spotlight did nothing, 2026-09-23).
+                down.flags = []
+                up.flags = []
                 down.post(tap: .cghidEventTap)
                 up.post(tap: .cghidEventTap)
             }
@@ -311,8 +330,11 @@ final class InputInjector {
     }
 
     private func tap(virtualKey: CGKeyCode) {
-        CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true)?.post(tap: .cghidEventTap)
-        CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)?.post(tap: .cghidEventTap)
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { continue }
+            event.flags = []       // plain Return, Tab, Delete: never a leftover modifier
+            event.post(tap: .cghidEventTap)
+        }
     }
 
     // MARK: Keys

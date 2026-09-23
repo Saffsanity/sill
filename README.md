@@ -14,18 +14,36 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
 ```
 cd winstream
 swift run -c release SillHost Safari
+swift run -c release SillHost --virtual-display   # each streamed window on its own HiDPI display; Ctrl-C restores it
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
-of on-screen windows. `swift build` needs Xcode selected as the developer
+of on-screen windows.
+
+`--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
+virtual HiDPI display created with a private CoreGraphics API and captures that
+display, so the window keeps repainting whatever covers its old spot on the Mac.
+It needs Screen Recording and Accessibility for the terminal that runs it. Every
+failure (API missing, display never listed, Accessibility refused, window would
+not move) falls back to today's real-window capture with a line in the log, and
+deselecting, switching, the last client leaving, Ctrl-C, `kill` or a hangup put
+the window back where it was and remove the display. Private API means the Mac
+companion is Developer ID distribution, never the Mac App Store.
+`swift run -c release SillHost --virtual-display-selftest` creates and destroys
+one display and reports what CoreGraphics, AppKit and ScreenCaptureKit see of it. `swift build` needs Xcode selected as the developer
 directory (`sudo xcode-select -s /Applications/Xcode.app`) with its license
 accepted (`sudo xcodebuild -license accept`). With only the Command Line Tools
 selected, the default build system fails to start; `swift build -c release
 --build-system native` works there as a fallback. First run: macOS asks for Screen Recording for Terminal
 (or Xcode, if you run it from there). Grant it, run again.
 
-Knobs are at the top of `Sources/SillHost/main.swift`: fps, scale,
+Knobs are at the top of `Sources/SillHost/main.swift`: maxFPS, scale,
 bitrate, prioritizeSpeed. Start at the defaults, change one at a time.
+The stream rate is the device's own: each client reports its panel's ceiling
+(120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
+Power Mode is on; the host runs capture, encoder and the virtual display at
+that rate, capped by maxFPS, and restarts when it changes. Bitrate scales
+with the rate (the knob is per 60 fps).
 
 ## iOS client (5 minutes)
 
@@ -56,6 +74,10 @@ the device.
 
 Targets: under 60 ms on 5 GHz Wi-Fi is the v1 bar. Under 40 ms is Mirage-class.
 
+If the device's round trip climbs in a 5→100→200→300 ms sawtooth while nothing
+is streaming, that is its Wi-Fi radio dozing on a quiet link. The host keeps the
+link lightly busy (`net.tick` in the stats line) whenever a session is live.
+
 ## What to try if it's slow
 
 - `scale = 1` (four times fewer pixels to encode).
@@ -63,10 +85,33 @@ Targets: under 60 ms on 5 GHz Wi-Fi is the v1 bar. Under 40 ms is Mirage-class.
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
 
+## If the picture freezes
+
+- Read the host's stats line. `cap` counting with `enc.out` stuck at zero means
+  the encoder, not the capture. `cap` at zero means the window is not
+  repainting (covered on the Mac, or the app is idle).
+- The Mac's hardware video encoder can wedge system-wide: every new session
+  accepts a frame and never returns it, in any process. `swift run -c release
+  SillHost --encoder-selftest` settles it in five seconds without any
+  permission. The host also probes the hardware encoder at launch and prints
+  "Hardware encoder probe: no answer" when it is wedged, then streams with the
+  software encoder at half scale on the CPU; if it wedges mid-stream the log
+  says "switching to the software encoder" and the stream restarts by itself.
+  A reboot brings the hardware encoder back for sure; once it also recovered
+  by itself after about three hours.
+- `swift run -c release SillHost --synthetic` streams a moving test pattern as
+  the Desktop source with no Screen Recording needed: if the device shows the
+  bar sweeping, the encoder, fallback and network are fine and the problem is
+  capture or permissions.
+- `swift run -c release CaptureProbe <window> [seconds] [--encode] [--software]
+  [--synthetic]` isolates capture from encode from the network.
+
 ## Known limitations, all intentional for a spike
 
 - TCP: one lost packet stalls everything behind it. The real transport is UDP
   or QUIC with FEC; measure before deciding.
-- The encoder is fixed to the window's size at launch. Resize = garbage frames.
-- Single window, single client tested, no input, no encryption, no reconnect.
+- The encoder is fixed to one size, so a resized window restarts the pipeline
+  (a brief black frame on the device).
+- Single window at a time, no encryption. The device reconnects on a timer
+  when the Mac drops it.
 - Bonjour only. iCloud auto-pairing comes with milestone 5.

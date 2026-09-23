@@ -13,6 +13,7 @@ let package = Package(
         .executableTarget(name: "SillHost", dependencies: ["StreamProtocol"]),
         // Milestone 3 spike: virtual display + window move + capture. Its VirtualDisplay.swift
         // is a symlink to the host's copy. Not shipped.
+        .executableTarget(name: "CaptureProbe"),
         .executableTarget(name: "VirtualDisplayProbe"),
     ]
 )
