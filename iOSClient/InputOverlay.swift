@@ -21,6 +21,15 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// Fires once a latch has been spent, so the key row can un-highlight itself.
     var onModifiersConsumed: (() -> Void)?
 
+    /// Writes the client-drawn pointer (`StreamClient.localPointer`: a fraction of the video frame,
+    /// nil hides it). Only ever alongside what is sent anyway; it never sends anything itself.
+    /// The Pencil shows it, since a Pencil here is a mouse and a mouse has a pointer. A finger
+    /// hides it, since the finger is its own feedback and has just moved the Mac's cursor out from
+    /// under it. A trackpad or mouse hovering hides it, since iPadOS draws its own pointer. Typing
+    /// hides it, standing in for the Mac hiding its cursor while you type; the next Pencil move
+    /// shows it again.
+    var setLocalPointer: (CGPoint?) -> Void = { _ in }
+
     /// Pan translation already turned into scroll, so each callback sends only the new delta.
     private var lastPanTranslation: CGPoint = .zero
     /// True between the `.scrollGesture(.began)` this view sent and its `.ended`, so an end is
@@ -28,6 +37,9 @@ final class InputOverlayView: UIView, UIKeyInput {
     private var scrollGestureOpen = false
     /// The coast after a flick.
     private let momentum = ScrollMomentum()
+    /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
+    /// Pencil reading zero for a moment at the bottom of its range does not flicker the pointer.
+    private var hoverIsPencil = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -90,10 +102,13 @@ final class InputOverlayView: UIView, UIKeyInput {
         return (Double(x), Double(y))
     }
 
-    private func sendPointer(_ action: PointerAction, at point: CGPoint, clamped: Bool) -> Bool {
-        guard let p = normalized(point, clamped: clamped) else { return false }
+    /// Sends `action` at `point` and returns the frame fraction it went out at, or nil when the point
+    /// was rejected (the letterbox, or no video yet) and nothing was sent.
+    @discardableResult
+    private func sendPointer(_ action: PointerAction, at point: CGPoint, clamped: Bool) -> CGPoint? {
+        guard let p = normalized(point, clamped: clamped) else { return nil }
         send(.pointer(action, x: p.x, y: p.y))
-        return true
+        return CGPoint(x: p.x, y: p.y)
     }
 
     // MARK: - Finger gestures
@@ -101,19 +116,21 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// Single tap: put the pointer there first, then click. The move matters — the Mac's cursor is
     /// wherever the last event left it, and hover state (menus, tooltips) follows it.
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        setLocalPointer(nil)
         let point = gesture.location(in: self)
-        guard sendPointer(.move, at: point, clamped: false) else { return }
-        _ = sendPointer(.leftDown, at: point, clamped: false)
-        _ = sendPointer(.leftUp, at: point, clamped: false)
+        guard sendPointer(.move, at: point, clamped: false) != nil else { return }
+        sendPointer(.leftDown, at: point, clamped: false)
+        sendPointer(.leftUp, at: point, clamped: false)
     }
 
     /// Long press: the right button, since there is no second finger to spare for it.
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
+        setLocalPointer(nil)
         let point = gesture.location(in: self)
-        guard sendPointer(.move, at: point, clamped: false) else { return }
-        _ = sendPointer(.rightDown, at: point, clamped: false)
-        _ = sendPointer(.rightUp, at: point, clamped: false)
+        guard sendPointer(.move, at: point, clamped: false) != nil else { return }
+        sendPointer(.rightDown, at: point, clamped: false)
+        sendPointer(.rightUp, at: point, clamped: false)
     }
 
     /// Finger pan: scrolling, not dragging, shaped like a Mac trackpad gesture so the Mac
@@ -125,6 +142,7 @@ final class InputOverlayView: UIView, UIKeyInput {
         let rect = videoRect
         switch gesture.state {
         case .began:
+            setLocalPointer(nil)
             lastPanTranslation = .zero
             // A new pan while the last flick is still coasting ends the coast first, so the Mac
             // sees momentumEnded before this gesture's began. (touchesBegan has usually done it.)
@@ -180,12 +198,19 @@ final class InputOverlayView: UIView, UIKeyInput {
     }
 
     /// Pencil hover (and a trackpad pointer): cursor only, no buttons.
+    ///
+    /// Both send the same moves; they differ only in the local pointer. Only a Pencil reports a
+    /// height or a tilt (a trackpad or mouse pointer reads 0 for both), which is how the two are
+    /// told apart here.
     @objc private func handleHover(_ gesture: UIHoverGestureRecognizer) {
         switch gesture.state {
         case .began, .changed:
-            _ = sendPointer(.move, at: gesture.location(in: self), clamped: true)
+            if gesture.state == .began { hoverIsPencil = false }
+            if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
+            setLocalPointer(hoverIsPencil ? at : nil)
         default:
-            break
+            hoverIsPencil = false
         }
     }
 
@@ -195,39 +220,52 @@ final class InputOverlayView: UIView, UIKeyInput {
     // releases. It bypasses the gesture recognizers entirely (they are direct-touch only), so the
     // events are built straight from the touches.
 
+    /// Pencil and iPad trackpad/mouse touches are handled here as a pointer: move, then a click.
+    /// Finger touches stay with the gesture recognizers above (tap, long-press, pan).
+    private static func pointerTouch(in touches: Set<UITouch>) -> UITouch? {
+        touches.first { $0.type == .pencil || $0.type == .indirectPointer }
+    }
+    /// Which button the current pointer press holds down, so the up matches the down.
+    private var pointerButtonIsSecondary = false
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         // Any new touch stops a coasting flick, the way touching a moving list does on iOS (and
         // before the Pencil clicks on content that is still sliding).
         momentum.stop()
-        guard let touch = touches.first(where: { $0.type == .pencil }) else {
+        guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesBegan(touches, with: event); return
         }
         let point = touch.location(in: self)
-        guard sendPointer(.move, at: point, clamped: false) else { return }
-        _ = sendPointer(.leftDown, at: point, clamped: false)
+        guard let at = sendPointer(.move, at: point, clamped: false) else { return }
+        setLocalPointer(at)
+        // A trackpad's secondary click (two fingers, or right button) is a right click on the Mac.
+        pointerButtonIsSecondary = touch.type == .indirectPointer && (event?.buttonMask.contains(.secondary) ?? false)
+        sendPointer(pointerButtonIsSecondary ? .rightDown : .leftDown, at: point, clamped: false)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first(where: { $0.type == .pencil }) else {
+        guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesMoved(touches, with: event); return
         }
         // A move while the button is down is a drag on the host's side.
-        _ = sendPointer(.move, at: touch.location(in: self), clamped: true)
+        if let at = sendPointer(.move, at: touch.location(in: self), clamped: true) { setLocalPointer(at) }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first(where: { $0.type == .pencil }) else {
+        guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesEnded(touches, with: event); return
         }
-        _ = sendPointer(.leftUp, at: touch.location(in: self), clamped: true)
+        if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { setLocalPointer(at) }
+        pointerButtonIsSecondary = false
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first(where: { $0.type == .pencil }) else {
+        guard let touch = Self.pointerTouch(in: touches) else {
             super.touchesCancelled(touches, with: event); return
         }
         // Never leave the button stuck down.
-        _ = sendPointer(.leftUp, at: touch.location(in: self), clamped: true)
+        if let at = sendPointer(pointerButtonIsSecondary ? .rightUp : .leftUp, at: touch.location(in: self), clamped: true) { setLocalPointer(at) }
+        pointerButtonIsSecondary = false
     }
 
     // MARK: - Keyboard
@@ -259,6 +297,7 @@ final class InputOverlayView: UIView, UIKeyInput {
     // Either way the latch is spent afterwards: it is a one-shot, like a sticky key.
 
     func insertText(_ text: String) {
+        setLocalPointer(nil)
         if !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1,
            let character = text.first, let usage = HIDKey.usage(for: character) {
             sendLatched(usage)
@@ -269,6 +308,7 @@ final class InputOverlayView: UIView, UIKeyInput {
     }
 
     func deleteBackward() {
+        setLocalPointer(nil)
         if !latchedModifiers.isDisjoint(with: .shortcutMakers) {
             sendLatched(HIDKey.deleteBackward)
             return
@@ -347,6 +387,8 @@ final class InputOverlayView: UIView, UIKeyInput {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // A hardware key hides the local pointer, as typing does (`setLocalPointer`).
+        if presses.contains(where: { $0.key != nil }) { setLocalPointer(nil) }
         let unhandled = forward(presses, down: true)
         if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
@@ -366,6 +408,8 @@ final class InputOverlayProxy {
 struct InputOverlay: UIViewRepresentable {
     let videoSize: CGSize
     let send: (InputEvent) -> Void
+    /// Writes `StreamClient.localPointer`; see `InputOverlayView.setLocalPointer`.
+    let setLocalPointer: (CGPoint?) -> Void
     let proxy: InputOverlayProxy
     @Binding var isKeyboardShown: Bool
     var latchedModifiers: KeyModifiers = []
@@ -380,6 +424,7 @@ struct InputOverlay: UIViewRepresentable {
     func updateUIView(_ uiView: InputOverlayView, context: Context) {
         uiView.videoSize = videoSize
         uiView.send = send
+        uiView.setLocalPointer = setLocalPointer
         uiView.latchedModifiers = latchedModifiers
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.

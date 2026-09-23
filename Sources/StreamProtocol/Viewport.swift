@@ -12,9 +12,17 @@ public struct Viewport: Codable, Hashable {
     public var width: Double
     public var height: Double
     public var scale: Double?
+    /// The client draws its own pointer. Kept for compatibility; the host now always leaves the
+    /// Mac cursor out of the video and streams its shape separately (`.cursorShape`).
+    public var localCursor: Bool?
+    /// The rate this device wants the stream at: its panel's ceiling (120 on ProMotion, 60
+    /// elsewhere), or 60 while Low Power Mode caps the panel. nil (an older client) means 60.
+    /// The host runs the stream at the highest rate among its connected clients and restarts the
+    /// pipeline when that changes.
+    public var fps: Int?
 
-    public init(width: Double, height: Double, scale: Double?) {
-        self.width = width; self.height = height; self.scale = scale
+    public init(width: Double, height: Double, scale: Double?, localCursor: Bool? = nil, fps: Int? = nil) {
+        self.width = width; self.height = height; self.scale = scale; self.localCursor = localCursor; self.fps = fps
     }
 }
 
@@ -28,5 +36,24 @@ public struct ClientStats: Codable, Hashable {
 
     public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String) {
         self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs; self.device = device
+    }
+}
+
+/// The Mac's current cursor, so the client can draw the same shape (arrow, I-beam, resize, hand…)
+/// under its own pointer. hotspot and size are in Mac points; the PNG is the cursor's best
+/// representation (usually 2×). Layout: hotX, hotY, width, height as Float32 big-endian, then PNG.
+public enum CursorShapeBlob {
+    public static func encode(hotspot: CGPoint, size: CGSize, png: Data) -> Data {
+        var d = Data(capacity: 16 + png.count)
+        for v in [Float(hotspot.x), Float(hotspot.y), Float(size.width), Float(size.height)] {
+            d.appendBigEndian(v.bitPattern)
+        }
+        d.append(png)
+        return d
+    }
+    public static func decode(_ d: Data) -> (hotspot: CGPoint, size: CGSize, png: Data)? {
+        guard d.count > 16 else { return nil }
+        func f(_ i: Int) -> CGFloat { CGFloat(Float(bitPattern: d.readBigEndian(UInt32.self, at: i * 4))) }
+        return (CGPoint(x: f(0), y: f(1)), CGSize(width: f(2), height: f(3)), d.subdata(in: (d.startIndex + 16)..<d.endIndex))
     }
 }

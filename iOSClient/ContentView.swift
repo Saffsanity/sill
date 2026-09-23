@@ -52,6 +52,9 @@ struct ContentView: View {
 ///
 /// * `-SillLayout 1000x710` — required; the fake screen's size in points.
 /// * `-SillDrawer 1` — start with the app drawer open.
+/// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
+///   `-SillScale 1.5` sets the scale it opens at.
+/// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
 /// * `-SillKeyboard 1` — start with the software keyboard shown.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
@@ -74,6 +77,8 @@ struct LayoutHarness: View {
         let size: CGSize
         let drawerOpen: Bool
         let keyboardShown: Bool
+        let scaleOpen: Bool
+        let textScale: Double?
         let live: Bool
         /// What the mock should be streaming. Ignored when `live`.
         let mockActive: StreamSource
@@ -88,6 +93,8 @@ struct LayoutHarness: View {
             return Spec(size: CGSize(width: width, height: height),
                         drawerOpen: defaults.bool(forKey: "SillDrawer"),
                         keyboardShown: defaults.bool(forKey: "SillKeyboard"),
+                        scaleOpen: defaults.bool(forKey: "SillScaleOpen"),
+                        textScale: defaults.double(forKey: "SillScale") > 0 ? defaults.double(forKey: "SillScale") : nil,
                         live: defaults.bool(forKey: "SillLive"),
                         mockActive: mockActive(defaults.string(forKey: "SillActive")))
         }
@@ -136,7 +143,8 @@ struct LayoutHarness: View {
                 if live.connected {
                     StreamScreen(client: live,
                                  drawerOpen: spec.drawerOpen,
-                                 keyboardShown: spec.keyboardShown)
+                                 keyboardShown: spec.keyboardShown,
+                                 scaleOpen: spec.scaleOpen, textScale: spec.textScale)
                 } else {
                     ConnectScreen(client: live)
                 }
@@ -144,7 +152,8 @@ struct LayoutHarness: View {
         } else {
             StreamScreen(client: mock,
                          drawerOpen: spec.drawerOpen,
-                         keyboardShown: spec.keyboardShown)
+                         keyboardShown: spec.keyboardShown,
+                         scaleOpen: spec.scaleOpen, textScale: spec.textScale)
         }
     }
 }

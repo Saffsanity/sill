@@ -70,6 +70,25 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
+    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
+    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
+    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
+    var preferMainDisplay = false
+
+    /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
+    /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
+    /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
+    /// the client's bar and the coordinator can still find it.
+    var stagedWindowID: CGWindowID?
+
+    /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
+    /// an off-screen window that probes layer backing on the new screen). They carry the app's
+    /// name and no content, showed up as duplicate tiles with blank thumbnails, and the window
+    /// server drops them onto a real display when a virtual display goes away.
+    static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
+        (w.title ?? "").lowercased().contains("layerprobe")
+    }
+
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
     /// A window whose `WindowInfo` (title, app, size) has not changed since its last thumbnail,
@@ -105,6 +124,36 @@ final class WindowCatalog {
     }
 
     func window(id: UInt32) -> SCWindow? { windows.first { $0.windowID == id } }
+
+    /// `window(id:)`, else one look at every window the system knows (on-screen or not). The
+    /// coordinator uses it for the staged window, whose SCWindow must be fresh after the move: the
+    /// probe refetched too before capturing on the virtual display.
+    func resolveWindow(id: UInt32) async -> SCWindow? {
+        if let w = window(id: id) { return w }
+        guard let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) else { return nil }
+        return all.windows.first { $0.windowID == id }
+    }
+
+    /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
+    /// without Screen Recording the call never returned once a virtual display existed (it returns
+    /// promptly, with no windows, without one). The virtual-display paths use this so a hang there
+    /// costs seconds and a fallback, not the coordinator's `switching` flag for good. The default
+    /// path's `refreshWindows` keeps the plain call it always had.
+    nonisolated static func shareableContent(excludingDesktopWindows: Bool, onScreenWindowsOnly: Bool, timeout: TimeInterval) async -> SCShareableContent? {
+        final class Once: @unchecked Sendable {
+            private let lock = NSLock(); private var done = false
+            func first() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
+        }
+        let once = Once()
+        return await withCheckedContinuation { (c: CheckedContinuation<SCShareableContent?, Never>) in
+            SCShareableContent.getExcludingDesktopWindows(excludingDesktopWindows, onScreenWindowsOnly: onScreenWindowsOnly) { content, _ in
+                if once.first() { c.resume(returning: content) }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if once.first() { c.resume(returning: nil) }   // the late answer, if any, is dropped
+            }
+        }
+    }
 
     /// Every icon we know, for a client that just connected.
     var allIcons: [(bundleID: String, png: Data)] { icons.map { ($0.key, $0.value) } }
@@ -155,15 +204,28 @@ final class WindowCatalog {
         refreshSeq += 1
         let seq = refreshSeq
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
+        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
+        // poll, and only then. Fetched before the sequence check so its await cannot let an older
+        // refresh overwrite a newer one.
+        var pinned: SCWindow? = nil
+        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
+           let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+            pinned = all.windows.first { $0.windowID == id }
+            if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
+        }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
-        display = content.displays.first
-        let visible = content.windows.filter { w in
+        display = preferMainDisplay
+            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
+            : content.displays.first
+        var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
                 && w.frame.width > 100 && w.frame.height > 100
                 && app.processID != Self.ownPID
+                && !Self.isSystemHelperWindow(w)
         }
+        if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })

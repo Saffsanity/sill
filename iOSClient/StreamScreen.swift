@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import StreamProtocol
 
 // MARK: - Palette
@@ -70,24 +71,31 @@ struct StreamScreen: View {
     @State private var latched: KeyModifiers = []
     /// The bar's Keyboard button drives the overlay's first responder through this.
     @State private var overlay = InputOverlayProxy()
-    /// The Aa button's text scale, device points per Mac point; nil leaves the Mac window alone.
-    /// Up here, like `latched`, so it survives rotation and both layouts share it.
+    /// The Aa control's text scale, device points per Mac point; nil means the Mac window has never
+    /// been asked to fit (the control shows 1× for it). Up here, like `latched`, so it survives
+    /// rotation and both layouts share it.
     @State private var textScale: Double? = nil
+    /// The Aa slider is unfolded (finger down): the bars fade their other buttons meanwhile.
+    @State private var scaleOpen = false
+    /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
+    /// content, so the submenu is drawn by this root, anchored to the thumbnail's frame.
+    @State private var windowMenu: UInt32? = nil
+    @Environment(\.scenePhase) private var scenePhase
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
 
-    /// What the Aa button cycles through. Off first: the Mac window is left alone until asked.
-    static let textScaleSteps: [Double?] = [nil, 1.0, 1.25, 1.5, 0.8]
-
     #if DEBUG
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
     /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
-    init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false) {
+    init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false,
+         scaleOpen: Bool = false, textScale: Double? = nil) {
         self.client = client
         _drawerOpen = State(initialValue: drawerOpen)
         _keyboardShown = State(initialValue: keyboardShown)
+        _scaleOpen = State(initialValue: scaleOpen)
+        _textScale = State(initialValue: textScale)
     }
     #endif
 
@@ -107,14 +115,26 @@ struct StreamScreen: View {
             }
         }
         .background(Color.black)
+        .overlayPreferenceValue(WindowMenuAnchorKey.self) { anchor in
+            if let anchor, let id = windowMenu, let window = client.windows.first(where: { $0.id == id }) {
+                WindowLightsMenu(anchor: anchor, window: window,
+                                 command: { action in client.command(action, window: id); closeWindowMenu() },
+                                 dismiss: closeWindowMenu)
+            }
+        }
+        .animation(.spring(duration: 0.25, bounce: 0.2), value: windowMenu)
+        .onChange(of: scenePhase) { _, phase in
+            // A gesture cut short by a scene change never ends: put the transient UI away.
+            if phase != .active { scaleOpen = false; windowMenu = nil }
+        }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
-            // A fresh connection streams nothing: the Mac no longer picks a window, the iPad does.
-            if client.active == .none { drawerOpen = true }
+            // A fresh connection starts on the Desktop (the client asks for it as soon as the host
+            // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
         }
         .onChange(of: client.active) { _, source in
-            withAnimation(.easeOut(duration: 0.18)) { drawerOpen = (source == .none) }
+            if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
             // The host sizes a window as it selects it, from the last viewport it has; this repeat
             // is for a host that restarted, or a window that was picked from the Mac's side.
             sendViewport()
@@ -126,6 +146,14 @@ struct StreamScreen: View {
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
         .onChange(of: textScale) { _, _ in sendViewport(after: 0.25) }
+        // The stream rate follows the panel (`StreamClient.wantedFPS`): re-send when Low Power Mode
+        // toggles or the screen's mode changes. Both notifications can arrive off the main thread.
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
+            sendViewport(after: 0.25)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.modeDidChangeNotification).receive(on: RunLoop.main)) { _ in
+            sendViewport(after: 0.25)
+        }
     }
 
     // MARK: Viewport
@@ -143,31 +171,28 @@ struct StreamScreen: View {
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
-                                         scale: textScale))
+                                         scale: textScale,
+                                         fps: StreamClient.wantedFPS()))
         }
     }
 
-    private func cycleTextScale() {
-        let steps = Self.textScaleSteps
-        let index = steps.firstIndex(of: textScale) ?? 0
-        textScale = steps[(index + 1) % steps.count]
-    }
+    private func closeWindowMenu() { windowMenu = nil }
 
     private func landscape(bar: BarMetrics) -> some View {
         VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
-                   textScale: textScale,
-                   toggleKeyboard: { overlay.toggleKeyboard() },
-                   cycleTextScale: cycleTextScale)
+                   textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
+                   toggleKeyboard: { overlay.toggleKeyboard() })
             contentArea
         }
     }
 
     private func portrait(metrics: PortraitMetrics) -> some View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
-                             keyboardShown: $keyboardShown, latched: $latched,
-                             overlay: overlay,
+                             keyboardShown: $keyboardShown,
+                             textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
+                             latched: $latched, overlay: overlay,
                              onPanelSize: { panelSize = $0 })
     }
 
@@ -182,6 +207,7 @@ struct StreamScreen: View {
                 // Same frame as the video, so a touch maps straight onto the streamed frame.
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
+                             setLocalPointer: { client.localPointer = $0 },
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
@@ -221,9 +247,8 @@ struct StreamScreen: View {
 /// The landscape top bar's numbers. The inner display gets the Main board's roomy bar; the outer
 /// display gets the Laptop board's compact one, which is 8 pt shorter and tighter all round — on a
 /// 500 pt tall screen the bar is a sixth of everything there is, so every point it gives back is a
-/// point of Mac. The compact bar also drops the Aa button, exactly as the Laptop board does: with
-/// this little room, a setting you change once is the first thing that should go. The scale it set
-/// still applies there; it lives in `StreamScreen`, not in the bar.
+/// point of Mac. Every bar carries the Aa control (Noah, 2026-09-22: both orientations); it takes
+/// one button's width and unfolds over its neighbours only while touched.
 struct BarMetrics {
     let height: CGFloat
     let padding: CGFloat
@@ -249,7 +274,7 @@ struct BarMetrics {
                                     buttonWidth: 64, buttonHeight: 58, buttonSpacing: 3,
                                     thumbWidth: 92, thumbHeight: 58, thumbRadius: 9,
                                     thumbSpacing: 14, thumbPad: 10, thumbFade: 0.88,
-                                    showsTextSize: false)
+                                    showsTextSize: true)
 }
 
 private struct TopBar: View {
@@ -257,9 +282,10 @@ private struct TopBar: View {
     let metrics: BarMetrics
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
-    let textScale: Double?
+    @Binding var textScale: Double?
+    @Binding var scaleOpen: Bool
+    @Binding var windowMenu: UInt32?
     let toggleKeyboard: () -> Void
-    let cycleTextScale: () -> Void
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -269,45 +295,40 @@ private struct TopBar: View {
 
             WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                         radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
-                        pad: metrics.thumbPad, fade: metrics.thumbFade)
+                        pad: metrics.thumbPad, fade: metrics.thumbFade, menuFor: $windowMenu)
+                .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
+                .allowsHitTesting(!scaleOpen)
 
-            if metrics.showsTextSize {
-                // Text size: the host resizes the Mac window to the panel divided by this scale, so
-                // a bigger number means a smaller Mac window and bigger text here. Off leaves the
-                // window as it is (and does not put it back).
-                BarButton(open: false, width: metrics.buttonWidth, height: metrics.buttonHeight,
-                          accessibilityLabel: textScale.map { "Text size, \(Self.scaleLabel($0)) times" }
-                              ?? "Text size, off",
-                          action: cycleTextScale) {
-                    VStack(spacing: 2) {
-                        Text("Aa")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(Palette.text)
-                        Text(textScale.map { Self.scaleLabel($0) + "×" } ?? "Off")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Palette.barLabel)
-                    }
-                }
-            }
+            // Text size: the host sizes the Mac window to the panel divided by this scale, so a
+            // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
+            // the right, over the two buttons after it, which fade while it is open.
+            TextScaleControl(scale: $textScale, open: $scaleOpen,
+                             width: metrics.buttonWidth, height: metrics.buttonHeight,
+                             pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
                    action: toggleKeyboard)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
 
             button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
                    accessibilityLabel: "Show the full Mac desktop",
                    action: { client.select(.desktop) })
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            button(open: false, symbol: "xmark.circle", label: "Leave",
+                   accessibilityLabel: "Disconnect from the Mac",
+                   action: { client.disconnect() })
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
         }
+        .animation(.easeOut(duration: 0.16), value: scaleOpen)
         .frame(height: metrics.height)
         .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.
         .background(Palette.bar.ignoresSafeArea(edges: .top))
-    }
-
-    /// 1.0, 1.25, 1.5, 0.8: two decimals, less a trailing zero, but never fewer than one.
-    static func scaleLabel(_ scale: Double) -> String {
-        let text = String(format: "%.2f", scale)
-        return text.hasSuffix("0") ? String(text.dropLast()) : text
     }
 
     private func button(open: Bool, symbol: String, label: String, accessibilityLabel: String,
@@ -378,6 +399,153 @@ struct BarButton<Content: View>: View {
     }
 }
 
+// MARK: - Text size control
+
+/// The Aa control: a bar button that opens into a ruler while the finger is down, the way the
+/// camera's zoom button opens into its dial and the Dynamic Island timer scrubs. The thumb stays
+/// put at the button's centre and the ruler slides under it: five detents, 0.5× to 1.5× in 0.25
+/// steps, a tick of haptic at each. The bar fades the buttons next to it while `open` and brings
+/// them back on release, when the chosen value is applied once (every change restarts the stream,
+/// so nothing is sent mid-drag). A nil scale means the Mac window has never been asked to fit; it
+/// shows 1×.
+struct TextScaleControl: View {
+    @Binding var scale: Double?
+    @Binding var open: Bool
+    var width: CGFloat = 66
+    var height: CGFloat = 66
+    var radius: CGFloat = 16
+    /// Finger travel (and ruler spacing) per detent; smaller in the tighter bars so the ruler,
+    /// centred on the button, stays inside the screen.
+    var pointsPerStep: CGFloat = 44
+
+    static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
+    /// Padding either side of the visible ruler; two detents show each side of the thumb.
+    static let sliderInset: CGFloat = 30
+    var sliderWidth: CGFloat { pointsPerStep * CGFloat(Self.steps.count - 1) + Self.sliderInset * 2 }
+
+    @State private var live: Double = 1.0
+    @State private var startValue: Double = 1.0
+    @State private var startX: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("Aa")
+                .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
+                .foregroundStyle(Palette.text)
+            Text(Self.label(scale ?? 1.0) + "×")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.barLabel)
+        }
+        .frame(width: width, height: height)
+        .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.control))
+        .opacity(open ? 0 : 1)
+        .overlay {
+            // Centred on the button: the thumb is where the finger came down.
+            slider
+                .opacity(open ? 1 : 0)
+                .scaleEffect(open ? 1 : 0.6)
+                .allowsHitTesting(false)
+        }
+        .zIndex(open ? 1 : 0)
+        .onChange(of: open, initial: true) { _, isOpen in if isOpen { live = scale ?? 1.0 } }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { g in
+                    if !open {
+                        startValue = scale ?? 1.0
+                        live = startValue
+                        startX = g.location.x
+                        withAnimation(.spring(duration: 0.22, bounce: 0.15)) { open = true }
+                    }
+                    // The ruler follows the finger: dragging right raises the value, and the ticks
+                    // slide left under the fixed thumb.
+                    let dx = g.location.x - startX
+                    let snapped = Self.snap(startValue + Double(dx / pointsPerStep) * 0.25)
+                    if snapped != live {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.easeOut(duration: 0.1)) { live = snapped }
+                    }
+                }
+                .onEnded { _ in
+                    if (scale ?? 1.0) != live { scale = live }     // a plain tap on an untouched control changes nothing
+                    withAnimation(.easeOut(duration: 0.2)) { open = false }
+                }
+        )
+        .onDisappear { open = false }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Text size")
+        .accessibilityValue("\(Self.label(scale ?? 1.0)) times")
+        .accessibilityAdjustableAction { direction in
+            let i = Self.steps.firstIndex(of: scale ?? 1.0) ?? 2
+            switch direction {
+            case .increment: scale = Self.steps[min(i + 1, Self.steps.count - 1)]
+            case .decrement: scale = Self.steps[max(i - 1, 0)]
+            @unknown default: break
+            }
+        }
+    }
+
+    /// The ruler: a track with five ticks and labels that slides so the live value sits under the
+    /// fixed thumb; the ends fade out where they run past the panel.
+    private var slider: some View {
+        let w = sliderWidth
+        let step = pointsPerStep
+        let midX = w / 2
+        let midY = height / 2 + 4
+        func x(_ value: Double) -> CGFloat { midX + CGFloat((value - live) / 0.25) * step }
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Palette.controlOpen)
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(Palette.barLabel.opacity(0.35))
+                    .frame(width: step * CGFloat(Self.steps.count - 1), height: 3)
+                    .offset(x: x(Self.steps[0]), y: midY - 1.5)
+                ForEach(Self.steps, id: \.self) { value in
+                    Rectangle().fill(Palette.barLabel.opacity(0.6))
+                        .frame(width: 2, height: 9)
+                        .offset(x: x(value) - 1, y: midY - 4.5)
+                    Text(Self.label(value))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(value == live ? Palette.text : Palette.barLabel)
+                        .frame(width: step, alignment: .center)
+                        .offset(x: x(value) - step / 2, y: midY + 9)
+                }
+            }
+            .frame(width: w, height: height, alignment: .topLeading)   // the mask below is sized to this
+            .mask(
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
+                                       .init(color: .black, location: 0.88), .init(color: .clear, location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+            )
+            Circle().fill(Palette.accent)
+                .frame(width: 22, height: 22)
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                .offset(x: midX - 11, y: midY - 11)
+            Text(Self.label(live) + "×")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.text)
+                .frame(width: 60, alignment: .center)
+                .offset(x: midX - 30, y: midY - 34)
+        }
+        .frame(width: w, height: height, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    }
+
+    /// Nearest detent, clamped to the ends.
+    static func snap(_ value: Double) -> Double {
+        let clamped = min(max(value, steps[0]), steps[steps.count - 1])
+        return steps.min { abs($0 - clamped) < abs($1 - clamped) } ?? 1.0
+    }
+
+    /// 0.5, 0.75, 1, 1.25, 1.5: trailing zeros dropped, and "1" rather than "1.0".
+    static func label(_ scale: Double) -> String {
+        var text = String(format: "%.2f", scale)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text
+    }
+}
+
 // MARK: - Window thumbnails
 
 /// The live window thumbnails. Defaults are the roomy top bar's numbers; the compact bars are
@@ -395,27 +563,230 @@ struct WindowStrip: View {
     var pad: CGFloat = 10
     var fade: Double = 0.86
     var badge: CGFloat = 24
+    /// Which thumbnail has its traffic-light submenu open. Owned by the screen root, which draws
+    /// the submenu outside this clipped strip.
+    @Binding var menuFor: UInt32?
+
+    /// Press and hold a thumbnail for 1.5 s: it starts to wiggle and its traffic lights (close,
+    /// minimize, full screen) appear in a submenu beside it, the way a held Home Screen icon
+    /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
+    /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
+    static let holdToOpen: TimeInterval = 1.5
+    @State private var lifted: UInt32? = nil
+    @State private var liftOffset: CGFloat = 0
+    @State private var liftStartIndex = 0
 
     var body: some View {
+        let windows = client.orderedWindows
+        let slot = width + spacing
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: spacing) {
-                ForEach(client.windows) { window in
+                ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
                     WindowThumbnail(window: window,
                                     image: client.thumbnails[window.id],
                                     icon: client.icons[window.bundleID],
                                     isActive: client.active == .window(window.id),
                                     width: width, height: height, radius: radius, badge: badge,
-                                    action: { client.select(.window(window.id)) })
+                                    menuOpen: menuFor == window.id,
+                                    lifted: lifted == window.id,
+                                    onSelect: { client.select(.window(window.id)) },
+                                    onCommand: { client.command($0, window: window.id) },
+                                    onMove: { step in
+                                        client.moveWindow(window.id, to: index + step)
+                                        client.persistWindowOrder()
+                                    })
+                        .overlay {
+                            HoldDragOverlay(minimumHold: Self.holdToOpen,
+                                            onTap: { if menuFor != nil { closeMenu() } else { client.select(.window(window.id)) } },
+                                            onHold: { openMenu(for: window.id) },
+                                            onMove: { t in holdMoved(window: window, index: index, count: windows.count, slot: slot, translation: t) },
+                                            onEnd: { holdEnded(window: window) })
+                        }
+                        .offset(x: lifted == window.id ? liftOffset : 0)
+                        .zIndex(lifted == window.id ? 1 : 0)
+                        // The lifted thumbnail follows the finger: its slot change must not animate,
+                        // or the layout springs one way while the compensating offset jumps the other.
+                        .transaction { if lifted == window.id { $0.animation = nil } }
                 }
             }
             .padding(.vertical, pad)
             .padding(.horizontal, 8)
         }
+        .coordinateSpace(name: "strip")
+        .scrollDisabled(lifted != nil)
         .frame(maxWidth: .infinity)
         .mask(LinearGradient(stops: [.init(color: .black, location: 0),
                                      .init(color: .black, location: fade),
                                      .init(color: .clear, location: 1)],
                              startPoint: .leading, endPoint: .trailing))
+        .onChange(of: client.windows) { _, now in
+            // A window that closed or minimized takes its menu, and any drag, with it.
+            if let id = menuFor, !now.contains(where: { $0.id == id }) { closeMenu() }
+            if let id = lifted, !now.contains(where: { $0.id == id }) {
+                lifted = nil; liftOffset = 0
+                client.persistWindowOrder()
+            }
+        }
+        .onDisappear { lifted = nil; liftOffset = 0 }
+        #if DEBUG
+        // Harness: `-SillWindowMenu 1` opens the first window's submenu at launch.
+        .onAppear {
+            if UserDefaults.standard.bool(forKey: "SillWindowMenu"), let first = client.orderedWindows.first { menuFor = first.id }
+        }
+        #endif
+    }
+
+    /// The finger moved while the hold is still down. More than 8 pt lifts the thumbnail and
+    /// drags it; the drag reorders live: crossing the middle of a neighbour swaps slots, and the
+    /// lifted thumbnail's offset is corrected by the slots it has moved so it stays under the finger.
+    private func holdMoved(window: WindowInfo, index: Int, count: Int, slot: CGFloat, translation t: CGSize) {
+        if lifted == nil {
+            guard abs(t.width) > 8 || abs(t.height) > 8 else { return }
+            closeMenu()
+            lifted = window.id
+            liftStartIndex = index
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        guard lifted == window.id else { return }
+        let shift = Int((t.width / slot).rounded())
+        let target = max(0, min(count - 1, liftStartIndex + shift))
+        if let current = client.orderedWindows.firstIndex(where: { $0.id == window.id }), current != target {
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.spring(duration: 0.3, bounce: 0.15)) { client.moveWindow(window.id, to: target) }
+        }
+        liftOffset = t.width - CGFloat(target - liftStartIndex) * slot
+    }
+
+    /// The finger lifted after a hold: drop the thumbnail (the submenu, if open, stays).
+    private func holdEnded(window: WindowInfo) {
+        guard lifted == window.id else { return }
+        withAnimation(.spring(duration: 0.3, bounce: 0.2)) { lifted = nil; liftOffset = 0 }
+        client.persistWindowOrder()
+    }
+
+    private func openMenu(for id: UInt32) {
+        guard menuFor != id else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        menuFor = id
+    }
+
+    private func closeMenu() { menuFor = nil }
+}
+
+/// A thumbnail's touch handling, in UIKit: a tap selects; a hold of `minimumHold` opens the
+/// submenu and keeps tracking the finger, so moving it afterwards drags. UIKit rather than SwiftUI
+/// gestures because a SwiftUI long press sequenced with a drag swallowed plain taps inside the
+/// ScrollView (2026-09-23), and UIKit's long press is exactly the Home Screen mechanic: by the time
+/// it recognizes, the scroll view's pan has already given up, so the drag is ours.
+struct HoldDragOverlay: UIViewRepresentable {
+    var minimumHold: TimeInterval
+    var onTap: () -> Void
+    var onHold: () -> Void
+    /// Translation since the hold began, in window coordinates (stable while the view moves).
+    var onMove: (CGSize) -> Void
+    var onEnd: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped))
+        let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.held(_:)))
+        hold.minimumPressDuration = minimumHold
+        hold.allowableMovement = 12        // more than this before the hold fires is a scroll, not a hold
+        view.addGestureRecognizer(tap)
+        view.addGestureRecognizer(hold)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: HoldDragOverlay
+        private var start = CGPoint.zero
+        init(_ parent: HoldDragOverlay) { self.parent = parent }
+
+        @objc func tapped() { parent.onTap() }
+
+        @objc func held(_ g: UILongPressGestureRecognizer) {
+            let p = g.location(in: g.view?.window)
+            switch g.state {
+            case .began: start = p; parent.onHold()
+            case .changed: parent.onMove(CGSize(width: p.x - start.x, height: p.y - start.y))
+            case .ended, .cancelled, .failed: parent.onEnd()
+            default: break
+            }
+        }
+    }
+}
+
+/// The frame of the thumbnail whose submenu is open, reported up to the screen root.
+struct WindowMenuAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+/// macOS's three lights in a floating submenu beside the held thumbnail: below it when the bar
+/// is at the top of the screen, above it when the bar is at the bottom (portrait). A tap anywhere
+/// else dismisses it. Drawn by the screen root, over everything.
+struct WindowLightsMenu: View {
+    let anchor: Anchor<CGRect>
+    let window: WindowInfo
+    let command: (WindowCommand.Action) -> Void
+    let dismiss: () -> Void
+
+    private static let size = CGSize(width: 214, height: 62)
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy[anchor]
+            let below = frame.midY < proxy.size.height / 2
+            let w = Self.size.width, h = Self.size.height
+            let x = min(max(frame.midX, w / 2 + 8), proxy.size.width - w / 2 - 8)
+            let y = below ? frame.maxY + 8 + h / 2 : frame.minY - 8 - h / 2
+            ZStack {
+                Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismiss)
+                HStack(spacing: 6) {
+                    light(.close, Color(hex: 0xFF5F57), "xmark", "Close")
+                    light(.minimize, Color(hex: 0xFEBC2E), "minus", "Minimize")
+                    light(.fullScreen, Color(hex: 0x28C840), "arrow.up.left.and.arrow.down.right", "Full Screen")
+                }
+                .padding(.horizontal, 10)
+                .frame(width: w, height: h)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Palette.control)
+                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.5), radius: 16, y: 6)
+                )
+                .position(x: x, y: y)
+                .transition(.scale(scale: 0.8, anchor: below ? .top : .bottom).combined(with: .opacity))
+            }
+            .accessibilityLabel("\(window.appName) window actions")
+        }
+    }
+
+    private func light(_ action: WindowCommand.Action, _ color: Color, _ symbol: String, _ label: String) -> some View {
+        Button { command(action) } label: {
+            VStack(spacing: 5) {
+                ZStack {
+                    Circle().fill(color).frame(width: 24, height: 24)
+                    Image(systemName: symbol)
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(.black.opacity(0.65))
+                }
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.barLabel)
+                    .lineLimit(1)
+            }
+            .frame(width: 60)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label) window")
     }
 }
 
@@ -428,31 +799,52 @@ private struct WindowThumbnail: View {
     let height: CGFloat
     let radius: CGFloat
     let badge: CGFloat
-    let action: () -> Void
+    let menuOpen: Bool
+    let lifted: Bool
+    /// VoiceOver's routes to what the finger does with a tap, the hold submenu and the drag.
+    let onSelect: () -> Void
+    let onCommand: (WindowCommand.Action) -> Void
+    let onMove: (Int) -> Void
 
     var body: some View {
-        Button(action: action) {
-            preview
-                .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                .overlay {
-                    // The active halo sits under the app badge: the badge's bar-coloured ring then
-                    // reads as cutting through the halo, instead of the halo slicing across the icon.
-                    // It follows the thumbnail's own radius so both sizes keep the same 3 pt gap.
-                    if isActive {
-                        RoundedRectangle(cornerRadius: radius + 5, style: .continuous)
-                            .strokeBorder(Palette.accent, lineWidth: 2)
-                            .padding(-5)
-                    }
-                }
-                // The badge barely scales with the thumbnail; it is the app's identity, not chrome,
-                // so it only shrinks once, to 22 pt, on the outer display's smallest bar.
-                .overlay(alignment: .bottomLeading) { appBadge.offset(x: -6, y: 6) }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(window.appName) window: \(window.title)" + (isActive ? ", showing now" : ""))
+        // Two stages: one long chain of modifiers here is more than the type checker will take.
+        card
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(window.appName) window: \(window.title)" + (isActive ? ", showing now" : ""))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default) { onSelect() }
+            .accessibilityAction(named: "Close window") { onCommand(.close) }
+            .accessibilityAction(named: "Minimize window") { onCommand(.minimize) }
+            .accessibilityAction(named: "Full screen") { onCommand(.fullScreen) }
+            .accessibilityAction(named: "Move left") { onMove(-1) }
+            .accessibilityAction(named: "Move right") { onMove(1) }
+    }
+
+    /// The thumbnail with its badge, halo, wiggle and lift.
+    private var card: some View {
+        let halo = RoundedRectangle(cornerRadius: radius + 5, style: .continuous)
+            .strokeBorder(Palette.accent, lineWidth: 2)
+            .padding(-5)
+        return preview
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+            // The active halo sits under the app badge: the badge's bar-coloured ring then reads as
+            // cutting through the halo, instead of the halo slicing across the icon. It follows the
+            // thumbnail's own radius so both sizes keep the same 3 pt gap.
+            .overlay { if isActive { halo } }
+            // The badge barely scales with the thumbnail; it is the app's identity, not chrome,
+            // so it only shrinks once, to 22 pt, on the outer display's smallest bar.
+            .overlay(alignment: .bottomLeading) { appBadge.offset(x: -6, y: 6) }
+            // Held: the Home Screen wiggle, until the submenu is dismissed. Lifted: bigger, with a shadow.
+            .rotationEffect(.degrees(menuOpen ? 1.8 : 0))
+            .offset(y: menuOpen ? -1 : 0)
+            .animation(menuOpen ? .easeInOut(duration: 0.13).repeatForever(autoreverses: true) : .easeOut(duration: 0.15),
+                       value: menuOpen)
+            .scaleEffect(lifted ? 1.08 : (menuOpen ? 1.04 : 1))
+            .shadow(color: .black.opacity(lifted ? 0.45 : 0), radius: 10, y: 4)
+            .anchorPreference(key: WindowMenuAnchorKey.self, value: .bounds) { menuOpen ? $0 : nil }
     }
 
     @ViewBuilder private var preview: some View {

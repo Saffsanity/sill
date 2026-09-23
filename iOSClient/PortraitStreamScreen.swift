@@ -134,6 +134,9 @@ struct PortraitStreamScreen: View {
     var metrics: PortraitMetrics = .regular
     @Binding var drawerOpen: Bool
     @Binding var keyboardShown: Bool
+    @Binding var textScale: Double?
+    @Binding var scaleOpen: Bool
+    @Binding var windowMenu: UInt32?
     @Binding var latched: KeyModifiers
     let overlay: InputOverlayProxy
     /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
@@ -183,6 +186,7 @@ struct PortraitStreamScreen: View {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
+                         setLocalPointer: { client.localPointer = $0 },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
@@ -206,6 +210,8 @@ struct PortraitStreamScreen: View {
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    showSpotlight: client.active == .desktop)
             Trackpad(send: { client.sendInput($0) },
+                     setLocalPointer: { client.localPointer = $0 },
+                     currentLocalPointer: { client.localPointer },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })
         }
@@ -215,7 +221,8 @@ struct PortraitStreamScreen: View {
     }
 
     /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
-    /// Keyboard or Aa button: the keyboard moved into the key row and Aa is not in this layout.
+    /// Keyboard button (it moved into the key row) but with the Aa control, whose ruler opens
+    /// centred on it; the strip's end and the Desktop button fade while it is open.
     private var windowBar: some View {
         HStack(spacing: 12) {
             barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
@@ -224,13 +231,29 @@ struct PortraitStreamScreen: View {
 
             WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                         radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
-                        pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge)
+                        pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
+                        menuFor: $windowMenu)
+                .opacity(scaleOpen ? 0.2 : 1)      // the slider unfolds over the strip's end
+                .allowsHitTesting(!scaleOpen)
+
+            TextScaleControl(scale: $textScale, open: $scaleOpen,
+                             width: metrics.buttonWidth, height: metrics.buttonHeight,
+                             radius: metrics.buttonRadius, pointsPerStep: 36)
 
             barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
                       accessibilityLabel: "Show the full Mac desktop",
                       action: { client.select(.desktop) })
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            barButton(open: false, symbol: "xmark.circle", label: "Leave",
+                      accessibilityLabel: "Disconnect from the Mac",
+                      action: { client.disconnect() })
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
         }
         .frame(height: metrics.barHeight)
+        .animation(.easeOut(duration: 0.16), value: scaleOpen)
     }
 
     private func barButton(open: Bool, symbol: String, label: String, accessibilityLabel: String,
