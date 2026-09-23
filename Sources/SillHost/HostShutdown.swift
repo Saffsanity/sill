@@ -6,20 +6,23 @@ import Darwin
 /// the window somewhere on a real display when the virtual one vanishes with the process, which
 /// is "not lost" but not where the user left it either.
 ///
-/// Installed only under the flag; the default host path exits on a signal exactly as it did.
+/// The CLI installs it only under the flag; its default path exits on a signal exactly as it did.
+/// The menu bar app always installs it, because Settings can turn the virtual display on while it
+/// runs; its Quit (NSApp.terminate: the menu, logout, "Quit & Reopen") comes through
+/// `releaseForQuit` instead, and AppKit does the exit.
 ///
 /// Threading: the signal sources fire on the main queue, i.e. on the main thread at a point where
 /// no main-actor code is mid-statement (an in-flight `select` is parked at an await), so the
 /// coordinator's state is consistent and `shutdownForExit()` can run synchronously. A watchdog on
 /// a global queue exits anyway if an Accessibility call into a wedged app never returns.
-enum HostShutdown {
+package enum HostShutdown {
     /// Kept for the life of the process: a released DispatchSourceSignal stops delivering.
     static var sources: [DispatchSourceSignal] = []
     static var began = false
 
     /// `coordinator` is read at signal time, not now: the coordinator is created asynchronously
     /// after `install` runs.
-    static func install(coordinator: @escaping () -> StreamCoordinator?) {
+    package static func install(coordinator: @escaping () -> StreamCoordinator?) {
         for sig in [SIGINT, SIGTERM, SIGHUP] {
             // The default disposition would kill the process before the source fires.
             signal(sig, SIG_IGN)
@@ -31,6 +34,20 @@ enum HostShutdown {
         // Covers `exit(1)` from a failed listener or startup: nothing is staged at either in
         // practice, but the snapshot restore costs nothing and needs no main-actor state.
         atexit { VirtualStage.emergencyRestore() }
+    }
+
+    /// The app's Quit: the same window-home and display-gone as a signal, once, with the same
+    /// watchdog, but no exit: the caller returns to AppKit, which ends the process (exit code 0).
+    @MainActor
+    package static func releaseForQuit(coordinator: StreamCoordinator?) {
+        guard !began else { return }
+        began = true
+        print("Shutting down: putting the window back and removing the virtual display.")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+            print("Shutdown timed out; exiting anyway.")
+            exit(0)
+        }
+        coordinator?.shutdownForExit()
     }
 
     static func begin(code: Int32, coordinator: () -> StreamCoordinator?) {

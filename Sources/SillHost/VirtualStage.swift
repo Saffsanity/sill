@@ -66,6 +66,22 @@ final class VirtualStage {
             case .windowMissing: return "windowMissing (the window vanished while being staged)"
             }
         }
+
+        /// A few words for the app's menu, after "real window (virtual display: …)".
+        var summary: String {
+            switch self {
+            case .disabled(let why): return why
+            case .accessibilityOff: return "needs Accessibility"
+            case .screenRecordingOff: return "needs Screen Recording"
+            case .axWindowNotFound: return "the window wasn’t found through Accessibility"
+            case .displayCreate: return "the display couldn’t be created"
+            case .neverOnline: return "the display never came up"
+            case .notListedBySCK: return "ScreenCaptureKit didn’t list the display"
+            case .moveRefused: return "the app refused the move"
+            case .notOnDisplay: return "the window didn’t move"
+            case .windowMissing: return "the window went away"
+            }
+        }
     }
 
     // MARK: State

@@ -31,6 +31,18 @@ final class StreamServer {
     var onClientCountChanged: ((Int) -> Void)?
     /// One connection ended (before `onClientCountChanged`), for per-client state such as its rate.
     var onClientDisconnected: ((NWConnection) -> Void)?
+    /// The listener failed. Called on the network queue after "Listener failed: …" is printed.
+    /// Unset, the process exits(1) as it always has (the CLI); the menu bar app sets it and keeps
+    /// running with the failure in its menu. Set it only before `start()`.
+    var onListenerFailed: ((NWError) -> Void)?
+    /// Every listener state change (ready, waiting, failed…). Called on the network queue.
+    var onListenerState: ((NWListener.State) -> Void)?
+    /// The name Bonjour actually registered, which differs from the Mac's name after a clash
+    /// ("… (2)"); nil when that registration went away. Called on the network queue.
+    var onServiceRegistered: ((String?) -> Void)?
+    /// Every ClientStats report, about once a second per device (the log prints every other one).
+    /// Called on the network queue.
+    var onClientStats: ((NWConnection, ClientStats) -> Void)?
 
     // MARK: Link keepalive
     //
@@ -98,13 +110,28 @@ final class StreamServer {
         if advertise {
             listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
         }
-        listener.stateUpdateHandler = { state in
-            if case .failed(let e) = state { print("Listener failed: \(e)"); exit(1) }
+        listener.stateUpdateHandler = { [weak self] state in
+            if case .failed(let e) = state {
+                print("Listener failed: \(e)")
+                guard let handler = self?.onListenerFailed else { exit(1) }   // the CLI, as always
+                handler(e)
+            }
+            self?.onListenerState?(state)
+        }
+        listener.serviceRegistrationUpdateHandler = { [weak self] change in
+            if case .add(let endpoint) = change, case .service(let name, _, _, _) = endpoint {
+                self?.onServiceRegistered?(name)
+            } else if case .remove = change {
+                self?.onServiceRegistered?(nil)
+            }
         }
         listener.newConnectionHandler = { [weak self] c in self?.accept(c) }
     }
 
     func start() { listener.start(queue: queue) }
+
+    /// The port the listener got, once it is ready: how test clients reach the synthetic host.
+    var port: UInt16? { listener.port?.rawValue }
 
     private func accept(_ connection: NWConnection) {
         let client = Client(connection)
@@ -176,10 +203,14 @@ final class StreamServer {
                     // What the device sees, printed here so the latency number is in the Mac's log.
                     // The client reports every second; every other report (~2 s) is enough. The gate
                     // is 1.5 s, not 2, so arrival jitter on a 1 s cadence cannot stretch it to 3 s.
-                    let now = CFAbsoluteTimeGetCurrent()
-                    if now - client.lastStatsPrint >= 1.5, let stats = Wire.decode(ClientStats.self, from: payload) {
-                        client.lastStatsPrint = now
-                        print("client \(stats.device): \(stats.fps) fps, frame age \(stats.frameAgeMs) ms, rtt \(stats.rttMs) ms")
+                    // Every report goes to `onClientStats` (the app's menu shows it live).
+                    if let stats = Wire.decode(ClientStats.self, from: payload) {
+                        let now = CFAbsoluteTimeGetCurrent()
+                        if now - client.lastStatsPrint >= 1.5 {
+                            client.lastStatsPrint = now
+                            print("client \(stats.device): \(stats.fps) fps, frame age \(stats.frameAgeMs) ms, rtt \(stats.rttMs) ms")
+                        }
+                        self.onClientStats?(c, stats)
                     }
                 } else {
                     self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)

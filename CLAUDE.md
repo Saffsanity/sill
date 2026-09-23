@@ -8,6 +8,87 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Sill.app, the menu bar host (2026-09-23, branch `menu-bar-app`; the plan and
+its background are in `docs/menu-bar-app-plan.md`).** The same host as the CLI,
+as an LSUIElement app. A status item whose glyph (drawn from AppIcon.svg:
+idle, connected, streaming, attention) and menu card show the network, each
+device with its fps, frame age and RTT, and the stream; a menu with Virtual
+Display, Frame Rate, Quality, Resolution, Launch at Login (SMAppService),
+Permissions, Show Log…, Settings… and Quit. Settings is an AppKit window with
+four SwiftUI panes (General, Streaming, Virtual Display, Permissions), kept off
+the virtual display; the Log window shows HostLog's last 5,000 lines, and
+`~/Library/Logs/Sill/Sill.log` has them all. SwiftPM builds the `SillMenuBar`
+executable; `Scripts/make-app.sh` wraps it (Packaging/Info.plist, an icon
+compiled by actool from design/AppIcon.svg), signs it with the Apple Development
+identity and, with `--install`, replaces /Applications/Sill.app. Bundle ID
+`me.saffer.sill.mac`. Settings persist (`defaults read me.saffer.sill.mac`)
+and apply live: `StreamCoordinator.apply` hands a new `HostConfig` to the next
+`select`, which takes it between pipelines; a change restarts the stream once,
+or not at all when nothing running depends on it (the virtual display toggle
+restarts only a window stream, and sends a staged window home first). Virtual
+display off by default in both the CLI and the app.
+- Rules. Host code is the `SillHostCore` library (folder `Sources/SillHost`),
+  reached with `package` access; make it `public` only if an Xcode target ever
+  needs it (M5 CloudKit). Never `MainActor.assumeIsolated` in core code: under
+  the CLI's dispatchMain the main queue drains on a worker thread and it traps;
+  hop with `Task { @MainActor }`. The modal-loop rule (AppDelegate's doc
+  comment): never start NSMenu.popUp, a runModal or a terminate that can answer
+  .terminateLater from a Task, an async continuation or a main-queue block, only
+  from AppKit target/action, SwiftUI Button actions or a run-loop Timer; errors
+  show inline, never in alerts. The CLI's stdout stays byte-identical: core
+  `print`s go through the shadow in HostLog.swift, which records nothing until
+  the app configures it. App Nap: while a device is connected the app holds a
+  latency-critical activity (napping would coalesce the 30 ms keepalive ticks).
+- TCC: a grant belongs to the bundle ID plus the designated requirement
+  (identifier + Apple anchor + the certificate's CN), so rebuilds signed with
+  the same Apple Development identity keep it; ad hoc would lose it on every
+  rebuild. Terminal's grants for the CLI don't carry over, and running
+  Contents/MacOS/Sill from Terminal makes Terminal responsible. The app asks
+  for nothing at launch (no Accessibility alert, no window list before Screen
+  Recording is granted); Settings opens on Permissions until both are allowed
+  or the user closes it. Allow… shows each system alert once
+  (`askedScreenRecording`/`askedAccessibility` in the defaults), then opens
+  System Settings, so recovering from a `tccutil reset` also deletes those two
+  keys (README, Permissions).
+- Build facts. SwiftPM's default build system links without SDKROOT, so its
+  executables record the deployment target as their SDK (`xcrun vtool
+  -show-build`: sdk 14.0), and macOS 26+ draws such an app in the pre-26 look.
+  make-app.sh writes the bundle's executable with vtool, recording the SDK in
+  use (27.0 here) as Xcode would; the CLI and the bare SillMenuBar keep 14.0.
+  It signs by the identity's SHA-1 hash (a renewed certificate with the same
+  name makes the name ambiguous to codesign), and `--release` refuses anything
+  but a Developer ID Application signature. NSTabViewController selects its
+  first tab while `NSWindow(contentViewController:)` builds the window, so the
+  Settings tab is saved only from an on-screen selection and from `show`.
+- In the app only: regular mode trusts `NSWorkspace.frontmostApplication` (the
+  AppKit loop runs), and turning the virtual display off brings the returning
+  window forward (a product call).
+- Verified without permissions: clean build (only the old CaptureProbe
+  warning); the CLI's output matches the pre-change baseline line for line
+  (sorted, digits masked) at 60 fps, exits 130/143 on the flag path; the bare
+  app streams the test pattern at 60 fps, each `-SillSetAfter` change gives one
+  "Settings:" line and at most one restart (virtual display on while the
+  Desktop streams: none), Quit exits 0 through `releaseForQuit`, a saved setting
+  survives a relaunch, idle CPU 0.0 %; the Settings and Log windows open and
+  render; make-app.sh signs with the Apple Development identity, the designated
+  requirement survives a rebuild, the icon renders as a native squircle, and
+  the signed bundle streams and creates a virtual display under the hardened
+  runtime. After the SDK fix the bundle (sdk 27.0) still streams at 60 fps,
+  exits 143 on SIGTERM and creates and removes a virtual display, and its
+  panes render in the macOS 26 look (the Streaming pane matches the design
+  draft); `--release` refuses a missing, ad hoc or Apple Development identity;
+  a stub harness showed the Settings tab now survives a relaunch.
+- **Untested, for Noah:** N1–N12 in the plan: first run and the grants, the
+  menu's live rows with the iPad, every control while streaming a real window
+  (virtual display on and off, also full screen), Settings placement, Launch
+  at Login, quitting with a staged window, App Nap and latency against the CLI,
+  regular-mode input, revoking Screen Recording, the Log window, the CLI and
+  the app side by side. Also the live menu and Settings window in the macOS 26
+  look that the SDK fix turned on (only offscreen renders were checked), and
+  Settings reopening on the last tab after a relaunch.
+- Known, not fixed here: the CLI's synthetic mode still prints "Advertising
+  _sill._tcp" although it no longer advertises.
+
 Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
 
 - **Fallback (shipped):** the Aa control, in every bar since 2026-09-22, is a
@@ -252,16 +333,23 @@ good.
 
 ## Layout
 
-- `Package.swift` — SwiftPM. `StreamProtocol` (shared wire format, iOS + macOS)
-  and `SillHost` (macOS CLI executable).
+- `Package.swift` — SwiftPM. Products: `StreamProtocol` (shared wire format,
+  iOS + macOS), `SillHost` (the CLI, target `SillHostCLI`) and `SillMenuBar`
+  (Sill.app's executable). `SillHostCore` (the host, folder `Sources/SillHost`)
+  is a library target with no product, so the iOS project never sees it.
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
-- `Sources/SillHost/` — `StreamCoordinator` (main actor; owns the pipeline,
-  switches sources on client request, raises the picked window in regular
-  mode (never on the virtual display), applies viewports, falls back to the
-  software encoder on a hang, stops capture when the last client leaves),
+- `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
+  actor; owns the pipeline, switches sources on client request, raises the
+  picked window in regular mode (never on the virtual display), applies
+  viewports, falls back to the software encoder on a hang, stops capture when
+  the last client leaves, takes live settings between pipelines (`apply`) and
+  writes `HostStatus`), `HostConfig` (the knobs: maxFPS, captureScale, bitrate
+  per 60 fps, prioritizeSpeed, virtualDisplay; `standard` is the CLI's values
+  and the app's defaults), `HostStatus` (the snapshot the app shows, pushed on
+  events), `HostLog` (the print shadow, the app's ring and log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
@@ -277,10 +365,23 @@ good.
   restore` for the virtual display), `VirtualDisplay` (private-API wrapper),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
-  sources + atexit, installed only with the flag), `VirtualDisplaySelfTest`
+  sources + atexit, installed only with the flag in the CLI, always in the app;
+  `releaseForQuit` for the app's Quit), `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
-  heartbeat when idle), `main.swift` (knobs incl. `maxFPS`, flags, `dispatchMain` vs
-  `NSApplication.run`).
+  heartbeat when idle).
+- `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
+  `NSApplication.run`, the Terminal permission hint.
+- `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
+  policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
+  (owns the coordinator, presentation, App Nap guard, onboarding),
+  `HostSettings` (UserDefaults, quality presets), `StatusItemController`
+  (+ `MenuBuilder`), `StatusText` (all status copy), `StatusCard`,
+  `StatusGlyph`, `SettingsWindow` + `SettingsPanes`, `Permissions`,
+  `LoginItem`, `LogWindow`, `MainMenu` (key equivalents), `DebugHooks`,
+  `AppLog` (its print shadow).
+- `Packaging/` — Sill.app's `Info.plist` and the development entitlements
+  (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
+  installs the bundle; `Scripts/sillclient.py` is the wire-format test client.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour,
@@ -304,10 +405,28 @@ swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no 
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
+Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
+Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
+SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.
-First run prompts for Screen Recording (grant to Terminal or whatever launched it).
+First run prompts for Screen Recording: the CLI's belongs to Terminal (or
+whatever launched it), Sill.app's to Sill itself.
+Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
+10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
+read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
+virtualDisplay), and a launch argument such as `-maxFPS 60` overrides one for
+one run. Test arguments for the bare binary (`.build/release/SillMenuBar`,
+defaults domain `SillMenuBar`; delete it after): `--synthetic` (test pattern,
+off Bonjour; the port is in the "Status: Test Pattern Mode" line),
+`-SillLogFile <path>`, `-SillSetAfter '<s> key=value[,key=value][; <s> …]'`,
+`-SillQuitAfter <s>`, `-SillRenderPreviews <dir>` (panes, cards, glyphs,
+menu.txt; no permission needed). Render previews from
+`.build/Sill.app/Contents/MacOS/Sill` to see what Sill.app looks like: only the
+bundle's copy records the real SDK (make-app.sh sets it with vtool; see Current
+step), and the bare binary draws the pre-26 look. `--encoder-selftest` and
+`--virtual-display-selftest` work in the app too.
 iOS side: open `iOSClient/Sill.xcodeproj`, set your team, run on a real
 device on the same Wi-Fi.
 Debug harness (simulator, no Duo simulator exists yet): launch arguments

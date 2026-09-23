@@ -445,8 +445,13 @@ final class InputInjector {
               + "in System Settings › Privacy & Security › Accessibility.")
     }
 
-    /// The parent process, which is the app the permission actually attaches to.
+    /// The parent process, which is the app the permission actually attaches to. Launched by
+    /// LaunchServices (Finder, `open`, a login item) the parent is launchd and the permission
+    /// belongs to the app bundle itself: name it ("Sill") rather than "launchd".
     private static func launchingAppName() -> String {
+        if getppid() == 1, let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String {
+            return "\"\(name)\""
+        }
         let fallback = "the app that launched this host"
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride

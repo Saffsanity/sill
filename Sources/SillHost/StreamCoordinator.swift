@@ -8,10 +8,16 @@ import StreamProtocol
 /// picks. Threading: this class is main-actor; frames flow capture queue → VT thread → network
 /// queue without touching it. Network callbacks hop here with Task { @MainActor }.
 @MainActor
-final class StreamCoordinator {
-    /// Ceiling for the stream rate (main.swift knob). Each device asks for its own panel's rate
+package final class StreamCoordinator {
+    /// The knobs (HostConfig.swift): the CLI's `standard` values and flag, or the app's Settings.
+    /// A new value is taken only between pipelines, inside `select` (see `apply`), so one pipeline
+    /// never mixes two. The knob properties below read it, so every existing read keeps its text.
+    package private(set) var config: HostConfig
+    /// Settings from the app that wait for the next `select` (a restart, or a switch in flight).
+    private var pendingConfig: HostConfig?
+    /// Ceiling for the stream rate (HostConfig). Each device asks for its own panel's rate
     /// through the viewport: 120 on ProMotion, 60 elsewhere, 60 while Low Power Mode caps it.
-    let maxFPS: Int
+    private var maxFPS: Int { config.maxFPS }
     /// The rate the current pipeline runs at, re-read from `wantedFPS` at every select. Capture
     /// interval, encoder session and virtual display refresh all follow it.
     private(set) var fps: Int = 60
@@ -25,9 +31,9 @@ final class StreamCoordinator {
     /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
     /// keeps its share of bits.
     private var streamBitrate: Int { bitrate * fps / 60 }
-    let scale: CGFloat
-    let bitrate: Int
-    let prioritizeSpeed: Bool
+    private var scale: CGFloat { config.captureScale }
+    private var bitrate: Int { config.bitrate }
+    private var prioritizeSpeed: Bool { config.prioritizeSpeed }
 
     let server: StreamServer
     let catalog = WindowCatalog()
@@ -37,13 +43,24 @@ final class StreamCoordinator {
     let syntheticCapture = SyntheticCapture()
     let injector = InputInjector()
     let sizer = WindowSizer()
-    /// `--virtual-display`: a picked window streams from its own HiDPI display (see VirtualStage).
-    /// Every branch this adds is behind this flag; without it the coordinator behaves as before.
-    let virtualDisplay: Bool
+    /// A picked window streams from its own HiDPI display (see VirtualStage): the CLI's
+    /// `--virtual-display`, or the app's setting. Every branch this adds is behind this flag;
+    /// without it the coordinator behaves as before. It changes only inside `select` (`adopt`).
+    private var virtualDisplay: Bool { config.virtualDisplay }
+    /// This process runs NSApplication's event loop (the app always, the CLI under
+    /// --virtual-display), so `NSWorkspace.frontmostApplication` is current (see `activePID`).
+    /// The virtual display needs that loop too: without it the setting is forced off.
+    private let appKitLoop: Bool
     let stage: VirtualStage
+    /// What the menu bar app shows. Written here, at the moment things happen; never read back.
+    package let status: HostStatus
     /// Set by the signal handler: a select in flight when Ctrl-C lands must not stage anything new.
     private var shuttingDown = false
     private var stageLosses = 0
+    /// The private CGVirtualDisplay API is checked once per run, the first time the mode is on.
+    private var apiChecked = false
+    /// Why that check failed, if it did: the virtual display then stays off for the whole run.
+    private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
     /// Hardware HEVC normally. When a session stops returning frames (the Mac's hardware encoder
     /// wedged system-wide on 2026-09-22 and stayed that way until a reboot), the source restarts
@@ -63,9 +80,10 @@ final class StreamCoordinator {
             set { lock.lock(); value = newValue; lock.unlock() }
         }
     }
-    private(set) var active: StreamSource = .none {
+    package private(set) var active: StreamSource = .none {
         didSet {
             if case .window(let id) = active { catalog.activeWindowID = id } else { catalog.activeWindowID = nil }
+            if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
         }
@@ -88,18 +106,25 @@ final class StreamCoordinator {
     let cursorShapes = CursorShapeWatcher()
     private let macName = Host.current().localizedName ?? "Mac"
 
-    init(maxFPS: Int, scale: CGFloat, bitrate: Int, prioritizeSpeed: Bool, synthetic: Bool = false, virtualDisplay: Bool = false) throws {
-        self.maxFPS = maxFPS; self.scale = scale; self.bitrate = bitrate; self.prioritizeSpeed = prioritizeSpeed
+    /// `config` is validated, and its virtual display forced off without the AppKit loop, which
+    /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
+    package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool) throws {
+        var config = config.validated()
+        if !appKitLoop { config.virtualDisplay = false }
+        self.config = config
         self.synthetic = synthetic
-        self.virtualDisplay = virtualDisplay
+        self.appKitLoop = appKitLoop
+        status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         stage = VirtualStage(sizer: sizer, catalog: catalog)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
+        status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
 
         server.onClientConnected = { [weak self] connection in
             Task { @MainActor in
                 guard let self else { return }
+                self.status.update { $0.devices.append(HostStatusSnapshot.Device(id: ObjectIdentifier(connection), endpoint: "\(connection.endpoint)")) }
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
@@ -114,6 +139,7 @@ final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
+                self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
             }
@@ -160,38 +186,217 @@ final class StreamCoordinator {
             print("Capture stopped: \(error.localizedDescription)")
             Task { @MainActor in await self?.select(.none) }
         }
+        // Status for the menu bar app. The server's callbacks hop here from its network queue; the
+        // stats tick runs on the main queue, which under the CLI's dispatchMain is drained by a
+        // worker thread, so it hops too instead of assuming main-actor isolation (that traps).
+        server.onListenerState = { [weak self] state in
+            let network: HostStatusSnapshot.Network
+            switch state {
+            case .ready: network = .registering          // refined in `listenerChanged`
+            case .waiting(let e): network = .waiting("\(e)")
+            case .failed(let e): network = .failed("\(e)")
+            default: return
+            }
+            Task { @MainActor in self?.listenerChanged(network) }
+        }
+        server.onServiceRegistered = { [weak self] name in
+            Task { @MainActor in self?.serviceRegistered(name) }
+        }
+        server.onClientStats = { [weak self] connection, stats in
+            let id = ObjectIdentifier(connection)
+            Task { @MainActor in
+                self?.status.update {
+                    guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                    $0.devices[i].name = stats.device
+                    $0.devices[i].fps = stats.fps
+                    $0.devices[i].frameAgeMs = stats.frameAgeMs
+                    $0.devices[i].rttMs = stats.rttMs
+                }
+            }
+        }
+        Stats.shared.onTick = { [weak self] counts in
+            let encoded = counts["enc.out"] ?? 0
+            Task { @MainActor in self?.status.update { $0.encodedFPS = encoded } }
+        }
+    }
+
+    /// The listener is up, waiting or failed. Up means registering until Bonjour confirms a name,
+    /// or not advertised at all in synthetic mode; a late "ready" never undoes a registered name.
+    private func listenerChanged(_ network: HostStatusSnapshot.Network) {
+        status.update {
+            guard network == .registering else { $0.network = network; return }
+            if synthetic {
+                $0.network = .notAdvertised(port: Int(server.port ?? 0))
+            } else if case .advertising = $0.network {
+                return
+            } else {
+                $0.network = .registering
+            }
+        }
+    }
+
+    /// Bonjour registered this name (nil: the registration went away, to come back).
+    private func serviceRegistered(_ name: String?) {
+        status.update {
+            if let name {
+                $0.network = .advertising(name)
+            } else if case .advertising = $0.network {
+                $0.network = .registering
+            }
+        }
     }
 
     /// `preselect` is the optional command-line match; without it nothing streams until a client picks.
-    func start(preselect: String?) async {
-        if !synthetic { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
+    /// `promptForPermissions: false` (the app) asks for nothing at launch: no Accessibility alert,
+    /// and no window list before Screen Recording is granted, because the first ScreenCaptureKit
+    /// call raises the system's Screen Recording alert. That should follow a click in Settings or
+    /// a device connecting, not a login.
+    package func start(preselect: String?, promptForPermissions: Bool = true) async {
+        if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         // One small frame through the hardware encoder before anything streams. If the Mac's
         // hardware encoder is wedged (it stays that way until a reboot) start on the software
         // encoder now, instead of hanging the first stream for 1.5 s and restarting it.
         let hardwareResponds = await Task.detached(priority: .userInitiated) { EncoderProbe.hardwareResponds() }.value
         if !hardwareResponds {
             useSoftwareEncoder = true
+            status.update { $0.softwareEncoder = true }
             Stats.shared.bump("enc.fallback")
             print("The Mac's hardware video encoder is not responding; streaming with the software encoder at half scale. A reboot brings it back.")
         }
-        if virtualDisplay {
-            // Decide once at launch whether the private API is there; a picked window falls back to
-            // plain window capture (with a log line) when it is not.
-            let problems = VirtualDisplay.checkPrivateAPI()
-            if problems.isEmpty {
-                print("Virtual display: private CGVirtualDisplay API present (\(VirtualDisplay.privateAPISurface.count) selectors); a picked window streams from its own HiDPI display.")
-            } else {
-                stage.disabledReason = problems.joined(separator: "; ")
-                print("Virtual display unavailable: \(stage.disabledReason!). Streaming real windows as before.")
-            }
-        }
+        if virtualDisplay { enableVirtualDisplay() }
         catalog.start()
         server.start()
-        await catalog.refreshWindows()
+        if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
         if let match = preselect?.lowercased(),
            let w = catalog.infos.first(where: { $0.appName.lowercased().contains(match) || $0.title.lowercased().contains(match) }) {
             await select(.window(w.id), bringForward: true)   // a pick, made on the command line
         }
+    }
+
+    // MARK: Settings (the menu bar app; the CLI never calls these)
+
+    /// The virtual display's parts, for the CLI's flag at launch or the app's setting turning on.
+    /// The private API is checked on the first call only, printing what the CLI always printed.
+    /// Every call clears a run-level disable left by repeated display losses (the app's Try
+    /// Again); a missing API stays a disable for the whole run.
+    private func enableVirtualDisplay() {
+        if !apiChecked {
+            apiChecked = true
+            // Decide once whether the private API is there; a picked window falls back to plain
+            // window capture (with a log line) when it is not.
+            let problems = VirtualDisplay.checkPrivateAPI()
+            if problems.isEmpty {
+                print("Virtual display: private CGVirtualDisplay API present (\(VirtualDisplay.privateAPISurface.count) selectors); a picked window streams from its own HiDPI display.")
+            } else {
+                apiProblem = problems.joined(separator: "; ")
+                print("Virtual display unavailable: \(apiProblem!). Streaming real windows as before.")
+            }
+        }
+        stageLosses = 0
+        stage.disabledReason = apiProblem
+        status.update {
+            $0.virtualDisplayProblem = apiProblem
+            $0.virtualDisplayAPIMissing = apiProblem != nil
+        }
+    }
+
+    /// New settings from the app, applied live. Validated, and the virtual display stays off
+    /// without the AppKit loop. With nothing streaming, or nothing the running pipeline depends
+    /// on changed, they are taken at once; otherwise the current source restarts and `select`
+    /// takes them between the old pipeline and the new one. A value that arrives mid-switch waits
+    /// (select's defer comes back here), and a newer value replaces one still waiting, so
+    /// requests that arrive out of order still converge on the last.
+    package func apply(_ requested: HostConfig) async {
+        guard !shuttingDown else { return }
+        var new = requested.validated()
+        if !appKitLoop { new.virtualDisplay = false }
+        guard new != (pendingConfig ?? config) else { return }
+        pendingConfig = new
+        await applyPending()
+    }
+
+    private func applyPending() async {
+        guard let new = pendingConfig, !switching, !shuttingDown else { return }   // select's defer calls it again
+        guard restartNeeded(for: new) else { pendingConfig = nil; adopt(new); return }
+        // Turning the virtual display off brings the window forward as it comes home, the way a
+        // pick does in regular mode.
+        let leavingStage = config.virtualDisplay && !new.virtualDisplay && stage.isStaged
+        await select(active, bringForward: leavingStage)   // committed inside select
+    }
+
+    /// Whether the running pipeline would come out different under `new`: its rate (the devices'
+    /// highest under the new limit, 60 at most on the software encoder), capture scale, bitrate,
+    /// encoder speed, or, for a window, the virtual display. The Desktop never uses the display.
+    private func restartNeeded(for new: HostConfig) -> Bool {
+        guard active != .none else { return false }
+        let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
+        let newFPS = useSoftwareEncoder ? min(wanted, 60) : wanted
+        let newScale = useSoftwareEncoder ? min(new.captureScale, 1.0) : new.captureScale
+        if newFPS != fps || newScale != captureScale { return true }
+        if new.bitrate != config.bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
+        if new.virtualDisplay != config.virtualDisplay, case .window = active { return true }
+        return false
+    }
+
+    /// Makes `next` the running settings, inside `select` or at once when nothing running depends
+    /// on what changed. Logs one "Settings:" line.
+    private func adopt(_ next: HostConfig) {
+        let old = config
+        guard next != old else { return }
+        config = next
+        catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
+        if old.virtualDisplay && !next.virtualDisplay {
+            stage.release()        // idempotent: select has already sent a staged window home
+            status.update { $0.lastStageFailure = nil }
+        }
+        if !old.virtualDisplay && next.virtualDisplay { enableVirtualDisplay() }
+        status.update { $0.virtualDisplayOn = next.virtualDisplay }
+        print("Settings: " + old.changes(to: next))
+    }
+
+    /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
+    /// window again.
+    package func retryVirtualDisplay() async {
+        enableVirtualDisplay()
+        if virtualDisplay, case .window = active { await select(active) }
+    }
+
+    /// The app keeps running when the Bonjour listener fails, with the failure in its menu; the
+    /// CLI exits as it always has. Call before `start`.
+    package func keepRunningOnListenerFailure() {
+        server.onListenerFailed = { [weak self] error in
+            Task { @MainActor in self?.status.update { $0.network = .failed("\(error)") } }
+        }
+    }
+
+    /// Windows in the catalog's last look, for the CLI's startup line.
+    package var windowCount: Int { catalog.infos.count }
+
+    /// A window is staged on the virtual display and in a full-screen Space there. The app's Quit
+    /// takes it out of full screen first (`beginLeavingFullScreenForQuit`), or it cannot go home.
+    package var stagedWindowIsFullScreen: Bool {
+        guard let p = stage.placement else { return false }
+        return WindowSizer.isFullScreen(p.element)
+    }
+
+    /// Presses the staged window's full-screen button; the app's Quit then waits for
+    /// `stagedWindowSettled`.
+    package func beginLeavingFullScreenForQuit() {
+        guard let p = stage.placement else { return }
+        _ = WindowSizer.perform(.fullScreen, element: p.element)
+    }
+
+    /// The staged window (if any) is out of full screen and back on a window list, so it can be
+    /// put back where it was. Leaving full screen, a window is off every list for about a second;
+    /// the same test as `VirtualStage.leaveFullScreenIfNeeded`.
+    package var stagedWindowSettled: Bool {
+        guard let p = stage.placement else { return true }
+        return !WindowSizer.isFullScreen(p.element) && WindowSizer.liveBounds(of: p.windowID) != nil
+    }
+
+    /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
+    package static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
+        CGDisplayVendorNumber(id) == VirtualStage.vendorID
     }
 
     // MARK: Client messages
@@ -374,6 +579,7 @@ final class StreamCoordinator {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
             }
+            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }   // settings that came in meanwhile
         }
 
         await capture.stop()
@@ -383,6 +589,23 @@ final class StreamCoordinator {
         heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
+        // New settings (the app only) take effect here, between pipelines, before the rate, the
+        // scale and the stage are worked out for the next one.
+        var leftStage = false
+        if let first = pendingConfig {
+            if config.virtualDisplay && !first.virtualDisplay {
+                // The virtual display block below is skipped once the flag reads off: send the
+                // window home now, and re-read the catalog so the .window lookup below gets its
+                // home frame, not the staged one.
+                await stage.leaveFullScreenIfNeeded(); stage.release()
+                if case .window = source { await catalog.refreshWindows() }
+                leftStage = true
+            }
+            // The newest value: another may have arrived during those awaits.
+            let next = pendingConfig ?? first
+            pendingConfig = nil
+            adopt(next)
+        }
         fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
 
         if virtualDisplay {
@@ -405,6 +628,8 @@ final class StreamCoordinator {
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
         let width: Int, height: Int
         var describe = ""
+        var title = ""                   // for the app's menu: "Safari — Apple Developer", "Whole Desktop"
+        var kind = HostStatusSnapshot.Stream.Kind.window
         switch source {
         case .none:
             active = .none
@@ -413,13 +638,14 @@ final class StreamCoordinator {
         case .window(let id):
             // On the virtual display the window may have left the on-screen list; look it up fully.
             var found = catalog.window(id: id)
-            if found == nil, virtualDisplay { found = await catalog.resolveWindow(id: id) }
+            if found == nil, virtualDisplay || leftStage { found = await catalog.resolveWindow(id: id) }
             guard let w = found else {
                 if virtualDisplay { stage.release() }
                 active = .none; broadcastList(); return
             }
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
+            title = Self.menuTitle(for: w)
             var size = w.frame.size
             if virtualDisplay, stage.disabledReason == nil {
                 let want = wantedStage(for: w)
@@ -430,10 +656,18 @@ final class StreamCoordinator {
                     sourceRect = prepared.sourceRect
                     size = prepared.outputSize ?? prepared.sourceRect.size
                     describe = prepared.describe + (useSoftwareEncoder ? " (software encoder)" : "")
+                    status.update { $0.lastStageFailure = nil }
                 } catch {
                     print("Virtual display fallback for \(w.owningApplication?.applicationName ?? "?"): \(error). Streaming the real window instead.")
                     Stats.shared.bump("vd.fallback")
                     stage.release()
+                    // For the menu: why this window streams in place, and whether the stage gave up
+                    // for the run (it does after repeated display creation failures).
+                    let why = (error as? VirtualStage.Failure)?.summary ?? "\(error)"
+                    status.update {
+                        $0.lastStageFailure = why
+                        if let off = stage.disabledReason { $0.virtualDisplayProblem = off }
+                    }
                 }
             }
             if sourceRect == nil {
@@ -459,28 +693,32 @@ final class StreamCoordinator {
                 // encoder and the fallback see realistic load without Screen Recording.
                 width = evenPixels(1512 * captureScale); height = evenPixels(949 * captureScale)
                 describe = "a synthetic test pattern\(useSoftwareEncoder ? " (software encoder)" : "")"
+                title = "Test Pattern"; kind = .testPattern
             } else {
                 guard let d = catalog.display else { active = .none; broadcastList(); return }
                 filter = SCContentFilter(display: d, excludingWindows: [])
                 width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
+                title = "Whole Desktop"; kind = .desktop
             }
         }
 
         do {
-            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe)
+            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe,
+                                    title: title, kind: kind)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
             if virtualDisplay, stage.isStaged, let w = picked {
                 // The display filter failed to start: send the window home and stream it there.
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
+                status.update { $0.lastStageFailure = "capture on the display failed" }
                 stage.release()
                 if bringForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 do {
                     try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
                                             width: evenPixels(w.frame.width * captureScale), height: evenPixels(w.frame.height * captureScale),
-                                            describe: fallback)
+                                            describe: fallback, title: title, kind: kind)
                 } catch {
                     print("Could not start streaming \(fallback): \(error)")
                     active = .none
@@ -497,7 +735,9 @@ final class StreamCoordinator {
 
     /// Encoder, then capture (ScreenCaptureKit for a filter, the test pattern without one), then
     /// `active`. Throws with `active` untouched if either refuses; the caller decides what to do.
-    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String) async throws {
+    /// `title` and `kind` describe the stream in the app's menu.
+    private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
+                               title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
         enc.onHung = { [weak self, weak enc] in
@@ -524,6 +764,11 @@ final class StreamCoordinator {
         encoder = enc
         active = source
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
+        status.update {
+            $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
+                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
+                                                  softwareEncoder: useSoftwareEncoder)
+        }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
         // may already have fired, and that report was ignored (no current encoder yet).
         if enc.isDead { Task { @MainActor in await self.encoderHung(enc) } }
@@ -594,15 +839,16 @@ final class StreamCoordinator {
         guard let pid = staged ? stage.placement?.pid : catalog.window(id: id)?.owningApplication?.processID else { return }
         // `NSWorkspace.frontmostApplication` is stale in a process without an AppKit run loop
         // (measured: it named an app that had not been active for minutes), so it is only used
-        // under --virtual-display. Otherwise the active app is read off the window list: the owner
-        // of the topmost layer-0 window. Covered = another app's window under the click point.
+        // under that loop (the app; the CLI's --virtual-display). Otherwise the active app is read
+        // off the window list: the owner of the topmost layer-0 window. Covered = another app's
+        // window under the click point.
         let point = injectorProbePoint(event)
         let cover = point.flatMap { Self.topmostWindow(at: $0) }
         let covered = cover != nil && cover?.id != id            // any other window over the spot, same app or not
         // On the virtual display a cover is a stranger (a window left there by an earlier run):
         // move it off, then the click lands.
         if staged, covered { stage.evictForeignWindows() }
-        let notActive = needsFocus && Self.activePID(trustAppKit: virtualDisplay) != pid
+        let notActive = needsFocus && Self.activePID(trustAppKit: appKitLoop) != pid
         guard notActive || covered else { return }
         // A failed activation must not stall every later interaction: one attempt per 2 s.
         guard now - lastActivationAt > 2 else { return }
@@ -627,7 +873,7 @@ final class StreamCoordinator {
             // the timeout. On the virtual display nothing can cover it: wait for activation only.
             let deadline = CFAbsoluteTimeGetCurrent() + Self.activationTimeout
             while CFAbsoluteTimeGetCurrent() < deadline {
-                let active = Self.activePID(trustAppKit: self.virtualDisplay) == pid
+                let active = Self.activePID(trustAppKit: self.appKitLoop) == pid
                 let onTop = staged || point.flatMap { Self.topmostWindow(at: $0) }?.pid == pid
                 if active && onTop { break }
                 try? await Task.sleep(for: .milliseconds(20))
@@ -719,9 +965,9 @@ final class StreamCoordinator {
         return nil
     }
 
-    /// The active app's pid. AppKit's answer only when this process runs the AppKit loop
-    /// (--virtual-display); otherwise the owner of the frontmost normal window, which is what the
-    /// window server considers active for input.
+    /// The active app's pid. AppKit's answer only when this process runs the AppKit loop (the
+    /// app, or the CLI's --virtual-display); otherwise the owner of the frontmost normal window,
+    /// which is what the window server considers active for input.
     private static func activePID(trustAppKit: Bool) -> pid_t? {
         if trustAppKit, let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier { return pid }
         return topmostWindow(at: nil)?.pid
@@ -729,6 +975,13 @@ final class StreamCoordinator {
 
     /// Retina normally; points when the software encoder is carrying the stream.
     private var captureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+
+    /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
+    private static func menuTitle(for w: SCWindow) -> String {
+        let app = w.owningApplication?.applicationName ?? "?"
+        let title = w.title ?? ""
+        return title.isEmpty ? app : "\(app) — \(title)"
+    }
 
     // MARK: Virtual display lifecycle
 
@@ -738,13 +991,17 @@ final class StreamCoordinator {
     private func stageLost() async {
         stageLosses += 1
         print("The system removed the virtual display; the window is back on a real display.")
-        if stageLosses > 2 { stage.disabledReason = "the system removed the virtual display \(stageLosses) times" }
+        if stageLosses > 2 {
+            stage.disabledReason = "the system removed the virtual display \(stageLosses) times"
+            status.update { $0.virtualDisplayProblem = stage.disabledReason }
+        }
         if case .window = active { await select(active) }
     }
 
-    /// Called by HostShutdown on the main queue just before `exit`: window home, display gone.
-    /// Capture and encoder need no stop; the process is about to end.
-    func shutdownForExit() {
+    /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
+    /// before AppKit exits): window home, display gone. Capture and encoder need no stop; the
+    /// process is about to end.
+    package func shutdownForExit() {
         shuttingDown = true
         stage.release()
     }
@@ -757,6 +1014,7 @@ final class StreamCoordinator {
     private func encoderHung(_ enc: HEVCEncoder, attempt: Int = 0) async {
         if !enc.software, !useSoftwareEncoder {
             useSoftwareEncoder = true
+            status.update { $0.softwareEncoder = true }
             Stats.shared.bump("enc.fallback")
             print("Hardware HEVC encoder is not returning frames; switching to the software encoder at half scale. A reboot brings the hardware encoder back.")
         }

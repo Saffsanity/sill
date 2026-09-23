@@ -8,8 +8,8 @@ import ScreenCaptureKit
 /// process, CoreGraphics, AppKit and ScreenCaptureKit see of it, destroys it and exits. The
 /// display part needs no permission; SCShareableContent needs Screen Recording and the report
 /// says so when it is missing. Exit code 0 when the display came up and went away cleanly.
-enum VirtualDisplaySelfTest {
-    static func run() -> Never {
+package enum VirtualDisplaySelfTest {
+    package static func run() -> Never {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         Task { @MainActor in
