@@ -43,9 +43,38 @@ final class StreamClient: ObservableObject {
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
 
-    /// Round trip to the host in ms, from a ping every second while connected. -1 until measured.
-    @Published var rttMs: Int = -1
-    private var pingTimer: Timer?
+    /// What this device measured over the last second: frames, frame age and round trip. The
+    /// network queue closes a window every second while connected and publishes it here; nil
+    /// before the first one closes and after a disconnect. The HUD shows it, and
+    /// `ClientStatsReporter` sends each one to the host exactly once. Main thread.
+    @Published private(set) var linkStats: LinkStats?
+
+    /// One second of measurements.
+    struct LinkStats: Equatable {
+        /// Frames received per second, frames discarded while waiting for a keyframe included.
+        var fps: Int
+        /// Host encode output → received here, over every frame of the second. Assumes synced
+        /// clocks; it is the transport part of latency, not glass-to-glass. nil: no frame arrived.
+        var frameAge: MedianMax?
+        /// Ping round trips, over the pongs that came back during the second. nil: none did.
+        var rtt: MedianMax?
+    }
+
+    /// The typical and the worst of one second's samples, in whole milliseconds.
+    struct MedianMax: Equatable {
+        let median: Int
+        let max: Int
+
+        /// nil for no samples: a second without a frame or a pong must not read as a fast one.
+        init?(_ samples: [Double]) {
+            guard !samples.isEmpty else { return nil }
+            let sorted = samples.sorted()
+            let mid = sorted.count / 2
+            let median = sorted.count % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+            self.median = Int(median.rounded())
+            self.max = Int(sorted[sorted.count - 1].rounded())
+        }
+    }
 
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
@@ -82,15 +111,23 @@ final class StreamClient: ObservableObject {
     private var storedConnection: NWConnection?
     private let connectionLock = NSLock()
     private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
-    private var frameCounter = 0
-    /// Frames received in the last second (main thread). Counts frames discarded while waiting for a keyframe too.
-    @Published var fps = 0
-    /// Host encode-output timestamp → received here, sampled every 15th frame. Assumes synced clocks;
-    /// it is the transport part of latency, not glass-to-glass.
-    @Published var frameAgeMs = 0
-    private var latestFrameAgeMs = 0   // network queue copy, published from the 1 s timer
     private var lastParameterSets: ParameterSets?
-    private var fpsTimer: Timer?
+
+    // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
+    // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
+    // timers, which stop while a scroll is tracked: the numbers froze, and the next tick then
+    // counted several seconds of frames as one ("222 fps").
+    private var frameCounter = 0
+    private var frameAgeSamples: [Double] = []   // ms, one per frame
+    private var rttSamples: [Double] = []        // ms, one per pong
+    private var windowOpenedAt = 0.0             // CACurrentMediaTime
+    private var windowTimer: DispatchSourceTimer?
+    private var pingTimer: DispatchSourceTimer?
+    /// Four pings per one-second window, so a report has a median and a max: a single sample either
+    /// landed in a stall or did not, and said nothing about the rest of the second.
+    private static let pingInterval = 0.25
+    /// A day. A sample beyond it is a broken clock, and clamping keeps an infinity away from `Int()`.
+    private static let sampleCeilingMs = 86_400_000.0
 
     // Pointer-move coalescing, all touched on `queue` only.
     private static let moveInterval = 0.008   // 125 Hz ceiling; a Pencil can report at 120+ Hz
@@ -160,9 +197,8 @@ final class StreamClient: ObservableObject {
                     self.reconnectTo = nil
                     self.connected = true
                     self.status = "Connected to \(name)"
-                    self.startFpsTimer()
-                    self.startPingTimer()
                 }
+                self.startMeasuring(c)   // before the first read, so the first window is this connection's alone
                 self.readHeader(on: c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
@@ -226,17 +262,10 @@ final class StreamClient: ObservableObject {
 
     /// Clears everything the session owned. Main thread.
     private func tearDown(status: String) {
-        queue.async { self.lastParameterSets = nil; self.pendingMove = nil }
-        fpsTimer?.invalidate()
-        fpsTimer = nil
-        pingTimer?.invalidate()
-        pingTimer = nil
-        rttMs = -1
-        fps = 0
-        frameAgeMs = 0
+        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        linkStats = nil
         localPointer = nil
         cursorShape = nil
-        queue.async { self.frameCounter = 0; self.latestFrameAgeMs = 0 }
         connected = false
         lastAutoDesktop = .distantPast     // the next connection starts on the Desktop again
         self.status = status
@@ -405,11 +434,14 @@ final class StreamClient: ObservableObject {
                 onParameterSets?(ps)
             }
         case .frame:
-            onFrame?(data, header.isKeyframe)
+            // Every frame is a sample, stamped on arrival before the hand-off to the display layer:
+            // the worst frame of a second is the stutter, and one sample in fifteen missed it.
+            // Clocks that disagree can make an age negative; nothing arrives before it was sent, so
+            // that reads as 0, which keeps -1 free on the wire for "no frame this second".
+            let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
+            if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
-            if frameCounter % 15 == 0 {
-                latestFrameAgeMs = Int((Date().timeIntervalSince1970 - header.timestamp) * 1000)
-            }
+            onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
             DispatchQueue.main.async {
@@ -458,40 +490,80 @@ final class StreamClient: ObservableObject {
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
         case .pong:
+            // The host echoes the ping's payload unchanged: our own monotonic send time.
             guard data.count >= 8 else { return }
             let sent = Double(bitPattern: data.readBigEndianUInt64())
-            let rtt = Int((Date().timeIntervalSince1970 - sent) * 1000)
-            DispatchQueue.main.async { self.rttMs = rtt }
+            let rtt = (CACurrentMediaTime() - sent) * 1000
+            if rtt.isFinite, rtt >= 0 { rttSamples.append(min(rtt, Self.sampleCeilingMs)) }
         default:
             break // client → host kinds, and anything a newer host invents
         }
     }
 
-    private func startFpsTimer() {
-        fpsTimer?.invalidate()
-        fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.queue.async {
-                let n = self.frameCounter
-                self.frameCounter = 0
-                let age = self.latestFrameAgeMs
-                DispatchQueue.main.async { self.fps = n; self.frameAgeMs = age }
-            }
+    // MARK: - Measurement (on `queue`)
+
+    /// Starts the one-second windows and the pings for `c`, dropping whatever an earlier connection
+    /// left behind. On `queue`, from the connection's ready state.
+    private func startMeasuring(_ c: NWConnection) {
+        guard c === connection else { return }   // replaced while connecting
+        stopMeasuring()
+        windowOpenedAt = CACurrentMediaTime()
+        let window = DispatchSource.makeTimerSource(queue: queue)
+        window.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(10))
+        window.setEventHandler { [weak self, weak c] in
+            guard let self, let c else { return }
+            self.closeWindow(of: c)
+        }
+        window.resume()
+        windowTimer = window
+        let ping = DispatchSource.makeTimerSource(queue: queue)
+        ping.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval, leeway: .milliseconds(5))
+        ping.setEventHandler { [weak self, weak c] in
+            guard let self, let c else { return }
+            self.sendPing(on: c)
+        }
+        ping.resume()
+        pingTimer = ping
+    }
+
+    /// On `queue`.
+    private func stopMeasuring() {
+        windowTimer?.cancel()
+        windowTimer = nil
+        pingTimer?.cancel()
+        pingTimer = nil
+        frameCounter = 0
+        frameAgeSamples.removeAll()
+        rttSamples.removeAll()
+    }
+
+    /// Closes the open window and publishes it. On `queue`, once a second.
+    private func closeWindow(of c: NWConnection) {
+        guard c === connection else { return }   // replaced or gone: not this session's numbers
+        let now = CACurrentMediaTime()
+        let elapsed = now - windowOpenedAt
+        windowOpenedAt = now
+        // Per second of the window's real length, which is a second unless the app was suspended.
+        let fps = elapsed > 0 ? Int((Double(frameCounter) / elapsed).rounded()) : frameCounter
+        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples))
+        frameCounter = 0
+        frameAgeSamples.removeAll(keepingCapacity: true)
+        rttSamples.removeAll(keepingCapacity: true)
+        DispatchQueue.main.async {
+            guard self.connection === c else { return }   // torn down meanwhile: stay nil
+            self.linkStats = stats
         }
     }
-}
 
-extension StreamClient {
-    private func startPingTimer() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let connection = self.connection else { return }
-            var payload = Data(capacity: 8)
-            var v = Date().timeIntervalSince1970.bitPattern.bigEndian
-            Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
-            let message = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
-            connection.send(content: message.serialized(), completion: .contentProcessed { _ in })
-        }
+    /// On `queue`. Stamped with the monotonic clock: a wall-clock correction between a ping and its
+    /// pong would otherwise land in the round trip.
+    private func sendPing(on c: NWConnection) {
+        guard c === connection else { return }
+        var payload = Data(capacity: 8)
+        var v = CACurrentMediaTime().bitPattern.bigEndian
+        Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
+        let message = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
+        c.send(content: message.serialized(), completion: .contentProcessed { _ in })
     }
 }
 

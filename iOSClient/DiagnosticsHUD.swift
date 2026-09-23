@@ -8,8 +8,13 @@ import StreamProtocol
 /// so the Mac's log carries the device-side numbers. Created once by `ContentView`, next to the
 /// app's `StreamClient`; runs in Release too, since it costs one tiny message a second.
 ///
-/// Holds the client weakly: the client is owned by `ContentView`'s `@StateObject`, and the timer
-/// sink only captures `self` weakly, so nothing here keeps anything alive. Main thread.
+/// Each report is one second the client closed (`StreamClient.linkStats`), sent as it closes. It
+/// has no timer of its own: a second timer drifting against the client's would now and then send
+/// a second twice or skip one. The client closes seconds only while connected, so nothing is sent
+/// between sessions and nothing ticks in the background.
+///
+/// Holds the client weakly: the client is owned by `ContentView`'s `@StateObject`, and the sink
+/// only captures `self` weakly, so nothing here keeps anything alive. Main thread.
 final class ClientStatsReporter: ObservableObject {
     private weak var client: StreamClient?
     private var subscription: AnyCancellable?
@@ -18,23 +23,21 @@ final class ClientStatsReporter: ObservableObject {
     func attach(to client: StreamClient) {
         guard self.client !== client else { return }
         self.client = client
-        // A 1 s timer exists only while connected: switchToLatest drops the old timer (Empty on
-        // disconnect), so nothing is sent between sessions and nothing ticks in the background.
-        subscription = client.$connected
-            .removeDuplicates()
-            .map { connected -> AnyPublisher<Date, Never> in
-                connected
-                    ? Timer.publish(every: 1, on: .main, in: .common).autoconnect().eraseToAnyPublisher()
-                    : Empty().eraseToAnyPublisher()
-            }
-            .switchToLatest()
-            .sink { [weak self] _ in self?.report() }
+        subscription = client.$linkStats
+            .compactMap { $0 }   // nil is "not measured yet" or a teardown, never a report
+            .sink { [weak self] stats in self?.report(stats) }
     }
 
-    private func report() {
+    /// The wire keeps its first four fields for older hosts: medians there, -1 for a second without
+    /// a sample; the maxima ride in the optional fields that only newer hosts read.
+    private func report(_ s: StreamClient.LinkStats) {
         guard let client, client.connected else { return }
-        let stats = ClientStats(fps: client.fps, frameAgeMs: client.frameAgeMs,
-                                rttMs: client.rttMs, device: Self.deviceName)
+        let stats = ClientStats(fps: s.fps,
+                                frameAgeMs: s.frameAge?.median ?? -1,
+                                rttMs: s.rtt?.median ?? -1,
+                                device: Self.deviceName,
+                                frameAgeMaxMs: s.frameAge?.max ?? -1,
+                                rttMaxMs: s.rtt?.max ?? -1)
         client.send(.clientStats, payload: Wire.encode(stats))
     }
 
@@ -61,8 +64,9 @@ final class ClientStatsReporter: ObservableObject {
 // MARK: - HUD (DEBUG only)
 
 #if DEBUG
-/// The on-screen readout: "58 fps · age 24 ms · rtt 3 ms · 3024×1898" in a translucent capsule at
-/// the display view's top-right. Only built when launched with `-SillHUD 1`; never in Release.
+/// The on-screen readout: "58 fps · age 9/24 ms · rtt 7/80 ms · 3024×1898" in a translucent
+/// capsule at the display view's top-right; each pair is the last second's median/max, "–" for a
+/// second without a sample. Only built when launched with `-SillHUD 1`; never in Release.
 /// Purely visual: it never takes a touch, so input still reaches the overlay underneath the stream.
 final class DiagnosticsHUDView: UIView {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "SillHUD") }
@@ -82,15 +86,21 @@ final class DiagnosticsHUDView: UIView {
         label.textColor = .white
         label.numberOfLines = 1
         addSubview(label)
-        update(fps: 0, frameAgeMs: 0, rttMs: -1, videoSize: .zero)
+        update(stats: nil, videoSize: .zero)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(fps: Int, frameAgeMs: Int, rttMs: Int, videoSize: CGSize) {
-        let rtt = rttMs < 0 ? "rtt –" : "rtt \(rttMs) ms"
+    /// `stats` nil: no second measured yet.
+    func update(stats: StreamClient.LinkStats?, videoSize: CGSize) {
         let size = videoSize == .zero ? "no video" : "\(Int(videoSize.width))×\(Int(videoSize.height))"
-        label.text = "\(fps) fps · age \(frameAgeMs) ms · \(rtt) · \(size)"
+        label.text = "\(stats?.fps ?? 0) fps · age \(Self.text(stats?.frameAge)) · rtt \(Self.text(stats?.rtt)) · \(size)"
         superview?.setNeedsLayout()
+    }
+
+    /// "9/24 ms" (median/max) or "–".
+    private static func text(_ spread: StreamClient.MedianMax?) -> String {
+        guard let spread else { return "–" }
+        return "\(spread.median)/\(spread.max) ms"
     }
 
     /// Called from the host view's `layoutSubviews`: pin to the top-right corner of `bounds`.

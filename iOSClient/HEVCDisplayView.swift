@@ -96,11 +96,9 @@ final class HEVCDisplayView: UIView {
         addSubview(hud)
         self.hud = hud
         // [weak hud]: the view owns the subscriptions, the subscriptions must not own the view.
-        Publishers.CombineLatest4(client.$fps, client.$frameAgeMs, client.$rttMs, client.$videoSize)
+        Publishers.CombineLatest(client.$linkStats, client.$videoSize)
             .receive(on: DispatchQueue.main)
-            .sink { [weak hud] fps, age, rtt, size in
-                hud?.update(fps: fps, frameAgeMs: age, rttMs: rtt, videoSize: size)
-            }
+            .sink { [weak hud] stats, size in hud?.update(stats: stats, videoSize: size) }
             .store(in: &hudSubscriptions)
         setNeedsLayout()
     }

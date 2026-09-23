@@ -165,14 +165,28 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   scan at once: the old logic warned in 21 of 30 scans, the new in none, and
   picked the overlapping window for eviction 20 of 20. Not yet run with real
   windows.
-  Learned, not fixed: `prepare`'s settle loop reads only the window list and
-  stops after three identical reads 20 ms apart, counted from the frame before
-  the move, so a pure resize the app commits late (1Password, Electron:
-  between 45 ms and ~0.45 s) looks settled at once and the old frame becomes
-  the crop until the catalog's next poll re-selects (~0.4 s of wrong crop).
-  "Moved … from" always prints the home frame, not the frame before the move.
-  Proposed: also read the AX frame after the writes, count stillness only once
-  the listed size has left the old one, 1 s deadline, log the real "from".
+  Fixed (2026-09-23): `prepare`'s settle loop read only the window list and
+  stopped after three identical reads 20 ms apart, counted from the frame
+  before the move, so a pure resize the app commits late (1Password, Electron:
+  between 45 ms and ~0.45 s) looked settled at once and the old frame became
+  the crop until the catalog's next poll re-selected (~0.4 s of wrong crop).
+  Now it reads the AX frame once after the writes. A new size there means
+  stillness counts only once the listed size has left the old one, the list
+  showing AX's frame ends the wait, and the deadline is 1 s; the old size (a
+  refusal) counts stillness at once within 0.5 s, as before. A wait that runs
+  out appends "; not settled by the deadline" to "Moved …", whose "from" is
+  now the frame before the move (it printed the home frame). A restart that
+  asks for the same rectangle as the last placement (the request fitted to the
+  usable area, so a Dock arriving on the display still gets the window
+  re-fitted) finds a clamped window where it was left and skips the move.
+  Step (6) run verbatim in a harness: a probe window whose commit trails its
+  frame by 80/150/300 ms was cropped at the old frame every time before, at
+  the new one in 104/181/341 ms now; a refusal still settles in ~50 ms; a
+  clamped restart takes 0 ms and no move; simulated, a Dock arriving between
+  two restarts still gets the window re-fitted. Known limit: an app whose AX
+  frame lags too (it applies the size after answering the write) still reads
+  as a refusal, and its old frame stays the crop until a catalog poll (2 s;
+  one that lands mid-switch is ignored) re-selects.
   **Untested, for Noah** (Screen Recording + Accessibility on the terminal):
   (a) `swift run -c release SillHost --virtual-display`, pick a window: the
   log shows "Virtual display … created", "Moved …", "Capturing … of virtual
@@ -183,6 +197,9 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   mid-stream: each prints "Restored …" then "Removed virtual display", the
   window is back within 2 pt, no "Sill" display remains. (d) Rotate and cycle
   Aa while staged: one "Capture started" per change, no new display created.
+  (e) The 1Password Aa step that showed the stale crop (staged at Aa 0.5,
+  then 1×): the first "Moved … to" shows the asked 1117×610 and "Capture
+  started" reads 2234×1220, with no second capture ~0.4 s later.
   If the picture is offset or black, the escape hatch is the last line of
   `VirtualStage.prepare`: return the `desktopIndependentWindow` filter with a
   nil `sourceRect` (window capture on the virtual display ran at 59 fps in the
@@ -259,10 +276,19 @@ both sides: discovery then needs a shared network, as it does today, and the
 iPad side still needs a device run. Secondary: `inflight > 2` counts only what
 Network.framework has not handed to the socket, so after a switch the socket
 buffer (autotuned up to 4 MB) can hold ~200 ms of frames ahead of pongs (frame
-age 188–229 ms, no `net.dropped`). The client samples frame age every 15th
-frame, so a second with fewer than 15 frames repeats the last value. It sends
-one rtt sample per report, and the host logs every other report. Its fps and
-ping timers are default-mode timers, so they stop while a scroll tracks.
+age 188–229 ms, no `net.dropped`). Client measurement, reworked 2026-09-23
+(it sampled frame age every 15th frame and repeated the last value in a
+slower second, sent one rtt sample per report, and ran its fps and ping
+timers in the main run loop's default mode, so both stopped while a scroll
+tracked): the client now takes the age of every frame and pings every 0.25 s
+(stamped with the monotonic clock), both on dispatch timers on its network
+queue, and closes a one-second window each second. Each report carries that
+second's median in the old `ClientStats` fields, -1 for a second without a
+sample (a still window streams no frames), and its max in two new optional
+fields. The host still logs every other report, now as
+`frame age 9/24 ms, rtt 7/80 ms` (the last second's median over the worst
+since the previous line, "–" for no sample; an older client prints one
+value), and the menu's device row and the HUD show "–" the same way.
 
 **Frozen stream, 2026-09-22 evening — the Mac's hardware video encoder wedged.**
 Every new HEVC session (and later H.264) accepted one frame and never returned

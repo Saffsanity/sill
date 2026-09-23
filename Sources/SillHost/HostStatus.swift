@@ -33,6 +33,8 @@ package struct HostStatusSnapshot: Equatable {
         /// The device's own description, such as "iPad (iPad14,1)".
         package var name: String?
         package var fps: Int?
+        /// What the device measured over its last second (a current client sends the medians);
+        /// -1 when that second had no sample (no frame arrived, no pong came back).
         package var frameAgeMs: Int?
         package var rttMs: Int?
 

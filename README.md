@@ -121,10 +121,15 @@ an asset catalog, and the package reference. Nothing else.
 
 ## Measuring latency
 
-The host logs what each connected device sees, once a second:
-`client iPad (iPad14,1): 53 fps, frame age 8 ms, rtt 7 ms`. Frame age is the
-host's encode-output timestamp to the device receiving the frame (clocks assumed
-synced); RTT is a ping round trip. Measured 2026-09-22 on 5 GHz Wi-Fi: frame age
+Each connected device reports what it sees every second, and the host logs
+every other report:
+`client iPad (iPad14,1): 58 fps, frame age 9/24 ms, rtt 7/80 ms`. Frame age is
+the host's encode-output timestamp to the device receiving the frame (clocks
+assumed synced), taken for every frame; RTT is a ping round trip, four pings a
+second. Each pair is the last second's median over the worst since the
+previous line, and "–" marks a second without a sample (a still window streams
+no frames). An older iOS build reports single values
+(`frame age 8 ms, rtt 7 ms`). Measured 2026-09-22 on 5 GHz Wi-Fi: frame age
 8–10 ms, RTT 6–9 ms. Capture, encode, decode and display add roughly 30–50 ms
 more, so glass-to-glass is about 40–60 ms.
 
