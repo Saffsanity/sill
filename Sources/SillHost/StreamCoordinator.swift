@@ -190,7 +190,7 @@ final class StreamCoordinator {
         await catalog.refreshWindows()
         if let match = preselect?.lowercased(),
            let w = catalog.infos.first(where: { $0.appName.lowercased().contains(match) || $0.title.lowercased().contains(match) }) {
-            await select(.window(w.id))
+            await select(.window(w.id), bringForward: true)   // a pick, made on the command line
         }
     }
 
@@ -200,7 +200,9 @@ final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
-            await select(source)
+            // A pick from the device's switcher: the device never selects a window by itself (its
+            // automatic requests are for the Desktop only).
+            await select(source, bringForward: true)
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -221,7 +223,9 @@ final class StreamCoordinator {
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
             pendingLaunch = req.bundleID
             let config = NSWorkspace.OpenConfiguration()
-            config.activates = false     // launched from the device: do not steal focus on the Mac
+            // The launch itself takes no focus on the Mac. Its first window is then picked for the
+            // device (`windowsChanged`), which in regular mode brings it forward like any pick.
+            config.activates = false
             NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
@@ -345,7 +349,13 @@ final class StreamCoordinator {
 
     // MARK: Source switching
 
-    func select(_ source: StreamSource) async {
+    /// Streams `source` in place of whatever streams now. Also how the host restarts the current
+    /// source (a resize, a rate change, the encoder fallback, a lost virtual display).
+    /// `bringForward` marks a pick instead: the device's switcher, the command line, an app
+    /// launched from the device. In regular mode a picked window comes forward on the Mac, and a
+    /// pick that falls back from the virtual display to the real window counts as regular mode;
+    /// restarts leave Mac focus where it is, and so does staging a window on the virtual display.
+    func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
         defer {
@@ -429,6 +439,11 @@ final class StreamCoordinator {
             if sourceRect == nil {
                 // Today's path: capture the window where it is.
                 filter = SCContentFilter(desktopIndependentWindow: w)
+                // Regular mode raises the picked window (2026-09-23, Noah: the Mac must show the
+                // picked window). A covered window stops repainting, so it would stream frozen, and
+                // keys go to the active app's key window. Done before capture starts, so the first
+                // frames already show it uncovered. The virtual display's fallback lands here too.
+                if bringForward, !shuttingDown { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
@@ -436,10 +451,8 @@ final class StreamCoordinator {
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
             }
             width = evenPixels(size.width * captureScale); height = evenPixels(size.height * captureScale)
-            // The picked app is NOT brought forward: that yanked focus on the Mac every time the
-            // device switched windows (and after every resize-triggered restart). A window covered
-            // on the Mac freezes on the device until the virtual display lands; that is the trade.
-            // (AX moves on the virtual display do not activate anything either.)
+            // Staged on the virtual display, nothing is activated or raised on select: the window
+            // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
             if synthetic {
                 // A 1512×949-point test pattern: the same size as a typical streamed window, so the
@@ -462,6 +475,7 @@ final class StreamCoordinator {
                 // The display filter failed to start: send the window home and stream it there.
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
                 stage.release()
+                if bringForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 do {
                     try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
@@ -515,18 +529,24 @@ final class StreamCoordinator {
         if enc.isDead { Task { @MainActor in await self.encoderHung(enc) } }
     }
 
-    // MARK: Bringing the target forward on interaction
+    // MARK: Bringing the target forward
     //
-    // Selecting never moves focus on the Mac (browsing windows from the device must not). Interacting
-    // does, the way a real click does: a click, scroll, keystroke or typed text into the streamed
-    // window first activates its app, because keys go to the active app's key window and a first
-    // click into an inactive app is otherwise eaten as "activate". On the regular path the window
-    // is also raised when another app's window covers the click point, so the event reaches it and
-    // it repaints; on the virtual display nothing can cover it. Activation goes through Launch
-    // Services (the direct NSRunningApplication call is refused from a background process since
-    // macOS 14) and is asynchronous, so the events that triggered it are held for a moment and
-    // replayed in order once the app is up. Everything here is cheap: one frontmost lookup per
-    // half second at most, and Accessibility only when a cover is actually found.
+    // On select, regular mode raises the picked window (`activateAndRaise`, 2026-09-23, Noah: the
+    // Mac must show the picked window). A window staged on the virtual display never touches Mac
+    // focus on select (a pick that falls back to the real window is regular mode), and neither do
+    // the host's own restarts. On interaction, both modes do what a real click does: a click,
+    // keystroke or typed text into the streamed window first activates its app, because keys go to
+    // the active app's key window and a first click into an inactive app is otherwise eaten as
+    // "activate". On the regular path the window is also raised when another window covers the
+    // click or scroll point, so the event reaches it and it repaints; on the virtual display a
+    // cover can only be a stranger, which is moved off instead. Activation is Accessibility first,
+    // Launch Services when AX refuses (the direct NSRunningApplication call is refused from a
+    // background process since macOS 14); either way the app comes up a moment later, so the
+    // events that triggered it are held and replayed in order once it is up. A pick always goes
+    // through Accessibility. Interaction stays cheap: one frontmost lookup per half second at
+    // most, and Accessibility only when the app is not active or a cover is found. An app that
+    // lets the activation run into its timeout (a beach ball) gets no further AX calls from
+    // either: each would hold the main actor for another second.
     /// Consecutive catalog polls the staged full-screen window has been missing from every list.
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
@@ -551,7 +571,12 @@ final class StreamCoordinator {
     }
 
     private func raiseIfInteracting(_ event: InputEvent) {
-        guard case .window(let id) = active else { return }
+        // Nothing mid-switch, pick or restart: `active` names the old source until capture has
+        // started, and by then a pick has already raised the new window. Raising or activating
+        // the old one here would put it back in front of the pick (a flick's momentum scroll keeps
+        // arriving through a tap on the switcher). The event itself is still delivered, so no
+        // key-up or button-up goes missing.
+        guard !switching, case .window(let id) = active else { return }
         // Scroll routes to the window under the cursor whatever the active app is: it only needs
         // uncovering (regular path). Clicks, keys and text need the app active and the window key.
         let needsFocus: Bool
@@ -582,27 +607,20 @@ final class StreamCoordinator {
         // A failed activation must not stall every later interaction: one attempt per 2 s.
         guard now - lastActivationAt > 2 else { return }
         lastActivationAt = now
-        if notActive {
-            // Accessibility activation is synchronous and touches only this app's ordering; Launch
-            // Services (a Dock-click: every window forward, a reopen event) is the fallback.
-            let app = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(app, 1.0)
-            if AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success {
-                Stats.shared.bump("win.activated")
-            } else if let url = NSRunningApplication(processIdentifier: pid)?.bundleURL {
-                let config = NSWorkspace.OpenConfiguration()
-                config.activates = true
-                NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
-                Stats.shared.bump("win.activatedLS")
-            }
-        }
+        // An app that let the activation run into its timeout gets no more AX calls, each of which
+        // would wait out another second; the Launch Services fallback brings it up, and the hold
+        // below still applies.
+        let answered = notActive ? activate(pid: pid) : true
         // The streamed window must also be the app's key window, or its first click only makes it
         // key (acceptsFirstMouse is false for most controls). Raising lifts it above the cover.
-        if staged, let element = stage.placement?.element {
-            if needsFocus { WindowSizer.makeKey(element) }
-        } else if let w = catalog.window(id: id) {
-            if needsFocus { sizer.makeKey(window: w) }
-            if covered, sizer.raise(window: w) { Stats.shared.bump("win.raised") }
+        // One window lookup serves both.
+        if answered {
+            if staged, let element = stage.placement?.element {
+                if needsFocus { WindowSizer.makeKey(element) }
+            } else if let w = catalog.window(id: id), let element = sizer.element(for: w) {
+                if needsFocus { WindowSizer.makeKey(element) }
+                if covered, WindowSizer.raise(element) { Stats.shared.bump("win.raised") }
+            }
         }
         holdUntil = now + Self.activationTimeout
         Task { @MainActor in
@@ -617,6 +635,51 @@ final class StreamCoordinator {
             }
             self.releaseHeldInput()
         }
+    }
+
+    /// A pick in regular mode: the window comes forward on the Mac as if clicked there. Its app is
+    /// activated, the window raised to the front and made key, so capture starts on an uncovered
+    /// window and typed keys go to it. `raiseIfInteracting`'s throttle is left alone: a click
+    /// right after a pick that finds the app not up yet still activates and holds as usual.
+    /// Every AX call here is synchronous on the main actor, and a hung app (a beach ball, a
+    /// debugger pause) holds every device's input and the catalog for a second per call: raise
+    /// and key share one window lookup, and none is made once the activation ran into its timeout.
+    private func activateAndRaise(window w: SCWindow) {
+        guard let pid = w.owningApplication?.processID else { return }
+        guard activate(pid: pid) else {
+            print("\(w.owningApplication?.applicationName ?? "?") is not answering Accessibility; its window is not raised.")
+            return
+        }
+        guard let element = sizer.element(for: w) else { return }
+        if WindowSizer.raise(element) { Stats.shared.bump("win.raised") }
+        WindowSizer.makeKey(element)
+    }
+
+    /// Makes `pid` the active app. Accessibility first: synchronous, and it touches only this app's
+    /// ordering. Launch Services (a Dock click: every window forward, a reopen event) is the
+    /// fallback when AX refuses; it returns at once and the app comes up a moment later.
+    /// False when the app did not answer at all, so the caller makes no further AX calls into it.
+    /// Only a call that ran out the whole timeout counts: `.cannotComplete` is also a quick
+    /// refusal from a live app, whose window may still take a raise.
+    private func activate(pid: pid_t) -> Bool {
+        let timeout: Float = 1.0
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, timeout)
+        let started = CFAbsoluteTimeGetCurrent()
+        let err = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        if err == .success {
+            Stats.shared.bump("win.activated")
+            return true
+        }
+        if let url = NSRunningApplication(processIdentifier: pid)?.bundleURL {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+            Stats.shared.bump("win.activatedLS")
+        }
+        let timedOut = err == .cannotComplete && CFAbsoluteTimeGetCurrent() - started >= Double(timeout) * 0.9
+        if timedOut { Stats.shared.bump("win.axTimeout") }
+        return !timedOut
     }
 
     /// One line per second at most: where a click lands on the Mac and which window is there,
@@ -727,7 +790,7 @@ final class StreamCoordinator {
     private func windowsChanged(_ infos: [WindowInfo]) async {
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
-            await select(.window(w.id))
+            await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
             return
         }
         if case .window(let id) = active {

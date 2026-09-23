@@ -168,14 +168,21 @@ only one. Protections now in the host:
 - Never reconfigure a running SCStream (`updateConfiguration` also wedged it);
   the Mac cursor is left out of the video for good and the device draws it,
   with the Mac's live cursor shape streamed as `.cursorShape`.
-- Selecting never activates an app (that stole focus on the Mac while browsing
-  windows). Interacting does, like a real click: a click, scroll, keystroke or
-  typed text activates the app through Launch Services (`NSRunningApplication.
-  activate` is refused from a background process) with a 150 ms hold so the
-  first click lands in an active app; on the regular path a window covered by
-  another app's window is also raised (Accessibility, only when a cover is
-  found at the click point). Ghost "LayerProbeParent" windows that SwiftUI apps
-  spawn per new display are filtered from the catalog.
+- Regular mode raises the picked window on select (2026-09-23, Noah: the Mac
+  must show the picked window): app activated, window raised and made key,
+  before capture starts. Picks only (switcher, command line, an app launched
+  from the device); the host's own restarts (resize, rate change, encoder
+  fallback) leave focus alone. The virtual display never touches Mac focus on
+  select; a pick that falls back to the real window counts as regular mode.
+  Interacting works like a real click in both modes: a click, keystroke or
+  typed text activates the app (Accessibility; Launch Services when AX
+  refuses; `NSRunningApplication.activate` is refused from a background
+  process), input held until it is up (at most 0.6 s) so the first click
+  lands; on the regular path a window covered at the click or scroll point is
+  also raised. Input that arrives mid-switch is delivered but raises nothing
+  (`active` still names the old window, and raising it would cover the pick).
+  Ghost "LayerProbeParent" windows that SwiftUI apps spawn per new display
+  are filtered from the catalog.
 Verified 2026-09-22 with `--synthetic` against the still-wedged encoder: hang
 detected at 1.5 s, software restart, 55–59 fps out, the iPad decoding it fine.
 Diagnosis tools: `swift run -c release CaptureProbe <window> [s] [--encode]
@@ -186,8 +193,9 @@ VTCompressionSessionEncodeFrameWithOutputHandler → RemoteVideoEncoder).
 Still open: the unexplained one-off stall where new clients received no catalog
 (2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
 Known: a streamed window covered by another window on the Mac freezes on the
-device (macOS stops repainting it); selecting it again does not raise it (the
-host never activates apps). `--virtual-display` removes the freeze for good.
+device (macOS stops repainting it) until the device picks it again or clicks
+or scrolls in it, which raises it. `--virtual-display` removes the freeze for
+good.
 
 ## Milestone 2 (input and window control) — done 2026-09-22
 
@@ -249,10 +257,11 @@ host never activates apps). `--virtual-display` removes the freeze for good.
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
 - `Sources/SillHost/` — `StreamCoordinator` (main actor; owns the pipeline,
-  switches sources on client request without touching Mac focus, applies
-  viewports, falls back to the software encoder on a hang, stops capture when
-  the last client leaves), `WindowCatalog` (polls windows and thumbnails only
-  while a client is connected; icons; installed apps in the background),
+  switches sources on client request, raises the picked window in regular
+  mode (never on the virtual display), applies viewports, falls back to the
+  software encoder on a hang, stops capture when the last client leaves),
+  `WindowCatalog` (polls windows and thumbnails only while a client is
+  connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
   `--synthetic`), `HEVCEncoder` (VideoToolbox behind a one-slot mailbox with a
   hang watchdog; hardware or software), `EncoderSelfTest`

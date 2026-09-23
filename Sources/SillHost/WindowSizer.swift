@@ -82,12 +82,6 @@ final class WindowSizer {
         let title: String
     }
 
-    /// Resolves `window` to its AX element and records its current frame, without moving it.
-    /// Nil if Accessibility is off or the window cannot be matched (see `axWindow`).
-    /// Brings `window` to the front of its app's windows (Accessibility raise; activation is the
-    /// coordinator's job, through Launch Services). Used by the regular path when another app's
-    /// window covers the spot the device clicked: otherwise the click lands on the cover, and a
-    /// covered window stops repainting anyway. Never called on select.
     /// The Accessibility window of `pid` whose frame is `rect` (a stranger found on the virtual
     /// display through the window list), or nil.
     static func axWindow(pid: pid_t, frame rect: CGRect) -> AXUIElement? {
@@ -155,23 +149,26 @@ final class WindowSizer {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     }
 
-    /// `makeKey` for a window known only by its ScreenCaptureKit description.
-    func makeKey(window: SCWindow) {
-        guard AXIsProcessTrusted(), let pid = window.owningApplication?.processID else { return }
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 1.0)
-        if let ax = Self.axWindow(matching: window, in: app) { Self.makeKey(ax) }
+    /// Brings a window to the front of its app's windows (Accessibility raise; activating the app
+    /// is the coordinator's job). Regular path only: when a pick brings the window forward, and
+    /// when another window covers the spot the device clicked or scrolled (otherwise the event
+    /// lands on the cover, and a covered window stops repainting anyway).
+    static func raise(_ element: AXUIElement) -> Bool {
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success
     }
 
-    @discardableResult
-    func raise(window: SCWindow) -> Bool {
-        guard AXIsProcessTrusted(), let pid = window.owningApplication?.processID else { return false }
+    /// The AX element of a window known only by its ScreenCaptureKit description, for `raise` and
+    /// `makeKey`. Matched once for both: each match (see `axWindow`) is synchronous IPC into the
+    /// app, a second when it hangs. Nil if Accessibility is off or no window matches.
+    func element(for window: SCWindow) -> AXUIElement? {
+        guard AXIsProcessTrusted(), let pid = window.owningApplication?.processID else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 1.0)
-        guard let ax = Self.axWindow(matching: window, in: app) else { return false }
-        return AXUIElementPerformAction(ax, kAXRaiseAction as CFString) == .success
+        return Self.axWindow(matching: window, in: app)
     }
 
+    /// Resolves `window` to its AX element and records its current frame, without moving it.
+    /// Nil if Accessibility is off or the window cannot be matched (see `axWindow`).
     func placement(for window: SCWindow) -> Placement? {
         guard AXIsProcessTrusted() else {
             if !warnedUntrusted {
