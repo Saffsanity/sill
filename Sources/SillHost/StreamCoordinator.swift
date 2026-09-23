@@ -93,6 +93,14 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// A restart of the active source is in flight (a settings change, a resize, a rate change,
+    /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
+    /// another source.
+    private var restartOf: StreamSource?
+    /// A device's pick of a different source that came in during that restart; taken by select's
+    /// defer. Never set during a switch to another source: the device's automatic Desktop request
+    /// can land then (StreamClient's window list handling) and must not override the user's pick.
+    private var pickArrivedWhileSwitching: StreamSource?
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
     private var viewport: Viewport?
@@ -430,6 +438,14 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            if switching {
+                // `select` would drop it. A pick made during a restart of the active source (a
+                // settings change from the panel, then a tap on a thumbnail) runs once the restart
+                // is done; the newest wins, and a pick of the source being restarted needs nothing.
+                // During a switch to another source it is dropped, as before.
+                if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
+                return
+            }
             // A pick from the device's switcher: the device never selects a window by itself (its
             // automatic requests are for the Desktop only).
             await select(source, bringForward: true)
@@ -606,11 +622,15 @@ package final class StreamCoordinator {
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
+        restartOf = (source == active && source != .none) ? source : nil
         defer {
             switching = false
+            restartOf = nil
+            var pick = pickArrivedWhileSwitching
+            pickArrivedWhileSwitching = nil
             // Requests that arrived mid-switch, applied now that `switching` is clear again (every
-            // return path, including the early ones). A last client leaving wins over a viewport:
-            // there is nobody left to fit the window to.
+            // return path, including the early ones). A last client leaving wins over a viewport
+            // and over a queued pick: there is nobody left to fit the window to or stream to.
             if deselectWhenSettled {
                 deselectWhenSettled = false
                 if catalog.clientCount == 0, active != .none {
@@ -618,11 +638,18 @@ package final class StreamCoordinator {
                     Task { @MainActor in await self.select(.none) }
                 }
             }
-            if viewportArrivedWhileSwitching {
+            if catalog.clientCount == 0 { pick = nil }
+            if let pick, pick != active {
+                // The pick's own select fits the latest viewport. Run after it has started, the
+                // viewport tail would resize the old window, which `active` still names mid-switch.
+                viewportArrivedWhileSwitching = false
+                Task { @MainActor in await self.select(pick, bringForward: true) }
+            } else if viewportArrivedWhileSwitching {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
             }
-            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }   // settings that came in meanwhile
+            // Settings that came in meanwhile; a no-op when the pick's select commits them first.
+            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }
         }
 
         await capture.stop()
