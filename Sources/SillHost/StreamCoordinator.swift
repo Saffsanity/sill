@@ -92,7 +92,7 @@ final class StreamCoordinator {
         self.maxFPS = maxFPS; self.scale = scale; self.bitrate = bitrate; self.prioritizeSpeed = prioritizeSpeed
         self.synthetic = synthetic
         self.virtualDisplay = virtualDisplay
-        server = try StreamServer()
+        server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         stage = VirtualStage(sizer: sizer, catalog: catalog)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
@@ -539,10 +539,10 @@ final class StreamCoordinator {
     // the active app's key window and a first click into an inactive app is otherwise eaten as
     // "activate". On the regular path the window is also raised when another window covers the
     // click or scroll point, so the event reaches it and it repaints; on the virtual display a
-    // cover can only be a stranger, which is moved off instead. Activation is Accessibility first,
-    // Launch Services when AX refuses (the direct NSRunningApplication call is refused from a
-    // background process since macOS 14); either way the app comes up a moment later, so the
-    // events that triggered it are held and replayed in order once it is up. A pick always goes
+    // cover can only be a stranger, which is moved off instead. Activation is Accessibility only
+    // (the direct NSRunningApplication call is refused from a background process since macOS 14,
+    // and a Launch Services "open" trips app-based Focus automations); the app comes up a moment
+    // later, so the events that triggered it are held and replayed in order once it is up. A pick always goes
     // through Accessibility. Interaction stays cheap: one frontmost lookup per half second at
     // most, and Accessibility only when the app is not active or a cover is found. An app that
     // lets the activation run into its timeout (a beach ball) gets no further AX calls from
@@ -608,8 +608,7 @@ final class StreamCoordinator {
         guard now - lastActivationAt > 2 else { return }
         lastActivationAt = now
         // An app that let the activation run into its timeout gets no more AX calls, each of which
-        // would wait out another second; the Launch Services fallback brings it up, and the hold
-        // below still applies.
+        // would wait out another second; the hold below still applies.
         let answered = notActive ? activate(pid: pid) : true
         // The streamed window must also be the app's key window, or its first click only makes it
         // key (acceptsFirstMouse is false for most controls). Raising lifts it above the cover.
@@ -655,12 +654,13 @@ final class StreamCoordinator {
         WindowSizer.makeKey(element)
     }
 
-    /// Makes `pid` the active app. Accessibility first: synchronous, and it touches only this app's
-    /// ordering. Launch Services (a Dock click: every window forward, a reopen event) is the
-    /// fallback when AX refuses; it returns at once and the app comes up a moment later.
-    /// False when the app did not answer at all, so the caller makes no further AX calls into it.
-    /// Only a call that ran out the whole timeout counts: `.cannotComplete` is also a quick
-    /// refusal from a live app, whose window may still take a raise.
+    /// Makes `pid` the active app, through Accessibility only: synchronous, and it touches only this
+    /// app's ordering. Never through Launch Services: "opening" an already-running app that way
+    /// counts as opening it, and it switched on Noah's Work Focus (an app-based Focus automation)
+    /// every time (2026-09-22 and 23). If AX refuses, the app stays where it is and the raise below
+    /// still runs. False when the app did not answer at all, so the caller makes no further AX
+    /// calls into it. Only a call that ran out the whole timeout counts: `.cannotComplete` is also
+    /// a quick refusal from a live app, whose window may still take a raise.
     private func activate(pid: pid_t) -> Bool {
         let timeout: Float = 1.0
         let app = AXUIElementCreateApplication(pid)
@@ -671,12 +671,7 @@ final class StreamCoordinator {
             Stats.shared.bump("win.activated")
             return true
         }
-        if let url = NSRunningApplication(processIdentifier: pid)?.bundleURL {
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
-            Stats.shared.bump("win.activatedLS")
-        }
+        Stats.shared.bump("win.activateRefused")
         let timedOut = err == .cannotComplete && CFAbsoluteTimeGetCurrent() - started >= Double(timeout) * 0.9
         if timedOut { Stats.shared.bump("win.axTimeout") }
         return !timedOut

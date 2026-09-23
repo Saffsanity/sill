@@ -175,11 +175,13 @@ only one. Protections now in the host:
   fallback) leave focus alone. The virtual display never touches Mac focus on
   select; a pick that falls back to the real window counts as regular mode.
   Interacting works like a real click in both modes: a click, keystroke or
-  typed text activates the app (Accessibility; Launch Services when AX
-  refuses; `NSRunningApplication.activate` is refused from a background
-  process), input held until it is up (at most 0.6 s) so the first click
-  lands; on the regular path a window covered at the click or scroll point is
-  also raised. Input that arrives mid-switch is delivered but raises nothing
+  typed text activates the app through Accessibility only
+  (`NSRunningApplication.activate` is refused from a background process, and
+  a Launch Services "open" of a running app counts as opening it, which
+  switched on Noah's Work Focus automation, so it is never used; an app that
+  refuses AX simply stays back), input held until it is up (at most 0.6 s) so
+  the first click lands; on the regular path a window covered at the click or
+  scroll point is also raised. Input that arrives mid-switch is delivered but raises nothing
   (`active` still names the old window, and raising it would cover the pick).
   Ghost "LayerProbeParent" windows that SwiftUI apps spawn per new display
   are filtered from the catalog.

@@ -78,7 +78,8 @@ final class StreamServer {
         Stats.shared.bump("net.tick")
     }
 
-    init(serviceType: String = "_sill._tcp") throws {
+    /// `advertise: false` keeps the host off Bonjour (the synthetic test mode).
+    init(serviceType: String = "_sill._tcp", advertise: Bool = true) throws {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         // A client that vanishes without closing (app killed, Wi-Fi gone) would otherwise stay
@@ -91,7 +92,12 @@ final class StreamServer {
         params.serviceClass = .interactiveVideo   // WMM video class on Wi-Fi: shorter queues, higher priority
         params.includePeerToPeer = true
         listener = try NWListener(using: params)
-        listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
+        // The synthetic test host does not advertise: a device would otherwise find it, connect,
+        // and show the test pattern (Noah saw "a white moving wall", 2026-09-23). Test clients
+        // connect to it by port.
+        if advertise {
+            listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
+        }
         listener.stateUpdateHandler = { state in
             if case .failed(let e) = state { print("Listener failed: \(e)"); exit(1) }
         }
