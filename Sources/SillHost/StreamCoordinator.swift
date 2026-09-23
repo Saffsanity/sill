@@ -10,10 +10,12 @@ import StreamProtocol
 @MainActor
 package final class StreamCoordinator {
     /// The knobs (HostConfig.swift): the CLI's `standard` values and flag, or the app's Settings.
-    /// A new value is taken only between pipelines, inside `select` (see `apply`), so one pipeline
-    /// never mixes two. The knob properties below read it, so every existing read keeps its text.
+    /// A new value is taken only between pipelines, inside `select` (see `setTarget`), so one
+    /// pipeline never mixes two. The knob properties below read it, so every existing read keeps
+    /// its text.
     package private(set) var config: HostConfig
-    /// Settings from the app that wait for the next `select` (a restart, or a switch in flight).
+    /// Settings from the app or a device that wait for the next `select` (a restart, or a switch in
+    /// flight). This, else `config`, is the `target`: what the Mac's menu and the devices show.
     private var pendingConfig: HostConfig?
     /// Ceiling for the stream rate (HostConfig). Each device asks for its own panel's rate
     /// through the viewport: 120 on ProMotion, 60 elsewhere, 60 while Low Power Mode caps it.
@@ -120,6 +122,10 @@ package final class StreamCoordinator {
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
+        // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
+        // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
+        // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
+        status.onChange = { [weak self] in self?.publishSettings() }
 
         server.onClientConnected = { [weak self] connection in
             Task { @MainActor in
@@ -273,7 +279,7 @@ package final class StreamCoordinator {
         }
     }
 
-    // MARK: Settings (the menu bar app; the CLI never calls these)
+    // MARK: Settings (the app's menu and Settings window, and devices through .changeSettings, on both hosts)
 
     /// The virtual display's parts, for the CLI's flag at launch or the app's setting turning on.
     /// The private API is checked on the first call only, printing what the CLI always printed.
@@ -300,19 +306,38 @@ package final class StreamCoordinator {
         }
     }
 
-    /// New settings from the app, applied live. Validated, and the virtual display stays off
-    /// without the AppKit loop. With nothing streaming, or nothing the running pipeline depends
-    /// on changed, they are taken at once; otherwise the current source restarts and `select`
-    /// takes them between the old pipeline and the new one. A value that arrives mid-switch waits
-    /// (select's defer comes back here), and a newer value replaces one still waiting, so
-    /// requests that arrive out of order still converge on the last.
-    package func apply(_ requested: HostConfig) async {
-        guard !shuttingDown else { return }
+    /// What the host is set to: a value still waiting for its restart, else the running one. What
+    /// the Mac's menu checks and what devices are told. (Private: the app merges over its own
+    /// settings, never over this.)
+    private var target: HostConfig { pendingConfig ?? config }
+
+    /// Who keeps the settings when a device changes one. Sill.app lays the change over its
+    /// HostSettings (saved, shown in its menu and Settings) and returns the result. Unset (the
+    /// CLI): the change lands on `target` and lasts until the process ends. Set it before `start`.
+    package var onDeviceSettingsChange: (@MainActor (HostSettingsChange) -> HostConfig)?
+
+    /// New settings from the app or a device, applied live. Synchronous: validated, the virtual
+    /// display kept off without the AppKit loop, compared with the target, told to every device.
+    /// The pipeline takes them in a Task: at once when nothing streaming depends on what changed,
+    /// otherwise through one restart of the current source, `select` taking them between the old
+    /// pipeline and the new one. A value that arrives mid-switch waits (select's defer comes back
+    /// to `applyPending`), and a newer value replaces one still waiting, so requests that arrive
+    /// out of order still converge on the last. Returns whether the target moved.
+    ///
+    /// Why the pipeline work is scheduled rather than awaited: the device handler must answer
+    /// before any await; a burst of changes that arrives before the Task runs is one restart; and
+    /// `applyPending` tolerates repeated calls (it returns while switching, and a later Task finds
+    /// `pendingConfig` already consumed).
+    @discardableResult
+    package func setTarget(_ requested: HostConfig) -> Bool {
+        guard !shuttingDown else { return false }
         var new = requested.validated()
         if !appKitLoop { new.virtualDisplay = false }
-        guard new != (pendingConfig ?? config) else { return }
+        guard new != target else { return false }
         pendingConfig = new
-        await applyPending()
+        publishSettings()
+        Task { @MainActor in await self.applyPending() }   // a burst before it runs is one restart
+        return true
     }
 
     private func applyPending() async {
@@ -445,6 +470,24 @@ package final class StreamCoordinator {
             clientFPS[ObjectIdentifier(connection)] = v.fps ?? 60
             if switching { viewportArrivedWhileSwitching = true; return }
             await applyViewportToActiveWindow()
+        case .changeSettings:
+            // A device's settings control. No `await` in this case: the answer leaves in request
+            // order, per device and across devices, and before any restart (setTarget schedules the
+            // pipeline work). Malformed JSON has no token to answer, so it gets nothing.
+            guard let change = Wire.decode(HostSettingsChange.self, from: message.payload) else { return }
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop)
+            let who = deviceName(connection)
+            if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
+            if !ok.isEmpty, !shuttingDown {
+                let before = target
+                // The app: the hook assigns its settings, whose didSet has already set the target
+                // (this call then finds it equal). The CLI: the change lands on the target.
+                setTarget(onDeviceSettingsChange?(ok) ?? before.applying(ok))
+                if target != before { print("Settings from \(who): " + before.changes(to: target)) }
+            }
+            // Exactly one answer, to this device alone: the settings as they now stand, so a
+            // refused or ignored field goes back to the Mac's value on the device.
+            server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
         default:
             break
         }
@@ -1104,6 +1147,9 @@ package final class StreamCoordinator {
         let now = Date().timeIntervalSince1970
         print("Catalog → \(connection.endpoint): \(catalog.infos.count) windows, \(catalog.allIcons.count) icons, \(catalog.installedApps.count) apps")
         server.send(listMessage(), to: connection)
+        // What the settings are, silently (the line above is the only one printed on connect). An
+        // older device skips the kind.
+        server.send(settingsMessage(settingsState()), to: connection)
         for (id, png) in catalog.allIcons {
             server.send(StreamMessage(kind: .appIcon, timestamp: now, isKeyframe: false,
                                       payload: ImageBlob.encodeIcon(bundleID: id, png: png)), to: connection)
@@ -1113,5 +1159,55 @@ package final class StreamCoordinator {
         if let shape = cursorShapes.current {
             server.send(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: shape), to: connection)
         }
+    }
+
+    // MARK: Settings to devices
+
+    /// The last broadcast state. Answers and the state sent on connect never touch it.
+    private var lastPublished: HostSettingsState?
+
+    /// A pure function of the target, the status snapshot and two constants (appKitLoop, whether
+    /// the hook is set). The target changes only in `setTarget` and the snapshot only in
+    /// `HostStatus.update`, and both publish, so no change can be missed and none can stick.
+    private func settingsState(answering: Int? = nil) -> HostSettingsState {
+        let t = target, s = status.snapshot
+        return HostSettingsState(settings: t.streamSettings,
+                                 persistent: onDeviceSettingsChange != nil,
+                                 virtualDisplayAvailable: appKitLoop,
+                                 virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
+                                 softwareEncoder: s.softwareEncoder,
+                                 stream: s.stream?.wire,
+                                 answering: answering)
+    }
+
+    /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the
+    /// permission lines: permissions are polled, not event-driven, and a missing one still reaches
+    /// the device as the fallback reason on the next pick.
+    private func virtualDisplayNote(target t: HostConfig, snapshot s: HostStatusSnapshot) -> String? {
+        if !appKitLoop { return "Start SillHost with --virtual-display to use it." }
+        if s.virtualDisplayAPIMissing, let p = s.virtualDisplayProblem { return "Not available on this version of macOS: \(p)" }
+        guard t.virtualDisplay else { return nil }
+        if let p = s.virtualDisplayProblem { return "Off for this session: \(p). Turn it off and on to try again." }
+        if let f = s.lastStageFailure { return "The last window streamed where it is: \(f)" }
+        return nil
+    }
+
+    private func settingsMessage(_ state: HostSettingsState) -> StreamMessage {
+        StreamMessage(kind: .hostSettings, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                      payload: Wire.encode(state))
+    }
+
+    /// To every device, when the state differs from the last broadcast. Prints nothing, so the
+    /// CLI's output only changes when a device sends a change.
+    private func publishSettings() {
+        let state = settingsState()
+        guard state != lastPublished else { return }
+        lastPublished = state
+        server.broadcast(settingsMessage(state))
+    }
+
+    /// "iPad (iPad14,1)" once the device has sent its stats, its address until then.
+    private func deviceName(_ connection: NWConnection) -> String {
+        status.snapshot.devices.first { $0.id == ObjectIdentifier(connection) }?.name ?? "\(connection.endpoint)"
     }
 }

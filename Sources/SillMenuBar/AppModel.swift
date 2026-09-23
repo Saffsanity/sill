@@ -55,7 +55,7 @@ final class AppModel {
                 // One path from the controls to the host. The task reads the settings when it runs,
                 // not when it was made, so tasks that run out of order still end on the last value.
                 settings.onChange = { [settings, weak c] in
-                    Task { @MainActor in await c?.apply(settings.config) }
+                    Task { @MainActor in c?.setTarget(settings.config) }
                 }
                 await c.start(preselect: nil, promptForPermissions: false)
                 Stats.shared.startPrinting()
