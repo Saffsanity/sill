@@ -11,6 +11,65 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
 
 ## Mac host (5 minutes)
 
+### Sill.app, the menu bar host
+
+```
+cd ~/Downloads/winstream && Scripts/make-app.sh --install --open
+```
+
+That builds the `SillMenuBar` executable with SwiftPM, wraps it into
+`Sill.app` (bundle ID `me.saffer.sill.mac`, the icon compiled from
+`design/AppIcon.svg`), signs it with your Apple Development identity, quits a
+running Sill (its streamed window goes home first), replaces
+`/Applications/Sill.app` and opens it. Run the same command after every change.
+Without `--install` it only builds `.build/Sill.app`. It will not replace an
+`/Applications/Sill.app` that is not this app (an iPad build of the client, say).
+
+Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
+whether it is visible on the network, each connected device with its frame
+rate, frame age and round trip, and what is streaming; it holds the
+virtual display, frame rate, quality and resolution controls, Launch at Login,
+Permissions, Show Log… and Settings… (⌘,). Changes apply at once; the current
+stream restarts for a moment. Opening Sill.app while it runs (Finder,
+Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
+has no room for the icon.
+
+Permissions:
+
+- The first launch opens Settings on Permissions. Screen Recording and
+  Accessibility are granted to **Sill**, not Terminal: what Terminal has for
+  the `SillHost` command-line tool does not carry over. Screen Recording takes
+  effect after a relaunch (macOS offers Quit & Reopen; the pane has Relaunch
+  Sill); Accessibility works at once.
+- Keep one copy, in /Applications, and launch it from Finder, `open` or the
+  login item. Running `Sill.app/Contents/MacOS/Sill` from Terminal makes
+  Terminal the responsible process, with Terminal's permissions.
+- Grants survive rebuilds because every build is signed with the same
+  identity. If they ever go stale (the switch is on in System Settings but Sill
+  still can't capture or click): quit Sill, run `tccutil reset ScreenCapture
+  me.saffer.sill.mac` and `tccutil reset Accessibility me.saffer.sill.mac`,
+  then `defaults delete me.saffer.sill.mac askedScreenRecording` and
+  `defaults delete me.saffer.sill.mac askedAccessibility`, open Sill again and
+  use Allow… in Settings › Permissions. The `defaults` step matters: Sill
+  shows each system alert only once and remembers that it did, so without it
+  Allow… only opens System Settings, where the reset has removed Sill from both
+  lists. (Adding /Applications/Sill.app to both lists with + works too.)
+
+The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
+file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
+Settings: `defaults read me.saffer.sill.mac`.
+
+Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
+Scripts/make-app.sh --release` (it refuses to finish with any other kind of
+signature, which notarization would reject), then `ditto -c -k --keepParent
+.build/Sill.app .build/Sill.zip`, `xcrun notarytool submit .build/Sill.zip --keychain-profile
+sill-notary --wait` and `xcrun stapler staple .build/Sill.app`. Store the
+notary credentials in the keychain profile yourself first
+(`xcrun notarytool store-credentials sill-notary`). A Developer ID signature
+has a different designated requirement, so permissions are granted once more.
+
+### The command-line host
+
 ```
 cd winstream
 swift run -c release SillHost Safari
@@ -37,8 +96,10 @@ selected, the default build system fails to start; `swift build -c release
 --build-system native` works there as a fallback. First run: macOS asks for Screen Recording for Terminal
 (or Xcode, if you run it from there). Grant it, run again.
 
-Knobs are at the top of `Sources/SillHost/main.swift`: maxFPS, scale,
-bitrate, prioritizeSpeed. Start at the defaults, change one at a time.
+Knobs live in `Sources/SillHost/HostConfig.swift` (`HostConfig.standard`):
+maxFPS, captureScale, bitrate, prioritizeSpeed. The CLI uses them as they are;
+Sill.app starts from them and changes them from its menu and Settings. Start
+at the defaults, change one at a time.
 The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
@@ -80,8 +141,8 @@ link lightly busy (`net.tick` in the stats line) whenever a session is live.
 
 ## What to try if it's slow
 
-- `scale = 1` (four times fewer pixels to encode).
-- `prioritizeSpeed = true`.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
 

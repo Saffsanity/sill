@@ -2,16 +2,16 @@ import Foundation
 import AppKit
 import CoreGraphics
 import StreamProtocol
+import SillHostCore
 
 // Line-buffer stdout so the log reads live when piped or redirected (Swift's print is fully
 // buffered off a terminal, which hides the stats line until exit).
 setvbuf(stdout, nil, _IOLBF, 0)
 
-// Knobs for the spike. Change, rebuild, measure.
-let maxFPS = 120                  // ceiling; each device asks for its own panel's rate (60 until it does)
-let scale: CGFloat = 2.0          // 2 = Retina capture, 1 = points (much cheaper)
-let bitrate = 15_000_000          // bits per second
-let prioritizeSpeed = false       // Apple: trades quality for encode speed; try after the baseline
+// Knobs for the spike: maxFPS, captureScale, bitrate (per 60 fps), prioritizeSpeed. They live in
+// Sources/SillHost/HostConfig.swift now (`HostConfig.standard`), which is also where the menu bar
+// app's Settings start. Change, rebuild, measure.
+var config = HostConfig.standard
 
 // Optional. Streams the first window whose app name or title matches, before any client asks.
 // Normally left off: the client picks a window from its bar.
@@ -26,6 +26,7 @@ let synthetic = CommandLine.arguments.contains("--synthetic")
 // Mac. Off by default until Noah has tried it. Needs the AppKit event loop below: without it this
 // process never sees the display's modes (VirtualDisplay.swift, "Event loop").
 let virtualDisplay = CommandLine.arguments.contains("--virtual-display")
+config.virtualDisplay = virtualDisplay
 
 // `SillHost --encoder-selftest`: no capture, no network. Pushes synthetic frames through the real
 // HEVCEncoder (hardware, then software) and reports what came back, so the watchdog and the
@@ -54,13 +55,12 @@ var coordinator: StreamCoordinator?
 func startHost() {
     Task { @MainActor in
         do {
-            let c = try StreamCoordinator(maxFPS: maxFPS, scale: scale, bitrate: bitrate, prioritizeSpeed: prioritizeSpeed,
-                                          synthetic: synthetic, virtualDisplay: virtualDisplay)
+            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay)
             coordinator = c
             await c.start(preselect: preselect)
             if synthetic { print("Synthetic mode: pick Desktop on the device (or from a test client) to stream a test pattern.") }
             if virtualDisplay { print("Virtual display mode: a picked window streams from its own HiDPI display; Ctrl-C puts it back.") }
-            print("\(c.catalog.infos.count) windows on screen. Advertising _sill._tcp on the local network.")
+            print("\(c.windowCount) windows on screen. Advertising _sill._tcp on the local network.")
             if c.active == .none { print("Nothing is streaming yet: pick a window from the iOS app. Ctrl-C to stop.") }
             Stats.shared.startPrinting()
         } catch {

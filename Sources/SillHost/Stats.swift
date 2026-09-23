@@ -11,8 +11,14 @@ import Foundation
 /// network queue; `activeClients` / `windowCount` from the main actor. All shared state is under
 /// `lock`. The timer, its schedule and `fast` belong to the main queue, and every reschedule runs
 /// there, so a wake-up enqueued by `bump` always lands after the tick that armed it.
-final class Stats {
-    static let shared = Stats()
+package final class Stats {
+    package static let shared = Stats()
+
+    /// Each tick's counters (empty on an idle heartbeat), on the main queue just before the line
+    /// prints: the app's live encoded fps. Set it on the main queue. The main queue is not always
+    /// the main thread (the CLI's dispatchMain drains it on a worker), so a main-actor consumer
+    /// hops with `Task { @MainActor }` rather than assuming isolation.
+    var onTick: (([String: Int]) -> Void)?
 
     private let lock = NSLock()
     // Guarded by `lock`.
@@ -60,7 +66,7 @@ final class Stats {
     }
 
     /// Call once, on the main queue.
-    func startPrinting() {
+    package func startPrinting() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard timer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
@@ -96,6 +102,7 @@ final class Stats {
         if quiet { armed = true }
         lock.unlock()
 
+        onTick?(snapshot)
         if quiet {
             if fast { fast = false; schedule() }       // heartbeat from now on, until woken
             print("[30s] idle · 0 clients · \(windows) windows")

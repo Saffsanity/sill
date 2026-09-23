@@ -2,9 +2,10 @@ import Foundation
 import CoreVideo
 import CoreMedia
 
-/// See main.swift. Synthetic 1512×949 420f frames at 60 Hz for 2.5 s per encoder.
-enum EncoderSelfTest {
-    static func run() {
+/// `--encoder-selftest` (see the CLI's main.swift; the app takes the flag too). Synthetic
+/// 1512×949 420f frames at 60 Hz for 2.5 s per encoder.
+package enum EncoderSelfTest {
+    package static func run() {
         print("== launch probe (what SillHost does at startup)")
         print("   hardware encoder \(EncoderProbe.hardwareResponds() ? "responds" : "does not respond: the host would start on the software encoder")")
         for software in [false, true] {
