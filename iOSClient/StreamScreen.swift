@@ -80,7 +80,14 @@ struct StreamScreen: View {
     /// The thumbnail whose traffic-light submenu is open (held for 1.5 s). The bars clip their
     /// content, so the submenu is drawn by this root, anchored to the thumbnail's frame.
     @State private var windowMenu: UInt32? = nil
+    /// The Settings panel (the Mac's streaming settings) is open. Up here, next to the drawer, so a
+    /// rotation keeps it open and it re-anchors in the other layout.
+    @State private var settingsOpen = false
+    /// The keyboard was up (the overlay first responder) when the panel opened: closing the panel
+    /// puts it back.
+    @State private var keyboardBeforeSettings = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
     /// The viewport send waiting out its debounce, if any.
@@ -90,12 +97,13 @@ struct StreamScreen: View {
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
     /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
     init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false,
-         scaleOpen: Bool = false, textScale: Double? = nil) {
+         scaleOpen: Bool = false, textScale: Double? = nil, settingsOpen: Bool = false) {
         self.client = client
         _drawerOpen = State(initialValue: drawerOpen)
         _keyboardShown = State(initialValue: keyboardShown)
         _scaleOpen = State(initialValue: scaleOpen)
         _textScale = State(initialValue: textScale)
+        _settingsOpen = State(initialValue: settingsOpen)
     }
     #endif
 
@@ -127,6 +135,10 @@ struct StreamScreen: View {
             // A gesture cut short by a scene change never ends: put the transient UI away.
             if phase != .active { scaleOpen = false; windowMenu = nil }
         }
+        // One thing open at a time: the Aa ruler and a thumbnail's traffic lights put the Settings
+        // panel away. (Opening the panel closes them, the drawer and the keyboard.)
+        .onChange(of: scaleOpen) { _, open in if open { setSettings(false) } }
+        .onChange(of: windowMenu) { _, menu in if menu != nil { setSettings(false) } }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
@@ -178,13 +190,43 @@ struct StreamScreen: View {
 
     private func closeWindowMenu() { windowMenu = nil }
 
+    /// Opens or closes the Settings panel. Opening puts the drawer, the traffic lights and the Aa
+    /// ruler away and takes the keyboard down: with the overlay not first responder no hardware
+    /// key reaches the Mac, and Esc (or ⌘.) reaches the panel's Done instead. Closing (Done, a tap
+    /// outside, the Settings button, Esc, the VoiceOver escape gesture) puts the keyboard back if
+    /// the panel took it down; the Apps and Keyboard buttons close it with `restoreKeyboard: false`
+    /// because they decide about the keyboard themselves.
+    private func setSettings(_ open: Bool, restoreKeyboard: Bool = true) {
+        guard open != settingsOpen else { return }
+        if open {
+            withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+            windowMenu = nil
+            scaleOpen = false
+            keyboardBeforeSettings = keyboardShown
+            overlay.setKeyboard(shown: false)
+        }
+        let motion: Animation = open && !reduceMotion ? .spring(duration: 0.25, bounce: 0.15) : .easeOut(duration: 0.18)
+        withAnimation(motion) { settingsOpen = open }
+        if !open {
+            if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
+            keyboardBeforeSettings = false
+        }
+    }
+
+    /// Grows from the Settings button's corner, the way a popover would; a plain fade under Reduce Motion.
+    private var settingsTransition: AnyTransition {
+        reduceMotion ? .opacity : .scale(scale: 0.94, anchor: .topTrailing).combined(with: .opacity)
+    }
+
     private func landscape(bar: BarMetrics) -> some View {
         VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                   toggleKeyboard: { overlay.toggleKeyboard() })
-            contentArea
+                   settingsOpen: settingsOpen,
+                   toggleKeyboard: { overlay.toggleKeyboard() },
+                   setSettings: { setSettings($0, restoreKeyboard: $1) })
+            contentArea(bar: bar)
         }
     }
 
@@ -193,12 +235,15 @@ struct StreamScreen: View {
                              keyboardShown: $keyboardShown,
                              textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                              latched: $latched, overlay: overlay,
+                             settingsOpen: settingsOpen,
+                             setSettings: { setSettings($0, restoreKeyboard: $1) },
+                             settingsTransition: settingsTransition,
                              onPanelSize: { panelSize = $0 })
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
-    private var contentArea: some View {
+    private func contentArea(bar: BarMetrics) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
 
@@ -237,6 +282,25 @@ struct StreamScreen: View {
                     .padding(.bottom, 14)
                     .transition(.opacity)
             }
+
+            // The drawer's mirror on the trailing edge, its right side lined up with the Settings
+            // button's. No dim: the stream stays as it is, so a change can be watched taking effect.
+            // A tap on it closes the panel and never clicks the Mac; the bar above stays live.
+            if settingsOpen {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { setSettings(false) }
+                    .accessibilityHidden(true)
+
+                HostSettingsPanel(client: client, close: { setSettings(false) })
+                    .frame(width: bar.settingsWidth)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
+                    .padding(.trailing, bar.padding)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(settingsTransition)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -263,18 +327,20 @@ struct BarMetrics {
     let thumbPad: CGFloat
     let thumbFade: Double
     let showsTextSize: Bool
+    /// The Settings panel hanging under this bar.
+    let settingsWidth: CGFloat
 
     static let regular = BarMetrics(height: 86, padding: 22, gap: 12,
                                     buttonWidth: 66, buttonHeight: 66, buttonSpacing: 4,
                                     thumbWidth: 104, thumbHeight: 66, thumbRadius: 10,
                                     thumbSpacing: 16, thumbPad: 10, thumbFade: 0.86,
-                                    showsTextSize: true)
+                                    showsTextSize: true, settingsWidth: 360)
 
     static let compact = BarMetrics(height: 78, padding: 14, gap: 12,
                                     buttonWidth: 64, buttonHeight: 58, buttonSpacing: 3,
                                     thumbWidth: 92, thumbHeight: 58, thumbRadius: 9,
                                     thumbSpacing: 14, thumbPad: 10, thumbFade: 0.88,
-                                    showsTextSize: true)
+                                    showsTextSize: true, settingsWidth: 340)
 }
 
 private struct TopBar: View {
@@ -285,13 +351,20 @@ private struct TopBar: View {
     @Binding var textScale: Double?
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
+    let settingsOpen: Bool
     let toggleKeyboard: () -> Void
+    /// Opens or closes the Settings panel; the second argument says whether closing puts the
+    /// keyboard back (see `StreamScreen.setSettings`).
+    let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
 
     var body: some View {
         HStack(spacing: metrics.gap) {
             button(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
                    accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                   action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } })
+                   action: {
+                       setSettings(false, false)
+                       withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
+                   })
 
             WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                         radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
@@ -308,7 +381,7 @@ private struct TopBar: View {
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
-                   action: toggleKeyboard)
+                   action: { setSettings(false, false); toggleKeyboard() })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -318,9 +391,10 @@ private struct TopBar: View {
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
-            button(open: false, symbol: "xmark.circle", label: "Leave",
-                   accessibilityLabel: "Disconnect from the Mac",
-                   action: { client.disconnect() })
+            // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
+            button(open: settingsOpen, symbol: "gearshape", label: "Settings",
+                   accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                   action: { setSettings(!settingsOpen, true) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
         }
