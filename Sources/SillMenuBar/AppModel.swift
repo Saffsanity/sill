@@ -52,10 +52,18 @@ final class AppModel {
                 let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
-                // One path from the controls to the host. The task reads the settings when it runs,
-                // not when it was made, so tasks that run out of order still end on the last value.
-                settings.onChange = { [settings, weak c] in
-                    Task { @MainActor in c?.setTarget(settings.config) }
+                // One path from the controls to the host, synchronous: the host's target equals
+                // settings.config at every main-actor turn, so a device's change and a menu click
+                // never undo each other.
+                settings.onChange = { [settings, weak c] in c?.setTarget(settings.config) }
+                // A device's change goes through HostSettings like a menu click: saved (only the keys
+                // it changed) and shown live in Settings and the menu. Laid over settings.config, never
+                // over the host's value. No validated(): the host accepted only menu values, and
+                // validating here would rewrite unrelated hand-set keys (which save(changedFrom:)
+                // would then write).
+                c.onDeviceSettingsChange = { [settings] change in
+                    settings.config = settings.config.applying(change)
+                    return settings.config
                 }
                 await c.start(preselect: nil, promptForPermissions: false)
                 Stats.shared.startPrinting()

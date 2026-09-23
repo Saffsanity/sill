@@ -6,9 +6,12 @@ import SillHostCore
 /// UserDefaults (the bundle's domain, me.saffer.sill.mac; the bare SillMenuBar binary's is
 /// "SillMenuBar"). Main actor, like everything that shows or changes them.
 ///
-/// One path to the host: the menu, the Settings panes and the debug hooks all assign `config`.
+/// One path to the host: the menu, the Settings panes, the debug hooks and connected devices (through
+/// the coordinator's `onDeviceSettingsChange`, which the model points here) all assign `config`.
 /// Its didSet saves what changed and calls `onChange`, which the model points at
-/// `StreamCoordinator.apply`. No sliders anywhere: one change is one apply and at most one restart.
+/// `StreamCoordinator.setTarget`, synchronously, so the host's target and `config` never disagree
+/// between two main-actor turns. No sliders anywhere: one change is one apply and at most one
+/// restart.
 ///
 /// Defaults are registered from `HostConfig.standard`, so a fresh install streams exactly like the
 /// CLI, and launch arguments override for one run without being saved (`-maxFPS 60`), because a
@@ -31,8 +34,8 @@ final class HostSettings {
             onChange?()
         }
     }
-    /// Called after `config` changed and was saved.
-    @ObservationIgnored var onChange: (() -> Void)?
+    /// Called after `config` changed and was saved, on the main actor, before the assignment returns.
+    @ObservationIgnored var onChange: (@MainActor () -> Void)?
 
     /// The Settings tab shown last, reopened next time.
     var settingsTab: SettingsTab { didSet { defaults.set(settingsTab.rawValue, forKey: Key.settingsTab) } }
