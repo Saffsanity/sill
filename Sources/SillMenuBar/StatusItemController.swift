@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import SillHostCore
+import StreamProtocol
 
 /// One line of the status menu, as data. `MenuBuilder` makes the list, the status item turns it
 /// into NSMenuItems, and the previews hook prints it to menu.txt, so the three cannot disagree.

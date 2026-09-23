@@ -79,28 +79,3 @@ final class HostSettings {
         if config.virtualDisplay != old.virtualDisplay { defaults.set(config.virtualDisplay, forKey: Key.virtualDisplay) }
     }
 }
-
-/// Bitrate presets, per 60 fps (a 120 fps stream gets twice as much). Balanced is the CLI's value.
-enum QualityPreset: Int, CaseIterable, Identifiable {
-    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, maximum = 40_000_000
-
-    var id: Int { rawValue }
-
-    var name: String {
-        switch self {
-        case .efficient: "Efficient"
-        case .balanced: "Balanced"
-        case .high: "High"
-        case .maximum: "Maximum"
-        }
-    }
-
-    /// "Balanced — 15 Mbps".
-    var title: String { "\(name) — \(rawValue / 1_000_000) Mbps" }
-
-    /// The label for any stored bitrate: a preset's title, or "Custom — 12 Mbps" for one set by
-    /// hand (`defaults write`, a launch argument).
-    static func title(forBitrate bitrate: Int) -> String {
-        QualityPreset(rawValue: bitrate)?.title ?? "Custom — \(HostConfig.mbps(bitrate)) Mbps"
-    }
-}

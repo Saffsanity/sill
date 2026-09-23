@@ -23,6 +23,12 @@ public enum StreamMessageKind: UInt8 {
                              // session is live (an idle downlink dozes and every next packet waits up to ~300 ms)
     case cursorShape = 14    // host → client: CursorShapeBlob, the Mac's current cursor image, whenever it changes
     case windowCommand = 15  // client → host: JSON WindowCommand — close, minimize or full-screen a window (the bar's long-press menu)
+    case hostSettings = 16   // host → client: JSON HostSettingsState (see HostSettings.swift) — the settings as the Mac's menu
+                             // shows them and what this host allows; on connect (right after the window list), whenever it
+                             // changes, and with `answering` set as the reply to one device's changeSettings
+    case changeSettings = 17 // client → host: JSON HostSettingsChange — only the fields one control changed, plus a token.
+                             // No ack kind, no "send me the state" kind, no version handshake: the answer is a hostSettings
+                             // sent to that device alone
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
