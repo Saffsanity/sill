@@ -151,6 +151,28 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   a virtual display exists, so every SCK call on these paths is bounded
   (`WindowCatalog.shareableContent(…timeout:)`) and `prepare` refuses to make
   a display without the permission.
+  Learned (2026-09-23): the window list shows an AX move only once the app
+  commits it, a few to tens of ms after the AX writes return (more for an app
+  slow to lay out); the AX frame reads the new frame at once. So the eviction
+  scan right after a switch found the window just sent home still listed on
+  the display, matched no AX window to that frame and printed "A System
+  Settings window sits on the virtual display and could not be matched…"
+  (twice, both false alarms: the window went home). Fixed: `releaseWindow`
+  keeps the element (`lastReleased`) and the scan judges that window by its
+  live AX frame: home, skipped; still overlapping (Messages kept a wider
+  frame, a 24 pt strip), evicted and centred by its live size. The warning now
+  names the window ID and listed frame. Probe on its own off-screen window,
+  scan at once: the old logic warned in 21 of 30 scans, the new in none, and
+  picked the overlapping window for eviction 20 of 20. Not yet run with real
+  windows.
+  Learned, not fixed: `prepare`'s settle loop reads only the window list and
+  stops after three identical reads 20 ms apart, counted from the frame before
+  the move, so a pure resize the app commits late (1Password, Electron:
+  between 45 ms and ~0.45 s) looks settled at once and the old frame becomes
+  the crop until the catalog's next poll re-selects (~0.4 s of wrong crop).
+  "Moved … from" always prints the home frame, not the frame before the move.
+  Proposed: also read the AX frame after the writes, count stillness only once
+  the listed size has left the old one, 1 s deadline, log the real "from".
   **Untested, for Noah** (Screen Recording + Accessibility on the terminal):
   (a) `swift run -c release SillHost --virtual-display`, pick a window: the
   log shows "Virtual display … created", "Moved …", "Capturing … of virtual
@@ -218,10 +240,29 @@ set so ProMotion iPhones render above 60.
 Dead-client eviction is time-based (no frame drained for 4 s, none in the first
 8 s after connect): the frame-count rule evicted the simulator at full Retina.
 A client evicted while the Mac is still advertised now retries on a timer.
-Caveat on (1): the flat-RTT verification may have run while the iPad was on USB
-networking (RTT 0–1 ms at times); a later Wi-Fi reading still showed the sawtooth
-with ticks flowing. Treat the tick keepalive as unproven until re-measured on
-Wi-Fi only; the client-drawn cursor is the fix that does not depend on it.
+Learned (2026-09-23; this replaces the caveat on (1)): the RTT spikes left with
+ticks flowing come from AWDL, and Sill turns AWDL on itself. `includePeerToPeer
+= true` on the host's NWListener (`StreamServer`) and the iPad's NWBrowser and
+NWConnection (`StreamClient`), there since the first commit, makes the kernel
+enable AWDL as `_sill._tcp` registers ("Enabling AWDL due to Mdns"; off ~3 s
+after Sill quits). The Mac's one radio then leaves the Wi-Fi channel on a
+512 TU schedule (kernel: infra 72 % while streaming, 48 % or 0 % around
+switches). A 20 Hz ping from the Mac to its gateway stalls up to ~97 ms once
+every 524 ms (p90 48 ms, 17 % over 10 ms; with AWDL off, p90 4 ms and max
+13 ms). The same Bonjour service registered with the AWDL flag gave p90
+67.5 ms with 32 % of pings delayed, against 3.9 ms without the flag. An rtt
+sample that lands in a stall reads baseline plus 0–100 ms. AWDL carries none
+of Sill's data (the connection is on en0). Ticks keep the radio awake but not
+on the channel, and every earlier RTT reading, those in (1) and (2) included,
+ran with AWDL on. The fix, not applied yet, is to drop `includePeerToPeer` on
+both sides: discovery then needs a shared network, as it does today, and the
+iPad side still needs a device run. Secondary: `inflight > 2` counts only what
+Network.framework has not handed to the socket, so after a switch the socket
+buffer (autotuned up to 4 MB) can hold ~200 ms of frames ahead of pongs (frame
+age 188–229 ms, no `net.dropped`). The client samples frame age every 15th
+frame, so a second with fewer than 15 frames repeats the last value. It sends
+one rtt sample per report, and the host logs every other report. Its fps and
+ping timers are default-mode timers, so they stop while a scroll tracks.
 
 **Frozen stream, 2026-09-22 evening — the Mac's hardware video encoder wedged.**
 Every new HEVC session (and later H.264) accepted one frame and never returned

@@ -344,7 +344,9 @@ final class WindowSizer {
         return size
     }
 
-    private static func frame(of element: AXUIElement) -> CGRect? {
+    /// The window's AX frame (CG global points). It reads a move as soon as the app accepted it,
+    /// before the window list shows it (VirtualStage's eviction scan relies on that).
+    static func frame(of element: AXUIElement) -> CGRect? {
         guard let origin = position(of: element), let size = size(of: element) else { return nil }
         return CGRect(origin: origin, size: size)
     }

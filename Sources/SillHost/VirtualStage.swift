@@ -125,6 +125,12 @@ final class VirtualStage {
     private var generation = 0
     /// Where the Mac cursor was before the host first drove it onto the virtual display.
     private var cursorBefore: CGPoint?
+    /// The window `releaseWindow` last sent home. The window list shows an AX move only once the
+    /// app has committed it, a few to tens of ms after the AX writes return, while the AX frame
+    /// reads home at once. The eviction scan right after a switch saw the window still listed on
+    /// the display, found no AX window at that frame and warned about a window already on its way
+    /// home (System Settings, twice, 2026-09-23), so `evictForeignWindows` asks this element instead.
+    private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
 
@@ -552,15 +558,24 @@ final class VirtualStage {
             let name = (info[kCGWindowName as String] as? String) ?? ""
             if name.lowercased().contains("layerprobe") { continue }
             let owner = (info[kCGWindowOwnerName as String] as? String) ?? "?"
-            guard let ax = WindowSizer.axWindow(pid: pid, frame: rect) else {
-                print("A \(owner) window sits on the virtual display and could not be matched to move it")
+            // The window just sent home may still be listed at its staged frame (see `lastReleased`):
+            // judge it by its own element's live frame, not by matching the listed one.
+            var known: (element: AXUIElement, frame: CGRect)?
+            if let r = lastReleased, r.windowID == id, let f = WindowSizer.frame(of: r.element) {
+                if !f.intersects(bounds) { continue }   // on its way home; the window list has not caught up
+                known = (r.element, f)                  // still overlaps (the app kept a larger size): evict it
+            }
+            guard let ax = known?.element ?? WindowSizer.axWindow(pid: pid, frame: rect) else {
+                // Which window, so a real stranger can be identified from the log.
+                print("A \(owner) window sits on the virtual display and could not be matched to move it (window \(id) at \(Self.fmt(rect)))")
                 continue
             }
             if WindowSizer.isFullScreen(ax) {
                 print("A \(owner) window is full screen on the virtual display; it cannot be moved from here")
                 continue
             }
-            let home = WindowSizer.homeFrame(size: rect.size)
+            // Centre it by its live size: a stale listed rect would carry the staged size.
+            let home = WindowSizer.homeFrame(size: (known?.frame ?? rect).size)
             let err = WindowSizer.setPosition(ax, home.origin)
             print("Moved a \(owner) window off the virtual display to \(Self.fmt(home)) (\(WindowSizer.axErrorName(err)))")
             Stats.shared.bump("vd.evicted")
@@ -590,6 +605,7 @@ final class VirtualStage {
             print(ok ? "Restored \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame))"
                      : "Could not restore \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame)); it is on a real display but not where it was")
             Stats.shared.bump("vd.restored")
+            lastReleased = (p.windowID, p.element)   // for the eviction scan that may follow at once
         }
         // The Mac cursor followed the device onto the virtual display: bring it back where it was
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
