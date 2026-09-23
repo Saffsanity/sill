@@ -20,6 +20,7 @@
 		A1000001000000000000A006 /* StreamProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A1000001000000000000D001 /* StreamProtocol */; };
 		A1000001000000000000A010 /* DiagnosticsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F010 /* DiagnosticsHUD.swift */; };
 		A1000001000000000000A011 /* StreamClient+Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F011 /* StreamClient+Viewport.swift */; };
+		A1000001000000000000A012 /* HostSettingsLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F012 /* HostSettingsLedger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		A1000001000000000000F00C /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
 		A1000001000000000000F010 /* DiagnosticsHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DiagnosticsHUD.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F011 /* StreamClient+Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Viewport.swift"; sourceTree = "<group>"; };
+		A1000001000000000000F012 /* HostSettingsLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsLedger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +63,7 @@
 				A1000001000000000000F008 /* StreamScreen.swift */,
 				A1000001000000000000F00A /* PortraitStreamScreen.swift */,
 				A1000001000000000000F003 /* StreamClient.swift */,
+				A1000001000000000000F012 /* HostSettingsLedger.swift */,
 				A1000001000000000000F004 /* HEVCDisplayView.swift */,
 				A1000001000000000000F009 /* InputOverlay.swift */,
 				A1000001000000000000F00B /* TrackpadView.swift */,
@@ -169,6 +172,7 @@
 				A1000001000000000000A007 /* StreamScreen.swift in Sources */,
 				A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */,
 				A1000001000000000000A003 /* StreamClient.swift in Sources */,
+				A1000001000000000000A012 /* HostSettingsLedger.swift in Sources */,
 				A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */,
 				A1000001000000000000A008 /* InputOverlay.swift in Sources */,
 				A1000001000000000000A00A /* TrackpadView.swift in Sources */,

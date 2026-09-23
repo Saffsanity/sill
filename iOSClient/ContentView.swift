@@ -36,7 +36,12 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { client.startBrowsing() }
+        .onAppear {
+            client.startBrowsing()
+            #if DEBUG
+            client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
+            #endif
+        }
     }
 }
 
@@ -63,6 +68,9 @@ struct ContentView: View {
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
 /// * `-SillHUD 1` — not a harness argument, but it combines with these: the fps / frame age / RTT
 ///   readout on the display view (see `DiagnosticsHUDView`). It works with or without the harness.
+/// * `-SillConnect 127.0.0.1:PORT` — connect straight to that address, in the normal app and under
+///   `-SillLive 1`. The synthetic test hosts (`SillHost --synthetic`, the bare `SillMenuBar
+///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -133,7 +141,12 @@ struct LayoutHarness: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
-        .onAppear { if spec.live { live.startBrowsing() } }
+        .onAppear {
+            if spec.live {
+                live.startBrowsing()
+                live.connectFromLaunchArgument()
+            }
+        }
     }
 
     @ViewBuilder private var screen: some View {
