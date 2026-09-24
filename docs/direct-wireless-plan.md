@@ -1105,3 +1105,59 @@ tapped by coordinates read from screenshots (the simulator tool's inspect was un
 0.15 s press: an instantaneous synthetic tap on a switch inside the panel's scroll view was taken
 by the scroll view. S3's Mac-side test client picks the Desktop on connecting, which restarts that
 pipeline once by itself; the setting's own changes never did.
+
+### Review fixes (second review, 2026-09-24)
+
+These supersede the parts of §6–§9 they name.
+
+- **An automatic reconnect takes a Direct row only after 3 s.** The row must have stayed Direct,
+  with no network row of that name, for `networkFirst` (`DiscoveryPolicy.directSince` and
+  `reconnectRow`); a network row is still taken at once. The reason: a Mac coming back to the
+  shared network (Sill relaunched, the Mac awake) registers there and over AWDL together, and while
+  the nearby browser runs (a remembered Mac missing for 3 s turns it on) it can report awdl0 before
+  the network browser reports the Wi‑Fi record. The old reconnect took that Direct row, and the
+  whole home session ran over AWDL. A tap on a Direct row is not held back. Cost: a direct reconnect
+  (W6) takes about 8 s instead of 5.
+- **The memory is keyed by the Bonjour name the connection was made to** (the connection's service
+  endpoint), not the window list's `macName`, which §6.1 and §11 named. `decide` compares the memory
+  with the browsers' instance names, and Bonjour renames a clashing registration ("Mac (2)") while the
+  window list still says "Mac", so that Mac looked missing at every launch and the nearby search ran
+  at home. A connection by address (`-SillConnect`) teaches nothing.
+- **Search Nearby turns into a muted "Also looking nearby"** of the button's 44 pt, whatever the
+  status line says, and VoiceOver announces it. Before, the only feedback was the idle status's
+  "…and nearby", which a disconnect's message ("Mac mini disconnected…") or "Browse failed" never
+  showed. Under the hint the idle status now stays "Looking for Macs on this network", since the line
+  says the rest; it adds "and nearby" when no hint shows (rows listed). §6.2's "the status reads
+  '…and nearby'" and S2's expectation change accordingly. The tap moves nothing: the title stays at
+  293.0 pt at 1000×710.
+- **Local Network access denied** (the network browser waits with `PolicyDenied`, TN3179): the
+  status reads "To find your Mac, allow Local Network for Sill in Settings.", with no hint and no
+  nearby search, which would be refused as well (`DiscoveryPolicy.Input.localNetworkDenied`). When
+  the browser is ready again, the network gets its 3 s afresh. The harness case is
+  `-SillConnectCase denied`. The simulator does not enforce Local Network access, so only a device
+  shows the real path (W4).
+- **The panel's warning** (the footer's "turning this off can disconnect it" and the switch's
+  accessibility hint) shows only while the switch shows on. §7 tied it to `connectedDirectly` alone.
+- **Copy:** Settings › Permissions says frames go "straight to your devices" (no "on this network":
+  a direct device shares none), so H11 now also expects `pane-permissions-{light,dark}.png` to differ
+  from the base. The README's menu list gains the item and says only a streaming setting restarts
+  the stream; its Direct Wireless paragraph says turning it off can disconnect a directly connected
+  device. In CLAUDE.md, the connect screen's title no longer jumps *sideways*: the column is still
+  centred vertically, so the hint moves it up 44 pt.
+- **Not changed:** the trackpad-stutter paragraph's present-tense "Sill turns AWDL on itself" stays.
+  It sits in a dated "Learned" paragraph and is still true with the setting on; only the device-side
+  clause was added. Sill.app's Local Network alert text (`Packaging/Info.plist`, "on the same
+  network") was outside the findings and is unchanged.
+
+Checks for these fixes: H1 (a clean Mac build and iOS Debug and Release, each with only its known
+warning); H2 again (identical, masked and sorted); H11 (only the two Permissions panes differ from the
+previous step); H12 (unchanged, 44 passes); H13 grown to 68 checks, all passing, including replays of
+the home race (awdl0 at 0 s, the network row at 0.8 s or 2.9 s: the network row taken), the café case
+(taken at exactly 3 s), a flapping row, exact names and the denied state; six mutants of the new code,
+all caught. A replay of the status rule, extracted verbatim from `updateDiscovery` and run against the
+real policy: 13 states, including the finding's disconnect-then-tap sequence. H14 again. Simulator:
+the connect cases (looking, hint, nearby, denied) at the four sizes; Search Nearby tapped at the four
+sizes (the line in its place, status unchanged, title unmoved); the `directlink` switch tapped off
+(the warning goes, "Connected directly" stays) and on again (it returns); the normal app connected by
+address to `SillHost --synthetic --direct-wireless` wrote no memory; unconnected with no memory, it
+started no nearby search and showed the real Mac as a plain row.

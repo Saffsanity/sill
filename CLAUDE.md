@@ -45,19 +45,31 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
 - iOS: the network browser and connections to the Macs it lists never use
   peer-to-peer. A nearby (peer-to-peer) browser runs only while not connected,
   and only when a Mac this device last saw with the setting on
-  (`Sill.directWirelessMacs`, from each state, keyed by the Mac's name) is
-  missing from the network 3 s after the connect screen began looking, or
-  after Search Nearby (offered when nothing is listed after 3 s); once started
-  it runs until a connection is ready (`DiscoveryPolicy`, pure, checked with
-  swiftc). A Mac seen only over awdl/llw is a "Direct" row, the one kind
+  (`Sill.directWirelessMacs`, from each state, keyed by the Bonjour name the
+  connection was made to, which is what the browsers list: the window list's
+  "Mac" stays "Mac" when Bonjour renames a clash "Mac (2)"; a connection by
+  address teaches nothing) is missing from the network 3 s after the connect
+  screen began looking, or after Search Nearby (offered when nothing is listed
+  after 3 s; once it runs, a muted "Also looking nearby" of the button's height
+  takes the button's place whatever the status line says, VoiceOver announces
+  it, and the idle status adds "and nearby" only when no hint shows); once
+  started it runs until a connection is ready (`DiscoveryPolicy`, pure, checked
+  with swiftc). A Mac seen only over awdl/llw is a "Direct" row, the one kind
   connected with peer-to-peer; a Mac the network lists is always a network row,
   so at home nothing takes AWDL. Reconnects match the name exactly ("MacBook
-  Pro" and "MacBook Pro (2)" are two Macs) and prefer the network row. The
-  panel's last group is the row (never disabled), after the closing footer,
-  with "Connected directly" in the header and a warning in its footer while
-  this device's own connection runs over AWDL. The connect screen's column is
-  anchored leading now, so its title no longer jumps when a row or the hint
-  appears.
+  Pro" and "MacBook Pro (2)" are two Macs) and take the network row at once, a
+  Direct row only once it has stayed Direct for 3 s: a Mac back on the shared
+  network (Sill relaunched, the Mac awake) registers there and on AWDL
+  together, and the nearby browser can report awdl0 first. A tap is never held
+  back. Local Network access denied (the network browser waits with
+  PolicyDenied): the status says "To find your Mac, allow Local Network for
+  Sill in Settings.", with no hint and no nearby search. The panel's last group
+  is the row (never disabled), after the closing footer, with "Connected
+  directly" in the header while this device's own connection runs over AWDL,
+  and then, while the switch shows on, a warning in its footer and hint. The
+  connect screen's column is anchored leading now, so its title no longer jumps
+  sideways when a row or the hint appears; it is still centred vertically, so
+  it moves up by half of what they add.
 - Verified without permissions (the plan's H0–H15 and S1–S4): the kernel's
   AWDL service count (ValidSvc, baseline 2 from Noah's PR #4 Sill.app) rises by
   2 exactly for a registration made with the AWDL flag: `dns-sd -includeAWDL -R`
@@ -89,7 +101,14 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   constant, no awdl0 row) while 139 of 139 connections across two replacements
   are served; after a total listener failure the next toggle retries; the
   device toggling on then off while streaming (two replacements, same port,
-  frames throughout, ends off on both sides).
+  frames throughout, ends off on both sides). A second review's fixes (the
+  plan's "Review fixes"), verified: clean builds; the CLI identical again;
+  previews differ from the step before only in the Permissions panes; the
+  policy check at 68 (the home race, the café case, denied; six mutants
+  caught) and a replay of the status rule (13 states); photos of the connect
+  cases (looking, hint, nearby, denied) and of Search Nearby tapped at the four
+  sizes (the title does not move); the panel's warning goes when its switch
+  is tapped off; an address connection to a host with it on writes no memory.
 - **Untested, for Noah (the plan's W1–W9):** W1 the payoff: both builds
   installed, `/usr/bin/log stream --style compact --predicate 'process ==
   "kernel" AND (eventMessage CONTAINS "abling AWDL" OR eventMessage CONTAINS
@@ -104,16 +123,22 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   it on, the iPad on the iPhone's hotspot and the Mac at home: within 3–5 s a
   "Direct" row; connected, the host logs `%awdl0` and the header says
   "Connected directly" (note frame age and rtt). W4 first use (reinstall, café
-  conditions): the hint and Search Nearby after 3 s, the Mac as Direct; a
-  relaunch there searches nearby by itself. W5 turned off from the Mac while
-  connected directly: does the stream continue while the socket is active, and
-  for how long? Then fix the footer's "can disconnect" to match. W6 home →
-  café while streaming with it on: reconnects directly within ~5 s without a
-  tap. W7 relaunch Sill.app with it on: `dns-sd -t 3 -includeAWDL -B _sill._tcp
-  local` lists one instance on awdl0, no "(2)". W8 the CLI with and without
+  conditions): the hint and Search Nearby after 3 s, then "Also looking
+  nearby", the Mac as Direct; a relaunch there searches nearby by itself; once
+  with Don't Allow on the Local Network alert: the status asks for Local
+  Network and no hint shows, and allowing it in Settings brings the list back.
+  W5 turned off from the Mac while connected directly: does the stream
+  continue while the socket is active, and for how long? Then fix the footer's
+  "can disconnect" to match. W6 home → café while streaming with it on:
+  reconnects directly within ~8 s without a tap (3 s for the network, then the
+  Direct row's own 3 s); and back home, relaunching Sill.app, the iPad
+  reconnects over the network (the host logs no `%awdl0`). W7 relaunch
+  Sill.app with it on: `dns-sd -t 3 -includeAWDL -B _sill._tcp local` lists
+  one instance on awdl0, no "(2)". W8 the CLI with and without
   `--direct-wireless`. W9 mixed builds (PR #4 iPad with this host, this iPad
   with PR #4's Sill.app: both connect on the LAN, the latter with no row) and
-  VoiceOver ("Mac mini, Direct", the hint, Search Nearby, the row).
+  VoiceOver ("Mac mini, Direct", the hint, Search Nearby and its announcement,
+  the row).
 - Known, not fixed here: the simulator's browsers run in the Mac's
   mDNSResponder, so a nearby search on the simulator turns the Mac's AWDL on:
   never measure latency with a simulator sitting on the connect screen.
@@ -519,7 +544,9 @@ of Sill's data (the connection is on en0). Ticks keep the radio awake but not
 on the channel, and every earlier RTT reading, those in (1) and (2) included,
 ran with AWDL on. The fix is applied (2026-09-24, Direct Wireless Connection
 in the current step): `includePeerToPeer` is off by default on both sides and
-comes back only for a Mac whose owner turns the setting on; the iPad side still
+comes back only for a Mac whose owner turns the setting on, and on the device
+during a nearby search (Search Nearby, or a Mac last seen with the setting on
+missing from the network), which stops once connected; the iPad side still
 needs a device run. Secondary: `inflight > 2` counts only what
 Network.framework has not handed to the socket, so after a switch the socket
 buffer (autotuned up to 4 MB) can hold ~200 ms of frames ahead of pongs (frame
@@ -714,8 +741,9 @@ good.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
   `FoundMac` rows; connection, parsing, reconnect, ping, generic `send`),
-  `DiscoveryPolicy` (when to look nearby, the rows, the memory of Macs with
-  Direct Wireless on; pure, checked with swiftc), `StreamScreen`
+  `DiscoveryPolicy` (when to look nearby, the rows, when a reconnect may take
+  a Direct row, the memory of Macs with Direct Wireless on; pure, checked with
+  swiftc), `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
   layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
@@ -789,7 +817,7 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillSettings 1` (the Settings panel open), `-SillSettingsCase
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect` (the mock Mac's settings; it answers a pick after 0.35 s),
-`-SillConnectCase looking|hint|nearby` (the connect screen in a discovery state;
+`-SillConnectCase looking|hint|nearby|denied` (the connect screen in a discovery state;
 the mock never browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`

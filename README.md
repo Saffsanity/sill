@@ -28,9 +28,10 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
 rate, frame age and round trip, and what is streaming; it holds the
-virtual display, frame rate, quality and resolution controls, Launch at Login,
-Permissions, Show Log… and Settings… (⌘,). Changes apply at once; the current
-stream restarts for a moment. Opening Sill.app while it runs (Finder,
+virtual display, frame rate, quality and resolution controls, Direct Wireless
+Connection, Launch at Login, Permissions, Show Log… and Settings… (⌘,).
+Changes apply at once; a change to a streaming setting restarts the current
+stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
 has no room for the icon.
 
@@ -67,7 +68,8 @@ updating from a Sill that always used AWDL, because while it is on the Mac's
 Wi-Fi keeps leaving its network's channel (up to ~100 ms twice a second), which
 made Wi-Fi streams stutter; on a shared network AWDL carries none of Sill's
 data anyway.
-Turning it on or off applies at once without interrupting a stream. A device
+Turning it on or off applies at once and never restarts the stream, though
+turning it off can disconnect a device that is connected directly. A device
 finds a Mac this way by itself once it has seen the Mac with it on, or when you
 tap Search Nearby on its connect screen; such a Mac shows as "Direct". With it
 on, anyone nearby running Sill can find and connect to the Mac.

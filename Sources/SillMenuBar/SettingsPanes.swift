@@ -260,7 +260,8 @@ private struct PermissionsPane: View {
         Form {
             Section {
                 PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices on this network.",
+                              // Not "on this network": a device connected over Direct Wireless shares none.
+                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices.",
                               button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
                     permissions.requestScreenRecording()
                 }

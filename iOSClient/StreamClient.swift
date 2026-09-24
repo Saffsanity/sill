@@ -25,7 +25,8 @@ final class StreamClient: ObservableObject {
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
     @Published var connected = false
-    /// The nearby (peer-to-peer) browser runs: the status line says so.
+    /// The nearby (peer-to-peer) browser runs: the status line says so, or under the hint the line
+    /// in Search Nearby's place.
     @Published var searchingNearby = false
     /// No Mac listed after the network's first seconds: the connect screen says why, and offers
     /// Search Nearby while the nearby browser is not running.
@@ -34,9 +35,11 @@ final class StreamClient: ObservableObject {
     /// turning Direct Wireless off can disconnect this device.
     @Published var connectedDirectly = false
 
-    /// The connect screen's idle status lines: only these follow the nearby search.
+    /// The connect screen's idle status lines: only these follow the nearby search and Local Network
+    /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
     static let lookingOnNetwork = "Looking for Macs on this network"
     static let lookingNearby = "Looking for Macs on this network and nearby"
+    static let allowLocalNetwork = "To find your Mac, allow Local Network for Sill in Settings."
 
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
@@ -165,16 +168,26 @@ final class StreamClient: ObservableObject {
     private var nearbyBrowser: NWBrowser?
     private var networkResults: [NWBrowser.Result] = []
     private var nearbyResults: [NWBrowser.Result] = []
-    /// Launch, or the last connection ending: the network gets its first seconds from here.
+    /// Launch, the last connection ending, or Local Network access coming back: the network gets its
+    /// first seconds from here.
     private var searchingSince = ProcessInfo.processInfo.systemUptime
     /// Search Nearby tapped since the last connection.
     private var askedNearby = false
+    /// The network browser waits with PolicyDenied: Local Network access is off for Sill.
+    private var localNetworkDenied = false
     /// The policy's next look (its 3 s mark).
     private var discoveryRecheck: DispatchWorkItem?
+    /// When each Direct row was first seen as one (DiscoveryPolicy.directSince): an automatic
+    /// reconnect takes a Direct row only once it has stayed Direct for the network's 3 s.
+    private var directSince: [String: Double] = [:]
+    /// The automatic reconnect's look at the moment the wanted Mac's Direct row has waited its 3 s,
+    /// rather than at the retry timer's next step, which can be up to 10 s away.
+    private var directReconnectCheck: DispatchWorkItem?
     /// Macs this device last saw with Direct Wireless on, most recent first (DiscoveryPolicy.remember),
-    /// keyed by the window list's Mac name like the bar order. A discovery hint only: the panel never
-    /// reads it, so a Mac's settings are still only ever the ones it sent on this connection. A launch
-    /// argument seeds it for one run: -Sill.directWirelessMacs '("Mac mini")', or '()' to clear it.
+    /// keyed by the Bonjour name the connection was made to, the name both browsers list the Mac
+    /// under. A discovery hint only: the panel never reads it, so a Mac's settings are still only ever
+    /// the ones it sent on this connection. A launch argument seeds it for one run:
+    /// -Sill.directWirelessMacs '("Mac mini")', or '()' to clear it.
     private var directWirelessMacs = UserDefaults.standard.stringArray(forKey: StreamClient.directWirelessMacsKey) ?? []
     private static let directWirelessMacsKey = "Sill.directWirelessMacs"
     #if DEBUG
@@ -232,12 +245,37 @@ final class StreamClient: ObservableObject {
                 self.discoveryChanged()
             }
         }
-        browser.stateUpdateHandler = { [weak self] state in
-            if case .failed(let e) = state { DispatchQueue.main.async { self?.status = "Browse failed: \(e)" } }
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
+            DispatchQueue.main.async {
+                guard let self, let browser, self.networkBrowser === browser else { return }
+                self.networkBrowserChanged(state)
+            }
         }
         browser.start(queue: queue)
         networkBrowser = browser
         discoveryChanged()
+    }
+
+    /// The network browser's state. Local Network access denied shows as waiting with PolicyDenied
+    /// (TN3179), at launch or after Don't Allow, and every Bonjour browse is refused then, the nearby
+    /// one too: the status says what to do instead of the hint, whose advice about the network would
+    /// be wrong. The browser becomes ready once Settings allows it. Main thread.
+    private func networkBrowserChanged(_ state: NWBrowser.State) {
+        switch state {
+        case .failed(let e):
+            status = "Browse failed: \(e)"
+        case .waiting(let e):
+            guard case .dns(let code) = e, code == DNSServiceErrorType(kDNSServiceErr_PolicyDenied), !localNetworkDenied else { return }
+            localNetworkDenied = true
+            updateDiscovery()
+        case .ready:
+            guard localNetworkDenied else { return }
+            localNetworkDenied = false
+            searchingSince = ProcessInfo.processInfo.systemUptime   // no hint before the network answers
+            updateDiscovery()
+        default:
+            break
+        }
     }
 
     /// Peer-to-peer, for a Mac whose Direct Wireless Connection is on and that shares no network
@@ -270,6 +308,7 @@ final class StreamClient: ObservableObject {
         let network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint) }
         let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces.map(\.name)) }
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.interfaces) })
+        directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: ProcessInfo.processInfo.systemUptime)
         let next = rows.compactMap { row -> FoundMac? in
             let endpoint = row.direct ? nearby.first { $0.name == row.name }?.endpoint : network.first { $0.name == row.name }?.endpoint
             return endpoint.map { FoundMac(name: row.name, endpoint: $0, direct: row.direct) }
@@ -287,7 +326,7 @@ final class StreamClient: ObservableObject {
         let out = DiscoveryPolicy.decide(DiscoveryPolicy.Input(
             now: now, connected: connected, onNetwork: Set(networkResults.map(Self.serviceName(of:))),
             remembered: Set(directWirelessMacs), searchingSince: searchingSince, askedNearby: askedNearby,
-            nearbyRunning: nearbyBrowser != nil, listed: macs.count))
+            nearbyRunning: nearbyBrowser != nil, listed: macs.count, localNetworkDenied: localNetworkDenied))
         if out.browseNearby, nearbyBrowser == nil {
             startNearbyBrowser()
             #if DEBUG
@@ -304,8 +343,11 @@ final class StreamClient: ObservableObject {
         }
         if searchingNearby != out.browseNearby { searchingNearby = out.browseNearby }
         if showsNearbyHint != out.showHint { showsNearbyHint = out.showHint }
-        if status == Self.lookingOnNetwork || status == Self.lookingNearby {
-            let idle = out.browseNearby ? Self.lookingNearby : Self.lookingOnNetwork
+        // "…and nearby" while the nearby search runs, but not under the hint: the line in Search
+        // Nearby's place says it there (ConnectScreen), and the status would only repeat it.
+        if [Self.lookingOnNetwork, Self.lookingNearby, Self.allowLocalNetwork].contains(status) {
+            let idle = localNetworkDenied ? Self.allowLocalNetwork
+                : (out.browseNearby && !out.showHint ? Self.lookingNearby : Self.lookingOnNetwork)
             if status != idle { status = idle }
         }
         discoveryRecheck?.cancel()
@@ -323,8 +365,8 @@ final class StreamClient: ObservableObject {
         askedNearby = true
         #if DEBUG
         if mockDiscovery {
+            // The button shows only under the hint, where updateDiscovery leaves the status alone.
             searchingNearby = true
-            if status == Self.lookingOnNetwork { status = Self.lookingNearby }
             return
         }
         #endif
@@ -353,13 +395,28 @@ final class StreamClient: ObservableObject {
     }
 
     /// The Mac we were talking to is listed again: reconnect without being asked, to its network row
-    /// when there is one. Names match exactly: two Macs can share a computer name ("MacBook Pro" and
-    /// "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one. Main thread.
+    /// at once, to its Direct row only once that has stayed Direct for the network's 3 s
+    /// (DiscoveryPolicy.reconnectRow: a Mac back at home can show on awdl0 first). Names match
+    /// exactly: two Macs can share a computer name ("MacBook Pro" and "MacBook Pro (2)"), and
+    /// stripping the suffix would rejoin the wrong one. Main thread.
     @discardableResult
     private func reconnectIfListed() -> Bool {
-        guard !connected, connection == nil, let wanted = reconnectTo,
-              let mac = macs.first(where: { $0.name == wanted && !$0.direct }) ?? macs.first(where: { $0.name == wanted })
-        else { return false }
+        directReconnectCheck?.cancel()
+        directReconnectCheck = nil
+        guard !connected, connection == nil, let wanted = reconnectTo else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        let network = macs.first { $0.name == wanted && !$0.direct }
+        let direct = macs.first { $0.name == wanted && $0.direct }
+        let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
+                                                  directSince: direct.flatMap { directSince[$0.name] }, now: now)
+        guard let mac = choice.take else {
+            if let at = choice.recheckAt {
+                let work = DispatchWorkItem { [weak self] in self?.reconnectIfListed() }
+                directReconnectCheck = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
+            }
+            return false
+        }
         connect(to: mac)
         status = mac.direct ? "Reconnecting to \(wanted) directly…" : "Reconnecting to \(wanted)…"
         return true
@@ -833,11 +890,15 @@ extension StreamClient {
     }
 
     /// Direct Wireless as this Mac last reported it, for discovery (DiscoveryPolicy.remember): every
-    /// state carries it, and the window list, which names the Mac, comes first. Never from the DEBUG
-    /// mock's answers (no connection). Main thread.
+    /// state carries it. Keyed by the Bonjour name this connection was made to, which is what the
+    /// policy compares with the browsers' results, not the window list's Mac name: Bonjour renames
+    /// a registration that clashes ("Mac (2)") while the window list still says "Mac", and that Mac
+    /// would then look missing from the network at every launch. A connection by address
+    /// (-SillConnect) has no such name and teaches nothing, and neither do the DEBUG mock's answers
+    /// (no connection). Main thread.
     private func rememberDirectWireless(_ state: HostSettingsState) {
-        guard connection != nil, !macName.isEmpty else { return }
-        let next = DiscoveryPolicy.remember(directWirelessMacs, mac: macName, directWireless: state.settings.directWireless)
+        guard let c = connection, case .service(let name, _, _, _) = c.endpoint else { return }
+        let next = DiscoveryPolicy.remember(directWirelessMacs, mac: name, directWireless: state.settings.directWireless)
         guard next != directWirelessMacs else { return }
         directWirelessMacs = next
         UserDefaults.standard.set(next, forKey: Self.directWirelessMacsKey)

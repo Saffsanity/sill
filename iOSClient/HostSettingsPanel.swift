@@ -197,10 +197,11 @@ struct HostSettingsPanel: View {
                         Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
                             RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
                         }
-                        .accessibilityHint(client.connectedDirectly ? "Turning this off can disconnect this \(device)." : "")
+                        // A warning about turning it off, so only while the switch shows on.
+                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off can disconnect this \(device)." : "")
                         .rowFrame()
                     }
-                    Footnote(text: directFooter)
+                    Footnote(text: directFooter(on: direct))
                 }
                 if !state.persistent {
                     Footnote(text: "SillHost keeps these until it quits.")
@@ -288,11 +289,12 @@ struct HostSettingsPanel: View {
     /// "iPhone" or "iPad", for copy about this device.
     private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
 
-    /// Under the Direct Wireless Connection row: what it does and costs, and, on a device connected
-    /// over it, what turning it off does to this device.
-    private var directFooter: String {
+    /// Under the Direct Wireless Connection row: what it does and costs, and, while the switch shows
+    /// on and this device is connected over it, what turning it off can do to this device. Once it
+    /// shows off (turned off here or on the Mac, with this connection still up) the warning is moot.
+    private func directFooter(on: Bool) -> String {
         var text = "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter."
-        if client.connectedDirectly { text += " This \(device) is connected directly: turning this off can disconnect it." }
+        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off can disconnect it." }
         return text
     }
 

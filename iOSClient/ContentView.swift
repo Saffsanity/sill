@@ -77,8 +77,9 @@ struct ContentView: View {
 ///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
 ///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
-///   `hint` (nothing listed: the hint and Search Nearby) or `nearby` (a network row and Direct
-///   rows). Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
+///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a network row and Direct
+///   rows) or `denied` (Local Network access denied: the status says what to do, no hint).
+///   Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
 ///   change what it shows (see `MockCatalog.ConnectCase`).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
@@ -246,9 +247,21 @@ struct ConnectScreen: View {
                     .foregroundStyle(Palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10)
-                // Gone once the nearby search runs: the status line then says "…and nearby".
-                if !client.searchingNearby {
-                    Button(action: { client.searchNearby() }) {
+                // Once the nearby search runs, a line in the button's place says so, whatever the
+                // status line says (a disconnect's message stays there), at the button's height so
+                // nothing moves.
+                if client.searchingNearby {
+                    Text("Also looking nearby")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 10)
+                } else {
+                    Button(action: {
+                        client.searchNearby()
+                        // The button leaves from under VoiceOver's cursor: say what it started.
+                        AccessibilityNotification.Announcement("Also looking nearby").post()
+                    }) {
                         Text("Search Nearby")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Palette.accent)
@@ -261,7 +274,8 @@ struct ConnectScreen: View {
                 }
             }
         }
-        // Leading, so the title stays put when the hint or the first row widens the column.
+        // Leading, so the title never jumps sideways when the hint or the first row widens the
+        // column. Vertically it is still centred: what adds height moves it up by half as much.
         .frame(width: 380, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -159,6 +159,7 @@ enum MockCatalog {
         case looking   // the first seconds: nothing listed yet
         case hint      // nothing listed after the network's 3 s: the hint and Search Nearby
         case nearby    // searching nearby: a network row, then Direct rows (one with a long name)
+        case denied    // Local Network access denied: the status says what to do, and no hint
     }
 
     static func connectClient(_ c: ConnectCase) -> StreamClient {
@@ -179,6 +180,8 @@ enum MockCatalog {
             // The long name checks that "Direct" never truncates: the title does.
             client.macs = [mac("Studio", direct: false), mac("Mac mini", direct: true),
                            mac("Noah Saffer’s MacBook Pro in the Studio (2)", direct: true)]
+        case .denied:
+            client.status = StreamClient.allowLocalNetwork
         }
         return client
     }
