@@ -28,14 +28,27 @@ public struct Viewport: Codable, Hashable {
 
 /// Client → host once a second while connected. Lets the Mac's log show what the device sees,
 /// which is how the latency number gets measured without a screenshot of the device.
+///
+/// A current client measures every frame and several pings a second, and each report covers the
+/// second since the one before. The first four fields are the ones every host requires, so they
+/// keep carrying the typical value: that second's median, or -1 when the second had no sample
+/// (no frame arrived, no pong came back) rather than an older number repeated. The maxima came
+/// later as optional fields: an older host ignores them, and nil means an older client, whose
+/// frame age and rtt are single samples.
 public struct ClientStats: Codable, Hashable {
     public var fps: Int
-    public var frameAgeMs: Int      // host encode timestamp → decoded on the device (clocks assumed synced)
+    public var frameAgeMs: Int      // host encode timestamp → received on the device (clocks assumed synced)
     public var rttMs: Int           // ping round trip
     public var device: String       // model name, so several clients can be told apart
+    /// The worst frame age of that second, -1 when no frame arrived. nil from an older client.
+    public var frameAgeMaxMs: Int?
+    /// The slowest round trip among that second's pongs, -1 when none came back. nil from an older client.
+    public var rttMaxMs: Int?
 
-    public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String) {
+    public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String,
+                frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil) {
         self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs; self.device = device
+        self.frameAgeMaxMs = frameAgeMaxMs; self.rttMaxMs = rttMaxMs
     }
 }
 

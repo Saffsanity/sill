@@ -5,7 +5,7 @@ import CoreGraphics
 /// runs. Change `standard`, rebuild, measure: both pick it up.
 ///
 /// The coordinator takes a new value only between pipelines (inside `select`), so one pipeline
-/// never mixes two settings. See `StreamCoordinator.apply`.
+/// never mixes two settings. See `StreamCoordinator.setTarget`.
 package struct HostConfig: Equatable, Sendable {
     /// Ceiling for the stream rate; each device asks for its own panel's rate (60 until it does).
     package var maxFPS: Int

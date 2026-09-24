@@ -92,6 +92,9 @@ final class VirtualStage {
     /// The size the window actually took on the display, and the size that was asked for.
     private(set) var placedSize: CGSize?
     private var askedSize: CGSize?
+    /// The rectangle that size was asked as (global points): fitted into the display's usable
+    /// area, which the Dock changes while the request stays the same. See `prepare` step (6).
+    private var askedDest: CGRect?
     /// The staged window is in a full-screen Space on the display (a video made full screen): it
     /// fills the display and refuses moves and sizes, so the display is captured as it is.
     private(set) var fullScreen = false
@@ -125,6 +128,12 @@ final class VirtualStage {
     private var generation = 0
     /// Where the Mac cursor was before the host first drove it onto the virtual display.
     private var cursorBefore: CGPoint?
+    /// The window `releaseWindow` last sent home. The window list shows an AX move only once the
+    /// app has committed it, a few to tens of ms after the AX writes return, while the AX frame
+    /// reads home at once. The eviction scan right after a switch saw the window still listed on
+    /// the display, found no AX window at that frame and warned about a window already on its way
+    /// home (System Settings, twice, 2026-09-23), so `evictForeignWindows` asks this element instead.
+    private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
 
@@ -240,6 +249,10 @@ final class VirtualStage {
         abs(a.minX - b.minX) <= t && abs(a.minY - b.minY) <= t && abs(a.width - b.width) <= t && abs(a.height - b.height) <= t
     }
 
+    private static func sameSize(_ a: CGSize, _ b: CGSize, within t: CGFloat = 2) -> Bool {
+        abs(a.width - b.width) <= t && abs(a.height - b.height) <= t
+    }
+
     private static func fmt(_ r: CGRect) -> String {
         String(format: "(%.0f,%.0f,%.0f×%.0f)", r.minX, r.minY, r.width, r.height)
     }
@@ -310,6 +323,7 @@ final class VirtualStage {
         // Only for a window that is already on this display: one that is full screen on a real
         // display cannot be moved here and must stream as the real window (the coordinator's
         // fallback), not as an empty virtual display.
+        let wasFullScreen = fullScreen        // set by the last prepare; step (6) must not read its sizes as a placement's
         if let d = display,
            let live = WindowSizer.liveBounds(of: p.windowID), live.intersects(CGDisplayBounds(d.displayID)),
            windowCoversDisplay || WindowSizer.isFullScreen(p.element) {
@@ -349,15 +363,29 @@ final class VirtualStage {
         // (6) Place the window; grow the display once if the app enforces a larger minimum.
         var live = CGRect.zero
         var displayBounds = CGRect.zero
+        var dest = CGRect.zero
         for attempt in 0..<2 {
             guard let d = display else { releaseWindow(); throw Failure.neverOnline }
             displayBounds = CGDisplayBounds(d.displayID)
             let usable = Self.usableArea(of: d.displayID) ?? displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
-            let dest = CGRect(origin: usable.origin,
-                              size: CGSize(width: min(wanted.width, usable.width), height: min(wanted.height, usable.height)))
+            dest = CGRect(origin: usable.origin,
+                          size: CGSize(width: min(wanted.width, usable.width), height: min(wanted.height, usable.height)))
             let before = WindowSizer.liveBounds(of: p.windowID)
-            if let before, Self.close(before, dest), Self.fraction(of: before, inside: displayBounds) >= 0.9 {
-                live = before                                 // already there (encoder hang, keyframe restart): no flicker
+            // Where the last placement left the window, if it asked for this same rectangle. An app
+            // that clamps (System Settings' fixed width, a minimum) never reaches `dest`, so a restart
+            // finds it there with nothing left to move or wait for. Keyed on the rectangle, not the
+            // request: `dest` also follows the usable area, which a Dock moving onto or off the
+            // display changes, and the window must then be fitted again. Only on the first try, and
+            // not after a full-screen capture (its sizes are the display's): on the grow path's
+            // second try the first try's move is the last placement, and a display `ensureDisplay`
+            // reused still holds the previous prepare's sizes.
+            var leftAt: CGRect?
+            if attempt == 0, !wasFullScreen, let placedSize, let askedDest, Self.close(askedDest, dest) {
+                leftAt = CGRect(origin: dest.origin, size: placedSize)
+            }
+            if let before, Self.close(before, dest) || leftAt.map({ Self.close(before, $0) }) == true,
+               Self.fraction(of: before, inside: displayBounds) >= 0.9 {
+                live = before                                 // already there (encoder hang, keyframe restart, a clamped size): no flicker
             } else {
                 if cursorBefore == nil { cursorBefore = CGEvent(source: nil)?.location }
                 let t0 = Date()
@@ -368,15 +396,32 @@ final class VirtualStage {
                 }
                 // Wait for the window server to show the move, no blind sleep: until the frame is at
                 // `dest` or has stopped changing (an app that clamps settles somewhere else).
+                // The window list shows a resize only once the app commits it; an AppKit window's AX
+                // frame has the new size as soon as the writes return. 1Password (Electron) was still
+                // listed at its old size three reads after the writes, so the old frame passed for
+                // settled and became the crop (2026-09-23). So when AX reports a new size, stillness
+                // counts only once the listed size has changed too, the list showing AX's frame ends
+                // the wait, and the deadline is 1 s. When AX reports the old size, the app refused it
+                // (a minimum in both dimensions) and stillness counts at once, as before: waiting for
+                // a change that never comes would freeze each such restart for the whole deadline. An
+                // app that applies a size after answering the write (AX lags too) reads as a refusal
+                // and is left to the catalog's next poll, as before.
+                var taken: CGRect?                            // what AX says the app took, if a new size
+                if let before, let f = WindowSizer.frame(of: p.element), !Self.sameSize(f.size, before.size) { taken = f }
+                var stillnessCounts = taken == nil
+                var settled = false
                 var same = 0
                 var last = before
-                let deadline = Date().addingTimeInterval(0.5)
+                let deadline = Date().addingTimeInterval(taken == nil ? 0.5 : 1.0)
                 while Date() < deadline {
                     let now = WindowSizer.liveBounds(of: p.windowID)
-                    if let now, Self.close(now, dest) { last = now; break }
+                    if let now, Self.close(now, dest) { last = now; settled = true; break }
+                    if let now, let taken, Self.close(now, taken) { last = now; settled = true; break }
+                    // Only the old size is suspect: a window the list no longer shows is not waited for.
+                    if let before, now.map({ Self.sameSize($0.size, before.size) }) != true { stillnessCounts = true }
                     same = (now == last) ? same + 1 : 0
                     last = now
-                    if same >= 3 { break }
+                    if stillnessCounts, same >= 3 { settled = true; break }
                     try? await Task.sleep(for: .milliseconds(20))
                 }
                 guard let moved = last ?? WindowSizer.liveBounds(of: p.windowID) else {
@@ -384,7 +429,10 @@ final class VirtualStage {
                     throw Failure.windowMissing
                 }
                 live = moved
-                print("Moved \(p.appName) — \(p.title) from \(Self.fmt(p.originalFrame)) to \(Self.fmt(live)) in \(Self.ms(since: t0)) ms (asked \(Self.fmt(dest)))")
+                // "from" is where this move started: a re-place of the staged window starts on the
+                // virtual display, not at the home frame `placement` keeps for the way back.
+                print("Moved \(p.appName) — \(p.title) from \(before.map(Self.fmt) ?? "(unlisted)") to \(Self.fmt(live)) in \(Self.ms(since: t0)) ms (asked \(Self.fmt(dest)))"
+                      + (settled ? "" : "; not settled by the deadline"))
             }
             let oversized = live.width > usable.width + 2 || live.height > usable.height + 2
             if oversized, attempt == 0 {
@@ -413,9 +461,10 @@ final class VirtualStage {
             break
         }
 
-        // (7) Record the sizes and hand over.
+        // (7) Record the sizes and the rectangle asked, and hand over.
         placedSize = live.size
         askedSize = wanted
+        askedDest = dest
         var crop = live.intersection(displayBounds).offsetBy(dx: -displayBounds.minX, dy: -displayBounds.minY)
         // Trim to whole, even output pixels so ScreenCaptureKit never resamples a fractional crop.
         let outW = evenPixels(crop.width * captureScale), outH = evenPixels(crop.height * captureScale)
@@ -552,15 +601,24 @@ final class VirtualStage {
             let name = (info[kCGWindowName as String] as? String) ?? ""
             if name.lowercased().contains("layerprobe") { continue }
             let owner = (info[kCGWindowOwnerName as String] as? String) ?? "?"
-            guard let ax = WindowSizer.axWindow(pid: pid, frame: rect) else {
-                print("A \(owner) window sits on the virtual display and could not be matched to move it")
+            // The window just sent home may still be listed at its staged frame (see `lastReleased`):
+            // judge it by its own element's live frame, not by matching the listed one.
+            var known: (element: AXUIElement, frame: CGRect)?
+            if let r = lastReleased, r.windowID == id, let f = WindowSizer.frame(of: r.element) {
+                if !f.intersects(bounds) { continue }   // on its way home; the window list has not caught up
+                known = (r.element, f)                  // still overlaps (the app kept a larger size): evict it
+            }
+            guard let ax = known?.element ?? WindowSizer.axWindow(pid: pid, frame: rect) else {
+                // Which window, so a real stranger can be identified from the log.
+                print("A \(owner) window sits on the virtual display and could not be matched to move it (window \(id) at \(Self.fmt(rect)))")
                 continue
             }
             if WindowSizer.isFullScreen(ax) {
                 print("A \(owner) window is full screen on the virtual display; it cannot be moved from here")
                 continue
             }
-            let home = WindowSizer.homeFrame(size: rect.size)
+            // Centre it by its live size: a stale listed rect would carry the staged size.
+            let home = WindowSizer.homeFrame(size: (known?.frame ?? rect).size)
             let err = WindowSizer.setPosition(ax, home.origin)
             print("Moved a \(owner) window off the virtual display to \(Self.fmt(home)) (\(WindowSizer.axErrorName(err)))")
             Stats.shared.bump("vd.evicted")
@@ -590,6 +648,7 @@ final class VirtualStage {
             print(ok ? "Restored \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame))"
                      : "Could not restore \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame)); it is on a real display but not where it was")
             Stats.shared.bump("vd.restored")
+            lastReleased = (p.windowID, p.element)   // for the eviction scan that may follow at once
         }
         // The Mac cursor followed the device onto the virtual display: bring it back where it was
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
@@ -602,6 +661,7 @@ final class VirtualStage {
         placement = nil
         placedSize = nil
         askedSize = nil
+        askedDest = nil
         captureRect = .zero
         catalog.stagedWindowID = nil
         EmergencySnapshot.set(nil)

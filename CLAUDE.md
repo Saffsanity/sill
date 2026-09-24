@@ -8,6 +8,133 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**iPad host settings (2026-09-23, branch `ipad-host-settings` from
+`menu-bar-app`, rebased onto its e89add6; the plan and its reasoning are in
+`docs/ipad-host-settings-plan.md`).** A device changes the Mac's five streaming
+settings the way the Sill menu does: Quality (bitrate), Resolution (capture
+scale), Frame Rate limit, Prioritize Speed, Virtual Display. Defaults taken for
+the plan's open questions: Settings replaces Leave in every bar's last slot and
+Disconnect moves to the panel's pinned foot (Q1); Sill.app saves a device's
+change like a menu click (Q2); the virtual display has full menu parity, so
+turning it off from a device brings the window home and forward (Q3).
+- Wire: kind 16 `.hostSettings` (host → device, JSON `HostSettingsState`: the
+  target settings, `persistent`, `virtualDisplayAvailable`,
+  `virtualDisplayNote`, `softwareEncoder`, the running `stream`, and
+  `answering` in the reply to one change) and kind 17 `.changeSettings` (device
+  → host, JSON `HostSettingsChange`: only the fields one control changed,
+  absolute values, a token strictly increasing per device process). Types,
+  `SettingsChoices` and `QualityPreset` (moved from the app) are in
+  `Sources/StreamProtocol/HostSettings.swift`. No ack, refresh or version
+  kinds: a kind 16 on this connection means the host supports settings. Fields
+  added later must be optional, never renamed or retyped, no enums.
+- Host: `StreamCoordinator.setTarget` (synchronous; replaced `apply`)
+  validates, forces the virtual display off without the AppKit loop, compares
+  with the target (`pendingConfig ?? config`), publishes, and schedules the
+  pipeline work in a Task, so a burst is one restart. The `.changeSettings`
+  handler has no await: it keeps exactly the Mac menu's values
+  (`DeviceSettings.accepted`; the virtual display on only under the AppKit
+  loop, off always), logs "Settings from ‹device›: …" and "… refused: …", and
+  answers that device alone. The state is a pure function of the target and
+  the `HostStatus` snapshot, and both publish (`setTarget`,
+  `HostStatus.onChange`), deduplicated, so the once-a-second stats send
+  nothing; every device also gets it right after its window list. Nothing new
+  prints unless a device sends kind 17 (the CLI's output is unchanged). A pick
+  that lands during a restart of the active source now runs after it
+  (`pickArrivedWhileSwitching`, newest wins, the restarted source itself
+  dropped); during a switch to another source it is still dropped (the device's
+  automatic Desktop request must not override a pick).
+- Sill.app: `HostSettings.onChange` calls `setTarget` synchronously, so the
+  target equals `settings.config` at every main-actor turn, and
+  `onDeviceSettingsChange` lays a device's change over `settings.config`: saved
+  (only the keys it changed), shown live in Settings and in the menu when it
+  next opens. The CLI sets no hook: a device's change lasts until SillHost quits
+  (`persistent: false` says so on the device).
+- iOS: `HostSettingsLedger` (pure logic) holds the Mac's last state on this
+  connection with this device's unanswered picks over it: a pick sends only what
+  changes what is shown, nothing before the first state; an answer clears only
+  the picks carrying its token (60 → 120 → 60 never shows 120); a refused pick
+  goes back with the warning haptic and an announcement; a pick unanswered after
+  max(4 s, 4 × RTT) goes back with "‹Mac› didn’t answer. Try again."; reset on
+  tear-down, never persisted. `HostSettingsPanel` mirrors the Apps drawer on the
+  trailing edge, lined up with the Settings button: 360 pt under the landscape
+  bar (340 on the outer display), in portrait wholly in the lower half under the
+  window bar; no dim (a clear catcher closes it without clicking the Mac);
+  pinned header (the Mac's name, what runs, Done with Esc/⌘.) and Disconnect
+  foot, the middle scrolling when short. Opening it takes the keyboard down
+  (`InputOverlayProxy.setKeyboard`, so no key reaches the Mac) and closing puts
+  it back. Only a control's action ever sends (`StreamClient.changeSettings`).
+- Verified without permissions (the plan's H0–H21, S1, S2, S5, S6): clean
+  builds (only the old CaptureProbe warning; iOS Debug and Release only the old
+  `StreamClient` capture warning); the CLI's output masked and sorted equals
+  the branch point and its idle stdout is unchanged; `sillclient.py` shows one
+  kind 16 after the first window list and one when the Desktop starts, accept /
+  no-op / refusals / partial / a burst of three (one restart) / two clients /
+  rapid pairs 0–300 ms (at most two restarts) / reconnect / malformed and
+  tokenless changes / 20 s idle (two states, CPU as before) / the toggle on the
+  `--virtual-display` host (no restart); the bare app saves a device's change,
+  keeps it across a relaunch, sends a `-SillSetAfter` change to the device,
+  lets the device and the Mac change different keys at once, and every
+  `-SillSetAfter` change still gives one "Settings:" and at most one restart;
+  previews byte-identical; the ledger check (28 scenarios, 5,000 random runs
+  with two mutants caught); the queued pick with a race client that sends the
+  pick while the restart runs (before: 8 of 8 picks lost; now 24 of 24 stop the
+  stream after one restart); 38 simulator photos of the panel (four Duo sizes
+  × eight cases, iPad mini and iPhone sizes, accessibility-extra-large); taps
+  through the harness; live by address against both synthetic hosts (the
+  device's change logged, one restart, saved by the app; a Mac-side change
+  shown; Disconnect); against the branch-point host the panel says to update
+  and the client sends no kind 17.
+- Review fixes (2026-09-23, after the rebase onto e89add6): the pick timeout
+  reads the new `linkStats` (the worst round trip of the last second that
+  measured one, kept through seconds without a pong); a pick queued behind a
+  restart goes through the same rule as a fresh one (`handlePick`), so a
+  restart that starts before its Task runs no longer drops it; a staged window
+  that the virtual display turning off sends home comes forward whichever
+  select commits that change (`cameHome`); the device holds back its automatic
+  Desktop request when the user picked or launched something while it waited
+  out a closed window (the race that remains, older devices and a pick sent
+  before the device heard of the close, is written down at `handlePick`); the
+  status menu's Virtual Display item sets the value it showed instead of
+  toggling, so a click on a menu left open while a device changed it never
+  undoes that change; in the panel the readout wraps instead of cutting off and
+  "On the virtual display" is a line of its own, Done's tap area is 44 pt tall,
+  and the speed switch is "Prioritize Encoding Speed" (the Mac's name) in its
+  own group under the Mac's explanation; `sillclient.py` checks every argument
+  before connecting; HostSettings.swift lists every place a new setting must
+  go. Verified: the CLI's output against e89add6's (masked; idle, 35 s idle,
+  the Desktop, `--virtual-display`); H4–H21 again, previews byte-identical;
+  the race that lost 5 of 6 queued picks to a rate-change restart now loses 0
+  of 10; 46 photos (a new `vdstream` case at every size and at larger text);
+  iOS Debug and Release with only the old warning; taps 7 pt above and
+  8 pt below Done close the panel; in portrait the header stays put while the
+  panel opens (the Quality value moves 2 pt; it slid 32); against a fake host
+  that never answers, a pick times out after 4.3 s with prompt pongs and 8.3 s
+  with pongs held 2 s; against one that closes the watched window, the Desktop
+  request follows 2 s later unless the user picks, and then never comes.
+- **Untested, for Noah:** D1–D11 (the plan's §7.4): the panel's values
+  against the Mac's menu and status card with a real window; every control from
+  the iPad (one restart each; the Mac's Settings window follows; saved in
+  `me.saffer.sill.mac` and after a relaunch); the virtual display on and off
+  from the iPad, also full screen; a Mac-menu change showing in the open panel;
+  two devices at once; `SillHost` without and with `--virtual-display`;
+  reconnecting after a change made while away; the 60 fps note and Low Power
+  Mode on the iPad mini; a Magic Keyboard (keys stop while the panel is open,
+  Esc closes it and does not reach the Mac, keys come back); VoiceOver (modal,
+  focus on the Mac's name, the escape gesture); a pick right after a change,
+  and five minutes with the panel closed (frame age and RTT unchanged). Also
+  rotating with the panel open and Reduce Motion (fade only), which the
+  harness cannot drive; not run here: S3 (no Accessibility Inspector) and S4
+  (no way to press a hardware Esc in the simulator from here). Also the Mac
+  menu's Virtual Display item clicked after the iPad changed it while the menu
+  was open (it should do what the item showed), and turning the virtual
+  display off while another change is restarting a staged window (the window
+  should still come forward).
+- Known, not fixed here: in the layout harness, bringing up the software
+  keyboard flips the fake screen into the portrait layout (the same at the
+  branch point; the harness only). A Mac menu that is already open keeps its
+  old checkmarks until reopened (every item sets the value it shows, so a
+  click there never inverts a device's change).
+
 **Sill.app, the menu bar host (2026-09-23, branch `menu-bar-app`; the plan and
 its background are in `docs/menu-bar-app-plan.md`).** The same host as the CLI,
 as an LSUIElement app. A status item whose glyph (drawn from AppIcon.svg:
@@ -22,7 +149,7 @@ executable; `Scripts/make-app.sh` wraps it (Packaging/Info.plist, an icon
 compiled by actool from design/AppIcon.svg), signs it with the Apple Development
 identity and, with `--install`, replaces /Applications/Sill.app. Bundle ID
 `me.saffer.sill.mac`. Settings persist (`defaults read me.saffer.sill.mac`)
-and apply live: `StreamCoordinator.apply` hands a new `HostConfig` to the next
+and apply live: `StreamCoordinator.setTarget` hands a new `HostConfig` to the next
 `select`, which takes it between pipelines; a change restarts the stream once,
 or not at all when nothing running depends on it (the virtual display toggle
 restarts only a window stream, and sends a staged window home first). Virtual
@@ -151,6 +278,42 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   a virtual display exists, so every SCK call on these paths is bounded
   (`WindowCatalog.shareableContent(…timeout:)`) and `prepare` refuses to make
   a display without the permission.
+  Learned (2026-09-23): the window list shows an AX move only once the app
+  commits it, a few to tens of ms after the AX writes return (more for an app
+  slow to lay out); the AX frame reads the new frame at once. So the eviction
+  scan right after a switch found the window just sent home still listed on
+  the display, matched no AX window to that frame and printed "A System
+  Settings window sits on the virtual display and could not be matched…"
+  (twice, both false alarms: the window went home). Fixed: `releaseWindow`
+  keeps the element (`lastReleased`) and the scan judges that window by its
+  live AX frame: home, skipped; still overlapping (Messages kept a wider
+  frame, a 24 pt strip), evicted and centred by its live size. The warning now
+  names the window ID and listed frame. Probe on its own off-screen window,
+  scan at once: the old logic warned in 21 of 30 scans, the new in none, and
+  picked the overlapping window for eviction 20 of 20. Not yet run with real
+  windows.
+  Fixed (2026-09-23): `prepare`'s settle loop read only the window list and
+  stopped after three identical reads 20 ms apart, counted from the frame
+  before the move, so a pure resize the app commits late (1Password, Electron:
+  between 45 ms and ~0.45 s) looked settled at once and the old frame became
+  the crop until the catalog's next poll re-selected (~0.4 s of wrong crop).
+  Now it reads the AX frame once after the writes. A new size there means
+  stillness counts only once the listed size has left the old one, the list
+  showing AX's frame ends the wait, and the deadline is 1 s; the old size (a
+  refusal) counts stillness at once within 0.5 s, as before. A wait that runs
+  out appends "; not settled by the deadline" to "Moved …", whose "from" is
+  now the frame before the move (it printed the home frame). A restart that
+  asks for the same rectangle as the last placement (the request fitted to the
+  usable area, so a Dock arriving on the display still gets the window
+  re-fitted) finds a clamped window where it was left and skips the move.
+  Step (6) run verbatim in a harness: a probe window whose commit trails its
+  frame by 80/150/300 ms was cropped at the old frame every time before, at
+  the new one in 104/181/341 ms now; a refusal still settles in ~50 ms; a
+  clamped restart takes 0 ms and no move; simulated, a Dock arriving between
+  two restarts still gets the window re-fitted. Known limit: an app whose AX
+  frame lags too (it applies the size after answering the write) still reads
+  as a refusal, and its old frame stays the crop until a catalog poll (2 s;
+  one that lands mid-switch is ignored) re-selects.
   **Untested, for Noah** (Screen Recording + Accessibility on the terminal):
   (a) `swift run -c release SillHost --virtual-display`, pick a window: the
   log shows "Virtual display … created", "Moved …", "Capturing … of virtual
@@ -161,6 +324,9 @@ Milestone 3, scaling and the virtual display. Two paths exist; adopt the second.
   mid-stream: each prints "Restored …" then "Removed virtual display", the
   window is back within 2 pt, no "Sill" display remains. (d) Rotate and cycle
   Aa while staged: one "Capture started" per change, no new display created.
+  (e) The 1Password Aa step that showed the stale crop (staged at Aa 0.5,
+  then 1×): the first "Moved … to" shows the asked 1117×610 and "Capture
+  started" reads 2234×1220, with no second capture ~0.4 s later.
   If the picture is offset or black, the escape hatch is the last line of
   `VirtualStage.prepare`: return the `desktopIndependentWindow` filter with a
   nil `sourceRect` (window capture on the virtual display ran at 59 fps in the
@@ -172,11 +338,14 @@ appear over it (close, minimize, full screen → `.windowCommand` = kind 15, JSO
 Accessibility, using the staged element on the virtual display). Keep holding
 and move: the lights go, the thumbnail lifts and drags into a new slot, Home
 Screen style; the arrangement is the device's own (`StreamClient.windowOrder`,
-persisted per Mac, host order for the rest). A "Leave" button disconnects. The
-device asks for the Desktop whenever the host reports nothing streaming (at
-most every 10 s), so a fresh connection starts on the Desktop and the drawer
-no longer opens by itself. Harness: `-SillWindowMenu 1` keeps the first
-thumbnail's lights open.
+persisted per Mac, host order for the rest). A "Leave" button disconnected
+(since the host settings step the last slot is Settings, with Disconnect in its
+panel's foot). The device asks for the Desktop whenever the host reports nothing
+streaming (at most every 10 s), so a fresh connection starts on the Desktop and
+the drawer no longer opens by itself. When the watched window has closed it
+waits 2 s first, and asks for nothing if the user picked or launched something
+meanwhile (the host cannot tell that request from a Desktop tap). Harness:
+`-SillWindowMenu 1` keeps the first thumbnail's lights open.
 
 **Frame rate follows the device (2026-09-22).** `Viewport.fps` carries the
 device's wanted rate: `UIScreen.maximumFramesPerSecond` (120 on ProMotion, 60
@@ -218,10 +387,38 @@ set so ProMotion iPhones render above 60.
 Dead-client eviction is time-based (no frame drained for 4 s, none in the first
 8 s after connect): the frame-count rule evicted the simulator at full Retina.
 A client evicted while the Mac is still advertised now retries on a timer.
-Caveat on (1): the flat-RTT verification may have run while the iPad was on USB
-networking (RTT 0–1 ms at times); a later Wi-Fi reading still showed the sawtooth
-with ticks flowing. Treat the tick keepalive as unproven until re-measured on
-Wi-Fi only; the client-drawn cursor is the fix that does not depend on it.
+Learned (2026-09-23; this replaces the caveat on (1)): the RTT spikes left with
+ticks flowing come from AWDL, and Sill turns AWDL on itself. `includePeerToPeer
+= true` on the host's NWListener (`StreamServer`) and the iPad's NWBrowser and
+NWConnection (`StreamClient`), there since the first commit, makes the kernel
+enable AWDL as `_sill._tcp` registers ("Enabling AWDL due to Mdns"; off ~3 s
+after Sill quits). The Mac's one radio then leaves the Wi-Fi channel on a
+512 TU schedule (kernel: infra 72 % while streaming, 48 % or 0 % around
+switches). A 20 Hz ping from the Mac to its gateway stalls up to ~97 ms once
+every 524 ms (p90 48 ms, 17 % over 10 ms; with AWDL off, p90 4 ms and max
+13 ms). The same Bonjour service registered with the AWDL flag gave p90
+67.5 ms with 32 % of pings delayed, against 3.9 ms without the flag. An rtt
+sample that lands in a stall reads baseline plus 0–100 ms. AWDL carries none
+of Sill's data (the connection is on en0). Ticks keep the radio awake but not
+on the channel, and every earlier RTT reading, those in (1) and (2) included,
+ran with AWDL on. The fix, not applied yet, is to drop `includePeerToPeer` on
+both sides: discovery then needs a shared network, as it does today, and the
+iPad side still needs a device run. Secondary: `inflight > 2` counts only what
+Network.framework has not handed to the socket, so after a switch the socket
+buffer (autotuned up to 4 MB) can hold ~200 ms of frames ahead of pongs (frame
+age 188–229 ms, no `net.dropped`). Client measurement, reworked 2026-09-23
+(it sampled frame age every 15th frame and repeated the last value in a
+slower second, sent one rtt sample per report, and ran its fps and ping
+timers in the main run loop's default mode, so both stopped while a scroll
+tracked): the client now takes the age of every frame and pings every 0.25 s
+(stamped with the monotonic clock), both on dispatch timers on its network
+queue, and closes a one-second window each second. Each report carries that
+second's median in the old `ClientStats` fields, -1 for a second without a
+sample (a still window streams no frames), and its max in two new optional
+fields. The host still logs every other report, now as
+`frame age 9/24 ms, rtt 7/80 ms` (the last second's median over the worst
+since the previous line, "–" for no sample; an older client prints one
+value), and the menu's device row and the HUD show "–" the same way.
 
 **Frozen stream, 2026-09-22 evening — the Mac's hardware video encoder wedged.**
 Every new HEVC session (and later H.264) accepted one frame and never returned
@@ -341,15 +538,22 @@ good.
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
   (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
+  `HostSettings.swift` — the host settings a device sees and changes (kinds 16
+  and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
+  `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
+  `QualityPreset`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
   viewports, falls back to the software encoder on a hang, stops capture when
-  the last client leaves, takes live settings between pipelines (`apply`) and
-  writes `HostStatus`), `HostConfig` (the knobs: maxFPS, captureScale, bitrate
+  the last client leaves, takes live settings between pipelines (`setTarget`,
+  from the app and from devices' kind 17, answered and published as kind 16;
+  a pick made during a restart runs after it) and writes `HostStatus`), `HostConfig` (the knobs: maxFPS, captureScale, bitrate
   per 60 fps, prioritizeSpeed, virtualDisplay; `standard` is the CLI's values
   and the app's defaults), `HostStatus` (the snapshot the app shows, pushed on
-  events), `HostLog` (the print shadow, the app's ring and log file),
+  events; `onChange` publishes the devices' settings state), `DeviceSettings`
+  (what a device may set, `HostConfig` ↔ wire), `HostLog` (the print shadow,
+  the app's ring and log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
@@ -381,7 +585,11 @@ good.
   `AppLog` (its print shadow).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
-  installs the bundle; `Scripts/sillclient.py` is the wire-format test client.
+  installs the bundle; `Scripts/sillclient.py` is the wire-format test client
+  (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
+  `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
+  `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
+  every argument is checked before it connects, and a bad one exits 2).
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour,
@@ -392,7 +600,10 @@ good.
   Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen + DEBUG harness),
-  `MockCatalog` (harness data). Swift 5 language mode.
+  `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
+  (the Mac's settings with this device's unanswered picks; pure logic, checked
+  with swiftc), `HostSettingsPanel` (the Settings panel). New files need their
+  four pbxproj entries by hand. Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
@@ -405,6 +616,7 @@ swift run -c release SillHost --synthetic  # Desktop streams a test pattern; no 
 swift run -c release SillHost --encoder-selftest   # is the hardware encoder alive? 5 s, exits
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
+python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
@@ -417,7 +629,8 @@ Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
 virtualDisplay), and a launch argument such as `-maxFPS 60` overrides one for
-one run. Test arguments for the bare binary (`.build/release/SillMenuBar`,
+one run. A device's change from its Settings panel is saved there too, like a
+menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
 defaults domain `SillMenuBar`; delete it after): `--synthetic` (test pattern,
 off Bonjour; the port is in the "Status: Test Pattern Mode" line),
 `-SillLogFile <path>`, `-SillSetAfter '<s> key=value[,key=value][; <s> …]'`,
@@ -432,7 +645,14 @@ device on the same Wi-Fi.
 Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
 (outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
-`-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay).
+`-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
+`-SillSettings 1` (the Settings panel open), `-SillSettingsCase
+default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout` (the mock
+Mac's settings; it answers a pick after 0.35 s), `-SillConnect 127.0.0.1:PORT`
+(connect by address, also in the normal app: the only way to reach the
+off-Bonjour synthetic hosts from the simulator). A fake screen wider than the
+simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
+drawn a quarter turn clockwise; `sips -r 270` the screenshot.
 
 ## Conventions
 

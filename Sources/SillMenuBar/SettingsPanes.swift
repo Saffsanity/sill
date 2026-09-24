@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import SillHostCore
+import StreamProtocol
 
 /// One Settings tab: a grouped Form, 520 pt wide. The controls bind straight to
 /// `settings.config`, whose didSet is the one path to the host (see HostSettings).

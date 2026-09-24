@@ -33,6 +33,8 @@ package struct HostStatusSnapshot: Equatable {
         /// The device's own description, such as "iPad (iPad14,1)".
         package var name: String?
         package var fps: Int?
+        /// What the device measured over its last second (a current client sends the medians);
+        /// -1 when that second had no sample (no frame arrived, no pong came back).
         package var frameAgeMs: Int?
         package var rttMs: Int?
 
@@ -94,6 +96,11 @@ package struct HostStatusSnapshot: Equatable {
 @MainActor @Observable
 package final class HostStatus {
     package internal(set) var snapshot = HostStatusSnapshot()
+    /// Called right after `snapshot` really changed, never for an update that changed nothing. The
+    /// coordinator re-publishes the devices' settings state from here, which is how a stream
+    /// starting, an encoder fallback or a virtual display problem reaches them. It must never call
+    /// `update` itself.
+    @ObservationIgnored var onChange: (@MainActor () -> Void)?
 
     init() {}
 
@@ -102,6 +109,6 @@ package final class HostStatus {
     func update(_ change: (inout HostStatusSnapshot) -> Void) {
         var next = snapshot
         change(&next)
-        if next != snapshot { snapshot = next }
+        if next != snapshot { snapshot = next; onChange?() }
     }
 }

@@ -403,6 +403,17 @@ final class InputOverlayView: UIView, UIKeyInput {
 final class InputOverlayProxy {
     weak var view: InputOverlayView?
     func toggleKeyboard() { view?.toggleKeyboard() }
+    /// Takes the keyboard down or puts it back, and with it hardware-key forwarding to the Mac: the
+    /// overlay forwards keys only while it is first responder. The Settings panel takes it down
+    /// while open, so Esc reaches its Done button instead of the Mac, and puts it back after.
+    func setKeyboard(shown: Bool) {
+        guard let view else { return }
+        if shown {
+            _ = view.becomeFirstResponder()
+        } else if view.isFirstResponder {
+            _ = view.resignFirstResponder()
+        }
+    }
 }
 
 struct InputOverlay: UIViewRepresentable {

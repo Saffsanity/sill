@@ -50,11 +50,18 @@ extension StreamClient {
     /// is on, which caps the panel at 60 anyway. `StreamScreen` re-sends the viewport when either
     /// changes, and the host restarts its capture and encoder at the new rate.
     static func wantedFPS() -> Int {
+        let ceiling = screenMaximumFPS()
+        return ProcessInfo.processInfo.isLowPowerModeEnabled ? min(60, ceiling) : ceiling
+    }
+
+    /// The fastest rate this device's screen shows, Low Power Mode aside: 120 on ProMotion, 60 on
+    /// the iPad mini and other 60 Hz panels. The Settings panel's frame rate note tells the two
+    /// reasons for a 60 fps stream apart with it.
+    static func screenMaximumFPS() -> Int {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         // `connectedScenes` is unordered: prefer the scene the user is looking at.
         let screen = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?.screen
-        let ceiling = max(30, screen?.maximumFramesPerSecond ?? 60)
-        return ProcessInfo.processInfo.isLowPowerModeEnabled ? min(60, ceiling) : ceiling
+        return max(30, screen?.maximumFramesPerSecond ?? 60)
     }
 }
 

@@ -55,7 +55,7 @@ enum MockCatalog {
     /// `active` is what the Mac would be streaming: the default is Code's window, as the boards
     /// draw it. `.none` is the state a fresh connection starts in — nothing picked yet, so the app
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
-    static func client(active: StreamSource = .window(102)) -> StreamClient {
+    static func client(active: StreamSource = .window(102), settings: SettingsCase = .default) -> StreamClient {
         let client = StreamClient()
         client.connected = true
         client.status = "Connected to Mac mini"
@@ -77,7 +77,63 @@ enum MockCatalog {
         }
         client.thumbnails = thumbnails
 
+        seed(client, settings: settings)
         return client
+    }
+
+    // MARK: - The Mac's settings
+
+    /// `-SillSettingsCase`: the states the Settings panel has to look right in. The mock streams
+    /// 2880×1800 · 60 fps · 15 Mbps unless a case says otherwise.
+    enum SettingsCase: String {
+        case `default`   // Sill.app: saved, the virtual display available and off
+        case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
+        case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
+        case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
+        case vdproblem   // the virtual display on, but off for this session after repeated losses
+        case vdstream    // a window streaming from the virtual display at 120 fps, 50 Mbps: the longest readout
+        case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
+        case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
+        case timeout     // the Mac did not answer a pick: the inline problem
+    }
+
+    /// Lays a case's state into the client as if the Mac had sent it on this connection.
+    private static func seed(_ client: StreamClient, settings c: SettingsCase) {
+        client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
+        guard c != .legacy else { return }
+        var state = HostSettingsState(
+            settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false),
+            persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
+            stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
+        switch c {
+        case .cli:
+            state.persistent = false
+            state.virtualDisplayAvailable = false
+            state.virtualDisplayNote = "Start SillHost with --virtual-display to use it."
+        case .software:
+            state.softwareEncoder = true
+            state.stream = RunningStream(width: 1440, height: 900, fps: 60, mbps: 15, onVirtualDisplay: false)
+        case .custom:
+            state.settings.bitrate = 12_000_000
+            state.stream?.mbps = 12
+        case .vdproblem:
+            state.settings.virtualDisplay = true
+            state.virtualDisplayNote = "Off for this session: the system removed the virtual display 3 times. Turn it off and on to try again."
+        case .vdstream:
+            state.settings.virtualDisplay = true
+            state.settings.bitrate = 25_000_000
+            state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 50, onVirtualDisplay: true)
+        case .default, .legacy, .pending, .timeout:
+            break
+        }
+        var ledger = SettingsLedger()
+        _ = ledger.receive(state)
+        if c == .pending {
+            _ = ledger.pick(HostSettingsChange(bitrate: 25_000_000), token: 0, now: ProcessInfo.processInfo.systemUptime - 1)
+            client.mockFrozen = true
+        }
+        client.settings = ledger
+        if c == .timeout { client.settingsProblem = "Mac mini didn’t answer. Try again." }
     }
 
     // MARK: - Drawn images

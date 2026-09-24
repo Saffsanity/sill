@@ -59,6 +59,15 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+A connected iPhone or iPad changes the same settings from its own Settings
+panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
+Prioritize Encoding Speed and Virtual Display, with exactly the Mac's choices.
+Sill.app saves a device's change like a menu click, and its Settings window and
+menu show it; the change applies to every connected device, and the stream
+restarts for a moment. To put one setting back to its default, quit Sill, run
+`defaults delete me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`,
+`captureScale`, `prioritizeSpeed` or `virtualDisplay`) and open Sill again.
+
 Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
 Scripts/make-app.sh --release` (it refuses to finish with any other kind of
 signature, which notarization would reject), then `ditto -c -k --keepParent
@@ -78,6 +87,11 @@ swift run -c release SillHost --virtual-display   # each streamed window on its 
 
 The argument matches an app name or window title. Leave it off to see the list
 of on-screen windows.
+
+A device can change the command-line host's settings from its Settings panel
+too; `SillHost` saves nothing, so a change lasts until it quits, and the
+device's panel says so. Its Virtual Display switch works only when `SillHost`
+runs with `--virtual-display`.
 
 `--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
 virtual HiDPI display created with a private CoreGraphics API and captures that
@@ -116,15 +130,23 @@ with the rate (the knob is per 60 fps).
    identifier if `me.saffer.sill` collides with something.
 3. Run on a real device on the same Wi-Fi. Tap the Mac's name.
 
+The gear at the end of the bar opens Settings: the Mac's streaming settings,
+changed from the device, and Disconnect at the bottom.
+
 The project is a plain Xcode project checked in by hand: four source files,
 an asset catalog, and the package reference. Nothing else.
 
 ## Measuring latency
 
-The host logs what each connected device sees, once a second:
-`client iPad (iPad14,1): 53 fps, frame age 8 ms, rtt 7 ms`. Frame age is the
-host's encode-output timestamp to the device receiving the frame (clocks assumed
-synced); RTT is a ping round trip. Measured 2026-09-22 on 5 GHz Wi-Fi: frame age
+Each connected device reports what it sees every second, and the host logs
+every other report:
+`client iPad (iPad14,1): 58 fps, frame age 9/24 ms, rtt 7/80 ms`. Frame age is
+the host's encode-output timestamp to the device receiving the frame (clocks
+assumed synced), taken for every frame; RTT is a ping round trip, four pings a
+second. Each pair is the last second's median over the worst since the
+previous line, and "–" marks a second without a sample (a still window streams
+no frames). An older iOS build reports single values
+(`frame age 8 ms, rtt 7 ms`). Measured 2026-09-22 on 5 GHz Wi-Fi: frame age
 8–10 ms, RTT 6–9 ms. Capture, encode, decode and display add roughly 30–50 ms
 more, so glass-to-glass is about 40–60 ms.
 

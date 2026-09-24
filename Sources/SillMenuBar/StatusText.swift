@@ -153,16 +153,22 @@ enum StatusText {
     }
 
     /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms"; the address until the
-    /// device's first report (within a second).
+    /// device's first report (within a second). A second without a sample reads "–", as in the
+    /// host's log line and the device's HUD: a still window sends no frames (ScreenCaptureKit
+    /// delivers only repaints), and a second can pass without a pong.
     private static func deviceRow(_ d: HostStatusSnapshot.Device) -> StatusPresentation.Row {
         let name = d.name ?? d.endpoint
         let symbol = name.localizedCaseInsensitiveContains("iphone") ? "iphone" : "ipad"
         var detail: String?
         if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
-            detail = "\(fps) fps · frame age \(age) ms · RTT \(rtt) ms"
+            detail = "\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))"
         }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name, detail: detail)
     }
+
+    /// One of a device's reported times. Negative is the client's "no sample this second" (-1),
+    /// never a time.
+    private static func ms(_ v: Int) -> String { v < 0 ? "–" : "\(v) ms" }
 
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
         if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }

@@ -13,6 +13,10 @@ final class StreamServer {
         let connectedAt = Date().timeIntervalSince1970
         var needsKeyframe = true
         var lastStatsPrint = 0.0  // CFAbsoluteTime of the last clientStats line, to rate-limit the log
+        /// The worst frame age and rtt reported since that line, -1 for none. The next line prints
+        /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
+        var worstFrameAgeSincePrint = -1
+        var worstRttSincePrint = -1
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -203,12 +207,19 @@ final class StreamServer {
                     // What the device sees, printed here so the latency number is in the Mac's log.
                     // The client reports every second; every other report (~2 s) is enough. The gate
                     // is 1.5 s, not 2, so arrival jitter on a 1 s cadence cannot stretch it to 3 s.
+                    // A skipped report's maxima still reach the next line.
                     // Every report goes to `onClientStats` (the app's menu shows it live).
                     if let stats = Wire.decode(ClientStats.self, from: payload) {
+                        client.worstFrameAgeSincePrint = max(client.worstFrameAgeSincePrint, stats.frameAgeMaxMs ?? -1)
+                        client.worstRttSincePrint = max(client.worstRttSincePrint, stats.rttMaxMs ?? -1)
                         let now = CFAbsoluteTimeGetCurrent()
                         if now - client.lastStatsPrint >= 1.5 {
                             client.lastStatsPrint = now
-                            print("client \(stats.device): \(stats.fps) fps, frame age \(stats.frameAgeMs) ms, rtt \(stats.rttMs) ms")
+                            let age = Self.medianAndWorst(stats.frameAgeMs, worst: stats.frameAgeMaxMs.map { _ in client.worstFrameAgeSincePrint })
+                            let rtt = Self.medianAndWorst(stats.rttMs, worst: stats.rttMaxMs.map { _ in client.worstRttSincePrint })
+                            print("client \(stats.device): \(stats.fps) fps, frame age \(age), rtt \(rtt)")
+                            client.worstFrameAgeSincePrint = -1
+                            client.worstRttSincePrint = -1
                         }
                         self.onClientStats?(c, stats)
                     }
@@ -226,6 +237,17 @@ final class StreamServer {
                 deliver(data)
             }
         }
+    }
+
+    /// One number of a client stats line. A current client reports each second's median and max:
+    /// "7/80 ms" is the last second's median over the worst since the previous line, "–" a second
+    /// without a sample (no frame arrived, no pong came back), "–/80 ms" such a second after one
+    /// that had samples. An older client sends one sample and no max (`worst` nil): "7 ms", as the
+    /// line always read.
+    private static func medianAndWorst(_ median: Int, worst: Int?) -> String {
+        guard let worst else { return "\(median) ms" }
+        if median < 0 { return worst < 0 ? "–" : "–/\(worst) ms" }
+        return "\(median)/\(max(worst, median)) ms"
     }
 
     /// Thread-safe: hops onto the network queue.

@@ -36,7 +36,12 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { client.startBrowsing() }
+        .onAppear {
+            client.startBrowsing()
+            #if DEBUG
+            client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
+            #endif
+        }
     }
 }
 
@@ -63,6 +68,17 @@ struct ContentView: View {
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
 /// * `-SillHUD 1` — not a harness argument, but it combines with these: the fps / frame age / RTT
 ///   readout on the display view (see `DiagnosticsHUDView`). It works with or without the harness.
+/// * `-SillConnect 127.0.0.1:PORT` — connect straight to that address, in the normal app and under
+///   `-SillLive 1`. The synthetic test hosts (`SillHost --synthetic`, the bare `SillMenuBar
+///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
+/// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
+/// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
+///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending` or `timeout` (see
+///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+///
+/// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
+/// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
+/// (`sips -r 270 shot.png`). Touches follow the rotation.
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -82,6 +98,9 @@ struct LayoutHarness: View {
         let live: Bool
         /// What the mock should be streaming. Ignored when `live`.
         let mockActive: StreamSource
+        let settingsOpen: Bool
+        /// The mock Mac's settings. Ignored when `live`.
+        let settingsCase: MockCatalog.SettingsCase
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -96,7 +115,9 @@ struct LayoutHarness: View {
                         scaleOpen: defaults.bool(forKey: "SillScaleOpen"),
                         textScale: defaults.double(forKey: "SillScale") > 0 ? defaults.double(forKey: "SillScale") : nil,
                         live: defaults.bool(forKey: "SillLive"),
-                        mockActive: mockActive(defaults.string(forKey: "SillActive")))
+                        mockActive: mockActive(defaults.string(forKey: "SillActive")),
+                        settingsOpen: defaults.bool(forKey: "SillSettings"),
+                        settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default)
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -117,23 +138,33 @@ struct LayoutHarness: View {
     init(spec: Spec, live: StreamClient) {
         self.spec = spec
         self.live = live
-        _mock = StateObject(wrappedValue: MockCatalog.client(active: spec.mockActive))
+        _mock = StateObject(wrappedValue: MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase))
     }
 
     var body: some View {
-        ZStack {
-            Color.black
-            screen
-                .frame(width: spec.size.width, height: spec.size.height)
-                .clipped()
-                .padding(1)
-                .background(Color(hex: 0x333333))
+        GeometryReader { geo in
+            let fits = spec.size.width <= geo.size.width && spec.size.height <= geo.size.height
+            let turned = !fits && spec.size.height <= geo.size.width && spec.size.width <= geo.size.height
+            ZStack {
+                Color.black
+                screen
+                    .frame(width: spec.size.width, height: spec.size.height)
+                    .clipped()
+                    .padding(1)
+                    .background(Color(hex: 0x333333))
+                    .rotationEffect(.degrees(turned ? 90 : 0))
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
-        .onAppear { if spec.live { live.startBrowsing() } }
+        .onAppear {
+            if spec.live {
+                live.startBrowsing()
+                live.connectFromLaunchArgument()
+            }
+        }
     }
 
     @ViewBuilder private var screen: some View {
@@ -144,7 +175,8 @@ struct LayoutHarness: View {
                     StreamScreen(client: live,
                                  drawerOpen: spec.drawerOpen,
                                  keyboardShown: spec.keyboardShown,
-                                 scaleOpen: spec.scaleOpen, textScale: spec.textScale)
+                                 scaleOpen: spec.scaleOpen, textScale: spec.textScale,
+                                 settingsOpen: spec.settingsOpen)
                 } else {
                     ConnectScreen(client: live)
                 }
@@ -153,7 +185,8 @@ struct LayoutHarness: View {
             StreamScreen(client: mock,
                          drawerOpen: spec.drawerOpen,
                          keyboardShown: spec.keyboardShown,
-                         scaleOpen: spec.scaleOpen, textScale: spec.textScale)
+                         scaleOpen: spec.scaleOpen, textScale: spec.textScale,
+                         settingsOpen: spec.settingsOpen)
         }
     }
 }

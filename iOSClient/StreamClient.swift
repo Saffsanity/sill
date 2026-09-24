@@ -20,10 +20,41 @@ final class StreamClient: ObservableObject {
     @Published private(set) var windowOrder: [UInt32] = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
+    /// Picks and launches sent from this device (main thread). The automatic Desktop request that
+    /// waits out a closed window stands down if this moved meanwhile: the user chose something,
+    /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
+    private var choicesSent = 0
     @Published var active: StreamSource = .none
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
     @Published var icons: [String: UIImage] = [:]      // by bundle ID
     @Published var apps: [AppInfo] = []                // installed apps, for "All apps"
+
+    // The Mac's streaming settings (kinds 16 and 17; see the Host settings section below and
+    // HostSettingsLedger.swift). Published on main.
+    /// What the Settings panel shows: the Mac's last state on this connection with this device's
+    /// unanswered picks laid over it. Internal setter: the DEBUG harness seeds it.
+    @Published var settings = SettingsLedger()
+    /// "Mac mini didn't answer. Try again.", shown inline in the panel; the next pick or answer clears it.
+    @Published var settingsProblem: String?
+    /// Bumped once per answer that refused something: the panel plays the warning haptic and
+    /// announces it.
+    @Published var settingsRefusals = 0
+    /// When this connection became ready; nil while disconnected. The panel gives the first state
+    /// two seconds before it calls the Mac an older one.
+    @Published var connectedAt: Date?
+    /// The next pick's token: strictly increasing for the life of the process, never reset, so an
+    /// answer can never be taken for one to an earlier connection's pick.
+    private var settingsToken = 1
+    /// The pending picks' timeout check (one at a time, for the oldest).
+    private var settingsExpiry: DispatchWorkItem?
+    /// The worst round trip of the last second that had a pong (`linkStats.rtt.max`), for the pick
+    /// timeout. Kept across seconds without one: a stalled slow link reports no rtt at all, and
+    /// that must not shrink the timeout back to 4 s. Nil until measured; cleared on tear-down.
+    private var lastRttMaxMs: Int?
+    #if DEBUG
+    /// Harness `pending` case: the mock never answers and never times out.
+    var mockFrozen = false
+    #endif
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
@@ -43,9 +74,38 @@ final class StreamClient: ObservableObject {
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
 
-    /// Round trip to the host in ms, from a ping every second while connected. -1 until measured.
-    @Published var rttMs: Int = -1
-    private var pingTimer: Timer?
+    /// What this device measured over the last second: frames, frame age and round trip. The
+    /// network queue closes a window every second while connected and publishes it here; nil
+    /// before the first one closes and after a disconnect. The HUD shows it, and
+    /// `ClientStatsReporter` sends each one to the host exactly once. Main thread.
+    @Published private(set) var linkStats: LinkStats?
+
+    /// One second of measurements.
+    struct LinkStats: Equatable {
+        /// Frames received per second, frames discarded while waiting for a keyframe included.
+        var fps: Int
+        /// Host encode output → received here, over every frame of the second. Assumes synced
+        /// clocks; it is the transport part of latency, not glass-to-glass. nil: no frame arrived.
+        var frameAge: MedianMax?
+        /// Ping round trips, over the pongs that came back during the second. nil: none did.
+        var rtt: MedianMax?
+    }
+
+    /// The typical and the worst of one second's samples, in whole milliseconds.
+    struct MedianMax: Equatable {
+        let median: Int
+        let max: Int
+
+        /// nil for no samples: a second without a frame or a pong must not read as a fast one.
+        init?(_ samples: [Double]) {
+            guard !samples.isEmpty else { return nil }
+            let sorted = samples.sorted()
+            let mid = sorted.count / 2
+            let median = sorted.count % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+            self.median = Int(median.rounded())
+            self.max = Int(sorted[sorted.count - 1].rounded())
+        }
+    }
 
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
@@ -82,15 +142,23 @@ final class StreamClient: ObservableObject {
     private var storedConnection: NWConnection?
     private let connectionLock = NSLock()
     private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
-    private var frameCounter = 0
-    /// Frames received in the last second (main thread). Counts frames discarded while waiting for a keyframe too.
-    @Published var fps = 0
-    /// Host encode-output timestamp → received here, sampled every 15th frame. Assumes synced clocks;
-    /// it is the transport part of latency, not glass-to-glass.
-    @Published var frameAgeMs = 0
-    private var latestFrameAgeMs = 0   // network queue copy, published from the 1 s timer
     private var lastParameterSets: ParameterSets?
-    private var fpsTimer: Timer?
+
+    // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
+    // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
+    // timers, which stop while a scroll is tracked: the numbers froze, and the next tick then
+    // counted several seconds of frames as one ("222 fps").
+    private var frameCounter = 0
+    private var frameAgeSamples: [Double] = []   // ms, one per frame
+    private var rttSamples: [Double] = []        // ms, one per pong
+    private var windowOpenedAt = 0.0             // CACurrentMediaTime
+    private var windowTimer: DispatchSourceTimer?
+    private var pingTimer: DispatchSourceTimer?
+    /// Four pings per one-second window, so a report has a median and a max: a single sample either
+    /// landed in a stall or did not, and said nothing about the rest of the second.
+    private static let pingInterval = 0.25
+    /// A day. A sample beyond it is a broken clock, and clamping keeps an infinity away from `Int()`.
+    private static let sampleCeilingMs = 86_400_000.0
 
     // Pointer-move coalescing, all touched on `queue` only.
     private static let moveInterval = 0.008   // 125 Hz ceiling; a Pencil can report at 120+ Hz
@@ -133,6 +201,13 @@ final class StreamClient: ObservableObject {
     }
 
     func connect(to result: NWBrowser.Result) {
+        connect(to: result.endpoint, name: Self.serviceName(of: result))
+    }
+
+    /// Connects to a Bonjour result's endpoint, or straight to an address (DEBUG `-SillConnect`,
+    /// later "add a Mac by address"). `name` is what the status line calls the Mac until its window
+    /// list brings its own name.
+    func connect(to endpoint: NWEndpoint, name: String) {
         // One connection at a time. A tap on the connect screen racing the reconnect timer used to
         // open two: both then read from whichever `connection` pointed at, interleaving headers
         // and payloads, while the other was never read and the host evicted it after 4 s.
@@ -140,7 +215,6 @@ final class StreamClient: ObservableObject {
             connection = nil
             old.cancel()      // its .cancelled callback is ignored: connectionLost checks identity
         }
-        let name = Self.serviceName(of: result)
         hostName = name
         status = "Connecting to \(name)…"
         let tcp = NWProtocolTCP.Options()
@@ -150,7 +224,7 @@ final class StreamClient: ObservableObject {
         // Wi-Fi QoS: video + pointer traffic is latency-sensitive; the access point and the radio
         // treat this class (WMM video) with shorter queues than best-effort.
         params.serviceClass = .interactiveVideo
-        let c = NWConnection(to: result.endpoint, using: params)
+        let c = NWConnection(to: endpoint, using: params)
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -159,10 +233,10 @@ final class StreamClient: ObservableObject {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
                     self.reconnectTo = nil
                     self.connected = true
+                    self.connectedAt = Date()
                     self.status = "Connected to \(name)"
-                    self.startFpsTimer()
-                    self.startPingTimer()
                 }
+                self.startMeasuring(c)   // before the first read, so the first window is this connection's alone
                 self.readHeader(on: c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
@@ -226,17 +300,10 @@ final class StreamClient: ObservableObject {
 
     /// Clears everything the session owned. Main thread.
     private func tearDown(status: String) {
-        queue.async { self.lastParameterSets = nil; self.pendingMove = nil }
-        fpsTimer?.invalidate()
-        fpsTimer = nil
-        pingTimer?.invalidate()
-        pingTimer = nil
-        rttMs = -1
-        fps = 0
-        frameAgeMs = 0
+        queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        linkStats = nil
         localPointer = nil
         cursorShape = nil
-        queue.async { self.frameCounter = 0; self.latestFrameAgeMs = 0 }
         connected = false
         lastAutoDesktop = .distantPast     // the next connection starts on the Desktop again
         self.status = status
@@ -248,12 +315,20 @@ final class StreamClient: ObservableObject {
         apps = []
         videoSize = .zero
         displayView.clear()
+        // Nothing of a Mac's settings outlives its connection: the next one sends them afresh.
+        settings.reset()
+        settingsProblem = nil
+        connectedAt = nil
+        settingsExpiry?.cancel()
+        settingsExpiry = nil
+        lastRttMaxMs = nil
     }
 
     // MARK: - Client → host
 
     /// Ask the host to stream this source. The host answers with a fresh window list.
     func select(_ source: StreamSource) {
+        choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
         // Layout harness (mock, no connection): show the pick locally so taps can be checked.
@@ -304,6 +379,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
 
@@ -405,11 +481,14 @@ final class StreamClient: ObservableObject {
                 onParameterSets?(ps)
             }
         case .frame:
-            onFrame?(data, header.isKeyframe)
+            // Every frame is a sample, stamped on arrival before the hand-off to the display layer:
+            // the worst frame of a second is the stutter, and one sample in fifteen missed it.
+            // Clocks that disagree can make an age negative; nothing arrives before it was sent, so
+            // that reads as 0, which keeps -1 free on the wire for "no frame this second".
+            let age = (Date().timeIntervalSince1970 - header.timestamp) * 1000
+            if age.isFinite { frameAgeSamples.append(min(max(age, 0), Self.sampleCeilingMs)) }
             frameCounter += 1
-            if frameCounter % 15 == 0 {
-                latestFrameAgeMs = Int((Date().timeIntervalSince1970 - header.timestamp) * 1000)
-            }
+            onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
             DispatchQueue.main.async {
@@ -432,8 +511,11 @@ final class StreamClient: ObservableObject {
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
+                        // Not if the user picked or launched something meanwhile: this request
+                        // could reach the host after that choice has started and replace it.
+                        let choices = self.choicesSent
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                            guard let self, self.connected, self.active == .none,
+                            guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
                             self.select(.desktop)
@@ -457,42 +539,183 @@ final class StreamClient: ObservableObject {
         case .cursorShape:
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
+        case .hostSettings:
+            guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                // A state from a connection that has since been replaced must not outlive its reset.
+                guard self.connection === from else { return }
+                self.receiveSettings(state)
+            }
         case .pong:
+            // The host echoes the ping's payload unchanged: our own monotonic send time.
             guard data.count >= 8 else { return }
             let sent = Double(bitPattern: data.readBigEndianUInt64())
-            let rtt = Int((Date().timeIntervalSince1970 - sent) * 1000)
-            DispatchQueue.main.async { self.rttMs = rtt }
+            let rtt = (CACurrentMediaTime() - sent) * 1000
+            if rtt.isFinite, rtt >= 0 { rttSamples.append(min(rtt, Self.sampleCeilingMs)) }
         default:
             break // client → host kinds, and anything a newer host invents
         }
     }
 
-    private func startFpsTimer() {
-        fpsTimer?.invalidate()
-        fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.queue.async {
-                let n = self.frameCounter
-                self.frameCounter = 0
-                let age = self.latestFrameAgeMs
-                DispatchQueue.main.async { self.fps = n; self.frameAgeMs = age }
-            }
+    // MARK: - Measurement (on `queue`)
+
+    /// Starts the one-second windows and the pings for `c`, dropping whatever an earlier connection
+    /// left behind. On `queue`, from the connection's ready state.
+    private func startMeasuring(_ c: NWConnection) {
+        guard c === connection else { return }   // replaced while connecting
+        stopMeasuring()
+        windowOpenedAt = CACurrentMediaTime()
+        let window = DispatchSource.makeTimerSource(queue: queue)
+        window.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(10))
+        window.setEventHandler { [weak self, weak c] in
+            guard let self, let c else { return }
+            self.closeWindow(of: c)
         }
+        window.resume()
+        windowTimer = window
+        let ping = DispatchSource.makeTimerSource(queue: queue)
+        ping.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval, leeway: .milliseconds(5))
+        ping.setEventHandler { [weak self, weak c] in
+            guard let self, let c else { return }
+            self.sendPing(on: c)
+        }
+        ping.resume()
+        pingTimer = ping
+    }
+
+    /// On `queue`.
+    private func stopMeasuring() {
+        windowTimer?.cancel()
+        windowTimer = nil
+        pingTimer?.cancel()
+        pingTimer = nil
+        frameCounter = 0
+        frameAgeSamples.removeAll()
+        rttSamples.removeAll()
+    }
+
+    /// Closes the open window and publishes it. On `queue`, once a second.
+    private func closeWindow(of c: NWConnection) {
+        guard c === connection else { return }   // replaced or gone: not this session's numbers
+        let now = CACurrentMediaTime()
+        let elapsed = now - windowOpenedAt
+        windowOpenedAt = now
+        // Per second of the window's real length, which is a second unless the app was suspended.
+        let fps = elapsed > 0 ? Int((Double(frameCounter) / elapsed).rounded()) : frameCounter
+        let stats = LinkStats(fps: fps, frameAge: MedianMax(frameAgeSamples), rtt: MedianMax(rttSamples))
+        frameCounter = 0
+        frameAgeSamples.removeAll(keepingCapacity: true)
+        rttSamples.removeAll(keepingCapacity: true)
+        DispatchQueue.main.async {
+            guard self.connection === c else { return }   // torn down meanwhile: stay nil
+            self.linkStats = stats
+            if let rtt = stats.rtt { self.lastRttMaxMs = rtt.max }   // for the settings timeout
+        }
+    }
+
+    /// On `queue`. Stamped with the monotonic clock: a wall-clock correction between a ping and its
+    /// pong would otherwise land in the round trip.
+    private func sendPing(on c: NWConnection) {
+        guard c === connection else { return }
+        var payload = Data(capacity: 8)
+        var v = CACurrentMediaTime().bitPattern.bigEndian
+        Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
+        let message = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
+        c.send(content: message.serialized(), completion: .contentProcessed { _ in })
     }
 }
 
+// MARK: - Host settings
+
 extension StreamClient {
-    private func startPingTimer() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let connection = self.connection else { return }
-            var payload = Data(capacity: 8)
-            var v = Date().timeIntervalSince1970.bitPattern.bigEndian
-            Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
-            let message = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
-            connection.send(content: message.serialized(), completion: .contentProcessed { _ in })
+    /// A control's action: its field set to an absolute value. Sends only what changes what is
+    /// shown, and nothing before this connection's first state (an older Mac never sends one).
+    /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
+    func changeSettings(_ change: HostSettingsChange) {
+        guard let out = settings.pick(change, token: settingsToken, now: ProcessInfo.processInfo.systemUptime) else { return }
+        settingsToken += 1
+        settingsProblem = nil
+        send(.changeSettings, payload: Wire.encode(out))
+        scheduleSettingsExpiry()
+        #if DEBUG
+        if connection == nil { mockAnswer(out) }
+        #endif
+    }
+
+    /// A state from the Mac: a broadcast, or the answer to one of this device's picks. Main thread.
+    private func receiveSettings(_ state: HostSettingsState) {
+        let refused = settings.receive(state)
+        if state.answering != nil { settingsProblem = nil }
+        if !refused.isEmpty { settingsRefusals += 1 }
+        scheduleSettingsExpiry()
+    }
+
+    /// How long a pick waits for its answer: 4 s, or four round trips on a slow link (a Mac
+    /// reached from afar), counting the worst round trip of the last second that measured one; an
+    /// RTT not measured yet counts as 4 s.
+    private var settingsTimeout: Double { lastRttMaxMs.map { max(4, 4 * Double($0) / 1000) } ?? 4 }
+
+    /// Arms the timeout check for the oldest pending pick, replacing any armed one.
+    private func scheduleSettingsExpiry() {
+        settingsExpiry?.cancel()
+        settingsExpiry = nil
+        guard let oldest = settings.pending.values.map(\.sentAt).min() else { return }
+        let work = DispatchWorkItem { [weak self] in self?.expireSettings() }
+        settingsExpiry = work
+        let due = oldest + settingsTimeout + 0.05 - ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, due), execute: work)
+    }
+
+    /// Picks the Mac never answered go back to its value, with the problem shown inline.
+    private func expireSettings() {
+        #if DEBUG
+        if mockFrozen { return }
+        #endif
+        if settings.expire(now: ProcessInfo.processInfo.systemUptime, timeout: settingsTimeout) {
+            settingsProblem = "\(macName.isEmpty ? "The Mac" : macName) didn’t answer. Try again."
+        }
+        scheduleSettingsExpiry()   // a later pick, or a timeout that grew with the RTT
+    }
+
+    #if DEBUG
+    /// The layout harness has no Mac: answer a pick after 0.35 s the way a host would, over the
+    /// mock's state at that moment, refusing the virtual display where the mock has none. The
+    /// readout follows as a restart would make it. Nothing under `mockFrozen`.
+    private func mockAnswer(_ out: HostSettingsChange) {
+        guard !mockFrozen else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.connection == nil, var state = self.settings.host else { return }
+            var ok = out
+            if ok.virtualDisplay == true, !state.virtualDisplayAvailable { ok.virtualDisplay = nil }
+            let before = state.settings
+            state.settings = ok.applied(to: before)
+            if var stream = state.stream {
+                stream.mbps = state.settings.bitrate * stream.fps / 60 / 1_000_000
+                if !state.softwareEncoder, state.settings.captureScale != before.captureScale {
+                    let f = state.settings.captureScale / before.captureScale
+                    stream.width = Int(Double(stream.width) * f) & ~1
+                    stream.height = Int(Double(stream.height) * f) & ~1
+                }
+                state.stream = stream
+            }
+            state.answering = out.token
+            self.receiveSettings(state)
         }
     }
+
+    /// `-SillConnect host:port`: connect straight to an address. The synthetic test hosts stay off
+    /// Bonjour, so this is how the simulator reaches `SillHost --synthetic` and the bare
+    /// `SillMenuBar --synthetic`. If such a connection drops, the reconnect timer looks for it on
+    /// Bonjour, never finds it and backs off to 10 s: harmless in a debug build.
+    func connectFromLaunchArgument() {
+        guard let raw = UserDefaults.standard.string(forKey: "SillConnect"),
+              let colon = raw.lastIndex(of: ":"),
+              let number = UInt16(raw[raw.index(after: colon)...]),
+              let port = NWEndpoint.Port(rawValue: number) else { return }
+        connect(to: .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port), name: raw)
+    }
+    #endif
 }
 
 private extension Data {

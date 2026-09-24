@@ -139,6 +139,11 @@ struct PortraitStreamScreen: View {
     @Binding var windowMenu: UInt32?
     @Binding var latched: KeyModifiers
     let overlay: InputOverlayProxy
+    /// The Settings panel, owned by `StreamScreen` (see its `setSettings`).
+    let settingsOpen: Bool
+    let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
+    /// The panel's open and close motion, scaled about the given point (see `StreamScreen`).
+    let settingsTransition: (_ anchor: UnitPoint) -> AnyTransition
     /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
     let onPanelSize: (CGSize) -> Void
 
@@ -172,6 +177,31 @@ struct PortraitStreamScreen: View {
                         .padding(.top, half + metrics.padTop + metrics.barHeight + 8)
                         .padding(.bottom, metrics.padBottom)
                         .transition(.opacity)
+                }
+
+                // The drawer's mirror: from just under the window bar at the trailing edge, lined up
+                // with the Settings button, entirely in the lower half, so it never spans the Duo's
+                // crease and the stream above stays in view. No dim; the tap catcher covers both
+                // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
+                // and never reaches the Mac.
+                if settingsOpen {
+                    let top = half + metrics.padTop + metrics.barHeight + 8
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { setSettings(false, true) }
+                        .accessibilityHidden(true)
+
+                    HostSettingsPanel(client: client, close: { setSettings(false, true) })
+                        .frame(width: min(360, geo.size.width - 2 * metrics.padSide))
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, top)
+                        .padding(.bottom, metrics.padBottom)
+                        .padding(.trailing, metrics.padSide)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        // The view carrying the transition fills the screen, so the panel's own
+                        // top-trailing corner, under the Settings button, is given as a point in it.
+                        .transition(settingsTransition(UnitPoint(x: 1 - metrics.padSide / max(geo.size.width, 1),
+                                                                 y: top / max(geo.size.height, 1))))
                 }
             }
         }
@@ -227,7 +257,10 @@ struct PortraitStreamScreen: View {
         HStack(spacing: 12) {
             barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
                       accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                      action: { withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() } })
+                      action: {
+                          setSettings(false, false)
+                          withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
+                      })
 
             WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
                         radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
@@ -246,9 +279,10 @@ struct PortraitStreamScreen: View {
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
-            barButton(open: false, symbol: "xmark.circle", label: "Leave",
-                      accessibilityLabel: "Disconnect from the Mac",
-                      action: { client.disconnect() })
+            // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
+            barButton(open: settingsOpen, symbol: "gearshape", label: "Settings",
+                      accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                      action: { setSettings(!settingsOpen, true) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
         }
