@@ -1067,3 +1067,39 @@ answer.
 4. **The security sentence in the Mac's footer.**
    - **Default:** it ends with "Anyone nearby with Sill can find and connect to this Mac."
    - The alternative drops it until pairing (M5) lands.
+
+---
+
+## As built (2026-09-24)
+
+Implemented in the order of §10, one commit per step. Where the code departs from the plan above:
+
+- **The plan was committed in step 0** (the orchestrating workflow asked for it), not left untracked
+  until step 6.
+- **A replaced listener's `newConnectionHandler` still accepts.** Its state and registration
+  handlers are inert, as planned, but a connection it delivers late is a real client and no longer
+  depends on the listener, so it is served rather than dropped.
+- **`start()` never silently drops the setting.** If the peer-to-peer listener cannot be built at
+  launch, it says so in one line and runs the other way; `setPeerToPeer` before `start()` only
+  records the value, as planned.
+- **The test type is validated** (`_name._tcp`, name 1–15 letters, digits or hyphens, never
+  `_sill._tcp`); anything else is ignored with one line.
+- **`startBrowsing()` starts the network browser once.** SwiftUI can run `onAppear` again, and a
+  second browser would have replaced the first without cancelling it.
+- **"Reconnecting to ‹Mac›…" is now visible.** It used to be overwritten at once by `connect`'s
+  "Connecting to ‹Mac›…"; `reconnectIfListed` sets it after `connect`.
+- **The connect screen's column is anchored leading** (`.frame(width: 380, alignment: .leading)`).
+  With no rows the column shrank to its text and was centred, so the title jumped ~90 pt left when
+  the hint or the first row appeared.
+- **Harness.** The `nearby` connect case has a third row with a 43-character name, to show that
+  "Direct" never truncates. The stream-screen mock sets `mockDiscovery` too, so the harness never
+  browses even after the panel's Disconnect.
+- **"Connected directly" lives in the header's readout block**, as §6.3 describes, so a direct
+  connection to a host without settings (no state) shows no such line.
+
+Test notes: H6 saw no refusal at all (55 of 55 accepted; ≤ 3 allowed). H11 renders both builds'
+previews from one copied path, because the General pane shows the binary's own path. S2 and S3
+tapped by coordinates read from screenshots (the simulator tool's inspect was unavailable), with a
+0.15 s press: an instantaneous synthetic tap on a switch inside the panel's scroll view was taken
+by the scroll view. S3's Mac-side test client picks the Desktop on connecting, which restarts that
+pipeline once by itself; the setting's own changes never did.
