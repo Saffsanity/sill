@@ -98,6 +98,24 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   "Visible on your network as", and a "Direct Wireless Connection" item at the
   top of the status menu's second group, absolute like Virtual Display. Saved
   under `directWireless`; an existing install has no key, so it comes up off.
+  The status menu's card ends each device's row in how it reaches this Mac
+  (Noah, 2026-09-24, branch `connection-route-in-settings`: "next to bitrate"),
+  and while exactly one device is connected the source row too, after the Mbps:
+  "Wired" (the cable's anri0, or any wired Ethernet interface), "Wi-Fi" or
+  "Direct" (awdl0, llw0), else no word (loopback, a VPN, a path that says two
+  things). `ClientLink.route` reads this Mac's side of the device's own
+  connection, by the witnesses `runsPeerToPeer` uses (so Direct is exactly what
+  turning Direct Wireless off disconnects): the address's scope, typed by the
+  address itself, else the path's interfaces when they all agree (a connection
+  to this Mac's own address lists en0 and lo0: no word). Read when the client is
+  ready and on each path update, shown only (`HostStatusSnapshot.Device.route`);
+  no wire change. Each end names its own link, so an iPad on Wi-Fi streaming
+  from a Mac on Ethernet says "Wi-Fi" while the card says "Wired". Verified: the
+  link check at 89 (PR #6's 40 plus 49), 14 mutants caught; the real host in a
+  scratch package (loopback, `fe80::1%lo0` and `::1` clients: no word; with the
+  lo0 stand-in, Direct on the device rows and on the source row only while one
+  is connected); previews: only the five cards with a device and their menu.txt
+  lines differ from a1484f9; the CLI identical to a1484f9 (masked).
 - iOS: the network browser and connections to the Macs it lists never use
   peer-to-peer. A nearby (peer-to-peer) browser runs only while not connected,
   and only when a Mac this device last saw with the setting on
@@ -857,7 +875,8 @@ good.
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL and
   SILL_TEST_PEER_TO_PEER_INTERFACE), `ClientLink` (which route a client came
-  by, from its endpoint's scope; pure, checked with swiftc),
+  by, from its endpoint's scope, and the menu card's word for it: Wired, Wi-Fi,
+  Direct or none; pure, checked with swiftc),
   `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
   events and Spotlight ignored them), HID keys),

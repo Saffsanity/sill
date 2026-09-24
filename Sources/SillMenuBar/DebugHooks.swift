@@ -193,10 +193,16 @@ enum DebugHooks {
     }
 
     private static func samples() -> [Sample] {
+        // Each word once or more: the iPad on Wi-Fi, on the USB cable ("connected" and the software
+        // encoder sample), the iPhone over peer-to-peer Wi-Fi; the test pattern's loopback client
+        // has none.
         let ipad = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[0]), endpoint: "192.168.1.23:52344",
-                                             name: "iPad (iPad14,1)", fps: 118, frameAgeMs: 9, rttMs: 7)
-        let iphone = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[1]), endpoint: "192.168.1.31:50112",
-                                               name: "iPhone (iPhone17,1)", fps: 60, frameAgeMs: 11, rttMs: 8)
+                                             name: "iPad (iPad14,1)", fps: 118, frameAgeMs: 9, rttMs: 7, route: .wifi)
+        var cabledIPad = ipad
+        cabledIPad.endpoint = "fe80::1%anri0.61390"
+        cabledIPad.route = .wired
+        let iphone = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[1]), endpoint: "fe80::2%awdl0.63101",
+                                               name: "iPhone (iPhone17,1)", fps: 60, frameAgeMs: 11, rttMs: 8, route: .direct)
         let window = HostStatusSnapshot.Stream(kind: .window, title: "Safari — Apple Developer Documentation: ScreenCaptureKit",
                                                width: 3024, height: 1898, fps: 120, mbps: 30,
                                                onVirtualDisplay: true, softwareEncoder: false)
@@ -205,8 +211,9 @@ enum DebugHooks {
         var registering = HostStatusSnapshot()
         registering.network = .registering
         var connected = idle
-        connected.devices = [ipad]
+        connected.devices = [cabledIPad]
         var streaming = connected
+        streaming.devices = [ipad]
         streaming.stream = window
         streaming.encodedFPS = 118
         streaming.virtualDisplayOn = true

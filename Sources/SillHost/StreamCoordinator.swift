@@ -142,10 +142,13 @@ package final class StreamCoordinator {
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
 
-        server.onClientConnected = { [weak self] connection in
+        server.onClientConnected = { [weak self] connection, route in
             Task { @MainActor in
                 guard let self else { return }
-                self.status.update { $0.devices.append(HostStatusSnapshot.Device(id: ObjectIdentifier(connection), endpoint: "\(connection.endpoint)")) }
+                self.status.update {
+                    $0.devices.append(HostStatusSnapshot.Device(id: ObjectIdentifier(connection), endpoint: "\(connection.endpoint)",
+                                                                route: route))
+                }
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
@@ -222,6 +225,16 @@ package final class StreamCoordinator {
         }
         server.onServiceRegistered = { [weak self] name in
             Task { @MainActor in self?.serviceRegistered(name) }
+        }
+        // Display only: the menu card's word for how the device reaches this Mac.
+        server.onClientRouteChanged = { [weak self] connection, route in
+            let id = ObjectIdentifier(connection)
+            Task { @MainActor in
+                self?.status.update {
+                    guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                    $0.devices[i].route = route
+                }
+            }
         }
         server.onClientStats = { [weak self] connection, stats in
             let id = ObjectIdentifier(connection)

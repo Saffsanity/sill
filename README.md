@@ -27,7 +27,8 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
-rate, frame age and round trip, and what is streaming; it holds the
+rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
+"Direct"), and what is streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
 Connection, Launch at Login, Permissions, Show Log… and Settings… (⌘,).
 Changes apply at once; a change to a streaming setting restarts the current
