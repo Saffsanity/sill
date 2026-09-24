@@ -12,6 +12,10 @@ struct FoundMac: Identifiable, Hashable {
     let endpoint: NWEndpoint
     /// Reached over peer-to-peer Wi-Fi alone: the one kind of row connected with includePeerToPeer.
     let direct: Bool
+    /// How the Mac is reachable, the word at the end of its row ("Wired", "Wi-Fi", "Direct"), or nil
+    /// when the interfaces it was seen on do not say (DiscoveryPolicy.method). Only shown: which
+    /// route a tap takes is `direct`'s alone.
+    let method: DiscoveryPolicy.Method?
     var id: String { name }   // unique: DiscoveryPolicy.rows lists a name once
 }
 
@@ -336,22 +340,48 @@ final class StreamClient: ObservableObject {
     }
 
     /// The rows, each with the endpoint of the browser that listed it: a network row always the
-    /// network browser's, so at home a Mac is never reached over AWDL. Main thread.
+    /// network browser's, so at home a Mac is never reached over AWDL. Each row's word comes from
+    /// the interfaces that same browser saw its Mac on (DiscoveryPolicy.method): a browser reports
+    /// one result per Mac with every interface it is seen on, and reports it again when one comes
+    /// or goes, so plugging the cable in or out changes the word. Main thread.
     private func recomputeMacs() {
-        var network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint) }
+        var network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces) }
         #if DEBUG
-        network += testNetworkRows
+        network += testNetworkRows.map { (name: $0.name, endpoint: $0.endpoint, interfaces: [NWInterface]()) }
         #endif
-        let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces.map(\.name)) }
-        let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.interfaces) })
+        let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces) }
+        let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.interfaces.map(\.name)) })
         let now = ProcessInfo.processInfo.systemUptime
         directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
         sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         let next = rows.compactMap { row -> FoundMac? in
-            let endpoint = row.direct ? nearby.first { $0.name == row.name }?.endpoint : network.first { $0.name == row.name }?.endpoint
-            return endpoint.map { FoundMac(name: row.name, endpoint: $0, direct: row.direct) }
+            guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
+            return FoundMac(name: row.name, endpoint: seen.endpoint, direct: row.direct,
+                            method: DiscoveryPolicy.method(direct: row.direct, interfaces: seen.interfaces.map(Self.policyInterface)))
         }
-        if next != macs { macs = next }
+        guard next != macs else { return }
+        #if DEBUG
+        // What each row's word was read from, to check it on a device (the cable in and out).
+        for mac in next {
+            let seen = (mac.direct ? nearby : network).first { $0.name == mac.name }?.interfaces ?? []
+            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(seen.map { "\($0.name) (\($0.type))" }.joined(separator: ", "))")
+        }
+        #endif
+        macs = next
+    }
+
+    /// An interface as DiscoveryPolicy spells it, case for case.
+    private static func policyInterface(_ interface: NWInterface) -> DiscoveryPolicy.Interface {
+        let type: DiscoveryPolicy.Interface.Kind
+        switch interface.type {
+        case .wifi: type = .wifi
+        case .wiredEthernet: type = .wiredEthernet
+        case .cellular: type = .cellular
+        case .loopback: type = .loopback
+        case .other: type = .other
+        @unknown default: type = .other   // a type newer than this code: no word rather than a wrong one
+        }
+        return DiscoveryPolicy.Interface(name: interface.name, type: type)
     }
 
     /// Runs the policy on what is known now: starts or stops the nearby browser, shows the hint,
