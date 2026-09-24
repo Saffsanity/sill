@@ -99,6 +99,9 @@ enum MockCatalog {
         case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
         case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
         case timeout     // the Mac did not answer a pick: the inline problem
+        case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
+        case directlink  // on, and this device connected over it: the header line and the footer's warning
+        case nodirect    // a host without the setting (the ipad-host-settings build): no row
     }
 
     /// Lays a case's state into the client as if the Mac had sent it on this connection.
@@ -128,6 +131,13 @@ enum MockCatalog {
             state.settings.virtualDisplay = true
             state.settings.bitrate = 25_000_000
             state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 50, onVirtualDisplay: true)
+        case .direct:
+            state.settings.directWireless = true
+        case .directlink:
+            state.settings.directWireless = true
+            client.connectedDirectly = true
+        case .nodirect:
+            state.settings.directWireless = nil
         case .default, .legacy, .pending, .timeout:
             break
         }

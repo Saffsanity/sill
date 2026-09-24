@@ -97,11 +97,16 @@ struct HostSettingsPanel: View {
                         if state.stream?.onVirtualDisplay == true {
                             Text("On the virtual display")
                         }
+                        // How this device reaches the Mac: over peer-to-peer Wi-Fi, which the Direct
+                        // Wireless Connection row can turn off.
+                        if client.connectedDirectly {
+                            Text("Connected directly")
+                        }
                     }
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.spokenReadout(state.stream))
+                    .accessibilityLabel(Self.spokenReadout(state.stream, direct: client.connectedDirectly))
                 }
             }
             Spacer(minLength: 8)
@@ -181,8 +186,25 @@ struct HostSettingsPanel: View {
                 } else {
                     Footnote(text: "The window you pick moves onto an invisible display on \(mac) while it streams, so it keeps updating when covered.")
                 }
-                Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment."
-                         + (state.persistent ? "" : " SillHost keeps these until it quits."))
+                Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment.")
+                // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
+                // closing footer, whose "the stream restarts" is not true of it, and last, the least
+                // changed row with the longest footer (the outer display's 259 pt shows the rest
+                // first). Never disabled: off from a directly connected device is allowed, as on the
+                // Mac, and its consequence is written beside it. No row for a host without it.
+                if let direct = shown.directWireless {
+                    Rows {
+                        Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
+                            RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
+                        }
+                        .accessibilityHint(client.connectedDirectly ? "Turning this off can disconnect this \(device)." : "")
+                        .rowFrame()
+                    }
+                    Footnote(text: directFooter)
+                }
+                if !state.persistent {
+                    Footnote(text: "SillHost keeps these until it quits.")
+                }
             } else if olderMac {
                 Label("Update Sill on \(mac) to change these from here.", systemImage: "arrow.down.circle")
                     .font(.body)
@@ -256,10 +278,22 @@ struct HostSettingsPanel: View {
         return "\(s.width)×\(s.height) · \(s.fps)\u{00A0}fps · \(s.mbps)\u{00A0}Mbps"
     }
 
-    static func spokenReadout(_ stream: RunningStream?) -> String {
-        guard let s = stream else { return "Not streaming" }
+    static func spokenReadout(_ stream: RunningStream?, direct: Bool = false) -> String {
+        let link = direct ? ", connected directly" : ""
+        guard let s = stream else { return "Not streaming" + link }
         return "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"
-            + (s.onVirtualDisplay ? ", on the virtual display" : "")
+            + (s.onVirtualDisplay ? ", on the virtual display" : "") + link
+    }
+
+    /// "iPhone" or "iPad", for copy about this device.
+    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+
+    /// Under the Direct Wireless Connection row: what it does and costs, and, on a device connected
+    /// over it, what turning it off does to this device.
+    private var directFooter: String {
+        var text = "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter."
+        if client.connectedDirectly { text += " This \(device) is connected directly: turning this off can disconnect it." }
+        return text
     }
 
     /// Under the stream rows. A frame rate limit above what this screen shows changes nothing for
@@ -269,7 +303,6 @@ struct HostSettingsPanel: View {
         var text = "Quality is per 60 fps; a 120 fps stream gets twice as much."
         let wanted = StreamClient.wantedFPS()
         guard wanted < 120 else { return text }
-        let device = UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad"
         if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {
             text += " Low Power Mode holds this \(device) to \(wanted) fps."
         } else {

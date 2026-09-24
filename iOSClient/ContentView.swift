@@ -73,7 +73,8 @@ struct ContentView: View {
 ///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
-///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending` or `timeout` (see
+///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
+///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
 ///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby) or `nearby` (a network row and Direct
