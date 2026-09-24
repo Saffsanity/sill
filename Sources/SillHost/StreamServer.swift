@@ -12,8 +12,10 @@ import StreamProtocol
 /// browse `_sill._tcp` only) ever finds it. `SILL_TEST_SWAP_FAIL=port` makes a Direct Wireless
 /// replacement's same-port bind fail as EADDRINUSE without binding, and `=all` its any-port bind
 /// too, so the fallback and the listener-failure rule can be exercised without a real conflict.
-/// Both are honoured only on a host that does not advertise, so a stray variable can never touch
-/// a real host.
+/// `SILL_TEST_PEER_TO_PEER_INTERFACE=en0` counts a client whose address is scoped to that interface
+/// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
+/// client on en0 stands in for a device on awdl0, which no test can reach. All three are honoured
+/// only on a host that does not advertise, so a stray variable can never touch a real host.
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
@@ -27,6 +29,9 @@ final class StreamServer {
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
+        /// The device's own name from its last ClientStats ("iPad (iPad14,1)"), for the line that
+        /// says why it was disconnected; nil until its first report.
+        var device: String?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -119,6 +124,8 @@ final class StreamServer {
     // awdl0 record for minutes (5 of 5), while 0.25 s and more removed it cleanly (6 of 6). So:
     // cancel, wait for `.cancelled`, bind the same port at once without a service (a device
     // connecting in those milliseconds is refused and retries), and advertise `advertiseDelay` later.
+    // The only connections a change ends: once a replacement with it off is advertised, those of
+    // the devices still on peer-to-peer Wi-Fi (`disconnectPeerToPeerClients`).
     //
     // From `start()` on, the listener's whole life is the network queue's: its creation, start,
     // handlers and replacement, and `readyPort`, which the main actor reads through `portLock`.
@@ -183,6 +190,16 @@ final class StreamServer {
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
+
+    /// TEST ONLY: SILL_TEST_PEER_TO_PEER_INTERFACE (see the type's doc comment). Read once, and only
+    /// by a host that does not advertise; an interface name (a letter, then letters or digits),
+    /// anything else ignored with one line.
+    private static let testPeerToPeerInterface: String? = {
+        guard let name = ProcessInfo.processInfo.environment["SILL_TEST_PEER_TO_PEER_INTERFACE"], !name.isEmpty else { return nil }
+        let valid = name.count <= 15 && name.first!.isLetter && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        if !valid { print("SILL_TEST_PEER_TO_PEER_INTERFACE=\(name) ignored: an interface name such as en0.") }
+        return valid ? name : nil
+    }()
 
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
     /// given (a replacement keeps the port that test clients and resolved devices know).
@@ -312,6 +329,8 @@ final class StreamServer {
     /// On `queue`, `advertiseDelay` after the replacement was bound: advertise it, or, when the
     /// setting moved again meanwhile, replace it once more (it was never advertised, so the last
     /// registration dropped is already that old). A retry or a newer replacement makes it a no-op.
+    /// Settled off, it disconnects the devices still on peer-to-peer Wi-Fi; a burst that ends on,
+    /// where it started, never gets here with off and disconnects nobody.
     private func settled(_ l: NWListener, swap n: Int) {
         guard swap == .settling(n), l === listener else { return }
         swap = .idle
@@ -319,6 +338,34 @@ final class StreamServer {
         l.service = service
         let at = l.port.map { " on port \($0.rawValue)" } ?? ""
         print("Direct wireless \(peerToPeer ? "on" : "off"): listening\(at) again" + (service == nil ? "." : ", advertised again."))
+        if !peerToPeer { disconnectPeerToPeerClients() }
+    }
+
+    /// On `queue`, once the listener runs without peer-to-peer: disconnects every client that still
+    /// reaches the Mac over peer-to-peer Wi-Fi, one line each. Such a connection outlives the
+    /// listener that accepted it (see the MARK above), and while one is open the kernel keeps AWDL
+    /// up: on 2026-09-24 the iPad stayed connected over awdl0 after Direct Wireless was turned off,
+    /// twice, with the stream as slow as before and no "Disabling AWDL" from the kernel, so the
+    /// setting changed nothing anyone could see. The replacement refuses peer-to-peer, so a device
+    /// that shares a network with the Mac comes back over it (the kernel then drops AWDL about half
+    /// a minute later, as it did when no socket held it); one that shares none cannot, which is
+    /// what off means. Clients on any other interface are untouched.
+    private func disconnectPeerToPeerClients() {
+        for client in clients.values where runsPeerToPeer(client.connection) {
+            let endpoint = "\(client.connection.endpoint)"
+            let who = client.device.map { "\($0) at \(endpoint)" } ?? endpoint
+            print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
+            client.connection.cancel()   // its state handler prints "Client left" and forgets it
+        }
+    }
+
+    /// Whether a client reaches this Mac over peer-to-peer Wi-Fi (ClientLink), with the TEST ONLY
+    /// stand-in interface counted as such on a host that does not advertise. On `queue`.
+    private func runsPeerToPeer(_ c: NWConnection) -> Bool {
+        let standIn = testHost ? Self.testPeerToPeerInterface : nil
+        return ClientLink.runsPeerToPeer(endpoint: "\(c.endpoint)",
+                                         pathInterfaces: c.currentPath?.availableInterfaces.map(\.name) ?? [],
+                                         peerToPeer: { ClientLink.isPeerToPeer(interface: $0) || $0 == standIn })
     }
 
     /// On `queue`: a replacement could not be bound, or failed once bound. Refused on its old port,
@@ -326,6 +373,8 @@ final class StreamServer {
     /// (the app shows it and keeps running; the CLI exits). It never goes back to the old flag: the
     /// listener runs what the setting says, or has visibly failed. `peerToPeer` takes the wanted
     /// value, so the next change either way replaces the dead listener: a toggle is also a retry.
+    /// Failed while turning it off, the devices on peer-to-peer Wi-Fi are still disconnected (the
+    /// app keeps running): off means no AWDL, listener or not.
     private func replacementFailed(_ e: NWError, swap n: Int) {
         guard swap == .settling(n) else { return }
         if let port = replacementPort {
@@ -339,6 +388,7 @@ final class StreamServer {
         guard let handler = onListenerFailed else { exit(1) }   // the CLI, as always
         handler(e)
         onListenerState?(.failed(e))
+        if !peerToPeer { disconnectPeerToPeerClients() }
     }
 
     /// Starts listening and advertising. Thread-safe: from here on the listener lives on `queue`.
@@ -440,6 +490,7 @@ final class StreamServer {
                     // A skipped report's maxima still reach the next line.
                     // Every report goes to `onClientStats` (the app's menu shows it live).
                     if let stats = Wire.decode(ClientStats.self, from: payload) {
+                        client.device = stats.device
                         client.worstFrameAgeSincePrint = max(client.worstFrameAgeSincePrint, stats.frameAgeMaxMs ?? -1)
                         client.worstRttSincePrint = max(client.worstRttSincePrint, stats.rttMaxMs ?? -1)
                         let now = CFAbsoluteTimeGetCurrent()

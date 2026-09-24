@@ -71,6 +71,17 @@ struct ContentView: View {
 /// * `-SillConnect 127.0.0.1:PORT` — connect straight to that address, in the normal app and under
 ///   `-SillLive 1`. The synthetic test hosts (`SillHost --synthetic`, the bare `SillMenuBar
 ///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
+/// * `-SillMoveTest 1` — with `-SillConnect`: that session counts as a direct (AWDL) one, and a
+///   second later the same address is listed as the Mac's network row, so the move to the network
+///   runs for real (a second connection shows the same host in its first window list and takes the
+///   session over once the fence is down; the host logs a second "Client connected" and the first
+///   "Client left", and streams on). `refused` lists port 1 instead: each try is given up after
+///   5 s and the session stays direct. `other:PORT` lists that port of the same address under the
+///   same name: another synthetic host there is refused at its first window list (another launch)
+///   and not tried again while it stays listed; the first host's own port, with `-SillConnect`
+///   going through a proxy that delays each direction, moves once the fence has waited out the
+///   proxy's round trip. The console says what happened ("discovery: …", "move to the network …";
+///   `xcrun simctl launch --console-pty`).
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,

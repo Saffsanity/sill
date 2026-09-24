@@ -35,9 +35,15 @@ public struct WindowList: Codable {
     public var macName: String
     public var windows: [WindowInfo]
     public var active: StreamSource
+    /// Random, picked once per launch of the host and the same in every list to every device: two
+    /// connections whose lists carry the same one reach the same running host. A name cannot tell
+    /// that (two Macs can share one, and mDNS renames neither when they share no link), and a
+    /// device moving its session from AWDL to the network must not land on another Mac. Optional:
+    /// nil from a host older than 2026-09-24, and an older device ignores the key.
+    public var launchID: String?
 
-    public init(macName: String, windows: [WindowInfo], active: StreamSource) {
-        self.macName = macName; self.windows = windows; self.active = active
+    public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil) {
+        self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
     }
 }
 

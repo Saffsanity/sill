@@ -116,6 +116,10 @@ package final class StreamCoordinator {
     /// The Mac's cursor shape, streamed to the clients that draw the pointer themselves.
     let cursorShapes = CursorShapeWatcher()
     private let macName = Host.current().localizedName ?? "Mac"
+    /// In every window list (`WindowList.launchID`): a device moving its session from AWDL to the
+    /// network checks that the new connection reaches this same running host, since the Bonjour
+    /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
+    private let launchID = UUID().uuidString
 
     /// `config` is validated, and its virtual display forced off without the AppKit loop, which
     /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
@@ -1200,7 +1204,7 @@ package final class StreamCoordinator {
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active)))
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
