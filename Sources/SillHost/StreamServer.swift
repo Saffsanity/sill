@@ -9,7 +9,9 @@ import StreamProtocol
 /// `SILL_TEST_SERVICE_TYPE=_silltest._tcp` registers a host that otherwise does not advertise (the
 /// `--synthetic` hosts) as "Sill test ‹pid›" under that type, with the listener's own peer-to-peer
 /// flag, so a dns-sd browse can check whether the registration includes AWDL while no device (they
-/// browse `_sill._tcp` only) ever finds it.
+/// browse `_sill._tcp` only) ever finds it. `SILL_TEST_SWAP_FAIL=port` makes a Direct Wireless
+/// replacement's same-port bind fail as EADDRINUSE without binding, and `=all` its any-port bind
+/// too, so the fallback and the listener-failure rule can be exercised without a real conflict.
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
@@ -105,11 +107,19 @@ final class StreamServer {
     // turns the Mac's AWDL on: the kernel counts that registration as an AWDL service ("Enabling AWDL
     // due to Mdns"); a peer-to-peer listener without a service counts as none. Off by default (Direct
     // Wireless Connection, HostConfig): AWDL takes the Mac's one radio off its Wi-Fi channel up to
-    // ~97 ms every 524 ms, and on a shared network it carries none of Sill's data. NWListener fixes
-    // its parameters at creation, so the listener is built with the setting given before `start()`.
+    // ~97 ms every 524 ms, and on a shared network it carries none of Sill's data.
     //
-    // From `start()` on, the listener's whole life is the network queue's: its creation, start and
-    // handlers, and `readyPort`, which the main actor reads through `portLock`.
+    // NWListener fixes its parameters at creation, so a change replaces the listener. Measured
+    // 2026-09-24: connections the old listener accepted are independent of it and keep streaming;
+    // `.cancelled` follows `cancel()` within 2 ms, and a new listener binds the same port right after
+    // it even while accepted connections hold the port (binding before it fails with EADDRINUSE);
+    // re-registering the same name within milliseconds of dropping an AWDL registration orphaned the
+    // awdl0 record for minutes (5 of 5), while 0.25 s and more removed it cleanly (6 of 6). So:
+    // cancel, wait for `.cancelled`, bind the same port at once without a service (a device
+    // connecting in those milliseconds is refused and retries), and advertise `advertiseDelay` later.
+    //
+    // From `start()` on, the listener's whole life is the network queue's: its creation, start,
+    // handlers and replacement, and `readyPort`, which the main actor reads through `portLock`.
 
     private var listener: NWListener                 // replaced whole, never reconfigured
     /// The Mac's name under `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
@@ -119,9 +129,19 @@ final class StreamServer {
     private let serviceIsTest: Bool
     private var peerToPeer = false                   // what `listener` was built with
     private var wantedPeerToPeer = false             // the newest request
+    /// A replacement under way, numbered so a late callback or timer of an earlier one is a no-op:
+    /// the old listener cancelling, then the new one bound and waiting to be advertised.
+    private enum Swap: Equatable { case idle, cancelling(Int), settling(Int) }
+    private var swap = Swap.idle
+    private var swapCount = 0
+    private var replacementPort: NWEndpoint.Port?    // the port the current replacement tried; nil = any port
     private var started = false
     private let portLock = NSLock()                  // `port` is read on the main actor
     private var readyPort: UInt16?
+    /// 6× the shortest clean pause measured, and past the ~1 s the old record's removal takes to show.
+    private static let advertiseDelay: TimeInterval = 1.5
+    /// `.cancelled` came within 2 ms in every measurement; without it the replacement takes any port.
+    private static let cancelTimeout: TimeInterval = 1.0
 
     /// `advertise: false` keeps the host off Bonjour (the synthetic test mode), unless a test asks
     /// for its test registration (SILL_TEST_SERVICE_TYPE, above).
@@ -156,6 +176,9 @@ final class StreamServer {
         return valid ? type : nil
     }()
 
+    /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
+    private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
+
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
     /// given (a replacement keeps the port that test clients and resolved devices know).
     private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?) throws -> NWListener {
@@ -183,6 +206,13 @@ final class StreamServer {
             case .ready:
                 portLock.lock(); readyPort = l.port?.rawValue; portLock.unlock()
             case .failed(let e):
+                if case .settling(let n) = swap {
+                    // A replacement failed after binding: its own fallback (another port, else the
+                    // rule below), reported from there.
+                    l.cancel()
+                    replacementFailed(e, swap: n)
+                    return
+                }
                 print("Listener failed: \(e)")
                 guard let handler = onListenerFailed else { exit(1) }   // the CLI, as always
                 handler(e)
@@ -214,9 +244,96 @@ final class StreamServer {
     }
 
     /// Direct Wireless Connection, from the coordinator. Before `start()` the listener is built with
-    /// it. Thread-safe; returns at once.
+    /// it; after, the listener is replaced (see the MARK above). Thread-safe; returns at once.
+    /// Requests during a replacement coalesce, and the newest wins.
     func setPeerToPeer(_ on: Bool) {
-        queue.async { [self] in wantedPeerToPeer = on }
+        queue.async { [self] in
+            wantedPeerToPeer = on
+            if started { beginSwap() }
+        }
+    }
+
+    /// On `queue`. Starts replacing the listener when the wanted flag differs from the one it was
+    /// built with, unless a replacement is under way: that one looks again when it settles.
+    private func beginSwap() {
+        guard started, swap == .idle, wantedPeerToPeer != peerToPeer else { return }
+        swapCount += 1
+        let n = swapCount
+        swap = .cancelling(n)
+        let old = listener
+        let oldPort = old.port   // nil for a listener that failed or was never ready: any port then
+        // Its registration ending is not the Mac leaving: the status keeps the name through the
+        // replacement, whose own registration brings it back.
+        old.serviceRegistrationUpdateHandler = nil
+        old.stateUpdateHandler = { [weak self] state in
+            guard let self, case .cancelled = state, swap == .cancelling(n) else { return }
+            bindReplacement(on: oldPort, swap: n)
+        }
+        old.cancel()
+        queue.asyncAfter(deadline: .now() + Self.cancelTimeout) { [weak self] in
+            guard let self, swap == .cancelling(n) else { return }
+            bindReplacement(on: nil, swap: n)   // no `.cancelled`: the old socket may still hold the port
+        }
+    }
+
+    /// On `queue`, once the old listener is gone (or said nothing for `cancelTimeout`): binds the
+    /// replacement at once, on `port` when given, with the newest wanted flag and no service. It is
+    /// advertised `advertiseDelay` later (`settled`).
+    private func bindReplacement(on port: NWEndpoint.Port?, swap n: Int) {
+        swap = .settling(n)
+        replacementPort = port
+        // TEST ONLY: the fallbacks without a real port conflict (SILL_TEST_SWAP_FAIL).
+        if Self.testSwapFail == "all" || (Self.testSwapFail == "port" && port != nil) {
+            replacementFailed(.posix(.EADDRINUSE), swap: n)
+            return
+        }
+        let l: NWListener
+        do {
+            l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: port)
+        } catch {
+            replacementFailed(error as? NWError ?? .posix(.EINVAL), swap: n)
+            return
+        }
+        wire(l)
+        listener = l
+        peerToPeer = wantedPeerToPeer
+        l.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + Self.advertiseDelay) { [weak self, weak l] in
+            guard let self, let l else { return }
+            settled(l, swap: n)
+        }
+    }
+
+    /// On `queue`, `advertiseDelay` after the replacement was bound: advertise it, or, when the
+    /// setting moved again meanwhile, replace it once more (it was never advertised, so the last
+    /// registration dropped is already that old). A retry or a newer replacement makes it a no-op.
+    private func settled(_ l: NWListener, swap n: Int) {
+        guard swap == .settling(n), l === listener else { return }
+        swap = .idle
+        if wantedPeerToPeer != peerToPeer { beginSwap(); return }
+        l.service = service
+        let at = l.port.map { " on port \($0.rawValue)" } ?? ""
+        print("Direct wireless \(peerToPeer ? "on" : "off"): listening\(at) again" + (service == nil ? "." : ", advertised again."))
+    }
+
+    /// On `queue`: a replacement could not be bound, or failed once bound. Refused on its old port,
+    /// it takes any port. Refused there too, the listener has failed and the existing rule applies
+    /// (the app shows it and keeps running; the CLI exits). It never goes back to the old flag: the
+    /// listener runs what the setting says, or has visibly failed. `peerToPeer` takes the wanted
+    /// value, so the next change either way replaces the dead listener: a toggle is also a retry.
+    private func replacementFailed(_ e: NWError, swap n: Int) {
+        guard swap == .settling(n) else { return }
+        if let port = replacementPort {
+            print("Direct wireless \(wantedPeerToPeer ? "on" : "off"): port \(port.rawValue) unavailable (\(e)); trying another port.")
+            bindReplacement(on: nil, swap: n)
+            return
+        }
+        swap = .idle
+        peerToPeer = wantedPeerToPeer
+        print("Listener failed: \(e)")
+        guard let handler = onListenerFailed else { exit(1) }   // the CLI, as always
+        handler(e)
+        onListenerState?(.failed(e))
     }
 
     /// Starts listening and advertising. Thread-safe: from here on the listener lives on `queue`.
