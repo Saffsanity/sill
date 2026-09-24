@@ -198,7 +198,7 @@ struct HostSettingsPanel: View {
                             RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
                         }
                         // A warning about turning it off, so only while the switch shows on.
-                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off can disconnect this \(device)." : "")
+                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off disconnects this \(device)." : "")
                         .rowFrame()
                     }
                     Footnote(text: directFooter(on: direct))
@@ -290,11 +290,14 @@ struct HostSettingsPanel: View {
     private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
 
     /// Under the Direct Wireless Connection row: what it does and costs, and, while the switch shows
-    /// on and this device is connected over it, what turning it off can do to this device. Once it
-    /// shows off (turned off here or on the Mac, with this connection still up) the warning is moot.
+    /// on and this device is connected over it, what turning it off does to this device: the Mac
+    /// disconnects every device on peer-to-peer Wi-Fi once its listener has changed (1.5 s), and a
+    /// device still connected directly shares no network the Mac is listed on (one that does moves
+    /// to it by itself), so it cannot come back until it does. Once the switch shows off (turned
+    /// off here or on the Mac, with this connection still up for that moment) the warning is moot.
     private func directFooter(on: Bool) -> String {
         var text = "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter."
-        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off can disconnect it." }
+        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off disconnects it." }
         return text
     }
 

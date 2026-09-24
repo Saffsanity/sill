@@ -1,10 +1,11 @@
 import Foundation
 
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
-/// from a network one, and when a reconnect may take one. AWDL takes the radio off its Wi-Fi
-/// channel (CLAUDE.md, trackpad stutter), so the device asks for it only when a Mac it has seen
-/// with Direct Wireless Connection on is missing from the network, or when the user taps Search
-/// Nearby, and never while connected.
+/// from a network one, when a reconnect may take one, and when a session over AWDL moves to the
+/// network. AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device
+/// asks for it only when a Mac it has seen with Direct Wireless Connection on is missing from the
+/// network, or when the user taps Search Nearby, never while connected, and leaves it once
+/// the network lists that Mac again.
 ///
 /// Pure logic, Foundation only: it is checked on its own with swiftc (H13 in
 /// docs/direct-wireless-plan.md), and StreamClient feeds it what its two browsers see.
@@ -14,6 +15,31 @@ enum DiscoveryPolicy {
     static let networkFirst = 3.0
     /// Macs remembered with Direct Wireless on, most recent first.
     static let memoryCap = 16
+
+    // An automatic reconnect and a direct session, against a network view that blinks. What the
+    // network browser lists at one moment is not enough to choose AWDL on: turning Direct Wireless
+    // on or off replaces the Mac's listener, which drops its Bonjour registration and makes it
+    // again 1.5 s later, so its network row can go for a few seconds (the goodbye, the new
+    // registration, and the announcement's own delay and loss); multicast on Wi-Fi is lost to a
+    // dozing or hopping radio; and a Mac back on the network registers there and over AWDL
+    // together, the nearby browser sometimes first. On 2026-09-24 the iPad twice reconnected over
+    // AWDL at home (15:37:25 and 15:43:17, 23 s and 12 s after the Mac dropped its Wi-Fi
+    // connection), which happens only while the network browser lists no such Mac, and stayed on
+    // AWDL for minutes: rtt ~75 ms typical, the worst of each report ~265 ms typical and up to 2.4 s.
+
+    /// An automatic reconnect takes a Direct row only once it has stayed Direct this long: past a
+    /// listener swap's blink and a lost announcement or two (mDNS repeats an announcement 1 s later,
+    /// then at doubling intervals).
+    static let directWait = 6.0
+    /// Nor within this long of the network browser last listing that Mac: a Mac the network listed
+    /// moments ago is taken to be coming back there.
+    static let networkGrace = 10.0
+    /// A session over AWDL moves to the network once the network has listed the same Mac this long
+    /// without a break (a blink restarts it).
+    static let moveAfter = 2.0
+    /// After a move that did not complete (the network connection failed or was not ready in 5 s),
+    /// the wait before the next try.
+    static let moveRetry = 10.0
 
     struct Input: Equatable {
         /// ProcessInfo.systemUptime.
@@ -89,19 +115,53 @@ enum DiscoveryPolicy {
         return next
     }
 
+    /// What the network browser has shown of each Mac, by Bonjour name, for the two decisions that
+    /// must not trust one moment's view of it.
+    struct NetworkSightings: Equatable {
+        /// Listed now, each since when without a break.
+        var since: [String: Double] = [:]
+        /// Not listed now: when each was last listed, which is the moment it went. Kept for
+        /// `networkGrace`, after which it no longer matters.
+        var leftAt: [String: Double] = [:]
+    }
+
+    /// The sightings after the network browser's list changed (or was looked at again) at `now`.
+    static func sightings(_ previous: NetworkSightings, listed: Set<String>, now: Double) -> NetworkSightings {
+        var next = NetworkSightings()
+        for name in listed { next.since[name] = previous.since[name] ?? now }
+        for name in previous.since.keys where !listed.contains(name) { next.leftAt[name] = now }
+        for (name, at) in previous.leftAt where !listed.contains(name) && next.leftAt[name] == nil && now - at < networkGrace {
+            next.leftAt[name] = at
+        }
+        return next
+    }
+
     /// The row an automatic reconnect takes now, or when to look again. The Mac's network row at
-    /// once; its Direct row only once that row has stayed Direct for `networkFirst`. A Mac coming
-    /// back to the shared network (Sill relaunched, the Mac awake again) registers there and over
-    /// AWDL at the same moment, and while the nearby browser runs it can report the awdl0 record
-    /// before the network browser reports the Wi‑Fi one: multicast on Wi‑Fi can be lost or held
-    /// for a dozing radio's next beacon, and mDNS repeats an announcement only a second or more
-    /// later. Taking the Direct row then would run the whole session at home over AWDL. A tap on
-    /// a Direct row is the user's choice and is not held back.
-    static func reconnectRow<Row>(network: Row?, direct: Row?, directSince: Double?, now: Double) -> (take: Row?, recheckAt: Double?) {
+    /// once, whenever there is one; its Direct row only once that row has stayed Direct for
+    /// `directWait` and the network last listed the Mac at least `networkGrace` ago (never listed:
+    /// no wait for it, the café case). Taking the Direct row while the Mac is on the network would
+    /// run the session at home over AWDL; if it happens anyway (the network stayed silent longer),
+    /// `moveToNetwork` brings the session back. A tap on a Direct row is the user's choice and is
+    /// not held back.
+    static func reconnectRow<Row>(network: Row?, direct: Row?, directSince: Double?, networkLeftAt: Double?, now: Double) -> (take: Row?, recheckAt: Double?) {
         if let network { return (network, nil) }
         guard let direct, let since = directSince else { return (nil, nil) }
-        let due = since + networkFirst
+        var due = since + directWait
+        if let left = networkLeftAt { due = max(due, left + networkGrace) }
         return now >= due ? (direct, nil) : (nil, due)
+    }
+
+    /// While this device's session runs over AWDL: whether to move it now to the same Mac's network
+    /// row, listed since `listedSince` (nil: not listed), or when to look again. Once the network
+    /// has listed the Mac for `moveAfter` without a break, and not within `moveRetry` of a try that
+    /// did not complete. The device is then on the Mac's network, where AWDL only costs: both
+    /// radios leave the channel, and over it the stream's worst rtt per report was ~265 ms
+    /// typical against ~11 ms on the LAN with AWDL off.
+    static func moveToNetwork(listedSince: Double?, lastAttempt: Double?, now: Double) -> (move: Bool, recheckAt: Double?) {
+        guard let since = listedSince else { return (false, nil) }
+        var due = since + moveAfter
+        if let last = lastAttempt { due = max(due, last + moveRetry) }
+        return now >= due ? (true, nil) : (false, due)
     }
 
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an

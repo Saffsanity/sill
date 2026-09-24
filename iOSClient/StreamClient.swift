@@ -32,7 +32,8 @@ final class StreamClient: ObservableObject {
     /// Search Nearby while the nearby browser is not running.
     @Published var showsNearbyHint = false
     /// This connection runs over peer-to-peer Wi-Fi: the Settings panel says so, and warns that
-    /// turning Direct Wireless off can disconnect this device.
+    /// turning Direct Wireless off disconnects this device. It lasts only while the network does
+    /// not list the Mac: once it has for 2 s the session moves there (`moveToNetworkIfListed`).
     @Published var connectedDirectly = false
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
@@ -178,11 +179,28 @@ final class StreamClient: ObservableObject {
     /// The policy's next look (its 3 s mark).
     private var discoveryRecheck: DispatchWorkItem?
     /// When each Direct row was first seen as one (DiscoveryPolicy.directSince): an automatic
-    /// reconnect takes a Direct row only once it has stayed Direct for the network's 3 s.
+    /// reconnect takes a Direct row only once it has stayed Direct for `directWait`.
     private var directSince: [String: Double] = [:]
-    /// The automatic reconnect's look at the moment the wanted Mac's Direct row has waited its 3 s,
+    /// What the network browser has shown of each Mac (DiscoveryPolicy.sightings): an automatic
+    /// reconnect does not take a Mac's Direct row within `networkGrace` of the network last listing
+    /// it, and a session over AWDL moves to the network once it has listed the Mac for `moveAfter`.
+    private var sightings = DiscoveryPolicy.NetworkSightings()
+    /// The automatic reconnect's look at the moment the wanted Mac's Direct row may be taken,
     /// rather than at the retry timer's next step, which can be up to 10 s away.
     private var directReconnectCheck: DispatchWorkItem?
+    /// A session over AWDL moving to the network: the network connection opened beside it, until it
+    /// is ready and takes over (`finishMove`) or gives up (`moveEnded`).
+    private var moving: NWConnection?
+    /// When this session's last move started, so one that did not complete waits `moveRetry`.
+    private var lastMoveAttempt: Double?
+    /// The move's look at the moment the network row has been listed for `moveAfter`.
+    private var moveCheck: DispatchWorkItem?
+    #if DEBUG
+    /// `-SillMoveTest 1` with `-SillConnect host:port`: rows the network browser did not list, so the
+    /// move to the network runs against a synthetic host, which no browser lists and which is not
+    /// on AWDL (see `beginMoveTest`).
+    private var testNetworkRows: [(name: String, endpoint: NWEndpoint)] = []
+    #endif
     /// Macs this device last saw with Direct Wireless on, most recent first (DiscoveryPolicy.remember),
     /// keyed by the Bonjour name the connection was made to, the name both browsers list the Mac
     /// under. A discovery hint only: the panel never reads it, so a Mac's settings are still only ever
@@ -300,15 +318,21 @@ final class StreamClient: ObservableObject {
         recomputeMacs()
         updateDiscovery()
         reconnectIfListed()
+        moveToNetworkIfListed()
     }
 
     /// The rows, each with the endpoint of the browser that listed it: a network row always the
     /// network browser's, so at home a Mac is never reached over AWDL. Main thread.
     private func recomputeMacs() {
-        let network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint) }
+        var network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint) }
+        #if DEBUG
+        network += testNetworkRows
+        #endif
         let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces.map(\.name)) }
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.interfaces) })
-        directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: ProcessInfo.processInfo.systemUptime)
+        let now = ProcessInfo.processInfo.systemUptime
+        directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
+        sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         let next = rows.compactMap { row -> FoundMac? in
             let endpoint = row.direct ? nearby.first { $0.name == row.name }?.endpoint : network.first { $0.name == row.name }?.endpoint
             return endpoint.map { FoundMac(name: row.name, endpoint: $0, direct: row.direct) }
@@ -395,9 +419,10 @@ final class StreamClient: ObservableObject {
     }
 
     /// The Mac we were talking to is listed again: reconnect without being asked, to its network row
-    /// at once, to its Direct row only once that has stayed Direct for the network's 3 s
-    /// (DiscoveryPolicy.reconnectRow: a Mac back at home can show on awdl0 first). Names match
-    /// exactly: two Macs can share a computer name ("MacBook Pro" and "MacBook Pro (2)"), and
+    /// at once, to its Direct row only once that has stayed Direct for `directWait` and the network
+    /// last listed the Mac `networkGrace` ago or more (DiscoveryPolicy.reconnectRow: its row blinks
+    /// off while its listener is replaced, and a Mac back at home can show on awdl0 first). Names
+    /// match exactly: two Macs can share a computer name ("MacBook Pro" and "MacBook Pro (2)"), and
     /// stripping the suffix would rejoin the wrong one. Main thread.
     @discardableResult
     private func reconnectIfListed() -> Bool {
@@ -408,7 +433,8 @@ final class StreamClient: ObservableObject {
         let network = macs.first { $0.name == wanted && !$0.direct }
         let direct = macs.first { $0.name == wanted && $0.direct }
         let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] }, now: now)
+                                                  directSince: direct.flatMap { directSince[$0.name] },
+                                                  networkLeftAt: sightings.leftAt[wanted], now: now)
         guard let mac = choice.take else {
             if let at = choice.recheckAt {
                 let work = DispatchWorkItem { [weak self] in self?.reconnectIfListed() }
@@ -433,18 +459,10 @@ final class StreamClient: ObservableObject {
             connection = nil
             old.cancel()      // its .cancelled callback is ignored: connectionLost checks identity
         }
+        abandonMove()         // a new session: an old one's move to the network is moot
         hostName = name
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
-        let tcp = NWProtocolTCP.Options()
-        tcp.noDelay = true
-        let params = NWParameters(tls: nil, tcp: tcp)
-        // Peer-to-peer (AWDL) only for a "Direct" row: a Mac the network lists is reached over the
-        // network (see startBrowsing), so at home a connection never takes AWDL.
-        params.includePeerToPeer = peerToPeer
-        // Wi-Fi QoS: video + pointer traffic is latency-sensitive; the access point and the radio
-        // treat this class (WMM video) with shorter queues than best-effort.
-        params.serviceClass = .interactiveVideo
-        let c = NWConnection(to: endpoint, using: params)
+        let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -459,6 +477,12 @@ final class StreamClient: ObservableObject {
                     self.connectedAt = Date()
                     self.status = "Connected to \(name)"
                     self.updateDiscovery()   // stops the nearby browser; the network one keeps running
+                    #if DEBUG
+                    if let test = UserDefaults.standard.string(forKey: "SillMoveTest"), test == "1" || test == "refused" {
+                        self.beginMoveTest(endpoint: endpoint, name: name, refused: test == "refused")
+                    }
+                    #endif
+                    self.moveToNetworkIfListed()   // over AWDL: the network may list this Mac already
                 }
                 self.startMeasuring(c)   // before the first read, so the first window is this connection's alone
                 self.readHeader(on: c)
@@ -485,6 +509,158 @@ final class StreamClient: ObservableObject {
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
     }
+
+    /// Every connection to a Mac: TCP without Nagle, the interactive video class, and peer-to-peer
+    /// (AWDL) only for a "Direct" row. A Mac the network lists is reached over the network (see
+    /// startBrowsing), so at home a connection never takes AWDL.
+    private static func connectionParameters(peerToPeer: Bool) -> NWParameters {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        let params = NWParameters(tls: nil, tcp: tcp)
+        params.includePeerToPeer = peerToPeer
+        // Wi-Fi QoS: video + pointer traffic is latency-sensitive; the access point and the radio
+        // treat this class (WMM video) with shorter queues than best-effort.
+        params.serviceClass = .interactiveVideo
+        return params
+    }
+
+    // MARK: Moving a session over AWDL to the network
+
+    /// This session runs over peer-to-peer Wi-Fi and the network lists the same Mac by its Bonjour
+    /// name: once it has for `moveAfter` without a break, move the session there
+    /// (DiscoveryPolicy.moveToNetwork). The device is then on the Mac's network, where AWDL only
+    /// costs; a reconnect can land on AWDL at home when the network browser stays silent for a
+    /// while (2026-09-24, twice). Main thread.
+    private func moveToNetworkIfListed() {
+        moveCheck?.cancel()
+        moveCheck = nil
+        guard connected, connectedDirectly, moving == nil, let direct = connection,
+              let mac = macs.first(where: { $0.name == hostName && !$0.direct }) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let decision = DiscoveryPolicy.moveToNetwork(listedSince: sightings.since[mac.name], lastAttempt: lastMoveAttempt, now: now)
+        if decision.move {
+            move(direct, to: mac)
+        } else if let at = decision.recheckAt {
+            let work = DispatchWorkItem { [weak self] in self?.moveToNetworkIfListed() }
+            moveCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
+        }
+    }
+
+    /// Opens a network connection to `mac` beside the direct one, and hands the session over once
+    /// it is ready (`finishMove`): make before break. The Mac keeps a connected device throughout,
+    /// so it never stops the stream, which it does at zero devices (a staged window would go home),
+    /// and the new connection is sent the running stream: no connect screen, no Desktop restart.
+    /// A network connection that fails or is not ready within 5 s changes nothing: the session
+    /// stays direct and the next try waits `moveRetry`. Main thread.
+    private func move(_ direct: NWConnection, to mac: FoundMac) {
+        lastMoveAttempt = ProcessInfo.processInfo.systemUptime
+        status = "Switching to Wi\u{2011}Fi…"
+        #if DEBUG
+        print("discovery: moving the session to the network")
+        #endif
+        let c = NWConnection(to: mac.endpoint, using: Self.connectionParameters(peerToPeer: false))
+        moving = c
+        // One handler for both lives of `c`: until it takes over, `moveEnded` acts (it checks
+        // `moving`); after, `connectionLost` does (it checks `connection`). The direct connection
+        // is held weakly: while it is the session, `connection` holds it.
+        c.stateUpdateHandler = { [weak self, weak direct] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                DispatchQueue.main.async { self.finishMove(c, from: direct) }
+            case .failed(let e):
+                print("move to the network failed: \(e)")
+                c.cancel()
+                self.connectionLost(c)
+                DispatchQueue.main.async { self.moveEnded(c) }
+            case .cancelled:
+                self.connectionLost(c)
+                DispatchQueue.main.async { self.moveEnded(c) }
+            default:
+                break
+            }
+        }
+        c.start(queue: queue)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.moving === c else { return }
+            c.cancel()   // not ready in 5 s: stay direct (moveEnded, from .cancelled)
+        }
+    }
+
+    /// The network connection is ready: it takes the session over and the direct one closes. What
+    /// any new connection starts afresh starts afresh here too, the screen aside: the Mac's settings
+    /// come again on this connection (the ledger's rule 7), the Desktop rule starts over, and the
+    /// panel gives the first state its two seconds. Main thread.
+    private func finishMove(_ c: NWConnection, from old: NWConnection?) {
+        guard moving === c else { c.cancel(); return }   // given up meanwhile
+        moving = nil
+        // The direct session ended meanwhile: its own reconnect runs, and takes the network row.
+        guard connected, connectedDirectly, let old, connection === old else { c.cancel(); return }
+        // From here `c` is the session's: the direct connection's read loop, pings and one-second
+        // windows stop at their next turn, since each checks that it is still `connection`.
+        connection = c
+        connectedDirectly = false
+        status = "Connected to \(hostName)"
+        settings.reset()
+        settingsProblem = nil
+        settingsExpiry?.cancel()
+        settingsExpiry = nil
+        lastRttMaxMs = nil
+        connectedAt = Date()
+        lastAutoDesktop = .distantPast
+        #if DEBUG
+        print("discovery: the session moved to the network")
+        #endif
+        queue.async { self.startMeasuring(c); self.readHeader(on: c) }
+        // The Mac keeps a frame rate per connection: this one's viewport goes out before the direct
+        // connection closes, so the stream's rate never falls back to the default in between.
+        if let v = lastViewport { sendViewport(v) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { old.cancel() }
+        updateDiscovery()
+    }
+
+    /// The network connection closed before it took the session over: the session stays direct,
+    /// and the next try waits `moveRetry`. Main thread.
+    private func moveEnded(_ c: NWConnection) {
+        guard moving === c else { return }
+        moving = nil
+        if connected { status = "Connected to \(hostName)" }
+        #if DEBUG
+        print("discovery: the move did not complete; the session stays direct")
+        #endif
+        moveToNetworkIfListed()
+    }
+
+    /// Stops a move under way and its timer (a new session, or none). Main thread.
+    private func abandonMove() {
+        moveCheck?.cancel()
+        moveCheck = nil
+        if let c = moving {
+            moving = nil
+            c.cancel()
+        }
+    }
+
+    #if DEBUG
+    /// `-SillMoveTest 1` with `-SillConnect host:port`: the address connection counts as a direct
+    /// one, and a second later the same address is listed as that Mac's network row, so the move
+    /// runs for real (policy, timer, second connection, hand-over) against a synthetic host.
+    /// `-SillMoveTest refused` lists port 1 of that host instead, where nothing listens: every try
+    /// waits, is given up after 5 s, and the session stays direct. Main thread.
+    private func beginMoveTest(endpoint: NWEndpoint, name: String, refused: Bool) {
+        guard case .hostPort(let host, _) = endpoint, testNetworkRows.isEmpty else { return }
+        connectedDirectly = true
+        print("discovery: move test: this session counts as direct")
+        let listed: NWEndpoint = refused ? .hostPort(host: host, port: 1) : endpoint
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, self.connected else { return }
+            self.testNetworkRows = [(name, listed)]
+            print("discovery: move test: \(name) listed on the network at \(listed)")
+            self.discoveryChanged()
+        }
+    }
+    #endif
 
     /// Whether an established connection runs over peer-to-peer Wi-Fi: its remote address is scoped
     /// to an awdl or llw interface (an IPv6 link-local address carries its interface), or, with no
@@ -532,6 +708,8 @@ final class StreamClient: ObservableObject {
 
     /// Clears everything the session owned. Main thread.
     private func tearDown(status: String) {
+        abandonMove()
+        lastMoveAttempt = nil
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         linkStats = nil
         localPointer = nil
