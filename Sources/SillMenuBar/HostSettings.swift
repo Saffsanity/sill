@@ -21,7 +21,7 @@ import SillHostCore
 final class HostSettings {
     enum Key {
         static let maxFPS = "maxFPS", captureScale = "captureScale", bitrate = "bitrate"
-        static let prioritizeSpeed = "prioritizeSpeed", virtualDisplay = "virtualDisplay"
+        static let prioritizeSpeed = "prioritizeSpeed", virtualDisplay = "virtualDisplay", directWireless = "directWireless"
         static let settingsTab = "settingsTab", permissionsOnboardingDismissed = "permissionsOnboardingDismissed"
         static let askedScreenRecording = "askedScreenRecording", askedAccessibility = "askedAccessibility"
         static let logShowsStats = "logShowsStats"
@@ -59,12 +59,15 @@ final class HostSettings {
             Key.bitrate: standard.bitrate,
             Key.prioritizeSpeed: standard.prioritizeSpeed,
             Key.virtualDisplay: standard.virtualDisplay,
+            // Off, like the CLI: an existing install has no key, so it stops asking for AWDL.
+            Key.directWireless: standard.directWireless,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
                             bitrate: defaults.integer(forKey: Key.bitrate),
                             prioritizeSpeed: defaults.bool(forKey: Key.prioritizeSpeed),
-                            virtualDisplay: defaults.bool(forKey: Key.virtualDisplay)).validated()
+                            virtualDisplay: defaults.bool(forKey: Key.virtualDisplay),
+                            directWireless: defaults.bool(forKey: Key.directWireless)).validated()
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)
@@ -80,5 +83,6 @@ final class HostSettings {
         if config.bitrate != old.bitrate { defaults.set(config.bitrate, forKey: Key.bitrate) }
         if config.prioritizeSpeed != old.prioritizeSpeed { defaults.set(config.prioritizeSpeed, forKey: Key.prioritizeSpeed) }
         if config.virtualDisplay != old.virtualDisplay { defaults.set(config.virtualDisplay, forKey: Key.virtualDisplay) }
+        if config.directWireless != old.directWireless { defaults.set(config.directWireless, forKey: Key.directWireless) }
     }
 }

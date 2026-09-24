@@ -167,8 +167,11 @@ final class StreamClient: ObservableObject {
     private var moveFlushScheduled = false
 
     func startBrowsing() {
+        // Network only: includePeerToPeer stays at its default, false. A peer-to-peer browse makes
+        // the kernel bring AWDL up, which takes the radio off its Wi-Fi channel up to ~100 ms twice
+        // a second (CLAUDE.md, trackpad stutter), and on a shared network AWDL carries nothing of
+        // Sill's. Direct Wireless Connection is the Mac's opt-in for that route.
         let params = NWParameters()
-        params.includePeerToPeer = true
         let browser = NWBrowser(for: .bonjour(type: "_sill._tcp", domain: nil), using: params)
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             DispatchQueue.main.async {
@@ -219,8 +222,9 @@ final class StreamClient: ObservableObject {
         status = "Connecting to \(name)…"
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
+        // No includePeerToPeer: a Mac found on the network is reached over the network (see
+        // startBrowsing).
         let params = NWParameters(tls: nil, tcp: tcp)
-        params.includePeerToPeer = true
         // Wi-Fi QoS: video + pointer traffic is latency-sensitive; the access point and the radio
         // treat this class (WMM video) with shorter queues than best-effort.
         params.serviceClass = .interactiveVideo

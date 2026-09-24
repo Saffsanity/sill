@@ -102,7 +102,8 @@ enum MockCatalog {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
         guard c != .legacy else { return }
         var state = HostSettingsState(
-            settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false),
+            settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                                     directWireless: false),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
         switch c {

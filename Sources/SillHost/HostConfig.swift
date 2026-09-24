@@ -1,8 +1,8 @@
 import CoreGraphics
 
-/// The host's knobs, as one value. The CLI streams with `standard` (plus its --virtual-display
-/// flag); the menu bar app starts from the same values and lets Settings change them while it
-/// runs. Change `standard`, rebuild, measure: both pick it up.
+/// The host's knobs, as one value. The CLI streams with `standard` (plus its --virtual-display and
+/// --direct-wireless flags); the menu bar app starts from the same values and lets Settings change
+/// them while it runs. Change `standard`, rebuild, measure: both pick it up.
 ///
 /// The coordinator takes a new value only between pipelines (inside `select`), so one pipeline
 /// never mixes two settings. See `StreamCoordinator.setTarget`.
@@ -18,19 +18,31 @@ package struct HostConfig: Equatable, Sendable {
     /// A picked window streams from its own HiDPI virtual display (see VirtualStage). Needs the
     /// AppKit event loop, so the CLI turns it on only with --virtual-display.
     package var virtualDisplay: Bool
+    /// Direct Wireless Connection: peer-to-peer Wi-Fi (AWDL) on the listener and its Bonjour
+    /// registration, so a device with no network in common can find and reach the Mac. Off by
+    /// default: while it is on the kernel keeps AWDL up and the Mac's one radio leaves its Wi-Fi
+    /// channel up to ~97 ms every 524 ms (CLAUDE.md, trackpad stutter). The listener's, not the
+    /// pipeline's: a change replaces the listener (StreamServer.setPeerToPeer) and never restarts
+    /// the stream.
+    package var directWireless: Bool
 
-    package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, prioritizeSpeed: Bool, virtualDisplay: Bool) {
+    /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
+    package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, prioritizeSpeed: Bool, virtualDisplay: Bool,
+                 directWireless: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
         self.prioritizeSpeed = prioritizeSpeed
         self.virtualDisplay = virtualDisplay
+        self.directWireless = directWireless
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift, and the app's
-    /// defaults. Virtual display off in both until Noah flips it.
+    /// defaults. Virtual display off in both until Noah flips it. Direct Wireless off in both
+    /// (Noah, 2026-09-24): AWDL costs every Wi-Fi stream its steadiness, and a shared network needs
+    /// none of it.
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
-                                             prioritizeSpeed: false, virtualDisplay: false)
+                                             prioritizeSpeed: false, virtualDisplay: false, directWireless: false)
 
     /// Within what the pipeline supports: 24…120 fps, Retina or points, 1–100 Mbps per 60 fps.
     /// A hand-edited default or a launch argument can hold anything.
@@ -43,7 +55,8 @@ package struct HostConfig: Equatable, Sendable {
     }
 
     /// What differs from `new`, for the log: "frame rate limit 120 → 60 fps, bitrate 15 → 8 Mbps
-    /// per 60 fps, Retina → points, speed off → on, virtual display off → on".
+    /// per 60 fps, Retina → points, speed off → on, virtual display off → on, direct wireless
+    /// off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -53,6 +66,7 @@ package struct HostConfig: Equatable, Sendable {
         if captureScale != new.captureScale { parts.append("\(scaleName(captureScale)) → \(scaleName(new.captureScale))") }
         if prioritizeSpeed != new.prioritizeSpeed { parts.append("speed \(onOff(prioritizeSpeed)) → \(onOff(new.prioritizeSpeed))") }
         if virtualDisplay != new.virtualDisplay { parts.append("virtual display \(onOff(virtualDisplay)) → \(onOff(new.virtualDisplay))") }
+        if directWireless != new.directWireless { parts.append("direct wireless \(onOff(directWireless)) → \(onOff(new.directWireless))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 
