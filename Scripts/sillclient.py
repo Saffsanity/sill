@@ -7,14 +7,15 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --fps-after=N@T    send a second viewport asking for N fps after T seconds
   --set=K=V[,K=V]@T  send a settings change (kind 17) T seconds in, with integer tokens 1, 2, 3...
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
-                     virtualDisplay; booleans accept 1/0/true/false/on/off
+                     virtualDisplay, directWireless; booleans accept 1/0/true/false/on/off
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --pick=SRC@T       a timed selectSource: none, desktop or window:ID
   --stats            send ClientStats (kind 12) once a second as device "sillclient", so the host
                      logs a name for this client
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
                      and virtualDisplayAvailable): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
-Every kind 16 (host settings) is printed on one line with its arrival time. Flags may come in any
+Every kind 16 (host settings) is printed on one line with its arrival time; dw= is Direct Wireless
+(1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
 with status 2 (--raw17 goes out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
@@ -23,10 +24,10 @@ import json, socket, struct, sys, time
 
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
-BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "persistent", "virtualDisplayAvailable"}
-# What --set may send: HostSettingsChange's five fields. The host drops any other key without a
+BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
+# What --set may send: HostSettingsChange's six fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
-SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay"}
+SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after")
 
@@ -106,8 +107,9 @@ def describe(d):
     running = (f"{stream['width']}x{stream['height']}@{stream['fps']}/{stream['mbps']}Mbps" + (" vd" if stream.get("onVirtualDisplay") else "")
                if stream else "none")
     note = d.get("virtualDisplayNote")
+    dw = "-" if st.get("directWireless") is None else b(st.get("directWireless"))   # "-": an older host
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
-            f"vd={b(st.get('virtualDisplay'))} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
+            f"vd={b(st.get('virtualDisplay'))} dw={dw} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else ""))
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0

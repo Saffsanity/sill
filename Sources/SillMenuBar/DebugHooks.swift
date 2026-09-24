@@ -12,9 +12,10 @@ import SillHostCore
 ///     -SillSetAfter '<s> key=value[,key=value][; <s> …]'
 ///                                              change settings s seconds after launch, exactly as
 ///                                              a control would (maxFPS, captureScale, bitrate,
-///                                              prioritizeSpeed, virtualDisplay). Saved like any
-///                                              change: run it on the bare binary, whose defaults
-///                                              domain is "SillMenuBar", not on Sill.app.
+///                                              prioritizeSpeed, virtualDisplay, directWireless).
+///                                              Saved like any change: run it on the bare binary,
+///                                              whose defaults domain is "SillMenuBar", not on
+///                                              Sill.app.
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
 ///     -SillRenderPreviews <dir>                write the Settings panes, status cards, glyphs and
 ///                                              menu.txt to <dir>, then exit (no Screen Recording
@@ -79,6 +80,7 @@ enum DebugHooks {
         case "bitrate": if let v = Int(value) { config.bitrate = v }
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
+        case "directWireless": config.directWireless = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }

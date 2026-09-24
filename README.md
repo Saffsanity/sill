@@ -28,9 +28,10 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
 rate, frame age and round trip, and what is streaming; it holds the
-virtual display, frame rate, quality and resolution controls, Launch at Login,
-Permissions, Show Log… and Settings… (⌘,). Changes apply at once; the current
-stream restarts for a moment. Opening Sill.app while it runs (Finder,
+virtual display, frame rate, quality and resolution controls, Direct Wireless
+Connection, Launch at Login, Permissions, Show Log… and Settings… (⌘,).
+Changes apply at once; a change to a streaming setting restarts the current
+stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
 has no room for the icon.
 
@@ -59,14 +60,29 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+Direct Wireless Connection (Settings › General, and the status menu) lets an
+iPhone or iPad connect when it is near the Mac but shares no Wi-Fi network with
+it, the way AirDrop does: Sill then also advertises over, and accepts
+connections from, peer-to-peer Wi-Fi (AWDL). It is off by default, also after
+updating from a Sill that always used AWDL, because while it is on the Mac's
+Wi-Fi keeps leaving its network's channel (up to ~100 ms twice a second), which
+made Wi-Fi streams stutter; on a shared network AWDL carries none of Sill's
+data anyway.
+Turning it on or off applies at once and never restarts the stream, though
+turning it off can disconnect a device that is connected directly. A device
+finds a Mac this way by itself once it has seen the Mac with it on, or when you
+tap Search Nearby on its connect screen; such a Mac shows as "Direct". With it
+on, anyone nearby running Sill can find and connect to the Mac.
+
 A connected iPhone or iPad changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
-Prioritize Encoding Speed and Virtual Display, with exactly the Mac's choices.
-Sill.app saves a device's change like a menu click, and its Settings window and
-menu show it; the change applies to every connected device, and the stream
-restarts for a moment. To put one setting back to its default, quit Sill, run
-`defaults delete me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`,
-`captureScale`, `prioritizeSpeed` or `virtualDisplay`) and open Sill again.
+Prioritize Encoding Speed, Virtual Display and Direct Wireless Connection, with
+exactly the Mac's choices. Sill.app saves a device's change like a menu click,
+and its Settings window and menu show it; the change applies to every connected
+device, and a streaming setting restarts the stream for a moment. To put one
+setting back to its default, quit Sill, run `defaults delete
+me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
+`prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
 
 Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
 Scripts/make-app.sh --release` (it refuses to finish with any other kind of
@@ -83,6 +99,7 @@ has a different designated requirement, so permissions are granted once more.
 cd winstream
 swift run -c release SillHost Safari
 swift run -c release SillHost --virtual-display   # each streamed window on its own HiDPI display; Ctrl-C restores it
+swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi, for a device with no shared network
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
@@ -91,7 +108,8 @@ of on-screen windows.
 A device can change the command-line host's settings from its Settings panel
 too; `SillHost` saves nothing, so a change lasts until it quits, and the
 device's panel says so. Its Virtual Display switch works only when `SillHost`
-runs with `--virtual-display`.
+runs with `--virtual-display`. `--direct-wireless` starts it with Direct
+Wireless Connection on (see Sill.app above); it is off by default here too.
 
 `--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
 virtual HiDPI display created with a private CoreGraphics API and captures that
@@ -128,7 +146,8 @@ with the rate (the knob is per 60 fps).
    `NSBonjourServices = [_sill._tcp]`.
 2. Target → Signing & Capabilities → pick your team. Change the bundle
    identifier if `me.saffer.sill` collides with something.
-3. Run on a real device on the same Wi-Fi. Tap the Mac's name.
+3. Run on a real device on the same Wi-Fi (or with Direct Wireless Connection
+   on in Sill on the Mac). Tap the Mac's name.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
@@ -160,6 +179,9 @@ Targets: under 60 ms on 5 GHz Wi-Fi is the v1 bar. Under 40 ms is Mirage-class.
 If the device's round trip climbs in a 5→100→200→300 ms sawtooth while nothing
 is streaming, that is its Wi-Fi radio dozing on a quiet link. The host keeps the
 link lightly busy (`net.tick` in the stats line) whenever a session is live.
+Spikes of up to ~100 ms about twice a second while streaming are AWDL taking
+the Mac's radio off the channel: Direct Wireless Connection should be off, and
+AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## What to try if it's slow
 

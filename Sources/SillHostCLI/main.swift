@@ -28,6 +28,12 @@ let synthetic = CommandLine.arguments.contains("--synthetic")
 let virtualDisplay = CommandLine.arguments.contains("--virtual-display")
 config.virtualDisplay = virtualDisplay
 
+// `SillHost --direct-wireless`: also advertise over, and accept connections from, peer-to-peer
+// Wi-Fi (AWDL), so a device with no network in common can connect. Off by default: while it is on
+// the Mac's radio leaves its Wi-Fi channel up to ~97 ms every 524 ms, which is the stutter in
+// CLAUDE.md. A device can still turn it on or off; that lasts until SillHost quits.
+config.directWireless = CommandLine.arguments.contains("--direct-wireless")
+
 // `SillHost --encoder-selftest`: no capture, no network. Pushes synthetic frames through the real
 // HEVCEncoder (hardware, then software) and reports what came back, so the watchdog and the
 // fallback can be exercised without Screen Recording. Exits when done.

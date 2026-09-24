@@ -1,8 +1,8 @@
 import Foundation
 
-// The Mac's streaming settings as a device sees and changes them (kinds 16 and 17, see
-// StreamMessage.swift). Rules for every later change, because older builds of either side must
-// keep decoding what newer ones send:
+// The Mac's settings as a device sees and changes them (kinds 16 and 17, see StreamMessage.swift):
+// five for the stream, and one (Direct Wireless) for how devices reach the Mac. Rules for every
+// later change, because older builds of either side must keep decoding what newer ones send:
 //
 // • A device knows the host supports settings when a `.hostSettings` arrives on this connection;
 //   there is no version number.
@@ -11,8 +11,11 @@ import Foundation
 // • Never remove, rename or retype a field (Swift property names are the JSON keys).
 // • No enums in these payloads: an unknown case would fail an older reader's whole decode, while
 //   JSONDecoder ignores unknown keys, so either side can add fields.
+// • A field a host did not report (nil in its state: an older host) is never sent to it. The
+//   device's ledger enforces it (its rule 9), so an older host is never asked for what it cannot
+//   show.
 //
-// A sixth setting has to be added everywhere the five are listed by hand, and the compiler points
+// A new setting has to be added everywhere the others are listed by hand, and the compiler points
 // at few of those places. Missing the host's whitelist is silent: a device's change is dropped with
 // no refusal and no log line, the answer shows the old value, and the device takes that for a
 // refusal. The places:
@@ -21,14 +24,17 @@ import Foundation
 // • the host: `HostConfig` (`validated()`, `changes(to:)`), `streamSettings`, `applying` and
 //   `DeviceSettings.accepted` in DeviceSettings.swift, and `StreamCoordinator.restartNeeded` when
 //   the running pipeline depends on it;
-// • Sill.app: `HostSettings` (its key, registered default, load and `save(changedFrom:)`), and the
-//   status menu and Settings panes when the Mac shows it;
+// • Sill.app: `HostSettings` (its key, registered default, load and `save(changedFrom:)`),
+//   `DebugHooks.apply` (`-SillSetAfter`), and the status menu and Settings panes when the Mac
+//   shows it;
 // • the device: `SettingsField` and `HostSettingsChange.fields`, `only` and `adding`
-//   (HostSettingsLedger.swift), the panel's row, and the DEBUG mock's cases (MockCatalog.swift);
+//   (HostSettingsLedger.swift), rule 9 in the ledger's `pick` for an optional field, the panel's
+//   row, and the DEBUG mock's cases (MockCatalog.swift);
 // • Scripts/sillclient.py: the keys `--set` accepts, and `describe`.
 
-/// The five streaming settings as the Mac's menu and Settings show them. Plain values, never enums:
-/// an unknown case would fail an older reader's whole decode.
+/// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
+/// stream, and one (Direct Wireless) for how devices reach the Mac. Plain values, never enums: an
+/// unknown case would fail an older reader's whole decode.
 public struct StreamSettings: Codable, Hashable, Sendable {
     /// Frame rate limit: a ceiling; each device still gets its own panel's rate below it.
     public var maxFPS: Int
@@ -38,10 +44,18 @@ public struct StreamSettings: Codable, Hashable, Sendable {
     public var captureScale: Double
     public var prioritizeSpeed: Bool
     public var virtualDisplay: Bool
+    /// Direct Wireless Connection: the host's listener and its Bonjour registration include
+    /// peer-to-peer Wi-Fi (AWDL), so devices with no network in common can find and reach it.
+    /// Optional because it came sixth: nil is a host without the setting (the device shows no row
+    /// and never sends it).
+    public var directWireless: Bool?
 
-    public init(maxFPS: Int, bitrate: Int, captureScale: Double, prioritizeSpeed: Bool, virtualDisplay: Bool) {
+    /// `directWireless` has no default: every host must say, so the compiler finds one that forgets.
+    public init(maxFPS: Int, bitrate: Int, captureScale: Double, prioritizeSpeed: Bool, virtualDisplay: Bool,
+                directWireless: Bool?) {
         self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
+        self.directWireless = directWireless
     }
 }
 
@@ -104,16 +118,19 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
     public var captureScale: Double?
     public var prioritizeSpeed: Bool?
     public var virtualDisplay: Bool?
+    public var directWireless: Bool?
 
     public init(token: Int? = nil, maxFPS: Int? = nil, bitrate: Int? = nil, captureScale: Double? = nil,
-                prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil) {
+                prioritizeSpeed: Bool? = nil, virtualDisplay: Bool? = nil, directWireless: Bool? = nil) {
         self.token = token; self.maxFPS = maxFPS; self.bitrate = bitrate; self.captureScale = captureScale
         self.prioritizeSpeed = prioritizeSpeed; self.virtualDisplay = virtualDisplay
+        self.directWireless = directWireless
     }
 
-    /// All five setting fields nil (the token does not count).
+    /// All setting fields nil (the token does not count).
     public var isEmpty: Bool {
         maxFPS == nil && bitrate == nil && captureScale == nil && prioritizeSpeed == nil && virtualDisplay == nil
+            && directWireless == nil
     }
 
     /// `s` with this change laid over it: the device's merge (its ledger, and the DEBUG mock's
@@ -127,6 +144,7 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
         if let v = captureScale { r.captureScale = v }
         if let v = prioritizeSpeed { r.prioritizeSpeed = v }
         if let v = virtualDisplay { r.virtualDisplay = v }
+        if let v = directWireless { r.directWireless = v }
         return r
     }
 }

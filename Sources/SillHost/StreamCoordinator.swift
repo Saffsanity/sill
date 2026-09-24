@@ -127,6 +127,8 @@ package final class StreamCoordinator {
         self.appKitLoop = appKitLoop
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
+        // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
+        server.setPeerToPeer(config.directWireless)
         stage = VirtualStage(sizer: sizer, catalog: catalog)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
@@ -280,6 +282,11 @@ package final class StreamCoordinator {
         }
         if virtualDisplay { enableVirtualDisplay() }
         catalog.start()
+        // The only startup line Direct Wireless adds, and only when it is on: the default path
+        // prints what it always printed.
+        if config.directWireless {
+            print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
+        }
         server.start()
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
         if let match = preselect?.lowercased(),
@@ -360,6 +367,7 @@ package final class StreamCoordinator {
     /// Whether the running pipeline would come out different under `new`: its rate (the devices'
     /// highest under the new limit, 60 at most on the software encoder), capture scale, bitrate,
     /// encoder speed, or, for a window, the virtual display. The Desktop never uses the display.
+    /// Direct Wireless is deliberately absent: it is the listener's (`adopt` hands it over).
     private func restartNeeded(for new: HostConfig) -> Bool {
         guard active != .none else { return false }
         let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
@@ -377,6 +385,8 @@ package final class StreamCoordinator {
         let old = config
         guard next != old else { return }
         config = next
+        // The listener's, not the pipeline's: StreamServer replaces it and connected devices keep streaming.
+        if old.directWireless != next.directWireless { server.setPeerToPeer(next.directWireless) }
         catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
         if old.virtualDisplay && !next.virtualDisplay {
             stage.release()        // idempotent: select has already sent a staged window home

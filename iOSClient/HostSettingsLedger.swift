@@ -5,9 +5,9 @@ import Foundation
 import StreamProtocol
 #endif
 
-/// One of the five settings a device can change on the Mac.
+/// One of the six settings a device can change on the Mac.
 enum SettingsField: CaseIterable, Hashable {
-    case maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay
+    case maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay, directWireless
 }
 
 extension HostSettingsChange {
@@ -19,6 +19,7 @@ extension HostSettingsChange {
         if captureScale != nil { f.append(.captureScale) }
         if prioritizeSpeed != nil { f.append(.prioritizeSpeed) }
         if virtualDisplay != nil { f.append(.virtualDisplay) }
+        if directWireless != nil { f.append(.directWireless) }
         return f
     }
 
@@ -30,6 +31,7 @@ extension HostSettingsChange {
         case .captureScale: HostSettingsChange(captureScale: captureScale)
         case .prioritizeSpeed: HostSettingsChange(prioritizeSpeed: prioritizeSpeed)
         case .virtualDisplay: HostSettingsChange(virtualDisplay: virtualDisplay)
+        case .directWireless: HostSettingsChange(directWireless: directWireless)
         }
     }
 
@@ -38,7 +40,8 @@ extension HostSettingsChange {
         HostSettingsChange(token: token, maxFPS: other.maxFPS ?? maxFPS, bitrate: other.bitrate ?? bitrate,
                            captureScale: other.captureScale ?? captureScale,
                            prioritizeSpeed: other.prioritizeSpeed ?? prioritizeSpeed,
-                           virtualDisplay: other.virtualDisplay ?? virtualDisplay)
+                           virtualDisplay: other.virtualDisplay ?? virtualDisplay,
+                           directWireless: other.directWireless ?? directWireless)
     }
 }
 
@@ -63,6 +66,8 @@ extension HostSettingsChange {
 /// 7. Reset on every tear-down, and never persisted: a Mac's settings are only ever the ones it
 ///    sent on this connection.
 /// 8. Nothing is sent on its own: only `pick`, called from a control's action, produces a change.
+/// 9. A field this Mac did not report (nil in its state: an older host) is never sent, so an older
+///    host is never asked for what it cannot show. A property of the model, not of the view.
 struct SettingsLedger: Equatable {
     /// One field's unanswered pick. `change` names that field only.
     struct Entry: Equatable {
@@ -91,6 +96,8 @@ struct SettingsLedger: Equatable {
         guard let shown = displayed else { return nil }
         var out = HostSettingsChange(token: token)
         for field in change.fields {
+            // Rule 9: applied(to:) would set the field anyway, and a nil differs from any value.
+            if field == .directWireless, shown.directWireless == nil { continue }
             let single = change.only(field)
             guard single.applied(to: shown) != shown else { continue }
             pending[field] = Entry(change: single, token: token, sentAt: now)

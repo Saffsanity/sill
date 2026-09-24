@@ -13,7 +13,7 @@ struct SettingsPane: View {
     var body: some View {
         Group {
             switch tab {
-            case .general: GeneralPane(model: model)
+            case .general: GeneralPane(model: model, settings: model.settings)
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
             case .permissions: PermissionsPane(model: model)
@@ -56,6 +56,7 @@ private struct Footnote: View {
 
 private struct GeneralPane: View {
     let model: AppModel
+    @Bindable var settings: HostSettings
 
     private static let runsFromApplications = Bundle.main.bundlePath.hasPrefix("/Applications/")
 
@@ -104,6 +105,14 @@ private struct GeneralPane: View {
                     .font(.footnote)
                     Spacer(minLength: 0)
                 }
+            }
+            // How devices reach this Mac, so beside its name on the network. Applies at once without
+            // restarting the stream (the listener is replaced); enabled in test pattern mode too,
+            // where it is saved and changes only the listener.
+            Section {
+                Toggle("Direct wireless connection", isOn: $settings.config.directWireless)
+            } footer: {
+                Footnote("Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find and connect to this Mac.")
             }
             Section {
                 HStack {
@@ -251,7 +260,8 @@ private struct PermissionsPane: View {
         Form {
             Section {
                 PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices on this network.",
+                              // Not "on this network": a device connected over Direct Wireless shares none.
+                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices.",
                               button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
                     permissions.requestScreenRecording()
                 }

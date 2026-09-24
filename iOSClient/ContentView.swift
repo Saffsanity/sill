@@ -73,8 +73,14 @@ struct ContentView: View {
 ///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
-///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending` or `timeout` (see
+///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
+///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
 ///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+/// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
+///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a network row and Direct
+///   rows) or `denied` (Local Network access denied: the status says what to do, no hint).
+///   Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
+///   change what it shows (see `MockCatalog.ConnectCase`).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -101,6 +107,8 @@ struct LayoutHarness: View {
         let settingsOpen: Bool
         /// The mock Mac's settings. Ignored when `live`.
         let settingsCase: MockCatalog.SettingsCase
+        /// The connect screen in a discovery state, instead of the stream screen. Ignored when `live`.
+        let connectCase: MockCatalog.ConnectCase?
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -117,7 +125,8 @@ struct LayoutHarness: View {
                         live: defaults.bool(forKey: "SillLive"),
                         mockActive: mockActive(defaults.string(forKey: "SillActive")),
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
-                        settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default)
+                        settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
+                        connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""))
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -138,7 +147,8 @@ struct LayoutHarness: View {
     init(spec: Spec, live: StreamClient) {
         self.spec = spec
         self.live = live
-        _mock = StateObject(wrappedValue: MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase))
+        _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
+                                ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase))
     }
 
     var body: some View {
@@ -181,6 +191,11 @@ struct LayoutHarness: View {
                     ConnectScreen(client: live)
                 }
             }
+        } else if spec.connectCase != nil {
+            ZStack {
+                Color.black
+                ConnectScreen(client: mock)
+            }
         } else {
             StreamScreen(client: mock,
                          drawerOpen: spec.drawerOpen,
@@ -192,9 +207,12 @@ struct LayoutHarness: View {
 }
 #endif
 
-/// Before a Mac is picked: the Bonjour results as drawer-style rows.
+/// Before a Mac is picked: the Macs the browsers found, as drawer-style rows ("Direct" for one
+/// reached over peer-to-peer Wi-Fi), and, when none turns up on the network, why, with Search Nearby.
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
+
+    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -209,9 +227,9 @@ struct ConnectScreen: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 4)
 
-            ForEach(client.hosts, id: \.self) { host in
-                DrawerRow(height: 50, highlighted: false, title: name(of: host), trailing: nil,
-                          action: { client.connect(to: host) }) {
+            ForEach(client.macs) { mac in
+                DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.direct ? "Direct" : nil,
+                          action: { client.connect(to: mac) }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
                         Image(systemName: "desktopcomputer")
@@ -220,14 +238,45 @@ struct ConnectScreen: View {
                     }
                     .frame(width: 32, height: 32)
                 }
+                .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network" : "")
+            }
+
+            if client.showsNearbyHint {
+                Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                // Once the nearby search runs, a line in the button's place says so, whatever the
+                // status line says (a disconnect's message stays there), at the button's height so
+                // nothing moves.
+                if client.searchingNearby {
+                    Text("Also looking nearby")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 10)
+                } else {
+                    Button(action: {
+                        client.searchNearby()
+                        // The button leaves from under VoiceOver's cursor: say what it started.
+                        AccessibilityNotification.Announcement("Also looking nearby").post()
+                    }) {
+                        Text("Search Nearby")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
+                }
             }
         }
-        .frame(width: 380)
+        // Leading, so the title never jumps sideways when the hint or the first row widens the
+        // column. Vertically it is still centred: what adds height moves it up by half as much.
+        .frame(width: 380, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func name(of result: NWBrowser.Result) -> String {
-        if case .service(let name, _, _, _) = result.endpoint { return name }
-        return "\(result.endpoint)"
     }
 }

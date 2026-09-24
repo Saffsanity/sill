@@ -6,7 +6,8 @@ import StreamProtocol
 ///
 /// It builds a `StreamClient` that *looks* connected — window list, thumbnails, icons, installed
 /// apps — without touching the network: `StreamClient` only starts Bonjour when `startBrowsing()`
-/// is called, so nothing here needs a hook into it. The display view stays black, since no frames
+/// is called, so nothing here needs a hook into it. The connect screen's cases (`connectClient`)
+/// are a client that is not connected and never browses. The display view stays black, since no frames
 /// ever arrive; the harness is about layout, not picture.
 ///
 /// None of this exists in a Release build.
@@ -57,6 +58,9 @@ enum MockCatalog {
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
     static func client(active: StreamSource = .window(102), settings: SettingsCase = .default) -> StreamClient {
         let client = StreamClient()
+        // Never browses, not even after the panel's Disconnect, when a remembered Mac would look
+        // missing from a network the mock never looked at.
+        client.mockDiscovery = true
         client.connected = true
         client.status = "Connected to Mac mini"
         client.macName = "Mac mini"
@@ -95,6 +99,9 @@ enum MockCatalog {
         case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
         case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
         case timeout     // the Mac did not answer a pick: the inline problem
+        case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
+        case directlink  // on, and this device connected over it: the header line and the footer's warning
+        case nodirect    // a host without the setting (the ipad-host-settings build): no row
     }
 
     /// Lays a case's state into the client as if the Mac had sent it on this connection.
@@ -102,7 +109,8 @@ enum MockCatalog {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
         guard c != .legacy else { return }
         var state = HostSettingsState(
-            settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false),
+            settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                                     directWireless: false),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
         switch c {
@@ -123,6 +131,13 @@ enum MockCatalog {
             state.settings.virtualDisplay = true
             state.settings.bitrate = 25_000_000
             state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 50, onVirtualDisplay: true)
+        case .direct:
+            state.settings.directWireless = true
+        case .directlink:
+            state.settings.directWireless = true
+            client.connectedDirectly = true
+        case .nodirect:
+            state.settings.directWireless = nil
         case .default, .legacy, .pending, .timeout:
             break
         }
@@ -134,6 +149,41 @@ enum MockCatalog {
         }
         client.settings = ledger
         if c == .timeout { client.settingsProblem = "Mac mini didn’t answer. Try again." }
+    }
+
+    // MARK: - The connect screen
+
+    /// `-SillConnectCase`: the connect screen's discovery states. The mock is not connected and never
+    /// browses (`mockDiscovery`): Search Nearby and a row's tap only change what it shows.
+    enum ConnectCase: String {
+        case looking   // the first seconds: nothing listed yet
+        case hint      // nothing listed after the network's 3 s: the hint and Search Nearby
+        case nearby    // searching nearby: a network row, then Direct rows (one with a long name)
+        case denied    // Local Network access denied: the status says what to do, and no hint
+    }
+
+    static func connectClient(_ c: ConnectCase) -> StreamClient {
+        let client = StreamClient()
+        client.mockDiscovery = true
+        client.status = StreamClient.lookingOnNetwork
+        func mac(_ name: String, direct: Bool) -> FoundMac {
+            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil), direct: direct)
+        }
+        switch c {
+        case .looking:
+            break
+        case .hint:
+            client.showsNearbyHint = true
+        case .nearby:
+            client.searchingNearby = true
+            client.status = StreamClient.lookingNearby
+            // The long name checks that "Direct" never truncates: the title does.
+            client.macs = [mac("Studio", direct: false), mac("Mac mini", direct: true),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", direct: true)]
+        case .denied:
+            client.status = StreamClient.allowLocalNetwork
+        }
+        return client
     }
 
     // MARK: - Drawn images
