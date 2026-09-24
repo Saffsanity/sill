@@ -6,7 +6,8 @@ import StreamProtocol
 ///
 /// It builds a `StreamClient` that *looks* connected — window list, thumbnails, icons, installed
 /// apps — without touching the network: `StreamClient` only starts Bonjour when `startBrowsing()`
-/// is called, so nothing here needs a hook into it. The display view stays black, since no frames
+/// is called, so nothing here needs a hook into it. The connect screen's cases (`connectClient`)
+/// are a client that is not connected and never browses. The display view stays black, since no frames
 /// ever arrive; the harness is about layout, not picture.
 ///
 /// None of this exists in a Release build.
@@ -57,6 +58,9 @@ enum MockCatalog {
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
     static func client(active: StreamSource = .window(102), settings: SettingsCase = .default) -> StreamClient {
         let client = StreamClient()
+        // Never browses, not even after the panel's Disconnect, when a remembered Mac would look
+        // missing from a network the mock never looked at.
+        client.mockDiscovery = true
         client.connected = true
         client.status = "Connected to Mac mini"
         client.macName = "Mac mini"
@@ -135,6 +139,38 @@ enum MockCatalog {
         }
         client.settings = ledger
         if c == .timeout { client.settingsProblem = "Mac mini didn’t answer. Try again." }
+    }
+
+    // MARK: - The connect screen
+
+    /// `-SillConnectCase`: the connect screen's discovery states. The mock is not connected and never
+    /// browses (`mockDiscovery`): Search Nearby and a row's tap only change what it shows.
+    enum ConnectCase: String {
+        case looking   // the first seconds: nothing listed yet
+        case hint      // nothing listed after the network's 3 s: the hint and Search Nearby
+        case nearby    // searching nearby: a network row, then Direct rows (one with a long name)
+    }
+
+    static func connectClient(_ c: ConnectCase) -> StreamClient {
+        let client = StreamClient()
+        client.mockDiscovery = true
+        client.status = StreamClient.lookingOnNetwork
+        func mac(_ name: String, direct: Bool) -> FoundMac {
+            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil), direct: direct)
+        }
+        switch c {
+        case .looking:
+            break
+        case .hint:
+            client.showsNearbyHint = true
+        case .nearby:
+            client.searchingNearby = true
+            client.status = StreamClient.lookingNearby
+            // The long name checks that "Direct" never truncates: the title does.
+            client.macs = [mac("Studio", direct: false), mac("Mac mini", direct: true),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", direct: true)]
+        }
+        return client
     }
 
     // MARK: - Drawn images
