@@ -11,6 +11,21 @@ import Foundation
 // • Never remove, rename or retype a field (Swift property names are the JSON keys).
 // • No enums in these payloads: an unknown case would fail an older reader's whole decode, while
 //   JSONDecoder ignores unknown keys, so either side can add fields.
+//
+// A sixth setting has to be added everywhere the five are listed by hand, and the compiler points
+// at few of those places. Missing the host's whitelist is silent: a device's change is dropped with
+// no refusal and no log line, the answer shows the old value, and the device takes that for a
+// refusal. The places:
+// • here: `StreamSettings` (optional), `HostSettingsChange` with `isEmpty` and `applied(to:)`, and
+//   `SettingsChoices` when the setting takes a fixed set of values;
+// • the host: `HostConfig` (`validated()`, `changes(to:)`), `streamSettings`, `applying` and
+//   `DeviceSettings.accepted` in DeviceSettings.swift, and `StreamCoordinator.restartNeeded` when
+//   the running pipeline depends on it;
+// • Sill.app: `HostSettings` (its key, registered default, load and `save(changedFrom:)`), and the
+//   status menu and Settings panes when the Mac shows it;
+// • the device: `SettingsField` and `HostSettingsChange.fields`, `only` and `adding`
+//   (HostSettingsLedger.swift), the panel's row, and the DEBUG mock's cases (MockCatalog.swift);
+// • Scripts/sillclient.py: the keys `--set` accepts, and `describe`.
 
 /// The five streaming settings as the Mac's menu and Settings show them. Plain values, never enums:
 /// an unknown case would fail an older reader's whole decode.
@@ -101,7 +116,10 @@ public struct HostSettingsChange: Codable, Hashable, Sendable {
         maxFPS == nil && bitrate == nil && captureScale == nil && prioritizeSpeed == nil && virtualDisplay == nil
     }
 
-    /// `s` with this change laid over it. The one merge, used by both sides.
+    /// `s` with this change laid over it: the device's merge (its ledger, and the DEBUG mock's
+    /// answer). The host never calls it: it keeps only what `DeviceSettings.accepted` whitelists
+    /// and merges with `HostConfig.applying`, so a new field goes into all three (see the list at
+    /// the top of this file).
     public func applied(to s: StreamSettings) -> StreamSettings {
         var r = s
         if let v = maxFPS { r.maxFPS = v }

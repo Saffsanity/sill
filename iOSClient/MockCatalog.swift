@@ -91,6 +91,7 @@ enum MockCatalog {
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
         case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
         case vdproblem   // the virtual display on, but off for this session after repeated losses
+        case vdstream    // a window streaming from the virtual display at 120 fps, 50 Mbps: the longest readout
         case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
         case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
         case timeout     // the Mac did not answer a pick: the inline problem
@@ -118,6 +119,10 @@ enum MockCatalog {
         case .vdproblem:
             state.settings.virtualDisplay = true
             state.virtualDisplayNote = "Off for this session: the system removed the virtual display 3 times. Turn it off and on to try again."
+        case .vdstream:
+            state.settings.virtualDisplay = true
+            state.settings.bitrate = 25_000_000
+            state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 50, onVirtualDisplay: true)
         case .default, .legacy, .pending, .timeout:
             break
         }

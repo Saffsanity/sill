@@ -213,9 +213,13 @@ struct StreamScreen: View {
         }
     }
 
-    /// Grows from the Settings button's corner, the way a popover would; a plain fade under Reduce Motion.
-    private var settingsTransition: AnyTransition {
-        reduceMotion ? .opacity : .scale(scale: 0.94, anchor: .topTrailing).combined(with: .opacity)
+    /// Grows from the Settings button's corner, the way a popover would; a plain fade under Reduce
+    /// Motion. `anchor` is the panel's top-trailing corner as a point of the view the transition is
+    /// attached to. In landscape that view is the content area, whose corner is within a few
+    /// points of the panel's; in portrait it is the whole screen, where `.topTrailing` would make
+    /// the panel slide down over the window bar (PortraitStreamScreen passes its own).
+    private func settingsTransition(anchor: UnitPoint = .topTrailing) -> AnyTransition {
+        reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
     private func landscape(bar: BarMetrics) -> some View {
@@ -237,7 +241,7 @@ struct StreamScreen: View {
                              latched: $latched, overlay: overlay,
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
-                             settingsTransition: settingsTransition,
+                             settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 })
     }
 
@@ -299,7 +303,7 @@ struct StreamScreen: View {
                     .padding(.bottom, 14)
                     .padding(.trailing, bar.padding)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .transition(settingsTransition)
+                    .transition(settingsTransition())
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

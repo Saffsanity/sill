@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **iPad host settings (2026-09-23, branch `ipad-host-settings` from
-`menu-bar-app`; the plan and its reasoning are in
+`menu-bar-app`, rebased onto its e89add6; the plan and its reasoning are in
 `docs/ipad-host-settings-plan.md`).** A device changes the Mac's five streaming
 settings the way the Sill menu does: Quality (bitrate), Resolution (capture
 scale), Frame Rate limit, Prioritize Speed, Virtual Display. Defaults taken for
@@ -84,6 +84,33 @@ turning it off from a device brings the window home and forward (Q3).
   device's change logged, one restart, saved by the app; a Mac-side change
   shown; Disconnect); against the branch-point host the panel says to update
   and the client sends no kind 17.
+- Review fixes (2026-09-23, after the rebase onto e89add6): the pick timeout
+  reads the new `linkStats` (the worst round trip of the last second that
+  measured one, kept through seconds without a pong); a pick queued behind a
+  restart goes through the same rule as a fresh one (`handlePick`), so a
+  restart that starts before its Task runs no longer drops it; a staged window
+  that the virtual display turning off sends home comes forward whichever
+  select commits that change (`cameHome`); the device holds back its automatic
+  Desktop request when the user picked or launched something while it waited
+  out a closed window (the race that remains, older devices and a pick sent
+  before the device heard of the close, is written down at `handlePick`); the
+  status menu's Virtual Display item sets the value it showed instead of
+  toggling, so a click on a menu left open while a device changed it never
+  undoes that change; in the panel the readout wraps instead of cutting off and
+  "On the virtual display" is a line of its own, Done's tap area is 44 pt tall,
+  and the speed switch is "Prioritize Encoding Speed" (the Mac's name) in its
+  own group under the Mac's explanation; `sillclient.py` checks every argument
+  before connecting; HostSettings.swift lists every place a new setting must
+  go. Verified: the CLI's output against e89add6's (masked; idle, 35 s idle,
+  the Desktop, `--virtual-display`); H4–H21 again, previews byte-identical;
+  the race that lost 5 of 6 queued picks to a rate-change restart now loses 0
+  of 10; 46 photos (a new `vdstream` case at every size and at larger text);
+  iOS Debug and Release with only the old warning; taps 7 pt above and
+  8 pt below Done close the panel; in portrait the header stays put while the
+  panel opens (the Quality value moves 2 pt; it slid 32); against a fake host
+  that never answers, a pick times out after 4.3 s with prompt pongs and 8.3 s
+  with pongs held 2 s; against one that closes the watched window, the Desktop
+  request follows 2 s later unless the user picks, and then never comes.
 - **Untested, for Noah:** D1–D11 (the plan's §7.4): the panel's values
   against the Mac's menu and status card with a real window; every control from
   the iPad (one restart each; the Mac's Settings window follows; saved in
@@ -97,11 +124,16 @@ turning it off from a device brings the window home and forward (Q3).
   and five minutes with the panel closed (frame age and RTT unchanged). Also
   rotating with the panel open and Reduce Motion (fade only), which the
   harness cannot drive; not run here: S3 (no Accessibility Inspector) and S4
-  (no way to press a hardware Esc in the simulator from here).
+  (no way to press a hardware Esc in the simulator from here). Also the Mac
+  menu's Virtual Display item clicked after the iPad changed it while the menu
+  was open (it should do what the item showed), and turning the virtual
+  display off while another change is restarting a staged window (the window
+  should still come forward).
 - Known, not fixed here: in the layout harness, bringing up the software
   keyboard flips the fake screen into the portrait layout (the same at the
   branch point; the harness only). A Mac menu that is already open keeps its
-  old checkmarks until reopened.
+  old checkmarks until reopened (every item sets the value it shows, so a
+  click there never inverts a device's change).
 
 **Sill.app, the menu bar host (2026-09-23, branch `menu-bar-app`; the plan and
 its background are in `docs/menu-bar-app-plan.md`).** The same host as the CLI,
@@ -308,10 +340,12 @@ and move: the lights go, the thumbnail lifts and drags into a new slot, Home
 Screen style; the arrangement is the device's own (`StreamClient.windowOrder`,
 persisted per Mac, host order for the rest). A "Leave" button disconnected
 (since the host settings step the last slot is Settings, with Disconnect in its
-panel's foot). The device asks for the Desktop whenever the host reports nothing streaming (at
-most every 10 s), so a fresh connection starts on the Desktop and the drawer
-no longer opens by itself. Harness: `-SillWindowMenu 1` keeps the first
-thumbnail's lights open.
+panel's foot). The device asks for the Desktop whenever the host reports nothing
+streaming (at most every 10 s), so a fresh connection starts on the Desktop and
+the drawer no longer opens by itself. When the watched window has closed it
+waits 2 s first, and asks for nothing if the user picked or launched something
+meanwhile (the host cannot tell that request from a Desktop tap). Harness:
+`-SillWindowMenu 1` keeps the first thumbnail's lights open.
 
 **Frame rate follows the device (2026-09-22).** `Viewport.fps` carries the
 device's wanted rate: `UIScreen.maximumFramesPerSecond` (120 on ProMotion, 60
@@ -554,7 +588,8 @@ good.
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
-  `--expect=K=V[,…]` against the last kind 16, which it prints one per line).
+  `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
+  every argument is checked before it connects, and a bad one exits 2).
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour,
@@ -612,8 +647,8 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 (outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
 `-SillSettings 1` (the Settings panel open), `-SillSettingsCase
-default|cli|software|custom|vdproblem|legacy|pending|timeout` (the mock Mac's
-settings; it answers a pick after 0.35 s), `-SillConnect 127.0.0.1:PORT`
+default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout` (the mock
+Mac's settings; it answers a pick after 0.35 s), `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the
 off-Bonjour synthetic hosts from the simulator). A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is

@@ -10,7 +10,10 @@ struct MenuEntry: Equatable {
     enum Action: Equatable {
         case none
         case allowScreenRecording, allowAccessibility, openPrivacy
-        case toggleVirtualDisplay
+        /// Absolute, like the radio items: sets what the item offered when the menu was built (on
+        /// when it showed unchecked). A device can change the setting while the menu is open, which
+        /// does not rebuild it, and a toggle would then do the opposite of what the item shows.
+        case setVirtualDisplay(Bool)
         case setMaxFPS(Int), setBitrate(Int), setCaptureScale(CGFloat)
         case toggleLaunchAtLogin
         case showLog, showSettings, quit
@@ -57,7 +60,7 @@ enum MenuBuilder {
         menu.append(.separator)
 
         menu.append(MenuEntry(kind: .item, title: "Virtual Display", subtitle: p.virtualDisplayNote,
-                              checked: config.virtualDisplay, action: .toggleVirtualDisplay))
+                              checked: config.virtualDisplay, action: .setVirtualDisplay(!config.virtualDisplay)))
         menu.append(MenuEntry(kind: .item, title: "Frame Rate", children: [60, 120].map { fps in
             MenuEntry(kind: .item, title: "Up to \(fps) fps", checked: config.maxFPS == fps, action: .setMaxFPS(fps))
         }))
@@ -236,7 +239,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .allowScreenRecording: model.permissions.requestScreenRecording()
         case .allowAccessibility: model.permissions.requestAccessibility()
         case .openPrivacy: model.permissions.openPrivacyPane()
-        case .toggleVirtualDisplay: model.settings.config.virtualDisplay.toggle()
+        case .setVirtualDisplay(let on): model.settings.config.virtualDisplay = on
         case .setMaxFPS(let fps): model.settings.config.maxFPS = fps
         case .setBitrate(let bitrate): model.settings.config.bitrate = bitrate
         case .setCaptureScale(let scale): model.settings.config.captureScale = scale

@@ -31,7 +31,10 @@ enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed). Refusal is
     /// per field: the rest of the same change still applies. The refused fields are named for the
-    /// log; the token is not carried (the handler answers with the request's own).
+    /// log; the token is not carried (the handler answers with the request's own). Each field is
+    /// copied by name, so one added to `HostSettingsChange` but not here is dropped without a
+    /// refusal or a log line (StreamProtocol's HostSettings.swift lists every place a new setting
+    /// goes).
     static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool) -> (HostSettingsChange, refused: [String]) {
         var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)
         var refused: [String] = []

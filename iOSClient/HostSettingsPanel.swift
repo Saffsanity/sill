@@ -87,17 +87,37 @@ struct HostSettingsPanel: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($headerFocused)
                 if let state = client.settings.host {
-                    Text(Self.readout(state.stream))
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                        .accessibilityLabel(Self.spokenReadout(state.stream))
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Wraps rather than cutting the bitrate off at larger text sizes; each
+                        // value keeps its unit (no-break spaces).
+                        Text(Self.readout(state.stream))
+                            .fixedSize(horizontal: false, vertical: true)
+                        // Its own line: beside the numbers it never fit the panel's width, and it
+                        // is what confirms the Virtual Display switch took effect.
+                        if state.stream?.onVirtualDisplay == true {
+                            Text("On the virtual display")
+                        }
+                    }
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.spokenReadout(state.stream))
                 }
             }
             Spacer(minLength: 8)
-            Button("Done", action: close)
-                .font(.body.weight(.semibold))
-                .keyboardShortcut(.cancelAction)
+            // A 44 pt tall tap area (the word alone is about 42×22) without moving the header: the
+            // padding and the shape sit inside the label, which is what the button hit-tests, and
+            // the layout takes them back outside.
+            Button(action: close) {
+                Text("Done")
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 4)
+                    .contentShape(Rectangle())
+            }
+            .padding(.vertical, -11)
+            .padding(.horizontal, -4)
+            .font(.body.weight(.semibold))
+            .keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 12)
@@ -136,6 +156,15 @@ struct HostSettingsPanel: View {
                 }
                 streamRows(shown)
                 Footnote(text: streamFooter)
+                // As in the Mac's Settings › Streaming: its own group, the Mac's name for it, and
+                // what it trades away.
+                Rows {
+                    Toggle(isOn: binding(shown.prioritizeSpeed) { HostSettingsChange(prioritizeSpeed: $0) }) {
+                        RowTitle(title: "Prioritize Encoding Speed", since: client.settings.pendingSince(.prioritizeSpeed))
+                    }
+                    .rowFrame()
+                }
+                Footnote(text: "Lower latency when \(mac) is busy, at a softer picture.")
                 Rows {
                     let unavailable = !state.virtualDisplayAvailable && !shown.virtualDisplay
                     Toggle(isOn: binding(shown.virtualDisplay) { HostSettingsChange(virtualDisplay: $0) }) {
@@ -208,11 +237,6 @@ struct HostSettingsPanel: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
-            RowDivider()
-            Toggle(isOn: binding(shown.prioritizeSpeed) { HostSettingsChange(prioritizeSpeed: $0) }) {
-                RowTitle(title: "Prioritize Speed", since: client.settings.pendingSince(.prioritizeSpeed))
-            }
-            .rowFrame()
         }
     }
 
@@ -225,16 +249,17 @@ struct HostSettingsPanel: View {
     // MARK: Copy
 
     /// Under the Mac's name: what actually runs, which confirms a change took effect and shows
-    /// what the software encoder caps.
+    /// what the software encoder caps. Whether it runs on the virtual display is a line of its own
+    /// (see `header`).
     static func readout(_ stream: RunningStream?) -> String {
         guard let s = stream else { return "Not streaming" }
-        return "\(s.width)×\(s.height) · \(s.fps) fps · \(s.mbps) Mbps" + (s.onVirtualDisplay ? " · virtual display" : "")
+        return "\(s.width)×\(s.height) · \(s.fps)\u{00A0}fps · \(s.mbps)\u{00A0}Mbps"
     }
 
     static func spokenReadout(_ stream: RunningStream?) -> String {
         guard let s = stream else { return "Not streaming" }
         return "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"
-            + (s.onVirtualDisplay ? ", from the virtual display" : "")
+            + (s.onVirtualDisplay ? ", on the virtual display" : "")
     }
 
     /// Under the stream rows. A frame rate limit above what this screen shows changes nothing for

@@ -61,12 +61,12 @@ Settings: `defaults read me.saffer.sill.mac`.
 
 A connected iPhone or iPad changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
-Prioritize Speed and Virtual Display, with exactly the menu's choices. Sill.app
-saves a device's change like a menu click, and its Settings window and menu
-show it; the change applies to every connected device, and the stream restarts
-for a moment. To put one setting back to its default, quit Sill, run `defaults
-delete me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
-`prioritizeSpeed` or `virtualDisplay`) and open Sill again.
+Prioritize Encoding Speed and Virtual Display, with exactly the Mac's choices.
+Sill.app saves a device's change like a menu click, and its Settings window and
+menu show it; the change applies to every connected device, and the stream
+restarts for a moment. To put one setting back to its default, quit Sill, run
+`defaults delete me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`,
+`captureScale`, `prioritizeSpeed` or `virtualDisplay`) and open Sill again.
 
 Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
 Scripts/make-app.sh --release` (it refuses to finish with any other kind of

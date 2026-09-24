@@ -142,7 +142,8 @@ struct PortraitStreamScreen: View {
     /// The Settings panel, owned by `StreamScreen` (see its `setSettings`).
     let settingsOpen: Bool
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
-    let settingsTransition: AnyTransition
+    /// The panel's open and close motion, scaled about the given point (see `StreamScreen`).
+    let settingsTransition: (_ anchor: UnitPoint) -> AnyTransition
     /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
     let onPanelSize: (CGSize) -> Void
 
@@ -184,6 +185,7 @@ struct PortraitStreamScreen: View {
                 // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
                 // and never reaches the Mac.
                 if settingsOpen {
+                    let top = half + metrics.padTop + metrics.barHeight + 8
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { setSettings(false, true) }
@@ -192,11 +194,14 @@ struct PortraitStreamScreen: View {
                     HostSettingsPanel(client: client, close: { setSettings(false, true) })
                         .frame(width: min(360, geo.size.width - 2 * metrics.padSide))
                         .frame(maxHeight: .infinity, alignment: .top)
-                        .padding(.top, half + metrics.padTop + metrics.barHeight + 8)
+                        .padding(.top, top)
                         .padding(.bottom, metrics.padBottom)
                         .padding(.trailing, metrics.padSide)
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .transition(settingsTransition)
+                        // The view carrying the transition fills the screen, so the panel's own
+                        // top-trailing corner, under the Settings button, is given as a point in it.
+                        .transition(settingsTransition(UnitPoint(x: 1 - metrics.padSide / max(geo.size.width, 1),
+                                                                 y: top / max(geo.size.height, 1))))
                 }
             }
         }

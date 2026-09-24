@@ -97,9 +97,10 @@ package final class StreamCoordinator {
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
     private var restartOf: StreamSource?
-    /// A device's pick of a different source that came in during that restart; taken by select's
-    /// defer. Never set during a switch to another source: the device's automatic Desktop request
-    /// can land then (StreamClient's window list handling) and must not override the user's pick.
+    /// A device's pick of a different source that came in during that restart (`handlePick`);
+    /// taken by select's defer. Never set during a switch to another source: the device's automatic
+    /// Desktop request can land then (StreamClient's window list handling) and must not override
+    /// the user's pick.
     private var pickArrivedWhileSwitching: StreamSource?
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
@@ -351,10 +352,9 @@ package final class StreamCoordinator {
     private func applyPending() async {
         guard let new = pendingConfig, !switching, !shuttingDown else { return }   // select's defer calls it again
         guard restartNeeded(for: new) else { pendingConfig = nil; adopt(new); return }
-        // Turning the virtual display off brings the window forward as it comes home, the way a
-        // pick does in regular mode.
-        let leavingStage = config.virtualDisplay && !new.virtualDisplay && stage.isStaged
-        await select(active, bringForward: leavingStage)   // committed inside select
+        // A restart, not a pick. Turning the virtual display off still brings the staged window
+        // forward as it comes home: select's commit decides that, from the value it actually takes.
+        await select(active)   // committed inside select
     }
 
     /// Whether the running pipeline would come out different under `new`: its rate (the devices'
@@ -438,17 +438,9 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
-            if switching {
-                // `select` would drop it. A pick made during a restart of the active source (a
-                // settings change from the panel, then a tap on a thumbnail) runs once the restart
-                // is done; the newest wins, and a pick of the source being restarted needs nothing.
-                // During a switch to another source it is dropped, as before.
-                if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
-                return
-            }
             // A pick from the device's switcher: the device never selects a window by itself (its
             // automatic requests are for the Desktop only).
-            await select(source, bringForward: true)
+            await handlePick(source)
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -613,12 +605,34 @@ package final class StreamCoordinator {
 
     // MARK: Source switching
 
+    /// A pick from a device's switcher, and one that waited out a restart (select's defer): one
+    /// rule for both, so a queued pick is not lost to a select that starts before its Task runs.
+    /// While the active source restarts (a settings change, a resize, a rate change, the encoder
+    /// fallback, a lost display), the pick waits for it and runs once it is done: the newest
+    /// wins, and a pick of the source being restarted needs nothing. During a switch to another
+    /// source it is dropped, as before this rule existed: the device's automatic Desktop request
+    /// can land then and must not override the user's pick.
+    ///
+    /// The host cannot tell that request from a Desktop tap. The device holds it back when the
+    /// user has picked since the watched window closed (StreamClient's window list); an older
+    /// device, or a pick made before the device heard of the close, can still let it land during
+    /// a restart that follows the user's pick, and then it is queued like the user's own.
+    private func handlePick(_ source: StreamSource) async {
+        if switching {
+            if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
+            return
+        }
+        await select(source, bringForward: true)
+    }
+
     /// Streams `source` in place of whatever streams now. Also how the host restarts the current
     /// source (a resize, a rate change, the encoder fallback, a lost virtual display).
     /// `bringForward` marks a pick instead: the device's switcher, the command line, an app
     /// launched from the device. In regular mode a picked window comes forward on the Mac, and a
     /// pick that falls back from the virtual display to the real window counts as regular mode;
     /// restarts leave Mac focus where it is, and so does staging a window on the virtual display.
+    /// One exception: a staged window that comes home because the virtual display was turned off
+    /// comes forward too, whichever select commits that change (see `cameHome`).
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
@@ -643,7 +657,10 @@ package final class StreamCoordinator {
                 // The pick's own select fits the latest viewport. Run after it has started, the
                 // viewport tail would resize the old window, which `active` still names mid-switch.
                 viewportArrivedWhileSwitching = false
-                Task { @MainActor in await self.select(pick, bringForward: true) }
+                // Through the handler's rule again, not straight to `select`: another restart can
+                // start before this Task runs (a viewport's new rate, an encoder hang, a lost
+                // display), and `select` would drop the pick; the rule queues it behind that one.
+                Task { @MainActor in await self.handlePick(pick) }
             } else if viewportArrivedWhileSwitching {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
@@ -659,14 +676,21 @@ package final class StreamCoordinator {
         heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
-        // New settings (the app only) take effect here, between pipelines, before the rate, the
-        // scale and the stage are worked out for the next one.
+        // New settings take effect here, between pipelines, before the rate, the scale and the
+        // stage are worked out for the next one.
         var leftStage = false
+        // The virtual display turned off (from the Mac or a device) sends a staged window home, and
+        // it comes forward the way a pick does in regular mode (Q3). Decided here, from the value
+        // this commit takes, not by the caller: any select can take that change, a restart
+        // included (a newer value replaces the one that started it during the awaits above), and
+        // a restart raises nothing on its own.
+        var cameHome = false
         if let first = pendingConfig {
             if config.virtualDisplay && !first.virtualDisplay {
                 // The virtual display block below is skipped once the flag reads off: send the
                 // window home now, and re-read the catalog so the .window lookup below gets its
                 // home frame, not the staged one.
+                cameHome = stage.isStaged
                 await stage.leaveFullScreenIfNeeded(); stage.release()
                 if case .window = source { await catalog.refreshWindows() }
                 leftStage = true
@@ -677,6 +701,7 @@ package final class StreamCoordinator {
             adopt(next)
         }
         fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
+        let comeForward = bringForward || cameHome
 
         if virtualDisplay {
             // The stage follows the selection. A different window sends the staged one home first
@@ -747,7 +772,7 @@ package final class StreamCoordinator {
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
-                if bringForward, !shuttingDown { activateAndRaise(window: w) }
+                if comeForward, !shuttingDown { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
@@ -783,7 +808,7 @@ package final class StreamCoordinator {
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
                 status.update { $0.lastStageFailure = "capture on the display failed" }
                 stage.release()
-                if bringForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
+                if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 do {
                     try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,

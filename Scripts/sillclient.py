@@ -15,18 +15,20 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
                      and virtualDisplayAvailable): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
 Every kind 16 (host settings) is printed on one line with its arrival time. Flags may come in any
-order after the positional arguments. Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
+order after the positional arguments. Everything is checked before connecting: an unknown flag, a
+--set or --expect key that is not one of theirs, or a value that does not parse stops the script
+with status 2 (--raw17 goes out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, socket, struct, sys, time
 
-args = sys.argv[1:]
-pos = [a for a in args if not a.startswith("--")]
-flags = [a for a in args if a.startswith("--")]
-port = int(pos[0]); dur = float(pos[1]) if len(pos) > 1 else 12
-src = pos[2] if len(pos) > 2 else "desktop"
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "persistent", "virtualDisplayAvailable"}
+# What --set may send: HostSettingsChange's five fields. The host drops any other key without a
+# word, so a misspelt one would only show up as an unchanged answer.
+SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay"}
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
+TIMED = ("set", "raw17", "pick", "fps-after")
 
 def msg(kind, payload=b"", key=False):
     return struct.pack(">BdBI", kind, time.time(), 1 if key else 0, len(payload)) + payload
@@ -34,33 +36,59 @@ def msg(kind, payload=b"", key=False):
 def source(spec):
     if spec == "desktop": return {"desktop": {}}
     if spec == "none": return {"none": {}}
-    return {"window": {"_0": int(spec.split(":")[1])}}
+    if spec.startswith("window:") and spec[7:].isdigit(): return {"window": {"_0": int(spec[7:])}}
+    raise ValueError(f"not a source: {spec!r} (desktop, none or window:ID)")
+
+def number(v, what, kind=int):
+    try: return kind(v)
+    except ValueError: raise ValueError(f"{what}: not a number: {v!r}") from None
 
 def value(k, v):
-    if k in BOOL_KEYS: return BOOL[v.lower()]
+    if k in BOOL_KEYS:
+        if v.lower() not in BOOL: raise ValueError(f"{k}: not a boolean: {v!r} (1/0/true/false/on/off)")
+        return BOOL[v.lower()]
     if k == "captureScale":
-        f = float(v); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
-    return int(v)
+        f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
+    return number(v, k)
 
-def pairs(body):
+def pairs(body, keys, flag):
     out = {}
     for kv in body.split(","):
-        k, v = kv.split("=", 1); out[k] = value(k, v)
+        k, eq, v = kv.partition("=")
+        if not eq: raise ValueError(f"{flag}: expected K=V, got {kv!r}")
+        if k not in keys: raise ValueError(f"{flag}: unknown key {k!r} (keys: {', '.join(sorted(keys))})")
+        out[k] = value(k, v)
     return out
 
-# Timed sends, in (time, argument order): equal times go out in the order given.
+args = sys.argv[1:]
+pos = [a for a in args if not a.startswith("--")]
+flags = [a for a in args if a.startswith("--")]
+# Timed sends as (time, argument order, name, text, parsed), sorted: equal times go out in the
+# order given. Every body is parsed here, before connecting, so a bad one fails at once instead of
+# after the stream has started.
 events = []
-for i, a in enumerate(flags):
-    for name in ("set", "raw17", "pick", "fps-after"):
-        if a.startswith(f"--{name}="):
-            body, t = a[len(name) + 3:].rsplit("@", 1)
-            events.append((float(t), i, name, body))
-events.sort(key=lambda e: (e[0], e[1]))
-expect = next((pairs(a[9:]) for a in flags if a.startswith("--expect=")), None)
+try:
+    if not pos: raise ValueError("no PORT (usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...])")
+    port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
+    sel = source(pos[2] if len(pos) > 2 else "desktop")
+    for i, a in enumerate(flags):
+        name, _, body = a[2:].partition("=")
+        if name in TIMED:
+            text, at, t = body.rpartition("@")
+            if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
+            parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
+                      else number(text, "--fps-after") if name == "fps-after" else text)
+            events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
+        elif a not in ("--junk", "--stats") and not a.startswith(("--fps=", "--expect=")):
+            raise ValueError(f"unknown flag {a!r}")
+    events.sort(key=lambda e: (e[0], e[1]))
+    expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
+    fps_now = next((number(a[6:], "--fps") for a in flags if a.startswith("--fps=")), None)
+except ValueError as e:
+    print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 stats = "--stats" in flags
 
 s = socket.create_connection(("127.0.0.1", port), timeout=5); s.settimeout(0.25)
-sel = source(src)
 s.sendall(msg(6, json.dumps(sel).encode()))
 if "--junk" in flags:
     # Kinds this host does not know: it must skip their payloads and keep serving.
@@ -68,7 +96,6 @@ if "--junk" in flags:
     print("  sent two unknown-kind messages (200 with 5 bytes, 201 empty)")
 def viewport(fps):
     return msg(9, json.dumps({"width": 1117, "height": 642, "scale": None, "fps": fps}).encode())
-fps_now = next((int(a[6:]) for a in flags if a.startswith("--fps=")), None)
 if fps_now is not None:
     s.sendall(viewport(fps_now)); print(f"  sent viewport fps={fps_now}")
 
@@ -90,17 +117,17 @@ def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
     global token
-    _, _, name, body = e
+    _, _, name, text, parsed = e
     at = f"{now - t0:.3f}s"
     if name == "set":
-        change = {"token": token, **pairs(body)}; token += 1
+        change = {"token": token, **parsed}; token += 1
         s.sendall(msg(17, json.dumps(change).encode())); print(f"  sent change {json.dumps(change)} at {at}")
     elif name == "raw17":
-        s.sendall(msg(17, body.encode())); print(f"  sent raw kind 17 {body} at {at}")
+        s.sendall(msg(17, text.encode())); print(f"  sent raw kind 17 {text} at {at}")
     elif name == "pick":
-        s.sendall(msg(6, json.dumps(source(body)).encode())); print(f"  sent pick {body} at {at}")
+        s.sendall(msg(6, json.dumps(parsed).encode())); print(f"  sent pick {text} at {at}")
     elif name == "fps-after":
-        s.sendall(viewport(int(body))); print(f"  sent viewport fps={body} at {at}")
+        s.sendall(viewport(parsed)); print(f"  sent viewport fps={parsed} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:

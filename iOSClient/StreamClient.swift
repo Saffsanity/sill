@@ -20,6 +20,10 @@ final class StreamClient: ObservableObject {
     @Published private(set) var windowOrder: [UInt32] = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
+    /// Picks and launches sent from this device (main thread). The automatic Desktop request that
+    /// waits out a closed window stands down if this moved meanwhile: the user chose something,
+    /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
+    private var choicesSent = 0
     @Published var active: StreamSource = .none
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
     @Published var icons: [String: UIImage] = [:]      // by bundle ID
@@ -324,6 +328,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to stream this source. The host answers with a fresh window list.
     func select(_ source: StreamSource) {
+        choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
         // Layout harness (mock, no connection): show the pick locally so taps can be checked.
@@ -374,6 +379,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
 
@@ -505,8 +511,11 @@ final class StreamClient: ObservableObject {
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
+                        // Not if the user picked or launched something meanwhile: this request
+                        // could reach the host after that choice has started and replace it.
+                        let choices = self.choicesSent
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                            guard let self, self.connected, self.active == .none,
+                            guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
                             self.select(.desktop)
