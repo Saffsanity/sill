@@ -59,6 +59,15 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+A connected iPhone or iPad changes the same settings from its own Settings
+panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
+Prioritize Encoding Speed and Virtual Display, with exactly the Mac's choices.
+Sill.app saves a device's change like a menu click, and its Settings window and
+menu show it; the change applies to every connected device, and the stream
+restarts for a moment. To put one setting back to its default, quit Sill, run
+`defaults delete me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`,
+`captureScale`, `prioritizeSpeed` or `virtualDisplay`) and open Sill again.
+
 Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
 Scripts/make-app.sh --release` (it refuses to finish with any other kind of
 signature, which notarization would reject), then `ditto -c -k --keepParent
@@ -78,6 +87,11 @@ swift run -c release SillHost --virtual-display   # each streamed window on its 
 
 The argument matches an app name or window title. Leave it off to see the list
 of on-screen windows.
+
+A device can change the command-line host's settings from its Settings panel
+too; `SillHost` saves nothing, so a change lasts until it quits, and the
+device's panel says so. Its Virtual Display switch works only when `SillHost`
+runs with `--virtual-display`.
 
 `--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
 virtual HiDPI display created with a private CoreGraphics API and captures that
@@ -115,6 +129,9 @@ with the rate (the knob is per 60 fps).
 2. Target → Signing & Capabilities → pick your team. Change the bundle
    identifier if `me.saffer.sill` collides with something.
 3. Run on a real device on the same Wi-Fi. Tap the Mac's name.
+
+The gear at the end of the bar opens Settings: the Mac's streaming settings,
+changed from the device, and Disconnect at the bottom.
 
 The project is a plain Xcode project checked in by hand: four source files,
 an asset catalog, and the package reference. Nothing else.

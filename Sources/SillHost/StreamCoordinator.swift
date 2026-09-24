@@ -10,10 +10,12 @@ import StreamProtocol
 @MainActor
 package final class StreamCoordinator {
     /// The knobs (HostConfig.swift): the CLI's `standard` values and flag, or the app's Settings.
-    /// A new value is taken only between pipelines, inside `select` (see `apply`), so one pipeline
-    /// never mixes two. The knob properties below read it, so every existing read keeps its text.
+    /// A new value is taken only between pipelines, inside `select` (see `setTarget`), so one
+    /// pipeline never mixes two. The knob properties below read it, so every existing read keeps
+    /// its text.
     package private(set) var config: HostConfig
-    /// Settings from the app that wait for the next `select` (a restart, or a switch in flight).
+    /// Settings from the app or a device that wait for the next `select` (a restart, or a switch in
+    /// flight). This, else `config`, is the `target`: what the Mac's menu and the devices show.
     private var pendingConfig: HostConfig?
     /// Ceiling for the stream rate (HostConfig). Each device asks for its own panel's rate
     /// through the viewport: 120 on ProMotion, 60 elsewhere, 60 while Low Power Mode caps it.
@@ -91,6 +93,15 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// A restart of the active source is in flight (a settings change, a resize, a rate change,
+    /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
+    /// another source.
+    private var restartOf: StreamSource?
+    /// A device's pick of a different source that came in during that restart (`handlePick`);
+    /// taken by select's defer. Never set during a switch to another source: the device's automatic
+    /// Desktop request can land then (StreamClient's window list handling) and must not override
+    /// the user's pick.
+    private var pickArrivedWhileSwitching: StreamSource?
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
     private var viewport: Viewport?
@@ -120,6 +131,10 @@ package final class StreamCoordinator {
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
+        // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
+        // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
+        // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
+        status.onChange = { [weak self] in self?.publishSettings() }
 
         server.onClientConnected = { [weak self] connection in
             Task { @MainActor in
@@ -273,7 +288,7 @@ package final class StreamCoordinator {
         }
     }
 
-    // MARK: Settings (the menu bar app; the CLI never calls these)
+    // MARK: Settings (the app's menu and Settings window, and devices through .changeSettings, on both hosts)
 
     /// The virtual display's parts, for the CLI's flag at launch or the app's setting turning on.
     /// The private API is checked on the first call only, printing what the CLI always printed.
@@ -300,28 +315,46 @@ package final class StreamCoordinator {
         }
     }
 
-    /// New settings from the app, applied live. Validated, and the virtual display stays off
-    /// without the AppKit loop. With nothing streaming, or nothing the running pipeline depends
-    /// on changed, they are taken at once; otherwise the current source restarts and `select`
-    /// takes them between the old pipeline and the new one. A value that arrives mid-switch waits
-    /// (select's defer comes back here), and a newer value replaces one still waiting, so
-    /// requests that arrive out of order still converge on the last.
-    package func apply(_ requested: HostConfig) async {
-        guard !shuttingDown else { return }
+    /// What the host is set to: a value still waiting for its restart, else the running one. What
+    /// the Mac's menu checks and what devices are told. (Private: the app merges over its own
+    /// settings, never over this.)
+    private var target: HostConfig { pendingConfig ?? config }
+
+    /// Who keeps the settings when a device changes one. Sill.app lays the change over its
+    /// HostSettings (saved, shown in its menu and Settings) and returns the result. Unset (the
+    /// CLI): the change lands on `target` and lasts until the process ends. Set it before `start`.
+    package var onDeviceSettingsChange: (@MainActor (HostSettingsChange) -> HostConfig)?
+
+    /// New settings from the app or a device, applied live. Synchronous: validated, the virtual
+    /// display kept off without the AppKit loop, compared with the target, told to every device.
+    /// The pipeline takes them in a Task: at once when nothing streaming depends on what changed,
+    /// otherwise through one restart of the current source, `select` taking them between the old
+    /// pipeline and the new one. A value that arrives mid-switch waits (select's defer comes back
+    /// to `applyPending`), and a newer value replaces one still waiting, so requests that arrive
+    /// out of order still converge on the last. Returns whether the target moved.
+    ///
+    /// Why the pipeline work is scheduled rather than awaited: the device handler must answer
+    /// before any await; a burst of changes that arrives before the Task runs is one restart; and
+    /// `applyPending` tolerates repeated calls (it returns while switching, and a later Task finds
+    /// `pendingConfig` already consumed).
+    @discardableResult
+    package func setTarget(_ requested: HostConfig) -> Bool {
+        guard !shuttingDown else { return false }
         var new = requested.validated()
         if !appKitLoop { new.virtualDisplay = false }
-        guard new != (pendingConfig ?? config) else { return }
+        guard new != target else { return false }
         pendingConfig = new
-        await applyPending()
+        publishSettings()
+        Task { @MainActor in await self.applyPending() }   // a burst before it runs is one restart
+        return true
     }
 
     private func applyPending() async {
         guard let new = pendingConfig, !switching, !shuttingDown else { return }   // select's defer calls it again
         guard restartNeeded(for: new) else { pendingConfig = nil; adopt(new); return }
-        // Turning the virtual display off brings the window forward as it comes home, the way a
-        // pick does in regular mode.
-        let leavingStage = config.virtualDisplay && !new.virtualDisplay && stage.isStaged
-        await select(active, bringForward: leavingStage)   // committed inside select
+        // A restart, not a pick. Turning the virtual display off still brings the staged window
+        // forward as it comes home: select's commit decides that, from the value it actually takes.
+        await select(active)   // committed inside select
     }
 
     /// Whether the running pipeline would come out different under `new`: its rate (the devices'
@@ -407,7 +440,7 @@ package final class StreamCoordinator {
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
             // A pick from the device's switcher: the device never selects a window by itself (its
             // automatic requests are for the Desktop only).
-            await select(source, bringForward: true)
+            await handlePick(source)
         case .windowCommand:
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
@@ -445,6 +478,24 @@ package final class StreamCoordinator {
             clientFPS[ObjectIdentifier(connection)] = v.fps ?? 60
             if switching { viewportArrivedWhileSwitching = true; return }
             await applyViewportToActiveWindow()
+        case .changeSettings:
+            // A device's settings control. No `await` in this case: the answer leaves in request
+            // order, per device and across devices, and before any restart (setTarget schedules the
+            // pipeline work). Malformed JSON has no token to answer, so it gets nothing.
+            guard let change = Wire.decode(HostSettingsChange.self, from: message.payload) else { return }
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop)
+            let who = deviceName(connection)
+            if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
+            if !ok.isEmpty, !shuttingDown {
+                let before = target
+                // The app: the hook assigns its settings, whose didSet has already set the target
+                // (this call then finds it equal). The CLI: the change lands on the target.
+                setTarget(onDeviceSettingsChange?(ok) ?? before.applying(ok))
+                if target != before { print("Settings from \(who): " + before.changes(to: target)) }
+            }
+            // Exactly one answer, to this device alone: the settings as they now stand, so a
+            // refused or ignored field goes back to the Mac's value on the device.
+            server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
         default:
             break
         }
@@ -554,20 +605,46 @@ package final class StreamCoordinator {
 
     // MARK: Source switching
 
+    /// A pick from a device's switcher, and one that waited out a restart (select's defer): one
+    /// rule for both, so a queued pick is not lost to a select that starts before its Task runs.
+    /// While the active source restarts (a settings change, a resize, a rate change, the encoder
+    /// fallback, a lost display), the pick waits for it and runs once it is done: the newest
+    /// wins, and a pick of the source being restarted needs nothing. During a switch to another
+    /// source it is dropped, as before this rule existed: the device's automatic Desktop request
+    /// can land then and must not override the user's pick.
+    ///
+    /// The host cannot tell that request from a Desktop tap. The device holds it back when the
+    /// user has picked since the watched window closed (StreamClient's window list); an older
+    /// device, or a pick made before the device heard of the close, can still let it land during
+    /// a restart that follows the user's pick, and then it is queued like the user's own.
+    private func handlePick(_ source: StreamSource) async {
+        if switching {
+            if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
+            return
+        }
+        await select(source, bringForward: true)
+    }
+
     /// Streams `source` in place of whatever streams now. Also how the host restarts the current
     /// source (a resize, a rate change, the encoder fallback, a lost virtual display).
     /// `bringForward` marks a pick instead: the device's switcher, the command line, an app
     /// launched from the device. In regular mode a picked window comes forward on the Mac, and a
     /// pick that falls back from the virtual display to the real window counts as regular mode;
     /// restarts leave Mac focus where it is, and so does staging a window on the virtual display.
+    /// One exception: a staged window that comes home because the virtual display was turned off
+    /// comes forward too, whichever select commits that change (see `cameHome`).
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
+        restartOf = (source == active && source != .none) ? source : nil
         defer {
             switching = false
+            restartOf = nil
+            var pick = pickArrivedWhileSwitching
+            pickArrivedWhileSwitching = nil
             // Requests that arrived mid-switch, applied now that `switching` is clear again (every
-            // return path, including the early ones). A last client leaving wins over a viewport:
-            // there is nobody left to fit the window to.
+            // return path, including the early ones). A last client leaving wins over a viewport
+            // and over a queued pick: there is nobody left to fit the window to or stream to.
             if deselectWhenSettled {
                 deselectWhenSettled = false
                 if catalog.clientCount == 0, active != .none {
@@ -575,11 +652,21 @@ package final class StreamCoordinator {
                     Task { @MainActor in await self.select(.none) }
                 }
             }
-            if viewportArrivedWhileSwitching {
+            if catalog.clientCount == 0 { pick = nil }
+            if let pick, pick != active {
+                // The pick's own select fits the latest viewport. Run after it has started, the
+                // viewport tail would resize the old window, which `active` still names mid-switch.
+                viewportArrivedWhileSwitching = false
+                // Through the handler's rule again, not straight to `select`: another restart can
+                // start before this Task runs (a viewport's new rate, an encoder hang, a lost
+                // display), and `select` would drop the pick; the rule queues it behind that one.
+                Task { @MainActor in await self.handlePick(pick) }
+            } else if viewportArrivedWhileSwitching {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
             }
-            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }   // settings that came in meanwhile
+            // Settings that came in meanwhile; a no-op when the pick's select commits them first.
+            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }
         }
 
         await capture.stop()
@@ -589,14 +676,21 @@ package final class StreamCoordinator {
         heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
-        // New settings (the app only) take effect here, between pipelines, before the rate, the
-        // scale and the stage are worked out for the next one.
+        // New settings take effect here, between pipelines, before the rate, the scale and the
+        // stage are worked out for the next one.
         var leftStage = false
+        // The virtual display turned off (from the Mac or a device) sends a staged window home, and
+        // it comes forward the way a pick does in regular mode (Q3). Decided here, from the value
+        // this commit takes, not by the caller: any select can take that change, a restart
+        // included (a newer value replaces the one that started it during the awaits above), and
+        // a restart raises nothing on its own.
+        var cameHome = false
         if let first = pendingConfig {
             if config.virtualDisplay && !first.virtualDisplay {
                 // The virtual display block below is skipped once the flag reads off: send the
                 // window home now, and re-read the catalog so the .window lookup below gets its
                 // home frame, not the staged one.
+                cameHome = stage.isStaged
                 await stage.leaveFullScreenIfNeeded(); stage.release()
                 if case .window = source { await catalog.refreshWindows() }
                 leftStage = true
@@ -607,6 +701,7 @@ package final class StreamCoordinator {
             adopt(next)
         }
         fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
+        let comeForward = bringForward || cameHome
 
         if virtualDisplay {
             // The stage follows the selection. A different window sends the staged one home first
@@ -677,7 +772,7 @@ package final class StreamCoordinator {
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
-                if bringForward, !shuttingDown { activateAndRaise(window: w) }
+                if comeForward, !shuttingDown { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
@@ -713,7 +808,7 @@ package final class StreamCoordinator {
                 print("Capture on the virtual display failed: \(error); retrying with the real window.")
                 status.update { $0.lastStageFailure = "capture on the display failed" }
                 stage.release()
-                if bringForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
+                if comeForward, !shuttingDown { activateAndRaise(window: w) }   // regular mode now: a pick comes forward
                 let fallback = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 do {
                     try await startPipeline(source: source, filter: SCContentFilter(desktopIndependentWindow: w), sourceRect: nil,
@@ -1104,6 +1199,9 @@ package final class StreamCoordinator {
         let now = Date().timeIntervalSince1970
         print("Catalog → \(connection.endpoint): \(catalog.infos.count) windows, \(catalog.allIcons.count) icons, \(catalog.installedApps.count) apps")
         server.send(listMessage(), to: connection)
+        // What the settings are, silently (the line above is the only one printed on connect). An
+        // older device skips the kind.
+        server.send(settingsMessage(settingsState()), to: connection)
         for (id, png) in catalog.allIcons {
             server.send(StreamMessage(kind: .appIcon, timestamp: now, isKeyframe: false,
                                       payload: ImageBlob.encodeIcon(bundleID: id, png: png)), to: connection)
@@ -1113,5 +1211,55 @@ package final class StreamCoordinator {
         if let shape = cursorShapes.current {
             server.send(StreamMessage(kind: .cursorShape, timestamp: now, isKeyframe: false, payload: shape), to: connection)
         }
+    }
+
+    // MARK: Settings to devices
+
+    /// The last broadcast state. Answers and the state sent on connect never touch it.
+    private var lastPublished: HostSettingsState?
+
+    /// A pure function of the target, the status snapshot and two constants (appKitLoop, whether
+    /// the hook is set). The target changes only in `setTarget` and the snapshot only in
+    /// `HostStatus.update`, and both publish, so no change can be missed and none can stick.
+    private func settingsState(answering: Int? = nil) -> HostSettingsState {
+        let t = target, s = status.snapshot
+        return HostSettingsState(settings: t.streamSettings,
+                                 persistent: onDeviceSettingsChange != nil,
+                                 virtualDisplayAvailable: appKitLoop,
+                                 virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
+                                 softwareEncoder: s.softwareEncoder,
+                                 stream: s.stream?.wire,
+                                 answering: answering)
+    }
+
+    /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the
+    /// permission lines: permissions are polled, not event-driven, and a missing one still reaches
+    /// the device as the fallback reason on the next pick.
+    private func virtualDisplayNote(target t: HostConfig, snapshot s: HostStatusSnapshot) -> String? {
+        if !appKitLoop { return "Start SillHost with --virtual-display to use it." }
+        if s.virtualDisplayAPIMissing, let p = s.virtualDisplayProblem { return "Not available on this version of macOS: \(p)" }
+        guard t.virtualDisplay else { return nil }
+        if let p = s.virtualDisplayProblem { return "Off for this session: \(p). Turn it off and on to try again." }
+        if let f = s.lastStageFailure { return "The last window streamed where it is: \(f)" }
+        return nil
+    }
+
+    private func settingsMessage(_ state: HostSettingsState) -> StreamMessage {
+        StreamMessage(kind: .hostSettings, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                      payload: Wire.encode(state))
+    }
+
+    /// To every device, when the state differs from the last broadcast. Prints nothing, so the
+    /// CLI's output only changes when a device sends a change.
+    private func publishSettings() {
+        let state = settingsState()
+        guard state != lastPublished else { return }
+        lastPublished = state
+        server.broadcast(settingsMessage(state))
+    }
+
+    /// "iPad (iPad14,1)" once the device has sent its stats, its address until then.
+    private func deviceName(_ connection: NWConnection) -> String {
+        status.snapshot.devices.first { $0.id == ObjectIdentifier(connection) }?.name ?? "\(connection.endpoint)"
     }
 }

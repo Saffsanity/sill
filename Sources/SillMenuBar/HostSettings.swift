@@ -6,9 +6,12 @@ import SillHostCore
 /// UserDefaults (the bundle's domain, me.saffer.sill.mac; the bare SillMenuBar binary's is
 /// "SillMenuBar"). Main actor, like everything that shows or changes them.
 ///
-/// One path to the host: the menu, the Settings panes and the debug hooks all assign `config`.
+/// One path to the host: the menu, the Settings panes, the debug hooks and connected devices (through
+/// the coordinator's `onDeviceSettingsChange`, which the model points here) all assign `config`.
 /// Its didSet saves what changed and calls `onChange`, which the model points at
-/// `StreamCoordinator.apply`. No sliders anywhere: one change is one apply and at most one restart.
+/// `StreamCoordinator.setTarget`, synchronously, so the host's target and `config` never disagree
+/// between two main-actor turns. No sliders anywhere: one change is one apply and at most one
+/// restart.
 ///
 /// Defaults are registered from `HostConfig.standard`, so a fresh install streams exactly like the
 /// CLI, and launch arguments override for one run without being saved (`-maxFPS 60`), because a
@@ -31,8 +34,8 @@ final class HostSettings {
             onChange?()
         }
     }
-    /// Called after `config` changed and was saved.
-    @ObservationIgnored var onChange: (() -> Void)?
+    /// Called after `config` changed and was saved, on the main actor, before the assignment returns.
+    @ObservationIgnored var onChange: (@MainActor () -> Void)?
 
     /// The Settings tab shown last, reopened next time.
     var settingsTab: SettingsTab { didSet { defaults.set(settingsTab.rawValue, forKey: Key.settingsTab) } }
@@ -77,30 +80,5 @@ final class HostSettings {
         if config.bitrate != old.bitrate { defaults.set(config.bitrate, forKey: Key.bitrate) }
         if config.prioritizeSpeed != old.prioritizeSpeed { defaults.set(config.prioritizeSpeed, forKey: Key.prioritizeSpeed) }
         if config.virtualDisplay != old.virtualDisplay { defaults.set(config.virtualDisplay, forKey: Key.virtualDisplay) }
-    }
-}
-
-/// Bitrate presets, per 60 fps (a 120 fps stream gets twice as much). Balanced is the CLI's value.
-enum QualityPreset: Int, CaseIterable, Identifiable {
-    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, maximum = 40_000_000
-
-    var id: Int { rawValue }
-
-    var name: String {
-        switch self {
-        case .efficient: "Efficient"
-        case .balanced: "Balanced"
-        case .high: "High"
-        case .maximum: "Maximum"
-        }
-    }
-
-    /// "Balanced — 15 Mbps".
-    var title: String { "\(name) — \(rawValue / 1_000_000) Mbps" }
-
-    /// The label for any stored bitrate: a preset's title, or "Custom — 12 Mbps" for one set by
-    /// hand (`defaults write`, a launch argument).
-    static func title(forBitrate bitrate: Int) -> String {
-        QualityPreset(rawValue: bitrate)?.title ?? "Custom — \(HostConfig.mbps(bitrate)) Mbps"
     }
 }
