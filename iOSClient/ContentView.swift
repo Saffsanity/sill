@@ -88,8 +88,9 @@ struct ContentView: View {
 ///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
 ///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
-///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a network row and Direct
-///   rows) or `denied` (Local Network access denied: the status says what to do, no hint).
+///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
+///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
+///   `denied` (Local Network access denied: the status says what to do, no hint).
 ///   Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
 ///   change what it shows (see `MockCatalog.ConnectCase`).
 ///
@@ -218,8 +219,9 @@ struct LayoutHarness: View {
 }
 #endif
 
-/// Before a Mac is picked: the Macs the browsers found, as drawer-style rows ("Direct" for one
-/// reached over peer-to-peer Wi-Fi), and, when none turns up on the network, why, with Search Nearby.
+/// Before a Mac is picked: the Macs the browsers found, as drawer-style rows that end in how each is
+/// reachable ("Wired", "Wi-Fi", or "Direct" for one reached over peer-to-peer Wi-Fi; nothing when
+/// the device cannot tell), and, when none turns up on the network, why, with Search Nearby.
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
 
@@ -239,7 +241,9 @@ struct ConnectScreen: View {
                 .padding(.bottom, 4)
 
             ForEach(client.macs) { mac in
-                DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.direct ? "Direct" : nil,
+                // The kind of link, never the Wi-Fi network's name: that needs Location access,
+                // which Sill does not ask for (DiscoveryPolicy.method).
+                DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.method?.word,
                           action: { client.connect(to: mac) }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
@@ -249,6 +253,7 @@ struct ConnectScreen: View {
                     }
                     .frame(width: 32, height: 32)
                 }
+                .accessibilityLabel(mac.method.map { "\(mac.name), \($0.word)" } ?? mac.name)
                 .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network" : "")
             }
 

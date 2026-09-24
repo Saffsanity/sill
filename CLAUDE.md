@@ -65,7 +65,27 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   started it runs until a connection is ready (`DiscoveryPolicy`, pure, checked
   with swiftc). A Mac seen only over awdl/llw is a "Direct" row, the one kind
   connected with peer-to-peer; a Mac the network lists is always a network row,
-  so at home nothing takes AWDL. Reconnects match the name exactly ("MacBook
+  so at home nothing takes AWDL. Each row ends in where the device sees its
+  Mac (`DiscoveryPolicy.method`; Noah, 2026-09-24, branch
+  `connection-method-labels`): "Wired" if the network browser saw it on a wired
+  Ethernet interface, else "Wi-Fi" on a Wi-Fi one that is not peer-to-peer,
+  "Direct" for a Direct row, else no word; never the Wi-Fi network's name,
+  which needs the Access Wi-Fi Information entitlement and Location access,
+  and Sill asks for neither. The word follows the browser as interfaces come
+  and go (the cable in or out), and the DEBUG console says what it was read
+  from ("discovery: <Mac>: Wired, seen on …"). It is not the route: no
+  connection is pinned to an interface (no `requiredInterfaceType`; pinning
+  is Noah's call), so with Wi-Fi and the cable both up a session can run over
+  either, whatever the word (Sill.log, 2026-09-24: a reconnect over `%anri0`
+  at 15:33:01; at 17:43:56, with the cable still up, a new connection over
+  `%en0`). Untested on a device: whether iPadOS types the cable to the Mac
+  (anri0 or enN on the host, both USB Ethernet there) as wired Ethernet. On
+  the device, also compare each word with the host's "Client connected:
+  fe80::…%anri0" line (`%anri0` or `%enN`: the cable; `%en0`: this Mac's
+  Wi-Fi). Verified on the simulator: the policy check at 138, eight mutants
+  caught; the `methods` and `nearby` cases at 1000x710 and 500x710; the rows'
+  VoiceOver labels ("Mac Studio, Wired"); the live row for this Mac, "Wi-Fi"
+  (lo0 loopback, en0 wifi). Reconnects match the name exactly ("MacBook
   Pro" and "MacBook Pro (2)" are two Macs) and take the network row at once, a
   Direct row only once it has stayed Direct for 6 s and the network last listed
   that Mac 10 s ago or more (`NetworkSightings`): a listener swap makes the
@@ -827,16 +847,17 @@ good.
   AWDL to the network, ping, generic `send`), `SessionLink` (the session's
   connection and the one door out to the Mac; the move's fenced hand-over;
   Foundation and Network only, checked with swiftc),
-  `DiscoveryPolicy` (when to look nearby, the rows, when a reconnect may take
-  a Direct row, when a session over AWDL moves to the network, the memory of
-  Macs with Direct Wireless on; pure, checked with swiftc), `StreamScreen`
+  `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
+  when a reconnect may take a Direct row, when a session over AWDL moves to
+  the network, the memory of Macs with Direct Wireless on; pure, checked with
+  swiftc), `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
   layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
   Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
-  `StreamClient+Viewport`, `ContentView` (connect screen with Direct rows, the
-  hint and Search Nearby, + DEBUG harness),
+  `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
+  Wired, Wi-Fi or Direct, the hint and Search Nearby, + DEBUG harness),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel). New files need their
@@ -909,8 +930,9 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillSettings 1` (the Settings panel open), `-SillSettingsCase
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect` (the mock Mac's settings; it answers a pick after 0.35 s),
-`-SillConnectCase looking|hint|nearby|denied` (the connect screen in a discovery state;
-the mock never browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
+`-SillConnectCase looking|hint|nearby|methods|denied` (the connect screen in a discovery
+state; `methods` has a row ending in each word, none, and long names; the mock never
+browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the

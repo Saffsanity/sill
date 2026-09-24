@@ -158,7 +158,8 @@ enum MockCatalog {
     enum ConnectCase: String {
         case looking   // the first seconds: nothing listed yet
         case hint      // nothing listed after the network's 3 s: the hint and Search Nearby
-        case nearby    // searching nearby: a network row, then Direct rows (one with a long name)
+        case nearby    // searching nearby: a Wi-Fi row, then Direct rows (one with a long name)
+        case methods   // every word a row can end in: Wired, Wi-Fi, none, long names with Wired and Wi-Fi, Direct
         case denied    // Local Network access denied: the status says what to do, and no hint
     }
 
@@ -166,8 +167,10 @@ enum MockCatalog {
         let client = StreamClient()
         client.mockDiscovery = true
         client.status = StreamClient.lookingOnNetwork
-        func mac(_ name: String, direct: Bool) -> FoundMac {
-            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil), direct: direct)
+        /// A row as `recomputeMacs` makes it: Direct only for a Direct row.
+        func mac(_ name: String, _ method: DiscoveryPolicy.Method?) -> FoundMac {
+            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
+                     direct: method == .direct, method: method)
         }
         switch c {
         case .looking:
@@ -178,8 +181,19 @@ enum MockCatalog {
             client.searchingNearby = true
             client.status = StreamClient.lookingNearby
             // The long name checks that "Direct" never truncates: the title does.
-            client.macs = [mac("Studio", direct: false), mac("Mac mini", direct: true),
-                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", direct: true)]
+            client.macs = [mac("Studio", .wifi), mac("Mac mini", .direct),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", .direct)]
+        case .methods:
+            // Network rows first, then the Direct one, as DiscoveryPolicy.rows orders them. "Office
+            // iMac" was seen only on interfaces the device cannot name (DiscoveryPolicy.method: no
+            // word). The long names check that the word never truncates or wraps, the title does:
+            // "Wi-Fi" is spelled with a non-breaking hyphen.
+            client.searchingNearby = true
+            client.status = StreamClient.lookingNearby
+            client.macs = [mac("Mac Studio", .wired), mac("Mac mini", .wifi), mac("Office iMac", nil),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", .wired),
+                           mac("Noah Saffer’s iMac on the Desk by the Window", .wifi),
+                           mac("MacBook Air", .direct)]
         case .denied:
             client.status = StreamClient.allowLocalNetwork
         }

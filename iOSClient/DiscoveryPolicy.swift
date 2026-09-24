@@ -1,11 +1,11 @@
 import Foundation
 
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
-/// from a network one, when a reconnect may take one, and when a session over AWDL moves to the
-/// network. AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device
-/// asks for it only when a Mac it has seen with Direct Wireless Connection on is missing from the
-/// network, or when the user taps Search Nearby, never while connected, and leaves it once
-/// the network lists that Mac again.
+/// from a network one, the word each row shows for how its Mac is reachable, when a reconnect may
+/// take a Direct row, and when a session over AWDL moves to the network. AWDL takes the radio off
+/// its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for it only when a Mac it
+/// has seen with Direct Wireless Connection on is missing from the network, or when the user taps
+/// Search Nearby, never while connected, and leaves it once the network lists that Mac again.
 ///
 /// Pure logic, Foundation only: it is checked on its own with swiftc (H13 in
 /// docs/direct-wireless-plan.md), and StreamClient feeds it what its two browsers see.
@@ -104,6 +104,50 @@ enum DiscoveryPolicy {
             out.append((n.name, true))
         }
         return out
+    }
+
+    /// An interface a Bonjour result was seen on, as NWInterface gives it: its name (en0, awdl0) and
+    /// its type, spelled here so that this file needs Foundation only (StreamClient maps
+    /// NWInterface.InterfaceType case for case, a type newer than this code as `other`).
+    struct Interface: Equatable {
+        enum Kind: Equatable { case wifi, wiredEthernet, cellular, loopback, other }
+        var name: String
+        var type: Kind
+    }
+
+    /// How a row's Mac is reachable: the one word at the end of its row.
+    enum Method: Hashable {
+        case wired, wifi, direct
+
+        var word: String {
+            switch self {
+            case .wired: return "Wired"
+            case .wifi: return "Wi\u{2011}Fi"   // a non-breaking hyphen: never "Wi-" and "Fi" on two lines
+            case .direct: return "Direct"
+            }
+        }
+    }
+
+    /// A row's method, from the interfaces its own browser saw its Mac on (Noah, 2026-09-24). A
+    /// Direct row is Direct: seen over peer-to-peer Wi-Fi alone, the one kind connected with it. A
+    /// network row takes the best of the network browser's interfaces: Wired for a wired Ethernet
+    /// one (an Ethernet adapter, and the USB cable to the Mac, which the host logs on anri0 or enN,
+    /// if the device types it so: the DEBUG console's "discovery:" lines show what it reports),
+    /// else Wi-Fi for a Wi-Fi one that is not peer-to-peer (awdl0 and llw0 report .wifi too), else
+    /// nothing: a VPN, loopback, cellular, a type this code does not know, or no interface
+    /// reported. A row says nothing rather than something it cannot tell. A Mac seen on several
+    /// paths shows one word, Wired over Wi-Fi over Direct: a Mac the network lists is a network
+    /// row (`rows`), so a network row is never Direct, whatever the nearby browser sees (its tap
+    /// connects without peer-to-peer), and the nearby browser only ever makes Direct rows. The
+    /// word names the kind of link, never the Wi-Fi network: reading the network's name (SSID)
+    /// needs the Access Wi-Fi Information entitlement and Location access, and Sill asks for
+    /// neither.
+    static func method(direct: Bool, interfaces: [Interface]) -> Method? {
+        if direct { return .direct }
+        let network = interfaces.filter { !isPeerToPeer($0.name) }
+        if network.contains(where: { $0.type == .wiredEthernet }) { return .wired }
+        if network.contains(where: { $0.type == .wifi }) { return .wifi }
+        return nil
     }
 
     /// When each Direct row was first seen as one: kept for a row that is still Direct, `now` for a
