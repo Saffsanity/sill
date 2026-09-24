@@ -44,13 +44,14 @@ package struct HostConfig: Equatable, Sendable {
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false)
 
-    /// Within what the pipeline supports: 24…120 fps, Retina or points, 1–100 Mbps per 60 fps.
-    /// A hand-edited default or a launch argument can hold anything.
+    /// Within what the pipeline supports: 24…120 fps, Retina or points, 1–200 Mbps per 60 fps
+    /// (so up to 400 Mbps at 120 fps; the top preset, Extreme, is 150). A hand-edited default or a
+    /// launch argument can hold anything; a device can set only a preset (`DeviceSettings`).
     package func validated() -> HostConfig {
         var c = self
         c.maxFPS = min(max(maxFPS, 24), 120)
         c.captureScale = captureScale >= 1.5 ? 2 : 1
-        c.bitrate = min(max(bitrate, 1_000_000), 100_000_000)
+        c.bitrate = min(max(bitrate, 1_000_000), 200_000_000)
         return c
     }
 
