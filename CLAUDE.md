@@ -65,17 +65,24 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   started it runs until a connection is ready (`DiscoveryPolicy`, pure, checked
   with swiftc). A Mac seen only over awdl/llw is a "Direct" row, the one kind
   connected with peer-to-peer; a Mac the network lists is always a network row,
-  so at home nothing takes AWDL. Each row ends in how its Mac is reachable
-  (`DiscoveryPolicy.method`; Noah, 2026-09-24, branch
+  so at home nothing takes AWDL. Each row ends in where the device sees its
+  Mac (`DiscoveryPolicy.method`; Noah, 2026-09-24, branch
   `connection-method-labels`): "Wired" if the network browser saw it on a wired
   Ethernet interface, else "Wi-Fi" on a Wi-Fi one that is not peer-to-peer,
   "Direct" for a Direct row, else no word; never the Wi-Fi network's name,
   which needs the Access Wi-Fi Information entitlement and Location access,
   and Sill asks for neither. The word follows the browser as interfaces come
-  and go (the cable in or out), the DEBUG console says what it was read from
-  ("discovery: <Mac>: Wired, seen on …"), and whether iPadOS types the cable
-  to the Mac (anri0 or enN on the host) as wired Ethernet is untested on a
-  device. Verified on the simulator: the policy check at 138, eight mutants
+  and go (the cable in or out), and the DEBUG console says what it was read
+  from ("discovery: <Mac>: Wired, seen on …"). It is not the route: no
+  connection is pinned to an interface (no `requiredInterfaceType`; pinning
+  is Noah's call), so with Wi-Fi and the cable both up a session can run over
+  either, whatever the word (Sill.log, 2026-09-24: a reconnect over `%anri0`
+  at 15:33:01; at 17:43:56, with the cable still up, a new connection over
+  `%en0`). Untested on a device: whether iPadOS types the cable to the Mac
+  (anri0 or enN on the host, both USB Ethernet there) as wired Ethernet. On
+  the device, also compare each word with the host's "Client connected:
+  fe80::…%anri0" line (`%anri0` or `%enN`: the cable; `%en0`: this Mac's
+  Wi-Fi). Verified on the simulator: the policy check at 138, eight mutants
   caught; the `methods` and `nearby` cases at 1000x710 and 500x710; the rows'
   VoiceOver labels ("Mac Studio, Wired"); the live row for this Mac, "Wi-Fi"
   (lo0 loopback, en0 wifi). Reconnects match the name exactly ("MacBook
