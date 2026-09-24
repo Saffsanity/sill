@@ -67,7 +67,11 @@ final class HostSettings {
                             bitrate: defaults.integer(forKey: Key.bitrate),
                             prioritizeSpeed: defaults.bool(forKey: Key.prioritizeSpeed),
                             virtualDisplay: defaults.bool(forKey: Key.virtualDisplay),
-                            directWireless: defaults.bool(forKey: Key.directWireless)).validated()
+                            directWireless: defaults.bool(forKey: Key.directWireless),
+                            // Remote access comes to the app with its keychain identity (a later
+                            // step); until then the app runs the standard values, never saved.
+                            remoteAccess: standard.remoteAccess, remotePort: standard.remotePort,
+                            internetAccess: standard.internetAccess).validated()
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)

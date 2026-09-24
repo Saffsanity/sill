@@ -8,8 +8,9 @@ usage: sillrelay.py --listen PORT --to HOST:PORT [--delay-ms N] [--rate-mbps R]
   --to HOST:PORT        the host's door ([v6]:port for IPv6); every accepted connection gets its own
   --delay-ms N          N ms more round trip, half each way, order kept
   --rate-mbps R         host → client at most R Mbit/s. The relay reads from the host only as fast
-                        as R allows (with a small receive buffer), so the host's own send queue
-                        fills as it would behind a slow uplink. Client → host is not shaped.
+                        as R allows, so the host's own send queue fills as it would behind a slow
+                        uplink. Client → host is not shaped. (The relay's receive buffer from the
+                        host is always small, 64 KB, for the same reason.)
   --blackhole-after S   S seconds into each connection, stop forwarding both ways without closing
                         either side (nothing is read, written or closed from then on): a dead path
   --record PREFIX       write each connection's bytes to PREFIX-N.up (client → host) and
@@ -109,8 +110,9 @@ async def handle(client_reader, client_writer):
         print(f"sillrelay #{n}: {peer} could not reach {OPTS['to']}: {e}", flush=True)
         client_writer.close(); return
     sock = host_writer.get_extra_info("socket")
-    if sock is not None and OPTS["rate-mbps"]:
-        # A small receive buffer, so the kernel does not soak up megabytes the link could not carry.
+    if sock is not None:
+        # A small receive buffer, so the kernel does not soak up megabytes a real link could not
+        # carry: behind a slow or dead path the host's own queue fills, as it would on a real uplink.
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
     print(f"sillrelay #{n}: {peer} → {OPTS['to'][0]}:{OPTS['to'][1]}", flush=True)
     dead = asyncio.Event()

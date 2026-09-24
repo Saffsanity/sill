@@ -121,10 +121,17 @@ package final class StreamCoordinator {
     /// The Mac's cursor shape, streamed to the clients that draw the pointer themselves.
     let cursorShapes = CursorShapeWatcher()
     private let macName = Host.current().localizedName ?? "Mac"
+    /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote. Nil: no
+    /// identity, no TXT tag, no kind 18, no remote door, exactly the host as before.
+    package let remote: RemoteAccess?
+    /// Each admitted connection's route (home and its origin, or the remote door's), from the server.
+    private var routes: [ObjectIdentifier: ClientRoute] = [:]
+    /// When each connection last asked for a pairing code (kind 21): once per 30 s.
+    private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
 
     /// `config` is validated, and its virtual display forced off without the AppKit loop, which
     /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
-    package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool) throws {
+    package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil) throws {
         var config = config.validated()
         if !appKitLoop { config.virtualDisplay = false }
         self.config = config
@@ -132,9 +139,12 @@ package final class StreamCoordinator {
         self.appKitLoop = appKitLoop
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
+        self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
         stage = VirtualStage(sizer: sizer, catalog: catalog)
+        // The identity's TXT tag must be in the first registration: set before `server.start()`.
+        remote?.attach(server: server, status: status, macName: macName)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
@@ -143,10 +153,16 @@ package final class StreamCoordinator {
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
 
-        server.onClientConnected = { [weak self] connection in
+        server.onClientConnected = { [weak self] connection, route in
             Task { @MainActor in
                 guard let self else { return }
-                self.status.update { $0.devices.append(HostStatusSnapshot.Device(id: ObjectIdentifier(connection), endpoint: "\(connection.endpoint)")) }
+                let id = ObjectIdentifier(connection)
+                self.routes[id] = route
+                // A remote device shows its paired name and its route until its own stats arrive.
+                self.status.update {
+                    $0.devices.append(HostStatusSnapshot.Device(id: id, endpoint: "\(connection.endpoint)", name: route.pairedName, route: route.label))
+                }
+                if let fp = route.fingerprint, let label = route.label { self.remote?.sessionStarted(fingerprint: fp, route: label) }
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
@@ -163,6 +179,8 @@ package final class StreamCoordinator {
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
+                self.routes[ObjectIdentifier(connection)] = nil
+                self.lastPairingWanted[ObjectIdentifier(connection)] = nil
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
@@ -297,6 +315,7 @@ package final class StreamCoordinator {
             print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
         }
         server.start()
+        remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
         if let match = preselect?.lowercased(),
            let w = catalog.infos.first(where: { $0.appName.lowercased().contains(match) || $0.title.lowercased().contains(match) }) {
@@ -396,6 +415,10 @@ package final class StreamCoordinator {
         config = next
         // The listener's, not the pipeline's: StreamServer replaces it and connected devices keep streaming.
         if old.directWireless != next.directWireless { server.setPeerToPeer(next.directWireless) }
+        // The remote door's, not the pipeline's: RemoteAccess starts, stops or moves it.
+        if old.remoteAccess != next.remoteAccess || old.remotePort != next.remotePort || old.internetAccess != next.internetAccess {
+            remote?.apply(next)
+        }
         catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
         if old.virtualDisplay && !next.virtualDisplay {
             stage.release()        // idempotent: select has already sent a staged window home
@@ -497,6 +520,15 @@ package final class StreamCoordinator {
             clientFPS[ObjectIdentifier(connection)] = v.fps ?? 60
             if switching { viewportArrivedWhileSwitching = true; return }
             await applyViewportToActiveWindow()
+        case .pairingWanted:
+            // "Show your pairing code" (Pair This iPad…): only from a device near the Mac (the home
+            // door, from loopback, this network or peer-to-peer Wi-Fi), once per 30 s per connection.
+            let id = ObjectIdentifier(connection)
+            guard let remote, case .home(let origin)? = routes[id], [.loopback, .lan, .direct].contains(origin) else { return }
+            let now = CFAbsoluteTimeGetCurrent()
+            if let last = lastPairingWanted[id], now - last < 30 { return }
+            lastPairingWanted[id] = now
+            remote.pairingWanted(by: deviceName(connection))
         case .changeSettings:
             // A device's settings control. No `await` in this case: the answer leaves in request
             // order, per device and across devices, and before any restart (setTarget schedules the
@@ -521,7 +553,10 @@ package final class StreamCoordinator {
             }
             recent.append(now)
             settingsArrivals[id] = recent
-            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop)
+            // A connection whose route is not known (never: it is set before any message is
+            // handled) counts as remote, so nothing it sends can widen exposure.
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop,
+                                                        fromRemote: routes[id].map { $0.isRemote } ?? true)
             if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
             if !ok.isEmpty, !shuttingDown {
                 let before = target
@@ -1138,9 +1173,12 @@ package final class StreamCoordinator {
     }
 
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
-    /// before AppKit exits): window home, display gone. Capture and encoder need no stop; the
-    /// process is about to end.
+    /// before AppKit exits): every connected device hears why (kind 22 "quit", at most 0.1 s),
+    /// then window home, display gone. Capture and encoder need no stop; the process is about to
+    /// end. The CLI without --virtual-display dies on a plain SIGINT with no goodbye, as before:
+    /// its devices notice by liveness.
     package func shutdownForExit() {
+        server.goodbyeAll(Goodbye.quit, within: 0.1)
         shuttingDown = true
         stage.release()
     }
@@ -1246,6 +1284,9 @@ package final class StreamCoordinator {
         // What the settings are, silently (the line above is the only one printed on connect). An
         // older device skips the kind.
         server.send(settingsMessage(settingsState()), to: connection)
+        // Who this Mac is and how to reach it from afar (kind 18, signed), on both doors, only from
+        // a host with an identity. An older device skips it too.
+        if let info = remote?.macInfoMessage() { server.send(info, to: connection) }
         for (id, png) in catalog.allIcons {
             server.send(StreamMessage(kind: .appIcon, timestamp: now, isKeyframe: false,
                                       payload: ImageBlob.encodeIcon(bundleID: id, png: png)), to: connection)

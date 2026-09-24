@@ -60,9 +60,7 @@ enum OriginPolicy {
     static func classify(remote: String, localAddress: String?, scope: String?, interfaces: Interfaces) -> Origin {
         guard let source = IPBytes.parse(remote) else { return .internet }
         if IPBytes.isLoopback(source) { return .loopback }
-        var arrival: String?
-        if let scope, !scope.isEmpty { arrival = scope }
-        if arrival == nil, let local = localAddress.flatMap(IPBytes.parse) { arrival = interfaces.owner[local] }
+        let arrival = arrivalInterface(localAddress: localAddress, scope: scope, interfaces: interfaces)
         let kind = arrival.map { interfaces.kind[$0] ?? interfaceKind(name: $0) }
         switch kind {
         case .peerToPeer: return .direct
@@ -80,6 +78,13 @@ enum OriginPolicy {
         }
         if onLink || IPBytes.isPrivate(source) { return .lan }
         return .internet
+    }
+
+    /// The interface a connection arrived on: the scope of a link-local source when it has one,
+    /// else the interface that owns the local address it arrived at, else unknown.
+    static func arrivalInterface(localAddress: String?, scope: String?, interfaces: Interfaces) -> String? {
+        if let scope, !scope.isEmpty { return scope }
+        return localAddress.flatMap(IPBytes.parse).flatMap { interfaces.owner[$0] }
     }
 
     /// The home door: loopback, direct (AWDL: Direct Wireless) and this Mac's own networks.

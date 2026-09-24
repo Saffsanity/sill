@@ -34,6 +34,40 @@ config.virtualDisplay = virtualDisplay
 // CLAUDE.md. A device can still turn it on or off; that lasts until SillHost quits.
 config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 
+// `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
+// PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
+// trust list every run. A pairing window is always open (a fresh one after each use or expiry);
+// its code and link are printed here, to this process's stdout only, and again when a device
+// near the Mac asks (kind 21). `--internet` also admits sources outside this Mac's networks and
+// VPNs. TEST ONLY: SILL_TEST_REMOTE_DIR=<dir> keeps the identity and pairings in a 0700
+// directory, on a --synthetic host only.
+let remoteFlag = CommandLine.arguments.first { $0 == "--remote" || $0.hasPrefix("--remote=") }
+let internetFlag = CommandLine.arguments.contains("--internet")
+if internetFlag && remoteFlag == nil {
+    print("--internet needs --remote.")
+    exit(2)
+}
+if let remoteFlag {
+    config.remoteAccess = true
+    config.internetAccess = internetFlag
+    if remoteFlag.hasPrefix("--remote=") {
+        guard let p = Int(remoteFlag.dropFirst("--remote=".count)), (1024...65535).contains(p) else {
+            print("--remote=PORT takes a port from 1024 to 65535.")
+            exit(2)
+        }
+        config.remotePort = p
+    } else {
+        config.remotePort = 0
+    }
+}
+
+// `SillHost --print-reachability`: the addresses this Mac would give devices away from home, as
+// its Remote Access pane lists them, read once (read-only SystemConfiguration); then exits.
+if CommandLine.arguments.contains("--print-reachability") {
+    for line in ReachabilityReport.lines() { print(line) }
+    exit(0)
+}
+
 // `SillHost --encoder-selftest`: no capture, no network. Pushes synthetic frames through the real
 // HEVCEncoder (hardware, then software) and reports what came back, so the watchdog and the
 // fallback can be exercised without Screen Recording. Exits when done.
@@ -61,9 +95,14 @@ var coordinator: StreamCoordinator?
 func startHost() {
     Task { @MainActor in
         do {
-            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay)
+            let remote = config.remoteAccess ? makeRemoteAccess() : nil
+            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay, remote: remote)
             coordinator = c
             await c.start(preselect: preselect)
+            if remote != nil, internetFlag {
+                print("Internet access on for this run: the remote door also admits paired devices from outside this Mac's networks and VPNs.")
+            }
+            remote?.openPairing(requestedBy: nil)
             if synthetic { print("Synthetic mode: pick Desktop on the device (or from a test client) to stream a test pattern.") }
             if virtualDisplay { print("Virtual display mode: a picked window streams from its own HiDPI display; Ctrl-C puts it back.") }
             print("\(c.windowCount) windows on screen. Advertising _sill._tcp on the local network.")
@@ -75,6 +114,30 @@ func startHost() {
             exit(1)
         }
     }
+}
+
+/// --remote's identity and pairing: in memory (or, TEST ONLY on a --synthetic host, in
+/// SILL_TEST_REMOTE_DIR), with the code printed here whenever a window opens or is asked for again.
+@MainActor
+func makeRemoteAccess() -> RemoteAccess {
+    var store: IdentityStore = MemoryIdentityStore()
+    if synthetic, let dir = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_DIR"], !dir.isEmpty {
+        do { store = try FileIdentityStore(directory: URL(fileURLWithPath: dir)) } catch { print("SILL_TEST_REMOTE_DIR=\(dir) ignored: \(error)") }
+    }
+    let remote = RemoteAccess(store: store)
+    if let problem = remote.identityProblem { print("Remote access unavailable: \(problem)") }
+    remote.reopensPairing = true
+    remote.logsPairingWindows = false
+    var first = true
+    remote.onPairingOffer = { offer in
+        if first {
+            first = false
+            print("Remote access for this run on port \(offer.port) (TLS, paired devices only). Pair with \(offer.groupedCode) or \(offer.url)")
+        } else {
+            print("Pairing: \(offer.again ? "code" : "new code") \(offer.groupedCode) or \(offer.url)")
+        }
+    }
+    return remote
 }
 
 if virtualDisplay {

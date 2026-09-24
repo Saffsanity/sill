@@ -31,6 +31,11 @@ import Foundation
 //   (HostSettingsLedger.swift), rule 9 in the ledger's `pick` for an optional field, the panel's
 //   row, and the DEBUG mock's cases (MockCatalog.swift);
 // • Scripts/sillclient.py: the keys `--set` accepts, and `describe`.
+//
+// A Mac-only listener knob (remote access, its port, internet access) goes in the host's
+// HostConfig, the app's HostSettings, DebugHooks, the Remote Access pane and the menu, and never in
+// StreamSettings, HostSettingsChange or DeviceSettings.accepted: only the Mac's own user widens
+// who can reach the Mac.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
 /// stream, and one (Direct Wireless) for how devices reach the Mac. Plain values, never enums: an

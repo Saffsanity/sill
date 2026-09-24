@@ -28,20 +28,26 @@ extension HostConfig {
 }
 
 /// What a device may change on this host. There is no generic "write a default": a device moves
-/// these six knobs, to exactly the Mac menu's values, and nothing else.
+/// these six knobs, to exactly the Mac menu's values, and nothing else. Remote access, its port and
+/// internet access can never enter this whitelist: they widen who reaches the Mac, and only the
+/// Mac's own user may do that.
 enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed), and Direct
     /// Wireless either way on every host (on the synthetic one it changes only which interfaces the
-    /// listener accepts on, since that host registers nothing a device browses). Refusal is
-    /// per field: the rest of the same change still applies. The refused fields are named for the
-    /// log; the token is not carried (the handler answers with the request's own). Each field is
-    /// copied by name, so one added to `HostSettingsChange` but not here is dropped without a
-    /// refusal or a log line (StreamProtocol's HostSettings.swift lists every place a new setting
-    /// goes).
-    static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool) -> (HostSettingsChange, refused: [String]) {
-        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: c.directWireless)
+    /// listener accepts on, since that host registers nothing a device browses), except from a
+    /// remote connection (`fromRemote`): a device away from home cannot change how devices near the
+    /// Mac reach it. Refusal is per field: the rest of the same change still applies. The refused
+    /// fields are named for the log; the token is not carried (the handler answers with the
+    /// request's own). Each field is copied by name, so one added to `HostSettingsChange` but not
+    /// here is dropped without a refusal or a log line (StreamProtocol's HostSettings.swift lists
+    /// every place a new setting goes).
+    static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool = false) -> (HostSettingsChange, refused: [String]) {
+        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)
         var refused: [String] = []
+        if let v = c.directWireless {
+            if fromRemote { refused.append("direct wireless (not from a remote connection)") } else { ok.directWireless = v }
+        }
         if let v = c.maxFPS {
             if SettingsChoices.maxFPS.contains(v) { ok.maxFPS = v } else { refused.append("frame rate limit \(v)") }
         }

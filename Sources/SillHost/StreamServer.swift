@@ -20,6 +20,11 @@ import StreamProtocol
 /// own networks (OriginPolicy), checked at `.ready` before anything is registered or sent: a
 /// refused connection is cancelled with zero bytes from Sill and only counted, one summary line a
 /// minute at most. Every client message is capped at `StreamMessage.maxClientPayload`.
+///
+/// The remote door (RemoteServer, on this queue) hands its admitted sessions here (`serve`), so
+/// both doors share the framing, the catalog and the stream; remote clients get their own
+/// eviction (silence, a longer drain backstop) and keyframe pacing, because a slow uplink is
+/// normal there.
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
@@ -34,18 +39,30 @@ final class StreamServer {
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
-        /// Where it comes from (OriginPolicy), decided at `.ready`.
-        var origin = OriginPolicy.Origin.loopback
+        /// Which door and from where: `.home(origin)` decided at `.ready`, or the remote door's.
+        var route = ClientRoute.home(.loopback)
         /// The device's own name from its last ClientStats, cleaned (SafeText); nil until its first.
         var device: String?
+        /// The last header received from it (remote clients: silence eviction).
+        var lastHeardAt = Date().timeIntervalSince1970
+        /// Remote clients: no keyframe has reached it since it was admitted or the stream changed,
+        /// so the next one goes out whatever its queue holds.
+        var awaitingFirstKeyframe = true
+        /// Remote clients: a frame was dropped for it and a keyframe should be asked for, at most
+        /// every `remoteKeyframeSpacing` across all remote clients.
+        var keyframeWanted = false
+        /// When a message was last handed to it (remote clients skip a tick right after one).
+        var lastSentAt: TimeInterval = 0
         init(_ c: NWConnection) { connection = c }
     }
 
-    private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
+    /// The network queue: both doors, their connections, the verify blocks and the timers.
+    let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
-    /// A client finished connecting. Called on the network queue.
-    var onClientConnected: ((NWConnection) -> Void)?
+    /// A client was admitted (home door at `.ready`, remote door once paired and checked), with
+    /// its route. Called on the network queue.
+    var onClientConnected: ((NWConnection, ClientRoute) -> Void)?
     /// A message from a client (selectSource, launchApp). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection) -> Void)?
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
@@ -107,8 +124,12 @@ final class StreamServer {
     private func tick() {
         let live = streaming || Date().timeIntervalSince1970 - lastInputAt < Self.inputRecency
         guard live, !clients.isEmpty else { updateTicking(); return }
-        let data = StreamMessage(kind: .tick, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Data()).serialized()
+        let now = Date().timeIntervalSince1970
+        let data = StreamMessage(kind: .tick, timestamp: now, isKeyframe: false, payload: Data()).serialized()
         for client in clients.values where client.connection.state == .ready {
+            // A remote client that was sent something within the interval needs no tick: its link
+            // is busy anyway, and over TLS every record costs the host CPU (H20).
+            if client.route.isRemote, now - client.lastSentAt < Self.tickInterval { continue }
             client.connection.send(content: data, completion: .contentProcessed { _ in })   // not counted as inflight
         }
         Stats.shared.bump("net.tick")
@@ -135,9 +156,20 @@ final class StreamServer {
     // handlers and replacement, and `readyPort`, which the main actor reads through `portLock`.
 
     private var listener: NWListener                 // replaced whole, never reconfigured
-    /// The Mac's name under `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
+    /// The Mac's name and `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
     /// synthetic hosts, which devices must never find).
-    private let service: NWListener.Service?
+    private let serviceNameAndType: (name: String, type: String)?
+    /// The TXT record for each registration (a host with an identity: a fresh recognition tag each
+    /// time, RecognitionTag); nil registers none, as before. Set before `start()`; called on the
+    /// network queue.
+    var txtRecord: (() -> NWTXTRecord?)?
+    /// The service to attach: built anew at init, in `start()` and after a Direct Wireless
+    /// replacement, so every registration carries a fresh tag. On `queue` (or before `start()`).
+    private func makeService() -> NWListener.Service? {
+        guard let s = serviceNameAndType else { return nil }
+        if let txt = txtRecord?() { return NWListener.Service(name: s.name, type: s.type, domain: nil, txtRecord: txt) }
+        return NWListener.Service(name: s.name, type: s.type)
+    }
     /// A test registration is announced once in the log and never reaches `onServiceRegistered`.
     private let serviceIsTest: Bool
     /// A host that does not advertise (the synthetic ones): the only kind the TEST ONLY hooks touch.
@@ -165,18 +197,18 @@ final class StreamServer {
         // and show the test pattern (Noah saw "a white moving wall", 2026-09-23). Test clients
         // connect to it by port.
         if advertise {
-            service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: serviceType)
+            serviceNameAndType = (Host.current().localizedName ?? "Mac", serviceType)
             serviceIsTest = false
         } else if let type = Self.testServiceType {
-            service = NWListener.Service(name: "Sill test \(getpid())", type: type)
+            serviceNameAndType = ("Sill test \(getpid())", type)
             serviceIsTest = true
         } else {
-            service = nil
+            serviceNameAndType = nil
             serviceIsTest = false
         }
         testHost = !advertise
         listener = try Self.makeListener(peerToPeer: false, port: nil)
-        listener.service = service
+        listener.service = makeService()
         wire(listener)
     }
 
@@ -212,17 +244,24 @@ final class StreamServer {
     /// loopback connection, so it is not used), classified by OriginPolicy. On a test host,
     /// SILL_TEST_ORIGIN turns a loopback source into that origin. On `queue`, at `.preparing` or
     /// later (the path exists from then on).
-    func origin(of c: NWConnection) -> OriginPolicy.Origin {
-        guard case .hostPort(let host, _) = c.endpoint else { return .internet }
+    func origin(of c: NWConnection) -> OriginPolicy.Origin { arrival(of: c).origin }
+
+    /// `origin(of:)` with the interface it arrived on (the scope, else the owner of the local
+    /// address), which names a VPN route ("through Tailscale").
+    func arrival(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?) {
+        guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, scope) = Self.addressText(host)
         var local: String?
         if case .hostPort(let lh, _)? = c.currentPath?.localEndpoint { local = Self.addressText(lh).text }
-        var o = OriginPolicy.classify(remote: remote, localAddress: local,
-                                      scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"),
-                                      interfaces: InterfaceSnapshot.shared.interfaces())
+        let interfaces = InterfaceSnapshot.shared.interfaces()
+        let s = scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)")
+        var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: s, interfaces: interfaces)
         if testHost, o == .loopback, let t = Self.testOrigin { o = t }
-        return o
+        return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: s, interfaces: interfaces))
     }
+
+    /// A test host (it does not advertise): the only kind that honours TEST ONLY variables.
+    var isTestHost: Bool { testHost }
 
     /// An endpoint host as an address string without its zone, and the interface a scoped
     /// (link-local) IPv6 address names.
@@ -291,7 +330,7 @@ final class StreamServer {
                 // forwarded, so the app keeps its "Test Pattern Mode … port N" status.
                 if case .add(let endpoint) = change, case .service(let name, _, _, _) = endpoint {
                     let p2p = l.parameters.includePeerToPeer ? "on" : "off"
-                    print("Test service registered as \"\(name)\" (\(service?.type ?? "?"), peer-to-peer \(p2p)); no device browses this type.")
+                    print("Test service registered as \"\(name)\" (\(serviceNameAndType?.type ?? "?"), peer-to-peer \(p2p)); no device browses this type.")
                 }
                 return
             }
@@ -374,9 +413,9 @@ final class StreamServer {
         guard swap == .settling(n), l === listener else { return }
         swap = .idle
         if wantedPeerToPeer != peerToPeer { beginSwap(); return }
-        l.service = service
+        l.service = makeService()
         let at = l.port.map { " on port \($0.rawValue)" } ?? ""
-        print("Direct wireless \(peerToPeer ? "on" : "off"): listening\(at) again" + (service == nil ? "." : ", advertised again."))
+        print("Direct wireless \(peerToPeer ? "on" : "off"): listening\(at) again" + (serviceNameAndType == nil ? "." : ", advertised again."))
     }
 
     /// On `queue`: a replacement could not be bound, or failed once bound. Refused on its old port,
@@ -406,7 +445,7 @@ final class StreamServer {
             if wantedPeerToPeer != peerToPeer {
                 do {
                     let l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: nil)
-                    l.service = service
+                    l.service = makeService()
                     wire(l)
                     listener = l
                     peerToPeer = wantedPeerToPeer
@@ -415,6 +454,8 @@ final class StreamServer {
                 }
             }
             started = true
+            // The TXT record is set by now (the coordinator sets it before start): a fresh tag.
+            if txtRecord != nil { listener.service = makeService() }
             listener.start(queue: queue)
         }
     }
@@ -442,11 +483,11 @@ final class StreamServer {
                     self.homeRefusals.count(origin == .vpn ? "vpn" : "internet")
                     return
                 }
-                client.origin = origin
+                client.route = .home(origin)
                 self.register(client)
                 print("Client connected: \(connection.endpoint)")
                 self.receiveLoop(client)
-                self.onClientConnected?(connection)
+                self.onClientConnected?(connection, client.route)
             case .failed:
                 // Cancelled at once: a failed connection that is only forgotten keeps its socket.
                 connection.cancel()
@@ -462,9 +503,112 @@ final class StreamServer {
     /// On `queue`: from now on `client` gets broadcasts, ticks and the catalog.
     private func register(_ client: Client) {
         client.connectedAt = Date().timeIntervalSince1970
+        client.lastHeardAt = client.connectedAt
         clients[ObjectIdentifier(client.connection)] = client
         onClientCountChanged?(clients.count)
         updateTicking()
+        updateRemoteSweep()
+    }
+
+    /// The remote door's admitted session, already `.ready` and pinned: registered like a home
+    /// client, with its own route. On `queue`.
+    func serve(_ connection: NWConnection, route: ClientRoute) {
+        let client = Client(connection)
+        client.route = route
+        let id = ObjectIdentifier(connection)
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .failed:
+                connection.cancel()
+                self.unregister(id)
+            case .cancelled:
+                self.unregister(id)
+            default: break
+            }
+        }
+        register(client)
+        receiveLoop(client)
+        onClientConnected?(connection, route)
+    }
+
+    /// Admitted remote sessions: how many. On `queue`.
+    var remoteSessionCount: Int { clients.values.filter { $0.route.isRemote }.count }
+
+    /// The admitted clients whose route matches, with their routes. On `queue`.
+    func sessions(where match: (ClientRoute) -> Bool) -> [(connection: NWConnection, route: ClientRoute)] {
+        clients.values.filter { match($0.route) }.map { ($0.connection, $0.route) }
+    }
+
+    // MARK: Goodbye (kind 22)
+
+    /// Tells one admitted client why it is about to be closed, then closes it once the message is
+    /// handed to the network or `within` has passed, whichever comes first. On `queue`.
+    func goodbye(_ reason: String, to connection: NWConnection, within: TimeInterval = 0.25) {
+        Self.sayGoodbye(reason, on: connection, queue: queue, within: within)
+    }
+
+    /// The same for any ready connection, registered or not (the remote door's refusals). On `queue`.
+    static func sayGoodbye(_ reason: String, on connection: NWConnection, queue: DispatchQueue, within: TimeInterval = 0.25) {
+        let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                 payload: Wire.encode(Goodbye(reason: reason))).serialized()
+        connection.send(content: data, completion: .contentProcessed { _ in connection.cancel() })
+        queue.asyncAfter(deadline: .now() + within) { connection.cancel() }
+    }
+
+    /// Every admitted client, home and remote, gets `reason` (the app's Quit and the signal path:
+    /// "quit"); returns once each message was handed to the network or after `within`. Call from
+    /// any thread but the network queue.
+    func goodbyeAll(_ reason: String, within: TimeInterval) {
+        let group = DispatchGroup()
+        group.enter()
+        queue.async { [self] in
+            let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                     payload: Wire.encode(Goodbye(reason: reason))).serialized()
+            for client in clients.values where client.connection.state == .ready {
+                group.enter()
+                client.connection.send(content: data, completion: .contentProcessed { _ in group.leave() })
+            }
+            group.leave()
+        }
+        _ = group.wait(timeout: .now() + within)
+    }
+
+    // MARK: Remote clients: silence and a slow uplink
+    //
+    // A home client that stops draining for 4 s is gone (8 s grace after connecting). A remote one
+    // can legitimately take longer: on a 2 Mbps uplink a 1.5 MB keyframe needs 6 s to hand off. So a
+    // remote client is dropped when it has sent nothing for 8 s (it pings every 0.25 s and reports
+    // once a second, so silence means it is gone), once 8 s have passed since it was admitted, and
+    // the drain backstop gives it 15 s after a 15 s grace.
+    private var remoteSweepTimer: DispatchSourceTimer?
+    static let remoteSilence: TimeInterval = 8
+    static let remoteDeadAfter: TimeInterval = 15
+    static let remoteGrace: TimeInterval = 15
+
+    /// On `queue`: a 1 s sweep while any remote client exists.
+    private func updateRemoteSweep() {
+        let wanted = clients.values.contains { $0.route.isRemote }
+        if wanted, remoteSweepTimer == nil {
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+            t.setEventHandler { [weak self] in self?.sweepRemote() }
+            t.resume()
+            remoteSweepTimer = t
+        } else if !wanted, let t = remoteSweepTimer {
+            t.cancel(); remoteSweepTimer = nil
+        }
+    }
+
+    private func sweepRemote() {
+        let now = Date().timeIntervalSince1970
+        for client in clients.values where client.route.isRemote {
+            let silent = now - client.lastHeardAt
+            if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
+                print("Client silent for \(Int(silent)) s, dropping: \(client.connection.endpoint)")
+                client.connection.cancel()   // its state handler forgets it
+            }
+        }
     }
 
     /// On `queue`: forgets a registered client, once ("Client left" and the callbacks). A
@@ -475,6 +619,7 @@ final class StreamServer {
         onClientDisconnected?(client.connection)
         onClientCountChanged?(clients.count)
         updateTicking()
+        updateRemoteSweep()
     }
 
     /// The source is changing: forget the old parameter sets and make every client wait for
@@ -482,7 +627,10 @@ final class StreamServer {
     func resetForNewStream() {
         queue.async { [self] in
             lastParameterSets = nil
-            for client in clients.values { client.needsKeyframe = true }
+            for client in clients.values {
+                client.needsKeyframe = true
+                client.awaitingFirstKeyframe = true
+            }
         }
     }
 
@@ -509,6 +657,7 @@ final class StreamServer {
                 if isComplete || error != nil { c.cancel() }
                 return
             }
+            client.lastHeardAt = Date().timeIntervalSince1970
             // A header can announce up to 4 GiB and the read below would wait for all of it. No
             // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
             if header.payloadLength > StreamMessage.maxClientPayload {
@@ -549,6 +698,8 @@ final class StreamServer {
                         }
                         self.onClientStats?(c, stats)
                     }
+                } else if header.kind == .pairingWanted && client.route.isRemote {
+                    // "Show your pairing code" comes only from a device near the Mac: ignored here.
                 } else {
                     self.onMessage?(StreamMessage(kind: header.kind, timestamp: header.timestamp, isKeyframe: header.isKeyframe, payload: payload), c)
                 }
@@ -584,6 +735,10 @@ final class StreamServer {
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
             for client in clients.values where client.connection.state == .ready {
+                if message.kind == .frame, client.route.isRemote {
+                    if paceRemote(client, message: message, data: data) { wantKeyframe = true }
+                    continue
+                }
                 if message.kind == .frame {
                     if client.needsKeyframe {
                         guard message.isKeyframe, let ps = lastParameterSets else { Stats.shared.bump("net.waitKey"); continue }
@@ -604,6 +759,52 @@ final class StreamServer {
         }
     }
 
+    /// Remote clients' frames (home clients keep the rule above byte for byte). Never queue anything
+    /// behind a full queue: with more than 2 messages in flight the frame is dropped, delta or
+    /// keyframe, and the client waits for a keyframe. A keyframe is sent to a waiting client only
+    /// when its queue has room, or when it has had none since it was admitted or the stream changed.
+    /// Keyframes are asked for at most every `remoteKeyframeSpacing` for all remote clients
+    /// together, so a slow link cannot turn the stream into a keyframe storm. Returns whether to ask
+    /// for one now. On `queue`. No new Stats key: skipped frames count as net.waitKey, dropped ones
+    /// as net.dropped, sent ones as net.sent.
+    private func paceRemote(_ client: Client, message: StreamMessage, data: Data) -> Bool {
+        var ask = false
+        if client.needsKeyframe {
+            guard message.isKeyframe else {
+                Stats.shared.bump("net.waitKey")
+                let now = Date().timeIntervalSince1970
+                if client.keyframeWanted, client.inflight <= 2, now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacing {
+                    lastRemoteKeyframeRequest = now
+                    client.keyframeWanted = false
+                    ask = true
+                }
+                return ask
+            }
+            guard client.awaitingFirstKeyframe || client.inflight <= 2, let ps = lastParameterSets else {
+                // Its queue is still full: this keyframe is lost to it too. Ask again later (within
+                // the spacing) rather than wait for the encoder's own periodic one.
+                Stats.shared.bump("net.waitKey")
+                client.keyframeWanted = true
+                return false
+            }
+            send(ps, to: client)
+            client.needsKeyframe = false
+            client.awaitingFirstKeyframe = false
+        } else if client.inflight > 2 {
+            Stats.shared.bump("net.dropped")
+            client.needsKeyframe = true
+            client.keyframeWanted = true
+            return false
+        }
+        Stats.shared.bump("net.sent")
+        send(data, to: client, isFrame: true)
+        return false
+    }
+
+    /// When a keyframe was last asked for on behalf of a remote client.
+    private var lastRemoteKeyframeRequest: TimeInterval = 0
+    static let remoteKeyframeSpacing: TimeInterval = 2
+
     /// A peer that has not drained a single video frame for this long stopped reading (app killed,
     /// device asleep). Time-based rather than a frame count: a slow decoder (the simulator at full
     /// Retina) or the connect burst can hold many frames unacked and still be alive.
@@ -613,13 +814,16 @@ final class StreamServer {
 
     private func send(_ data: Data, to client: Client, isFrame: Bool = false) {
         let now = Date().timeIntervalSince1970
+        let remote = client.route.isRemote
         if isFrame, let oldest = client.oldestUnackedFrameAt,
-           now - oldest > Self.deadAfter, now - client.connectedAt > Self.graceAfterConnect {
+           now - oldest > (remote ? Self.remoteDeadAfter : Self.deadAfter),
+           now - client.connectedAt > (remote ? Self.remoteGrace : Self.graceAfterConnect) {
             print("Client not draining for \(Int(now - oldest)) s, dropping: \(client.connection.endpoint)")
             client.connection.cancel()   // its state handler removes it from `clients`
             return
         }
         client.inflight += 1
+        client.lastSentAt = now
         if isFrame {
             client.inflightFrames += 1
             if client.oldestUnackedFrameAt == nil { client.oldestUnackedFrameAt = now }
@@ -638,4 +842,25 @@ final class StreamServer {
             }
         })
     }
+}
+
+/// Which door admitted a client and from where. The home door's origin is decided at `.ready`; a
+/// remote session carries the paired device's fingerprint and name and the route's label
+/// ("through Tailscale", "over the internet", "by address").
+enum ClientRoute: Equatable {
+    case home(OriginPolicy.Origin)
+    case remote(origin: OriginPolicy.Origin, label: String, fingerprint: Data, name: String)
+
+    var isRemote: Bool { if case .remote = self { return true }; return false }
+    var origin: OriginPolicy.Origin {
+        switch self {
+        case .home(let o): return o
+        case .remote(let o, _, _, _): return o
+        }
+    }
+    /// The label a remote route shows on the Mac's card; nil at home.
+    var label: String? { if case .remote(_, let l, _, _) = self { return l }; return nil }
+    var fingerprint: Data? { if case .remote(_, _, let f, _) = self { return f }; return nil }
+    /// The paired name of a remote device; nil at home.
+    var pairedName: String? { if case .remote(_, _, _, let n) = self { return n }; return nil }
 }
