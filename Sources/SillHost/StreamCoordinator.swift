@@ -105,6 +105,11 @@ package final class StreamCoordinator {
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
     private var viewport: Viewport?
+    /// Each connection's kind 17 changes of the last second (applied or refused), and when its
+    /// "ignored" line was last printed: `settingsPerSecond` a second, one line a second at most.
+    private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
+    private var settingsIgnoredLineAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    static let settingsPerSecond = 4
     /// A viewport that came in mid-switch, when `active` still names the old source: applied once
     /// the switch is done, so a rotation during a restart is not lost.
     private var viewportArrivedWhileSwitching = false
@@ -156,6 +161,8 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
+                self.settingsArrivals[ObjectIdentifier(connection)] = nil
+                self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
@@ -221,10 +228,12 @@ package final class StreamCoordinator {
         }
         server.onClientStats = { [weak self] connection, stats in
             let id = ObjectIdentifier(connection)
+            // The device's own words, cleaned before the menu, Settings or a log line shows them.
+            let name = SafeText.label(stats.device)
             Task { @MainActor in
                 self?.status.update {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
-                    $0.devices[i].name = stats.device
+                    $0.devices[i].name = name.isEmpty ? nil : name
                     $0.devices[i].fps = stats.fps
                     $0.devices[i].frameAgeMs = stats.frameAgeMs
                     $0.devices[i].rttMs = stats.rttMs
@@ -493,8 +502,26 @@ package final class StreamCoordinator {
             // order, per device and across devices, and before any restart (setTarget schedules the
             // pipeline work). Malformed JSON has no token to answer, so it gets nothing.
             guard let change = Wire.decode(HostSettingsChange.self, from: message.payload) else { return }
-            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop)
             let who = deviceName(connection)
+            // At most `settingsPerSecond` changes a second per connection: a panel's control sends
+            // one per tap, so more is a runaway or hostile client, and each could cost a restart.
+            // The excess applies nothing and is answered with the state as it stands, so the
+            // device's ledger still hears back.
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            var recent = (settingsArrivals[id] ?? []).filter { now - $0 < 1 }
+            if recent.count >= Self.settingsPerSecond {
+                settingsArrivals[id] = recent
+                if now - (settingsIgnoredLineAt[id] ?? 0) >= 1 {
+                    settingsIgnoredLineAt[id] = now
+                    print("Settings from \(who) ignored: more than \(Self.settingsPerSecond) changes a second.")
+                }
+                server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
+                return
+            }
+            recent.append(now)
+            settingsArrivals[id] = recent
+            let (ok, refused) = DeviceSettings.accepted(change, virtualDisplayAvailable: appKitLoop)
             if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
             if !ok.isEmpty, !shuttingDown {
                 let before = target
@@ -801,7 +828,14 @@ package final class StreamCoordinator {
                 title = "Test Pattern"; kind = .testPattern
             } else {
                 guard let d = catalog.display else { active = .none; broadcastList(); return }
-                filter = SCContentFilter(display: d, excludingWindows: [])
+                // Sill's own windows (Settings, Log, the pairing window with its code) never go out
+                // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
+                // reconfigured. Without Sill in the catalog's last look (the CLI), as before.
+                if let own = catalog.ownApplication {
+                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
+                } else {
+                    filter = SCContentFilter(display: d, excludingWindows: [])
+                }
                 width = evenPixels(CGFloat(d.width) * captureScale); height = evenPixels(CGFloat(d.height) * captureScale)
                 describe = "the whole desktop\(useSoftwareEncoder ? " (software encoder)" : "")"
                 title = "Whole Desktop"; kind = .desktop

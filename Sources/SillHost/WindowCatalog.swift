@@ -19,6 +19,10 @@ final class WindowCatalog {
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
     private(set) var installedApps: [AppInfo] = []
+    /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
+    /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
+    /// is not listed (the CLI has no windows).
+    private(set) var ownApplication: SCRunningApplication?
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -44,8 +48,8 @@ final class WindowCatalog {
     /// Connected clients, from the server. 0→N starts polling (with an immediate pass); N→0 stops
     /// it, so an idle host makes no ScreenCaptureKit calls at all.
     ///
-    /// Ordering on connect: the server reports the new count when it accepts the connection,
-    /// before the connection is ready; the coordinator's `sendCatalog` runs at ready. The pass
+    /// Ordering on connect: the server reports the new count when it admits the connection (at
+    /// ready, once its origin passed), just before the coordinator's `sendCatalog` runs. The pass
     /// started here awaits `SCShareableContent` (tens of ms), so it usually finishes after
     /// `sendCatalog` has already sent the list as of the last look. That is fine: when the fresh
     /// list differs, `onWindowsChanged` fires and the coordinator broadcasts it, so the client is
@@ -215,6 +219,7 @@ final class WindowCatalog {
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
+        ownApplication = content.applications.first { $0.processID == Self.ownPID }
         display = preferMainDisplay
             ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
             : content.displays.first

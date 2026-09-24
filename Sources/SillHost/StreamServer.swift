@@ -12,21 +12,32 @@ import StreamProtocol
 /// browse `_sill._tcp` only) ever finds it. `SILL_TEST_SWAP_FAIL=port` makes a Direct Wireless
 /// replacement's same-port bind fail as EADDRINUSE without binding, and `=all` its any-port bind
 /// too, so the fallback and the listener-failure rule can be exercised without a real conflict.
-/// Both are honoured only on a host that does not advertise, so a stray variable can never touch
-/// a real host.
+/// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
+/// gate can refuse a test client. All are honoured only on a host that does not advertise, so a
+/// stray variable can never touch a real host.
+///
+/// The home door (this listener) admits only loopback, link-local (AWDL included) and this Mac's
+/// own networks (OriginPolicy), checked at `.ready` before anything is registered or sent: a
+/// refused connection is cancelled with zero bytes from Sill and only counted, one summary line a
+/// minute at most. Every client message is capped at `StreamMessage.maxClientPayload`.
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
         var inflight = 0          // every message still unacknowledged (backpressure for delta drops)
         var inflightFrames = 0    // video frames only
         var oldestUnackedFrameAt: TimeInterval?   // last time a frame was drained, or queued from 0 (dead-peer detection)
-        let connectedAt = Date().timeIntervalSince1970
+        /// When it was admitted (registered), which is when the dead-peer grace starts.
+        var connectedAt = Date().timeIntervalSince1970
         var needsKeyframe = true
         var lastStatsPrint = 0.0  // CFAbsoluteTime of the last clientStats line, to rate-limit the log
         /// The worst frame age and rtt reported since that line, -1 for none. The next line prints
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
+        /// Where it comes from (OriginPolicy), decided at `.ready`.
+        var origin = OriginPolicy.Origin.loopback
+        /// The device's own name from its last ClientStats, cleaned (SafeText); nil until its first.
+        var device: String?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -183,6 +194,53 @@ final class StreamServer {
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
+
+    /// TEST ONLY: SILL_TEST_ORIGIN (see the type's doc comment). Read once, and only by a host that
+    /// does not advertise; "vpn" or "internet", anything else ignored with one line.
+    static let testOrigin: OriginPolicy.Origin? = {
+        guard let value = ProcessInfo.processInfo.environment["SILL_TEST_ORIGIN"], !value.isEmpty else { return nil }
+        guard value == "vpn" || value == "internet" else {
+            print("SILL_TEST_ORIGIN=\(value) ignored: vpn or internet.")
+            return nil
+        }
+        return OriginPolicy.Origin(rawValue: value)
+    }()
+
+    /// Where `c` comes from: its endpoint's address (and the interface a link-local one is scoped
+    /// to), the local address it arrived at (`currentPath.localEndpoint`, which names the
+    /// interface through `InterfaceSnapshot`; `availableInterfaces` listed en0 and lo0 for one
+    /// loopback connection, so it is not used), classified by OriginPolicy. On a test host,
+    /// SILL_TEST_ORIGIN turns a loopback source into that origin. On `queue`, at `.preparing` or
+    /// later (the path exists from then on).
+    func origin(of c: NWConnection) -> OriginPolicy.Origin {
+        guard case .hostPort(let host, _) = c.endpoint else { return .internet }
+        let (remote, scope) = Self.addressText(host)
+        var local: String?
+        if case .hostPort(let lh, _)? = c.currentPath?.localEndpoint { local = Self.addressText(lh).text }
+        var o = OriginPolicy.classify(remote: remote, localAddress: local,
+                                      scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"),
+                                      interfaces: InterfaceSnapshot.shared.interfaces())
+        if testHost, o == .loopback, let t = Self.testOrigin { o = t }
+        return o
+    }
+
+    /// An endpoint host as an address string without its zone, and the interface a scoped
+    /// (link-local) IPv6 address names.
+    static func addressText(_ host: NWEndpoint.Host) -> (text: String, scope: String?) {
+        switch host {
+        case .ipv4(let a): return (IPBytes.text([UInt8](a.rawValue)), a.interface?.name)
+        case .ipv6(let a): return (IPBytes.text([UInt8](a.rawValue)), a.interface?.name)
+        case .name(let n, let i): return (n, i?.name)
+        @unknown default: return ("\(host)", nil)
+        }
+    }
+
+    /// Home door refusals, reported at most once a minute.
+    private lazy var homeRefusals = RefusalSummary(queue: queue, categories: ["vpn", "internet"]) { c in
+        let n = c["vpn", default: 0] + c["internet", default: 0]
+        return "Home listener refused \(n) connection\(n == 1 ? "" : "s") in the last minute (\(c["vpn", default: 0]) through a VPN, "
+            + "\(c["internet", default: 0]) from the internet): only this Mac's own networks reach it."
+    }
 
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
     /// given (a replacement keeps the port that test clients and resolved devices know).
@@ -367,29 +425,56 @@ final class StreamServer {
         return readyPort
     }
 
+    /// The home door. A connection is registered only once it is ready and its origin is one the
+    /// home door admits: until then it gets nothing, counts for nothing, and prints nothing.
     private func accept(_ connection: NWConnection) {
         let client = Client(connection)
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
             case .ready:
+                guard self.clients[id] == nil else { return }   // once: a second .ready changes nothing
+                let origin = self.origin(of: connection)
+                guard OriginPolicy.homeAdmits(origin) else {
+                    // Through a tunnel or from the internet: never registered, zero bytes sent.
+                    connection.cancel()
+                    self.homeRefusals.count(origin == .vpn ? "vpn" : "internet")
+                    return
+                }
+                client.origin = origin
+                self.register(client)
                 print("Client connected: \(connection.endpoint)")
-                self?.receiveLoop(client)
-                self?.onClientConnected?(connection)
-            case .failed, .cancelled:
-                print("Client left: \(connection.endpoint)")
-                guard let self else { return }
-                self.clients[id] = nil
-                self.onClientDisconnected?(connection)
-                self.onClientCountChanged?(self.clients.count)
-                self.updateTicking()
+                self.receiveLoop(client)
+                self.onClientConnected?(connection)
+            case .failed:
+                // Cancelled at once: a failed connection that is only forgotten keeps its socket.
+                connection.cancel()
+                self.unregister(id)
+            case .cancelled:
+                self.unregister(id)
             default: break
             }
         }
-        clients[id] = client
+        connection.start(queue: queue)
+    }
+
+    /// On `queue`: from now on `client` gets broadcasts, ticks and the catalog.
+    private func register(_ client: Client) {
+        client.connectedAt = Date().timeIntervalSince1970
+        clients[ObjectIdentifier(client.connection)] = client
         onClientCountChanged?(clients.count)
         updateTicking()
-        connection.start(queue: queue)
+    }
+
+    /// On `queue`: forgets a registered client, once ("Client left" and the callbacks). A
+    /// connection that was never registered (refused, or failed before it was ready) leaves no line.
+    private func unregister(_ id: ObjectIdentifier) {
+        guard let client = clients.removeValue(forKey: id) else { return }
+        print("Client left: \(client.connection.endpoint)")
+        onClientDisconnected?(client.connection)
+        onClientCountChanged?(clients.count)
+        updateTicking()
     }
 
     /// The source is changing: forget the old parameter sets and make every client wait for
@@ -424,6 +509,13 @@ final class StreamServer {
                 if isComplete || error != nil { c.cancel() }
                 return
             }
+            // A header can announce up to 4 GiB and the read below would wait for all of it. No
+            // client message comes near a megabyte, so a bigger one is a broken or hostile peer.
+            if header.payloadLength > StreamMessage.maxClientPayload {
+                print("Closing \(c.endpoint): it announced a \(header.payloadLength)-byte message (the limit is 1 MB).")
+                c.cancel()
+                return
+            }
             let deliver = { (payload: Data) in
                 if header.kind == .input {
                     self.lastInputAt = Date().timeIntervalSince1970
@@ -440,6 +532,10 @@ final class StreamServer {
                     // A skipped report's maxima still reach the next line.
                     // Every report goes to `onClientStats` (the app's menu shows it live).
                     if let stats = Wire.decode(ClientStats.self, from: payload) {
+                        // The device names itself: one clean line of at most 64 characters, never
+                        // its raw text (a newline would forge a log line).
+                        let name = SafeText.label(stats.device)
+                        client.device = name.isEmpty ? nil : name
                         client.worstFrameAgeSincePrint = max(client.worstFrameAgeSincePrint, stats.frameAgeMaxMs ?? -1)
                         client.worstRttSincePrint = max(client.worstRttSincePrint, stats.rttMaxMs ?? -1)
                         let now = CFAbsoluteTimeGetCurrent()
@@ -447,7 +543,7 @@ final class StreamServer {
                             client.lastStatsPrint = now
                             let age = Self.medianAndWorst(stats.frameAgeMs, worst: stats.frameAgeMaxMs.map { _ in client.worstFrameAgeSincePrint })
                             let rtt = Self.medianAndWorst(stats.rttMs, worst: stats.rttMaxMs.map { _ in client.worstRttSincePrint })
-                            print("client \(stats.device): \(stats.fps) fps, frame age \(age), rtt \(rtt)")
+                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)")
                             client.worstFrameAgeSincePrint = -1
                             client.worstRttSincePrint = -1
                         }
