@@ -66,13 +66,18 @@ it, the way AirDrop does: Sill then also advertises over, and accepts
 connections from, peer-to-peer Wi-Fi (AWDL). It is off by default, also after
 updating from a Sill that always used AWDL, because while it is on the Mac's
 Wi-Fi keeps leaving its network's channel (up to ~100 ms twice a second), which
-made Wi-Fi streams stutter; on a shared network AWDL carries none of Sill's
-data anyway.
+made Wi-Fi streams stutter. With it on, a device that shares a network with the
+Mac still streams over the network: one that got onto AWDL anyway moves there by
+itself, without dropping the stream, once the network has listed the Mac for
+two seconds.
 Turning it on or off applies at once and never restarts the stream, though
-turning it off can disconnect a device that is connected directly. A device
+turning it off disconnects a device that is still connected directly (a second
+and a half later); it comes back over the network if it shares one. A device
 finds a Mac this way by itself once it has seen the Mac with it on, or when you
 tap Search Nearby on its connect screen; such a Mac shows as "Direct". With it
-on, anyone nearby running Sill can find and connect to the Mac.
+on, anyone nearby running Sill can find and connect to the Mac. Turning Wi-Fi
+off in Control Center does not end a direct connection (it leaves the radio on
+for AirDrop); Settings › Wi-Fi does.
 
 A connected iPhone or iPad changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,

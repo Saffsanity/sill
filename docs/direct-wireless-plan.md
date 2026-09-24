@@ -1161,3 +1161,166 @@ sizes (the line in its place, status unchanged, title unmoved); the `directlink`
 (the warning goes, "Connected directly" stays) and on again (it returns); the normal app connected by
 address to `SillHost --synthetic --direct-wireless` wrote no memory; unconnected with no memory, it
 started no nearby search and showed the real Mac as a plain row.
+
+### Fixes after Noah's first sessions (2026-09-24, branch `direct-wireless-fixes`)
+
+These supersede the parts of §3.2, §6, §7, §8 and the review fixes they name. Line numbers without a
+commit are at a9cc248 (the merge of PR #5), the tree Sill.app build 40 ran.
+
+**What the sessions showed** (Sill.app build 40, the iPad mini on the home Wi‑Fi, 40 Mbps; Sill.log
+and the kernel's "…abling AWDL" lines):
+
+- 15:34:20 on from the iPad: the swap at 15:34:21.9, "Enabling AWDL due to Mdns" at 15:34:22, and the
+  rtt maxima went from ~9 ms to 85–103 ms. 15:35:22 off from the iPad: the swap at 15:35:24, "Disabling
+  AWDL due to no services and no active sockets" at 15:35:51, and maxima of 7–24 ms from 15:35:52. So
+  off works when no socket uses AWDL, with a ~30 s kernel lag.
+- 15:36:29 on again. At 15:37:02 the host evicted the iPad on en0 ("not draining for 4 s"); at 15:37:25
+  it came back over `%awdl0` while still on the home Wi‑Fi. 15:38:43 off from the Mac: the swap, but
+  no "Disabling AWDL", and the iPad stayed on awdl0. The same at 15:43:05/15:43:17 (evicted on en0,
+  back over awdl0) and 15:44:45 (off from the iPad, still connected). Noah then turned the iPad's Wi‑Fi
+  off in Control Center and was *still* connected: Control Center's switch leaves the radio on for
+  AirDrop and AWDL.
+- Over awdl0 the device reported rtt ~75 ms typical, the worst of each report ~265 ms typical and up to
+  2.4 s (frame age up to 2.1 s); on the LAN with AWDL off ~7 ms and ~11 ms; on en0 with AWDL on
+  ~10 ms and ~91 ms.
+
+**Why.**
+
+- *Gap A, host.* `setPeerToPeer` (StreamServer.swift:254) → `beginSwap` (:263) drops the old
+  registration's handler (:272) and cancels only the listener (:277); `bindReplacement` (:287) binds
+  the new one. `clients` (:34) is never touched, by design: accepted connections are independent of
+  the listener (the MARK at :115; `newConnectionHandler`, :248). The coordinator's `adopt`
+  (StreamCoordinator.swift:389) is the only caller. So a connection accepted over awdl0 while it was on
+  outlives off, and the kernel keeps AWDL up for its socket. §8's row "That connection is left alone"
+  described exactly this; the footer's "can disconnect" never happened.
+- *Knowing a client's route.* The accepted connection's `endpoint` is the device's address, which the
+  log already prints (`Client connected:`, :376): `fe80::8425:bdff:fe62:8930%awdl0.63101` at 15:37:25,
+  `…%en0.55690` at 15:34:05, `…%anri0.61390` (the USB cable) at 15:33:01. AWDL carries IPv6 link-local
+  addresses only, and those always carry their interface. A local probe gave the same name through
+  `IPv6Address.interface` (en0, type `.wifi`; awdl0 reports `.wifi` too, so only the name tells), while
+  `currentPath.availableInterfaces` listed en0 *and* lo0 for one connection: a weaker witness.
+- *Gap B, iOS.* `reconnectRow` (DiscoveryPolicy.swift:100) took a Direct row once it had stayed Direct
+  for `networkFirst`, 3 s (:103), with no memory of the network row. And `reconnectIfListed`
+  (StreamClient.swift:403) returns at once while connected (:406), so once on AWDL nothing looked at the
+  network browser again, although it keeps running (`decide` stops only the nearby one,
+  DiscoveryPolicy.swift:51; the network results still reach `discoveryChanged`, StreamClient.swift:241
+  and :299). During a swap the old registration goes at `cancel()` (StreamServer.swift:272–277) and the
+  new one is made 1.5 s later (`settled`, :319; `advertiseDelay`, :146): browsers drop the Mac about 1 s
+  in and list it again about 2.2 s in (§3.2's table; H5 measured 1.3 s and 2.6 s for the awdl0
+  record), longer when an announcement is lost.
+- *What the log does not show.* The evictions behind the 15:37 and 15:43 reconnects came 32 s and
+  3 min after the last swap (15:36:30.6, 15:40:06.9), not inside a blink, and the reconnects 23 s and
+  12 s after them. A reconnect takes a network row at once, so the network browser must have
+  lacked the Mac for longer than a blink: most likely mDNS lost while both radios left the channel. A
+  stricter reconnect alone would not have caught them; moving back to the network does.
+
+**What changed.**
+
+1. **Host: off disconnects the devices on peer-to-peer Wi‑Fi** (commit "Host: turning Direct Wireless
+   off disconnects…"). Once a replacement with it off is advertised (`settled`), or has failed for good
+   while turning it off (`replacementFailed`, the app keeps running), StreamServer cancels every client
+   whose connection runs over awdl or llw, one line each: `Direct wireless off: disconnecting iPad
+   (iPad14,1) at fe80::…%awdl0.63101, which was connected over peer-to-peer Wi-Fi; it can reconnect over
+   the network.` (the device's name from its last ClientStats; the endpoint alone before one). Then
+   "Client left" as for any close. The replacement refuses peer-to-peer, so a device that shares a
+   network with the Mac comes back over it; one that shares none cannot, which is what off means. A
+   burst that ends where it started (off, then on again within the 1.5 s) disconnects nobody.
+   `ClientLink` (new, Foundation only) decides from the endpoint's text: the scope decides when it names
+   an interface; without one, the path's interfaces, only when every one is peer-to-peer. "Client
+   connected" is unchanged for every client. TEST ONLY `SILL_TEST_PEER_TO_PEER_INTERFACE=en0` (honoured
+   only by the hosts that do not advertise, like the other two) counts a client scoped to that interface
+   as peer-to-peer, so a link-local test client on en0 stands in for awdl0. `HostStatus` has no
+   per-device route, so nothing there changed.
+2. **iOS: the reconnect waits out the network's blinks** (`DiscoveryPolicy.reconnectRow`). A network row
+   is still taken at once. A Direct row only once it has stayed Direct for `directWait`, 6 s (was 3), and
+   the network last listed that Mac `networkGrace`, 10 s, ago or more (`NetworkSightings.leftAt`, kept per
+   Bonjour name from the network browser's results). Never listed there (the café): only the 6 s.
+3. **iOS: a session over AWDL moves to the network** (`DiscoveryPolicy.moveToNetwork`,
+   `StreamClient.moveToNetworkIfListed`). While connected directly, once the network browser has listed the
+   same Mac (exact Bonjour name) for `moveAfter`, 2 s, without a break, the client opens a network
+   connection beside the direct one and hands the session over when it is ready, closing the direct one
+   0.5 s later. Make before break, so the Mac never drops to zero devices: it never stops the stream or
+   sends a staged window home, and the new connection gets the running stream (no connect screen, no
+   Desktop restart). As on any new connection, the ledger starts afresh (rule 7), the Desktop rule starts
+   over, the panel gives the first state its two seconds, and the viewport (this device's rate) goes out
+   on the new connection before the old one closes. A network connection that fails or is not ready in
+   5 s changes nothing; the next try waits `moveRetry`, 10 s. The status reads "Switching to Wi‑Fi…"
+   meanwhile, which only the connect screen shows, so in practice the move is seen in the host's log
+   (a second "Client connected", then "Client left" for the `%awdl0` one) and in the panel's header
+   losing "Connected directly". A plain reconnect was the first idea: it would have dropped the Mac to
+   zero devices, stopped the stream (and sent a staged window home) and restarted it on the Desktop.
+4. **Copy.** The panel's footer and the switch's hint: "This iPad is connected directly: turning this off
+   disconnects it." / "Turning this off disconnects this iPad." (§7's "can disconnect" rows). With the
+   move, a device still connected directly shares no network the Mac is listed on, so it stays
+   disconnected until it does. README and CLAUDE.md follow.
+
+**W5, answered.** Turned off while a device is connected directly (from the Mac or the device), the
+stream did not stop and never would have: the awdl0 socket stayed open and kept AWDL up for as long as it
+lasted (15:38:43 and 15:44:45, no "Disabling AWDL" after). Now the host disconnects that device 1.5 s
+after the change, and the kernel should release AWDL about 30 s after the last registration and socket
+are gone, as it did at 15:35:51 when no socket held it ("Disabling AWDL due to no services and no active
+sockets"); W5 again below confirms it with a socket. The device reconnects over the network when it
+shares one: the host's state said off first, which drops the Mac from the device's memory, so no nearby
+search starts and no Direct row can be taken. A reconnect takes AWDL at home only if the network browser
+has said nothing of the Mac for 10 s, and the move then brings the session back within 2 s of the network
+listing it again. **Control Center's Wi‑Fi switch keeps AWDL alive**: it disconnects from the network but
+leaves the radio on for AirDrop, so a direct session survives it. The real test for "no shared network"
+is Settings › Wi‑Fi off, or another network.
+
+**Checks** (headless, simulator, no permissions; Noah's running Sill.app untouched):
+
+- Builds: the package clean (only the old CaptureProbe warning), iOS Debug and Release with only the old
+  ImplicitStrongCapture warning.
+- CLI byte for byte against 22209db (masked and sorted; idle 35 s, and a 5 s client): identical, first
+  kind 16 `dw=0`.
+- `ClientLink` on its own: 40 checks (the three endpoints from Sill.log verbatim, bracketed, numeric and
+  empty scopes, IPv4, loopback, the scope deciding over the path, the stand-in rule); five mutants
+  caught.
+- Gap A end to end with the stand-in: `SILL_TEST_PEER_TO_PEER_INTERFACE=en0 SillHost --synthetic
+  --direct-wireless`, a client on the Mac's own en0 link-local address and one on 127.0.0.1 that sets it
+  off at 3 s: "…listening on port P again." then the disconnect line for the en0 client (by name), its
+  EOF 1.5 s after the change, and the loopback client streaming to the end. Without the variable, the
+  same en0 client (a real `%en0` endpoint) stays. Off then on within 0.3 s: one "on: listening…" line,
+  nobody disconnected. The bare app with `SILL_TEST_SWAP_FAIL=all`: "Listener failed", the disconnect
+  line, the app running on.
+- `DiscoveryPolicy` check at 98: the constants; `reconnectRow` with and without a recent network row;
+  `sightings`; `moveToNetwork`; a model of StreamClient's glue stepped every 50 ms: the network row
+  blinking off for 1.5 s, 4 s and 7 s beside a Direct row goes back over the network at 1.5, 4.0 and
+  7.0 s and never Direct; absent for good, Direct at exactly 10.0 s; connected directly, the network row
+  from 5 s moves at exactly 7.0 s, a blink at 6–6.3 s moves it at 8.3 s, a failed move retries at 17.0 s,
+  another Mac or "Studio (2)" never moves it; the café takes Direct 6 s after its row appeared; the home
+  race (Sill relaunched, awdl0 first) takes the network row at 0.8, 2.9 and 5.9 s, and at 6.1 s takes
+  Direct at 6.0 and moves at 8.1; a replay of 15:43 goes Direct at 10 s and back to the network at 22 s.
+  Seven mutants of the new code caught.
+- Simulator (iPad Pro 13-inch) against `SillHost --synthetic` with `-SillConnect … -SillMoveTest 1`: the
+  host logs a second "Client connected" and "Client left" for the first, 1 → 2 → 1 clients with frames
+  every second, one "Streaming" line in all (no Desktop restart); screenshots before and after show the
+  test pattern moving; after the move the panel shows the Mac's state and a Prioritize Encoding Speed tap
+  is answered ("Settings from iPad Pro 13-inch (M5)…: speed off → on"). `-SillMoveTest refused`: two tries
+  given up after 5 s each, 10 s apart, the session streaming on one connection throughout. The
+  `directlink` panel at 500×710 reads the new footer in full.
+
+**Not changed:** the bitrate for direct clients (Noah has not decided); kinds 16 and 17; the default,
+off on both ends; `StreamServer(advertise: !synthetic)`; the CLI's default output.
+
+**For Noah** (both builds installed; the kernel's lines with `/usr/bin/log stream --style compact
+--predicate 'process == "kernel" AND eventMessage CONTAINS "abling AWDL"'`):
+
+- *W5 again.* Connected directly (the iPad on the iPhone's hotspot, the Mac at home), turn it off from
+  the Mac: the disconnect line within ~2 s, the iPad on its connect screen, "Disabling AWDL…" about 30 s
+  later. From the iPad's panel: the same, and the footer said so beforehand.
+- *W6 again.* Home → café while streaming with it on: back over AWDL in about 10 s without a tap (was
+  ~8 s: the 10 s since the network last listed the Mac). Café → home (rejoin the home Wi‑Fi while
+  streaming directly): within a few seconds of the network listing the Mac, the host logs a second
+  "Client connected" on `%en0` and "Client left" for the `%awdl0` one, the picture never stops, and the
+  panel loses "Connected directly".
+- *The blink.* At home with it on and the iPad streaming, quit Sill.app and open it again a few times,
+  sometimes at once and sometimes after 15 s (its registration leaves and comes back on both routes at
+  once, as in a swap, and the iPad reconnects by itself): the host logs the iPad on `%en0`. Only if the
+  network takes over 6 s to list the Mac again may it come back on `%awdl0`, and then it moves to `%en0`
+  about 2 s after the network lists it. Turning it off and on from the menu while the iPad streams
+  never touches its connection at all.
+- *Control Center.* Connected directly with Wi‑Fi off in Control Center, the session goes on over AWDL
+  (as at 15:44); turning Direct Wireless off on the Mac now ends it within ~2 s and the iPad stays on its
+  connect screen until Wi‑Fi is back. Streaming over the network at home with it on, Control Center's
+  Wi‑Fi off drops the network connection and the iPad comes back over AWDL after ~10 s (W6's path).
