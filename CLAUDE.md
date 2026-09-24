@@ -75,12 +75,25 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   the channel. A tap is never held back. A session over AWDL moves to the
   network once the network browser (it keeps running while connected) has
   listed the same Mac for 2 s without a break: a network connection opens beside
-  the direct one and takes the session over when ready (make before break: the
-  Mac never drops to zero devices, so the stream and a staged window stay; the
-  ledger, the Desktop rule and the panel's two seconds start afresh as on any
-  connection, and the viewport goes out on the new one before the old closes);
-  one that fails or is not ready in 5 s changes nothing, and the next try waits
-  10 s (`DiscoveryPolicy.moveToNetwork`, `StreamClient.moveToNetworkIfListed`).
+  the direct one, and once its first window list names the same host it takes
+  the session over (make before break: the Mac never drops to zero devices, so
+  the stream and a staged window stay; the ledger, the Desktop rule and the
+  panel's two seconds start afresh as on any connection, and the viewport goes
+  out on the new one before the old closes); one that fails or has not shown its
+  host in 5 s changes nothing, and the next try waits 10 s
+  (`DiscoveryPolicy.moveToNetwork`, `StreamClient.moveToNetworkIfListed`). The
+  same host: `WindowList.launchID`, a random ID each host launch puts in every
+  window list (optional; hosts without it on both ends go by the name, as
+  before), because a Bonjour name can belong to two Macs that share no link;
+  a listing found to be another Mac is not tried again while it lasts
+  (`sameHost`, `refusedListing`). The hand-over keeps what the device sends in
+  order (`SessionLink`): the Mac never orders one connection against another,
+  and a release sent on the fast one could overtake its press still in flight
+  on AWDL (the button stays down, every later move drags), so the network
+  connection is read at once but nothing goes out until a fence ping sent on
+  the direct one after everything else comes back (the Mac echoes a ping only
+  after reading all before it); messages wait in order meanwhile, one direct
+  round trip, at most 3 s, or until the direct connection closes.
   On 2026-09-24 the iPad twice reconnected over AWDL at home (15:37:25,
   15:43:17) after an eviction on en0 and stayed there for minutes at rtt maxima
   ~265 ms. Local Network access denied (the network browser waits with
@@ -149,7 +162,18 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   the café at 6 s, a 15:43 replay), seven mutants caught; on the simulator
   (`-SillMoveTest 1|refused`) the move hands over with the host streaming
   throughout (1 → 2 → 1 clients, no Desktop restart), a panel change after it
-  is answered, and a refused network row leaves the session direct.
+  is answered, and a refused network row leaves the session direct. Review
+  fixes (the plan's "Review fixes of the move"): the hand-over fenced
+  (`SessionLink`), the host checked by launch ID, and a move given up at 5 s
+  ends before its connection is cancelled, so a late `.ready` cannot adopt it.
+  Verified: the CLI identical again; the fence against a stand-in Mac whose
+  first connection lags 120 ms (600 inputs from two threads, in order and
+  complete; the old hand-over reordered 64; released by timeout and by the old
+  connection closing), five mutants caught; the policy check at 111, five
+  mutants caught; on the simulator the move behind a 150 ms delay proxy waits
+  301 ms for its fence, then rtt 302 → 1 ms; `other:PORT` (another synthetic
+  host) is refused at its first list and not tried again, the session streaming
+  on; the panel shows the Mac's state after a move.
 - **Untested, for Noah (the plan's W1–W9):** W1 the payoff: both builds
   installed, `/usr/bin/log stream --style compact --predicate 'process ==
   "kernel" AND (eventMessage CONTAINS "abling AWDL" OR eventMessage CONTAINS
@@ -176,7 +200,8 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   since the network last listed the Mac); café → home (rejoin the home Wi-Fi
   while streaming directly): a second "Client connected" on `%en0`, then
   "Client left" for the `%awdl0` one, the picture never stops, and the header
-  loses "Connected directly"; and relaunching Sill.app at home, the iPad
+  loses "Connected directly" (drag and type through the move: no button stays
+  down, no letters swap); and relaunching Sill.app at home, the iPad
   reconnects over the network (the host logs no `%awdl0`). The blink: at home
   with it on and the iPad streaming, quit and reopen Sill.app a few times, at
   once and after 15 s: the iPad comes back on `%en0` (on `%awdl0` only if the
@@ -197,11 +222,11 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   payload cap and a kind 17 rate limit matter more with it on. It is the first
   device-writable setting that widens who can reach the Mac, against that
   plan's "a device sets stream quality, never network exposure": revisit it
-  with pairing. A Mac is known by its Bonjour name for a reconnect and now for
-  the move too, so another Mac of the same name running Sill on the device's
-  network would be joined (pairing again). The host can print "Client left"
-  twice for a connection that ends with a reset, as the direct one after a
-  move may (the device stops reading it before it closes it).
+  with pairing. A Mac is known by its Bonjour name for a reconnect, so another
+  Mac of the same name running Sill on the device's network would be joined
+  (pairing again; the move checks the launch ID, which a reconnect cannot, as
+  the host may have relaunched). The host can print "Client left" twice for a
+  connection that ends with a reset, as the direct one after a move may.
 
 **iPad host settings (2026-09-23, branch `ipad-host-settings` from
 `menu-bar-app`, rebased onto its e89add6; the plan and its reasoning are in
@@ -735,7 +760,8 @@ good.
 - `Sources/StreamProtocol/StreamMessage.swift` — 14-byte header + payload framing,
   message kinds in both directions, HEVC parameter set encoding. Shared by both
   sides. Change it in one place. `Switcher.swift` — the catalog types
-  (`WindowList`, `WindowInfo`, `AppInfo`, `StreamSource`) and image blob framing.
+  (`WindowList`, with the host's per-launch `launchID`; `WindowInfo`,
+  `AppInfo`, `StreamSource`) and image blob framing.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
   `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
@@ -798,7 +824,9 @@ good.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
   `FoundMac` rows; connection, parsing, reconnect, the move of a session over
-  AWDL to the network, ping, generic `send`),
+  AWDL to the network, ping, generic `send`), `SessionLink` (the session's
+  connection and the one door out to the Mac; the move's fenced hand-over;
+  Foundation and Network only, checked with swiftc),
   `DiscoveryPolicy` (when to look nearby, the rows, when a reconnect may take
   a Direct row, when a session over AWDL moves to the network, the memory of
   Macs with Direct Wireless on; pure, checked with swiftc), `StreamScreen`

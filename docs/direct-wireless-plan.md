@@ -1324,3 +1324,84 @@ off on both ends; `StreamServer(advertise: !synthetic)`; the CLI's default outpu
   (as at 15:44); turning Direct Wireless off on the Mac now ends it within ~2 s and the iPad stays on its
   connect screen until Wi‑Fi is back. Streaming over the network at home with it on, Control Center's
   Wi‑Fi off drops the network connection and the iPad comes back over AWDL after ~10 s (W6's path).
+
+### Review fixes of the move (2026-09-24, branch `direct-wireless-fixes`)
+
+A review of the three commits above confirmed three findings, all in the iOS move from AWDL to the
+network (`StreamClient.finishMove` and its neighbours at 386e6e8). These supersede the parts of "What
+changed" 3 they name.
+
+- **The hand-over could reorder what the device sends (medium).** `finishMove` pointed every send at the
+  network connection as soon as it was ready, while earlier input and picks were still in flight on the
+  direct one. The Mac reads each connection in arrival order on one queue and never orders one against the
+  other, and over AWDL a round trip was ~75 ms typical and up to 2.4 s against ~10 ms on the network. So a
+  release sent after the hand-over could land before its press (InputInjector then keeps the button down,
+  and every later pointer move posts as a drag), keystrokes could swap, and a key could stay held. Now
+  `SessionLink` (new, Foundation and Network only) holds the session's connection and is the one door every
+  message to the Mac goes out of, each send under its lock. The hand-over makes the network connection the
+  one read at once, but holds everything the device sends until a fence ping, sent on the direct connection
+  under the same lock after everything else sent there, comes back: the host echoes a ping from its receive
+  loop only after delivering all that came before it on that connection. Then the held messages go out on
+  the network connection, in order, ahead of anything later; the viewport is the first of them, and the
+  direct connection closes half a second after the fence is down. The fence's payload is 8 random bytes, so
+  the pong of a regular ping still in flight cannot pass for it. The direct connection's read loop runs on
+  until the fence's pong (the same loop, so no message is split between two readers) and only looks for it.
+  If the direct connection closes first, what it had not delivered never will, and the held messages go at
+  once; with no pong in 3 s (past the worst direct round trip of the sessions) they go anyway. The finding's
+  first suggestion, waiting for a quiet spell longer than the worst rtt, was not taken: it guesses, and it
+  leaves the network connection unread meanwhile, so the video would jump back when it takes over.
+- **A move given up at 5 s could still be adopted (low).** The timer cancelled the network connection
+  without ending the move, and a `.ready` can be delivered after `cancel()` returns (38 of 3000 in the
+  review's experiment), so `finishMove` could make a dead connection the session's and tear it down, taking
+  the Mac to zero devices. Now the timer ends the move (`moveEnded`) before it cancels, so the identity
+  check turns a late `.ready` away, and the step that hands over also requires `c.state == .ready`, which
+  catches a connection that failed after it was ready.
+- **The move matched the Mac by Bonjour name alone (low).** Two Macs that share no link keep the same name
+  (mDNS renames only within a link), so a session over AWDL to one "MacBook Pro" could move to another
+  "MacBook Pro" on the network. The finding's suggestion, comparing the window list's `macName`, cannot tell
+  them apart either: it is the same `Host.current().localizedName`. Now each host picks a random
+  `launchID` at launch and puts it in every window list (`WindowList.launchID`, optional: an older device
+  ignores the key, an older host sends none). A move reads the network connection up to its first window
+  list, keeping every message it read for the session to replay, and hands over only when that list's
+  launch ID equals the direct session's (`DiscoveryPolicy.sameHost`; two hosts without one go by the name,
+  as before). A listing found to be another Mac is not tried again while it lasts
+  (`moveToNetwork(refusedListing:)`): each try would connect to that Mac and fetch its whole catalog. A move
+  also waits for the direct session's first window list, which names its host. Per launch, not per install:
+  the move only needs to know that both connections reach the same running host, and nothing is stored. A
+  reconnect still goes by the name (the host may have relaunched); pairing (M5) is the fix for that.
+
+Also: `-SillMoveTest other:PORT` lists another port of the same address as the Mac's network row (another
+synthetic host, refused; or the same host's own port behind a delay proxy, moved).
+
+**Checks** (headless and on the simulator, no permissions; Noah's running Sill.app untouched):
+
+- Builds: the package from a fresh copy with only the old CaptureProbe warning; iOS Debug and Release with
+  only the old ImplicitStrongCapture warning.
+- CLI byte for byte against 22209db (masked and sorted; idle 35 s and a 5 s client): identical, first kind
+  16 `dw=0`.
+- `SessionLink` against a stand-in Mac on loopback (the fence check: one serial queue reading every
+  connection in arrival order and echoing pings, as StreamServer does; the first connection's messages each
+  delivered 120 ms late, in order; 20 KB of frames every 10 ms on each; 600 numbered inputs from two senders
+  on two threads; regular pings every 30 ms): all 600 in order with the fence down 122 ms after the
+  hand-over (85 held); the old hand-over (switch at once) reordered 64; with the direct connection muted at
+  the hand-over, released by the caller's timeout, everything sent after the hand-over in order; with it
+  closed during the fence, released 31 ms after, in order. Five mutants caught: sends ignoring the fence
+  (60 inversions), any pong ending it (ended after 29 ms by a regular ping's pong, 48 inversions), the held
+  messages dropped (84 missing), the direct connection not read on (released only by the timeout), the fence
+  ping sent on the new connection (the same).
+- `DiscoveryPolicy` check at 111 (the 98 above, plus `sameHost` and the refused listing: another Mac named
+  Studio is tried once at 7.0 s and never again to 40 s; after its row blinks at 20–20.3 s, tried at 22.3 s
+  and refused again; when this Mac takes the name at 20.3 s, moved at 22.3 s; hosts without IDs move at
+  7.0 s by name; an ID against none is refused). Five mutants caught.
+- Simulator (iPad Pro 13-inch, Debug) against `SillHost --synthetic`: `-SillMoveTest 1` moves with the
+  fence down in 2 ms holding the viewport, the host streaming throughout (one "Streaming" line) and five
+  device reports arriving over the new connection; in the harness with the panel open, the panel shows the
+  Mac's state after the move. `other:PORT` against a second synthetic host: one try, "move to the network
+  refused", that host accepts one connection in 24 s ("Client connected" once), and the first host streams
+  to one device throughout. Behind a proxy delaying each direction 150 ms (the direct session's rtt 302 ms),
+  with the network row on the host's own port: the fence down after 301 ms, then rtt 1 ms and frame age
+  0 ms. `refused`: tries 10 s apart, each ended once by its 5 s timer, the session streaming on.
+
+**For Noah**, with W6: rejoin the home Wi-Fi while streaming directly and keep dragging on the trackpad or
+typing through the move a few times: no button stays down, no letters swap, and the host logs the
+`%awdl0` connection leaving about half a second after the `%en0` one arrives, plus one direct round trip.

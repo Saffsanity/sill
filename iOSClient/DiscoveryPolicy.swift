@@ -37,8 +37,8 @@ enum DiscoveryPolicy {
     /// A session over AWDL moves to the network once the network has listed the same Mac this long
     /// without a break (a blink restarts it).
     static let moveAfter = 2.0
-    /// After a move that did not complete (the network connection failed or was not ready in 5 s),
-    /// the wait before the next try.
+    /// After a move that did not complete (the network connection failed, was not ready in 5 s, or
+    /// reached another Mac), the wait before the next try.
     static let moveRetry = 10.0
 
     struct Input: Equatable {
@@ -156,12 +156,25 @@ enum DiscoveryPolicy {
     /// has listed the Mac for `moveAfter` without a break, and not within `moveRetry` of a try that
     /// did not complete. The device is then on the Mac's network, where AWDL only costs: both
     /// radios leave the channel, and over it the stream's worst rtt per report was ~265 ms
-    /// typical against ~11 ms on the LAN with AWDL off.
-    static func moveToNetwork(listedSince: Double?, lastAttempt: Double?, now: Double) -> (move: Bool, recheckAt: Double?) {
-        guard let since = listedSince else { return (false, nil) }
+    /// typical against ~11 ms on the LAN with AWDL off. Never again for a listing that turned out
+    /// to be another Mac (`refusedListing`, the `listedSince` it had; see `sameHost`): each try
+    /// would connect to that Mac and fetch its whole catalog. A new listing (the row went and came
+    /// back) is tried afresh.
+    static func moveToNetwork(listedSince: Double?, lastAttempt: Double?, refusedListing: Double?, now: Double) -> (move: Bool, recheckAt: Double?) {
+        guard let since = listedSince, since != refusedListing else { return (false, nil) }
         var due = since + moveAfter
         if let last = lastAttempt { due = max(due, last + moveRetry) }
         return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// Whether the network connection a move opened reaches the host this session runs on: both
+    /// window lists carry the same `WindowList.launchID`, a random ID a host picks at launch. The
+    /// Bonjour name the move went by cannot tell: two Macs can share one when they share no link
+    /// (one reached over AWDL, the other on the network), and mDNS then renames neither. Hosts from
+    /// before the ID (nil and nil) are taken at their name, as before; one with and one without are
+    /// two hosts.
+    static func sameHost(_ session: String?, _ network: String?) -> Bool {
+        session == network
     }
 
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an

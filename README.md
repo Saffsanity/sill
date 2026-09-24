@@ -69,7 +69,7 @@ Wi-Fi keeps leaving its network's channel (up to ~100 ms twice a second), which
 made Wi-Fi streams stutter. With it on, a device that shares a network with the
 Mac still streams over the network: one that got onto AWDL anyway moves there by
 itself, without dropping the stream, once the network has listed the Mac for
-two seconds.
+two seconds (and only to that same Mac, never to another of the same name).
 Turning it on or off applies at once and never restarts the stream, though
 turning it off disconnects a device that is still connected directly (a second
 and a half later); it comes back over the network if it shares one. A device

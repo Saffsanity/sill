@@ -189,15 +189,28 @@ final class StreamClient: ObservableObject {
     /// rather than at the retry timer's next step, which can be up to 10 s away.
     private var directReconnectCheck: DispatchWorkItem?
     /// A session over AWDL moving to the network: the network connection opened beside it, until it
-    /// is ready and takes over (`finishMove`) or gives up (`moveEnded`).
+    /// has shown it reaches this session's host and takes over (`finishMove`), or gives up
+    /// (`moveEnded`).
     private var moving: NWConnection?
     /// When this session's last move started, so one that did not complete waits `moveRetry`.
     private var lastMoveAttempt: Double?
     /// The move's look at the moment the network row has been listed for `moveAfter`.
     private var moveCheck: DispatchWorkItem?
+    /// This connection has delivered a window list, and the host's launch ID it carried
+    /// (`WindowList.launchID`; nil from an older host): a move hands the session only to a
+    /// connection whose first list names the same host (`moveProbed`), so none starts before.
+    private var sessionListed = false
+    private var sessionHost: String?
+    /// The network listing (its `sightings.since`) a move found to be another Mac: not tried again
+    /// while it lasts (DiscoveryPolicy.moveToNetwork).
+    private var refusedListing: Double?
+    /// How long a move's hand-over waits for the Mac to have read everything sent on the direct
+    /// connection before what waits goes out anyway (SessionLink): past the worst direct round trip
+    /// of Noah's sessions on 2026-09-24 (2.4 s), and no longer, since input waits meanwhile.
+    private static let fenceTimeout = 3.0
     #if DEBUG
-    /// `-SillMoveTest 1` with `-SillConnect host:port`: rows the network browser did not list, so the
-    /// move to the network runs against a synthetic host, which no browser lists and which is not
+    /// `-SillMoveTest` with `-SillConnect host:port`: rows the network browser did not list, so the
+    /// move to the network runs against synthetic hosts, which no browser lists and which are not
     /// on AWDL (see `beginMoveTest`).
     private var testNetworkRows: [(name: String, endpoint: NWEndpoint)] = []
     #endif
@@ -214,14 +227,15 @@ final class StreamClient: ObservableObject {
     var mockDiscovery = false
     #endif
 
-    /// Read on `queue` (receive loop, sends) and written on main (connect, disconnect, loss): a
-    /// plain stored property would be a data race on a strong reference.
+    /// The session's connection, kept by `link`: read on `queue` (receive loop, sends) and written
+    /// on main (connect, disconnect, loss, a move's hand-over), so it is locked there.
     private var connection: NWConnection? {
-        get { connectionLock.lock(); defer { connectionLock.unlock() }; return storedConnection }
-        set { connectionLock.lock(); storedConnection = newValue; connectionLock.unlock() }
+        get { link.connection }
+        set { link.connection = newValue }
     }
-    private var storedConnection: NWConnection?
-    private let connectionLock = NSLock()
+    /// Where every message to the Mac goes, in the order sent, also across a move's hand-over from
+    /// the direct connection to the network one (SessionLink).
+    private let link = SessionLink()
     private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
 
@@ -460,6 +474,9 @@ final class StreamClient: ObservableObject {
             old.cancel()      // its .cancelled callback is ignored: connectionLost checks identity
         }
         abandonMove()         // a new session: an old one's move to the network is moot
+        sessionListed = false // …and its host is not yet known
+        sessionHost = nil
+        refusedListing = nil
         hostName = name
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
@@ -478,8 +495,8 @@ final class StreamClient: ObservableObject {
                     self.status = "Connected to \(name)"
                     self.updateDiscovery()   // stops the nearby browser; the network one keeps running
                     #if DEBUG
-                    if let test = UserDefaults.standard.string(forKey: "SillMoveTest"), test == "1" || test == "refused" {
-                        self.beginMoveTest(endpoint: endpoint, name: name, refused: test == "refused")
+                    if let test = UserDefaults.standard.string(forKey: "SillMoveTest") {
+                        self.beginMoveTest(endpoint: endpoint, name: name, mode: test)
                     }
                     #endif
                     self.moveToNetworkIfListed()   // over AWDL: the network may list this Mac already
@@ -530,16 +547,18 @@ final class StreamClient: ObservableObject {
     /// name: once it has for `moveAfter` without a break, move the session there
     /// (DiscoveryPolicy.moveToNetwork). The device is then on the Mac's network, where AWDL only
     /// costs; a reconnect can land on AWDL at home when the network browser stays silent for a
-    /// while (2026-09-24, twice). Main thread.
+    /// while (2026-09-24, twice). Not before this connection's first window list, which names the
+    /// host the move must reach again (`moveProbed`). Main thread.
     private func moveToNetworkIfListed() {
         moveCheck?.cancel()
         moveCheck = nil
-        guard connected, connectedDirectly, moving == nil, let direct = connection,
+        guard connected, connectedDirectly, sessionListed, moving == nil, connection != nil,
               let mac = macs.first(where: { $0.name == hostName && !$0.direct }) else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let decision = DiscoveryPolicy.moveToNetwork(listedSince: sightings.since[mac.name], lastAttempt: lastMoveAttempt, now: now)
+        let decision = DiscoveryPolicy.moveToNetwork(listedSince: sightings.since[mac.name], lastAttempt: lastMoveAttempt,
+                                                     refusedListing: refusedListing, now: now)
         if decision.move {
-            move(direct, to: mac)
+            move(to: mac)
         } else if let at = decision.recheckAt {
             let work = DispatchWorkItem { [weak self] in self?.moveToNetworkIfListed() }
             moveCheck = work
@@ -548,12 +567,14 @@ final class StreamClient: ObservableObject {
     }
 
     /// Opens a network connection to `mac` beside the direct one, and hands the session over once
-    /// it is ready (`finishMove`): make before break. The Mac keeps a connected device throughout,
-    /// so it never stops the stream, which it does at zero devices (a staged window would go home),
-    /// and the new connection is sent the running stream: no connect screen, no Desktop restart.
-    /// A network connection that fails or is not ready within 5 s changes nothing: the session
-    /// stays direct and the next try waits `moveRetry`. Main thread.
-    private func move(_ direct: NWConnection, to mac: FoundMac) {
+    /// its first window list shows it reaches the same host (`moveProbed`, `finishMove`): make
+    /// before break. The Mac keeps a connected device throughout, so it never stops the stream,
+    /// which it does at zero devices (a staged window would go home), and the new connection is
+    /// sent the running stream: no connect screen, no Desktop restart. A network connection that
+    /// fails, has not shown its host within 5 s, or reaches another Mac changes nothing: the
+    /// session stays direct and the next try waits `moveRetry` (after another Mac, a new listing
+    /// too). Main thread.
+    private func move(to mac: FoundMac) {
         lastMoveAttempt = ProcessInfo.processInfo.systemUptime
         status = "Switching to Wi\u{2011}Fi…"
         #if DEBUG
@@ -562,13 +583,12 @@ final class StreamClient: ObservableObject {
         let c = NWConnection(to: mac.endpoint, using: Self.connectionParameters(peerToPeer: false))
         moving = c
         // One handler for both lives of `c`: until it takes over, `moveEnded` acts (it checks
-        // `moving`); after, `connectionLost` does (it checks `connection`). The direct connection
-        // is held weakly: while it is the session, `connection` holds it.
-        c.stateUpdateHandler = { [weak self, weak direct] state in
+        // `moving`); after, `connectionLost` does (it checks `connection`).
+        c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
-                DispatchQueue.main.async { self.finishMove(c, from: direct) }
+                self.probeMove(c)
             case .failed(let e):
                 print("move to the network failed: \(e)")
                 c.cancel()
@@ -584,22 +604,77 @@ final class StreamClient: ObservableObject {
         c.start(queue: queue)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.moving === c else { return }
-            c.cancel()   // not ready in 5 s: stay direct (moveEnded, from .cancelled)
+            // Not taken over in 5 s: stay direct. The move ends before `c` is cancelled: a `.ready`
+            // can still be delivered after the cancel, and a list read meanwhile must find the move
+            // over (`moveProbed` checks `moving`) rather than hand the session to a dead connection.
+            self.moveEnded(c)
+            c.cancel()
         }
     }
 
-    /// The network connection is ready: it takes the session over and the direct one closes. What
-    /// any new connection starts afresh starts afresh here too, the screen aside: the Mac's settings
-    /// come again on this connection (the ledger's rule 7), the Desktop rule starts over, and the
-    /// panel gives the first state its two seconds. Main thread.
-    private func finishMove(_ c: NWConnection, from old: NWConnection?) {
-        guard moving === c else { c.cancel(); return }   // given up meanwhile
+    /// On `queue`, once the network connection is ready: reads it up to its first window list,
+    /// keeping every message for the session's read loop to replay should it take over, and hands
+    /// the list's host to `moveProbed`. Ticks, frames or a broadcast can come before the list: the
+    /// Mac adds a connection to its broadcasts before its catalog goes out. A read that fails
+    /// cancels `c`, which ends the move (`moveEnded`).
+    private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            guard let data, let header = StreamMessage.parseHeader(data) else {
+                if isComplete || error != nil { c.cancel() }
+                return
+            }
+            let next = { (payload: Data) in
+                let kept = kept + [(header, payload)]
+                guard header.kind == .windowList else { self.probeMove(c, kept: kept); return }
+                guard let list = Wire.decode(WindowList.self, from: payload) else { c.cancel(); return }
+                DispatchQueue.main.async { self.moveProbed(c, kept: kept, host: list.launchID) }
+            }
+            if header.payloadLength == 0 { next(Data()); return }
+            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
+                guard let data else {
+                    if isComplete || error != nil { c.cancel() }
+                    return
+                }
+                next(data)
+            }
+        }
+    }
+
+    /// The network connection's first window list is in: the session goes over if the list comes
+    /// from the host this session runs on (DiscoveryPolicy.sameHost). Main thread.
+    private func moveProbed(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)], host: String?) {
+        guard moving === c else { c.cancel(); return }   // given up meanwhile (its 5 s, a new session)
+        // Failed since its list came: its handler's `moveEnded` follows, so `moving` is left for it.
+        guard c.state == .ready else { c.cancel(); return }
+        guard DiscoveryPolicy.sameHost(sessionHost, host) else {
+            // Another Mac of this name, on the network while this one is reached over AWDL: the two
+            // share no link, so mDNS renamed neither. Not tried again while that listing lasts.
+            print("move to the network refused: \(hostName) on the network is another Mac")
+            refusedListing = sightings.since[hostName]
+            c.cancel()   // moveEnded, from .cancelled
+            return
+        }
+        finishMove(c, kept: kept)
+    }
+
+    /// The network connection reaches this session's host: it takes the session over and the
+    /// direct one closes. The session reads it at once (first what `probeMove` kept), while what
+    /// this device sends waits until the Mac has read everything sent on the direct connection
+    /// (SessionLink's fence): a release sent now must not overtake its press still on the slow
+    /// link. What any new connection starts afresh starts afresh here too, the screen aside: the
+    /// Mac's settings come again on this connection (the ledger's rule 7), the Desktop rule starts
+    /// over, and the panel gives the first state its two seconds. Main thread.
+    private func finishMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)]) {
         moving = nil
         // The direct session ended meanwhile: its own reconnect runs, and takes the network row.
-        guard connected, connectedDirectly, let old, connection === old else { c.cancel(); return }
-        // From here `c` is the session's: the direct connection's read loop, pings and one-second
-        // windows stop at their next turn, since each checks that it is still `connection`.
-        connection = c
+        guard connected, connectedDirectly, let old = connection else { c.cancel(); return }
+        // From here `c` is the session's: the direct connection's pings and one-second windows stop
+        // at their next turn, since each checks that it is still `connection`, and its read loop
+        // goes on only until the fence's pong (`deliver`).
+        let nonce = withUnsafeBytes(of: UInt64.random(in: .min ... .max)) { Data($0) }
+        let fencePing = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: nonce)
+        link.handOver(from: old, to: c, fencePing: fencePing.serialized(), nonce: nonce)
         connectedDirectly = false
         status = "Connected to \(hostName)"
         settings.reset()
@@ -612,16 +687,35 @@ final class StreamClient: ObservableObject {
         #if DEBUG
         print("discovery: the session moved to the network")
         #endif
-        queue.async { self.startMeasuring(c); self.readHeader(on: c) }
-        // The Mac keeps a frame rate per connection: this one's viewport goes out before the direct
-        // connection closes, so the stream's rate never falls back to the default in between.
+        queue.async {
+            self.startMeasuring(c)
+            for m in kept { self.handle(m.header, m.payload) }
+            self.readHeader(on: c)
+        }
+        // The Mac keeps a frame rate per connection: this one's viewport is the first thing the
+        // network connection carries once the fence is down, and the direct one closes half a
+        // second after that (`fenceEnded`), so the stream's rate never falls back to the default.
         if let v = lastViewport { sendViewport(v) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { old.cancel() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
+            guard let self, let released = self.link.release(old) else { return }
+            self.fenceEnded(old, released, why: "no pong on the direct connection")
+        }
         updateDiscovery()
     }
 
-    /// The network connection closed before it took the session over: the session stays direct,
-    /// and the next try waits `moveRetry`. Main thread.
+    /// A move's fence is down: the Mac has read everything sent on the direct connection (or it
+    /// closed, or never answered), and what waited has gone out on the network connection. The
+    /// direct one closes half a second later, once the viewport, which went first, has reached the
+    /// Mac. Any thread.
+    private func fenceEnded(_ old: NWConnection, _ released: SessionLink.Released, why: String) {
+        #if DEBUG
+        print("discovery: fence down (\(why)) after \(Int((released.seconds * 1000).rounded())) ms; \(released.held) held messages went out over the network")
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { old.cancel() }
+    }
+
+    /// The network connection closed before it took the session over, or reached another Mac: the
+    /// session stays direct, and the next try waits `moveRetry`. Main thread.
     private func moveEnded(_ c: NWConnection) {
         guard moving === c else { return }
         moving = nil
@@ -632,7 +726,8 @@ final class StreamClient: ObservableObject {
         moveToNetworkIfListed()
     }
 
-    /// Stops a move under way and its timer (a new session, or none). Main thread.
+    /// Stops a move under way and its timer (a new session, or none), and drops a hand-over still
+    /// waiting for its fence: what it held belonged to the session that ended. Main thread.
     private func abandonMove() {
         moveCheck?.cancel()
         moveCheck = nil
@@ -640,19 +735,34 @@ final class StreamClient: ObservableObject {
             moving = nil
             c.cancel()
         }
+        link.dropHandOver()?.cancel()
     }
 
     #if DEBUG
-    /// `-SillMoveTest 1` with `-SillConnect host:port`: the address connection counts as a direct
-    /// one, and a second later the same address is listed as that Mac's network row, so the move
-    /// runs for real (policy, timer, second connection, hand-over) against a synthetic host.
-    /// `-SillMoveTest refused` lists port 1 of that host instead, where nothing listens: every try
-    /// waits, is given up after 5 s, and the session stays direct. Main thread.
-    private func beginMoveTest(endpoint: NWEndpoint, name: String, refused: Bool) {
+    /// `-SillMoveTest <mode>` with `-SillConnect host:port`: the address connection counts as a
+    /// direct one, and a second later an address is listed as that Mac's network row, so the move
+    /// runs for real (policy, timer, second connection, its first window list, the fence, the
+    /// hand-over) against synthetic hosts. `1` lists the same address. `refused` lists port 1 of
+    /// that host, where nothing listens: every try waits, is given up after 5 s, and the session
+    /// stays direct. `other:PORT` lists that port of the same host address: another synthetic host
+    /// there is another launch (one try, refused at its first list, none again while it stays
+    /// listed); the same host's own port, with `-SillConnect` through a proxy that delays each
+    /// direction, is the same launch behind a slow direct link (moved once the fence has waited out
+    /// the proxy's round trip). Main thread.
+    private func beginMoveTest(endpoint: NWEndpoint, name: String, mode: String) {
         guard case .hostPort(let host, _) = endpoint, testNetworkRows.isEmpty else { return }
+        let listed: NWEndpoint
+        if mode == "1" {
+            listed = endpoint
+        } else if mode == "refused" {
+            listed = .hostPort(host: host, port: 1)
+        } else if mode.hasPrefix("other:"), let number = UInt16(mode.dropFirst(6)), let port = NWEndpoint.Port(rawValue: number) {
+            listed = .hostPort(host: host, port: port)
+        } else {
+            return
+        }
         connectedDirectly = true
         print("discovery: move test: this session counts as direct")
-        let listed: NWEndpoint = refused ? .hostPort(host: host, port: 1) : endpoint
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self, self.connected else { return }
             self.testNetworkRows = [(name, listed)]
@@ -686,6 +796,9 @@ final class StreamClient: ObservableObject {
     /// The Mac went away (host quit, Wi-Fi dropped, connection reset). Back to the connect screen with
     /// a plain message, and remember the Mac so we rejoin when it shows up again. Any thread.
     private func connectionLost(_ c: NWConnection) {
+        // The direct connection of a move ended before its fence came back: nothing more of it can
+        // reach the Mac, so what waited goes out on the network connection now.
+        if let released = link.release(c) { fenceEnded(c, released, why: "the direct connection closed") }
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // stale callback from a connection we already replaced
             self.connection = nil
@@ -710,6 +823,9 @@ final class StreamClient: ObservableObject {
     private func tearDown(status: String) {
         abandonMove()
         lastMoveAttempt = nil
+        sessionListed = false
+        sessionHost = nil
+        refusedListing = nil
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         linkStats = nil
         localPointer = nil
@@ -810,7 +926,7 @@ final class StreamClient: ObservableObject {
     /// Any client → host message. Extensions (viewport, client stats) use this; frames never go this way.
     func send(_ kind: StreamMessageKind, payload: Data) {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
-        connection?.send(content: message.serialized(), completion: .contentProcessed { _ in })
+        link.send(message.serialized())
     }
 
     func sendInput(_ event: InputEvent) {
@@ -852,17 +968,18 @@ final class StreamClient: ObservableObject {
     private func send(_ kind: StreamMessageKind, _ payload: Data) {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970,
                                     isKeyframe: false, payload: payload)
-        connection?.send(content: message.serialized(), completion: .contentProcessed { _ in })
+        link.send(message.serialized())
     }
 
     // MARK: - Host → client
 
     /// The read loop is bound to one connection: a replaced connection's loop stops at its next
-    /// read instead of reading from the new one.
+    /// read instead of reading from the new one. The direct connection a move is leaving is read on
+    /// until its fence's pong (`deliver`): the same loop, so no message is split between two.
     private func readHeader(on c: NWConnection) {
-        guard c === connection else { return }
+        guard link.reads(c) else { return }
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
-            guard let self, c === self.connection else { return }
+            guard let self, self.link.reads(c) else { return }
             guard let data, let header = StreamMessage.parseHeader(data) else {
                 // EOF (the host closed cleanly) or a read error: both mean the Mac is gone.
                 if let error { print("read error: \(error)") }
@@ -876,14 +993,25 @@ final class StreamClient: ObservableObject {
     private func readPayload(_ header: StreamHeader, on c: NWConnection) {
         // A zero-length payload is legal (an empty window list, say); receive() rejects length 0.
         guard header.payloadLength > 0 else {
-            handle(header, Data())
+            deliver(header, Data(), from: c)
             readHeader(on: c)
             return
         }
         c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { [weak self] data, _, _, _ in
-            guard let self, c === self.connection, let data else { return }
-            self.handle(header, data)
+            guard let self, self.link.reads(c), let data else { return }
+            self.deliver(header, data, from: c)
             self.readHeader(on: c)
+        }
+    }
+
+    /// On the network queue. A message from the session's connection is handled. One from the
+    /// direct connection a move is leaving only matters if it is the fence's pong, which says the
+    /// Mac has read everything sent there; the network connection brings all the rest.
+    private func deliver(_ header: StreamHeader, _ data: Data, from c: NWConnection) {
+        if c === connection {
+            handle(header, data)
+        } else if header.kind == .pong, let released = link.fenceReturned(data, on: c) {
+            fenceEnded(c, released, why: "the Mac has read all the direct connection carried")
         }
     }
 
@@ -906,7 +1034,18 @@ final class StreamClient: ObservableObject {
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
+            let from = connection
             DispatchQueue.main.async {
+                // The host this session runs on, which a move to the network must reach again
+                // (`moveProbed`); its first list is what lets a move start. Only from the current
+                // connection: a list queued by a replaced one must not describe the next session.
+                if self.connection === from {
+                    self.sessionHost = list.launchID
+                    if !self.sessionListed {
+                        self.sessionListed = true
+                        self.moveToNetworkIfListed()
+                    }
+                }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
                 let previous = self.active
                 self.windows = list.windows
