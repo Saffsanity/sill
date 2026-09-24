@@ -10,10 +10,12 @@ struct MenuEntry: Equatable {
     enum Action: Equatable {
         case none
         case allowScreenRecording, allowAccessibility, openPrivacy
-        /// Absolute, like the radio items: sets what the item offered when the menu was built (on
-        /// when it showed unchecked). A device can change the setting while the menu is open, which
-        /// does not rebuild it, and a toggle would then do the opposite of what the item shows.
+        /// These two are absolute, like the radio items: each sets what the item offered when the
+        /// menu was built (on when it showed unchecked). A device can change the setting while the
+        /// menu is open, which does not rebuild it, and a toggle would then do the opposite of what
+        /// the item shows.
         case setVirtualDisplay(Bool)
+        case setDirectWireless(Bool)
         case setMaxFPS(Int), setBitrate(Int), setCaptureScale(CGFloat)
         case toggleLaunchAtLogin
         case showLog, showSettings, quit
@@ -79,6 +81,11 @@ enum MenuBuilder {
         ]))
         menu.append(.separator)
 
+        // How Sill runs on this Mac, not the picture: devices reach it over peer-to-peer Wi-Fi too.
+        // Here as well as in Settings because it is situational (on in a café, off at home).
+        menu.append(MenuEntry(kind: .item, title: "Direct Wireless Connection",
+                              subtitle: "No shared network needed; Wi\u{2011}Fi streams can stutter",
+                              checked: config.directWireless, action: .setDirectWireless(!config.directWireless)))
         var loginNote: String?
         if !login.available { loginNote = "Available when Sill runs from its app bundle" }
         else if let error = login.error { loginNote = error }
@@ -240,6 +247,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .allowAccessibility: model.permissions.requestAccessibility()
         case .openPrivacy: model.permissions.openPrivacyPane()
         case .setVirtualDisplay(let on): model.settings.config.virtualDisplay = on
+        case .setDirectWireless(let on): model.settings.config.directWireless = on
         case .setMaxFPS(let fps): model.settings.config.maxFPS = fps
         case .setBitrate(let bitrate): model.settings.config.bitrate = bitrate
         case .setCaptureScale(let scale): model.settings.config.captureScale = scale
