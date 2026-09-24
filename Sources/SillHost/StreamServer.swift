@@ -12,6 +12,8 @@ import StreamProtocol
 /// browse `_sill._tcp` only) ever finds it. `SILL_TEST_SWAP_FAIL=port` makes a Direct Wireless
 /// replacement's same-port bind fail as EADDRINUSE without binding, and `=all` its any-port bind
 /// too, so the fallback and the listener-failure rule can be exercised without a real conflict.
+/// Both are honoured only on a host that does not advertise, so a stray variable can never touch
+/// a real host.
 final class StreamServer {
     private final class Client {
         let connection: NWConnection
@@ -127,6 +129,8 @@ final class StreamServer {
     private let service: NWListener.Service?
     /// A test registration is announced once in the log and never reaches `onServiceRegistered`.
     private let serviceIsTest: Bool
+    /// A host that does not advertise (the synthetic ones): the only kind the TEST ONLY hooks touch.
+    private let testHost: Bool
     private var peerToPeer = false                   // what `listener` was built with
     private var wantedPeerToPeer = false             // the newest request
     /// A replacement under way, numbered so a late callback or timer of an earlier one is a no-op:
@@ -159,6 +163,7 @@ final class StreamServer {
             service = nil
             serviceIsTest = false
         }
+        testHost = !advertise
         listener = try Self.makeListener(peerToPeer: false, port: nil)
         listener.service = service
         wire(listener)
@@ -283,7 +288,7 @@ final class StreamServer {
         swap = .settling(n)
         replacementPort = port
         // TEST ONLY: the fallbacks without a real port conflict (SILL_TEST_SWAP_FAIL).
-        if Self.testSwapFail == "all" || (Self.testSwapFail == "port" && port != nil) {
+        if testHost, Self.testSwapFail == "all" || (Self.testSwapFail == "port" && port != nil) {
             replacementFailed(.posix(.EADDRINUSE), swap: n)
             return
         }

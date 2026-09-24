@@ -82,7 +82,14 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   change shows in the open panel; the app saves 1 then 0); the normal app on
   the simulator: no nearby search without memory, and with a remembered Mac
   that is missing it starts 3.8 s after launch (ValidSvc +1 until it quits)
-  while the real Mac on the network stays a plain row.
+  while the real Mac on the network stays a plain row. Review (one pass by the
+  implementer, three lenses: wire and hard rules, the replacement's
+  concurrency, the device UI), then adversarial re-runs of H2–H8 on the final
+  build plus: a burst that ends where it started never turns AWDL on (ValidSvc
+  constant, no awdl0 row) while 139 of 139 connections across two replacements
+  are served; after a total listener failure the next toggle retries; the
+  device toggling on then off while streaming (two replacements, same port,
+  frames throughout, ends off on both sides).
 - **Untested, for Noah (the plan's W1–W9):** W1 the payoff: both builds
   installed, `/usr/bin/log stream --style compact --predicate 'process ==
   "kernel" AND (eventMessage CONTAINS "abling AWDL" OR eventMessage CONTAINS
@@ -764,7 +771,7 @@ not advertise, but `SILL_TEST_SERVICE_TYPE=_silltest._tcp` registers them as
 "Sill test ‹pid›" under that test type (never `_sill._tcp`, so no device sees
 them) with the listener's own peer-to-peer flag, and prints which one it got;
 `SILL_TEST_SWAP_FAIL=port|all` makes a replacement's same-port (and any-port)
-bind fail. `dns-sd -t 3 -includeAWDL -B _silltest._tcp local` lists a
+bind fail; both are honoured only by a host that does not advertise. `dns-sd -t 3 -includeAWDL -B _silltest._tcp local` lists a
 registration that includes AWDL a second time on awdl0's index (`python3 -c
 'import socket; print(socket.if_nametoindex("awdl0"))'`, 16 here). dns-sd
 options go before the command: `dns-sd -R … -includeAWDL` registers a TXT

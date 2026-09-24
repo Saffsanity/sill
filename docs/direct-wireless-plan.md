@@ -1083,7 +1083,9 @@ Implemented in the order of §10, one commit per step. Where the code departs fr
   launch, it says so in one line and runs the other way; `setPeerToPeer` before `start()` only
   records the value, as planned.
 - **The test type is validated** (`_name._tcp`, name 1–15 letters, digits or hyphens, never
-  `_sill._tcp`); anything else is ignored with one line.
+  `_sill._tcp`); anything else is ignored with one line. **`SILL_TEST_SWAP_FAIL` is honoured only
+  by a host that does not advertise**, like the test type (review): a stray variable can never
+  break a real host's listener.
 - **`startBrowsing()` starts the network browser once.** SwiftUI can run `onAppear` again, and a
   second browser would have replaced the first without cancelling it.
 - **"Reconnecting to ‹Mac›…" is now visible.** It used to be overwritten at once by `connect`'s
