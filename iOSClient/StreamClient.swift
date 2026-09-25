@@ -990,13 +990,23 @@ final class StreamClient: ObservableObject {
     /// On `queue`, once the network connection is ready: reads it up to its first window list,
     /// keeping every message for the session's read loop to replay should it take over, and hands
     /// the list's host to `moveProbed`. Ticks, frames or a broadcast can come before the list: the
-    /// Mac adds a connection to its broadcasts before its catalog goes out. A read that fails
-    /// cancels `c`, which ends the move (`moveEnded`).
+    /// Mac adds a connection to its broadcasts before its catalog goes out. A read that fails, a
+    /// message cut short, or one bigger than the session's reader takes (`readHeader`), cancels
+    /// `c`, which ends the move (`moveEnded`).
     private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             guard let data, let header = StreamMessage.parseHeader(data) else {
                 if isComplete || error != nil { c.cancel() }
+                return
+            }
+            // The session reader's caps (docs/remote-access-plan.md §3.7): nothing a Sill host sends
+            // is bigger, and waiting for what such a header announces would hold whatever follows
+            // until the move's 5 s run out.
+            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
+            guard header.payloadLength <= cap else {
+                print("move to the network: closing, the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
+                c.cancel()
                 return
             }
             let next = { (payload: Data) in
@@ -1007,8 +1017,10 @@ final class StreamClient: ObservableObject {
             }
             if header.payloadLength == 0 { next(Data()); return }
             c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
-                guard let data else {
-                    if isComplete || error != nil { c.cancel() }
+                // As in readPayload: fewer bytes than announced is the connection ending mid-message,
+                // never a message to keep.
+                guard let data, data.count == header.payloadLength else {
+                    if isComplete || error != nil || data != nil { c.cancel() }
                     return
                 }
                 next(data)
