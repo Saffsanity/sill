@@ -72,10 +72,9 @@ trust.
 ## Tips
 
 Sill is free, with no ads, no tracking and no subscription. If it is useful to
-you, a tip helps: through
-[GitHub Sponsors](https://github.com/sponsors/Saffsanity), or on
-[the Ko-fi page](https://ko-fi.com/KOFI_HANDLE_PLACEHOLDER). A tip unlocks
-nothing: every feature is free.
+you, a tip through [GitHub Sponsors](https://github.com/sponsors/Saffsanity)
+helps pay for the developer account. A tip unlocks nothing: every feature is
+free.
 
 ## Building from source
 

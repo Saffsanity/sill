@@ -1,6 +1,3 @@
 # The Sponsor button at the top of the repository page. GitHub reads this file.
+# To add Ko-fi later: a line `ko_fi: <handle>` here and a link in README.md's Tips.
 github: Saffsanity
-# The Ko-fi handle below is a placeholder, and so is the Ko-fi link in the
-# README: put the real handle in both. For GitHub Sponsors only, delete this
-# line and that link.
-ko_fi: KOFI_HANDLE_PLACEHOLDER
