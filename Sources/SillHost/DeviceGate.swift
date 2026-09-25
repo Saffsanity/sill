@@ -28,6 +28,9 @@ package enum DeviceGate {
     package static let loopRefusals = 5
     package static let loopWindow: TimeInterval = 60
     package static let loopDelay: TimeInterval = 2
+    /// After the goodbye and this side's FIN, how long a refused device has to close its side before
+    /// the host cancels the connection anyway (StreamServer.closeWithGoodbye).
+    package static let closeWait: TimeInterval = 1
 
     /// The shipped floor as a version (the swiftc check asserts that the constant parses).
     package static var floor: SillVersion { SillVersion(minimumDeviceVersion) ?? .zero }

@@ -837,9 +837,9 @@ final class StreamServer {
     }
 
     /// A device the gate did not admit: the update goodbye (or SILL_TEST_GOODBYE's payload), then
-    /// the close; one Refused line per source a minute, the rest counted. A source refused
-    /// `DeviceGate.loopRefusals` times within the window hears it `DeviceGate.loopDelay` later. On
-    /// `queue`.
+    /// the close (`closeWithGoodbye`); one Refused line per source a minute, the rest counted. A
+    /// source refused `DeviceGate.loopRefusals` times within the window hears it
+    /// `DeviceGate.loopDelay` later. On `queue`.
     private func refuse(_ c: NWConnection, hello: Hello?) {
         let source: String
         if case .hostPort(let host, _) = c.endpoint { source = Self.addressText(host).text } else { source = "\(c.endpoint)" }
@@ -853,10 +853,31 @@ final class StreamServer {
         let payload = testGoodbye ?? Wire.encode(DeviceGate.refusal(hello, floor: deviceFloor, macName: macName))
         let queue = queue
         if slowed {
-            queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.sayGoodbye(payload: payload, on: c, queue: queue, within: 0.25) }
+            queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
         } else {
-            Self.sayGoodbye(payload: payload, on: c, queue: queue, within: 0.25)
+            Self.closeWithGoodbye(payload, on: c, queue: queue)
         }
+    }
+
+    /// The gate's goodbye and close: the message, then this side's FIN, then whatever the device
+    /// still sends read and dropped until it closes too (at most `DeviceGate.closeWait`), then the
+    /// connection cancelled. Cancelling at once, with messages the device sent after its first still
+    /// unread, makes TCP answer with a reset, which can reach the device before it has read the
+    /// goodbye (sillclient, sending on after its hello, got the goodbye and then ECONNRESET); a
+    /// device that loses the notice redials. Only for connections nothing else sends to: the gate's,
+    /// never registered. On `queue`.
+    private static func closeWithGoodbye(_ payload: Data, on c: NWConnection, queue: DispatchQueue) {
+        let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                 payload: payload).serialized()
+        c.send(content: data, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in })
+        func drain() {
+            c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, isComplete, error in
+                if isComplete || error != nil { c.cancel(); return }
+                drain()
+            }
+        }
+        drain()
+        queue.asyncAfter(deadline: .now() + DeviceGate.closeWait) { c.cancel() }
     }
 
     /// The first refusal of a source in a minute prints its line; the rest of that minute's are
