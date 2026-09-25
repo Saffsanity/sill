@@ -254,7 +254,7 @@ Private
 
 Good to know
 • Sill shows one window, or the whole desktop, at a time.
-• Sill doesn’t play your Mac’s sound.
+• Sill doesn’t play sound from your Mac.
 • Sill for Mac comes from sill.saffer.me, not the Mac App Store.
 ```
 
@@ -267,6 +267,11 @@ network can connect to it" is true on main and on the remote-access branch,
 whose home connection stays open to devices on the Mac's networks. It stays
 until pairing covers the local network too. Leaving it out would make the
 listing sound safer than the app is.
+
+Apple's trademark rules keep its product names singular and never possessive
+in public copy, here and on the site: "sound from your Mac" and "Mac computers
+with Apple silicon", not "your Mac’s sound" or "Macs". The review notes aren't
+public.
 
 ### Keywords (100 bytes at most, commas, no spaces)
 
@@ -562,7 +567,7 @@ Safe:
 
 - Limits, measured on the blocks in this file by a script: name 4 characters;
   fallbacks 23 and 21; subtitle 27 of 30; promotional text 164 of 170;
-  description 2,059 of 4,000 characters; keywords
+  description 2,062 of 4,000 characters; keywords
   95 bytes (local-only 97) of 100, each
   keyword at least three characters, no spaces, no repeats; review notes
   3,553 bytes (local-only 2,845) of 4,000, all ASCII;
