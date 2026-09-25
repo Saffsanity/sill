@@ -220,9 +220,10 @@ enum StatusText {
     /// this Mac's side would read "Wi-Fi" for a session over the internet. A home device gets its
     /// link from this Mac's side of its connection (ClientLink.route), in the words the device's
     /// connect screen and Settings panel use; nil when neither says (loopback, an interface of no
-    /// known kind).
+    /// known kind). Either is kept whole when a detail wraps: a remote label's spaces are no-break
+    /// ones (the source row wrapped "through" and "Tailscale" onto two lines), as Wi-Fi's hyphen is.
     private static func routeWord(_ d: HostStatusSnapshot.Device) -> String? {
-        if let remote = d.remoteRoute { return remote }
+        if let remote = d.remoteRoute { return remote.replacingOccurrences(of: " ", with: "\u{00A0}") }
         return d.route.map(word)
     }
 
