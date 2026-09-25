@@ -1162,7 +1162,14 @@ check && ./check`, 63,778 checks, and `python3 mutants.py`):
   the rest overlapping, two inside give 60 fps at a 30 ms turnaround; if the
   encoder did the whole 30 ms one frame at a time, two inside would still give
   33 fps and add ~30 ms (latency median 66.7 against 36.7 ms). The HeartBeat
-  cannot tell which, and Sill's frame age starts after the encoder.
+  cannot tell which, and Sill's frame age starts after the encoder. For the
+  overlap, read-only: at 15:14–15:24 on 2026-09-25 Noah's Sill.app (session
+  3024×1968, one frame inside, 57 fps at 9.0 ms a frame alone) shared the
+  engine with a priority-60 2064×2752 session; both ran at ~36 fps while the
+  engine completed ~72 frames a second at 9.2–9.8 ms each (about two thirds
+  busy). So the engine works on other frames during a Sill frame's turnaround;
+  whether it takes a second frame of the same session then is what the
+  hardware run shows.
 - **Untested, for Noah (the hardware encoder; only with no device
   connected):** the scratchpad's `two-in-flight/verify-hardware.sh`: the CLI's
   idle stdout against 4fe37d4 (masked and sorted), SillHost `--synthetic` with
