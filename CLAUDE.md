@@ -10,9 +10,10 @@ Formerly winstream; the folder still carries the old name.
 
 **Remote access merged with main (2026-09-25, branch `remote-access`: merge
 0f7f50d of main at 76366e8 into 7f5f19d, not a rebase; the fix-up after it is
-ee922db).** Main's PRs #6–#10 (the Direct Wireless fixes, the connect screen's
-Wired/Wi-Fi/Direct, the quality presets, the route in Settings, prefer-cable)
-now sit beside remote access. Where the two meet:
+ee922db, the review's fixes 7200334–e8c7490).** Main's PRs #6–#10 (the Direct
+Wireless fixes, the connect screen's Wired/Wi-Fi/Direct, the quality presets,
+the route in Settings, prefer-cable) now sit beside remote access. Where the
+two meet:
 - Presets: seven, ascending, Low (4 Mbps) first, then Efficient 8, Balanced 15,
   High 25, Pro 40, Ultra 80, Extreme 150; main's 200 Mbps cap. A device may pick
   all seven (`SettingsChoices`); a host from before either change refuses the
@@ -35,10 +36,12 @@ now sit beside remote access. Where the two meet:
   `remoteRoute` (the route line, the 60 fps request, the slow-link callout), and
   it has no link word. The reconnect is the remote branch's (`reconnect`, saved
   Macs by Mac ID, then remote dials) with main's Direct-row rule (`directWait`,
-  and `networkGrace` from the sightings); every row dial, a tap's or the
-  reconnect's, goes through `dial`, so a "Wired" row dials the cable first. The
-  move to the network keeps its SessionLink fence and sets the session's route
-  to network. `-SillConnect` takes `[::1]:P` (the address parser) and
+  and `networkGrace` from the sightings; a remote dial's `networkGrace` counts
+  from the same moment, the saved Mac's row going, in `savedSightings`, the
+  sightings by Mac ID); every row dial, a tap's or the reconnect's, goes
+  through `dial`, so a "Wired" row dials the cable first. The move to the
+  network keeps its SessionLink fence and sets the session's route to network.
+  `-SillConnect` takes `[::1]:P` (the address parser) and
   `fe80::…%en0:P` (split at the last colon). In the project file main's
   SessionLink keeps A015/F015 and DeviceIdentity moved to A01D/F01D.
 - Verified without devices: `swift build` (only the CaptureProbe warning), iOS
@@ -70,11 +73,57 @@ now sit beside remote access. Where the two meet:
   saved across a relaunch. On a simulator of its own: by address, the route
   word read; `-SillMoveTest 1` moved and fenced; `-SillPairURL` pairing and a
   remote session; the host gone and back, redialled remotely.
+- Review of the merge (2026-09-25, after 3a7b501). Fixed: a lost saved Mac's
+  automatic remote dial counts `networkGrace` from the moment its network row
+  went (`StreamClient.savedSightings`, DiscoveryPolicy.sightings by Mac ID); it
+  read `networkLastListed`, the last browser change while the Mac was listed
+  (often the connect), so a Mac that blinked off the network at home was dialled
+  through the remote door 3 s after the loss, and a remote session that wins
+  that race is never moved home (the bug was on 7f5f19d already). The move's
+  probe (main's `probeMove`) takes §3.7's caps (frames 32 MiB, anything else
+  4 MiB: it closes, which ends the move) and, like `readPayload`, never keeps a
+  message cut short. The panel's route line keeps its route whole when it wraps,
+  as ee922db does on the card: at xxLarge on the 340 pt panels "Connected" /
+  "through Tailscale · 48 ms", where the merge's no-break space before the "·"
+  alone gave "Connected through" / "Tailscale · 48 ms". Two stale doc comments.
+  Verified: a clean release build of the result (only the CaptureProbe warning),
+  iOS Debug for the simulator (only the capture warning); the remote rules check
+  64 of 64 (four new: the sightings by Mac ID, and the dial after an hour
+  listed) with 35 of 35 mutants (two new, on the leave), main's policy check 187
+  with its 25 and the 20 old mutants; an event model of the reconnect on these
+  files: with the row gone at the loss the first remote dial moves from +3.2 s
+  to +10.0 s (Sill quitting: +8.0 to +11.0 s), what the by-name sightings give;
+  the probe copied verbatim into a loopback harness: Sill's traffic probed as
+  before, an SSH banner and a 1.7 GB frame header closed at once (before, both
+  held the move until its 5 s ran out, the second with the harness at 534 MB), a
+  window list cut short and then the stream's end no longer taken as the Mac's;
+  the CLI's output idle and with a client, masked and sorted, main's; on a
+  simulator of its own `-SillMoveTest 1` and `to:` this Mac's `fe80::…%en0`
+  (moved and fenced, the second gaining "Wi-Fi" at the hand-over),
+  `-SillPairURL` pairing, a remote session and its automatic redial; 63 photos
+  of the route line (seven layouts, three text sizes) identical to 3a7b501's but
+  for the six at xxLarge on the 340 pt panels, and long VPN names wrap at the
+  route's words, never inside one. The review's reruns on 3a7b501, none failing:
+  on the simulator S4 and S5 13 of 13, S7 against a9cc248's host, S8 in short
+  host runs (typed pairing through the relay, 60 fps through a VPN route and 120
+  by address, the 300 ms callout), testS3OutsideLink and the three RF2 UI tests
+  (the link test's Mac A a stand-in, not a second host), `-SillConnect` by this
+  Mac's `fe80::…%en0` ("Wi-Fi") and `-SillMoveTest to:` it; the host gates
+  H7–H12, H10(f) on the bare app, H15, H17 and a variant with `--remote` through
+  Direct Wireless off (a fresh tag, only the scoped home client disconnected,
+  the remote session streaming on), H18 and H19, and H14 (no base run), H16 and
+  H20 shortened to keep each host under 60 s; main's Direct Wireless gates
+  nohook, burst and appfail (the app's failed replacement disconnects the en0
+  stand-in and keeps a paired remote session from the same address; a build
+  without the guard fails it).
 - **Untested, for Noah:** everything the entries below leave for the devices,
   now on the merged build, and in particular a remote session's card on the
   real menu (the label on the source row is a merge decision), a "Wired" row's
   reconnect after a loss (it goes through `dial` now), and the move to the
-  network with remote access on.
+  network with remote access on. The grace: at home with a paired Mac and
+  Remote Access on, quit Sill.app while the iPad streams and reopen it 7–10 s
+  later; the iPad should come back on the home door (the host logs no remote
+  client).
 
 **Remote access (2026-09-24/25, branch `remote-access` from `a9cc248`; the plan,
 its open questions and the results are in `docs/remote-access-plan.md`).** Bring

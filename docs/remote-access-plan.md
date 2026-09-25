@@ -2158,7 +2158,8 @@ the plan.
   (errSecItemNotFound); a DEBUG `-SillDeviceKeySE 1` run, whose tag had no key, cleared real
   pairings.
 - Not applied: the route line's wrap after "·" (unverified; it matches the readout's rule on
-  origin/main, where a wrap falls after the "·").
+  origin/main, where a wrap falls after the "·"). The merge applied it, and its review kept the
+  route whole as well (below).
 - Gates on this build: the host's own (the internet source refused with Remote Access off and a
   window open, internet=0 and no address name in kind 18 until Remote Access is on again; one
   goodbye each for Remote Access off and for internet off; a Remove whose save fails changes
@@ -2207,3 +2208,13 @@ way in apart (`StreamClient.remoteRoute`); a Direct row waits `directWait` and `
 the reconnect (§7.4's 3 s became main's rule), and every row dial goes through the cable first
 when the row says Wired; Direct Wireless off never ends a remote session. CLAUDE.md's first
 current-step entry lists the resolution and what was checked.
+
+**The merge's review (2026-09-25).** Three fixes beside two doc comments. §7.4 step 3's
+`networkLeftAt` is the moment the network stopped listing the Mac, and the device passed the last
+browser change while it was listed, often the connect (since step 5), so a Mac that blinked off at
+home was dialled remotely 3 s after the loss: the saved Macs now keep main's sightings by Mac ID
+(`StreamClient.savedSightings`). §3.7's caps now also bound the reader main added for the move to
+the network (`probeMove`), which also drops a message cut short. The route line's own spaces are
+no-break ones, so at larger text it wraps before the route, never inside it ("Connected" /
+"through Tailscale · 48 ms"), as the Mac card does since ee922db. CLAUDE.md's entry lists the
+checks, and the gates the review reran on the merged build.
