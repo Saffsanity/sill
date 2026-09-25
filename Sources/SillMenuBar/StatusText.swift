@@ -1,5 +1,6 @@
 import Foundation
 import SillHostCore
+import StreamProtocol
 
 /// Everything the status item, its card and its menu say, as plain values. Made by
 /// `StatusText.present` from the host's snapshot, so the same words appear in the menu, the
@@ -15,7 +16,7 @@ struct StatusPresentation: Equatable {
 
     /// Something that needs the user, shown in the menu with an orange warning.
     struct Attention: Equatable, Identifiable {
-        enum Action: Equatable { case allowScreenRecording, allowAccessibility, none }
+        enum Action: Equatable { case allowScreenRecording, allowAccessibility, showRemoteAccess, none }
         var title: String
         var subtitle: String
         var action: Action
@@ -34,6 +35,11 @@ struct StatusPresentation: Equatable {
     var accessibilityLabel: String
     /// The name devices see this Mac as, once Bonjour has registered it.
     var advertisedName: String?
+    /// Under the menu's Remote Access… item: "Off", "On · Tailscale"… Nil on a host without
+    /// remote access (no item then).
+    var remoteAccessNote: String?
+    /// Pair iPhone or iPad… can open a pairing window (the Mac has an identity).
+    var canPair = false
 }
 
 /// Whether Sill holds its two permissions, as last read.
@@ -62,10 +68,16 @@ enum StatusText {
                                    subtitle: "Streaming with the software encoder, up to 60 fps. Restarting the Mac fixes this.",
                                    action: .none))
         }
+        let remotePortTaken = remotePortInUse(s.remote)
+        if let port = remotePortTaken {
+            attention.append(.init(title: "Remote Access Can’t Start", subtitle: "Port \(port) is in use by another app.",
+                                   action: .showRemoteAccess))
+        }
 
         // The attention glyph means "Sill needs you". The test pattern needs no permission.
         let glyph: StatusGlyph.State
-        if startupError != nil || isFailed(s.network) || (!s.synthetic && !(permissions.screenRecording && permissions.accessibility)) {
+        if startupError != nil || isFailed(s.network) || remotePortTaken != nil
+            || (!s.synthetic && !(permissions.screenRecording && permissions.accessibility)) {
             glyph = .attention
         } else if s.stream != nil {
             glyph = .streaming
@@ -82,7 +94,33 @@ enum StatusText {
                                   source: sourceRow(s), devices: s.devices.map(deviceRow), attention: attention,
                                   virtualDisplayNote: virtualDisplayNote(s),
                                   tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
-                                  advertisedName: name)
+                                  advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
+                                  canPair: s.remote.map { $0.identityProblem == nil } ?? false)
+    }
+
+    /// The remote door's port while Remote Access is on and another app holds that port.
+    private static func remotePortInUse(_ r: RemoteStatus?) -> Int? {
+        guard let r, r.remoteAccess, r.identityProblem == nil, case .portInUse(let port) = r.listener else { return nil }
+        return port
+    }
+
+    /// The Remote Access… item's subtitle: "Off", "On · Tailscale", "On · Tailscale and the
+    /// internet", "On · no VPN on this Mac", "Port 7455 is in use" or "Unavailable: the keychain
+    /// couldn’t be used".
+    static func remoteAccessNote(_ r: RemoteStatus?) -> String? {
+        guard let r else { return nil }
+        if r.identityProblem != nil { return "Unavailable: the keychain couldn’t be used" }
+        guard r.remoteAccess else { return "Off" }
+        switch r.listener {
+        case .portInUse(let port): return "Port \(port) is in use"
+        case .failed: return "Couldn’t start; trying again"
+        case .off, .listening: break
+        }
+        var ways: [String] = []
+        for a in r.addresses where a.kind == MacAddress.vpn && !ways.contains(a.via) { ways.append(a.via) }
+        if r.internetAccess { ways.append("the internet") }
+        guard let last = ways.last else { return "On · no VPN on this Mac" }
+        return "On · " + (ways.count == 1 ? last : ways.dropLast().joined(separator: ", ") + " and " + last)
     }
 
     /// The header and its explanation; the first match wins.
@@ -149,7 +187,7 @@ enum StatusText {
         // window stopped or started changing.
         let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, still"
         var detail = "\(stream.width)×\(stream.height) · \(rate) · \(stream.mbps) Mbps"
-        if s.devices.count == 1, let route = s.devices[0].route { detail += " · \(word(route))" }
+        if s.devices.count == 1, let route = routeWord(s.devices[0]) { detail += " · \(route)" }
         if stream.onVirtualDisplay {
             detail += " · virtual display"
         } else if s.virtualDisplayOn, stream.kind == .window {
@@ -159,10 +197,11 @@ enum StatusText {
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
-    /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms · Wi-Fi"; the address until the
-    /// device's first report (within a second), and until then the route alone. A second without
-    /// a sample reads "–", as in the host's log line and the device's HUD: a still window sends no
-    /// frames (ScreenCaptureKit delivers only repaints), and a second can pass without a pong.
+    /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms · Wi-Fi" (from away: "… · through
+    /// Tailscale"); the address until the device's first report (within a second; a remote device
+    /// shows its paired name), and until then the route alone. A second without a sample reads
+    /// "–", as in the host's log line and the device's HUD: a still window sends no frames
+    /// (ScreenCaptureKit delivers only repaints), and a second can pass without a pong.
     private static func deviceRow(_ d: HostStatusSnapshot.Device) -> StatusPresentation.Row {
         let name = d.name ?? d.endpoint
         let symbol = name.localizedCaseInsensitiveContains("iphone") ? "iphone" : "ipad"
@@ -170,14 +209,26 @@ enum StatusText {
         if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
             parts.append("\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))")
         }
-        if let route = d.route { parts.append(word(route)) }
+        if let route = routeWord(d) { parts.append(route) }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
                                       detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
     }
 
-    /// How a device reaches this Mac, from this Mac's side of its connection (ClientLink.route):
-    /// the words the device's connect screen and Settings panel use. "Wi-Fi" has a non-breaking
-    /// hyphen, so a wrapped detail never splits it.
+    /// How a device reaches this Mac, the one place the card decides it (the device's row, and the
+    /// source row while it is the only device). A remote session says how it came ("through
+    /// Tailscale", "over the internet"; RemoteServer's label), which always wins: its link from
+    /// this Mac's side would read "Wi-Fi" for a session over the internet. A home device gets its
+    /// link from this Mac's side of its connection (ClientLink.route), in the words the device's
+    /// connect screen and Settings panel use; nil when neither says (loopback, an interface of no
+    /// known kind). Either is kept whole when a detail wraps: a remote label's spaces are no-break
+    /// ones (the source row wrapped "through" and "Tailscale" onto two lines), as Wi-Fi's hyphen is.
+    private static func routeWord(_ d: HostStatusSnapshot.Device) -> String? {
+        if let remote = d.remoteRoute { return remote.replacingOccurrences(of: " ", with: "\u{00A0}") }
+        return d.route.map(word)
+    }
+
+    /// A home device's link as the card words it. "Wi-Fi" has a non-breaking hyphen, so a wrapped
+    /// detail never splits it.
     private static func word(_ route: ClientLink.Route) -> String {
         switch route {
         case .wired: return "Wired"

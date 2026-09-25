@@ -29,6 +29,16 @@ public enum StreamMessageKind: UInt8 {
     case changeSettings = 17 // client → host: JSON HostSettingsChange — only the fields one control changed, plus a token.
                              // No ack kind, no "send me the state" kind, no version handshake: the answer is a hostSettings
                              // sent to that device alone
+    // Remote access (Remote.swift, Pairing.swift). Older readers map all five to `.unknown` and skip them.
+    case macInfo = 18        // host → device: JSON SignedMacInfo — who this Mac is and how to reach it from afar, signed
+                             // with its identity key. In the catalog right after kind 16, on both doors, and again whenever
+                             // it changes. Only from a host with an identity (Sill.app always; SillHost with --remote)
+    case pairRequest = 19    // device → host: JSON PairRequest — the one message of a pairing connection (ALPN sill-pair/1),
+                             // at most `maxPairingPayload` bytes, within 10 s of the connection
+    case pairResult = 20     // host → device: JSON PairResult — the answer to 19; the host then closes the connection
+    case pairingWanted = 21  // device → host, empty payload: "show your pairing code" (Pair This iPad…). Home door only,
+                             // from this Mac's own networks, at most once per 30 s per connection; ignored elsewhere
+    case goodbye = 22        // host → device: JSON Goodbye — why the host is about to close this session
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
@@ -41,6 +51,18 @@ public struct StreamHeader {
 
 public struct StreamMessage {
     public static let headerLength = 14
+
+    // Caps on what a header may announce. The length field allows 4 GiB, and a reader that simply
+    // waits for the announced bytes can be held (or fed an SSH banner that parses as a 1.7 GB
+    // payload), so each side refuses more than it could ever legitimately receive and closes.
+    /// Any client → host message, on both doors. The largest real one is a few hundred bytes.
+    public static let maxClientPayload = 1 << 20
+    /// The one message of a pairing connection (kind 19).
+    public static let maxPairingPayload = 4096
+    /// A video frame, as a device accepts it (a Retina keyframe is 1–2 MB).
+    public static let maxFramePayload = 32 << 20
+    /// Any other host → device message (window lists, icons, thumbnails, the app list).
+    public static let maxOtherHostPayload = 4 << 20
 
     public var kind: StreamMessageKind
     public var timestamp: Double

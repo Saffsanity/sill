@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal Sill wire-format client for testing a host without a device.
+r"""Minimal Sill wire-format client for testing a host without a device.
 
 usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --junk             also send two unknown message kinds (the host must skip them)
@@ -14,22 +14,50 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      logs a name for this client
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
                      and virtualDisplayAvailable): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
+  --host=H           connect to H instead of 127.0.0.1 (an IPv4 or IPv6 address, or a name)
+  --device=NAME      the name ClientStats reports (implies --stats); \n, \t, \xHH and \uXXXX escapes
+                     are decoded, so control and bidi characters can be sent
+  --big-payload=N    right after the select, send a header of an unknown kind announcing N payload
+                     bytes (and none of them); the host should close the connection
+  --flood=N          before the session, open N connections to the same door and reset each one
+                     (SO_LINGER 0) before sending a byte
+  --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
+  --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
+  --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
+  --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
+                     an earlier pairing in --identity (or given with --pin)
+  --identity=DIR     this client's P-256 key and certificate, made on first use with /usr/bin/openssl
+                     (DIR/key.pem, DIR/cert.pem), and the paired Mac (DIR/mac.json); required with --tls
+  --pair-url=URL     pair first with a sill://pair link (the QR path: the Mac is pinned to its k before
+                     a byte is sent), save the Mac, then run the session
+  --pair-code=CODE   pair first with the typed code (no pin: the proofs bind both keys), then the session
+  --pin=FP|none      pin this base64url fingerprint instead of the saved one; none accepts any key
+  --expect-tls-fail  the session must be refused (a TLS error, or closed before any message): exits 0
+                     when it is, 1 when a session is served
+A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
+and against the Mac ID), 20 and 22 are printed one line each; a session prints the order of the
+kinds it received first (the catalog). Pairing prints PAIR ok or PAIR FAIL with the reason.
+At exit a LINK line gives the pong round trip (p50/p95/max over every pong), the keyframes' arrival
+times, the frames received in each 5 s window, and the frames' age (host timestamp to arrival; the
+same clock when both run on one Mac).
 Every kind 16 (host settings) is printed on one line with its arrival time; dw= is Direct Wireless
 (1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
 with status 2 (--raw17 goes out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
-import json, socket, struct, sys, time
+import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
 # What --set may send: HostSettingsChange's six fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
-TIMED = ("set", "raw17", "pick", "fps-after")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted")
+VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin")
 
 def msg(kind, payload=b"", key=False):
     return struct.pack(">BdBI", kind, time.time(), 1 if key else 0, len(payload)) + payload
@@ -61,6 +89,145 @@ def pairs(body, keys, flag):
         out[k] = value(k, v)
     return out
 
+def unescape(text):
+    """\\n, \\t, \\r, \\\\, \\xHH and \\uXXXX in a --device value, so a test can send control and bidi characters."""
+    def repl(m):
+        e = m.group(0)
+        if e[1] in "xu": return chr(int(e[2:], 16))
+        return {"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}[e[1]]
+    return re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|[ntr\\])", repl, text)
+
+# MARK: the remote door's crypto (standard library, and /usr/bin/openssl for keys and signatures)
+import base64, hashlib, hmac, os, ssl, subprocess, tempfile, urllib.parse
+def b64u(b): return base64.urlsafe_b64encode(b).decode().rstrip("=")
+def b64u_decode(t):
+    if not re.fullmatch(r"[A-Za-z0-9_-]*", t or ""): raise ValueError(f"not base64url: {t!r}")
+    return base64.urlsafe_b64decode(t + "=" * (-len(t) % 4))
+CROCK = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+def macid(fp):
+    n = int.from_bytes(fp[:10], "big")
+    return "".join(CROCK[(n >> (75 - 5 * i)) & 31] for i in range(16))
+DAMM = [[0,3,1,7,5,9,8,6,4,2],[7,0,9,2,1,5,4,8,6,3],[4,2,0,6,8,7,1,3,5,9],[1,7,5,0,9,8,3,4,2,6],[6,1,2,3,0,4,5,9,7,8],
+        [3,6,7,4,2,0,9,5,8,1],[5,8,6,9,7,2,0,1,3,4],[8,9,4,5,3,6,2,0,1,7],[9,4,3,8,6,1,7,2,0,5],[2,5,8,1,4,3,6,7,9,0]]
+def damm(digits):
+    i = 0
+    for d in digits: i = DAMM[i][int(d)]
+    return i
+def tlv(b, i):
+    tag = b[i]; n = b[i + 1]; i += 2
+    if n & 0x80:
+        k = n & 0x7F; n = int.from_bytes(b[i:i + k], "big"); i += k
+    return tag, i, i + n
+def spki(der):
+    """A certificate's SubjectPublicKeyInfo TLV: the 6th field of TBSCertificate after the optional [0] version."""
+    _, cs, _ = tlv(der, 0); _, ts, te = tlv(der, cs)
+    fields, i = [], ts
+    while i < te:
+        tag, _, end = tlv(der, i); fields.append((tag, i, end)); i = end
+    if fields[0][0] == 0xA0: fields = fields[1:]
+    _, start, end = fields[5]
+    return der[start:end]
+SPKI_PREFIX = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
+def parse_link(url):
+    u = urllib.parse.urlsplit(url)
+    if u.scheme.lower() != "sill" or u.netloc.lower() != "pair": raise ValueError("--pair-url: not a sill://pair link")
+    q = urllib.parse.parse_qs(u.query, keep_blank_values=True)
+    one = lambda k: (q.get(k) or [None])[0] if len(q.get(k, [])) == 1 else None
+    if one("v") != "1": raise ValueError("--pair-url: v is not 1")
+    k = b64u_decode(one("k") or ""); sec = b64u_decode(one("s") or "")
+    if len(k) != 32 or len(sec) != 16: raise ValueError("--pair-url: k or s malformed")
+    if one("m") != macid(k): raise ValueError("--pair-url: m is not the Mac ID of k")
+    p = int(one("p") or "0")
+    if not 1 <= p <= 65535: raise ValueError("--pair-url: p malformed")
+    return {"fp": k, "secret": sec, "port": p, "name": one("n") or "Mac", "addresses": q.get("a", []), "macID": one("m")}
+def ensure_identity(d):
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    key, cert = os.path.join(d, "key.pem"), os.path.join(d, "cert.pem")
+    if not os.path.exists(cert):
+        subprocess.run(["/usr/bin/openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-param_enc", "named_curve", "-out", key],
+                       check=True, capture_output=True)
+        os.chmod(key, 0o600)
+        subprocess.run(["/usr/bin/openssl", "req", "-x509", "-new", "-key", key, "-subj", "/CN=sillclient", "-days", "3650", "-out", cert],
+                       check=True, capture_output=True)
+    der = base64.b64decode("".join(l for l in open(cert).read().splitlines() if "-----" not in l))
+    return key, cert, hashlib.sha256(spki(der)).digest()
+def tls_connect(alpn, pin):
+    """TLS 1.3 to the remote door with this client's identity and one ALPN. `pin` (32 bytes) must equal
+    the Mac's SPKI hash or the script exits 3 before sending a byte; None accepts any key (the typed
+    pairing path, and --pin=none). Returns (socket, the Mac's fingerprint)."""
+    key, cert, _ = ensure_identity(identity_dir)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3; ctx.maximum_version = ssl.TLSVersion.TLSv1_3
+    ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE        # trust is the pin below
+    ctx.load_cert_chain(cert, key)
+    ctx.set_alpn_protocols([alpn])
+    raw = socket.create_connection((host, port), timeout=10)
+    s = ctx.wrap_socket(raw, server_hostname="sill")
+    fp = hashlib.sha256(spki(s.getpeercert(binary_form=True))).digest()
+    if pin is not None and fp != pin:
+        print(f"PIN MISMATCH: the Mac presented {b64u(fp)[:10]}…, expected {b64u(pin)[:10]}…; nothing sent"); s.close(); sys.exit(3)
+    got = s.selected_alpn_protocol()
+    if got != alpn:
+        print(f"ALPN MISMATCH: {got!r}"); s.close(); sys.exit(4)
+    print(f"  tls {s.version()} {s.cipher()[0]} alpn {got}, the Mac {b64u(fp)[:10]}…{' (pinned)' if pin else ''}")
+    return s, fp
+def read_message(s, timeout):
+    s.settimeout(timeout); buf = b""
+    while len(buf) < 14:
+        c = s.recv(14 - len(buf))
+        if not c: return None
+        buf += c
+    kind, ts, key, ln = struct.unpack(">BdBI", buf)
+    payload = b""
+    while len(payload) < ln:
+        c = s.recv(ln - len(payload))
+        if not c: return None
+        payload += c
+    return kind, payload
+def verify_macinfo(payload, pin):
+    """kind 18: the signature with openssl over the exact info bytes, the Mac ID against the key,
+    and the key against the pin when there is one. Returns (verified, info dict)."""
+    d = json.loads(payload)
+    info = base64.b64decode(d["info"]); point = base64.b64decode(d["key"]); sig = base64.b64decode(d["sig"])
+    spki_der = SPKI_PREFIX + point
+    with tempfile.TemporaryDirectory() as t:
+        open(os.path.join(t, "pub.pem"), "w").write("-----BEGIN PUBLIC KEY-----\n" + base64.encodebytes(spki_der).decode() + "-----END PUBLIC KEY-----\n")
+        open(os.path.join(t, "info"), "wb").write(info); open(os.path.join(t, "sig"), "wb").write(sig)
+        r = subprocess.run(["/usr/bin/openssl", "dgst", "-sha256", "-verify", os.path.join(t, "pub.pem"), "-signature", os.path.join(t, "sig"),
+                            os.path.join(t, "info")], capture_output=True, text=True)
+    fp = hashlib.sha256(spki_der).digest(); i = json.loads(info)
+    ok = r.returncode == 0 and "Verified OK" in r.stdout and i.get("macID") == macid(fp) and (pin is None or fp == pin)
+    return ok, i
+def pair():
+    """One pairing connection (ALPN sill-pair/1): kind 19 out, kind 20 back. Saves the Mac on ok."""
+    key, cert, fp_dev = ensure_identity(identity_dir)
+    if pair_url:
+        s, fp_mac = tls_connect("sill-pair/1", link["fp"])
+        k, method = link["secret"], "qr"
+    else:
+        s, fp_mac = tls_connect("sill-pair/1", None)
+        t0 = time.time()
+        k = hashlib.pbkdf2_hmac("sha256", pair_code.encode(), b"sill-pair-v1" + fp_mac, 600_000, 32); method = "code"
+        print(f"  code key derived in {1000 * (time.time() - t0):.0f} ms")
+    proof = hmac.new(k, b"sill-pair-v1 device\x00" + fp_dev + fp_mac, hashlib.sha256).digest()
+    req = {"v": 1, "method": method, "proof": b64u(proof), "name": device, "model": "sillclient"}
+    s.sendall(msg(19, json.dumps(req).encode()))
+    try:
+        m = read_message(s, 15)
+    except (OSError, ssl.SSLError) as e:
+        print(f"PAIR FAIL: {e}"); return False
+    s.close()
+    if m is None or m[0] != 20: print(f"PAIR FAIL: no kind 20 ({m[0] if m else 'EOF'})"); return False
+    r = json.loads(m[1]); print(f"  pairResult: {json.dumps(r, sort_keys=True)}")
+    if not r.get("ok"): print(f"PAIR FAIL: {r.get('reason')}"); return False
+    want = hmac.new(k, b"sill-pair-v1 mac\x00" + fp_mac + fp_dev, hashlib.sha256).digest()
+    if not hmac.compare_digest(b64u_decode(r.get("proof", "")), want): print("PAIR FAIL: proof_M does not check"); return False
+    if r.get("macID") != macid(fp_mac): print("PAIR FAIL: macID is not the Mac's key"); return False
+    with open(os.path.join(identity_dir, "mac.json"), "w") as f:
+        json.dump({"fingerprint": b64u(fp_mac), "macID": r["macID"], "name": r.get("name"), "recognitionKey": r.get("recognitionKey")}, f)
+    print(f"PAIR ok: {r.get('name')} ({r['macID']}), proof_M checked, pin saved")
+    return True
+
 args = sys.argv[1:]
 pos = [a for a in args if not a.startswith("--")]
 flags = [a for a in args if a.startswith("--")]
@@ -73,24 +240,80 @@ try:
     port = number(pos[0], "PORT"); dur = number(pos[1], "seconds", float) if len(pos) > 1 else 12
     sel = source(pos[2] if len(pos) > 2 else "desktop")
     for i, a in enumerate(flags):
-        name, _, body = a[2:].partition("=")
+        bare = re.fullmatch(r"--(stop-ping|stop-read|pairing-wanted)@([^=]*)", a)     # timed flags without a value
+        name, _, body = (bare.group(1), "", "@" + bare.group(2)) if bare else a[2:].partition("=")
         if name in TIMED:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
+            if name in ("stop-ping", "stop-read", "pairing-wanted") and text: raise ValueError(f"--{name}@T takes no value")
             parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
                       else number(text, "--fps-after") if name == "fps-after" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
-        elif a not in ("--junk", "--stats") and not a.startswith(("--fps=", "--expect=")):
+        elif name in VALUED:
+            if not body: raise ValueError(f"--{name} needs a value")
+            if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
     fps_now = next((number(a[6:], "--fps") for a in flags if a.startswith("--fps=")), None)
+    def valued(name, default=None):
+        return next((a.partition("=")[2] for a in flags if a.startswith(f"--{name}=")), default)
+    host = valued("host", "127.0.0.1")
+    device = unescape(valued("device")) if valued("device") is not None else None
+    big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
+    flood = number(valued("flood"), "--flood") if valued("flood") else 0
+    tls = "--tls" in flags or valued("pair-url") is not None or valued("pair-code") is not None
+    identity_dir = valued("identity")
+    pair_url = valued("pair-url"); pair_code = valued("pair-code"); pin_arg = valued("pin")
+    expect_tls_fail = "--expect-tls-fail" in flags
+    if tls and not identity_dir: raise ValueError("--tls, --pair-url and --pair-code need --identity=DIR")
+    if pair_url and pair_code: raise ValueError("--pair-url or --pair-code, not both")
+    if pair_url: link = parse_link(pair_url)
+    if pair_code:
+        pair_code = re.sub(r"[ -]", "", pair_code)
+        if not re.fullmatch(r"\d{12}", pair_code): raise ValueError("--pair-code: 12 digits")
+        if damm(pair_code) != 0: raise ValueError("--pair-code: the check digit does not match (a typo)")
+    if pin_arg and pin_arg != "none" and len(b64u_decode(pin_arg)) != 32: raise ValueError("--pin: a base64url SHA-256 or none")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
-stats = "--stats" in flags
+stats = "--stats" in flags or device is not None
+device = device if device is not None else "sillclient"
 
-s = socket.create_connection(("127.0.0.1", port), timeout=5); s.settimeout(0.25)
-s.sendall(msg(6, json.dumps(sel).encode()))
+if flood:
+    # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
+    # growth) and must not log them as clients.
+    for _ in range(flood):
+        f = socket.create_connection((host, port), timeout=5)
+        f.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        f.close()
+    print(f"  flood: {flood} connections opened and reset before sending")
+mac_pin = None
+if tls:
+    if pair_url or pair_code:
+        if not pair(): sys.exit(1)
+    saved = os.path.join(identity_dir, "mac.json")
+    if pin_arg == "none": mac_pin = None
+    elif pin_arg: mac_pin = b64u_decode(pin_arg)
+    elif os.path.exists(saved): mac_pin = b64u_decode(json.load(open(saved))["fingerprint"])
+    elif pair_url: mac_pin = link["fp"]
+    else: print("sillclient.py: no saved Mac in --identity; pair first or give --pin", file=sys.stderr); sys.exit(2)
+    if dur <= 0: sys.exit(0)
+    try:
+        s, _ = tls_connect("sill/1", mac_pin)
+    except (OSError, ssl.SSLError) as e:
+        print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
+else:
+    s = socket.create_connection((host, port), timeout=5)
+s.settimeout(0.25)
+try:
+    s.sendall(msg(6, json.dumps(sel).encode()))
+except (OSError, ssl.SSLError) as e:
+    print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
+if big_payload:
+    # A header that announces far more than any client message; nothing of it follows.
+    s.sendall(struct.pack(">BdBI", 200, time.time(), 0, big_payload))
+    print(f"  sent a header announcing {big_payload} payload bytes")
 if "--junk" in flags:
     # Kinds this host does not know: it must skip their payloads and keep serving.
     s.sendall(msg(200, b"hello") + msg(201) + msg(6, json.dumps(sel).encode()))
@@ -115,6 +338,7 @@ def describe(d):
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; rtt = None; first_frame = None; ps_seen = []
 token = 1; last_state = None; settings_msgs = 0
+pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
@@ -130,38 +354,66 @@ def fire(e, now):
         s.sendall(msg(6, json.dumps(parsed).encode())); print(f"  sent pick {text} at {at}")
     elif name == "fps-after":
         s.sendall(viewport(parsed)); print(f"  sent viewport fps={parsed} at {at}")
+    elif name == "stop-ping":
+        global pinging; pinging = False; print(f"  stopped pinging at {at}")
+    elif name == "stop-read":
+        global reading; reading = False; print(f"  stopped reading at {at}")
+    elif name == "pairing-wanted":
+        s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
         fire(events.pop(0), now)
-    if now >= nextping:
-        s.sendall(msg(10, struct.pack(">d", now))); nextping = now + 1
-    if stats and now >= nextstats:
-        s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": "sillclient"}).encode())); nextstats = now + 1
+    try:
+        if pinging and now >= nextping:
+            s.sendall(msg(10, struct.pack(">d", now))); nextping = now + 1
+        if pinging and stats and now >= nextstats:
+            s.sendall(msg(12, json.dumps({"fps": 0, "frameAgeMs": 0, "rttMs": 0, "device": device}).encode())); nextstats = now + 1
+    except OSError as e:
+        print(f"send failed at {now - t0:.2f}s: {e}"); break
+    if not reading:
+        # A client that stopped draining: nothing is read, so the host's queue to it fills.
+        time.sleep(0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now)))
+        if now - last >= 1: print(f"t={now-t0:4.1f}s (not reading)"); last = now
+        continue
     # Wake in time for the next timed send (a few ms matter for the race checks).
     wait = 0.25 if not events else min(0.25, max(0.001, t0 + events[0][0] - now))
     s.settimeout(wait)
     try:
         chunk = s.recv(1 << 20)
-        if not chunk: print("EOF from host"); break
+        if not chunk: print(f"EOF from host at {time.time() - t0:.2f}s"); break
         buf += chunk
     except socket.timeout: pass
+    except OSError as e:
+        print(f"read failed at {time.time() - t0:.2f}s: {e}"); break
     while len(buf) >= 14:
         kind, ts, key, ln = struct.unpack(">BdBI", buf[:14])
         if len(buf) < 14 + ln: break
         payload = buf[14:14+ln]; buf = buf[14+ln:]
-        name = KIND.get(kind, str(kind)); bump(name)
+        name = KIND.get(kind, str(kind)); bump(name); served = True
+        if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13): first_kinds.append(kind)
         if kind == 1:
             frames += 1; kb += ln / 1024
-            if key: keys += 1
+            ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
+            w = int((time.time() - t0) // 5); window_frames[w] = window_frames.get(w, 0) + 1
+            if key: keys += 1; key_times.append(round(time.time() - t0, 2))
             if first_frame is None:
                 first_frame = time.time() - t0; print(f"  first frame at {first_frame:.2f}s, {ln} bytes, key={key}")
         elif kind == 0:
             ps_seen.append(round(time.time() - t0, 2)); print(f"  parameter sets at {ps_seen[-1]}s ({ln} bytes)")
         elif kind == 11:
-            rtt = (time.time() - struct.unpack(">d", payload)[0]) * 1000
+            rtt = (time.time() - struct.unpack(">d", payload)[0]) * 1000; rtts.append(rtt)
         elif kind == 2:
             d = json.loads(payload); print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}")
+        elif kind == 18:
+            ok, i = verify_macinfo(payload, mac_pin)
+            addrs = ",".join(f"{a['host']}{':' + str(a['port']) if a.get('port') else ''}/{a['kind']}/{a['via']}" for a in i.get("addresses", []))
+            print(f"  macInfo at {time.time()-t0:.3f}s: verified={1 if ok else 0} macID={i.get('macID')} name={i.get('name')!r} "
+                  f"remoteAccess={1 if i.get('remoteAccess') else 0} port={i.get('remotePort')} internet={1 if i.get('internet') else 0} addresses=[{addrs}]")
+        elif kind == 20:
+            print(f"  pairResult at {time.time()-t0:.3f}s: {payload.decode(errors='replace')}")
+        elif kind == 22:
+            print(f"  goodbye at {time.time()-t0:.3f}s: {json.loads(payload).get('reason')}")
         elif kind == 16:
             settings_msgs += 1
             try:
@@ -177,6 +429,21 @@ while time.time() - t0 < dur:
         per = {}; last = now
 print(f"TOTAL {frames} frames ({keys} key) {kb:.0f} kB in {dur:.0f}s = {frames/dur:.1f} fps; kinds={tot}")
 print(f"settings messages: {settings_msgs}")
+def runs(ks):
+    out = []
+    for k in ks:
+        if out and out[-1][0] == k: out[-1][1] += 1
+        else: out.append([k, 1])
+    return " ".join(f"{k}×{n}" if n > 1 else str(k) for k, n in out)
+print(f"first kinds: {runs(first_kinds[:200])}")
+if expect_tls_fail:
+    print("EXPECT-TLS-FAIL ok: refused" if not served else "EXPECT-TLS-FAIL FAIL: a session was served")
+    if served: sys.exit(1)
+def pct(v, q):
+    v = sorted(v); return v[min(len(v) - 1, int(round(q * (len(v) - 1))))] if v else float("nan")
+windows = [window_frames.get(w, 0) for w in range(int(dur // 5))]
+print(f"LINK rtt p50 {pct(rtts, .5):.1f} p95 {pct(rtts, .95):.1f} max {max(rtts) if rtts else float('nan'):.1f} ms over {len(rtts)} pongs; "
+      f"keyframes at {key_times}; frames per 5 s {windows}; frame age p50 {pct(ages, .5):.2f} p95 {pct(ages, .95):.2f} ms")
 s.close()
 if expect is not None:
     problems = []

@@ -3,7 +3,9 @@ import Foundation
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
 /// from a network one, the word each row shows for how its Mac is reachable and the one the
 /// Settings panel shows for the session's own connection, which interface a "Wired" row is dialled
-/// on, when a reconnect may take a Direct row, and when a session over AWDL moves to the network.
+/// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network, and,
+/// for the Macs this device paired with, when they show as Remote rows and when a lost one is
+/// dialed away from home.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -239,8 +241,9 @@ enum DiscoveryPolicy {
         return next
     }
 
-    /// What the network browser has shown of each Mac, by Bonjour name, for the two decisions that
-    /// must not trust one moment's view of it.
+    /// What the network browser has shown of each Mac, for the decisions that must not trust one
+    /// moment's view of it: by Bonjour name for a reconnect's Direct row and the move
+    /// (StreamClient.sightings), by Mac ID for a saved Mac's remote dial (StreamClient.savedSightings).
     struct NetworkSightings: Equatable {
         /// Listed now, each since when without a break.
         var since: [String: Double] = [:]
@@ -308,5 +311,43 @@ enum DiscoveryPolicy {
         var next = list.filter { $0 != mac }
         if on { next.insert(mac, at: 0) }
         return Array(next.prefix(memoryCap))
+    }
+
+    // MARK: Saved Macs away from home (docs/remote-access-plan.md §7.3–7.4)
+
+    /// A saved Mac that no browser lists shows as a Remote row once the network has had this long.
+    static let remoteWait = 3.0
+    /// After a session ends by itself, automatic remote dials stop this long after the loss.
+    static let redialWindow = 120.0
+    /// A failed automatic remote dial is tried again after 2, 4, 8, then every 10 s.
+    static let remoteRetry: [Double] = [2, 4, 8, 10]
+
+    /// The Remote rows: saved Macs that neither browser lists, in the order given, once the
+    /// network has had its `networkFirst` seconds, or at once when Local Network access is denied
+    /// (then they are the only route left).
+    static func remoteRows(saved: [(macID: String, name: String)], listedIDs: Set<String>, now: Double,
+                           searchingSince: Double, localNetworkDenied: Bool) -> [(macID: String, name: String)] {
+        guard localNetworkDenied || now >= searchingSince + networkFirst else { return [] }
+        return saved.filter { !listedIDs.contains($0.macID) }
+    }
+
+    /// Whether an automatic remote dial of a lost saved Mac is due now, or when to look again. Never
+    /// while a network or Direct row lists it (the row takes it), never once `redialWindow` has
+    /// passed. Due `remoteWait` after the loss (`directWait`, the wait an automatic reconnect gives
+    /// a Direct row, for a Mac remembered with Direct Wireless on), and not within `networkGrace` of
+    /// the network last listing it, the moment its row went (`NetworkSightings.leftAt`; a Mac the
+    /// network listed moments ago is taken to be blinking, not gone) unless this device's path
+    /// changed since the loss (it left home, or Wi‑Fi became cellular).
+    static func remoteDialDue(listed: Bool, lostAt: Double, networkLeftAt: Double?, rememberedDirect: Bool,
+                              pathChangedSinceLoss: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
+        guard !listed, now < lostAt + redialWindow else { return (false, nil) }
+        var due = lostAt + (rememberedDirect ? directWait : remoteWait)
+        if !pathChangedSinceLoss, let left = networkLeftAt { due = max(due, left + networkGrace) }
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// The wait before the next automatic remote dial after `failures` failed ones.
+    static func remoteRetryDelay(afterFailures failures: Int) -> Double {
+        remoteRetry[min(max(failures, 1), remoteRetry.count) - 1]
     }
 }

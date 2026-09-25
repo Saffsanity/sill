@@ -4,7 +4,7 @@ import SillHostCore
 
 /// The Settings window's tabs.
 enum SettingsTab: String, CaseIterable {
-    case general, streaming, virtualDisplay, permissions
+    case general, streaming, virtualDisplay, permissions, remoteAccess
 
     var title: String {
         switch self {
@@ -12,6 +12,7 @@ enum SettingsTab: String, CaseIterable {
         case .streaming: "Streaming"
         case .virtualDisplay: "Virtual Display"
         case .permissions: "Permissions"
+        case .remoteAccess: "Remote Access"
         }
     }
 
@@ -21,6 +22,7 @@ enum SettingsTab: String, CaseIterable {
         case .streaming: "play.rectangle"
         case .virtualDisplay: "display"
         case .permissions: "lock.shield"
+        case .remoteAccess: "globe"
         }
     }
 }
