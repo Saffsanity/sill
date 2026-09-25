@@ -101,9 +101,30 @@ setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 `prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
 
-Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
-Scripts/make-app.sh --release` (it refuses to finish with any other kind of
-signature, which notarization would reject), then `ditto -c -k --keepParent
+Updates: once a day (and when you click Check Now in Settings › General),
+Sill asks GitHub (api.github.com) whether a newer Sill has been released, and
+when one has, the menu offers "Sill 0.4 Is Available…" and Settings › General
+says so; either opens the release's page on GitHub, where you download it.
+Sill never downloads or installs anything by itself, and a failed check is one
+line in the log and in Settings, never an alert. The request carries the Mac's
+IP address (like any visit to a website) and Sill's version in its User-Agent
+("Sill/0.3.0"), and nothing else: no identifier, no cookie, nothing about your
+devices. "Check for updates automatically" turns the daily check off (what an
+earlier check found stays in the menu); the check needs a published GitHub
+release, so while the repository has none it logs "GitHub has no release of
+Sill (HTTP 404)" once a day. It keeps `updateLastCheck`, `updateETag`,
+`updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`; to make the
+next launch check again after 30 s: `for k in updateLastCheck updateETag
+updateLatestTag updateLatestURL; do defaults delete me.saffer.sill.mac $k;
+done` (`defaults delete` takes one key at a time).
+
+Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
+CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
+tag v0.4.0`), and its GitHub release is published (not a draft, not a
+prerelease) with the notarized zip attached; every Sill.app's update check
+compares that tag with the version it runs. `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
+Scripts/make-app.sh --release` (it refuses a HEAD without that tag, and refuses
+to finish with any other kind of signature, which notarization would reject), then `ditto -c -k --keepParent
 .build/Sill.app .build/Sill.zip`, `xcrun notarytool submit .build/Sill.zip --keychain-profile
 sill-notary --wait` and `xcrun stapler staple .build/Sill.app`. Store the
 notary credentials in the keychain profile yourself first
@@ -173,6 +194,14 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
+
+Every connection starts with the device's hello (its Sill version, build and
+name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
+on the device answers with a notice instead of a stream: the connect screen
+shows the Mac's words ("Update Sill on your iPad to keep using Mac mini. It
+needs version 1.2 or later."), with "Update Sill in the App Store" under them
+once the app has its App Store address, and the device does not reconnect by
+itself. Today's Macs refuse no device.
 
 The project is a plain Xcode project checked in by hand: four source files,
 an asset catalog, and the package reference. Nothing else.

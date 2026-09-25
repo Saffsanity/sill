@@ -1187,4 +1187,219 @@ Commit messages end with the session's attribution lines.
 
 ## Results
 
-Filled in by step 6.
+Implemented 2026-09-25 on `update-notice` (from `remote-access` at cb0ec55): the protocol
+(3a2470b), the host (0d93a5f), the device's goodbye rule on its own (1024830, the fix that can also
+go into PR #13), the hello and the notice (19214e4), the update check (a20b00f), two commits of
+review fixes (6390d4f, 93c32ae), then these docs. Not pushed.
+
+### Defaults taken
+
+All thirteen open questions at their defaults: a kind 23 hello; the version and protocol in every
+window list, shown nowhere; the refusal names the Mac; the floor a build constant ("0"); pairing not
+gated; a found update stays offered with automatic checks off; no glyph change; no App Store link
+until the placeholder is replaced; `--release` needs the tag; the home refusal's flash accepted;
+stacked on #13; 0–30 minutes of jitter; older development builds loop against a refusing host.
+
+### Where the build departs from the plan, and why
+
+- **`Accept-Language: en` on every check.** URLSession adds the Mac's preferred languages
+  (`en-US,en;q=0.9` here, seen by the fake feed) unless the header is set; fixed to "en" it says
+  nothing about the Mac. It also adds Host, Accept-Encoding and Connection, which say nothing either.
+  §6.2's list of headers is these plus the four the plan names.
+- **The pane's line, first match wins:** a check running, this run's Check Now result, *then* why
+  Sill cannot check (no version; test pattern mode without a test feed), then an offer, the last
+  check, never. §6.7's table put the two "cannot check" rows last, where "Not checked yet." would
+  always have matched first.
+- **A hello without a version is refused as "(no version)"** in the Refused line (§4.5 names only
+  "Sill 1.0" and "an older Sill").
+- **`UpdateChecker` imports StreamProtocol** (for SillVersion) besides Foundation and Observation;
+  the swiftc checks drop that import and compile Compatibility.swift alongside, as they do for
+  DeviceGate and GoodbyePolicy.
+- **`-SillPrintMenuAfter <s>`** (a test argument, in release builds like the others): the status
+  menu as it would open, as menu.txt draws it, and the pane's update line, in the log, so H8 sees the
+  live item without a click. `MenuBuilder.entries(for:)` builds that menu and the real one.
+- **`make-app.sh --release` reads `git tag --points-at HEAD`** rather than `git describe
+  --exact-match`, which names one tag when HEAD carries several.
+- **The hello is built on the main thread** (in `StreamClient.init`): it reads UIDevice for the
+  device's name, and connections become ready, and send it, on the network queue.
+- **The gate's goodbye closes with a FIN and a drain**, not `sayGoodbye`'s cancel on
+  `.contentProcessed`: cancelled with what the device sent after its first message still unread,
+  TCP answered with a reset (sillclient, which sends on after its hello, got the goodbye and then
+  ECONNRESET 20 times in 20 in a loopback A/B), and on a real link a reset can reach the device
+  before it has read the notice. Now the goodbye goes with this side's FIN, what the device still
+  sends is read and dropped until it closes (at most `DeviceGate.closeWait`, 1 s), and then the
+  connection is cancelled: 0 resets in 20. Only the gate's connections, never registered, close this
+  way; the five older goodbyes keep `sayGoodbye`.
+- **Test rig:** the bare binary ran as a copy named `SillMenuBarUN`, so its defaults domain is
+  `SillMenuBarUN` and no other worktree's run shares it; the simulator runs used a simulator of this
+  stage's own ("iPad update-notice", iPad Pro 13-inch (M5), iOS 27.0; the simulator's app reports
+  that name, and a name that starts with "iPad" gets "your iPad" in the refusal) rather than
+  40522E9E, which other sessions use, with the app built ad hoc signed (`CODE_SIGN_IDENTITY=-`) for
+  the remote door's runs: unsigned, its device key cannot be made, and pairing stops without a line;
+  `sillfeed.py` gained `--no-etag`, `--big`, `--redirect`,
+  `--set-cookie`, `--bind`, `--all-headers` and `/__control`, and its default ETag follows its
+  body, as GitHub's does.
+
+### Verified
+
+- **H1, builds.** A clean `swift build -c release` of the final commit (a `git archive` copy):
+  only the old CaptureProbe warning. iOS Debug for the simulator and for a device (build only,
+  unsigned), and Release for the simulator, each from fresh derived data: only the old
+  `StreamClient` capture warning. `make-app.sh` without `--install`: `.build/Sill.app` 0.3.0 (91),
+  signed with the Apple Development identity; nothing installed.
+- **H3, pure checks with swiftc, each with its mutants.** The protocol (SillVersion and the
+  payloads): 74 checks, 13 of 13 mutants caught; every §3.2 example, tags with and without "v",
+  "0.3.0 (85)" equal to 0.3.0, "0.10" above "0.9", 1,000 random pairs against a reference, the
+  description's round trip, Hello's keys, the five goodbyes byte for byte, the update goodbye, the
+  window list with and without the new keys. DeviceGate: 58 checks, 14 of 14; floor "0" admits no
+  hello, "", "junk" and every version, floor 1.2 refuses no hello, "0.1", "1.1.9" and "junk" and
+  admits "1.2", "1.2.0", "1.10", "2"; the message for an iPad, an iPhone and another name; the
+  Refused, count and hello lines, one line whatever the device sends; the shipped constant parses
+  and is "0". GoodbyePolicy: 42 checks, 16 of 16; every row of §7.3, control and bidi characters,
+  1,000 characters, empty after cleaning, reconnect nil, true and false, saved and unsaved.
+  UpdatePolicy: 124 checks, 18 of 18; every row of §6.4 (a 304 with and without a stored release,
+  drafts, prereleases, "nightly", a page off github.com, a refused redirect, 1 MB), the offer after
+  an update and after a downgrade, a forged stored page never offered, the due rule with a clock in
+  the future, the jitter's range, loopback-only feeds, every text.
+- **H4, decode part.** cb0ec55's StreamProtocol, compiled with a check, reads the update goodbye's
+  reason, a later reason, a window list with `hostVersion` and `protocol`, and maps kind 23 to
+  `.unknown` with its length to skip.
+- **H7, the checker alone** (swiftc: UpdatePolicy, UpdateChecker and Compatibility with a driver;
+  no host) against `sillfeed.py`, which sets a cookie on every answer: 42 of 42. Every row of §6.4
+  live (200 newer and the same; 304 through If-None-Match; 404 clearing the stored release; 403
+  with a reset; 429; 500; a draft; a prerelease; "nightly"; not JSON; a page on ftp; a redirect
+  elsewhere refused; 1.5 MB refused; a closed port, -1004 in 0.03 s; the feed held 30 s, a timeout at
+  10.01 s); every request had only Host, User-Agent `Sill/0.3.0`, Accept, X-GitHub-Api-Version,
+  Accept-Language `en`, Accept-Encoding, Connection and (once a release was stored) If-None-Match,
+  never a Cookie or an Authorization; a 4 s period against a 404: 4 requests in 20.5 s; a closed port
+  retried every scaled hour (1 s): 5 in 6 s; Check Now during an automatic check: one request,
+  logged and shown as Check Now's.
+- **H9, previews** from the bare binary, base and new at the same path: 69 files identical, and
+  only `pane-general-{light,dark}` (the new section, fixed at "Not checked yet.") and `menu.txt`
+  (the `update-available` sample appended) differ; 20 new `pane-updates-*` (ten states, light and
+  dark), each looked at.
+- **H10, the hard rules.** No URLSession or api.github.com in Sources/SillHost or SillHostCLI; no
+  Authorization, Bearer or Sparkle in Sources; `minimumDeviceVersion = "0"`; the two TEST ONLY
+  variables read only by `gateSettings(testHost:)`, which returns first on a host that advertises;
+  no new `assumeIsolated` or `updateConfiguration` in Sources/SillHost (HostShutdown's one is
+  cb0ec55's); no NSAlert or runModal in the app; `-SillUpdateFeed` goes through `isLocalFeed`.
+- **H11, regression.** The remote-access protocol check on this StreamProtocol: 188 of 188 with its
+  "kind 23 is unknown" now "kind 23 is hello, 24 unknown"; the merged DiscoveryPolicy check 187 of
+  187; the remote rules checks of the remote-access build, 41 and 49. The ledger, ClientLink,
+  OriginPolicy and SessionLink (a doc comment) are unchanged.
+- **S1, photos** on this stage's simulator (`simctl io … screenshot`): `update` with and without
+  `-SillAppStoreURL` and `notice` at 1000x710 and 500x710, and also 710x1000, 710x500, 874x402,
+  402x874 and 375x667, and at accessibility-extra-large (the connect screen's type is fixed-size,
+  as before, so they match): the message wraps and never truncates, the link sits under it at
+  44 pt, nothing crosses the half-folded layout's middle, and the title stays put.
+- **`make-app.sh --release`** refuses an untagged HEAD before building ("…HEAD is tagged
+  'nothing'…", exit 2) and one tagged v0.2.0; in a scratch clone with `v0.3.0` among three tags on
+  HEAD it goes on to build.
+- **The gate on StreamServer alone** (compiled with swiftc from StreamServer, DeviceGate and what
+  they need, with a stand-in for the coordinator's catalog: no capture, no encoder), before any
+  host could run: floor 0 serves a hello'd device, an empty hello and cb0ec55's client alike, with
+  "Client hello: iPad (iPad14,1), Sill 1.0, protocol 1 (127.0.0.1:P)" and "Client hello:
+  127.0.0.1:P, no version" after their "Client connected"; floor 1.2 answers a 1.1 hello with
+  exactly one message, the update goodbye with its four fields, and EOF 2 ms later; serves 1.2 and
+  1.10; refuses cb0ec55's client (a select first), silence at 2.09 s and a 5 MB viewport header at
+  once; registers only the admitted (two "Client connected", two "Client left"); one Refused line a
+  minute per source, "(an older Sill)" for no hello; SILL_TEST_GOODBYE's payload as written, and a
+  payload that is no Goodbye ignored with one line; SILL_TEST_MIN_DEVICE_VERSION=abc ignored, floor
+  0; 20 refusals in 5 s: five at once, fifteen 2.07–2.10 s after their hello, then one Refused line
+  and "Refused 19 more connections from 127.0.0.1 in the last minute: too old for this Mac (needs
+  1.2 or later)." at the minute. After the FIN-and-drain fix, sillclient (which sends on after its
+  hello) reads the goodbye and then EOF, and a hello followed at once by 50 pings, 20 times: the
+  goodbye and EOF 20 times, 0 resets (the build before: 20 resets in 20).
+- **The device against a stand-in Mac** (`fakehost.py`: it logs a connection's first message and
+  answers with a kind 22; no encoder), the normal app on this stage's simulator by `-SillConnect`:
+  the first message is the hello (`{"appVersion":"0.1","build":"1","protocol":1,"device":"iPad
+  update-notice (iPad17,4 simulator)"}`) and nothing else came before the goodbye; "update" puts the
+  Mac's words on the connect screen ("status: Update Sill on your iPad to keep using Mac mini. It
+  needs version 99.0 or later."), the console says "not reconnecting", one connection in 30 s; with
+  `-SillAppStoreURL` the live screen shows "Update Sill in the App Store" under it (photo); a reason
+  it does not know shows its message and says "not reconnecting" with `"reconnect":false`,
+  "reconnecting" with true; a kind 22 that does not decode gives "127.0.0.1:P closed the connection.
+  Tap it to try again." and no reconnect; "quit" keeps its words.
+- **Host runs, under the encoder rule** (each start checked Noah's Sill.log first; the runs that
+  stream were watched and would have been stopped had a device connected to his Sill.app): three
+  windows, 17:31–17:38, 17:49–17:58 and 17:59–18:04, on 6390d4f and then on the final build; the
+  first idle baseline of cb0ec55 at 15:54.
+- **H2, the CLI byte for byte** against cb0ec55, `SillHost --synthetic` idle 35 s and with one
+  Desktop pick for 8 s (cb0ec55's sillclient.py for both builds): masked and sorted, `[1s]` lines
+  dropped, identical, idle (6 lines) and with the client (10 lines), on 6390d4f and again on the
+  final build; the `[1s]` lines' Stats keys the same (enc.out, enc.probeOK idle; cap.complete,
+  cursor.shape, enc.mailboxDrop, enc.out, enc.probeOK, net.sent, net.tick streaming); the distinct
+  masked `[1s]`/`[30s]` lines identical on 6390d4f and, on the final build, one more because
+  cursor.shape landed in a later second (the Mac's own cursor moved: its count, not a key).
+- **H4 live:** cb0ec55's `SillHost --synthetic` with `sillclient.py --hello=1.0,1`: served, the
+  catalog as always (`2 16 4×119 5 2`), nothing new printed (it skips kind 23).
+- **H5** (floor 0, the real CLI): "Client hello: iPad (iPad14,1), Sill 1.0, protocol 1
+  (127.0.0.1:P)" and "Client hello: 127.0.0.1:P, no version", both served with the catalog in its
+  usual order, no refusal; the stats line names the device.
+- **H6 on the real CLI** (`SILL_TEST_MIN_DEVICE_VERSION=1.2`), passed on the final build: (a) one
+  message, kind 22 `{"minimumVersion":"1.2","reason":"update","message":"Update Sill on your iPad to
+  keep using Noah’s MacBook Pro. It needs version 1.2 or later.","reconnect":false}`, EOF 2 ms later,
+  one Refused line, no Client connected/Catalog/left for it, and sillclient (which sends on) reads
+  the goodbye and a clean EOF; (b) 1.2 and 1.10 served; (c) cb0ec55's sillclient refused as "an older
+  Sill"; (d) silence refused at 2.075 s; (e) 20 in 5 s: five at once, fifteen at 2.03–2.10 s, one
+  Refused line and "Refused 19 more connections from 127.0.0.1 in the last minute…"; (f) the remote
+  door (`--remote`, SILL_TEST_REMOTE_DIR): paired, a `--tls --hello=1.1` session gets the update
+  goodbye inside TLS and no "Remote client connected", a 1.2 one is served; (g) SILL_TEST_GOODBYE's
+  payload as written, a non-Goodbye payload ignored with its line; (h) `abc` ignored, floor 0.
+  cb0ec55's client is served at floor 0 (nothing new printed) and refused at floor 0.1.
+- **H8, Sill.app end to end** (on 6390d4f; the bare SillMenuBar as `SillMenuBarUN --synthetic`,
+  against `sillfeed.py`): run 1 (`-SillUpdateFeed`, `-SillUpdateVersion 0.3.0`, `-SillUpdateNow 1`): one
+  request (`User-Agent 'Sill/0.3.0'`, no Cookie, no If-None-Match), "Update check: Sill 0.4 is
+  available (this is 0.3.0): https://github.com/Saffsanity/sill/releases/tag/v0.4.0", the live menu
+  (`-SillPrintMenuAfter`) with "Sill 0.4 Is Available…  — You have 0.3; opens its download page"
+  right after the card, the pane's line "Sill 0.4 is available.", the four keys in the defaults,
+  exit 0; run 2 (no Check Now, 40 s): "Update: Sill 0.4 is available (found by an earlier check).",
+  the item, no request; run 3 (`-SillUpdateInterval 4 -SillSetAfter '2 updateCheck=0'`): "Update
+  check: automatic checks off.", saved, no request; run 4 (Check Now in test pattern mode without a
+  feed): "SillUpdateNow ignored: …", no request, and at 35 s its only socket the listener's; run 5
+  (the feed at v0.3.0): "Update check: up to date (this is 0.3.0; the latest release is v0.3.0).",
+  no item, the pane "Sill is up to date."; run 6: a 200 stores the ETag, the next check sends it and
+  gets 304, and still offers 0.4; run 7 (a 404, automatic at a 6 s period): one request, one "Update
+  check failed: GitHub has no release of Sill (HTTP 404)." line, no item, the pane "Last checked …",
+  the stored release cleared.
+- **The simulator against real hosts** (the normal app, `-SillConnect`): S2 (floor 99, the final
+  build): "status: Update Sill on your iPad to keep using Noah’s MacBook Pro. It needs version 99.0
+  or later.", the host's one line "Refused iPad update-notice (iPad17,4 simulator) (Sill 0.1): needs
+  99.0 or later.", no Client connected, no second connection in 60 s, "not reconnecting" (photo
+  `s2-live-refusal`); S3 (on 6390d4f; floor 0.1, and 1.2 with `-SillHelloVersion 1.2`): admitted with one
+  "Client hello: iPad update-notice (iPad17,4 simulator), Sill 0.1 (1), protocol 1 (…)" (1.2 with
+  the argument), streamed, "host: no version, protocol 1"; S4 at home (SILL_TEST_GOODBYE,
+  `pairingRequired`): the message as the status line, "not reconnecting" with false, "reconnecting"
+  with true; S6 (cb0ec55's host): streamed as always, no hello line on the host, "host: no version (a
+  Mac from before 2026-09-25)". Through the remote door (`--remote`, the app ad hoc signed so it has
+  a keychain, paired at launch with `-SillPairURL`): S4 with `"reconnect":false`, paired, the
+  after-pairing dial ready "by address", the Mac's words as the status line, "not reconnecting", one
+  session connection in 60 s, never "isn’t accepting remote connections"; with true, redialled
+  automatically ("Reconnecting to … remotely…", then the words again), 12 session connections in the
+  minute (the host's count line: 11 more; about 5 s apart, the redial's 3 s and, from the sixth, the
+  gate's 2 s); S5 (floor 99): "Update Sill on your iPad to keep using Noah’s MacBook Pro. It needs
+  version 99.0 or later." with the saved Mac's Remote row kept, no dial failure, one session
+  connection in 120 s, never "Remote client connected" (photo `s5-remote-refusal`).
+
+### Not verified here
+
+- **The host gates after each step:** the runs that start a host waited on the encoder rule (Noah's
+  iPad was connected to his Sill.app for most of the afternoon), so they ran on the build after the
+  update check (6390d4f) and on the final one, not after steps 2–4; what needs no host (the pure
+  checks, H7, the previews, the gate on StreamServer alone, the device against a stand-in Mac) ran as
+  each step landed.
+- **S7** (tapping the link opens the App Store page): not driven; the simulator control tool's first
+  use asks the person for permission. The link's address is SillLinks'; the photos show it.
+- **The plan's V1–V7** are Noah's (CLAUDE.md, Untested).
+
+### For the app-store-readiness branch (not merged into this base)
+
+- **site/privacy.html**, the plan's §6.10 line as written, with one addition after "(for example
+  “Sill/1.0”)": "and a fixed “en” as its language".
+- **docs/release-checklist.md**, in order: bump CFBundleShortVersionString in Packaging/Info.plist
+  and commit; `git tag v‹version›`; `make-app.sh --release` (through `release.sh`); publish the
+  GitHub release for that tag, with the zip (not a draft, not a prerelease); within a day every
+  older Sill.app offers it. And before the first upload: replace APP_STORE_URL_PLACEHOLDER in
+  iOSClient/SillLinks.swift with https://apps.apple.com/app/id‹Apple ID›.
+- **SillLinks.swift** exists on both branches: merging them is an add/add conflict to resolve by
+  keeping both enums' members in one file (and one set of pbxproj entries).
