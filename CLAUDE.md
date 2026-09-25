@@ -994,7 +994,12 @@ good.
   Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
-  Wired, Wi-Fi or Direct, the hint and Search Nearby, + DEBUG harness),
+  Wired, Wi-Fi or Direct, the hint and Search Nearby, and a footer along the
+  bottom, "Needs the free Sill app on your Mac." with links to the download
+  and the privacy policy, which open in Safari; the column stays centred where
+  it was and rises only to keep clear of the footer, and scrolls above it when
+  even that does not fit; + DEBUG harness), `SillLinks` (the site's
+  addresses, written once; sill.saffer.me is not confirmed yet),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel).

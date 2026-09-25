@@ -232,13 +232,44 @@ struct LayoutHarness: View {
 
 /// Before a Mac is picked: the Macs the browsers found, as drawer-style rows that end in how each is
 /// reachable ("Wired", "Wi-Fi", or "Direct" for one reached over peer-to-peer Wi-Fi; nothing when
-/// the device cannot tell), and, when none turns up on the network, why, with Search Nearby.
+/// the device cannot tell), and, when none turns up on the network, why, with Search Nearby. Along
+/// the bottom, a footer says Sill needs its free Mac app, where to get it, and links the privacy
+/// policy (App Review guidelines 2.1 and 5.1.1(i)). None of it shows while connected: the stream
+/// screen takes this one's place (`ContentView`).
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
 
     private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
 
+    /// The least room between the column and the footer.
+    private static let footerGap: CGFloat = 24
+    /// How far a footer link's tap area reaches above and below its words: a footnote line is about
+    /// 16 pt, so the area is about 44 pt tall at the default size. The layout never sees it (the
+    /// Settings panel's Done does the same).
+    private static let linkReach: CGFloat = 14
+
     var body: some View {
+        // The column centred on the screen, where it sat before there was a footer, and the footer
+        // along the bottom: the footer never moves the title. Only a column that would come within
+        // the gap of the footer rises to keep it. One too tall for that even at the top (many Macs
+        // on a phone held sideways) scrolls above the footer, which stays in reach, as the Settings
+        // panel keeps its header and foot.
+        ViewThatFits(in: .vertical) {
+            ColumnOverFooter(gap: Self.footerGap) {
+                column
+                footer
+            }
+            VStack(spacing: 0) {
+                ScrollView {
+                    column.padding(.vertical, 16)
+                }
+                .scrollIndicatorsFlash(onAppear: true)
+                footer.padding(.top, 8)
+            }
+        }
+    }
+
+    private var column: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Connect to a Mac")
                 .font(.system(size: 17, weight: .semibold))
@@ -302,8 +333,91 @@ struct ConnectScreen: View {
             }
         }
         // Leading, so the title never jumps sideways when the hint or the first row widens the
-        // column. Vertically it is still centred: what adds height moves it up by half as much.
+        // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
+        // by half as much.
         .frame(width: 380, alignment: .leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// For someone who found Sill here first, and for App Review: what else it needs, where to get
+    /// it, and the privacy policy. Muted and 13 pt like the status line, but it follows the text
+    /// size, up to the Settings panel's cap (the column keeps its fixed sizes); it wraps, never
+    /// truncates. Each link opens in Safari (a Link hands its URL to the environment's openURL),
+    /// and VoiceOver reads it as a link. The addresses are SillLinks'.
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Needs the free Sill app on your Mac.")
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            // Side by side while they fit on one line, else one under the other, far enough apart
+            // that their tap areas meet without overlapping. Upward the areas reach a little into
+            // the line above, which is plain text.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
+                    Text(" · ")
+                        .foregroundStyle(Palette.muted)
+                        .accessibilityHidden(true)
+                    footerLink("Privacy Policy", to: SillLinks.privacy)
+                }
+                VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                    footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
+                    footerLink("Privacy Policy", to: SillLinks.privacy)
+                }
+            }
+        }
+        .font(.footnote)
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        .padding(.horizontal, 10)
+        // Under the column's own edge, so the two line up.
+        .frame(width: 380, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        // Room for the last link's tap area, which then stays on the screen.
+        .padding(.bottom, Self.linkReach)
+    }
+
+    private func footerLink(_ title: LocalizedStringKey, to url: URL) -> some View {
+        Link(destination: url) {
+            Text(title)
+                .foregroundStyle(Palette.accent)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, Self.linkReach)
+                .contentShape(Rectangle())
+        }
+        .padding(.vertical, -Self.linkReach)
+    }
+}
+
+/// The connect screen's column and footer: the column centred in the whole height, where it sat
+/// before there was a footer, and the footer along the bottom. A column that would come within
+/// `gap` of the footer rises to keep the gap, no higher than the top. Its ideal height is both
+/// parts and the gap, so under `ViewThatFits` a column that cannot keep the gap goes to the
+/// scrolling form instead.
+private struct ColumnOverFooter: Layout {
+    let gap: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let (column, footer) = sizes(width: proposal.width, subviews) else { return .zero }
+        let needed = column.height + gap + footer.height
+        let height = proposal.height.flatMap { $0.isFinite ? max($0, needed) : nil } ?? needed
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(column.width, footer.width)
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.maxY - footer.height), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: footer.height))
+        let centred = bounds.midY - column.height / 2
+        let clear = bounds.maxY - footer.height - gap - column.height
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: max(bounds.minY, min(centred, clear))), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: column.height))
+    }
+
+    /// The column's and the footer's heights at this width, each as tall as it wants.
+    private func sizes(width: CGFloat?, _ subviews: Subviews) -> (CGSize, CGSize)? {
+        guard subviews.count == 2 else { return nil }
+        let proposal = ProposedViewSize(width: width, height: nil)
+        return (subviews[0].sizeThatFits(proposal), subviews[1].sizeThatFits(proposal))
     }
 }
