@@ -99,20 +99,18 @@ Sill
 No live app is called exactly Sill (the audit searched the App Store on
 2026-09-25; the closest is "Sill Notes", released 2026-09-15), but a name held
 by an unreleased app record doesn't show in search. If App Store Connect
-refuses it, use the first of these that it takes (2 to 30 characters, no Apple
-product name in the name itself):
+refuses it, use this (2 to 30 characters, no Apple product name in the name
+itself):
 
 ```text
 Sill – Window Streaming
 ```
 
-```text
-Sill – Remote Windows
-```
-
 The dash is an en dash (U+2013). The Home Screen label stays "Sill" whatever
 the store name is (`CFBundleDisplayName`). Keep other apps' names, Sidecar
-included, out of the name, the subtitle and the keywords (2.3.7).
+included, out of the name, the subtitle and the keywords (2.3.7), and keep
+"Windows" out of the name: in a remote display app it reads as Microsoft's
+(5.2.1).
 
 ### Subtitle (30 characters at most)
 
@@ -578,7 +576,7 @@ Safe:
 ## 10. Checked for this file
 
 - Limits, measured on the blocks in this file by a script: name 4 characters;
-  fallbacks 23 and 21; subtitle 27 of 30; promotional text 164 of 170;
+  fallback 23; subtitle 27 of 30; promotional text 164 of 170;
   description 2,062 (local-only 1,906) of 4,000 characters; keywords
   95 bytes (local-only 97) of 100, each
   keyword at least three characters, no spaces, no repeats; review notes
@@ -615,7 +613,7 @@ Apple pages as fetched on 2026-09-25 for the App Store audit (kept in the
 session scratchpad under `appstore/rules/`):
 
 - App Review Guidelines (last updated June 8, 2026): 1.5, 2.1(a), 2.3.1(a),
-  2.3.3, 2.3.4, 2.3.7, 2.3.9, 4.2.7, 5.1.1(i).
+  2.3.3, 2.3.4, 2.3.7, 2.3.9, 4.2.7, 5.1.1(i), 5.2.1.
 - App Store Connect Help: App information; Platform version information;
   Screenshot specifications; Upload app previews and screenshots; Age ratings
   values and definitions; Set an app age rating; Manage app privacy; Overview
