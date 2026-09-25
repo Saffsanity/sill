@@ -145,13 +145,20 @@ fixes of step 9's first review round (below); the rest of step 9 is next.
   carries a recognition tag (`r`) only paired devices can read.
 - Pairing: the Mac's window shows a QR code (`sill://pair?…`, pinned to the
   Mac's key) and a 12-digit code (Damm check digit; PBKDF2 600k), 5 minutes,
-  single use, five wrong tries. Sill.app: Settings › Remote Access (a fifth
-  tab: the switch, the addresses, the port, paired devices, the internet
-  switch with the router's answer, the address name, sleep), the menu's Remote
-  Access… and Pair iPhone or iPad…, identity in the login keychain
-  (`KeychainIdentityStore`; label "Sill Remote Access", service
-  `me.saffer.sill.remote`), idle sleep held off while a device is connected
-  remotely. The CLI's `--remote` uses a throwaway identity per run.
+  single use, five wrong tries, and the address to type with the code: the
+  VPN's name (Tailscale's MagicDNS name) and that VPN's IPv4 under it ("or
+  100.65.142.55"), else a VPN IP, else this network's address
+  (`PairingWindowAddress`, pure; Noah, 2026-09-25: from an iPhone's hotspot
+  this network's address answered nothing, the Tailscale name and address both
+  paired; checked with swiftc, 36 checks and 15 of 15 mutants, and
+  photographed as the previews' `pairing-novpn` and `pairing-longname`).
+  Sill.app: Settings › Remote Access (a fifth tab: the switch, the addresses,
+  the port, paired devices, the internet switch with the router's answer, the
+  address name, sleep), the menu's Remote Access… and Pair iPhone or iPad…,
+  identity in the login keychain (`KeychainIdentityStore`; label "Sill Remote
+  Access", service `me.saffer.sill.remote`), idle sleep held off while a
+  device is connected remotely. The CLI's `--remote` uses a throwaway identity
+  per run.
 - iOS: `DeviceIdentity` (a Keychain key, this device only), `SavedMacs`,
   `RemoteDialPolicy` + `RemoteConnector` (the dial order, happy-eyeballs 1 s
   apart, every failure's words), Remote rows after the network's 3 s, the
@@ -1174,7 +1181,8 @@ good.
   `SettingsPanes`, `Permissions`, `LoginItem`, `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
-  code).
+  code), `PairingWindowAddress` (the address that window gives to type: a
+  VPN's name and IPv4 first; pure, checked with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client

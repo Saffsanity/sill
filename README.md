@@ -191,8 +191,10 @@ connect (TLS 1.3, each end pinned to the other's key).
 2. Pair each device once, at home or away: Pair iPhone or iPad… in the Sill
    menu shows a QR code and a 12-digit code for five minutes. On the device,
    tap Add a Mac… at the bottom of the connect screen and point it at the
-   code, or choose Enter Code Instead and type the address and the code. A
-   device already connected at home can use Pair This iPad… at the end of its
+   code, or choose Enter Code Instead and type the address and the code the
+   window shows. The address is your VPN's name (the Tailscale MagicDNS name)
+   or the IP address under it; without a VPN, this network's address. A device
+   already connected at home can use Pair This iPad… at the end of its
    Settings panel instead; the Mac shows its code by itself.
 3. Away from home the Mac is a "Remote" row about 3 s after the connect screen
    opens (the local network gets the first 3 s); tap it. After a drop the device

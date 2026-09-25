@@ -1160,7 +1160,8 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 │                 ██ ██ ██ ▀▄█ ██ ██ ██   (220 pt)    │   scale, no interpolation, always dark on white
 │                 ██▄▄▄▄██ █▀▄ ██▄▄▄▄██               │   with a 4-module quiet zone
 │ Can’t scan? Tap Enter Code Instead, and type:       │
-│   Address   192.168.1.20                            │   this network first, else a VPN name, else a VPN IP
+│   Address   mac-mini.tail1234.ts.net                │   a VPN's name, that VPN's IPv4 under it (muted),
+│             or 100.101.102.103                      │   else a VPN IP, else this network's address (below)
 │   Code      4829 1355 7208                          │   22 pt monospaced digits, selectable
 │ Works once, for the next 4:58.                      │   updating, not announced every second
 │ A paired device can see and control this Mac.       │
@@ -1183,6 +1184,22 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   click.
 - The QR image is labelled "Pairing code image"; the code and address are plain text VoiceOver
   reads.
+- **The address to type** (`PairingWindowAddress.choose`, pure, checked with swiftc). Noah,
+  2026-09-25: pairing from an iPhone's hotspot with a typed code, this network's address
+  (10.128.0.34, which the window gave first) answered nothing, while Tailscale's 100.65.142.55 and
+  its MagicDNS name both paired. So the window shows those two instead:
+  1. the first VPN with a name (Tailscale's MagicDNS name), with that VPN's first IPv4 under it,
+     muted: "or 100.65.142.55";
+  2. else the first VPN IPv4, else the first VPN IPv6;
+  3. else this network's address (no VPN at all), as before;
+  4. else the first address listed, as before (with no VPN and no LAN address only an internet
+     address or a test host's 127.0.0.1 is left);
+  5. else "this Mac’s address".
+  - VPNs are picked by their kind and names told from IPs by the address parser, never by the
+    text. Each value carries the port when it is not 7455 (an address name's own port first).
+  - Both lines are selectable, "or" apart from the address; the window has no Copy button (the
+    pane's rows have them). The router's address and the address name stay in the pane, unless
+    nothing else is listed (step 4).
 
 #### 6.3 Status menu and card (`StatusItemController.swift`, `StatusText.swift`)
 
@@ -1243,7 +1260,9 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 - **`-SillUnpairAfter <s>`** removes every paired device.
 - **`-SillRenderPreviews`** adds:
   - `pane-remote-{off,tailscale,notconnected,novpn,internet,cgnat,doublenat,inuse,keychain}-{light,dark}.png`;
-  - `pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff}-{light,dark}.png`;
+  - `pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,longname}-{light,dark}.png`
+    (`novpn`: this network's address; `longname`: a 40-character MagicDNS name on port 17455, the
+    widest the Address row gets);
   - menu.txt's two new items;
   - a card sample with a remote device.
 - **Packaging/Info.plist:** unchanged. Listening and accepting need no Local Network access (TN3179),
@@ -2218,3 +2237,20 @@ the network (`probeMove`), which also drops a message cut short. The route line'
 no-break ones, so at larger text it wraps before the route, never inside it ("Connected" /
 "through Tailscale · 48 ms"), as the Mac card does since ee922db. CLAUDE.md's entry lists the
 checks, and the gates the review reran on the merged build.
+
+**The pairing window's address (2026-09-25, after cb0ec55).** Noah paired his iPad from an iPhone's
+hotspot with a typed code: the window gave this network's address first (10.128.0.34), which
+answered nothing from there ("Nothing answered at 10.128.0.34"), while Tailscale's 100.65.142.55 and
+noahs-macbook-pro.tailc94091.ts.net both paired. His decision: the window shows those two instead of
+the local IP; §6.2 has the rule (`PairingWindowAddress.choose`). It is the app's alone: nothing in
+Sources/SillHost, SillHostCLI or StreamProtocol changed, so the CLI's output cannot. Checked: a
+clean release build (only the CaptureProbe warning) and `make-app.sh` without `--install`; the rule
+with swiftc against StreamProtocol's sources and the real `AddressList.build`, 36 checks (Noah's
+store with and without the internet switch and its router address, no MagicDNS name, IPv6 only, a
+name with IPv6 only, several VPNs, a point-to-point tunnel, LAN only, nothing, ports 7456 and 17455,
+kinds over text, and 5,000 random runs, 1,686 of them without a VPN and equal to the window before)
+and 15 of 15 mutants caught; the previews from the bundle against cb0ec55's with the same saved
+settings: only the four waiting-state pairing samples changed, each 18 pt taller with nothing but
+the Address row's band different, plus the new `novpn` and `longname`, light and dark. The value
+column is 336.5 pt wide: Noah's name takes 229, the 40-character name on port 17455 292; a
+57-character one wraps after a hyphen and is never cut.
