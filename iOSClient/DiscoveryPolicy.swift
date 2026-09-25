@@ -112,4 +112,46 @@ enum DiscoveryPolicy {
         if on { next.insert(mac, at: 0) }
         return Array(next.prefix(memoryCap))
     }
+
+    // MARK: Saved Macs away from home (docs/remote-access-plan.md §7.3–7.4)
+
+    /// A saved Mac that no browser lists shows as a Remote row once the network has had this long.
+    static let remoteWait = 3.0
+    /// After a session ends by itself, automatic remote dials stop this long after the loss.
+    static let redialWindow = 120.0
+    /// A Mac last seen with Direct Wireless on gets this long for its Direct row before a remote
+    /// dial (the direct-wireless fixes' `directWait`, which has not landed on this base).
+    static let directWait = 6.0
+    /// A Mac the network listed this recently is taken to be blinking, not gone, unless this
+    /// device's own path changed (the fixes' `networkGrace`).
+    static let networkGrace = 10.0
+    /// A failed automatic remote dial is tried again after 2, 4, 8, then every 10 s.
+    static let remoteRetry: [Double] = [2, 4, 8, 10]
+
+    /// The Remote rows: saved Macs that neither browser lists, in the order given, once the
+    /// network has had its `networkFirst` seconds, or at once when Local Network access is denied
+    /// (then they are the only route left).
+    static func remoteRows(saved: [(macID: String, name: String)], listedIDs: Set<String>, now: Double,
+                           searchingSince: Double, localNetworkDenied: Bool) -> [(macID: String, name: String)] {
+        guard localNetworkDenied || now >= searchingSince + networkFirst else { return [] }
+        return saved.filter { !listedIDs.contains($0.macID) }
+    }
+
+    /// Whether an automatic remote dial of a lost saved Mac is due now, or when to look again. Never
+    /// while a network or Direct row lists it (the row takes it), never once `redialWindow` has
+    /// passed. Due `remoteWait` after the loss (`directWait` for a Mac remembered with Direct
+    /// Wireless on), and not within `networkGrace` of the network last listing it unless this
+    /// device's path changed since the loss (it left home, or Wi‑Fi became cellular).
+    static func remoteDialDue(listed: Bool, lostAt: Double, networkLeftAt: Double?, rememberedDirect: Bool,
+                              pathChangedSinceLoss: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
+        guard !listed, now < lostAt + redialWindow else { return (false, nil) }
+        var due = lostAt + (rememberedDirect ? directWait : remoteWait)
+        if !pathChangedSinceLoss, let left = networkLeftAt { due = max(due, left + networkGrace) }
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// The wait before the next automatic remote dial after `failures` failed ones.
+    static func remoteRetryDelay(afterFailures failures: Int) -> Double {
+        remoteRetry[min(max(failures, 1), remoteRetry.count) - 1]
+    }
 }

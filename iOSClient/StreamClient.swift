@@ -4,15 +4,72 @@ import QuartzCore
 import UIKit
 import StreamProtocol
 
-/// A Mac on the connect screen: one the network browser lists, or one seen only over peer-to-peer
-/// Wi-Fi (`direct`: its Direct Wireless Connection is on and no network is shared). Constructible,
-/// unlike NWBrowser.Result, so the DEBUG harness can seed the list.
+/// A Mac on the connect screen: one the network browser lists, one seen only over peer-to-peer
+/// Wi-Fi (Direct: its Direct Wireless Connection is on and no network is shared), or a saved Mac
+/// that neither browser lists (Remote: dialed at its saved addresses through the remote door).
+/// Constructible, unlike NWBrowser.Result, so the DEBUG harness can seed the list.
 struct FoundMac: Identifiable, Hashable {
+    enum Route: String, Hashable { case network, direct, remote }
+
     let name: String
-    let endpoint: NWEndpoint
+    /// The browser's endpoint; nil for a Remote row.
+    let endpoint: NWEndpoint?
+    let route: Route
+    /// The saved Mac this row is: a network or Direct row whose TXT tag this device resolved, or
+    /// a Remote row. Nil for any other Mac.
+    let macID: String?
+
+    init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil) {
+        self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID
+    }
+
     /// Reached over peer-to-peer Wi-Fi alone: the one kind of row connected with includePeerToPeer.
-    let direct: Bool
-    var id: String { name }   // unique: DiscoveryPolicy.rows lists a name once
+    var direct: Bool { route == .direct }
+    /// A network "Mac mini" and a Remote "Mac mini" are two rows. Names are unique per route
+    /// (DiscoveryPolicy.rows lists a name once), Mac IDs among Remote rows.
+    var id: String { route == .remote ? "remote:\(macID ?? name)" : "\(route.rawValue):\(name)" }
+}
+
+/// How the current connection runs, for the Settings panel's route line and the saved Mac's
+/// `lastRoute`.
+enum SessionRoute: Equatable {
+    case network
+    /// Over peer-to-peer Wi-Fi (Direct Wireless).
+    case direct
+    /// Through the remote door.
+    case remote(RemoteRoute)
+
+    var isRemote: Bool { if case .remote = self { return true }; return false }
+}
+
+/// A remote session's way in, from the winning address and the path it took.
+enum RemoteRoute: Equatable {
+    /// The path went through a tunnel: the VPN's service name when the address carried one.
+    case vpn(String?)
+    /// An internet-kind address (a port forward).
+    case internet
+    /// Anything else: an address reached directly (the tests' 127.0.0.1, a LAN address).
+    case address
+
+    /// "through Tailscale", "through your VPN", "over the internet", "by address".
+    var phrase: String {
+        switch self {
+        case .vpn(let name?): return "through \(name)"
+        case .vpn(nil): return "through your VPN"
+        case .internet: return "over the internet"
+        case .address: return "by address"
+        }
+    }
+
+    /// What `SavedMac.lastRoute` keeps: "Tailscale", "your VPN", "the internet", "by address".
+    var saved: String {
+        switch self {
+        case .vpn(let name?): return name
+        case .vpn(nil): return "your VPN"
+        case .internet: return "the internet"
+        case .address: return "by address"
+        }
+    }
 }
 
 /// Finds Macs over Bonjour, connects, and splits the byte stream into messages.
@@ -20,7 +77,13 @@ struct FoundMac: Identifiable, Hashable {
 final class StreamClient: ObservableObject {
     // Connection. The setters of what the connect screen shows are internal: the DEBUG harness
     // seeds them.
-    @Published var status = StreamClient.lookingOnNetwork
+    @Published var status = StreamClient.lookingOnNetwork {
+        didSet {
+            #if DEBUG
+            if status != oldValue { print("status: \(status)") }    // the simulator tests read the status line here
+            #endif
+        }
+    }
     /// The connect screen's rows (DiscoveryPolicy.rows): every Mac the network browser lists, then
     /// those seen only over peer-to-peer Wi-Fi.
     @Published var macs: [FoundMac] = []
@@ -34,6 +97,26 @@ final class StreamClient: ObservableObject {
     /// This connection runs over peer-to-peer Wi-Fi: the Settings panel says so, and warns that
     /// turning Direct Wireless off can disconnect this device.
     @Published var connectedDirectly = false
+    /// How this connection runs (the panel's route line); nil while disconnected. A remote one
+    /// is set at its first window list, with `connected`.
+    @Published var route: SessionRoute?
+
+    // Remote access (StreamClient+Remote.swift). Published on main; the DEBUG harness seeds them.
+    /// The Macs this device paired with (SavedMacs), persisted in `SavedMacs.defaultsKey`.
+    @Published var savedMacs: [SavedMac] = []
+    /// This connection's latest kind 18: who the Mac is and how to reach it from afar. Verified
+    /// against the pin when the Mac is a saved one; otherwise decoded unverified, shown in the
+    /// panel's Away from home group and never saved.
+    @Published var macInfo: MacInfo?
+    /// This connection's Mac is a saved one: its kind 18 verified against the saved pin.
+    @Published var macInfoSaved = false
+    /// When this connection's first kind 18 arrived (the panel hides Away from home without one).
+    @Published var macInfoAt: Date?
+    /// Pairing, as the Add a Mac card and the overlay show it.
+    @Published var pairing = PairingPhase.idle
+    /// A sill://pair link from outside the app (Camera, Messages, simctl openurl): never acted on
+    /// until the person confirms it.
+    @Published var pendingLink: PairLink?
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
     /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
@@ -68,8 +151,9 @@ final class StreamClient: ObservableObject {
     /// Bumped once per answer that refused something: the panel plays the warning haptic and
     /// announces it.
     @Published var settingsRefusals = 0
-    /// When this connection became ready; nil while disconnected. The panel gives the first state
-    /// two seconds before it calls the Mac an older one.
+    /// When this connection became ready (a remote one: its first window list, since with TLS 1.3
+    /// the device is ready before the Mac has judged its certificate); nil while disconnected. The
+    /// panel gives the first state two seconds before it calls the Mac an older one.
     @Published var connectedAt: Date?
     /// The next pick's token: strictly increasing for the life of the process, never reset, so an
     /// answer can never be taken for one to an earlier connection's pick.
@@ -163,49 +247,115 @@ final class StreamClient: ObservableObject {
 
     // Discovery (main thread). Two browsers: the network one always runs and never uses
     // peer-to-peer; the nearby one runs only when DiscoveryPolicy says, never while connected.
-    private static let serviceType = "_sill._tcp"
+    // Both read the TXT record, whose `r` tag names a saved Mac whatever its Bonjour name.
+    static let serviceType = "_sill._tcp"
     private var networkBrowser: NWBrowser?
     private var nearbyBrowser: NWBrowser?
     private var networkResults: [NWBrowser.Result] = []
     private var nearbyResults: [NWBrowser.Result] = []
     /// Launch, the last connection ending, or Local Network access coming back: the network gets its
     /// first seconds from here.
-    private var searchingSince = ProcessInfo.processInfo.systemUptime
+    var searchingSince = ProcessInfo.processInfo.systemUptime
     /// Search Nearby tapped since the last connection.
-    private var askedNearby = false
+    var askedNearby = false
     /// The network browser waits with PolicyDenied: Local Network access is off for Sill.
-    private var localNetworkDenied = false
+    var localNetworkDenied = false
     /// The policy's next look (its 3 s mark).
     private var discoveryRecheck: DispatchWorkItem?
     /// When each Direct row was first seen as one (DiscoveryPolicy.directSince): an automatic
     /// reconnect takes a Direct row only once it has stayed Direct for the network's 3 s.
-    private var directSince: [String: Double] = [:]
-    /// The automatic reconnect's look at the moment the wanted Mac's Direct row has waited its 3 s,
-    /// rather than at the retry timer's next step, which can be up to 10 s away.
-    private var directReconnectCheck: DispatchWorkItem?
+    var directSince: [String: Double] = [:]
     /// Macs this device last saw with Direct Wireless on, most recent first (DiscoveryPolicy.remember),
     /// keyed by the Bonjour name the connection was made to, the name both browsers list the Mac
     /// under. A discovery hint only: the panel never reads it, so a Mac's settings are still only ever
     /// the ones it sent on this connection. A launch argument seeds it for one run:
     /// -Sill.directWirelessMacs '("Mac mini")', or '()' to clear it.
-    private var directWirelessMacs = UserDefaults.standard.stringArray(forKey: StreamClient.directWirelessMacsKey) ?? []
+    var directWirelessMacs = UserDefaults.standard.stringArray(forKey: StreamClient.directWirelessMacsKey) ?? []
     private static let directWirelessMacsKey = "Sill.directWirelessMacs"
+    /// When the network browser last listed each saved Mac (systemUptime), by Mac ID: a Mac it
+    /// listed moments ago is taken to be blinking, not gone (DiscoveryPolicy.remoteDialDue).
+    var networkLastListed: [String: Double] = [:]
     #if DEBUG
     /// Harness connect cases: the discovery state is seeded, no browser ever runs, and Search Nearby
     /// or a row's tap only change what is shown.
     var mockDiscovery = false
     #endif
 
+    // Sessions and reconnecting (main thread; StreamClient+Remote.swift).
+    /// Why a remote dial was made: its failure copy and its retries depend on it.
+    enum DialReason: Equatable { case tap, automatic, connectRemotely, afterPairing, launchArgument }
+
+    /// The current connection's facts: set when it starts, cleared when it ends.
+    struct Session {
+        var route: SessionRoute
+        /// The saved Mac it is with: its row's, its dial's, or learned from a verified kind 18.
+        var macID: String?
+        /// The Bonjour name it was made to (network and Direct rows).
+        var bonjourName: String?
+        /// Remote: the address that won, and why it was dialed.
+        var candidate: RemoteDialPolicy.Candidate?
+        var why: DialReason?
+    }
+    var session: Session?
+
+    /// An automatic reconnect after a session ended on its own (docs/remote-access-plan.md §7.4).
+    struct Reconnect {
+        /// A saved Mac: its network row, its Direct row, then its saved addresses. Nil: today's
+        /// rules, by exact Bonjour name.
+        var macID: String?
+        var bonjourName: String?
+        /// What the status line calls the Mac.
+        var name: String
+        /// systemUptime of the loss, and this device's path then.
+        var lostAt: Double
+        var pathAtLoss: String
+        /// False after goodbye `remoteOff` or `internetOff`: the rows only.
+        var remoteAllowed: Bool
+        var rememberedDirect: Bool
+        var remoteFailures = 0
+        var nextRemoteAt = 0.0
+    }
+    var reconnect: Reconnect?
+    /// The dial in flight, remote or pairing: one at a time each.
+    var remoteDial: RemoteConnector?
+    var pairingDial: RemoteConnector?
+    /// The next look at the reconnect (a Direct row's 3 s, a remote dial's due time).
+    var reconnectCheck: DispatchWorkItem?
+    /// A remote session's first window list must come within 10 s of `.ready`.
+    var firstListDeadline: DispatchWorkItem?
+    /// A kind 22 on the current connection: why the Mac is about to close it.
+    var goodbyeReason: String?
+    /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
+    var pathSignature = ""
+    var pathMonitor: NWPathMonitor?
+    /// After a pairing: no session within 10 s leaves the Mac as a saved row.
+    var afterPairingWatch: DispatchWorkItem?
+
     /// Read on `queue` (receive loop, sends) and written on main (connect, disconnect, loss): a
     /// plain stored property would be a data race on a strong reference.
-    private var connection: NWConnection? {
+    var connection: NWConnection? {
         get { connectionLock.lock(); defer { connectionLock.unlock() }; return storedConnection }
         set { connectionLock.lock(); storedConnection = newValue; connectionLock.unlock() }
     }
     private var storedConnection: NWConnection?
     private let connectionLock = NSLock()
-    private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
+    let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var lastParameterSets: ParameterSets?
+
+    // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
+    // live connection never goes quiet for long; a dead path used to keep a frozen picture.
+    /// The last completed receive with data (CACurrentMediaTime).
+    private var lastReceivedAt = 0.0
+    /// The worst round trip of the last second that measured one, ms.
+    private var worstRecentRttMs: Double?
+    /// A remote connection's path stopped being viable at this time; nil while viable.
+    private var unviableSince: Double?
+    /// The current connection is a remote one (the viability rule applies).
+    private var remoteOnQueue = false
+    /// No byte for this long (or four times the worst recent round trip) is a lost connection.
+    static let livenessFloor = 6.0
+    /// A remote path that is not viable for this long is a lost connection.
+    static let viabilityLimit = 3.0
 
     // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
     // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
@@ -229,15 +379,39 @@ final class StreamClient: ObservableObject {
     private var lastMoveAt = 0.0              // CACurrentMediaTime
     private var moveFlushScheduled = false
 
+    /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
+    private(set) var savedMacsSeeded = false
+
+    init() {
+        #if DEBUG
+        // Read from the command line itself: the argument domain drops a value that starts like a
+        // property list but is not one, and JSON's "[" is such a start.
+        let arguments = CommandLine.arguments
+        if let i = arguments.firstIndex(of: "-" + SavedMacs.defaultsKey), i + 1 < arguments.count {
+            savedMacs = SavedMacs.decode(arguments[i + 1])
+            savedMacsSeeded = true
+        } else {
+            savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        }
+        #else
+        savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        #endif
+        // Back from the background: the pings stopped while the app was suspended, which is no loss.
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.resetLiveness()
+        }
+    }
+
     /// Starts the network browser (once). The nearby one follows the policy (`updateDiscovery`).
     func startBrowsing() {
         guard networkBrowser == nil else { return }
         searchingSince = ProcessInfo.processInfo.systemUptime
+        startPathMonitor()
         // Network only: includePeerToPeer stays at its default, false. A peer-to-peer browse makes
         // the kernel bring AWDL up, which takes the radio off its Wi-Fi channel up to ~100 ms twice
         // a second (CLAUDE.md, trackpad stutter), and on a shared network AWDL carries nothing of
         // Sill's. Direct Wireless Connection is the Mac's opt-in for that route (the nearby browser).
-        let browser = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: NWParameters())
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: NWParameters())
         browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
             DispatchQueue.main.async {
                 guard let self, let browser, self.networkBrowser === browser else { return }
@@ -283,7 +457,7 @@ final class StreamClient: ObservableObject {
     private func startNearbyBrowser() {
         let params = NWParameters()
         params.includePeerToPeer = true
-        let browser = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: params)
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: params)
         browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
             DispatchQueue.main.async {
                 guard let self, let browser, self.nearbyBrowser === browser else { return }
@@ -295,30 +469,55 @@ final class StreamClient: ObservableObject {
         nearbyBrowser = browser
     }
 
-    /// A browser's results changed, or what the policy reads did. Main thread.
-    private func discoveryChanged() {
+    /// A browser's results changed, or what the policy reads did (the saved Macs, the network's
+    /// 3 s mark). Main thread.
+    func discoveryChanged() {
         recomputeMacs()
         updateDiscovery()
         reconnectIfListed()
     }
 
     /// The rows, each with the endpoint of the browser that listed it: a network row always the
-    /// network browser's, so at home a Mac is never reached over AWDL. Main thread.
-    private func recomputeMacs() {
-        let network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint) }
-        let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces.map(\.name)) }
+    /// network browser's, so at home a Mac is never reached over AWDL. A row whose TXT tag this
+    /// device resolves is that saved Mac, whatever its Bonjour name; a result without a tag is no
+    /// saved Mac (an older host, or briefly during a re-registration: the reconnect still finds it
+    /// by the Bonjour name last used with it). Then a Remote row for each saved Mac neither browser
+    /// lists, once the network has had its 3 s. Main thread.
+    func recomputeMacs() {
+        #if DEBUG
+        if mockDiscovery { return }
+        #endif
+        let now = ProcessInfo.processInfo.systemUptime
+        let network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, tag: Self.tag(of: $0)) }
+        let nearby = nearbyResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces.map(\.name),
+                                          tag: Self.tag(of: $0)) }
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.interfaces) })
-        directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: ProcessInfo.processInfo.systemUptime)
-        let next = rows.compactMap { row -> FoundMac? in
-            let endpoint = row.direct ? nearby.first { $0.name == row.name }?.endpoint : network.first { $0.name == row.name }?.endpoint
-            return endpoint.map { FoundMac(name: row.name, endpoint: $0, direct: row.direct) }
+        directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
+        var next = rows.compactMap { row -> FoundMac? in
+            let found = row.direct ? nearby.first { $0.name == row.name }.map { ($0.endpoint, $0.tag) }
+                                   : network.first { $0.name == row.name }.map { ($0.endpoint, $0.tag) }
+            guard let (endpoint, tag) = found else { return nil }
+            return FoundMac(name: row.name, endpoint: endpoint, route: row.direct ? .direct : .network,
+                            macID: SavedMacs.recognize(tag: tag, in: savedMacs))
         }
+        for mac in next where mac.route == .network { if let id = mac.macID { networkLastListed[id] = now } }
+        let names = SavedMacs.displayNames(savedMacs)
+        let saved = savedMacs.sorted { $0.pairedAt < $1.pairedAt }.map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
+        let remote = DiscoveryPolicy.remoteRows(saved: saved, listedIDs: Set(next.compactMap(\.macID)), now: now,
+                                                searchingSince: searchingSince, localNetworkDenied: localNetworkDenied)
+        next += remote.map { FoundMac(name: $0.name, endpoint: nil, route: .remote, macID: $0.macID) }
         if next != macs { macs = next }
+    }
+
+    /// A result's recognition tag (TXT `r`), if it carries one.
+    static func tag(of result: NWBrowser.Result) -> String? {
+        if case .bonjour(let txt) = result.metadata { return txt[RecognitionTag.txtKey] }
+        return nil
     }
 
     /// Runs the policy on what is known now: starts or stops the nearby browser, shows the hint,
     /// keeps an idle status line in step, and looks again at the network's 3 s mark. Main thread.
-    private func updateDiscovery() {
+    func updateDiscovery() {
         #if DEBUG
         if mockDiscovery { return }
         #endif
@@ -353,7 +552,8 @@ final class StreamClient: ObservableObject {
         discoveryRecheck?.cancel()
         discoveryRecheck = nil
         if let at = out.recheckAt {
-            let work = DispatchWorkItem { [weak self] in self?.updateDiscovery() }
+            // The whole look, not only the policy: the Remote rows appear at the same mark.
+            let work = DispatchWorkItem { [weak self] in self?.discoveryChanged() }
             discoveryRecheck = work
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
         }
@@ -373,59 +573,42 @@ final class StreamClient: ObservableObject {
         updateDiscovery()
     }
 
-    /// Bonjour instance name of the Mac we are connected to (or were, if it dropped).
-    private var hostName = "Mac"
-    /// Set when the Mac went away on its own; cleared by an explicit disconnect().
-    private var reconnectTo: String?
+    /// What the status line calls the Mac we are connected to (or were, if it dropped): its Bonjour
+    /// name, its saved name, or the address dialed.
+    var hostName = "Mac"
 
     static func serviceName(of result: NWBrowser.Result) -> String {
         if case .service(let name, _, _, _) = result.endpoint { return name }
         return "\(result.endpoint)"
     }
 
-    /// A row of the connect screen. Only a direct row is connected with peer-to-peer allowed.
+    /// A row of the connect screen. Only a Direct row is connected with peer-to-peer allowed; a
+    /// Remote row dials the saved Mac's addresses through the remote door.
     func connect(to mac: FoundMac) {
         #if DEBUG
         if mockDiscovery {
-            status = mac.direct ? "Connecting to \(mac.name) directly…" : "Connecting to \(mac.name)…"
+            switch mac.route {
+            case .direct: status = "Connecting to \(mac.name) directly…"
+            case .remote: status = "Connecting to \(mac.name) remotely…"
+            case .network: status = "Connecting to \(mac.name)…"
+            }
             return
         }
         #endif
-        connect(to: mac.endpoint, name: mac.name, peerToPeer: mac.direct)
-    }
-
-    /// The Mac we were talking to is listed again: reconnect without being asked, to its network row
-    /// at once, to its Direct row only once that has stayed Direct for the network's 3 s
-    /// (DiscoveryPolicy.reconnectRow: a Mac back at home can show on awdl0 first). Names match
-    /// exactly: two Macs can share a computer name ("MacBook Pro" and "MacBook Pro (2)"), and
-    /// stripping the suffix would rejoin the wrong one. Main thread.
-    @discardableResult
-    private func reconnectIfListed() -> Bool {
-        directReconnectCheck?.cancel()
-        directReconnectCheck = nil
-        guard !connected, connection == nil, let wanted = reconnectTo else { return false }
-        let now = ProcessInfo.processInfo.systemUptime
-        let network = macs.first { $0.name == wanted && !$0.direct }
-        let direct = macs.first { $0.name == wanted && $0.direct }
-        let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] }, now: now)
-        guard let mac = choice.take else {
-            if let at = choice.recheckAt {
-                let work = DispatchWorkItem { [weak self] in self?.reconnectIfListed() }
-                directReconnectCheck = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
-            }
-            return false
+        reconnect = nil      // a tap starts afresh
+        if mac.route == .remote, let id = mac.macID {
+            dialSaved(id, why: .tap)
+            return
         }
-        connect(to: mac)
-        status = mac.direct ? "Reconnecting to \(wanted) directly…" : "Reconnecting to \(wanted)…"
-        return true
+        guard let endpoint = mac.endpoint else { return }
+        connect(to: endpoint, name: mac.name, peerToPeer: mac.direct, macID: mac.macID)
     }
 
-    /// Connects to a Bonjour result's endpoint, or straight to an address (DEBUG `-SillConnect`,
-    /// later "add a Mac by address"). `name` is what the status line calls the Mac until its window
-    /// list brings its own name. `peerToPeer` only for a Mac seen over peer-to-peer Wi-Fi alone.
-    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false) {
+    /// Connects to a Bonjour result's endpoint through the home door, or straight to an address
+    /// (DEBUG `-SillConnect`). `name` is what the status line calls the Mac until its window list
+    /// brings its own name. `peerToPeer` only for a Mac seen over peer-to-peer Wi-Fi alone. `macID`:
+    /// the saved Mac the row is, when its tag said so.
+    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false, macID: String? = nil) {
         // One connection at a time. A tap on the connect screen racing the reconnect timer used to
         // open two: both then read from whichever `connection` pointed at, interleaving headers
         // and payloads, while the other was never read and the host evicted it after 4 s.
@@ -433,7 +616,12 @@ final class StreamClient: ObservableObject {
             connection = nil
             old.cancel()      // its .cancelled callback is ignored: connectionLost checks identity
         }
+        cancelRemoteDial()
         hostName = name
+        var bonjourName: String?
+        if case .service(let service, _, _, _) = endpoint { bonjourName = service }
+        session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName)
+        goodbyeReason = nil
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
@@ -452,15 +640,17 @@ final class StreamClient: ObservableObject {
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
                 DispatchQueue.main.async {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
-                    self.reconnectTo = nil
+                    self.reconnect = nil
                     self.connected = true
                     self.connectedDirectly = direct
+                    self.route = direct ? .direct : .network
+                    self.session?.route = direct ? .direct : .network
                     self.askedNearby = false
                     self.connectedAt = Date()
                     self.status = "Connected to \(name)"
                     self.updateDiscovery()   // stops the nearby browser; the network one keeps running
                 }
-                self.startMeasuring(c)   // before the first read, so the first window is this connection's alone
+                self.startMeasuring(c, remote: false)   // before the first read, so the first window is this connection's alone
                 self.readHeader(on: c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
@@ -473,7 +663,7 @@ final class StreamClient: ObservableObject {
                 }
             case .failed(let e):
                 print("connection failed: \(e)")
-                self.connectionLost(c)
+                self.connectionLost(c, error: e)
                 c.cancel()   // Network.framework releases a failed connection only once cancelled
             case .cancelled:
                 // Either disconnect() cancelled it (state already cleaned up) or the host closed it.
@@ -484,6 +674,41 @@ final class StreamClient: ObservableObject {
         }
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
+    }
+
+    /// A remote dial's winner, already `.ready` and pinned (StreamClient+Remote): the session
+    /// connection from now on. `connected` waits for its first window list. Main thread.
+    func adopt(_ c: NWConnection, session s: Session) {
+        if let old = connection {
+            connection = nil
+            old.cancel()
+        }
+        session = s
+        goodbyeReason = nil
+        c.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .failed(let e):
+                print("connection failed: \(e)")
+                self.connectionLost(c, error: e)
+                c.cancel()
+            case .cancelled:
+                self.connectionLost(c)
+            default:
+                break
+            }
+        }
+        // A remote path that stops being viable for 3 s is gone (the Wi‑Fi dropped, the VPN went
+        // down): the ping timer reads this.
+        c.viabilityUpdateHandler = { [weak self] viable in
+            guard let self else { return }
+            self.unviableSince = viable ? nil : (self.unviableSince ?? CACurrentMediaTime())
+        }
+        connection = c
+        queue.async { [weak self] in
+            self?.startMeasuring(c, remote: true)
+            self?.readHeader(on: c)
+        }
     }
 
     /// Whether an established connection runs over peer-to-peer Wi-Fi: its remote address is scoped
@@ -499,7 +724,8 @@ final class StreamClient: ObservableObject {
 
     /// The user chose to leave. No reconnect.
     func disconnect() {
-        reconnectTo = nil
+        reconnect = nil
+        cancelRemoteDial()
         let c = connection
         connection = nil
         c?.cancel()
@@ -507,32 +733,41 @@ final class StreamClient: ObservableObject {
         updateDiscovery()
     }
 
-    /// The Mac went away (host quit, Wi-Fi dropped, connection reset). Back to the connect screen with
-    /// a plain message, and remember the Mac so we rejoin when it shows up again. Any thread.
-    private func connectionLost(_ c: NWConnection) {
+    /// The connection ended: the Mac went away (host quit, Wi-Fi dropped, connection reset, a
+    /// goodbye), or a remote dial's winner failed before its window list. `end` overrides what the
+    /// error says (a message no Sill sends). StreamClient+Remote decides the words and whether and
+    /// how to reconnect. Any thread.
+    func connectionLost(_ c: NWConnection, error: NWError? = nil, end: RemoteDialPolicy.End? = nil) {
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // stale callback from a connection we already replaced
             self.connection = nil
-            self.reconnectTo = self.hostName
-            self.tearDown(status: "\(self.hostName) disconnected. It will reconnect when the Mac is back.")
-            self.updateDiscovery()
-            self.scheduleReconnectRetry()
+            self.sessionEnded(error: error, end: end)
         }
     }
 
     /// The browse-results handlers reconnect when the Mac's Bonjour record comes back. If the record
     /// never left (the host dropped us but kept running), nothing would fire, so also retry on a
-    /// timer while the Mac is still listed. Main thread.
-    private func scheduleReconnectRetry(after seconds: TimeInterval = 2) {
+    /// timer while a reconnect is wanted. Main thread.
+    func scheduleReconnectRetry(after seconds: TimeInterval = 2) {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self, !self.connected, self.connection == nil, self.reconnectTo != nil else { return }
+            guard let self, !self.connected, self.reconnect != nil else { return }
             if !self.reconnectIfListed() { self.scheduleReconnectRetry(after: min(seconds * 2, 10)) }
         }
     }
 
-    /// Clears everything the session owned. Main thread.
-    private func tearDown(status: String) {
+    /// Clears everything the session owned. `restartSearch` false for a remote dial whose winner
+    /// never delivered its window list: the connect screen never left, and its Remote rows must not
+    /// vanish for another 3 s. Main thread.
+    func tearDown(status: String, restartSearch: Bool = true) {
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
+        firstListDeadline?.cancel()
+        firstListDeadline = nil
+        session = nil
+        goodbyeReason = nil
+        route = nil
+        macInfo = nil
+        macInfoSaved = false
+        macInfoAt = nil
         linkStats = nil
         localPointer = nil
         cursorShape = nil
@@ -540,8 +775,10 @@ final class StreamClient: ObservableObject {
         connectedDirectly = false
         // The network gets its first seconds again before a remembered Mac is looked for nearby; the
         // callers then run the policy (updateDiscovery).
-        searchingSince = ProcessInfo.processInfo.systemUptime
-        askedNearby = false
+        if restartSearch {
+            searchingSince = ProcessInfo.processInfo.systemUptime
+            askedNearby = false
+        }
         lastAutoDesktop = .distantPast     // the next connection starts on the Desktop again
         self.status = status
         macName = ""
@@ -688,7 +925,18 @@ final class StreamClient: ObservableObject {
             guard let data, let header = StreamMessage.parseHeader(data) else {
                 // EOF (the host closed cleanly) or a read error: both mean the Mac is gone.
                 if let error { print("read error: \(error)") }
-                if isComplete || error != nil { self.connectionLost(c) }
+                if isComplete || error != nil { self.connectionLost(c, error: error) }
+                return
+            }
+            self.lastReceivedAt = CACurrentMediaTime()
+            // Nothing a Sill host sends is bigger than these (docs/remote-access-plan.md §3.7). A
+            // reader that waited for whatever a header announces could be held for ever, or read
+            // an SSH banner as a 1.7 GB payload: closed, and on a remote dial that is "not Sill".
+            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
+            guard header.payloadLength <= cap else {
+                print("closing: the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
+                self.connectionLost(c, end: .notSill)
+                c.cancel()
                 return
             }
             self.readPayload(header, on: c)
@@ -702,8 +950,16 @@ final class StreamClient: ObservableObject {
             readHeader(on: c)
             return
         }
-        c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { [weak self] data, _, _, _ in
-            guard let self, c === self.connection, let data else { return }
+        c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { [weak self] data, _, isComplete, error in
+            guard let self, c === self.connection else { return }
+            // EOF or an error mid-message is the Mac gone, as it is between messages: ignoring it
+            // left a dead connection on screen with a frozen picture.
+            guard let data, data.count == header.payloadLength else {
+                if let error { print("read error: \(error)") }
+                if isComplete || error != nil || data != nil { self.connectionLost(c, error: error) }
+                return
+            }
+            self.lastReceivedAt = CACurrentMediaTime()
             self.handle(header, data)
             self.readHeader(on: c)
         }
@@ -728,7 +984,11 @@ final class StreamClient: ObservableObject {
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
+            let from = connection
             DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                // A remote session is connected at its first window list, not at `.ready`.
+                self.remoteSessionReady()
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
                 let previous = self.active
                 self.windows = list.windows
@@ -750,8 +1010,11 @@ final class StreamClient: ObservableObject {
                         // full screen): only a window still gone after that has really closed.
                         // Not if the user picked or launched something meanwhile: this request
                         // could reach the host after that choice has started and replace it.
+                        // Two seconds plus the worst recent round trip: from afar the host's next
+                        // list, which would bring the window back, takes that much longer.
                         let choices = self.choicesSent
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                        let wait = 2 + Double(self.lastRttMaxMs ?? 0) / 1000
+                        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
@@ -790,6 +1053,22 @@ final class StreamClient: ObservableObject {
             let sent = Double(bitPattern: data.readBigEndianUInt64())
             let rtt = (CACurrentMediaTime() - sent) * 1000
             if rtt.isFinite, rtt >= 0 { rttSamples.append(min(rtt, Self.sampleCeilingMs)) }
+        case .macInfo:
+            // Who this Mac is and how to reach it from afar (StreamClient+Remote).
+            guard let signed = Wire.decode(SignedMacInfo.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.receiveMacInfo(signed, endpoint: from?.endpoint)
+            }
+        case .goodbye:
+            // Why the Mac is about to close this connection: the words, and whether to reconnect.
+            let reason = Wire.decode(Goodbye.self, from: data)?.reason ?? ""
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.goodbyeReason = reason
+            }
         default:
             break // client → host kinds, and anything a newer host invents
         }
@@ -798,11 +1077,15 @@ final class StreamClient: ObservableObject {
     // MARK: - Measurement (on `queue`)
 
     /// Starts the one-second windows and the pings for `c`, dropping whatever an earlier connection
-    /// left behind. On `queue`, from the connection's ready state.
-    private func startMeasuring(_ c: NWConnection) {
+    /// left behind, and its liveness from now. On `queue`, from the connection's ready state.
+    private func startMeasuring(_ c: NWConnection, remote: Bool) {
         guard c === connection else { return }   // replaced while connecting
         stopMeasuring()
         windowOpenedAt = CACurrentMediaTime()
+        lastReceivedAt = windowOpenedAt
+        worstRecentRttMs = nil
+        unviableSince = nil
+        remoteOnQueue = remote
         let window = DispatchSource.makeTimerSource(queue: queue)
         window.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(10))
         window.setEventHandler { [weak self, weak c] in
@@ -844,6 +1127,7 @@ final class StreamClient: ObservableObject {
         frameCounter = 0
         frameAgeSamples.removeAll(keepingCapacity: true)
         rttSamples.removeAll(keepingCapacity: true)
+        if let rtt = stats.rtt { worstRecentRttMs = Double(rtt.max) }
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // torn down meanwhile: stay nil
             self.linkStats = stats
@@ -851,10 +1135,35 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// Liveness, on every route: nothing received for `livenessFloor` seconds, or four times the
+    /// worst recent round trip on a slow link, and the connection is gone; a remote path that has
+    /// not been viable for `viabilityLimit` seconds too. Checked at each ping. On `queue`.
+    private func checkLiveness(_ c: NWConnection) -> Bool {
+        let now = CACurrentMediaTime()
+        let limit = max(Self.livenessFloor, 4 * (worstRecentRttMs ?? 0) / 1000)
+        let silent = now - lastReceivedAt > limit
+        let unviable = remoteOnQueue && unviableSince.map { now - $0 > Self.viabilityLimit } == true
+        guard silent || unviable else { return true }
+        print(silent ? "connection silent for \(Int(now - lastReceivedAt)) s: lost" : "connection not viable for 3 s: lost")
+        connectionLost(c)
+        c.cancel()
+        return false
+    }
+
+    /// Returning to the foreground is never a loss by itself: the pings stopped while suspended.
+    /// Main thread.
+    func resetLiveness() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.lastReceivedAt = CACurrentMediaTime()
+            self.unviableSince = nil
+        }
+    }
+
     /// On `queue`. Stamped with the monotonic clock: a wall-clock correction between a ping and its
     /// pong would otherwise land in the round trip.
     private func sendPing(on c: NWConnection) {
-        guard c === connection else { return }
+        guard c === connection, checkLiveness(c) else { return }
         var payload = Data(capacity: 8)
         var v = CACurrentMediaTime().bitPattern.bigEndian
         Swift.withUnsafeBytes(of: &v) { payload.append(contentsOf: $0) }
@@ -958,16 +1267,17 @@ extension StreamClient {
         }
     }
 
-    /// `-SillConnect host:port`: connect straight to an address. The synthetic test hosts stay off
-    /// Bonjour, so this is how the simulator reaches `SillHost --synthetic` and the bare
-    /// `SillMenuBar --synthetic`. If such a connection drops, the reconnect timer looks for it on
-    /// Bonjour, never finds it and backs off to 10 s: harmless in a debug build.
+    /// `-SillConnect host:port`: connect straight to an address, through the home door. The
+    /// synthetic test hosts stay off Bonjour, so this is how the simulator reaches `SillHost
+    /// --synthetic` and the bare `SillMenuBar --synthetic`. Read by the strict address parser, so
+    /// `[::1]:P` works (the old split at the last colon broke IPv6). It never saves anything. If
+    /// such a connection drops, the reconnect timer looks for it on Bonjour, never finds it and
+    /// backs off to 10 s (or, when its kind 18 named a saved Mac, dials that Mac remotely).
     func connectFromLaunchArgument() {
         guard let raw = UserDefaults.standard.string(forKey: "SillConnect"),
-              let colon = raw.lastIndex(of: ":"),
-              let number = UInt16(raw[raw.index(after: colon)...]),
-              let port = NWEndpoint.Port(rawValue: number) else { return }
-        connect(to: .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port), name: raw)
+              case .success(let address) = AddressParser.parse(raw), let number = address.port,
+              let port = NWEndpoint.Port(rawValue: UInt16(number)) else { return }
+        connect(to: .hostPort(host: NWEndpoint.Host(address.host), port: port), name: raw)
     }
     #endif
 }

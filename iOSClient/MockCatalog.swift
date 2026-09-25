@@ -167,7 +167,8 @@ enum MockCatalog {
         client.mockDiscovery = true
         client.status = StreamClient.lookingOnNetwork
         func mac(_ name: String, direct: Bool) -> FoundMac {
-            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil), direct: direct)
+            FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
+                     route: direct ? .direct : .network)
         }
         switch c {
         case .looking:

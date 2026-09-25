@@ -38,10 +38,13 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             client.startBrowsing()
+            client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
             client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
             #endif
         }
+        // sill://pair from the Camera, Messages or `xcrun simctl openurl`: a confirmation first.
+        .onOpenURL { client.handleOpenURL($0) }
     }
 }
 
@@ -172,6 +175,7 @@ struct LayoutHarness: View {
         .onAppear {
             if spec.live {
                 live.startBrowsing()
+                live.startRemote()
                 live.connectFromLaunchArgument()
             }
         }
@@ -228,7 +232,8 @@ struct ConnectScreen: View {
                 .padding(.bottom, 4)
 
             ForEach(client.macs) { mac in
-                DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.direct ? "Direct" : nil,
+                DrawerRow(height: 50, highlighted: false, title: mac.name,
+                          trailing: mac.route == .direct ? "Direct" : mac.route == .remote ? "Remote" : nil,
                           action: { client.connect(to: mac) }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
@@ -238,7 +243,8 @@ struct ConnectScreen: View {
                     }
                     .frame(width: 32, height: 32)
                 }
-                .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network" : "")
+                .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
+                                   : mac.route == .remote ? "Connects through your VPN or the internet." : "")
             }
 
             if client.showsNearbyHint {
