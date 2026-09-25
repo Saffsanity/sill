@@ -32,14 +32,22 @@ final class StreamServer {
         /// The device's own name from its last ClientStats ("iPad (iPad14,1)"), for the line that
         /// says why it was disconnected; nil until its first report.
         var device: String?
+        /// Ready, and its route as last reported (`onClientConnected`, then `onClientRouteChanged`
+        /// on a change). A path update before ready reports nothing: the device has no row yet.
+        var ready = false
+        var route: ClientLink.Route?
         init(_ c: NWConnection) { connection = c }
     }
 
     private let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
-    /// A client finished connecting. Called on the network queue.
-    var onClientConnected: ((NWConnection) -> Void)?
+    /// A client finished connecting, with its route (ClientLink.route; nil when its connection does
+    /// not say). Called on the network queue.
+    var onClientConnected: ((NWConnection, ClientLink.Route?) -> Void)?
+    /// A connected client's route changed with its connection's path. Only reported, never acted
+    /// on: the menu card shows it. Called on the network queue.
+    var onClientRouteChanged: ((NWConnection, ClientLink.Route?) -> Void)?
     /// A message from a client (selectSource, launchApp). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection) -> Void)?
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
@@ -362,10 +370,43 @@ final class StreamServer {
     /// Whether a client reaches this Mac over peer-to-peer Wi-Fi (ClientLink), with the TEST ONLY
     /// stand-in interface counted as such on a host that does not advertise. On `queue`.
     private func runsPeerToPeer(_ c: NWConnection) -> Bool {
+        ClientLink.runsPeerToPeer(endpoint: "\(c.endpoint)",
+                                  pathInterfaces: c.currentPath?.availableInterfaces.map(\.name) ?? [],
+                                  peerToPeer: peerToPeerRule)
+    }
+
+    /// A client's route (ClientLink.route) over `path`: the interface its address is scoped to, as
+    /// the address itself types it, then the path's interfaces. The same stand-in counts as
+    /// peer-to-peer, so a test client this host would disconnect is shown as Direct. On `queue`.
+    private func route(_ c: NWConnection, path: NWPath?) -> ClientLink.Route? {
+        var interfaces: [NWInterface] = []
+        if case .hostPort(let host, _) = c.endpoint, case .ipv6(let address) = host, let scoped = address.interface {
+            interfaces.append(scoped)
+        }
+        interfaces += path?.availableInterfaces ?? []
+        return ClientLink.route(endpoint: "\(c.endpoint)", interfaces: interfaces.map(Self.linkInterface),
+                                peerToPeer: peerToPeerRule)
+    }
+
+    /// ClientLink's peer-to-peer rule, with the TEST ONLY stand-in interface on a host that does not
+    /// advertise.
+    private var peerToPeerRule: (String) -> Bool {
         let standIn = testHost ? Self.testPeerToPeerInterface : nil
-        return ClientLink.runsPeerToPeer(endpoint: "\(c.endpoint)",
-                                         pathInterfaces: c.currentPath?.availableInterfaces.map(\.name) ?? [],
-                                         peerToPeer: { ClientLink.isPeerToPeer(interface: $0) || $0 == standIn })
+        return { ClientLink.isPeerToPeer(interface: $0) || $0 == standIn }
+    }
+
+    /// An interface as ClientLink spells it, case for case.
+    private static func linkInterface(_ interface: NWInterface) -> ClientLink.Interface {
+        let type: ClientLink.Interface.Kind
+        switch interface.type {
+        case .wifi: type = .wifi
+        case .wiredEthernet: type = .wiredEthernet
+        case .cellular: type = .cellular
+        case .loopback: type = .loopback
+        case .other: type = .other
+        @unknown default: type = .other   // a type newer than this code: no word rather than a wrong one
+        }
+        return ClientLink.Interface(name: interface.name, type: type)
     }
 
     /// On `queue`: a replacement could not be bound, or failed once bound. Refused on its old port,
@@ -424,8 +465,11 @@ final class StreamServer {
             switch state {
             case .ready:
                 print("Client connected: \(connection.endpoint)")
-                self?.receiveLoop(client)
-                self?.onClientConnected?(connection)
+                guard let self else { return }
+                self.receiveLoop(client)
+                client.route = self.route(connection, path: connection.currentPath)
+                client.ready = true
+                self.onClientConnected?(connection, client.route)
             case .failed, .cancelled:
                 print("Client left: \(connection.endpoint)")
                 guard let self else { return }
@@ -435,6 +479,17 @@ final class StreamServer {
                 self.updateTicking()
             default: break
             }
+        }
+        // The route follows the path: reported once the client is ready, then on every change. An
+        // established connection keeps its interface (TCP does not move), so a change is rare; a
+        // cable pulled mid-session ends the connection instead, and the device's reconnect is a new
+        // client with its own route.
+        connection.pathUpdateHandler = { [weak self] path in
+            guard let self, client.ready, self.clients[id] != nil else { return }
+            let route = self.route(connection, path: path)
+            guard route != client.route else { return }
+            client.route = route
+            self.onClientRouteChanged?(connection, route)
         }
         clients[id] = client
         onClientCountChanged?(clients.count)

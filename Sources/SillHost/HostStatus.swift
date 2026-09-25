@@ -37,11 +37,16 @@ package struct HostStatusSnapshot: Equatable {
         /// -1 when that second had no sample (no frame arrived, no pong came back).
         package var frameAgeMs: Int?
         package var rttMs: Int?
+        /// How it reaches this Mac, as this Mac's side of its connection says (ClientLink.route): at
+        /// connect, then whenever the connection's path changes. Nil when the connection does not
+        /// say (loopback, a VPN, an interface of no known kind). Shown, never acted on.
+        package var route: ClientLink.Route?
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
-                     frameAgeMs: Int? = nil, rttMs: Int? = nil) {
+                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil) {
             self.id = id; self.endpoint = endpoint; self.name = name
             self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs
+            self.route = route
         }
     }
 

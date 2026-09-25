@@ -89,24 +89,21 @@ struct HostSettingsPanel: View {
                 if let state = client.settings.host {
                     VStack(alignment: .leading, spacing: 1) {
                         // Wraps rather than cutting the bitrate off at larger text sizes; each
-                        // value keeps its unit (no-break spaces).
-                        Text(Self.readout(state.stream))
+                        // value keeps its unit (no-break spaces), and a wrap falls after a "·".
+                        // It ends in how this device's connection reaches the Mac, the connect
+                        // screen's word; "Direct" is the old "Connected directly" line.
+                        Text(Self.readout(state.stream, route: client.route))
                             .fixedSize(horizontal: false, vertical: true)
                         // Its own line: beside the numbers it never fit the panel's width, and it
                         // is what confirms the Virtual Display switch took effect.
                         if state.stream?.onVirtualDisplay == true {
                             Text("On the virtual display")
                         }
-                        // How this device reaches the Mac: over peer-to-peer Wi-Fi, which the Direct
-                        // Wireless Connection row can turn off.
-                        if client.connectedDirectly {
-                            Text("Connected directly")
-                        }
                     }
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.spokenReadout(state.stream, direct: client.connectedDirectly))
+                    .accessibilityLabel(Self.spokenReadout(state.stream, route: client.route))
                 }
             }
             Spacer(minLength: 8)
@@ -272,18 +269,29 @@ struct HostSettingsPanel: View {
     // MARK: Copy
 
     /// Under the Mac's name: what actually runs, which confirms a change took effect and shows
-    /// what the software encoder caps. Whether it runs on the virtual display is a line of its own
-    /// (see `header`).
-    static func readout(_ stream: RunningStream?) -> String {
-        guard let s = stream else { return "Not streaming" }
-        return "\(s.width)×\(s.height) · \(s.fps)\u{00A0}fps · \(s.mbps)\u{00A0}Mbps"
+    /// what the software encoder caps, then how this device's connection reaches the Mac
+    /// ("… · 15 Mbps · Wi-Fi"; StreamClient.route), when its path says. Whether it runs on the
+    /// virtual display is a line of its own (see `header`). A no-break space before each "·"
+    /// keeps it with the value before it, so a wrap at larger text never starts a line with one.
+    static func readout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil) -> String {
+        let values = stream.map { ["\($0.width)×\($0.height)", "\($0.fps)\u{00A0}fps", "\($0.mbps)\u{00A0}Mbps"] } ?? ["Not streaming"]
+        return (values + [route?.word].compactMap { $0 }).joined(separator: "\u{00A0}· ")
     }
 
-    static func spokenReadout(_ stream: RunningStream?, direct: Bool = false) -> String {
-        let link = direct ? ", connected directly" : ""
+    static func spokenReadout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil) -> String {
+        let link = route.map { ", " + spoken($0) } ?? ""
         guard let s = stream else { return "Not streaming" + link }
         return "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"
             + (s.onVirtualDisplay ? ", on the virtual display" : "") + link
+    }
+
+    /// The route as VoiceOver says it: a sentence's end rather than the bare word.
+    private static func spoken(_ route: DiscoveryPolicy.Method) -> String {
+        switch route {
+        case .wired: return "connected by cable"
+        case .wifi: return "connected over Wi-Fi"
+        case .direct: return "connected directly"
+        }
     }
 
     /// "iPhone" or "iPad", for copy about this device.

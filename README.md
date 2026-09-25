@@ -27,7 +27,8 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
-rate, frame age and round trip, and what is streaming; it holds the
+rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
+"Direct"), and what is streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
 Connection, Launch at Login, Permissions, Show Log… and Settings… (⌘,).
 Changes apply at once; a change to a streaming setting restarts the current
@@ -163,7 +164,8 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    on in Sill on the Mac). Tap the Mac's name. Its row ends in where the device
    sees it: "Wi-Fi", "Wired" (a cable), "Direct", or nothing when it can't
    tell. The word is not the path a connection takes: with Wi-Fi and a cable
-   both up, a connection can go over either.
+   both up, a connection can go over either; the Settings panel's readout ends
+   in the one it does take.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.

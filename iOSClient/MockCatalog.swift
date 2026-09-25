@@ -88,7 +88,7 @@ enum MockCatalog {
     // MARK: - The Mac's settings
 
     /// `-SillSettingsCase`: the states the Settings panel has to look right in. The mock streams
-    /// 2880×1800 · 60 fps · 15 Mbps unless a case says otherwise.
+    /// 2880×1800 · 60 fps · 15 Mbps over Wi-Fi unless a case says otherwise.
     enum SettingsCase: String {
         case `default`   // Sill.app: saved, the virtual display available and off
         case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
@@ -100,13 +100,22 @@ enum MockCatalog {
         case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
         case timeout     // the Mac did not answer a pick: the inline problem
         case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
-        case directlink  // on, and this device connected over it: the header line and the footer's warning
+        case directlink  // on, and this device connected over it: "Direct" in the readout and the footer's warning
         case nodirect    // a host without the setting (the ipad-host-settings build): no row
+        case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
+        case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
     }
 
     /// Lays a case's state into the client as if the Mac had sent it on this connection.
     private static func seed(_ client: StreamClient, settings c: SettingsCase) {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
+        // How this session reaches the Mac: read from the connection, whatever the Mac runs.
+        switch c {
+        case .directlink: client.route = .direct
+        case .wired: client.route = .wired
+        case .noroute: client.route = nil
+        default: client.route = .wifi
+        }
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
@@ -138,7 +147,7 @@ enum MockCatalog {
             client.connectedDirectly = true
         case .nodirect:
             state.settings.directWireless = nil
-        case .default, .legacy, .pending, .timeout:
+        case .default, .legacy, .pending, .timeout, .wired, .noroute:
             break
         }
         var ledger = SettingsLedger()

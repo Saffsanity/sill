@@ -98,6 +98,35 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   "Visible on your network as", and a "Direct Wireless Connection" item at the
   top of the status menu's second group, absolute like Virtual Display. Saved
   under `directWireless`; an existing install has no key, so it comes up off.
+  The status menu's card ends each device's row in how it reaches this Mac
+  (Noah, 2026-09-24, branch `connection-route-in-settings`: "next to bitrate"),
+  and while exactly one device is connected the source row too, after the Mbps:
+  "Wired" (the cable's anri0, or any wired Ethernet interface), "Wi-Fi" or
+  "Direct" (awdl0, llw0), else no word (loopback, a VPN, a path that says two
+  things). `ClientLink.route` reads this Mac's side of the device's own
+  connection, by the witnesses `runsPeerToPeer` uses (so Direct is exactly what
+  turning Direct Wireless off disconnects): the address's scope, typed by the
+  address itself, else the path's interfaces when they all agree (a connection
+  to this Mac's own address lists en0 and lo0: no word). Read when the client is
+  ready and on each path update, shown only (`HostStatusSnapshot.Device.route`);
+  no wire change. Each end names its own link, so an iPad on Wi-Fi streaming
+  from a Mac on Ethernet says "Wi-Fi" while the card says "Wired". A still
+  picture's rate reads "120 fps, still", as wide as a one-digit count ("5 of
+  120 fps"): "120 fps, nothing changing" (the plan's copy) plus the word
+  wrapped the row only while still, and the open menu, which resizes the card
+  on every change, jumped a line each time a window stopped or started
+  changing. The wording is Noah's call. Over 405 layouts (three sizes, 60 and
+  120 fps, 8 to 200 Mbps, each word or none, each suffix, the real StatusCard)
+  a row's line count never changes between still and changing unless the
+  count's own digits change it (16 layouts, all without a word; with "nothing
+  changing" 198 did); the `still-window` preview is the widest case the menu
+  offers. Verified: the link check at 89 (PR #6's 40 plus 49;
+  `swiftc -package-name sill`), 14 mutants caught; the real host in a scratch
+  package (loopback, `fe80::1%lo0` and `::1` clients: no word; with the lo0
+  stand-in, Direct on the device rows and on the source row only while one is
+  connected); previews: only the five cards with a device, the new
+  `still-window` and their menu.txt lines differ from a1484f9; the CLI
+  identical to a1484f9 (masked).
 - iOS: the network browser and connections to the Macs it lists never use
   peer-to-peer. A nearby (peer-to-peer) browser runs only while not connected,
   and only when a Mac this device last saw with the setting on
@@ -125,8 +154,55 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   is Noah's call), so with Wi-Fi and the cable both up a session can run over
   either, whatever the word (Sill.log, 2026-09-24: a reconnect over `%anri0`
   at 15:33:01; at 17:43:56, with the cable still up, a new connection over
-  `%en0`). Untested on a device: whether iPadOS types the cable to the Mac
-  (anri0 or enN on the host, both USB Ethernet there) as wired Ethernet. On
+  `%en0`). The route is the Settings panel's (branch
+  `connection-route-in-settings`): its readout ends in how this session's own
+  connection reaches the Mac, "… · 15 Mbps · Wi-Fi", "Wired" or "Direct"
+  (`DiscoveryPolicy.route`, `StreamClient.route`): the interface the Mac's
+  address is scoped to (the cable and AWDL carry only link-local addresses),
+  else the one this device's own address is on (an IPv4 connection's remote
+  address has no scope), else the path's interfaces when they all agree, else
+  no word (the simulator's path to its own Mac is lo0 alone). Read at
+  `.ready`, again at a move's hand-over, and on those path updates of the
+  session connection that describe it, satisfied and naming the Mac's IP
+  address (`DiscoveryPolicy.describesFlow`, `sessionRoute`); any other update
+  keeps the word. A connection to a Bonjour row also gets updates for the
+  service's resolution, which name the service instead of an address and list
+  "en0 (wifi), en0 (wifi)", the device's default route, whatever link carries
+  the connection: on 2026-09-25, on the cable with Wi-Fi on, they turned a
+  session's right "Wired" into "Wi-Fi" while its connection stayed on en2 (the
+  Mac saw it on `%en14` at 1–3 ms throughout). The DEBUG console prints
+  "session: <word>, read from …" and, for each update it skips, "session: kept
+  <word>; ignored a path update without an address (for <service>): …".
+  "Direct" there replaced the
+  header's "Connected directly" line (the footer's warning and the switch's
+  hint stay), and a no-break space before each "·" makes a wrap at larger
+  text fall after one. The Mac's card names its own side the same way (see
+  Sill.app above), so the two can differ (an iPad on Wi-Fi, a Mac on
+  Ethernet). Verified: the policy check at 155 (138 plus 17 for the route),
+  eight mutants of it caught; photos of the panel cases `default` (Wi-Fi),
+  `wired`, `directlink` (Direct), `noroute` and `vdstream` at 1000x710 and
+  500x710, and at accessibility-extra-large also at 710x500 (the readout wraps
+  after a "·", never truncates, never splits "Wi-Fi"); live against a
+  synthetic host: by 127.0.0.1 no word, by this Mac's `fe80::…%en0` "Wi-Fi",
+  and `-SillMoveTest to:` from the first to the second gains "Wi-Fi" at the
+  hand-over. What each end calls the cable (2026-09-25): iPadOS names its ends
+  anpi0 and en2 and types both as wired Ethernet (the connect screen's row
+  says "Wired", seen on anpi0, en2 and en0, and a session over it reads the
+  Mac's address on en2); macOS names its end en14 (anri0 on other days; both
+  up that night), wired Ethernet too (the simulator's browser saw both).
+  The fix for the updates above, verified on the iPad: the policy check at 174
+  (155 plus 19), 18 mutants caught (the route's 8 plus 10); "session: Wired,
+  read from the Mac's address on en2" at `.ready` (a row resolved on en2 and
+  tapped by a scratch build, and `-SillConnect` to the Mac's en14 address) and
+  at a move's hand-over from awdl0, the host on `%en14` each time; a row's
+  unscoped updates after
+  `.ready` logged as ignored with the word kept (that session ran over Wi-Fi,
+  `%en0` on the host: with Wi-Fi healthy the race took en0 in all three
+  unscoped tries, and the night's cable session came right after an eviction
+  on Wi-Fi). A session over
+  the cable ends when it is pulled and comes back over Wi-Fi, "Wi-Fi" on both
+  ends; plugged back in, an established Wi-Fi session stays on Wi-Fi (TCP does
+  not move) until the next connection. On
   the device, also compare each word with the host's "Client connected:
   fe80::…%anri0" line (`%anri0` or `%enN`: the cable; `%en0`: this Mac's
   Wi-Fi). Verified on the simulator: the policy check at 138, eight mutants
@@ -166,8 +242,8 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   ~265 ms. Local Network access denied (the network browser waits with
   PolicyDenied): the status says "To find your Mac, allow Local Network for
   Sill in Settings.", with no hint and no nearby search. The panel's last group
-  is the row (never disabled), after the closing footer, with "Connected
-  directly" in the header while this device's own connection runs over AWDL,
+  is the row (never disabled), after the closing footer, with "Direct" ending
+  the header's readout while this device's own connection runs over AWDL,
   and then, while the switch shows on, a warning in its footer and hint
   ("turning this off disconnects it"). The connect screen's column is anchored
   leading now, so its title no longer jumps
@@ -253,8 +329,10 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   me.saffer.sill.mac directWireless` is 1, "Enabling AWDL due to Mdns" and the
   maxima rise; off from the menu two minutes later and they fall back. W3 with
   it on, the iPad on the iPhone's hotspot and the Mac at home: within 3–5 s a
-  "Direct" row; connected, the host logs `%awdl0` and the header says
-  "Connected directly" (note frame age and rtt). W4 first use (reinstall, café
+  "Direct" row; connected, the host logs `%awdl0`, and the panel's readout
+  and the iPad's row on the Mac's card both end in "Direct" (the plan still
+  says the header's "Connected directly"); note frame age and rtt. W4
+  first use (reinstall, café
   conditions): the hint and Search Nearby after 3 s, then "Also looking
   nearby", the Mac as Direct; a relaunch there searches nearby by itself; once
   with Don't Allow on the Local Network alert: the status asks for Local
@@ -266,8 +344,10 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   streaming with it on: reconnects directly within ~10 s without a tap (10 s
   since the network last listed the Mac); café → home (rejoin the home Wi-Fi
   while streaming directly): a second "Client connected" on `%en0`, then
-  "Client left" for the `%awdl0` one, the picture never stops, and the header
-  loses "Connected directly" (drag and type through the move: no button stays
+  "Client left" for the `%awdl0` one, the picture never stops, the panel's
+  readout goes from "Direct" to "Wi-Fi" (the plan: the header loses "Connected
+  directly"), and the Mac's card shows the iPad twice for a moment (Direct,
+  Wi-Fi), then once, Wi-Fi (drag and type through the move: no button stays
   down, no letters swap); and relaunching Sill.app at home, the iPad
   reconnects over the network (the host logs no `%awdl0`). The blink: at home
   with it on and the iPad streaming, quit and reopen Sill.app a few times, at
@@ -857,7 +937,9 @@ good.
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL and
   SILL_TEST_PEER_TO_PEER_INTERFACE), `ClientLink` (which route a client came
-  by, from its endpoint's scope; pure, checked with swiftc),
+  by, from its endpoint's scope, and the menu card's word for it: Wired, Wi-Fi,
+  Direct or none; pure, checked on its own with `swiftc -package-name sill`,
+  which its `package` access needs),
   `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
   events and Spotlight ignored them), HID keys),
@@ -895,6 +977,7 @@ good.
   connection and the one door out to the Mac; the move's fenced hand-over;
   Foundation and Network only, checked with swiftc),
   `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
+  the session's route word for the Settings panel,
   when a reconnect may take a Direct row, when a session over AWDL moves to
   the network, the memory of Macs with Direct Wireless on; pure, checked with
   swiftc), `StreamScreen`
@@ -976,17 +1059,21 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
 `-SillSettings 1` (the Settings panel open), `-SillSettingsCase
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
-directlink|nodirect` (the mock Mac's settings; it answers a pick after 0.35 s),
+directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
+after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
+Wired and `noroute` none),
 `-SillConnectCase looking|hint|nearby|methods|denied` (the connect screen in a discovery
 state; `methods` has a row ending in each word, none, and long names; the mock never
 browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the
-off-Bonjour synthetic hosts from the simulator), `-SillMoveTest 1|refused`
+off-Bonjour synthetic hosts from the simulator), `-SillMoveTest 1|refused|to:HOST:PORT`
 (with `-SillConnect`: that session counts as direct and a second later the same
-address, or its port 1, is listed as the Mac's network row, so the move to the
-network runs against a synthetic host; the console's "discovery: …" lines,
+address, or its port 1, or HOST:PORT, is listed as the Mac's network row, so the
+move to the network runs against a synthetic host; `to:` this Mac's
+`fe80::…%en0` address from `127.0.0.1` shows the panel's route word change at
+the hand-over; the console's "discovery: …" and "session: …" lines,
 `xcrun simctl launch --console-pty`, say what happened). A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot.

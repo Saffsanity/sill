@@ -35,10 +35,17 @@ final class StreamClient: ObservableObject {
     /// No Mac listed after the network's first seconds: the connect screen says why, and offers
     /// Search Nearby while the nearby browser is not running.
     @Published var showsNearbyHint = false
-    /// This connection runs over peer-to-peer Wi-Fi: the Settings panel says so, and warns that
-    /// turning Direct Wireless off disconnects this device. It lasts only while the network does
-    /// not list the Mac: once it has for 2 s the session moves there (`moveToNetworkIfListed`).
+    /// This connection runs over peer-to-peer Wi-Fi: the Settings panel warns that turning Direct
+    /// Wireless off disconnects this device. It lasts only while the network does not list the
+    /// Mac: once it has for 2 s the session moves there (`moveToNetworkIfListed`).
     @Published var connectedDirectly = false
+    /// How the session's connection reaches the Mac, the word the Settings panel's readout ends in
+    /// (DiscoveryPolicy.route): "Wired", "Wi-Fi" or "Direct", nil when its path does not say and
+    /// while disconnected. It follows the connection that carries the session: read when it is
+    /// ready, again when a move hands the session over, and on each path update of that
+    /// connection that describes it (`followRoute`; the others keep the word). Only shown;
+    /// `connectedDirectly` is what routing reads.
+    @Published var route: DiscoveryPolicy.Method?
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
     /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
@@ -515,11 +522,13 @@ final class StreamClient: ObservableObject {
             switch state {
             case .ready:
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
+                let path = c.currentPath
                 DispatchQueue.main.async {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
                     self.reconnectTo = nil
                     self.connected = true
                     self.connectedDirectly = direct
+                    self.setRoute(from: path, fresh: true)
                     self.askedNearby = false
                     self.connectedAt = Date()
                     self.status = "Connected to \(name)"
@@ -553,6 +562,7 @@ final class StreamClient: ObservableObject {
                 break
             }
         }
+        followRoute(of: c)
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
     }
@@ -631,6 +641,7 @@ final class StreamClient: ObservableObject {
                 break
             }
         }
+        followRoute(of: c)   // from the hand-over on
         c.start(queue: queue)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.moving === c else { return }
@@ -706,6 +717,7 @@ final class StreamClient: ObservableObject {
         let fencePing = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: nonce)
         link.handOver(from: old, to: c, fencePing: fencePing.serialized(), nonce: nonce)
         connectedDirectly = false
+        setRoute(from: c.currentPath, fresh: true)   // the network connection's, which carries the session now
         status = "Connected to \(hostName)"
         settings.reset()
         settingsProblem = nil
@@ -778,7 +790,9 @@ final class StreamClient: ObservableObject {
     /// there is another launch (one try, refused at its first list, none again while it stays
     /// listed); the same host's own port, with `-SillConnect` through a proxy that delays each
     /// direction, is the same launch behind a slow direct link (moved once the fence has waited out
-    /// the proxy's round trip). Main thread.
+    /// the proxy's round trip). `to:HOST:PORT` lists that address: the same host reached another
+    /// way, so the route can change at the hand-over (from 127.0.0.1, no word, to this Mac's
+    /// fe80::…%en0 address, "Wi-Fi"). Main thread.
     private func beginMoveTest(endpoint: NWEndpoint, name: String, mode: String) {
         guard case .hostPort(let host, _) = endpoint, testNetworkRows.isEmpty else { return }
         let listed: NWEndpoint
@@ -788,6 +802,9 @@ final class StreamClient: ObservableObject {
             listed = .hostPort(host: host, port: 1)
         } else if mode.hasPrefix("other:"), let number = UInt16(mode.dropFirst(6)), let port = NWEndpoint.Port(rawValue: number) {
             listed = .hostPort(host: host, port: port)
+        } else if mode.hasPrefix("to:"), let colon = mode.lastIndex(of: ":"), mode.distance(from: mode.startIndex, to: colon) > 3,
+                  let number = UInt16(mode[mode.index(after: colon)...]), let port = NWEndpoint.Port(rawValue: number) {
+            listed = .hostPort(host: NWEndpoint.Host(String(mode[mode.index(mode.startIndex, offsetBy: 3)..<colon])), port: port)
         } else {
             return
         }
@@ -811,6 +828,90 @@ final class StreamClient: ObservableObject {
             return DiscoveryPolicy.isPeerToPeer(interface.name)
         }
         return path.availableInterfaces.contains { DiscoveryPolicy.isPeerToPeer($0.name) }
+    }
+
+    /// The interface a link-local address of the Mac is scoped to (the USB cable, AWDL, a Wi-Fi
+    /// link-local address); nil for IPv4 and a global IPv6 address, which carry none.
+    private static func scopedInterface(_ path: NWPath) -> NWInterface? {
+        guard case .hostPort(let host, _)? = path.remoteEndpoint, case .ipv6(let address) = host else { return nil }
+        return address.interface
+    }
+
+    /// Whether the path names the Mac by its IP address, as the connection's own path does. A path
+    /// update of a connection to a Bonjour row can name the service instead, or nothing: that path
+    /// describes the service's resolution, not the connection (DiscoveryPolicy.describesFlow).
+    private static func namesAddress(_ path: NWPath) -> Bool {
+        switch path.remoteEndpoint {
+        case .hostPort(.ipv4, _)?, .hostPort(.ipv6, _)?: return true
+        default: return false
+        }
+    }
+
+    /// The interface this device's own address on the connection is on, when the path's local
+    /// endpoint names one (either family): the session route's witness after the Mac's scope, for
+    /// a connection whose remote address carries none (IPv4, a global IPv6 address).
+    private static func localInterface(_ path: NWPath) -> NWInterface? {
+        guard case .hostPort(let host, _)? = path.localEndpoint else { return nil }
+        return host.interface
+    }
+
+    /// `route` after a reading of the session connection's path (DiscoveryPolicy.sessionRoute):
+    /// `fresh` for a connection that has just come to carry the session (ready, or handed a move),
+    /// which always counts, else a path update, which counts only when it describes the connection
+    /// (DiscoveryPolicy.describesFlow: satisfied, and naming the Mac's IP address); any other update
+    /// keeps the word. The witness: the Mac's scoped address, else this device's own address's
+    /// interface, else the path's interfaces, each as the address or path itself types it. Main
+    /// thread.
+    private func setRoute(from path: NWPath?, fresh: Bool = false) {
+        let describes = DiscoveryPolicy.describesFlow(fresh: fresh, hasAddress: path.map(Self.namesAddress) ?? false,
+                                                      satisfied: path?.status == .satisfied)
+        let scope = path.flatMap(Self.scopedInterface)
+        let local = path.flatMap(Self.localInterface)
+        let next = DiscoveryPolicy.sessionRoute(current: route, scope: scope.map(Self.policyInterface),
+                                                local: local.map(Self.policyInterface),
+                                                path: path?.availableInterfaces.map(Self.policyInterface) ?? [],
+                                                describesFlow: describes)
+        #if DEBUG
+        // What the word was read from, or why an update was not read, to check it on a device (the
+        // cable in and out).
+        let interfaces = path.map { Self.listed($0.availableInterfaces) } ?? "none"
+        if !describes, let path {
+            let status = path.status == .satisfied ? "" : " (\(path.status))"
+            let endpoint = Self.namesAddress(path) ? ""
+                : path.remoteEndpoint.map { " without an address (for \($0))" } ?? " without an endpoint"
+            print("session: kept \(route?.word ?? "no word"); ignored a path update\(status)\(endpoint): \(interfaces)")
+        } else if fresh || next != route {
+            let witness = scope.map { "the Mac's address on \(Self.listed([$0])); " }
+                ?? local.map { "this device's address on \(Self.listed([$0])); " } ?? ""
+            print("session: \(next?.word ?? "no word"), read from \(witness)path \(interfaces)")
+        }
+        #endif
+        if next != route { route = next }
+    }
+
+    #if DEBUG
+    /// Interfaces as the DEBUG console names them: "en2 (wiredEthernet), en0 (wifi)", or "none".
+    private static func listed(_ interfaces: [NWInterface]) -> String {
+        interfaces.isEmpty ? "none" : interfaces.map { "\($0.name) (\($0.type))" }.joined(separator: ", ")
+    }
+    #endif
+
+    /// Keeps `route` in step with `c`'s path while `c` carries the session: a move's network
+    /// connection only from its hand-over on, the direct one it replaced no longer. Only an update
+    /// that describes the connection may change the word (`setRoute`): iPadOS also sends ones that
+    /// describe a Bonjour row's resolution instead, naming the service rather than the Mac's address
+    /// ("en0 (wifi), en0 (wifi)" for a session on the cable's en2, 2026-09-25), and those keep it;
+    /// the DEBUG console logs each.
+    /// An established TCP connection keeps its interface, so an update that counts rarely changes
+    /// anything: a cable pulled mid-session ends the connection instead, and the reconnect reads
+    /// its own route when ready.
+    private func followRoute(of c: NWConnection) {
+        c.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                guard let self, self.connected, self.connection === c else { return }
+                self.setRoute(from: path)
+            }
+        }
     }
 
     /// The user chose to leave. No reconnect.
@@ -862,6 +963,7 @@ final class StreamClient: ObservableObject {
         cursorShape = nil
         connected = false
         connectedDirectly = false
+        route = nil
         // The network gets its first seconds again before a remembered Mac is looked for nearby; the
         // callers then run the policy (updateDiscovery).
         searchingSince = ProcessInfo.processInfo.systemUptime
