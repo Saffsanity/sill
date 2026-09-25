@@ -29,10 +29,12 @@ struct EncoderMailbox<Frame> {
     /// The last id given out: 1 for the first frame let in, 2 for the next, and so on.
     private var lastID = 0
 
-    /// One frame inside at a time, on the hardware and on the software encoder alike: the next
-    /// goes in when the last came back.
+    /// Two frames inside on the hardware encoder: a second frame goes in while the first is still
+    /// inside, so the time a frame spends around the encoder chip can overlap the next one's (see
+    /// HEVCEncoder). One on the software encoder: it is bound by the CPU, and a second frame there
+    /// would only wait a whole software encode inside.
     init(software: Bool) {
-        limit = 1
+        limit = software ? 1 : 2
     }
 
     enum Admission: Equatable {

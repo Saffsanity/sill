@@ -27,7 +27,13 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         config.height = height
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-        config.queueDepth = 5   // headroom: a wedged encoder may keep one buffer forever
+        // Surfaces ScreenCaptureKit may have out at once. The encoder holds up to three (two
+        // inside the hardware encoder, one waiting in its mailbox; its last frame is always one of
+        // them), which leaves two to render into and deliver, the margin the default depth of 3
+        // leaves an app that holds one. A wedged encoder keeps its two until the watchdog gives
+        // up (1.5 s) and the source restarts on a new stream; the waiting one is replaced as
+        // each new frame arrives, so capture never stalls meanwhile.
+        config.queueDepth = 5
         config.showsCursor = showsCursor
         config.colorSpaceName = CGColorSpace.sRGB
         if let sourceRect {
