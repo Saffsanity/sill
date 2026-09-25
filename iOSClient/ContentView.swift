@@ -80,13 +80,18 @@ struct ContentView: View {
 ///   same name: another synthetic host there is refused at its first window list (another launch)
 ///   and not tried again while it stays listed; the first host's own port, with `-SillConnect`
 ///   going through a proxy that delays each direction, moves once the fence has waited out the
-///   proxy's round trip. The console says what happened ("discovery: …", "move to the network …";
+///   proxy's round trip. `to:HOST:PORT` lists that address under the same name: the same host
+///   reached another way, so the Settings panel's route word changes at the hand-over (from
+///   `127.0.0.1`, none, to this Mac's `fe80::…%en0`, "Wi-Fi"). The console says what happened
+///   ("discovery: …", "move to the network …", "session: …" for the route;
 ///   `xcrun simctl launch --console-pty`).
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
-///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's route, the
+///   readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired) and `noroute`
+///   (none, as a connection whose path says nothing).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or

@@ -1,8 +1,9 @@
 import Foundation
 
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
-/// from a network one, the word each row shows for how its Mac is reachable, when a reconnect may
-/// take a Direct row, and when a session over AWDL moves to the network. AWDL takes the radio off
+/// from a network one, the word each row shows for how its Mac is reachable and the one the
+/// Settings panel shows for the session's own connection, when a reconnect may take a Direct row,
+/// and when a session over AWDL moves to the network. AWDL takes the radio off
 /// its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for it only when a Mac it
 /// has seen with Direct Wireless Connection on is missing from the network, or when the user taps
 /// Search Nearby, never while connected, and leaves it once the network lists that Mac again.
@@ -148,6 +149,35 @@ enum DiscoveryPolicy {
         if network.contains(where: { $0.type == .wiredEthernet }) { return .wired }
         if network.contains(where: { $0.type == .wifi }) { return .wifi }
         return nil
+    }
+
+    /// How the session's own connection reaches the Mac: the word the Settings panel's readout
+    /// ends in (Noah, 2026-09-24), where a row's `method` says where the browser saw the Mac. A
+    /// session can run over another link than its row's word, as no connection is pinned to an
+    /// interface (with Wi-Fi and the cable both up, either), so this reads the connection's path:
+    /// the interface the Mac's address is scoped to when it is a link-local one, which is all the
+    /// USB cable and AWDL carry (the Mac logs such a device at "fe80::…%anri0" or "fe80::…%awdl0"),
+    /// else the path's interfaces when they all say the same, else nothing: the simulator's path
+    /// to its own Mac lists lo0 alone, and a word for a path that says two things would be a guess.
+    /// The Mac's card names its own side by the same rule (ClientLink.route), so the two can
+    /// differ: this device on Wi-Fi, the Mac on Ethernet.
+    static func route(scope: Interface?, path: [Interface]) -> Method? {
+        if let scope { return method(of: scope) }
+        let each = path.map(method(of:))
+        guard let first = each.first, each.allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+
+    /// One interface's word: Direct for peer-to-peer Wi-Fi (by name: awdl0 and llw0 report .wifi),
+    /// Wired for wired Ethernet (the USB cable to the Mac, if iPadOS types it so, and an adapter),
+    /// Wi-Fi for the rest of Wi-Fi, and nothing for loopback, cellular, a VPN or an unknown type.
+    static func method(of interface: Interface) -> Method? {
+        if isPeerToPeer(interface.name) { return .direct }
+        switch interface.type {
+        case .wiredEthernet: return .wired
+        case .wifi: return .wifi
+        case .cellular, .loopback, .other: return nil
+        }
     }
 
     /// When each Direct row was first seen as one: kept for a row that is still Direct, `now` for a

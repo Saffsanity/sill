@@ -164,7 +164,8 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    on in Sill on the Mac). Tap the Mac's name. Its row ends in where the device
    sees it: "Wi-Fi", "Wired" (a cable), "Direct", or nothing when it can't
    tell. The word is not the path a connection takes: with Wi-Fi and a cable
-   both up, a connection can go over either.
+   both up, a connection can go over either; the Settings panel's readout ends
+   in the one it does take.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
