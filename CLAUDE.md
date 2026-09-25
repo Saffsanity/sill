@@ -8,6 +8,39 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Public README (2026-09-25, branch `public-readme` from main at b50e224,
+draft PR #15).** For the repository going public at launch: `README.md` is the
+public front page, everything the old README said is in `docs/DEVELOPMENT.md`
+(word for word but for local paths, cross-references and two notes on the iOS
+project, plus the two cable sentences main's README gained from
+follow-best-path, PR #12, after this branch began), `LICENSE` is the Apache
+License 2.0 as apache.org publishes it with "Copyright 2026 Noah Saffer" in
+its appendix, and `.github/FUNDING.yml` names GitHub Sponsors (Saffsanity)
+only, until there is a Ko-fi handle (see Layout for all four). The README
+claims only what the site and this file back: Apple silicon and macOS 14, iOS
+17, no latency figures, and the home connection's lack of encryption said
+plainly.
+- **For Noah:** Sponsorships turned on in the repository's settings (General,
+  Features), or GitHub shows no Sponsor button (github.com/sponsors/Saffsanity
+  is live since 2026-09-25); a Ko-fi handle, if wanted, goes in two places, a
+  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; Apache-2.0 or
+  MPL-2.0, still open in docs/BRIEF.md (for MPL-2.0, replace LICENSE and the
+  README's License section); the App Store badge and the sentence under the
+  README's links, as the listing and the first notarized Sill for Mac come
+  out.
+- Merging: main gained follow-best-path (PR #12, cea195c) after this branch
+  began, so PR #15 conflicts in README.md and CLAUDE.md: take this branch's
+  README.md (DEVELOPMENT.md's step 3 of The iOS app already has PR #12's
+  cable sentences) and keep both Current step entries. The open branches that
+  edit the old README put that text in docs/DEVELOPMENT.md:
+  app-store-readiness's release paragraph under Releasing (its Layout list
+  fits the Overview), encoder-two-in-flight's stats-line bullet and its
+  Resolution note under What to try if it's slow, and update-notice's (local,
+  not pushed) Updates paragraph under Sill.app, the menu bar host, its
+  Distribution text under Releasing and its device-hello paragraph after the
+  gear paragraph of The iOS app. A change the public README describes (pairing
+  at home, say) also updates README.md's How it works and Good to know.
+
 **App Store readiness (2026-09-25, branch `app-store-readiness` from main at
 76366e8; main at ba91136, PR #13 remote access, merged in, not rebased).** What
 a first upload of the iOS app and the first Developer ID download of Sill.app
@@ -1268,7 +1301,7 @@ display off by default in both the CLI and the app.
   or the user closes it. Allow… shows each system alert once
   (`askedScreenRecording`/`askedAccessibility` in the defaults), then opens
   System Settings, so recovering from a `tccutil reset` also deletes those two
-  keys (README, Permissions).
+  keys (docs/DEVELOPMENT.md, Permissions).
 - Build facts. SwiftPM's default build system links without SDKROOT, so its
   executables record the deployment target as their SDK (`xcrun vtool
   -show-build`: sdk 14.0), and macOS 26+ draws such an app in the pre-26 look.
@@ -1808,6 +1841,20 @@ good.
   upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
+- `docs/DEVELOPMENT.md` — building, running and testing from source; the
+  README's developer material until 2026-09-25, so a plan's "README" means a
+  section there: the toolchain, make-app.sh, Sill.app's menu and Quality, the
+  CLI's flags, the iOS project, Permissions (the TCC reset), settings from a
+  device, Direct Wireless, remote access (setup, troubleshooting, reset), the
+  test tools in brief (Build and run below has them all), measuring latency,
+  troubleshooting (slow, frozen, the encoder), releasing, known limitations.
+- `README.md` — the public front page: the site's lede, links to getsill.app
+  and its download, support and privacy pages, a commented App Store badge
+  slot, requirements, how it works, tips, building from source in brief,
+  contributing, the license. `LICENSE` — the Apache License 2.0.
+  `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
+  line joins it once there is a Ko-fi handle). Tip links live there, in the
+  README's Tips and on the site, never in the iOS app.
 
 ## Build and run
 
