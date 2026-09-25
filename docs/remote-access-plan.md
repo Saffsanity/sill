@@ -2196,3 +2196,14 @@ the plan.
   and Settings in the macOS 26 look (only offscreen renders were checked); one unexplained failure
   in four runs of the outside-link UI test (the first after a rebuild: the pairing dial was refused
   and no log was captured; three reruns passed).
+
+**Merged with main (2026-09-25).** Main's PRs #6–#10 came in by one merge (0f7f50d), not a rebase:
+the Direct Wireless fixes, the connect screen's Wired/Wi-Fi/Direct, the quality presets, the route
+in Settings and prefer-cable. What changed here with it: Low is the first of seven presets (main's
+six after it, the 200 Mbps cap main's); the Mac card keeps main's link word for home devices and
+this plan's label for remote ones, the label winning (`StatusText.routeWord`, also on the source
+row with one device); the device keeps main's route word for the readout and a remote session's
+way in apart (`StreamClient.remoteRoute`); a Direct row waits `directWait` and `networkGrace` in
+the reconnect (§7.4's 3 s became main's rule), and every row dial goes through the cable first
+when the row says Wired; Direct Wireless off never ends a remote session. CLAUDE.md's first
+current-step entry lists the resolution and what was checked.
