@@ -400,8 +400,16 @@ final class StreamClient: ObservableObject {
     var reconnectCheck: DispatchWorkItem?
     /// A remote session's first window list must come within 10 s of `.ready`.
     var firstListDeadline: DispatchWorkItem?
-    /// A kind 22 on the current connection: why the Mac is about to close it.
-    var goodbyeReason: String?
+    /// A kind 22 on the current connection: why the Mac is about to close it, and what to do then
+    /// (GoodbyePolicy). One that does not decode reads as reason "", a reason this build does not know.
+    var goodbye: Goodbye?
+    /// The Mac's own words from the goodbye that ended the last session, when it was a notice (a
+    /// reason this build does not know): the connect screen's status line (GoodbyePolicy). Cleared
+    /// by the next session's tear-down, and a new dial replaces the status line it matches.
+    struct Notice: Equatable {
+        let text: String
+    }
+    @Published var notice: Notice?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -777,7 +785,7 @@ final class StreamClient: ObservableObject {
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
         session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName)
-        goodbyeReason = nil
+        goodbye = nil
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
         c.stateUpdateHandler = { [weak self] state in
@@ -1275,7 +1283,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         session = s
-        goodbyeReason = nil
+        goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
         if route != nil { route = nil }
         c.stateUpdateHandler = { [weak self] state in
@@ -1353,7 +1361,8 @@ final class StreamClient: ObservableObject {
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
-        goodbyeReason = nil
+        goodbye = nil
+        notice = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -1677,12 +1686,14 @@ final class StreamClient: ObservableObject {
                 self.receiveMacInfo(signed, endpoint: from?.endpoint)
             }
         case .goodbye:
-            // Why the Mac is about to close this connection: the words, and whether to reconnect.
-            let reason = Wire.decode(Goodbye.self, from: data)?.reason ?? ""
+            // Why the Mac is about to close this connection: the words, and whether to reconnect
+            // (GoodbyePolicy, when the connection ends). One that does not decode is a reason this
+            // build does not know: its own words, and no reconnect.
+            let goodbye = Wire.decode(Goodbye.self, from: data) ?? Goodbye(reason: "")
             let from = connection
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
-                self.goodbyeReason = reason
+                self.goodbye = goodbye
             }
         default:
             break // client → host kinds, and anything a newer host invents

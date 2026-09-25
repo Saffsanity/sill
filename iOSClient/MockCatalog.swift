@@ -317,9 +317,10 @@ enum MockCatalog {
         case "revoked": return copy(.revoked, vpn)
         case "notsill": return copy(.notSill, router)
         case "gaveup": return "Stopped trying to reach Mac mini. Tap it to try again."
-        case "quit": return "Mac mini quit Sill. This \(device) reconnects when it’s back."
-        case "removed": return "Mac mini removed this \(device). To use it again, pair it again."
-        case "remoteoff": return "Mac mini turned off Remote Access."
+        // A session's goodbyes, in the words GoodbyePolicy gives them.
+        case "quit": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.quit), mac: "Mac mini", device: device, saved: true).text
+        case "removed": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.removed), mac: "Mac mini", device: device, saved: true).text
+        case "remoteoff": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.remoteOff), mac: "Mac mini", device: device, saved: true).text
         case "timeoutip": return copy(.noAnswer, router)
         default: return copy(.noAnswer, vpn)
         }
