@@ -1241,6 +1241,22 @@ Review fixes, each shown by an encoder-free check (`Scripts/encoder-check/run.sh
   the six, this tree all six, a keyframe out 70–73 ms after the last frame
   (its harness mode against the stand-in VideoToolbox: 0 of 6 with 5ec3b63's
   file, 6 of 6 now, 74–76 ms).
+- The mailbox check now reaches two cases no scenario did (review): a
+  timestamp equal to the last one handed over, and the watchdog's "true,
+  once". S16: two keyframe requests on a still window before the first
+  re-encode is handed over (two devices joining at once) stamp both re-encodes
+  alike, and the second goes in 1 ms after the first (`enc.ptsFixed`). S17, on
+  `EncoderMailbox` directly: an equal timestamp is moved past the last one;
+  the watchdog is false before `after`, true once, then false, and false on a
+  session its owner gave up on (`abandon`). `EncoderMailbox` is unchanged. Its
+  mutants `<=` made `<` (equal timestamps let through) and `giveUpIfHung`
+  without `!dead` passed the check before (147,778 checks each) and fail it
+  now, so both are in mutants.py: 148,261 checks, 30 of 30 mutants caught.
+  Equal timestamps can happen in the product: any two requests on a still
+  window before the first re-encode is handed over. A second true from the
+  watchdog cannot today (its timer is cancelled when it fires, and `abandon`,
+  a probe's, comes after 1 s, under `hangAfter`): the guard keeps the doc's
+  "true, once".
 
 The first round (two inside by default) was verified without the hardware
 encoder: clean builds at each commit (only the old CaptureProbe warning); the

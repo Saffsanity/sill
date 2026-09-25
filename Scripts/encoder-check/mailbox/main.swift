@@ -897,5 +897,63 @@ do {
     expectAllSettled(s)
 }
 
+// S16: two keyframe requests on a still window before the first re-encode is handed over (two
+// devices joining at once, or one joining as another's delta is dropped). Both re-encodes are
+// stamped just after the last timestamp handed over, so alike, and the second is moved past the
+// first at its hand-over. The last capture's encode call blocks encodeQueue for 0.2 s (its frame is
+// back in 9 ms), so the first re-encode waits on the queue and the second in the mailbox.
+do {
+    scenarioName = "two re-encodes stamped alike"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    let caps = captureTimes(fps: fps, from: 0, to: 0.5)   // 30 captures, let in as frames 1 to 30
+    s.callBlocks = { $0 == caps.count ? 0.2 : 0 }
+    schedule(s, captures: caps)
+    clock.at(caps.last! + 0.1) { s.requestKeyframe(); s.requestKeyframe() }
+    s.startWatchdog(until: 1.5)
+    clock.run()
+    let reencodes = s.handOvers.filter(\.frame.reencode)
+    expect(reencodes.count == 2, "\(reencodes.count) re-encodes handed over, not 2")
+    if reencodes.count == 2 {
+        expect(CMTimeCompare(reencodes[0].frame.pts, reencodes[1].frame.pts) == 0,
+               "the two re-encodes were stamped \(CMTimeGetSeconds(reencodes[0].frame.pts)) and \(CMTimeGetSeconds(reencodes[1].frame.pts)) s: the scenario does not exercise an equal timestamp")
+        expect(CMTimeCompare(reencodes[1].pts, reencodes[0].pts) > 0, "the second re-encode went in at \(CMTimeGetSeconds(reencodes[1].pts)) s, not after the first's \(CMTimeGetSeconds(reencodes[0].pts)) s")
+        expect(reencodes[0].keyframe && !reencodes[1].keyframe, "the first re-encode is \(reencodes[0].keyframe ? "" : "not ")the keyframe, the second \(reencodes[1].keyframe ? "is" : "is not") one")
+    }
+    expect(s.ptsFixed == 1, "\(s.ptsFixed) timestamps fixed, not 1")
+    let pts = s.handOvers.map(\.pts)
+    expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "timestamps handed to VideoToolbox not strictly increasing")
+    expectAllSettled(s)
+}
+
+// S17: EncoderMailbox on its own. A timestamp equal to the last one handed over is moved past it,
+// as an earlier one is. The watchdog is true once, when a frame has been inside for over `after`,
+// and never again: not on the session it gave up on, nor on one its owner gave up on (`abandon`).
+do {
+    scenarioName = "direct: an equal timestamp"
+    var b = EncoderMailbox<Int>(limit: 1)
+    let p = CMTime(value: 1000, timescale: 1000)
+    expect(b.admit(1, now: 0) == .goesIn(id: 1), "the first frame was not let in as frame 1")
+    let first = b.handOver(1, pts: p, now: 0)
+    expect(first == EncoderMailbox<Int>.HandOver(pts: p, keyframe: false, ptsFixed: false), "the first hand-over: \(String(describing: first))")
+    _ = b.returned(1, now: 0.01)
+    expect(b.admit(2, now: 0.02) == .goesIn(id: 2), "the second frame was not let in as frame 2")
+    let second = b.handOver(2, pts: p, now: 0.02)
+    expect(second?.ptsFixed == true && second.map { CMTimeCompare($0.pts, p) > 0 } == true,
+           "a timestamp equal to the last one went in as \(second.map { CMTimeGetSeconds($0.pts) } ?? -1) s (fixed: \(second?.ptsFixed == true)), not after 1 s")
+    expect(second.map { CMTimeCompare(b.lastPTS, $0.pts) == 0 } == true, "the last timestamp is \(CMTimeGetSeconds(b.lastPTS)) s, not the one handed over")
+
+    scenarioName = "direct: the watchdog, once"
+    var w = EncoderMailbox<Int>(limit: 1)
+    _ = w.admit(1, now: 0)   // inside from 0, never back
+    expect(!w.giveUpIfHung(now: 1.4, after: 1.5), "the watchdog fired 1.4 s after the frame went in")
+    expect(w.giveUpIfHung(now: 2.0, after: 1.5) && w.dead, "the watchdog did not give up 2.0 s after the frame went in")
+    expect(!w.giveUpIfHung(now: 2.5, after: 1.5), "the watchdog fired again on the session it gave up on")
+    var a = EncoderMailbox<Int>(limit: 1)
+    _ = a.admit(1, now: 0)
+    expect(a.giveUp(), "giving up with a frame inside returned false")
+    expect(!a.giveUpIfHung(now: 5, after: 1.5), "the watchdog fired on a session its owner gave up on")
+}
+
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)
