@@ -2426,6 +2426,14 @@ final class StreamClient: ObservableObject {
     /// On `queue`. Stamped with the monotonic clock: a wall-clock correction between a ping and its
     /// pong would otherwise land in the round trip.
     private func sendPing(on c: NWConnection) {
+        // A connection already closed sends nothing, and is not declared lost again at each ping:
+        // while a move carries its session on (`rescue`) it stays the session's until the move
+        // takes over or ends, and its liveness would otherwise report it lost four times a second.
+        // Its own state handler has already reported the close (`connectionLost`).
+        switch c.state {
+        case .cancelled, .failed: return
+        default: break
+        }
         guard c === connection, checkLiveness(c) else { return }
         var payload = Data(capacity: 8)
         var v = CACurrentMediaTime().bitPattern.bigEndian

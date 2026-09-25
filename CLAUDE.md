@@ -30,7 +30,10 @@ says; remote access works as its entries say. Where the two meet:
   beside a move (`moveUnderWay`: a move, or a session one carries on, which
   stays `connected` until the move takes over or ends it). #13's liveness (no
   byte for 6 s) now ends a stranded cable connection too; the rescue then
-  decides as for any other end.
+  decides as for any other end. A connection already closed sends no pings
+  (the fix-up after the merge): while a move carried its session on, it was
+  still the session's, and its liveness reported it lost four times a second
+  until the move ended (log lines, and `connectionLost` calls that did nothing).
 - Dials: one row dial, #13's `dial(_:macID:)`, which carries prefer-cable's
   wired dial and its fallback; the moves keep theirs (`startMove` with
   `wiredDial`, or this branch's `wifiDial`), both for network rows only now
