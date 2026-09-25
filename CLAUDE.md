@@ -63,6 +63,10 @@ Apple's sources and every text to paste into App Store Connect;
   (tags, links, CSP, headings, the Remote Access markers and their cut gate);
   release.sh's refusals and its functions (33 checks, a fake keychain), never a
   real run; the placeholder commands on a scratch copy.
+- After the merge, three review findings fixed: every page's brand and Home
+  links were `./`, which opens nothing from the folder (WebKit from file://:
+  8 of the 28 header and footer links dead; with `index.html`, all 28 land on
+  their page, and each answers 200 from `python3 -m http.server`).
 - **Untested, for Noah:** the decisions: the domain, the contact address, and
   whether 1.0 keeps Remote Access, which main has had since ba91136 (the
   audit advised a 1.0 without it before it merged; the metadata's switch lists
@@ -1297,8 +1301,9 @@ good.
   App Store Connect and the app link to), `support.html`, `style.css` (system
   fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
   scripts and nothing loaded from elsewhere: every page's
-  Content-Security-Policy is `default-src 'none'`. Links are relative
-  (`download.html`), so it renders from the folder; GitHub Pages also serves
+  Content-Security-Policy is `default-src 'none'`. Links are relative and
+  name a file (`download.html`; Home is `index.html`, since `./` opens nothing
+  from the folder), so it renders from the folder; GitHub Pages also serves
   each page without `.html`, the form the app and App Store Connect use
   (`/download`, `/privacy`, `/support`). Remote Access paragraphs sit between
   `<!-- Remote Access` and `<!-- /Remote Access -->`, to cut for a release
