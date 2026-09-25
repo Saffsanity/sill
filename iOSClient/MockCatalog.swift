@@ -176,10 +176,11 @@ enum MockCatalog {
         let client = StreamClient()
         client.mockDiscovery = true
         client.status = StreamClient.lookingOnNetwork
-        /// A row as `recomputeMacs` makes it: Direct only for a Direct row.
+        /// A row as `recomputeMacs` makes it: Direct only for a Direct row. No wired interface: the
+        /// mock never dials.
         func mac(_ name: String, _ method: DiscoveryPolicy.Method?) -> FoundMac {
             FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
-                     direct: method == .direct, method: method)
+                     direct: method == .direct, method: method, wired: nil)
         }
         switch c {
         case .looking:

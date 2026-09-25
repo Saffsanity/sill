@@ -85,6 +85,12 @@ struct ContentView: View {
 ///   `127.0.0.1`, none, to this Mac's `fe80::…%en0`, "Wi-Fi"). The console says what happened
 ///   ("discovery: …", "move to the network …", "session: …" for the route;
 ///   `xcrun simctl launch --console-pty`).
+/// * `-SillWiredTest HOST:PORT` — a "Wired" row's dial goes to the cable first and falls back to
+///   the row as listed; this puts that fallback under test. `-SillConnect`'s dial, any network
+///   row's (each counts as Wired) and a move's under `-SillMoveTest` go to HOST:PORT first, with
+///   the address they would have dialled as the fallback: `192.0.2.1:9` (never answers) gives way
+///   after 2.5 s, `127.0.0.1:1` (nothing listens) at once, and the session comes up on the
+///   address as before ("wired dial … dialing unconstrained" on the console).
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
