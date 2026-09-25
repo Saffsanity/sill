@@ -8,6 +8,29 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Public README (2026-09-25, branch `public-readme` from main at b50e224).**
+For the repository going public at launch: `README.md` is the public front
+page, everything the old README said is in `docs/DEVELOPMENT.md` (word for
+word but for local paths, cross-references and two notes on the iOS project),
+`LICENSE` is the Apache License 2.0 as apache.org publishes it with "Copyright
+2026 Noah Saffer" in its appendix, and `.github/FUNDING.yml` names GitHub
+Sponsors (Saffsanity) and Ko-fi (see Layout for all four). The README claims
+only what the site and this file back: Apple silicon and macOS 14, iOS 17, no
+latency figures, and the home connection's lack of encryption said plainly.
+- **For Noah:** the Ko-fi handle (a placeholder in FUNDING.yml and in the
+  README's one Ko-fi link; for Sponsors only, delete both); Sponsorships turned
+  on in the repository's settings (General, Features), or GitHub shows no
+  Sponsor button (github.com/sponsors/Saffsanity is live since 2026-09-25);
+  Apache-2.0 or MPL-2.0, still open in docs/BRIEF.md (for MPL-2.0, replace
+  LICENSE and the README's License section); the App Store badge and the
+  sentence under the README's links, as the listing and the first notarized
+  Sill for Mac come out.
+- Merging: the open branches that edit the old README put that text in
+  docs/DEVELOPMENT.md: app-store-readiness's release paragraph under
+  Releasing (its Layout list fits the Overview), follow-best-path's cable
+  paragraph after step 3 of The iOS app, encoder-two-in-flight's stats-line
+  bullet under Troubleshooting.
+
 **The hardware encoder: busy, not stuck (2026-09-24; fixed 2026-09-25, branch
 `encoder-recovery` from main at 76366e8, with main at ba91136 merged in: the
 bullet before the last).** Sill.app's watchdog fired twice on 2026-09-24 and
@@ -1502,6 +1525,12 @@ good.
   device, Direct Wireless, remote access (setup, troubleshooting, reset), the
   test tools in brief (Build and run below has them all), measuring latency,
   troubleshooting (slow, frozen, the encoder), releasing, known limitations.
+- `README.md` — the public front page: the site's lede, links to getsill.app
+  and its download, support and privacy pages, a commented App Store badge
+  slot, requirements, how it works, tips, building from source in brief,
+  contributing, the license. `LICENSE` — the Apache License 2.0.
+  `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors and Ko-fi. Tip
+  links live there and on the site, never in the iOS app.
 
 ## Build and run
 
