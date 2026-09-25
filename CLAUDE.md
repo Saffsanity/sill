@@ -1121,9 +1121,8 @@ Verified without the hardware encoder: clean builds at each commit
 (only the old CaptureProbe warning); the encoder-free check, the real
 `EncoderMailbox.swift` compiled with a stand-in for VideoToolbox that returns
 frames after programmable delays, in any order, in virtual time, driven at 60
-fps through a copy of HEVCEncoder's glue (scratchpad
-`two-in-flight/mailboxcheck/`: `swiftc -O EncoderMailbox.swift main.swift -o
-check && ./check`, 63,778 checks, and `python3 mutants.py`):
+fps through a copy of HEVCEncoder's glue (`Scripts/encoder-check/mailbox/`;
+`Scripts/encoder-check/run.sh mailbox mutants`, 63,778 checks and the mutants):
 - 30 ms a frame: 60.0 fps, no drops, latency 30 ms with two inside; 33.3 fps,
   26.7 drops a second, latency median 36.7 ms with one (the old pipeline, which
   63a365b still has: its run reads the same). 9 ms: 60 either way. 40 ms: 50
@@ -1153,13 +1152,18 @@ check && ./check`, 63,778 checks, and `python3 mutants.py`):
   older one.
 - The throughput test's loop, the real `EncoderProbe.swift` and `Stats.swift`
   against a stand-in `HEVCEncoder` whose frames come back in real time and in
-  decode order (scratchpad `two-in-flight/probecheck/`, 18 checks and a
+  decode order (`Scripts/encoder-check/probe/`, 18 checks and a
   `SILL_TEST_PROBE_HOLD=0.08` run): at 30 ms a frame, each on its own, 68 fps
   with two inside where 4fe37d4's test reads 30; one engine at 30 ms a frame,
   33 either way; never more frames inside than the encoder lets in, nor a
   surface inside twice; a frame that never comes back: no answer after ~1.03
   s, counted stuck, never reported back; one 1.5 s late: reported back once
-  after ~1.5 s and the count back down; the hold still reads 12 fps.
+  after ~1.5 s and the count back down; the hold still reads 12 fps. Since it
+  moved into the repository its stand-in returns frames on a strict timer with
+  no leeway: with dispatch's `asyncAfter` the one-inside case read 24–29 fps
+  for 33 while Sill.app streamed beside it and failed its bound; now 33.2, and
+  two inside 77.5 (two frames back every 30 ms, so the 7 timed frames span
+  three turnarounds).
 - What the change assumes, from the same stand-in: with 15 ms on the chip and
   the rest overlapping, two inside give 60 fps at a 30 ms turnaround; if the
   encoder did the whole 30 ms one frame at a time, two inside would still give
@@ -1171,16 +1175,16 @@ check && ./check`, 63,778 checks, and `python3 mutants.py`):
   engine completed ~72 frames a second at 9.2–9.8 ms each by C/F (two thirds
   of its time). The hardware runs below show that total was the engine's
   whole capacity: C/F leaves out part of each frame's time on it.
-On the hardware, 15:28–15:45 (no device connected; the scratchpad's
-`two-in-flight/verify-hardware.sh`, which checks the rule before each run and
-stops a run if a device connects). All session the Claude app's iOS Simulator
+On the hardware, 15:28–15:45 (no device connected; what is now
+`Scripts/encoder-check/verify-hardware.sh`, which checks the rule before each
+run and stops a run if a device connects). All session the Claude app's iOS Simulator
 panel (`claude-ios-sim`, mapped through VTEncoderXPCService's peer PID) was
 encoding the simulator's 2064×2752 screen at priority 60 and ~62 fps, so every
 run shared the engine with it, and the sparse phase did not bring on the slow
 state (C/F stayed near 9 ms):
 - The CLI's idle stdout (35 s, 7 lines) against 4fe37d4: identical masked and
   sorted, and masked in order too.
-- The real HEVCEncoder of each build (scratchpad `two-in-flight/harness/`, the
+- The real HEVCEncoder of each build (`Scripts/encoder-check/harness/`, the
   file under test compiled with a test pattern: 3024×1964, 40 Mbps, 3 s at 60
   fps, 6 s of a frame every 0.3 s, 20 s at 60 fps): one inside 35.7 fps, 24
   mailbox drops a second, capture-to-output latency median 36.3 ms (p95
@@ -1196,9 +1200,9 @@ state (C/F stayed near 9 ms):
 - The throughput test at 3024×1904: one at a time 49–51 fps, two inside 49.5;
   at 1512×948, 46–81 and 60–67.
 - **Untested, for Noah:** the case the change is for, the slow state on an
-  engine nobody else uses: `verify-hardware.sh harness` with no device
-  connected, the Claude app's iOS Simulator panel closed and no recording
-  (the HeartBeat lines it prints should show one session). Expected with one
+  engine nobody else uses: `Scripts/encoder-check/verify-hardware.sh harness`
+  with no device connected, the Claude app's iOS Simulator panel closed and no
+  recording (the HeartBeat lines it prints should show one session). Expected with one
   inside once slow: ~33 fps, ~24 drops, C/F ~15. Merge only if two inside
   lifts that to ~55 or more; then, since a shared engine gets no frames and a
   turnaround of latency from the second place, keep it only while it adds
@@ -1344,6 +1348,13 @@ good.
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
   every argument is checked before it connects, and a bad one exits 2).
+  `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
+  `run.sh` builds and runs those that never touch an encoder (the mailbox
+  check and its mutants, the probe check; it refuses any binary that links
+  VideoToolbox), and `verify-hardware.sh` the hardware runs against a base
+  commit built from `git archive` (parity, stream, harness, probe), each only
+  while `no-device.sh` finds no device connected to Sill.app; outputs go to
+  `.build/encoder-check/`.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -1385,6 +1396,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
+Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
+Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.

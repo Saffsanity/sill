@@ -10,7 +10,8 @@ import CoreMedia
 ///
 /// Foundation and CoreMedia only, so it is checked on its own with swiftc against a stand-in for
 /// VideoToolbox that returns frames after programmable delays, in any order, in virtual time
-/// (CLAUDE.md, "Frozen stream": the check's command, its scenarios and its mutants).
+/// (`Scripts/encoder-check/run.sh mailbox mutants`; its scenarios and mutants: CLAUDE.md, "The 33
+/// fps plateau").
 struct EncoderMailbox<Frame> {
     /// Frames VideoToolbox may hold at once.
     let limit: Int
