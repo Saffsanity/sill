@@ -315,18 +315,12 @@ The first version of Sill. Use any window on your Mac, or the whole desktop, on 
 
 ## 6. Export compliance (encryption)
 
-**Add the key now.** It is correct today and stays correct with Remote Access.
-Put these two lines inside the top-level `<dict>` of `iOSClient/Info.plist`:
-
-```xml
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-```
-
-Or, instead of the plist lines, the build setting
-`INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO` in both configurations. Use
-one, not both. With the key, uploads skip the encryption questions, TestFlight
-builds included.
+**The key is in the app.** `iOSClient/Info.plist` sets
+`ITSAppUsesNonExemptEncryption` to NO (`<false/>`). That is correct today and
+stays correct with Remote Access. With the key, uploads skip the encryption
+questions, TestFlight builds included. Don't also add the build setting
+`INFOPLIST_KEY_ITSAppUsesNonExemptEncryption` to the project: use one, not
+both.
 
 - Main today uses no encryption at all. Both ends open plain TCP
   (`NWParameters(tls: nil, tcp: tcp)`, iOSClient/StreamClient.swift:639 and
@@ -573,10 +567,13 @@ Safe:
   keyword at least three characters, no spaces, no repeats; review notes
   3,553 bytes (local-only 2,845) of 4,000, all ASCII;
   What's New 260 and 226 characters.
-- The encryption key: a scratch Release build of main (76366e8) for the
-  simulator with the two plist lines, and another with the build setting
-  instead, each put `"ITSAppUsesNonExemptEncryption" => false` in the built
-  Sill.app's Info.plist. Only the known StreamClient.swift:1307 warning.
+- The encryption key, now in `iOSClient/Info.plist`: Release builds of this
+  branch for the simulator and for a device each have
+  `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
+  Info.plist, with the privacy manifest beside it. The device binary links
+  neither Security nor CryptoKit, and its one TLS-named symbol is
+  `NWParameters(tls:tcp:)`, called with `tls: nil`. Only the known
+  StreamClient.swift:1307 warning.
 - The capture path: that Release build on the iPhone 18 Pro Max simulator
   listed the real Sill.app on this Mac within 10 seconds, with no connection
   made. `simctl io … screenshot` gave 1320 × 2868; the PNG had an alpha channel

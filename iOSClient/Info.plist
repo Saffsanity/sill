@@ -6,6 +6,11 @@
 	     on those panels, so ask. iPads ignore this key. -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- Export compliance: Sill uses no encryption but Apple's own, so uploads, TestFlight builds
+	     included, skip the encryption questions. Look again before adding cipher code or a crypto
+	     library of Sill's own (docs/app-store-metadata.md section 6). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Finds your Mac on the local network.</string>
 	<key>NSBonjourServices</key>

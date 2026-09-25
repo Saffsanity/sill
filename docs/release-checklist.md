@@ -118,7 +118,8 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       and the app's privacy manifest say the same.
 - [ ] Version 1.0 (metadata §5 and §9): Support URL `https://sill.saffer.me/support`, the
       description, keywords and screenshots.
-- [ ] Export compliance (metadata §6): the Info.plist key.
+- [ ] Export compliance (metadata §6): nothing to answer. The app's Info.plist says NO
+      (`ITSAppUsesNonExemptEncryption`), so the uploaded build must not show Missing Compliance.
 - [ ] App Review Information (metadata §7 and §8): contact, notes, the video.
 - [ ] Version Release: Manually release this version, so an approval waits for the Mac download.
 
