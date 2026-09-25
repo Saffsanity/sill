@@ -21,7 +21,7 @@ literally, and the command under the table changes every copy in this file.
 | Mac download | `https://sill.saffer.me/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `SUPPORT_EMAIL_PLACEHOLDER` | Placeholder. Never ship it. |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
-| Remote Access in 1.0 | Undecided: main lacks it | Noah decides, before anything is pasted, whether 1.0 ships from main without it (the audit's advice) or waits for PR #13. |
+| Remote Access in 1.0 | Undecided: main has it since ba91136 (PR #13) | Noah decides, before anything is pasted, whether 1.0 keeps it or ships without it (the audit's advice, given before it merged). |
 
 To change the domain or fill in the contact address in this file:
 
@@ -33,8 +33,8 @@ The app's own copy of the site and of the download, support and privacy links
 is `iOSClient/SillLinks.swift`.
 
 **Remote Access switch.** The blocks below describe a 1.0 that includes Remote
-Access (PR #13), which main lacks today. Guideline 2.3.1(a) forbids describing
-what the build lacks, so if 1.0 ships from main, make every one of these cuts:
+Access (PR #13, on main since ba91136). Guideline 2.3.1(a) forbids describing
+what the build lacks, so if 1.0 ships without it, make every one of these cuts:
 
 | Where | Cut |
 |---|---|
@@ -50,9 +50,10 @@ what the build lacks, so if 1.0 ships from main, make every one of these cuts:
 
 These texts are only true once these are:
 
-- The paste blocks match the build. Main has no Remote Access today, and the
-  audit advised shipping 1.0 from main. For a build without it, make every cut
-  in the Remote Access switch above, the site's included.
+- The paste blocks match the build. Main has had Remote Access since
+  ba91136; the audit, before that, advised a 1.0 without it. For a build
+  without it, make every cut in the Remote Access switch above, the site's
+  included.
 - The support, privacy and download URLs load in a private window, signed out.
   The support page shows a way to reach you (guideline 1.5).
 - Sill for Mac at the download URL is Developer ID signed, notarized and
@@ -331,20 +332,22 @@ The first version of Sill. Use any window on your Mac, or the whole desktop, on 
 ## 6. Export compliance (encryption)
 
 **The key is in the app.** `iOSClient/Info.plist` sets
-`ITSAppUsesNonExemptEncryption` to NO (`<false/>`). That is correct today and
-stays correct with Remote Access. With the key, uploads skip the encryption
+`ITSAppUsesNonExemptEncryption` to NO (`<false/>`). That is correct with
+Remote Access and without it. With the key, uploads skip the encryption
 questions, TestFlight builds included. Don't also add the build setting
 `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption` to the project: use one, not
 both.
 
-- Main today uses no encryption at all. Both ends open plain TCP
-  (`NWParameters(tls: nil, tcp: tcp)`, iOSClient/StreamClient.swift:639 and
-  Sources/SillHost/StreamServer.swift:223). The iOS app and StreamProtocol
-  import no CryptoKit, CommonCrypto or Security and make no HTTPS requests.
-- Remote Access (PR #13) adds TLS 1.3 through Network.framework
-  (`sec_protocol_options`, Sources/StreamProtocol/RemoteTLS.swift), P-256 keys and
-  ECDSA signatures (Security, CryptoKit), and HMAC-SHA256 and PBKDF2 for the
-  pairing code (CryptoKit, CommonCrypto). All of it is encryption within
+- The home connection uses no encryption. Both ends open plain TCP
+  (`NWParameters(tls: nil, tcp: tcp)`, iOSClient/StreamClient.swift:870 and
+  Sources/SillHost/StreamServer.swift:347), and the iOS app makes no HTTPS
+  requests. Before Remote Access, the iOS app and StreamProtocol imported no
+  CryptoKit, CommonCrypto or Security at all.
+- Remote Access (PR #13, on main since ba91136) adds TLS 1.3 through
+  Network.framework (`sec_protocol_options`,
+  Sources/StreamProtocol/RemoteTLS.swift), P-256 keys and ECDSA signatures
+  (Security, CryptoKit), and HMAC-SHA256 and PBKDF2 for the pairing code
+  (CryptoKit, CommonCrypto). All of it is encryption within
   Apple's operating system. Apple's reference, "Export compliance
   documentation for encryption", lists "Your app uses encryption limited to
   that within the Apple operating system" as needing no documentation in App
@@ -585,10 +588,13 @@ Safe:
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
-  Info.plist, with the privacy manifest beside it. The device binary links
-  neither Security nor CryptoKit, and its one TLS-named symbol is
+  Info.plist, with the privacy manifest beside it. The device binary linked
+  neither Security nor CryptoKit, and its one TLS-named symbol was
   `NWParameters(tls:tcp:)`, called with `tls: nil`. Only the known
-  StreamClient.swift:1307 warning.
+  StreamClient capture warning. With main's Remote Access merged in (ba91136),
+  the Release simulator and Debug device builds still have the key and the
+  manifest; the binary now links Security and CryptoKit, Apple's, and no
+  library of Sill's own (`otool -L`: only /System/Library and /usr/lib).
 - The capture path: that Release build on the iPhone 18 Pro Max simulator
   listed the real Sill.app on this Mac within 10 seconds, with no connection
   made. `simctl io … screenshot` gave 1320 × 2868; the PNG had an alpha channel
@@ -599,8 +605,9 @@ Safe:
   2064 × 2752 size is from its device profile) and a connected stream (it
   would have streamed from Noah's Sill.app while he used it).
 - Main (76366e8): no TLS, no crypto import and no web address in the iOS app
-  or StreamProtocol. The remote-access branch (cb0ec55): TLS 1.3, Security,
-  CryptoKit and CommonCrypto, all Apple's, and no `URLSession` or web address.
+  or StreamProtocol. The remote-access branch (cb0ec55, merged into main as
+  ba91136): TLS 1.3, Security, CryptoKit and CommonCrypto, all Apple's, and no
+  `URLSession` or web address.
 - The UI names in the review notes and the shot list match the code: the
   connect screen, the bars (Apps, Keyboard, Desktop, Settings), the panel, the
   Mac's Permissions pane and menu, and on remote-access "Add a Mac…",

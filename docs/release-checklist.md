@@ -80,7 +80,7 @@ Before it goes public:
 
 - [ ] Replace `SUPPORT_EMAIL_PLACEHOLDER` (above) with an address someone reads. Apple wants real
       contact details behind the Support URL (guideline 1.5).
-- [ ] Remote Access: the pages describe it (PR #13), which main lacks today. For a release without
+- [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
 - [ ] Open source: the site doesn't say it while Saffsanity/sill is private. Once the repository is
@@ -131,7 +131,7 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       and the app's privacy manifest say the same.
 - [ ] Version 1.0 (metadata §5 and §9): Support URL `https://sill.saffer.me/support`, the
       description, keywords and screenshots.
-- [ ] For a build without Remote Access (main today), paste the local-only keywords, What's New
+- [ ] For a build without Remote Access, paste the local-only keywords, What's New
       and review notes, leave out the description's "Away from home" bullet, and film no shot 11
       (metadata, the Remote Access switch). Then nothing you paste mentions Remote Access, a VPN,
       Tailscale, pairing or camera access.
