@@ -330,7 +330,7 @@ extension StreamClient {
         afterPairingWatch = nil
         reconnect = nil
         connected = true
-        route = s.route
+        remoteRoute = r
         askedNearby = false
         connectedAt = Date()
         status = "Connected to \(hostName)"
@@ -442,14 +442,15 @@ extension StreamClient {
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
-    /// (§7.4): the Mac's network row at once; its Direct row once that has stayed Direct for the
-    /// network's 3 s (DiscoveryPolicy.reconnectRow: a Mac back at home can show on awdl0 first);
-    /// then, for a saved Mac, a remote dial when DiscoveryPolicy.remoteDialDue says so, again after
-    /// 2, 4, 8, then every 10 s, and none 120 s after the loss. A row that appears while an
-    /// automatic remote dial has no window list yet takes over from it; an established remote
-    /// session is never moved. Unsaved Macs keep the old rule, by exact Bonjour name: two Macs can
-    /// share a computer name ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would
-    /// rejoin the wrong one.
+    /// (§7.4): the Mac's network row at once (over its cable first when it says "Wired": `dial`);
+    /// its Direct row only once that has stayed Direct for `directWait` and the network last listed
+    /// the Mac `networkGrace` ago or more (DiscoveryPolicy.reconnectRow: its row blinks off while its
+    /// listener is replaced, and a Mac back at home can show on awdl0 first); then, for a saved
+    /// Mac, a remote dial when DiscoveryPolicy.remoteDialDue says so, again after 2, 4, 8, then
+    /// every 10 s, and none 120 s after the loss. A row that appears while an automatic remote dial
+    /// has no window list yet takes over from it; an established remote session is never moved.
+    /// Unsaved Macs keep the old rule, by exact Bonjour name: two Macs can share a computer name
+    /// ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
@@ -464,13 +465,17 @@ extension StreamClient {
         }
         let network = macs.first { $0.route == .network && matches($0) }
         let direct = macs.first { $0.route == .direct && matches($0) }
+        // The network's sightings are by the name it lists: the Direct row's, else the name last
+        // used with the Mac.
+        let listedName = direct?.name ?? r.bonjourName
         let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] }, now: now)
-        if let mac = choice.take, let endpoint = mac.endpoint {
+                                                  directSince: direct.flatMap { directSince[$0.name] },
+                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] }, now: now)
+        if let mac = choice.take, mac.endpoint != nil {
             if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
             cancelRemoteDial()
             reconnect = r        // kept until the row's connection is ready
-            connect(to: endpoint, name: mac.name, peerToPeer: mac.direct, macID: mac.macID ?? r.macID)
+            dial(mac, macID: mac.macID ?? r.macID)
             status = mac.direct ? "Reconnecting to \(r.name) directly…" : "Reconnecting to \(r.name)…"
             return true
         }

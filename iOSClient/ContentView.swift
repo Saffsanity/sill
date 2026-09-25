@@ -74,18 +74,42 @@ struct ContentView: View {
 /// * `-SillConnect 127.0.0.1:PORT` — connect straight to that address, in the normal app and under
 ///   `-SillLive 1`. The synthetic test hosts (`SillHost --synthetic`, the bare `SillMenuBar
 ///   --synthetic`) stay off Bonjour, so this is how the simulator reaches them.
+/// * `-SillMoveTest 1` — with `-SillConnect`: that session counts as a direct (AWDL) one, and a
+///   second later the same address is listed as the Mac's network row, so the move to the network
+///   runs for real (a second connection shows the same host in its first window list and takes the
+///   session over once the fence is down; the host logs a second "Client connected" and the first
+///   "Client left", and streams on). `refused` lists port 1 instead: each try is given up after
+///   5 s and the session stays direct. `other:PORT` lists that port of the same address under the
+///   same name: another synthetic host there is refused at its first window list (another launch)
+///   and not tried again while it stays listed; the first host's own port, with `-SillConnect`
+///   going through a proxy that delays each direction, moves once the fence has waited out the
+///   proxy's round trip. `to:HOST:PORT` lists that address under the same name: the same host
+///   reached another way, so the Settings panel's route word changes at the hand-over (from
+///   `127.0.0.1`, none, to this Mac's `fe80::…%en0`, "Wi-Fi"). The console says what happened
+///   ("discovery: …", "move to the network …", "session: …" for the route;
+///   `xcrun simctl launch --console-pty`).
+/// * `-SillWiredTest HOST:PORT` — a "Wired" row's dial goes to the cable first and falls back to
+///   the row as listed; this puts that fallback under test. `-SillConnect`'s dial, any network
+///   row's (each counts as Wired) and a move's under `-SillMoveTest` go to HOST:PORT first, with
+///   the address they would have dialled as the fallback: `192.0.2.1:9` (never answers) gives way
+///   after 2.5 s, `127.0.0.1:1` (nothing listens) at once, and the session comes up on the
+///   address as before ("wired dial … dialing unconstrained" on the console).
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
-///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it); and away from
-///   home: `remote` (through Tailscale, 48 ms, saved), `remoteinternet`, `remoteslow` (the slow-link
-///   callout), `remotepair` (Pair This iPad…), `remoteoff` or `noremote` (no kind 18: no group)
-///   (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
+///   `noroute`; and away from home: `remote` (through Tailscale, 48 ms, saved), `remoteinternet`,
+///   `remoteslow` (the slow-link callout), `remotepair` (Pair This iPad…), `remoteoff` or
+///   `noremote` (no kind 18: no group) (see `MockCatalog.SettingsCase`). The mock answers a pick
+///   after 0.35 s. The session's route, the readout's last word: Wi-Fi, except `directlink`
+///   (Direct), `wired` (Wired), `noroute` (none, as a connection whose path says nothing) and the
+///   remote cases (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
-///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a network row and Direct
-///   rows) or `denied` (Local Network access denied: the status says what to do, no hint); or
-///   remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
+///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
+///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
+///   `denied` (Local Network access denied: the status says what to do, no hint); or remote
+///   access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
 ///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
 ///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
 ///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
@@ -232,8 +256,9 @@ struct LayoutHarness: View {
 #endif
 
 /// Before a Mac is picked: the Macs the browsers found and the saved ones they do not list, as
-/// drawer-style rows ("Direct" for one reached over peer-to-peer Wi-Fi, "Remote" for a saved Mac
-/// dialed through its VPN or the internet); when none turns up on the network, why, with Search
+/// drawer-style rows that end in how each is reachable ("Wired", "Wi-Fi", or "Direct" for one
+/// reached over peer-to-peer Wi-Fi; "Remote" for a saved Mac dialed through its VPN or the internet;
+/// nothing when the device cannot tell); when none turns up on the network, why, with Search
 /// Nearby; and Add a Mac… last, which unfolds the pairing card in the column's place
 /// (docs/remote-access-plan.md §7.8, §7.10). A saved Mac's row has a menu: Connect or Connect
 /// Remotely, and Forget.
@@ -341,8 +366,10 @@ struct ConnectScreen: View {
             .padding(.bottom, 4)
 
         ForEach(client.macs) { mac in
-            DrawerRow(height: 50, highlighted: false, title: mac.name,
-                      trailing: mac.route == .direct ? "Direct" : mac.route == .remote ? "Remote" : nil,
+            // The kind of link, never the Wi-Fi network's name: that needs Location access, which
+            // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
+            // from home.
+            DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.word,
                       action: { client.connect(to: mac) }) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
@@ -352,6 +379,7 @@ struct ConnectScreen: View {
                 }
                 .frame(width: 32, height: 32)
             }
+            .accessibilityLabel(mac.word.map { "\(mac.name), \($0)" } ?? mac.name)
             .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
                                : mac.route == .remote ? "Connects through your VPN or the internet." : "")
             .contextMenu { menu(for: mac) }

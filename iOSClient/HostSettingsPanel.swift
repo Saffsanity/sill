@@ -102,30 +102,30 @@ struct HostSettingsPanel: View {
                 if let state = client.settings.host {
                     VStack(alignment: .leading, spacing: 1) {
                         // Wraps rather than cutting the bitrate off at larger text sizes; each
-                        // value keeps its unit (no-break spaces).
-                        Text(Self.readout(state.stream))
+                        // value keeps its unit (no-break spaces), and a wrap falls after a "·".
+                        // It ends in how this device's connection reaches the Mac, the connect
+                        // screen's word; "Direct" is the old "Connected directly" line.
+                        Text(Self.readout(state.stream, route: client.route))
                             .fixedSize(horizontal: false, vertical: true)
                         // Its own line: beside the numbers it never fit the panel's width, and it
                         // is what confirms the Virtual Display switch took effect.
                         if state.stream?.onVirtualDisplay == true {
                             Text("On the virtual display")
                         }
-                        // How this device reaches the Mac: over peer-to-peer Wi-Fi, which the Direct
-                        // Wireless Connection row can turn off; or from afar, with the round trip
-                        // (it needs no clock agreement between the two devices, unlike frame age).
-                        if client.connectedDirectly {
-                            Text("Connected directly")
-                        } else if case .remote(let r)? = client.route {
-                            // Wraps like the readout above (larger text on the outer display cut it off).
-                            Text("Connected \(r.phrase) · \(Self.rttText(client.linkStats))")
+                        // From afar, how, with the round trip (it needs no clock agreement between
+                        // the two devices, unlike frame age); the readout above then ends in the
+                        // bitrate. Wraps like the readout (larger text on the outer display cut it
+                        // off), after a "·" as the readout does.
+                        if let r = remoteRoute {
+                            Text("Connected \(r.phrase)\u{00A0}· \(Self.rttText(client.linkStats))")
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.spokenReadout(state.stream, direct: client.connectedDirectly,
-                                                           remote: remoteRoute, rttMs: client.linkStats?.rtt?.median))
+                    .accessibilityLabel(Self.spokenReadout(state.stream, route: client.route, remote: remoteRoute,
+                                                           rttMs: client.linkStats?.rtt?.median))
                 }
             }
             Spacer(minLength: 8)
@@ -214,15 +214,16 @@ struct HostSettingsPanel: View {
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the outer display's 259 pt shows the rest
-                // first). Never disabled: off from a directly connected device is allowed, as on the
-                // Mac, and its consequence is written beside it. No row for a host without it.
+                // first). Disabled only away from home (the Mac refuses it from a remote connection):
+                // off from a directly connected device is allowed, as on the Mac, and its consequence
+                // is written beside it. No row for a host without it.
                 if let direct = shown.directWireless {
                     Rows {
                         Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
                             RowTitle(title: "Direct Wireless Connection", since: client.settings.pendingSince(.directWireless))
                         }
                         // A warning about turning it off, so only while the switch shows on.
-                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off can disconnect this \(device)." : "")
+                        .accessibilityHint(client.connectedDirectly && direct ? "Turning this off disconnects this \(device)." : "")
                         // From afar the Mac refuses it anyway: how devices near the Mac reach it is
                         // theirs and the Mac's to change.
                         .disabled(remoteRoute != nil)
@@ -300,10 +301,7 @@ struct HostSettingsPanel: View {
     // MARK: Away from home
 
     /// This connection's way in from afar, when it is one.
-    private var remoteRoute: RemoteRoute? {
-        if case .remote(let r)? = client.route { return r }
-        return nil
-    }
+    private var remoteRoute: RemoteRoute? { client.remoteRoute }
 
     /// The last group (docs/remote-access-plan.md §7.11): whether this device can reach the Mac
     /// away from home, from the Mac's kind 18. None from an older Mac (no kind 18 on this connection).
@@ -359,11 +357,14 @@ struct HostSettingsPanel: View {
     // MARK: Copy
 
     /// Under the Mac's name: what actually runs, which confirms a change took effect and shows
-    /// what the software encoder caps. Whether it runs on the virtual display is a line of its own
-    /// (see `header`).
-    static func readout(_ stream: RunningStream?) -> String {
-        guard let s = stream else { return "Not streaming" }
-        return "\(s.width)×\(s.height) · \(s.fps)\u{00A0}fps · \(s.mbps)\u{00A0}Mbps"
+    /// what the software encoder caps, then how this device's connection reaches the Mac
+    /// ("… · 15 Mbps · Wi-Fi"; StreamClient.route), when its path says (never on a remote session:
+    /// its route line says how instead). Whether it runs on the virtual display is a line of its
+    /// own (see `header`). A no-break space before each "·" keeps it with the value before it, so a
+    /// wrap at larger text never starts a line with one.
+    static func readout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil) -> String {
+        let values = stream.map { ["\($0.width)×\($0.height)", "\($0.fps)\u{00A0}fps", "\($0.mbps)\u{00A0}Mbps"] } ?? ["Not streaming"]
+        return (values + [route?.word].compactMap { $0 }).joined(separator: "\u{00A0}· ")
     }
 
     /// "48 ms", the last second's median round trip; "–" for a second without a pong.
@@ -371,8 +372,12 @@ struct HostSettingsPanel: View {
         stats?.rtt.map { "\($0.median)\u{00A0}ms" } ?? "–"
     }
 
-    static func spokenReadout(_ stream: RunningStream?, direct: Bool = false, remote: RemoteRoute? = nil, rttMs: Int? = nil) -> String {
-        var link = direct ? ", connected directly" : ""
+    /// The readout as VoiceOver says it, ending in how this device reaches the Mac: its link, or
+    /// from afar the remote route with the round trip, which wins (a remote session has no link
+    /// word; see `header`).
+    static func spokenReadout(_ stream: RunningStream?, route: DiscoveryPolicy.Method? = nil, remote: RemoteRoute? = nil,
+                              rttMs: Int? = nil) -> String {
+        var link = route.map { ", " + spoken($0) } ?? ""
         if let remote {
             link = ", connected \(remote.phrase)" + (rttMs.map { ", \($0) millisecond round trip" } ?? "")
         }
@@ -381,23 +386,37 @@ struct HostSettingsPanel: View {
             + (s.onVirtualDisplay ? ", on the virtual display" : "") + link
     }
 
+    /// The route as VoiceOver says it: a sentence's end rather than the bare word.
+    private static func spoken(_ route: DiscoveryPolicy.Method) -> String {
+        switch route {
+        case .wired: return "connected by cable"
+        case .wifi: return "connected over Wi-Fi"
+        case .direct: return "connected directly"
+        }
+    }
+
     /// "iPhone" or "iPad", for copy about this device.
     private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
 
     /// Under the Direct Wireless Connection row: what it does and costs, and, while the switch shows
-    /// on and this device is connected over it, what turning it off can do to this device. Once it
-    /// shows off (turned off here or on the Mac, with this connection still up) the warning is moot.
+    /// on and this device is connected over it, what turning it off does to this device: the Mac
+    /// disconnects every device on peer-to-peer Wi-Fi once its listener has changed (1.5 s), and a
+    /// device still connected directly shares no network the Mac is listed on (one that does moves
+    /// to it by itself), so it cannot come back until it does. Once the switch shows off (turned
+    /// off here or on the Mac, with this connection still up for that moment) the warning is moot.
     private func directFooter(on: Bool) -> String {
         var text = "Lets devices reach \(mac) without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, streaming over Wi\u{2011}Fi can stutter."
-        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off can disconnect it." }
+        if on, client.connectedDirectly { text += " This \(device) is connected directly: turning this off disconnects it." }
         return text
     }
 
-    /// Under the stream rows. A frame rate limit above what this screen shows changes nothing for
-    /// it, which is worth saying on a 60 Hz device; away from home this device asks for 60 fps.
+    /// Under the stream rows: what Quality counts and what its top presets need (the Mac's
+    /// Settings › Streaming says the same). A frame rate limit above what this screen shows changes
+    /// nothing for it, which is worth saying on a 60 Hz device; away from home this device asks
+    /// for 60 fps.
     private var streamFooter: String {
         _ = powerState
-        var text = "Quality is per 60 fps; a 120 fps stream gets twice as much."
+        var text = "Quality is per 60 fps; a 120 fps stream gets twice as much. " + QualityPreset.fastLinkNote
         let away = client.awayCapsFrameRate
         let wanted = StreamClient.wantedFPS(remote: away)
         guard wanted < 120 else { return text }

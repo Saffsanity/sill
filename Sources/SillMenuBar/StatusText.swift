@@ -168,7 +168,9 @@ enum StatusText {
         return name.isEmpty ? device : name
     }
 
-    /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps".
+    /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps" (a still
+    /// picture: "120 fps, still"), and with one device, how it is connected: "… · 30 Mbps · Wi-Fi".
+    /// With two or more, each device's own row says it.
     private static func sourceRow(_ s: HostStatusSnapshot) -> StatusPresentation.Row? {
         guard let stream = s.stream else { return nil }
         let title: String, symbol: String
@@ -178,9 +180,14 @@ enum StatusText {
         case .testPattern: title = "Test Pattern"; symbol = "checkerboard.rectangle"
         }
         // The encoder only produces a frame when the picture changed (ScreenCaptureKit delivers
-        // frames on repaint), so 0 means a still window, not a stalled stream.
-        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, nothing changing"
+        // frames on repaint), so 0 means a still window, not a stalled stream. "120 fps, still" is
+        // about as wide as a one-digit count ("5 of 120 fps"), so a row wraps the same still as
+        // changing, unless the count's own digits tip it: the open menu resizes the card on every
+        // change, and "nothing changing" with the route word made it jump a line each time a
+        // window stopped or started changing.
+        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, still"
         var detail = "\(stream.width)×\(stream.height) · \(rate) · \(stream.mbps) Mbps"
+        if s.devices.count == 1, let route = routeWord(s.devices[0]) { detail += " · \(route)" }
         if stream.onVirtualDisplay {
             detail += " · virtual display"
         } else if s.virtualDisplayOn, stream.kind == .window {
@@ -190,10 +197,11 @@ enum StatusText {
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
-    /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms"; the address until the
-    /// device's first report (within a second). A second without a sample reads "–", as in the
-    /// host's log line and the device's HUD: a still window sends no frames (ScreenCaptureKit
-    /// delivers only repaints), and a second can pass without a pong.
+    /// "iPad (iPad14,1)" over "118 fps · frame age 9 ms · RTT 7 ms · Wi-Fi" (from away: "… · through
+    /// Tailscale"); the address until the device's first report (within a second; a remote device
+    /// shows its paired name), and until then the route alone. A second without a sample reads
+    /// "–", as in the host's log line and the device's HUD: a still window sends no frames
+    /// (ScreenCaptureKit delivers only repaints), and a second can pass without a pong.
     private static func deviceRow(_ d: HostStatusSnapshot.Device) -> StatusPresentation.Row {
         let name = d.name ?? d.endpoint
         let symbol = name.localizedCaseInsensitiveContains("iphone") ? "iphone" : "ipad"
@@ -201,10 +209,31 @@ enum StatusText {
         if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
             parts.append("\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))")
         }
-        // A device connected from away says how ("through Tailscale"); home devices read as before.
-        if let route = d.route { parts.append(route) }
-        let detail = parts.isEmpty ? nil : parts.joined(separator: " · ")
-        return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name, detail: detail)
+        if let route = routeWord(d) { parts.append(route) }
+        return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
+                                      detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
+    }
+
+    /// How a device reaches this Mac, the one place the card decides it (the device's row, and the
+    /// source row while it is the only device). A remote session says how it came ("through
+    /// Tailscale", "over the internet"; RemoteServer's label), which always wins: its link from
+    /// this Mac's side would read "Wi-Fi" for a session over the internet. A home device gets its
+    /// link from this Mac's side of its connection (ClientLink.route), in the words the device's
+    /// connect screen and Settings panel use; nil when neither says (loopback, an interface of no
+    /// known kind).
+    private static func routeWord(_ d: HostStatusSnapshot.Device) -> String? {
+        if let remote = d.remoteRoute { return remote }
+        return d.route.map(word)
+    }
+
+    /// A home device's link as the card words it. "Wi-Fi" has a non-breaking hyphen, so a wrapped
+    /// detail never splits it.
+    private static func word(_ route: ClientLink.Route) -> String {
+        switch route {
+        case .wired: return "Wired"
+        case .wifi: return "Wi\u{2011}Fi"
+        case .direct: return "Direct"
+        }
     }
 
     /// One of a device's reported times. Negative is the client's "no sample this second" (-1),

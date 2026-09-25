@@ -38,14 +38,20 @@ package struct HostStatusSnapshot: Equatable {
         /// -1 when that second had no sample (no frame arrived, no pong came back).
         package var frameAgeMs: Int?
         package var rttMs: Int?
+        /// How it reaches this Mac, as this Mac's side of its connection says (ClientLink.route): at
+        /// connect, then whenever the connection's path changes. Nil when the connection does not
+        /// say (loopback, a VPN, an interface of no known kind), and always on the remote door.
+        /// Shown, never acted on.
+        package var route: ClientLink.Route?
         /// Nil on the home door; "through Tailscale", "through your VPN", "over the internet" or "by
-        /// address" on the remote door.
-        package var route: String?
+        /// address" on the remote door. The card shows it instead of `route` (StatusText).
+        package var remoteRoute: String?
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
-                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: String? = nil) {
+                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil) {
             self.id = id; self.endpoint = endpoint; self.name = name
-            self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs; self.route = route
+            self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs
+            self.route = route; self.remoteRoute = remoteRoute
         }
     }
 
@@ -96,7 +102,7 @@ package struct HostStatusSnapshot: Equatable {
 
     /// Devices connected through the remote door: while any is, the app keeps the Mac from idle
     /// sleep (it could not be woken from away).
-    package var remoteDeviceCount: Int { devices.filter { $0.route != nil }.count }
+    package var remoteDeviceCount: Int { devices.filter { $0.remoteRoute != nil }.count }
 
     package init() {}
 }

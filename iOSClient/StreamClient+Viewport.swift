@@ -58,10 +58,7 @@ extension StreamClient {
     }
 
     /// This session is away from home through a VPN or over the internet, so it asks for 60 fps.
-    var awayCapsFrameRate: Bool {
-        if case .remote(let r)? = route { return r.capsFrameRate }
-        return false
-    }
+    var awayCapsFrameRate: Bool { remoteRoute?.capsFrameRate ?? false }
 
     /// The fastest rate this device's screen shows, Low Power Mode aside: 120 on ProMotion, 60 on
     /// the iPad mini and other 60 Hz panels. The Settings panel's frame rate note tells the two

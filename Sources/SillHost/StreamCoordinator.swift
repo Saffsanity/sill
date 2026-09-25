@@ -121,6 +121,10 @@ package final class StreamCoordinator {
     /// The Mac's cursor shape, streamed to the clients that draw the pointer themselves.
     let cursorShapes = CursorShapeWatcher()
     private let macName = Host.current().localizedName ?? "Mac"
+    /// In every window list (`WindowList.launchID`): a device moving its session from AWDL to the
+    /// network checks that the new connection reaches this same running host, since the Bonjour
+    /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
+    private let launchID = UUID().uuidString
     /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote. Nil: no
     /// identity, no TXT tag, no kind 18, no remote door, exactly the host as before.
     package let remote: RemoteAccess?
@@ -153,14 +157,16 @@ package final class StreamCoordinator {
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
 
-        server.onClientConnected = { [weak self] connection, route in
+        server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
                 guard let self else { return }
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
-                // A remote device shows its paired name and its route until its own stats arrive.
+                // A remote device shows its paired name and its route until its own stats arrive;
+                // a home device its link (Wired, Wi-Fi, Direct) as soon as it is known.
                 self.status.update {
-                    $0.devices.append(HostStatusSnapshot.Device(id: id, endpoint: "\(connection.endpoint)", name: route.pairedName, route: route.label))
+                    $0.devices.append(HostStatusSnapshot.Device(id: id, endpoint: "\(connection.endpoint)", name: route.pairedName,
+                                                                route: link, remoteRoute: route.label))
                 }
                 if let fp = route.fingerprint, let label = route.label { self.remote?.sessionStarted(fingerprint: fp, route: label) }
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
@@ -243,6 +249,16 @@ package final class StreamCoordinator {
         }
         server.onServiceRegistered = { [weak self] name in
             Task { @MainActor in self?.serviceRegistered(name) }
+        }
+        // Display only: the menu card's word for how the device reaches this Mac.
+        server.onClientRouteChanged = { [weak self] connection, route in
+            let id = ObjectIdentifier(connection)
+            Task { @MainActor in
+                self?.status.update {
+                    guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                    $0.devices[i].route = route
+                }
+            }
         }
         server.onClientStats = { [weak self] connection, stats in
             let id = ObjectIdentifier(connection)
@@ -1280,7 +1296,7 @@ package final class StreamCoordinator {
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active)))
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

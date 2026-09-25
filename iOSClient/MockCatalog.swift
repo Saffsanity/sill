@@ -88,20 +88,22 @@ enum MockCatalog {
     // MARK: - The Mac's settings
 
     /// `-SillSettingsCase`: the states the Settings panel has to look right in. The mock streams
-    /// 2880×1800 · 60 fps · 15 Mbps unless a case says otherwise.
+    /// 2880×1800 · 60 fps · 15 Mbps over Wi-Fi unless a case says otherwise.
     enum SettingsCase: String {
         case `default`   // Sill.app: saved, the virtual display available and off
         case cli         // SillHost without --virtual-display: kept until it quits, the switch off and disabled
         case software    // the hardware encoder is down: the callout, a 1440×900 stream under Retina / 120 fps targets
         case custom      // a bitrate set by hand on the Mac: "Custom — 12 Mbps"
         case vdproblem   // the virtual display on, but off for this session after repeated losses
-        case vdstream    // a window streaming from the virtual display at 120 fps, 50 Mbps: the longest readout
+        case vdstream    // a window streaming from the virtual display, 120 fps at Extreme, 300 Mbps: the longest readout
         case legacy      // an older Sill on the Mac: no state ever arrives (connected 10 s ago)
         case pending     // a Quality pick sent 1 s ago that is never answered and never expires: its spinner
         case timeout     // the Mac did not answer a pick: the inline problem
         case direct      // Direct Wireless Connection on (every other case has it off, so its row shows)
-        case directlink  // on, and this device connected over it: the header line and the footer's warning
+        case directlink  // on, and this device connected over it: "Direct" in the readout and the footer's warning
         case nodirect    // a host without the setting (the ipad-host-settings build): no row
+        case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
+        case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
         case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired for remote access
         case remoteinternet  // connected over the internet, 120 ms
         case remoteslow      // through Tailscale on a slow link (320 ms): the slow-link callout
@@ -129,6 +131,15 @@ enum MockCatalog {
     /// Lays a case's state into the client as if the Mac had sent it on this connection.
     private static func seed(_ client: StreamClient, settings c: SettingsCase) {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
+        // How this session reaches the Mac: read from the connection, whatever the Mac runs.
+        // Away from home the route line under the readout says how instead (the remote cases), and
+        // the readout ends in the bitrate.
+        switch c {
+        case .directlink: client.route = .direct
+        case .wired: client.route = .wired
+        case .noroute, .remote, .remoteinternet, .remoteslow: client.route = nil
+        default: client.route = .wifi
+        }
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
@@ -151,8 +162,8 @@ enum MockCatalog {
             state.virtualDisplayNote = "Off for this session: the system removed the virtual display 3 times. Turn it off and on to try again."
         case .vdstream:
             state.settings.virtualDisplay = true
-            state.settings.bitrate = 25_000_000
-            state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 50, onVirtualDisplay: true)
+            state.settings.bitrate = 150_000_000
+            state.stream = RunningStream(width: 3024, height: 1898, fps: 120, mbps: 300, onVirtualDisplay: true)
         case .direct:
             state.settings.directWireless = true
         case .directlink:
@@ -161,13 +172,13 @@ enum MockCatalog {
         case .nodirect:
             state.settings.directWireless = nil
         case .remote, .remoteslow:
-            client.route = .remote(.vpn("Tailscale"))
+            client.remoteRoute = .vpn("Tailscale")
             client.macInfo = macInfo()
             client.macInfoSaved = true
             client.showMockLinkStats(linkStats(rtt: c == .remoteslow ? 320 : 48), slow: c == .remoteslow)
             state.stream = RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false)
         case .remoteinternet:
-            client.route = .remote(.internet)
+            client.remoteRoute = .internet
             client.macInfo = macInfo(internet: true)
             client.macInfoSaved = true
             client.showMockLinkStats(linkStats(rtt: 120))
@@ -175,7 +186,7 @@ enum MockCatalog {
             client.macInfo = macInfo()
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
-        case .default, .legacy, .pending, .timeout, .noremote:
+        case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
         }
         if client.macInfo != nil { client.macInfoAt = Date().addingTimeInterval(-59) }
@@ -196,7 +207,8 @@ enum MockCatalog {
     enum ConnectCase: String {
         case looking   // the first seconds: nothing listed yet
         case hint      // nothing listed after the network's 3 s: the hint and Search Nearby
-        case nearby    // searching nearby: a network row, then Direct rows (one with a long name)
+        case nearby    // searching nearby: a Wi-Fi row, then Direct rows (one with a long name)
+        case methods   // every word a row can end in: Wired, Wi-Fi, none, long names with Wired and Wi-Fi, Direct
         case denied    // Local Network access denied: the status says what to do, and no hint
         case remote        // a network row, a Direct row and two Remote rows (a long name, a "(2)")
         case addmac        // Add a Mac unfolded, scanning (a drawn viewfinder: the simulator has no camera)
@@ -234,12 +246,14 @@ enum MockCatalog {
         let client = StreamClient()
         client.mockDiscovery = true
         client.status = StreamClient.lookingOnNetwork
-        func mac(_ name: String, direct: Bool) -> FoundMac {
+        /// A row as `recomputeMacs` makes it: Direct only for a Direct row. No wired interface: the
+        /// mock never dials.
+        func mac(_ name: String, _ method: DiscoveryPolicy.Method?) -> FoundMac {
             FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
-                     route: direct ? .direct : .network)
+                     route: method == .direct ? .direct : .network, method: method)
         }
         func remote(_ name: String, _ id: String) -> FoundMac { FoundMac(name: name, endpoint: nil, route: .remote, macID: id) }
-        let remoteRows = [mac("Studio", direct: false), mac("Mac mini", direct: true),
+        let remoteRows = [mac("Studio", .wifi), mac("Mac mini", .direct),
                           remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21"), remote("Mac mini (2)", "0123456789ABCDEF")]
         switch c {
         case .looking:
@@ -250,8 +264,19 @@ enum MockCatalog {
             client.searchingNearby = true
             client.status = StreamClient.lookingNearby
             // The long name checks that "Direct" never truncates: the title does.
-            client.macs = [mac("Studio", direct: false), mac("Mac mini", direct: true),
-                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", direct: true)]
+            client.macs = [mac("Studio", .wifi), mac("Mac mini", .direct),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", .direct)]
+        case .methods:
+            // Network rows first, then the Direct one, as DiscoveryPolicy.rows orders them. "Office
+            // iMac" was seen only on interfaces the device cannot name (DiscoveryPolicy.method: no
+            // word). The long names check that the word never truncates or wraps, the title does:
+            // "Wi-Fi" is spelled with a non-breaking hyphen.
+            client.searchingNearby = true
+            client.status = StreamClient.lookingNearby
+            client.macs = [mac("Mac Studio", .wired), mac("Mac mini", .wifi), mac("Office iMac", nil),
+                           mac("Noah Saffer’s MacBook Pro in the Studio (2)", .wired),
+                           mac("Noah Saffer’s iMac on the Desk by the Window", .wifi),
+                           mac("MacBook Air", .direct)]
         case .denied:
             client.status = StreamClient.allowLocalNetwork
         case .remote:

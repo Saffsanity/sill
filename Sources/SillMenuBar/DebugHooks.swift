@@ -260,10 +260,11 @@ enum DebugHooks {
         var list = localSamples()
         // Sill.app always has remote access: every menu shows its two items (off here).
         for i in list.indices { list[i].snapshot.remote = RemoteStatus() }
+        // One device from away: its card names the remote route, never a link word.
         var remote = list.first { $0.name == "streaming" }?.snapshot ?? HostStatusSnapshot()
         remote.devices = [HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[0]), endpoint: "100.84.3.2:61022",
                                                     name: "iPad (iPad14,1)", fps: 60, frameAgeMs: 41, rttMs: 48,
-                                                    route: "through Tailscale")]
+                                                    remoteRoute: "through Tailscale")]
         remote.remote = RemoteStatus(remoteAccess: true, listener: .listening(7455), addresses: tailscaleAddresses,
                                      lanAddress: "192.168.1.20")
         var taken = list.first { $0.name == "idle" }?.snapshot ?? HostStatusSnapshot()
@@ -274,10 +275,16 @@ enum DebugHooks {
     }
 
     private static func localSamples() -> [Sample] {
+        // Each word once or more: the iPad on Wi-Fi, on the USB cable ("connected" and the software
+        // encoder sample), the iPhone over peer-to-peer Wi-Fi (with the iPad, and alone on a still
+        // window); the test pattern's loopback client has none.
         let ipad = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[0]), endpoint: "192.168.1.23:52344",
-                                             name: "iPad (iPad14,1)", fps: 118, frameAgeMs: 9, rttMs: 7)
-        let iphone = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[1]), endpoint: "192.168.1.31:50112",
-                                               name: "iPhone (iPhone17,1)", fps: 60, frameAgeMs: 11, rttMs: 8)
+                                             name: "iPad (iPad14,1)", fps: 118, frameAgeMs: 9, rttMs: 7, route: .wifi)
+        var cabledIPad = ipad
+        cabledIPad.endpoint = "fe80::1%anri0.61390"
+        cabledIPad.route = .wired
+        let iphone = HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[1]), endpoint: "fe80::2%awdl0.63101",
+                                               name: "iPhone (iPhone17,1)", fps: 60, frameAgeMs: 11, rttMs: 8, route: .direct)
         let window = HostStatusSnapshot.Stream(kind: .window, title: "Safari — Apple Developer Documentation: ScreenCaptureKit",
                                                width: 3024, height: 1898, fps: 120, mbps: 30,
                                                onVirtualDisplay: true, softwareEncoder: false)
@@ -286,13 +293,26 @@ enum DebugHooks {
         var registering = HostStatusSnapshot()
         registering.network = .registering
         var connected = idle
-        connected.devices = [ipad]
+        connected.devices = [cabledIPad]
         var streaming = connected
+        streaming.devices = [ipad]
         streaming.stream = window
         streaming.encodedFPS = 118
         streaming.virtualDisplayOn = true
         var two = streaming
         two.devices = [ipad, iphone]
+        // A still window on the Mac's own screen (virtual display off) to one device, at the most the
+        // menu offers (Maximum at 120 fps: 80 Mbps) over the widest word: the source row stays on one
+        // line, as it does while the picture changes, so the open menu keeps its height. The device
+        // gets no frames, so its row reads "0 fps · frame age –".
+        var stillIPhone = iphone
+        stillIPhone.fps = 0
+        stillIPhone.frameAgeMs = -1
+        var still = idle
+        still.devices = [stillIPhone]
+        still.stream = window
+        still.stream?.onVirtualDisplay = false
+        still.stream?.mbps = 80
         var software = connected
         software.softwareEncoder = true
         software.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 1512, height: 982, fps: 60,
@@ -317,6 +337,7 @@ enum DebugHooks {
             Sample(name: "registering", snapshot: registering),
             Sample(name: "connected", snapshot: connected),
             Sample(name: "streaming", snapshot: streaming),
+            Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "virtual-display-fallback", snapshot: fallback),

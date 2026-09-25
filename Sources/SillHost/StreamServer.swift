@@ -12,6 +12,9 @@ import StreamProtocol
 /// browse `_sill._tcp` only) ever finds it. `SILL_TEST_SWAP_FAIL=port` makes a Direct Wireless
 /// replacement's same-port bind fail as EADDRINUSE without binding, and `=all` its any-port bind
 /// too, so the fallback and the listener-failure rule can be exercised without a real conflict.
+/// `SILL_TEST_PEER_TO_PEER_INTERFACE=en0` counts a client whose address is scoped to that interface
+/// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
+/// client on en0 stands in for a device on awdl0, which no test can reach.
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
 /// gate can refuse a test client. All are honoured only on a host that does not advertise, so a
 /// stray variable can never touch a real host.
@@ -41,8 +44,14 @@ final class StreamServer {
         var worstRttSincePrint = -1
         /// Which door and from where: `.home(origin)` decided at `.ready`, or the remote door's.
         var route = ClientRoute.home(.loopback)
-        /// The device's own name from its last ClientStats, cleaned (SafeText); nil until its first.
+        /// The device's own name from its last ClientStats, cleaned (SafeText), for its stats line
+        /// and the line that says why it was disconnected; nil until its first report.
         var device: String?
+        /// A home client's link (ClientLink.route) as last reported (`onClientConnected`, then
+        /// `onClientRouteChanged` on a change): Wired, Wi-Fi, Direct or nil. Read once it is
+        /// registered (admitted at `.ready`): a path update before that reports nothing, the device
+        /// has no row yet. Always nil for a remote session, whose card names its route instead.
+        var link: ClientLink.Route?
         /// The last header received from it (remote clients: silence eviction).
         var lastHeardAt = Date().timeIntervalSince1970
         /// Remote clients: no keyframe has reached it since it was admitted or the stream changed,
@@ -61,8 +70,13 @@ final class StreamServer {
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
     /// A client was admitted (home door at `.ready`, remote door once paired and checked), with
-    /// its route. Called on the network queue.
-    var onClientConnected: ((NWConnection, ClientRoute) -> Void)?
+    /// its route (which door, from where) and, for a home client, its link (ClientLink.route; nil
+    /// when its connection does not say, and always for a remote session). Called on the network
+    /// queue.
+    var onClientConnected: ((NWConnection, ClientRoute, ClientLink.Route?) -> Void)?
+    /// A connected home client's link changed with its connection's path. Only reported, never
+    /// acted on: the menu card shows it. Called on the network queue.
+    var onClientRouteChanged: ((NWConnection, ClientLink.Route?) -> Void)?
     /// A message from a client (selectSource, launchApp). Called on the network queue.
     var onMessage: ((StreamMessage, NWConnection) -> Void)?
     /// A client fell behind and lost a delta frame; the encoder should produce a keyframe now
@@ -151,6 +165,8 @@ final class StreamServer {
     // awdl0 record for minutes (5 of 5), while 0.25 s and more removed it cleanly (6 of 6). So:
     // cancel, wait for `.cancelled`, bind the same port at once without a service (a device
     // connecting in those milliseconds is refused and retries), and advertise `advertiseDelay` later.
+    // The only connections a change ends: once a replacement with it off is advertised, those of
+    // the devices still on peer-to-peer Wi-Fi (`disconnectPeerToPeerClients`).
     //
     // From `start()` on, the listener's whole life is the network queue's: its creation, start,
     // handlers and replacement, and `readyPort`, which the main actor reads through `portLock`.
@@ -226,6 +242,16 @@ final class StreamServer {
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
+
+    /// TEST ONLY: SILL_TEST_PEER_TO_PEER_INTERFACE (see the type's doc comment). Read once, and only
+    /// by a host that does not advertise; an interface name (a letter, then letters or digits),
+    /// anything else ignored with one line.
+    private static let testPeerToPeerInterface: String? = {
+        guard let name = ProcessInfo.processInfo.environment["SILL_TEST_PEER_TO_PEER_INTERFACE"], !name.isEmpty else { return nil }
+        let valid = name.count <= 15 && name.first!.isLetter && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        if !valid { print("SILL_TEST_PEER_TO_PEER_INTERFACE=\(name) ignored: an interface name such as en0.") }
+        return valid ? name : nil
+    }()
 
     /// TEST ONLY: SILL_TEST_ORIGIN (see the type's doc comment). Read once, and only by a host that
     /// does not advertise; "vpn" or "internet", anything else ignored with one line.
@@ -435,6 +461,8 @@ final class StreamServer {
     /// On `queue`, `advertiseDelay` after the replacement was bound: advertise it, or, when the
     /// setting moved again meanwhile, replace it once more (it was never advertised, so the last
     /// registration dropped is already that old). A retry or a newer replacement makes it a no-op.
+    /// Settled off, it disconnects the devices still on peer-to-peer Wi-Fi; a burst that ends on,
+    /// where it started, never gets here with off and disconnects nobody.
     private func settled(_ l: NWListener, swap n: Int) {
         guard swap == .settling(n), l === listener else { return }
         swap = .idle
@@ -442,6 +470,69 @@ final class StreamServer {
         l.service = makeService()
         let at = l.port.map { " on port \($0.rawValue)" } ?? ""
         print("Direct wireless \(peerToPeer ? "on" : "off"): listening\(at) again" + (serviceNameAndType == nil ? "." : ", advertised again."))
+        if !peerToPeer { disconnectPeerToPeerClients() }
+    }
+
+    /// On `queue`, once the listener runs without peer-to-peer: disconnects every client that still
+    /// reaches the Mac over peer-to-peer Wi-Fi, one line each. Such a connection outlives the
+    /// listener that accepted it (see the MARK above), and while one is open the kernel keeps AWDL
+    /// up: on 2026-09-24 the iPad stayed connected over awdl0 after Direct Wireless was turned off,
+    /// twice, with the stream as slow as before and no "Disabling AWDL" from the kernel, so the
+    /// setting changed nothing anyone could see. The replacement refuses peer-to-peer, so a device
+    /// that shares a network with the Mac comes back over it (the kernel then drops AWDL about half
+    /// a minute later, as it did when no socket held it); one that shares none cannot, which is
+    /// what off means. Clients on any other interface are untouched, and so is every remote
+    /// session: the remote door never listens on peer-to-peer Wi-Fi (RemoteTLS), and who reaches it
+    /// is Remote Access's to say, not Direct Wireless's.
+    private func disconnectPeerToPeerClients() {
+        for client in clients.values where !client.route.isRemote && runsPeerToPeer(client.connection) {
+            let endpoint = "\(client.connection.endpoint)"
+            let who = client.device.map { "\($0) at \(endpoint)" } ?? endpoint
+            print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
+            client.connection.cancel()   // its state handler prints "Client left" and forgets it
+        }
+    }
+
+    /// Whether a client reaches this Mac over peer-to-peer Wi-Fi (ClientLink), with the TEST ONLY
+    /// stand-in interface counted as such on a host that does not advertise. On `queue`.
+    private func runsPeerToPeer(_ c: NWConnection) -> Bool {
+        ClientLink.runsPeerToPeer(endpoint: "\(c.endpoint)",
+                                  pathInterfaces: c.currentPath?.availableInterfaces.map(\.name) ?? [],
+                                  peerToPeer: peerToPeerRule)
+    }
+
+    /// A home client's link (ClientLink.route) over `path`: the interface its address is scoped to,
+    /// as the address itself types it, then the path's interfaces. The same stand-in counts as
+    /// peer-to-peer, so a test client this host would disconnect is shown as Direct. On `queue`.
+    private func link(_ c: NWConnection, path: NWPath?) -> ClientLink.Route? {
+        var interfaces: [NWInterface] = []
+        if case .hostPort(let host, _) = c.endpoint, case .ipv6(let address) = host, let scoped = address.interface {
+            interfaces.append(scoped)
+        }
+        interfaces += path?.availableInterfaces ?? []
+        return ClientLink.route(endpoint: "\(c.endpoint)", interfaces: interfaces.map(Self.linkInterface),
+                                peerToPeer: peerToPeerRule)
+    }
+
+    /// ClientLink's peer-to-peer rule, with the TEST ONLY stand-in interface on a host that does not
+    /// advertise.
+    private var peerToPeerRule: (String) -> Bool {
+        let standIn = testHost ? Self.testPeerToPeerInterface : nil
+        return { ClientLink.isPeerToPeer(interface: $0) || $0 == standIn }
+    }
+
+    /// An interface as ClientLink spells it, case for case.
+    private static func linkInterface(_ interface: NWInterface) -> ClientLink.Interface {
+        let type: ClientLink.Interface.Kind
+        switch interface.type {
+        case .wifi: type = .wifi
+        case .wiredEthernet: type = .wiredEthernet
+        case .cellular: type = .cellular
+        case .loopback: type = .loopback
+        case .other: type = .other
+        @unknown default: type = .other   // a type newer than this code: no word rather than a wrong one
+        }
+        return ClientLink.Interface(name: interface.name, type: type)
     }
 
     /// On `queue`: a replacement could not be bound, or failed once bound. Refused on its old port,
@@ -449,6 +540,8 @@ final class StreamServer {
     /// (the app shows it and keeps running; the CLI exits). It never goes back to the old flag: the
     /// listener runs what the setting says, or has visibly failed. `peerToPeer` takes the wanted
     /// value, so the next change either way replaces the dead listener: a toggle is also a retry.
+    /// Failed while turning it off, the devices on peer-to-peer Wi-Fi are still disconnected (the
+    /// app keeps running): off means no AWDL, listener or not.
     private func replacementFailed(_ e: NWError, swap n: Int) {
         guard swap == .settling(n) else { return }
         if let port = replacementPort {
@@ -462,6 +555,7 @@ final class StreamServer {
         guard let handler = onListenerFailed else { exit(1) }   // the CLI, as always
         handler(e)
         onListenerState?(.failed(e))
+        if !peerToPeer { disconnectPeerToPeerClients() }
     }
 
     /// Starts listening and advertising. Thread-safe: from here on the listener lives on `queue`.
@@ -510,10 +604,11 @@ final class StreamServer {
                     return
                 }
                 client.route = .home(origin)
+                client.link = self.link(connection, path: connection.currentPath)
                 self.register(client)
                 print("Client connected: \(connection.endpoint)")
                 self.receiveLoop(client)
-                self.onClientConnected?(connection, client.route)
+                self.onClientConnected?(connection, client.route, client.link)
             case .failed:
                 // Cancelled at once: a failed connection that is only forgotten keeps its socket.
                 connection.cancel()
@@ -522,6 +617,17 @@ final class StreamServer {
                 self.unregister(id)
             default: break
             }
+        }
+        // The link follows the path: reported once the client is registered, then on every change.
+        // An established connection keeps its interface (TCP does not move), so a change is rare; a
+        // cable pulled mid-session ends the connection instead, and the device's reconnect is a new
+        // client with its own link.
+        connection.pathUpdateHandler = { [weak self] path in
+            guard let self, self.clients[id] === client else { return }
+            let link = self.link(connection, path: path)
+            guard link != client.link else { return }
+            client.link = link
+            self.onClientRouteChanged?(connection, link)
         }
         connection.start(queue: queue)
     }
@@ -537,7 +643,8 @@ final class StreamServer {
     }
 
     /// The remote door's admitted session, already `.ready` and pinned: registered like a home
-    /// client, with its own route. On `queue`.
+    /// client, with its own route, and no link (its card names the route, "through Tailscale").
+    /// On `queue`.
     func serve(_ connection: NWConnection, route: ClientRoute) {
         let client = Client(connection)
         client.route = route
@@ -555,7 +662,7 @@ final class StreamServer {
         }
         register(client)
         receiveLoop(client)
-        onClientConnected?(connection, route)
+        onClientConnected?(connection, route, nil)
     }
 
     /// Admitted remote sessions: how many. On `queue`.

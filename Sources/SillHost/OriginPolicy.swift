@@ -118,8 +118,8 @@ enum OriginPolicy {
 
     /// The interface a link-local endpoint is scoped to, from its description: "awdl0" from
     /// "fe80::1%awdl0.52397" (Network prints the port after a dot) or "[fe80::1%awdl0]:52397". Nil
-    /// without a scope (IPv4, a global IPv6 address) and for a numeric one ("%16"). Ported from the
-    /// direct-wireless fixes (ClientLink.scope, e51f254), which have not landed on this base.
+    /// without a scope (IPv4, a global IPv6 address) and for a numeric one ("%16"). The same rule as
+    /// ClientLink.scope, kept here so that this file is checked on its own.
     static func scope(ofEndpoint description: String) -> String? {
         guard let percent = description.firstIndex(of: "%") else { return nil }
         let name = description[description.index(after: percent)...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber) }

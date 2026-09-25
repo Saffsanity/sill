@@ -27,7 +27,9 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
-rate, frame age and round trip, and what is streaming; it holds the
+rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
+"Direct"; from away, "through Tailscale" or "over the internet"), and what is
+streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
 Connection, Remote Access… and Pair iPhone or iPad… (see Remote access below),
 Launch at Login, Permissions, Show Log… and Settings… (⌘,).
@@ -35,6 +37,15 @@ Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
 has no room for the icon.
+
+Quality is the stream's bitrate per 60 fps (a 120 fps stream gets twice as
+much): Low 4 Mbps (for a slow link away from home), Efficient 8, Balanced 15
+(the default, and the command-line host's), High 25, Pro 40, Ultra 80 and
+Extreme 150. Ultra and Extreme need the
+USB cable or very fast Wi-Fi; if the picture lags (the device's frame age in
+the menu climbs), step down. Any other value from 1 to 200 Mbps can be set by
+hand (quit Sill, `defaults write me.saffer.sill.mac bitrate -int 60000000`,
+open it again) and shows as Custom; a device can pick only the presets.
 
 Permissions:
 
@@ -67,13 +78,18 @@ it, the way AirDrop does: Sill then also advertises over, and accepts
 connections from, peer-to-peer Wi-Fi (AWDL). It is off by default, also after
 updating from a Sill that always used AWDL, because while it is on the Mac's
 Wi-Fi keeps leaving its network's channel (up to ~100 ms twice a second), which
-made Wi-Fi streams stutter; on a shared network AWDL carries none of Sill's
-data anyway.
+made Wi-Fi streams stutter. With it on, a device that shares a network with the
+Mac still streams over the network: one that got onto AWDL anyway moves there by
+itself, without dropping the stream, once the network has listed the Mac for
+two seconds (and only to that same Mac, never to another of the same name).
 Turning it on or off applies at once and never restarts the stream, though
-turning it off can disconnect a device that is connected directly. A device
+turning it off disconnects a device that is still connected directly (a second
+and a half later); it comes back over the network if it shares one. A device
 finds a Mac this way by itself once it has seen the Mac with it on, or when you
 tap Search Nearby on its connect screen; such a Mac shows as "Direct". With it
-on, anyone nearby running Sill can find and connect to the Mac.
+on, anyone nearby running Sill can find and connect to the Mac. Turning Wi-Fi
+off in Control Center does not end a direct connection (it leaves the radio on
+for AirDrop); Settings › Wi-Fi does.
 
 A connected iPhone or iPad changes the same settings from its own Settings
 panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
@@ -137,7 +153,7 @@ The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
 that rate, capped by maxFPS, and restarts when it changes. Bitrate scales
-with the rate (the knob is per 60 fps).
+with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 ## iOS client (5 minutes)
 
@@ -149,7 +165,11 @@ with the rate (the knob is per 60 fps).
 2. Target → Signing & Capabilities → pick your team. Change the bundle
    identifier if `me.saffer.sill` collides with something.
 3. Run on a real device on the same Wi-Fi (or with Direct Wireless Connection
-   on in Sill on the Mac). Tap the Mac's name.
+   on in Sill on the Mac). Tap the Mac's name. Its row ends in where the device
+   sees it: "Wi-Fi", "Wired" (a cable), "Direct", or nothing when it can't
+   tell. A "Wired" row connects over the cable, even with Wi-Fi up (should
+   that not connect within 2.5 s, over whichever link the device picks); the
+   Settings panel's readout ends in the link the connection does take.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
