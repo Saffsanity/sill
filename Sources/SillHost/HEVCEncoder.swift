@@ -27,9 +27,10 @@ import StreamProtocol
 ///   40 Mbps. With two, the next frame is already inside when one comes back, so the part of a
 ///   frame's turnaround spent beside the chip can overlap the next frame's. That is a reading of
 ///   the counters: if the encoder ran all 30 ms one frame at a time, two inside would still give
-///   33 fps and a frame would wait inside instead of in the mailbox (CLAUDE.md, "The 33 fps
-///   plateau"). While the encoder keeps up (~9 ms against 16.7 ms between frames at 60 fps) a
-///   frame seldom finds another inside, and nothing changes.
+///   33 fps and a frame would wait inside instead of in the mailbox. Measured so far only on an
+///   engine shared with another session, where two inside gained no frames and added a turnaround
+///   of latency (CLAUDE.md, "The 33 fps plateau"). While the encoder keeps up (~9 ms against
+///   16.7 ms between frames at 60 fps) a frame seldom finds another inside, and nothing changes.
 /// - A watchdog on its own queue declares the session dead when the frame inside VT longest has
 ///   been there `hangAfter` seconds without an output. The owner is told (`onHung`) and starts
 ///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping

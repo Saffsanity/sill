@@ -991,7 +991,10 @@ What the host does now:
   sessions (the next "AVE : open") to client PIDs.
 - Operational rule, from the same logs: while Noah streams, agents do not run
   `simctl io recordVideo`, SillHost streams, ReelRenderer or encoder benchmarks;
-  each shares the one engine, and the recorder outranks Sill.
+  each shares the one engine, and the recorder outranks Sill. The Claude app's
+  iOS Simulator panel counts too: `claude-ios-sim` encodes the simulator's
+  screen at priority 60 (~62 fps at 2064×2752), and Noah's Retina Desktop fell
+  from 57 to 36 fps beside it (2026-09-25, 15:14).
 - Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
   60 (above every default session, still below the recorder's 80) and follows
   live bitrate changes, but it changes the bitstream and rate control (frames
@@ -1114,8 +1117,7 @@ cost is at most one frame waiting inside VideoToolbox instead of in the
 mailbox. Commits: 63a365b (the bookkeeping moved, still one inside), ec93e09
 (two inside), 47f0cc1 (the test).
 
-Verified without the hardware encoder (a device was connected to Noah's
-Sill.app all session: the operational rule above): clean builds at each commit
+Verified without the hardware encoder: clean builds at each commit
 (only the old CaptureProbe warning); the encoder-free check, the real
 `EncoderMailbox.swift` compiled with a stand-in for VideoToolbox that returns
 frames after programmable delays, in any order, in virtual time, driven at 60
@@ -1170,20 +1172,41 @@ check && ./check`, 63,778 checks, and `python3 mutants.py`):
   busy). So the engine works on other frames during a Sill frame's turnaround;
   whether it takes a second frame of the same session then is what the
   hardware run shows.
-- **Untested, for Noah (the hardware encoder; only with no device
-  connected):** the scratchpad's `two-in-flight/verify-hardware.sh`: the CLI's
-  idle stdout against 4fe37d4 (masked and sorted), SillHost `--synthetic` with
-  a test client (enc.out, mailboxDrop, HeartBeat), the real HEVCEncoder of
-  each build at 3024×1964 and 40 Mbps (3 s at 60 fps, 6 s of a frame every 0.3
-  s to provoke the slow state, 20 s at 60 fps; per second enc.out,
-  mailboxDrop, capture-to-output latency, the HeartBeat's C/F), and each
-  build's throughput test. Expected with one inside once slow: ~33 fps, ~24
-  drops, C/F ~15; with two: ~57–60 and latency no higher. If two still read
-  ~33, or the latency rises, revert ec93e09 and 47f0cc1 (63a365b alone
-  changes nothing); the next thing to try is
-  `EnableLowLatencyRateControl`. Then the iPad on the Retina Desktop at 40
-  Mbps: a still screen for 10 s, then scrolling; the menu's encoded fps should
-  stay near 57 where it read 33. Resolution: Standard avoids the plateau
+On the hardware, 15:28–15:45 (no device connected; the scratchpad's
+`two-in-flight/verify-hardware.sh`, which checks the rule before each run and
+stops a run if a device connects). All session the Claude app's iOS Simulator
+panel (`claude-ios-sim`, mapped through VTEncoderXPCService's peer PID) was
+encoding the simulator's 2064×2752 screen at priority 60 and ~62 fps, so every
+run shared the engine with it, and the sparse phase did not bring on the slow
+state (C/F stayed near 9 ms):
+- The CLI's idle stdout (35 s, 7 lines) against 4fe37d4: identical masked and
+  sorted, and masked in order too.
+- The real HEVCEncoder of each build (scratchpad `two-in-flight/harness/`, the
+  file under test compiled with a test pattern: 3024×1964, 40 Mbps, 3 s at 60
+  fps, 6 s of a frame every 0.3 s, 20 s at 60 fps): one inside 35.7 fps, 24
+  mailbox drops a second, capture-to-output latency median 36.3 ms (p95
+  46.6); two inside 35.6 fps, 24 drops, median 64.4 ms (p95 72.4). No frame
+  gained and one turnaround (~28 ms) added. The engine completed ~72 frames a
+  second across the two sessions (~36 each) at C/F 9.0 ms, so it was full: the
+  work that fills it is not the part a second frame could overlap. With two
+  inside, output handlers never overlapped and came in timestamp order (0 and
+  0 of the run's ~850 outputs).
+- SillHost `--synthetic` with a test client (3024×1898, 60 fps, 15 Mbps, 30
+  s): one inside `enc.out` 32.1, `enc.mailboxDrop` 27.5 a second; two inside
+  35.6 and 24.2, beside the panel at 28–35 fps.
+- The throughput test at 3024×1904: one at a time 49–51 fps, two inside 49.5;
+  at 1512×948, 46–81 and 60–67.
+- **Untested, for Noah:** the case the change is for, the slow state on an
+  engine nobody else uses: `verify-hardware.sh harness` with no device
+  connected, the Claude app's iOS Simulator panel closed and no recording
+  (the HeartBeat lines it prints should show one session). Expected with one
+  inside once slow: ~33 fps, ~24 drops, C/F ~15. Merge only if two inside
+  lifts that to ~55 or more; then, since a shared engine gets no frames and a
+  turnaround of latency from the second place, keep it only while it adds
+  frames (for instance: two inside, and back to one for a while when the
+  output rate does not rise). If it still reads ~33, revert ec93e09 and
+  47f0cc1 (63a365b alone changes nothing); the next thing to try is
+  `EnableLowLatencyRateControl`. Resolution: Standard avoids the plateau
   meanwhile (57 fps with no drops at 1512×982).
 
 Still open: the unexplained one-off stall where new clients received no catalog

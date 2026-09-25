@@ -203,13 +203,14 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## What to try if it's slow
 
-- Read the host's stats line. `enc.out` near 33 with `enc.mailboxDrop` about 24
-  a second while ~57 frames are captured is the hardware encoder's slow state at
-  the Retina Desktop's size (about 30 ms a frame; it can set in after a few
-  seconds of few frames, at any bitrate). The host used to let one frame into
-  the encoder at a time, which capped the stream at 33 fps; since 2026-09-25 it
-  lets in two, which should carry the full rate. `enc.mailboxDrop` counts the
-  frames that found no room.
+- Read the host's stats line. `enc.mailboxDrop` counts captured frames the
+  encoder had no room for, so `enc.out` well under `cap.complete` with the
+  difference in `enc.mailboxDrop` means the encoder takes longer than a frame
+  interval. At the Retina Desktop's size that is either its slow state (about
+  30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
+  seconds of few frames, at any bitrate) or another app encoding at the same
+  time (a screen recording, the Simulator's recorder, or the Claude app's iOS
+  Simulator panel, beside which a Retina Desktop ran at 36 fps).
 - Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
   it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
