@@ -43,8 +43,9 @@ struct FoundMac: Identifiable, Hashable {
     var word: String? { route == .remote ? "Remote" : method?.word }
 }
 
-/// How the current connection runs, for the Settings panel's route line and the saved Mac's
-/// `lastRoute`.
+/// How the current connection runs (`Session.route`): set when it starts, again at `.ready` and by
+/// a move to the network. A remote one's way in becomes `remoteRoute` (the Settings panel's route
+/// line) and the saved Mac's `lastRoute` at its first window list; the rest reads `isRemote`.
 enum SessionRoute: Equatable {
     case network
     /// Over peer-to-peer Wi-Fi (Direct Wireless).
@@ -394,7 +395,8 @@ final class StreamClient: ObservableObject {
     /// The dial in flight, remote or pairing: one at a time each.
     var remoteDial: RemoteConnector?
     var pairingDial: RemoteConnector?
-    /// The next look at the reconnect (a Direct row's 3 s, a remote dial's due time).
+    /// The next look at the reconnect (a Direct row's `directWait` and `networkGrace`, a remote
+    /// dial's due time, the end of `redialWindow`).
     var reconnectCheck: DispatchWorkItem?
     /// A remote session's first window list must come within 10 s of `.ready`.
     var firstListDeadline: DispatchWorkItem?
