@@ -14,7 +14,9 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      logs a name for this client
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
                      and virtualDisplayAvailable): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
-Every kind 16 (host settings) is printed on one line with its arrival time; dw= is Direct Wireless
+Once a second it prints the frames, their payload in kB (the encoder's output), ticks, cursor
+shapes and the last ping's round trip. Every kind 16 (host settings) is printed on one line with
+its arrival time; dw= is Direct Wireless
 (1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
@@ -113,7 +115,7 @@ def describe(d):
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else ""))
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
-per = {}; tot = {}; frames = 0; keys = 0; kb = 0; rtt = None; first_frame = None; ps_seen = []
+per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
 token = 1; last_state = None; settings_msgs = 0
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
@@ -152,7 +154,7 @@ while time.time() - t0 < dur:
         payload = buf[14:14+ln]; buf = buf[14+ln:]
         name = KIND.get(kind, str(kind)); bump(name)
         if kind == 1:
-            frames += 1; kb += ln / 1024
+            frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             if key: keys += 1
             if first_frame is None:
                 first_frame = time.time() - t0; print(f"  first frame at {first_frame:.2f}s, {ln} bytes, key={key}")
@@ -172,9 +174,10 @@ while time.time() - t0 < dur:
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
     if now - last >= 1:
         f = per.get("frame", 0)
-        print(f"t={now-t0:4.1f}s frames={f:3d} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
-              f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} ticks={per.get('tick',0):3d}")
-        per = {}; last = now
+        # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
+        print(f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
+              f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d}")
+        per = {}; kb_sec = 0; last = now
 print(f"TOTAL {frames} frames ({keys} key) {kb:.0f} kB in {dur:.0f}s = {frames/dur:.1f} fps; kinds={tot}")
 print(f"settings messages: {settings_msgs}")
 s.close()
