@@ -41,6 +41,96 @@ plainly.
   gear paragraph of The iOS app. A change the public README describes (pairing
   at home, say) also updates README.md's How it works and Good to know.
 
+**App Store readiness (2026-09-25, branch `app-store-readiness` from main at
+76366e8; main at ba91136, PR #13 remote access, merged in, not rebased).** What
+a first upload of the iOS app and the first Developer ID download of Sill.app
+need, after the App Store audit. `docs/app-store-metadata.md` has the reasons,
+Apple's sources and every text to paste into App Store Connect;
+`docs/release-checklist.md` the order of work, once and on every release.
+- Adds: the privacy manifest, `iOSClient/PrivacyInfo.xcprivacy`, a resource of
+  the target (UserDefaults CA92.1 and `systemUptime` 35F9.1, no tracking,
+  nothing collected; remote access uses no required-reason API outside those
+  two); `ITSAppUsesNonExemptEncryption` NO in `iOSClient/Info.plist`, which the
+  build merges with the generated keys (the home connection is plain TCP, and
+  remote access's TLS 1.3, CryptoKit and CommonCrypto are Apple's, which needs
+  no documentation; the plist key, never also the build setting); the connect
+  screen's footer (Layout, `ContentView`), for guidelines 1.5, 2.1 and
+  5.1.1(i); the website in `site/` and `Scripts/release.sh` (Layout); the two
+  docs, with the Remote Access switch (the cuts for a 1.0 without it).
+- Confirmed by Noah on 2026-09-25 (the site is live): the site at `https://getsill.app`
+  (`site/CNAME`, `SillLinks.swift`, both docs; nothing is served there yet),
+  the contact address `support@getsill.app` (the privacy and support
+  pages and the metadata; never ship it), and the Mac download at `/download`
+  (`site/download.html`, whose version, link and SHA-256 are placeholders that
+  release.sh's output fills in). The checklist's Placeholders table has the one
+  command that changes each everywhere.
+- The merge: the footer sits under main's connect screen (Add a Mac…, the
+  Remote rows, the card, the leading anchor, the Duo's top half, the column at
+  the top while a field has the keyboard). The branch drew the column twice,
+  under a ViewThatFits of a form that fits and one that scrolls; with main's
+  card that meant two cards, each with its camera and fields, and a new one
+  whenever the fit changed (the card folds its words while a field has the
+  keyboard). Now one scroll view holds the one column whatever the fit
+  (`ColumnOverFooter`, measuring a hidden copy of the footer), and a scrolling
+  column fades over 12 pt with 12 pt clear before the footer (the branch: 24
+  and 12), both inside the 24 pt gap that a column that fits keeps. At 710×1000
+  the column stays in main's top half, the footer along the bottom. README
+  and CLAUDE.md keep both sides.
+- Verified on the merge: iOS Debug and Release for the simulator and Debug for
+  a device, only the StreamClient capture warning; no package source differs
+  from ba91136; both built Info.plists read `"ITSAppUsesNonExemptEncryption" =>
+  false` (Xcode's ProcessInfoPlistFile takes `iOSClient/Info.plist`), with
+  `PrivacyInfo.xcprivacy` at the bundle root. Harness photos of the merge and
+  of main's own build, compared pixel by pixel: 1000x710, 710x1000, 500x710 and
+  710x500 on an iPad, 440x956 and 956x440 on an iPhone 17 Pro Max, default and
+  accessibility-extra-large text, the cases looking, methods, denied, remote
+  and addmac. In 54 of the 60 the title is where main puts it and only the
+  footer's pixels differ. The six others follow the rule: methods at 710x500
+  and at 956x440 scroll above the footer (the column 16 pt from the top), and
+  remote at 956x440 rises 17 pt (27 at the larger text). The title's x never
+  changes, and nothing overlaps the footer.
+- Verified before the merge (the commits say how): Release builds with the key
+  in the built Info.plist beside the manifest; the footer's photos against its
+  parent commit (the column never moved), an accessibility dump (three links,
+  the dots hidden) and Support opening its page; the site's static checks
+  (tags, links, CSP, headings, the Remote Access markers and their cut gate);
+  release.sh's refusals and its functions (33 checks, a fake keychain), never a
+  real run; the placeholder commands on a scratch copy.
+- After the merge, review findings fixed: every page's brand and Home links
+  were `./`, which opens nothing from the folder (WebKit from file://: 8 of
+  the 28 header and footer links dead; with `index.html`, all 28 land on their
+  page, and each answers 200 from `python3 -m http.server`). A column that
+  rose to keep the gap could reach the very top, while one that scrolls has
+  16 pt above it, so at the switch it jumped: methods at 710 wide scrolled with
+  its title 19.5 pt down at 510 pt tall and, one point taller, rose flush (the
+  title 4 pt down). Now it rises no higher than 16 pt from the top, the same
+  as scrolling: photographed at every height from 500 to 540, the title stays
+  19.5 pt down up to 526 and then moves 1 pt a point (at the larger text, up
+  to 535); the 60 photos above are pixel for pixel the merge's. The export
+  compliance key needed no change: the target generates its Info.plist from
+  `iOSClient/Info.plist` plus the build settings (GENERATE_INFOPLIST_FILE with
+  INFOPLIST_FILE), and clean Debug and Release builds of the result, for the
+  simulator and for a device, all carry `ITSAppUsesNonExemptEncryption` false
+  and `PrivacyInfo.xcprivacy` at the bundle root, with only the StreamClient
+  capture warning; `swift build -c release` builds, and again is a no-op. The
+  real app on the iPhone simulator (Bonjour listed this Mac; nothing
+  connected): the footer above the home indicator, at both text sizes.
+- Main moved on while this ran: PR #11 (encoder recovery) is b50e224, not
+  merged here; it overlaps this branch only in CLAUDE.md and README.md.
+- **Untested, for Noah:** the decisions: the domain, the contact address, and
+  whether 1.0 keeps Remote Access, which main has had since ba91136 (the
+  audit advised a 1.0 without it before it merged; the metadata's switch lists
+  the cuts). On a device: the footer's links open Safari (the pages are not
+  served yet), VoiceOver reads the footer once, after the rows (its measuring
+  copy is hidden from it), the card's fields with a hardware keyboard (the
+  column at the top, the footer in view) and the software one (the footer
+  under it), and a phone held sideways, which only the harness drew here
+  (956x440). The release: the Developer ID
+  certificate, notary credentials, release.sh for real, a first launch on a
+  Mac that never had Sill, the site on GitHub Pages with its DNS record, the
+  App Store Connect record (the checklist's part 1). The description's claims
+  not yet seen on a device: the cable on an iPhone, Pencil hover, 120 fps.
+
 **Follow-best-path merged with main after remote access (2026-09-25, branch
 `follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12;
 not a rebase).** A session at home follows the best path as the next entry
@@ -1660,7 +1750,17 @@ good.
   address; pure, checked with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
-  installs the bundle; `Scripts/sillclient.py` is the wire-format test client
+  installs the bundle; `Scripts/release.sh` (M6) makes the download from it:
+  `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
+  service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
+  the ticket stapled, the zip made again with the ticket inside, and a copy
+  unpacked from it checked with `stapler validate` and `spctl` ("Notarized
+  Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
+  `site/download.html`. It refuses to start, before building, without a
+  Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
+  keychain) or the profile, and `--dry-run` stops before notarytool (the
+  profile only warned about); sourced, it only defines its functions.
+  `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
@@ -1673,6 +1773,21 @@ good.
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through).
+- `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
+  `index.html`, `download.html` (the current release's version, link and
+  SHA-256, set by hand from release.sh's output), `privacy.html` (the policy
+  App Store Connect and the app link to), `support.html`, `style.css` (system
+  fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
+  scripts and nothing loaded from elsewhere: every page's
+  Content-Security-Policy is `default-src 'none'`. Links are relative and
+  name a file (`download.html`; Home is `index.html`, since `./` opens nothing
+  from the folder), so it renders from the folder; GitHub Pages also serves
+  each page without `.html`, the form the app and App Store Connect use
+  (`/download`, `/privacy`, `/support`). Remote Access paragraphs sit between
+  `<!-- Remote Access` and `<!-- /Remote Access -->`, to cut for a release
+  without it. `docs/release-checklist.md` is the order of work: the one-time
+  setup (Developer ID, notary credentials, hosting and DNS, the App Store
+  Connect record) and every release's steps.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -1697,8 +1812,20 @@ good.
   Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
-  Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, +
-  DEBUG harness),
+  Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, and
+  a footer along the bottom, "Needs the free Sill app on your Mac." with links
+  to the download, support and the privacy policy, which open in Safari (one
+  line while they fit, else the download link over the other two, as wide as
+  the column); the column stays where it would be without the footer
+  (centred; in the top half on the Duo's 710×1000, the footer still along the
+  bottom; at the top while a field has the keyboard), rises only to keep 24 pt
+  clear of the footer, never closer than 16 pt to the top, and scrolls above
+  it, 16 pt from the top, when even that does not fit (a 12 pt fade, then
+  12 pt clear, both inside the gap); one scroll view
+  whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
+  footer), so a fit that changes never builds the card anew (its fields, the
+  camera); + DEBUG harness), `SillLinks`
+  (the site's addresses, written once; getsill.app is live since 2026-09-25),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
@@ -1706,8 +1833,13 @@ good.
   `SavedMacs` (pure), `RemoteDialPolicy` (pure), `RemoteConnector`,
   `StreamClient+Remote` (pairing, remote dials, the reconnect order, links),
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
-  `PairingOverlay` (Pair This iPad…). New files need their four pbxproj
-  entries by hand. Swift 5 language mode.
+  `PairingOverlay` (Pair This iPad…).
+  `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
+  it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
+  use of a required-reason API (file dates, disk space, `mach_absolute_time`,
+  active keyboards) must add its category and reason there before the next
+  upload. New files need their four pbxproj entries by hand.
+  Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 - `docs/DEVELOPMENT.md` — building, running and testing from source; the
   README's developer material until 2026-09-25, so a plan's "README" means a
@@ -1742,6 +1874,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
+SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
+python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.
