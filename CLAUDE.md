@@ -975,8 +975,10 @@ for `enc.mailboxDrop` counts, which follow the other encoder users of the
 moment (either build had them); `SILL_TEST_ENCODER_HANG=1` with a client: the
 hang at 1.5 s, the fallback, 1512×948, "came back after 3.0 s", back 30.0 s
 later (114 fps in the test) and 3024×1898 on the hardware at 60 fps for 67 s,
-the client getting frames every second but the hang's; `=2`: the second hang
-3.5 s after the return, "next check in 60 s", back 60.0 s later; with
+the client getting frames every second but the hang's; `=2`, while another
+agent's Simulator recording and SillHost came and went: the check at 30 s
+"busy (25 fps …); next check in 60 s", back 60 s later at 114 fps, the
+second hang 3 s after the return and "next check in 120 s"; with
 `SILL_TEST_PROBE_HOLD=0.08` while the recorder and another SillHost really
 shared the engine (the test's own hardware stream ran at 16 fps): "busy
 (7 fps …)" at 30 s and "(8 fps …)" 60 s later, no return; the client leaving
