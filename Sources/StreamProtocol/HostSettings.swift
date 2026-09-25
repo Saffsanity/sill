@@ -31,6 +31,11 @@ import Foundation
 //   (HostSettingsLedger.swift), rule 9 in the ledger's `pick` for an optional field, the panel's
 //   row, and the DEBUG mock's cases (MockCatalog.swift);
 // • Scripts/sillclient.py: the keys `--set` accepts, and `describe`.
+//
+// A Mac-only listener knob (remote access, its port, internet access) goes in the host's
+// HostConfig, the app's HostSettings, DebugHooks, the Remote Access pane and the menu, and never in
+// StreamSettings, HostSettingsChange or DeviceSettings.accepted: only the Mac's own user widens
+// who can reach the Mac.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
 /// stream, and one (Direct Wireless) for how devices reach the Mac. Plain values, never enums: an
@@ -166,9 +171,10 @@ public enum SettingsChoices {
 /// every menu and picker on both ends lists `allCases` in this order. The raw values are what the
 /// defaults and kinds 16/17 carry, so a rename (Maximum became Pro) changes nothing stored or sent.
 /// A new raw value is new to `SettingsChoices` too: an older host refuses it and an older device
-/// shows it as "Custom — N Mbps". All stay within `HostConfig.validated()`'s 200 Mbps.
+/// shows it as "Custom — N Mbps". All stay within `HostConfig.validated()`'s 200 Mbps. Low is for a
+/// slow link away from home (docs/remote-access-plan.md §7.11), so it comes first.
 public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
-    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, pro = 40_000_000
+    case low = 4_000_000, efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, pro = 40_000_000
     /// For the USB cable or very fast Wi-Fi (`fastLinkNote`).
     case ultra = 80_000_000, extreme = 150_000_000
 
@@ -176,6 +182,7 @@ public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
 
     public var name: String {
         switch self {
+        case .low: "Low"
         case .efficient: "Efficient"
         case .balanced: "Balanced"
         case .high: "High"

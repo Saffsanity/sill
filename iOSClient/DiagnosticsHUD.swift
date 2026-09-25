@@ -49,7 +49,8 @@ final class ClientStatsReporter: ObservableObject {
         return id.isEmpty ? name : "\(name) (\(id))"
     }()
 
-    private static var hardwareIdentifier: String {
+    /// "iPad14,1", or "iPad16,6 simulator": also what a pairing request gives as the model.
+    static var hardwareIdentifier: String {
         if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
             return "\(simulated) simulator"
         }

@@ -8,6 +8,457 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The hardware encoder: busy, not stuck (2026-09-24; fixed 2026-09-25, branch
+`encoder-recovery` from main at 76366e8, with main at ba91136 merged in: the
+bullet before the last).** Sill.app's watchdog fired twice on 2026-09-24 and
+both times the host stayed on the software encoder until it relaunched, which
+was Noah's poor frame rate (~3 h at 1512×982, 46–55 fps with motion, 6–46 fps
+at the end, through 18 settings changes the fallback's caps made useless). The
+kernel's AppleAVE2 log (every hardware session's open with its size, bitrate
+and firmware "Priority", and a HeartBeat every 5 s listing each session's
+frames submitted | completed) shows neither was a wedge:
+- 19:00:21 (40 Mbps, the Retina desktop at 60 fps, a 61 s old session): the
+  iOS Simulator's screen recorder (SimRenderServer, what `simctl io
+  recordVideo` drives: H.264 2064×2752 of the iPad Pro 13" simulator, 38 Mbps,
+  priority 80) shared the one encoder engine with Sill and an agent's `SillHost
+  --synthetic` (both priority 0). Sill fell to 7–8 fps, then its frame waited
+  ~8.6 s; the invalidate blocked 7.06 s, off-thread, and the frame completed
+  0.3 s after the other SillHost process died. A fresh 256×256 probe answered
+  within 270 ms with the recorder still running, while the next stream-size
+  sessions stalled again (0.3–9.5 s).
+- 23:30:04 (150 Mbps, a 36 s old session, running 57–58 fps alone): the
+  recorder opened a session at 23:29:45.2 and Sill fell from 58 to 22 fps in
+  that second, then ran 13–45 fps; a frame waited ~1.8 s and completed (the
+  invalidate took 0.17 s). A near miss at 23:27:54 (57 → 2–34 fps) came from
+  the same recorder. The render and the benchmarks named at the time ran later.
+- 424 hardware HEVC sessions from 17:40 to 02:30: 47 overlapped a recorder
+  session and 7 of those stalled (median 39 fps); the other 377 had no stall
+  (median 60), including a priority-0 H.264 2064×2752 benchmark beside HEVC
+  3024×1968 at 40–150 Mbps (both 28–46 fps, a fair share). Ruled out: the
+  bitrate (hang 1 was at 40 Mbps), 120 fps (both at 60), session churn (22
+  bitrate restarts ran clean) and invalidating with a frame inside (both
+  frames completed). No "Frame POC timed out" line, the 2026-09-22 signature,
+  anywhere in the period (the log store no longer has 09-22's AppleAVE2 lines).
+- Priorities, measured with one 256×256 frame per configuration: real-time
+  HEVC and H.264 0, not real-time 0, `EnableLowLatencyRateControl` 60 (RCMode
+  20), the recorder 80. No public key sets it. One engine on this M2 Pro:
+  unthrottled HEVC 3024×1968 runs ~105–115 fps (~650 MP/s), so the Retina
+  desktop at 60 fps takes 55–65 % of it and any other encode costs Sill frames
+  without a hang (a 3024×1904 test beside Noah's 1512×982 desktop: both at
+  57–60 fps for ~4 s, then both at ~50, 2026-09-25). A Retina desktop at 120 fps
+  (~713 MP/s) exceeds it alone (untested).
+- A bitrate change still needs a new session (measured 2026-09-25, 1512×948 at
+  60 fps, blocky noise): VideoToolbox takes AverageBitRate and DataRateLimits
+  on a live session and reads them back, but the hardware HEVC rate control
+  does not follow: raised 8 → 40 Mbps the output stayed at 9.6 Mbps for 5 s,
+  across an IDR and a forced keyframe (a session made at 40: 28 Mbps); lowered
+  40 → 8 it dropped 41 of the next 60 frames. Hardware H.264 the same. The
+  software encoder follows (7.9 → 19.5 Mbps in 2 s) and so does low-latency
+  rate control (8 → 38 Mbps within 1 s). `restartNeeded` keeps the bitrate.
+- `VTCompressionSessionInvalidate` waits for a frame still inside (17 ms for a
+  3024×1898 frame in flight, whose output handler runs first).
+
+What the host does now:
+- The fallback is temporary. `enterSoftwareFallback` (a hardware hang, or the
+  launch probe) says "… (busy or stuck); switching to the software encoder at
+  half scale until the hardware keeps up again (next check in 30 s)." While a
+  device is connected (an idle host opens no session; the task ends with the
+  last device) `recheckLoop` tests the hardware at the size the stream would
+  have on it (the running one's at full scale, else the Desktop's):
+  `EncoderProbe.throughput` sends a moving pattern through a quiet session (no
+  line, no counter: the stats line's `enc.out` is the menu's fps), one frame
+  at a time like a stream, on a user-initiated GCD thread, and measures the
+  rate the last 7 of 10 frames come back at; its 3 frames are drawn before
+  the session opens and reused, and the first pass over them is left out
+  (~110 ms at 3024×1904 when the engine is free, ~120 fps; ~290 ms at
+  6016×3384, ~39 fps). At the rate a return needs or more
+  (`EncoderProbe.returnBar`: 0.75 of the stream's rate, 60 at most, the
+  software encoder's cap, so 45 fps; but never more than 0.75 of what the
+  engine does alone at the test's size, from the best pixel rate any test
+  measured this run, 400 MP/s until one has) `hardwareIsBack` waits out a
+  switch, clears the flag and restarts a running stream on the hardware, like
+  a settings change (no focus change): "Hardware encoder is back (121 fps at
+  3024×1896 in a test, 45 needed); restarting the stream on it." (or "the
+  next stream uses it"). Slower: "Hardware encoder answers but is busy (8 fps
+  at 3024×1896 in a test, under the 45 fps a return needs; another app is
+  using it); next check in 60 s". No frame in 1 s: "Hardware encoder still
+  not answering after N ms; next check in 60 s". Either doubles the interval,
+  up to 300 s; so does a hang within 5 min of a return; a return that lasted
+  10 min resets it to 30 s. The first device after none gets a check at once
+  when the last is 30 s old, so its stream starts on the hardware (a software
+  start ~20 ms before is replaced). A hang reported by an encoder no newer
+  than the last return (`HEVCEncoder.serial`) is stale and ignored. One loop
+  and one test at a time: `stopRecheck` only cancels, and the task clears
+  `recheckTask` once its loop has ended, so a device that connects during a
+  test gets no second loop beside it (the ending task's tail starts one); a
+  test that ends with no device left is dropped without a line or a backoff.
+- Why a rate at the stream's size and not one small frame: at 03:26 on
+  2026-09-25, with another agent's Simulator recording (priority 80) and a
+  second SillHost on the engine, a 256×256 frame answered in 72 ms, the
+  stream went back to the hardware and ran at 12 fps there (it had run at ~57
+  on the software encoder), and no watchdog fires for a slow stream. Noah's
+  own Sill.app sat at 8–18 fps in the same minutes, and at 03:32:02 it fell
+  back once more (16, then 2 fps, then the watchdog), which the old build
+  keeps until it relaunches.
+- Why the bar follows the size (review, 2026-09-25): a fixed 45 fps asked more
+  than a free engine gives a large frame. Measured with the engine free (Noah's
+  Sill.app on the software encoder), as the probe was (frames drawn inside the
+  timing, utility QoS) and as it is: 6016×3384, a Retina 6K Desktop, 37 and
+  39 fps; 5120×2880 50 and 53; 3024×1904 115 and 121. So a host streaming a 6K
+  Desktop read "busy" at every check and stayed on the software encoder for
+  good. Now the first check there needs 15 fps (400 MP/s assumed) and, learned
+  from its test, the next 29; a starved session got a sixth of the free rate
+  or less, so busy still reads busy.
+- The session given up on reports on its way out: "Encoder (hardware HEVC
+  3024×1898): the stalled frame came back after 3.0 s; the encoder was busy,
+  not stuck." A stuck one never lets go, so it never prints.
+- Probes whose frame never comes back each hold a blocked thread; with 8 out
+  (`maxStuckProbes`, after 22–28 min of failed checks) the re-check stops
+  probing and says once that the encoder is stuck and a restart of the Mac
+  fixes it, and the menu shows "Hardware Encoder Stuck". A late frame counts
+  out again (`EncoderProbe.onStalledProbeBack`): under 8, the host says "a
+  check's frame came back after N s, so it is not stuck; checks resume",
+  clears the menu's line at once (a device connected or not) and, with a
+  device connected, checks at once instead of when the held-back loop wakes
+  (300 s).
+- Copy: the menu's "Hardware Encoder Busy — Streaming with the software
+  encoder, up to 60 fps, until it is free again." (one line, 373 pt: a menu
+  item's subtitle does not wrap, the old one was 422 pt) or "Hardware Encoder
+  Stuck — … Restarting the Mac fixes this."; the Streaming pane says the same
+  at length; `HostSettingsState.softwareEncoder`'s doc. The device's callout
+  says "‹Mac›’s hardware encoder is busy or not responding, so for now streams
+  run at up to 60 fps at Standard." (it said "until the Mac restarts"; it
+  promises neither now, as hosts before this change keep the fallback until
+  they relaunch), and goes away by itself when the host clears the flag.
+- Test hooks, read once and inert without them: `SILL_TEST_ENCODER_HANG=N`
+  (the first N hardware stream sessions hold frame 90 for 3 s before it goes
+  in: a busy engine; it prints a "TEST:" line), `SILL_TEST_PROBE_HOLD=S` (every
+  frame of every probe waits S s: 0.08 a starved engine, 2 a busy one, a huge
+  S a stuck one), `SILL_TEST_RECHECK_SECONDS=N` (intervals N to 10 N instead
+  of 30 to 300) and `SILL_TEST_PROBE_SIZE=WxH` (the re-check tests that size,
+  as for a Retina 5K or 6K Desktop on a smaller screen).
+- Diagnosis: `/usr/bin/log show --start '2026-09-24 18:55' --end '2026-09-24
+  19:05' --style compact --predicate 'sender == "AppleAVE2" AND (eventMessage
+  CONTAINS "HeartBeat" OR eventMessage CONTAINS "Resolution:" OR eventMessage
+  CONTAINS "AVE : open" OR eventMessage CONTAINS "AVE : close")'` (a session
+  whose completed count stops while its submitted one is ahead is starved;
+  "Priority: 80" beside it is the recorder), plus `process ==
+  "VTEncoderXPCService" AND eventMessage CONTAINS "videoencoder.peer"` to map
+  sessions (the next "AVE : open") to client PIDs.
+- Operational rule, from the same logs: while Noah streams, agents do not run
+  `simctl io recordVideo`, SillHost streams, ReelRenderer or encoder benchmarks;
+  each shares the one engine, and the recorder outranks Sill.
+- Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
+  60 (above every default session, still below the recorder's 80) and follows
+  live bitrate changes, but it changes the bitstream and rate control (frames
+  dropped at 8 Mbps in the rate test): a flagged experiment with iPad tests.
+Verified headless (the synthetic host; hardware runs kept to seconds, Noah's
+Sill.app streaming beside them): clean build (only the old CaptureProbe
+warning); the CLI against 76366e8 built from `git archive`, masked and
+sorted: idle identical, and with a client and a bitrate change identical but
+for `enc.mailboxDrop` counts, which follow the other encoder users of the
+moment (either build had them); `SILL_TEST_ENCODER_HANG=1` with a client: the
+hang at 1.5 s, the fallback, 1512×948, "came back after 3.0 s", back 30.0 s
+later (114 fps in the test) and 3024×1898 on the hardware at 60 fps for 67 s,
+the client getting frames every second but the hang's; `=2`, while another
+agent's Simulator recording and SillHost came and went: the check at 30 s
+"busy (25 fps …); next check in 60 s", back 60 s later at 114 fps, the
+second hang 3 s after the return and "next check in 120 s"; with
+`SILL_TEST_PROBE_HOLD=0.08` while the recorder and another SillHost really
+shared the engine (the test's own hardware stream ran at 16 fps): "busy
+(7 fps …)" at 30 s and "(8 fps …)" 60 s later, no return; the client leaving
+during a fallback: no session from the host in the kernel log for 40–45 s
+(the next check was due after 30), then a client again: the test at the
+Desktop's size (112 fps) and back ~100 ms after its stream started on the
+software encoder; `SILL_TEST_PROBE_HOLD=100000 SILL_TEST_RECHECK_SECONDS=1`
+with a client picking nothing: the launch fallback, then checks 1, 2, 4, 8,
+10, 10 and 10 s apart, all unanswered, and the stuck line after the 8th
+unanswered probe (the launch one and 7 checks); `SILL_TEST_PROBE_HOLD=2`:
+unanswered probes, each back 2 s later, never stuck; previews against
+76366e8: only menu.txt (the copy and a new `software-encoder-stuck` sample,
+its cards equal to the busy one's) and the General pane's "Running from" path
+differ.
+Review fixes (2026-09-25), verified headless: the host builds with no warning,
+iOS Debug with only the old `StreamClient` one; `returnBar` checked on its own
+(swiftc, 100,011 checks: 45 at Retina laptop sizes, also at 120 fps, 15 and 29
+at 6K, a free engine always passes, always the lower of the two shares), four
+mutants caught (the fixed 45, the engine term without its share, no 60 fps
+cap, an assumed rate above this engine); the CLI against 76366e8 (`git
+archive`), masked and sorted: idle identical, with a client and a bitrate
+change identical (a first pair differed by one `enc.mailboxDrop` in the
+base's first second); `SILL_TEST_ENCODER_HANG=1`: back 30.1 s after the
+fallback ("121 fps at 3024×1896 in a test, 45 needed"), the client getting
+frames every second but the hang's (40–57 fps on the software encoder, 60 on
+the hardware); `=2` with `SILL_TEST_PROBE_SIZE=6016x3384
+SILL_TEST_RECHECK_SECONDS=5`: "39 fps at 6016×3384 in a test, 15 needed", the
+second hang and "next check in 10 s", then "39 fps …, 29 needed"; the
+verifier's overlap run (`SILL_TEST_PROBE_HOLD=1000
+SILL_TEST_RECHECK_SECONDS=4`, a device leaving during a test and another
+arriving): one line, "next check in 8 s" (it was two, 8 then 16 s), none when
+nobody comes back, and the second device's own check 8 s later;
+`SILL_TEST_PROBE_HOLD=70 SILL_TEST_RECHECK_SECONDS=1`: the stuck line at
+65.0 s, the launch probe's frame back at 70.2 s, "a check's frame came back
+after 70.0 s, so it is not stuck; checks resume" and a check at once; with
+the device gone by then, the same line at 70.2 s and the next device checked
+the moment it connected.
+- Merged with main at ba91136 (2026-09-25: PR #13, remote access; one merge
+  commit, not a rebase). Git stopped only on `Scripts/sillclient.py`, and both
+  sides stay: main's remote-door flags and LINK line, this branch's `kB=` each
+  second. Checked by hand in every file both sides changed: `StreamCoordinator`
+  has main's routes, kind 21, the kind 17 cap, Sill's own windows kept off the
+  Desktop and the goodbye at quit beside the fallback and the re-check; the
+  re-check runs while any device is connected, at home or through the remote
+  door (both register in `StreamServer.clients`, which `onClientCountChanged`
+  counts), and a return restarts the stream through `select` like any other
+  restart (`switching` is set before main's new wait for Sill's own app). The
+  menu lists the encoder's item (Busy or Stuck) before main's "Remote Access
+  Can’t Start"; `HostStatus`, `HostSettings.swift` (the `softwareEncoder` doc
+  beside the seven presets), `SettingsPanes`, `DebugHooks` (both sides'
+  samples), README and the device's panel (this branch's callout beside main's
+  route line and slow-link callout) keep both sides' changes. Verified: a clean
+  `swift build -c release` (only the CaptureProbe warning); iOS Debug for the
+  simulator and for a device (generic, signed, not installed; only the
+  StreamClient capture warning); `make-app.sh` without `--install`; the
+  return-bar check on the merged `EncoderProbe`, 100,011 checks, its four
+  mutants caught; previews from the bundle against main's (built from `git
+  archive`, both run from one path): identical but menu.txt (Busy for Not
+  Responding, and the `software-encoder-stuck` sample) and that sample's two
+  cards, equal to the busy one's. Not run at the merge: the CLI's output
+  against main's (idle 35 s and a Desktop pick, masked and sorted) and the
+  `SILL_TEST_ENCODER_HANG=1` run (the fallback, the stalled-frame line, the
+  return ~30 s later), both kept off the hardware encoder because Noah's iPad
+  was streaming from Sill.app the whole time.
+- **Untested, for Noah:** a build of this branch in /Applications
+  (`Scripts/make-app.sh --install --open` from this branch, which now carries
+  remote access too, or from main once PR #11 is in; only a new build comes
+  back by itself). Then, with the iPad streaming the Desktop, `xcrun
+  simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
+  simulator: the frame rate drops, and within a minute or so "switching to the
+  software encoder" and "the stalled frame came back" (the menu: "Hardware
+  Encoder Busy"); while it records, "answers but is busy" at each check, 30,
+  60, 120 s apart; stop the recording (Ctrl-C) and at the next check "Hardware
+  encoder is back" and the full resolution on the iPad. Also a window stream
+  and the virtual display through a return, and a 120 fps stream (the test
+  asks for 45 fps at its size). On a Mac with a Retina 5K or 6K display, a
+  return while the Desktop streams ("… in a test, N needed", N under 45 at
+  6K). New with the merge: the iPad through the remote door (Tailscale) through
+  a fallback and a return, the re-check running for it as for a device at home.
+
+**Remote access merged with main (2026-09-25, branch `remote-access`: merge
+0f7f50d of main at 76366e8 into 7f5f19d, not a rebase; the fix-up after it is
+ee922db, the review's fixes 7200334–e8c7490).** Main's PRs #6–#10 (the Direct
+Wireless fixes, the connect screen's Wired/Wi-Fi/Direct, the quality presets,
+the route in Settings, prefer-cable) now sit beside remote access. Where the
+two meet:
+- Presets: seven, ascending, Low (4 Mbps) first, then Efficient 8, Balanced 15,
+  High 25, Pro 40, Ultra 80, Extreme 150; main's 200 Mbps cap. A device may pick
+  all seven (`SettingsChoices`); a host from before either change refuses the
+  new ones and an older device shows them as Custom.
+- The Mac card: `HostStatusSnapshot.Device.route` is main's home link
+  (ClientLink: Wired, Wi-Fi, Direct) and `remoteRoute` the remote door's label
+  ("through Tailscale", "over the internet", "by address"). `StatusText.routeWord`
+  is the one place the card picks the word: the remote label first (its link
+  would read Wi-Fi for a session over the internet), on the device's row and,
+  while it is the only device, the source row after the Mbps, with no-break
+  spaces so a wrap never splits it. `remoteDeviceCount` counts `remoteRoute`.
+- StreamServer: the remote door's register-at-ready and origin gate carry main's
+  link, read at registration and on path updates (a remote session gets none);
+  Direct Wireless off disconnects only home clients on peer-to-peer Wi-Fi (the
+  remote door never listens there, and who reaches it is Remote Access's).
+- The device: `FoundMac` has the remote branch's route (network, direct,
+  remote) and Mac ID with main's `method` and `wired`; a row ends in "Remote" or
+  its method word (`FoundMac.word`, also for VoiceOver). `StreamClient.route`
+  stays main's link word (the readout); a remote session's way in is
+  `remoteRoute` (the route line, the 60 fps request, the slow-link callout), and
+  it has no link word. The reconnect is the remote branch's (`reconnect`, saved
+  Macs by Mac ID, then remote dials) with main's Direct-row rule (`directWait`,
+  and `networkGrace` from the sightings; a remote dial's `networkGrace` counts
+  from the same moment, the saved Mac's row going, in `savedSightings`, the
+  sightings by Mac ID); every row dial, a tap's or the reconnect's, goes
+  through `dial`, so a "Wired" row dials the cable first. The move to the
+  network keeps its SessionLink fence and sets the session's route to network.
+  `-SillConnect` takes `[::1]:P` (the address parser) and
+  `fe80::…%en0:P` (split at the last colon). In the project file main's
+  SessionLink keeps A015/F015 and DeviceIdentity moved to A01D/F01D.
+- Verified without devices: `swift build` (only the CaptureProbe warning), iOS
+  Debug and Release for the simulator and Debug for the iPad (only the
+  StreamClient capture warning), `make-app.sh` without `--install`. Pure checks
+  against the merged files: main's policy check 187 of 187 (main's own count
+  at 76366e8) with 45 of 45 mutants (its 25, and the 20 older ones re-applied as
+  text); the remote rules, RemoteDialPolicy and SavedMacs 60 of 60, 33 of 33;
+  AddressList and PairingWindow 41, 15 of 15; OriginPolicy 66, 10 of 10; the
+  protocol 188 and its 8 openssl cross-checks, 20 of 20; ClientLink 89, 14 of
+  14; the SessionLink fence in its four modes, 5 of 5; the ledger check
+  extended to seven presets (Low's own block, and an older host refusing Low,
+  Ultra and Extreme in the random model) 90 with 5,000 runs, 3 of 3; the wire
+  read and written across a9cc248, main, 7f5f19d and the merge, 16 of 16. The
+  CLI's output, idle 35 s and with one client, masked and sorted, is main's and
+  7f5f19d's. Previews against main differ only in the remote branch's own
+  (36 files, and menu.txt's Low, Remote Access… and Pair iPhone or iPad…);
+  against 7f5f19d only in main's (the route words, "still", the Streaming
+  footer, the presets, the still-window card) and the remote-device card's
+  source row, which now ends in "through Tailscale". Live on loopback: Extreme
+  restarts at 150 Mbps and 200 is refused; Direct Wireless on and off keeps the
+  port; pairing, a paired session and an unpaired key refused at the remote
+  door; both doors at once, where Direct Wireless off (the en0 stand-in)
+  disconnects a home client on this Mac's en0 link-local address and not a
+  remote session from the same address, and the remote door's port never
+  changes (a build without the remote-session guard fails this); the home
+  door's caps and origin gate; the bare app's `-SillSetAfter` bitrate, Direct
+  Wireless and Remote Access (one Settings line each, one restart in all),
+  saved across a relaunch. On a simulator of its own: by address, the route
+  word read; `-SillMoveTest 1` moved and fenced; `-SillPairURL` pairing and a
+  remote session; the host gone and back, redialled remotely.
+- Review of the merge (2026-09-25, after 3a7b501). Fixed: a lost saved Mac's
+  automatic remote dial counts `networkGrace` from the moment its network row
+  went (`StreamClient.savedSightings`, DiscoveryPolicy.sightings by Mac ID); it
+  read `networkLastListed`, the last browser change while the Mac was listed
+  (often the connect), so a Mac that blinked off the network at home was dialled
+  through the remote door 3 s after the loss, and a remote session that wins
+  that race is never moved home (the bug was on 7f5f19d already). The move's
+  probe (main's `probeMove`) takes §3.7's caps (frames 32 MiB, anything else
+  4 MiB: it closes, which ends the move) and, like `readPayload`, never keeps a
+  message cut short. The panel's route line keeps its route whole when it wraps,
+  as ee922db does on the card: at xxLarge on the 340 pt panels "Connected" /
+  "through Tailscale · 48 ms", where the merge's no-break space before the "·"
+  alone gave "Connected through" / "Tailscale · 48 ms". Two stale doc comments.
+  Verified: a clean release build of the result (only the CaptureProbe warning),
+  iOS Debug for the simulator (only the capture warning); the remote rules check
+  64 of 64 (four new: the sightings by Mac ID, and the dial after an hour
+  listed) with 35 of 35 mutants (two new, on the leave), main's policy check 187
+  with its 25 and the 20 old mutants; an event model of the reconnect on these
+  files: with the row gone at the loss the first remote dial moves from +3.2 s
+  to +10.0 s (Sill quitting: +8.0 to +11.0 s), what the by-name sightings give;
+  the probe copied verbatim into a loopback harness: Sill's traffic probed as
+  before, an SSH banner and a 1.7 GB frame header closed at once (before, both
+  held the move until its 5 s ran out, the second with the harness at 534 MB), a
+  window list cut short and then the stream's end no longer taken as the Mac's;
+  the CLI's output idle and with a client, masked and sorted, main's; on a
+  simulator of its own `-SillMoveTest 1` and `to:` this Mac's `fe80::…%en0`
+  (moved and fenced, the second gaining "Wi-Fi" at the hand-over),
+  `-SillPairURL` pairing, a remote session and its automatic redial; 63 photos
+  of the route line (seven layouts, three text sizes) identical to 3a7b501's but
+  for the six at xxLarge on the 340 pt panels, and long VPN names wrap at the
+  route's words, never inside one. The review's reruns on 3a7b501, none failing:
+  on the simulator S4 and S5 13 of 13, S7 against a9cc248's host, S8 in short
+  host runs (typed pairing through the relay, 60 fps through a VPN route and 120
+  by address, the 300 ms callout), testS3OutsideLink and the three RF2 UI tests
+  (the link test's Mac A a stand-in, not a second host), `-SillConnect` by this
+  Mac's `fe80::…%en0` ("Wi-Fi") and `-SillMoveTest to:` it; the host gates
+  H7–H12, H10(f) on the bare app, H15, H17 and a variant with `--remote` through
+  Direct Wireless off (a fresh tag, only the scoped home client disconnected,
+  the remote session streaming on), H18 and H19, and H14 (no base run), H16 and
+  H20 shortened to keep each host under 60 s; main's Direct Wireless gates
+  nohook, burst and appfail (the app's failed replacement disconnects the en0
+  stand-in and keeps a paired remote session from the same address; a build
+  without the guard fails it).
+- **Untested, for Noah:** everything the entries below leave for the devices,
+  now on the merged build, and in particular a remote session's card on the
+  real menu (the label on the source row is a merge decision), a "Wired" row's
+  reconnect after a loss (it goes through `dial` now), and the move to the
+  network with remote access on. The grace: at home with a paired Mac and
+  Remote Access on, quit Sill.app while the iPad streams and reopen it 7–10 s
+  later; the iPad should come back on the home door (the host logs no remote
+  client).
+
+**Remote access (2026-09-24/25, branch `remote-access` from `a9cc248`; the plan,
+its open questions and the results are in `docs/remote-access-plan.md`).** Bring
+your own VPN (Tailscale, WireGuard into the home network) or, behind a switch
+of its own, a port forward: a device paired once reaches the Mac from anywhere.
+Every open question took its default. Steps 1–8 are committed, and so are the
+fixes of step 9's first review round (below); the rest of step 9 is next.
+- Two doors. The home door (today's plain TCP listener, Bonjour, unchanged for
+  old iOS builds) now admits only this Mac's own networks, loopback and Direct
+  Wireless (`OriginPolicy`), with caps (1 MiB messages, 4 kind-17 changes a
+  second, a clean device name). The remote door (`RemoteServer`, port 7455) is
+  TLS 1.3 only, both ends self-signed P-256 keys pinned by SPKI SHA-256, ALPN
+  `sill/1` for a paired key, `sill-pair/1` only while a pairing window is
+  open; pre-auth caps (8 pending, 2 per source, backoff after 5 of its own
+  refusals), 8 sessions, remote clients evicted after 8 s of silence, forced
+  keyframes at least 2 s apart. Kinds 18 (the signed MacInfo: Mac ID, name,
+  addresses), 19/20 (one pairing request and its answer), 21 (Pair This iPad…,
+  home door only) and 22 (goodbye) are skipped by older readers; the TXT record
+  carries a recognition tag (`r`) only paired devices can read.
+- Pairing: the Mac's window shows a QR code (`sill://pair?…`, pinned to the
+  Mac's key) and a 12-digit code (Damm check digit; PBKDF2 600k), 5 minutes,
+  single use, five wrong tries, and the address to type with the code:
+  Tailscale's MagicDNS name and its IPv4 under it ("or 100.65.142.55"), else a
+  Tailscale IP (100.64/10, else fd7a:115c:a1e0::/48), else this network's
+  address with any other VPN's IP under it ("or 10.8.0.6"). Another VPN never
+  takes this network's place, since NordVPN's or WARP's address answers from
+  nowhere; which of the two goes first is Noah's call. `PairingWindowAddress`
+  decides, pure (Noah, 2026-09-25: from an iPhone's hotspot this network's
+  address answered nothing, the Tailscale name and address both paired;
+  checked with swiftc, 80 checks and 35 of 35 mutants, and photographed as the
+  previews' `pairing-novpn`, `pairing-othervpn` and `pairing-longname`).
+  Sill.app: Settings › Remote Access (a fifth tab: the switch, the addresses,
+  the port, paired devices, the internet switch with the router's answer, the
+  address name, sleep), the menu's Remote Access… and Pair iPhone or iPad…,
+  identity in the login keychain (`KeychainIdentityStore`; label "Sill Remote
+  Access", service `me.saffer.sill.remote`), idle sleep held off while a
+  device is connected remotely. The CLI's `--remote` uses a throwaway identity
+  per run.
+- iOS: `DeviceIdentity` (a Keychain key, this device only), `SavedMacs`,
+  `RemoteDialPolicy` + `RemoteConnector` (the dial order, happy-eyeballs 1 s
+  apart, every failure's words), Remote rows after the network's 3 s, the
+  reconnect order after a loss, liveness on every route; the connect screen's
+  "Add a Mac…" card (the VisionKit scanner or the typed address and code),
+  `sill://pair` links only ever confirmed, Pair This iPad… as an overlay over
+  the stream, the panel's route line ("Connected through Tailscale · 48 ms"),
+  its Away from home group and the slow-link callout; the Low preset (4 Mbps,
+  first of the seven on both sides) and 60 fps away from home.
+- Verified without Noah's devices: the plan's H1–H24 headless (the CLI's
+  output byte for byte, the pure checks with mutants, the doors' refusals and
+  caps, no plaintext on the wire, no code or secret in any log, a 2 Mbps
+  +150 ms relay with no eviction and the base's keyframe rate), the app's
+  persistence and previews, and on the simulator S1–S8: about 200 photos at
+  the Duo sizes, phones and larger text, taps and accessibility as XCUITests,
+  live pairing (QR, typed, an outside link confirmed first), reconnects,
+  every failure's words, an older host, and a slow link (60 fps through a VPN
+  route; the callout at +300 ms).
+- Review fixes (step 9, the plan's "Review fixes (step 9)"): a pick never
+  streams Sill's own windows (the virtual display's lookup skips them; the
+  Desktop looks for Sill among every window when the on-screen look missed it);
+  the internet switch counts only while Remote Access is on; Remove changes
+  nothing when the keychain cannot be written, and the pane says so; a spent
+  code shows no QR; kind 18 lists no addresses before the Mac's first look,
+  and a device keeps its saved ones on an empty or Remote-Access-off kind 18;
+  an overlay pairing ties the session only to the same Mac (by its signed kind
+  18) and takes that kind 18's addresses; the scanner never restarts a pairing
+  by itself (after a failure, the same code only from a tap); a link confirmed
+  over the stream keeps the overlay for its outcome; the overlay's typed path
+  says "Enter the Code from ‹Mac›" and moves up while typing; the status line
+  is announced; saved Macs are cleared only when no device key exists at all.
+  Checked headless, on the simulator with three new XCUITests against live
+  hosts, and against the pre-fix build (which fails them).
+- **Untested, for Noah (R0–R13; the plan's Results say exactly what):** R0 the
+  probes (the Secure Enclave key, the login keychain identity with your OK, the
+  router probe, the scanner on the iPad, with a failed pairing's code held
+  until tapped); R1 Tailscale setup and pairing,
+  timed; R2 away on the hotspot; R3 leaving home mid-stream; R4 Wi‑Fi to
+  cellular; R5 Tailscale off at either end; R6 sleep; R7 removing the iPad
+  while it streams; R8 a rebuild keeps port, Mac ID and pairing; R9 Pair This
+  iPad… at home; R10 the port forward; R11 Direct Wireless at the café; R12
+  VoiceOver and a hardware keyboard (Esc never reaches an app in the iPadOS 27
+  simulator; only ⌘. was tested); R13 mixed builds. Also the pairing window's
+  Address row, live (only its offscreen previews were seen): with this build's
+  Sill.app, Pair iPhone or iPad… reads noahs-macbook-pro.tailc94091.ts.net
+  with "or 100.65.142.55" muted under it (what `SillHost --print-reachability`
+  lists); with the window open, Tailscale off on the Mac gives 10.128.0.34
+  alone and a window 18 pt shorter, and back on the name and the "or" line
+  return (100.65.142.55 alone for a few seconds, until MagicDNS answers, is
+  expected; note it if it stays); each line selects without "or" and pastes
+  (Universal Clipboard) or types into Enter Code Instead (a code works once:
+  New Code, or reopen the window, for a second try); VoiceOver reads "or
+  100.65.142.55" as one element. And a decision: beside a VPN that is not
+  Tailscale (NordVPN, WARP, a work VPN, your own WireGuard) the window shows
+  this network's address with that VPN's IP under it; the other order, or
+  this network's address alone, is one line in `PairingWindowAddress.choose`.
+- Known: the simulator iPad Pro 13" is shared with other work, so a test that
+  installs the app there can replace someone else's build (the iPad Pro 11"
+  was used for S8); an unsigned simulator build cannot use the keychain on a
+  fresh simulator (-34018): build it ad hoc signed (`CODE_SIGN_IDENTITY=-`).
+
 **Quality presets (2026-09-24, branch `quality-presets` from main at
 ad7fba2).** Noah's decisions: Maximum is renamed Pro; two presets above it,
 Ultra (80 Mbps) and Extreme (150 Mbps), for the USB cable or very fast Wi-Fi;
@@ -818,8 +1269,9 @@ only one. Protections now in the host:
 - The coordinator then restarts the source on the software encoder at half
   scale (slow, ~10 fps under load, but live) and says so in the log; three
   software hangs stop the stream instead of looping. Since 2026-09-25 that
-  lasts only until a re-check finds the hardware keeping up (below); before,
-  it lasted until the host relaunched.
+  lasts only until a re-check finds the hardware keeping up (Current step,
+  "The hardware encoder: busy, not stuck"); before, it lasted until the host
+  relaunched.
 - Presentation timestamps are forced monotonic; a keyframe request re-encodes
   the last frame only when the window is static.
 - Never reconfigure a running SCStream (`updateConfiguration` also wedged it);
@@ -848,212 +1300,6 @@ Diagnosis tools: `swift run -c release CaptureProbe <window> [s] [--encode]
 [--synthetic] [--software] [--h264] [--lowres]` (capture vs encode, hardware vs
 software) and `sample <pid> 2` (a wedged encode shows as
 VTCompressionSessionEncodeFrameWithOutputHandler → RemoteVideoEncoder).
-
-**Busy, not stuck (2026-09-24; fixed 2026-09-25, branch `encoder-recovery`
-from main at 76366e8).** Sill.app's watchdog fired twice on 2026-09-24 and
-both times the host stayed on the software encoder until it relaunched, which
-was Noah's poor frame rate (~3 h at 1512×982, 46–55 fps with motion, 6–46 fps
-at the end, through 18 settings changes the fallback's caps made useless). The
-kernel's AppleAVE2 log (every hardware session's open with its size, bitrate
-and firmware "Priority", and a HeartBeat every 5 s listing each session's
-frames submitted | completed) shows neither was a wedge:
-- 19:00:21 (40 Mbps, the Retina desktop at 60 fps, a 61 s old session): the
-  iOS Simulator's screen recorder (SimRenderServer, what `simctl io
-  recordVideo` drives: H.264 2064×2752 of the iPad Pro 13" simulator, 38 Mbps,
-  priority 80) shared the one encoder engine with Sill and an agent's `SillHost
-  --synthetic` (both priority 0). Sill fell to 7–8 fps, then its frame waited
-  ~8.6 s; the invalidate blocked 7.06 s, off-thread, and the frame completed
-  0.3 s after the other SillHost process died. A fresh 256×256 probe answered
-  within 270 ms with the recorder still running, while the next stream-size
-  sessions stalled again (0.3–9.5 s).
-- 23:30:04 (150 Mbps, a 36 s old session, running 57–58 fps alone): the
-  recorder opened a session at 23:29:45.2 and Sill fell from 58 to 22 fps in
-  that second, then ran 13–45 fps; a frame waited ~1.8 s and completed (the
-  invalidate took 0.17 s). A near miss at 23:27:54 (57 → 2–34 fps) came from
-  the same recorder. The render and the benchmarks named at the time ran later.
-- 424 hardware HEVC sessions from 17:40 to 02:30: 47 overlapped a recorder
-  session and 7 of those stalled (median 39 fps); the other 377 had no stall
-  (median 60), including a priority-0 H.264 2064×2752 benchmark beside HEVC
-  3024×1968 at 40–150 Mbps (both 28–46 fps, a fair share). Ruled out: the
-  bitrate (hang 1 was at 40 Mbps), 120 fps (both at 60), session churn (22
-  bitrate restarts ran clean) and invalidating with a frame inside (both
-  frames completed). No "Frame POC timed out" line, the 2026-09-22 signature,
-  anywhere in the period (the log store no longer has 09-22's AppleAVE2 lines).
-- Priorities, measured with one 256×256 frame per configuration: real-time
-  HEVC and H.264 0, not real-time 0, `EnableLowLatencyRateControl` 60 (RCMode
-  20), the recorder 80. No public key sets it. One engine on this M2 Pro:
-  unthrottled HEVC 3024×1968 runs ~105–115 fps (~650 MP/s), so the Retina
-  desktop at 60 fps takes 55–65 % of it and any other encode costs Sill frames
-  without a hang (a 3024×1904 test beside Noah's 1512×982 desktop: both at
-  57–60 fps for ~4 s, then both at ~50, 2026-09-25). A Retina desktop at 120 fps
-  (~713 MP/s) exceeds it alone (untested).
-- A bitrate change still needs a new session (measured 2026-09-25, 1512×948 at
-  60 fps, blocky noise): VideoToolbox takes AverageBitRate and DataRateLimits
-  on a live session and reads them back, but the hardware HEVC rate control
-  does not follow: raised 8 → 40 Mbps the output stayed at 9.6 Mbps for 5 s,
-  across an IDR and a forced keyframe (a session made at 40: 28 Mbps); lowered
-  40 → 8 it dropped 41 of the next 60 frames. Hardware H.264 the same. The
-  software encoder follows (7.9 → 19.5 Mbps in 2 s) and so does low-latency
-  rate control (8 → 38 Mbps within 1 s). `restartNeeded` keeps the bitrate.
-- `VTCompressionSessionInvalidate` waits for a frame still inside (17 ms for a
-  3024×1898 frame in flight, whose output handler runs first).
-
-What the host does now:
-- The fallback is temporary. `enterSoftwareFallback` (a hardware hang, or the
-  launch probe) says "… (busy or stuck); switching to the software encoder at
-  half scale until the hardware keeps up again (next check in 30 s)." While a
-  device is connected (an idle host opens no session; the task ends with the
-  last device) `recheckLoop` tests the hardware at the size the stream would
-  have on it (the running one's at full scale, else the Desktop's):
-  `EncoderProbe.throughput` sends a moving pattern through a quiet session (no
-  line, no counter: the stats line's `enc.out` is the menu's fps), one frame
-  at a time like a stream, on a user-initiated GCD thread, and measures the
-  rate the last 7 of 10 frames come back at; its 3 frames are drawn before
-  the session opens and reused, and the first pass over them is left out
-  (~110 ms at 3024×1904 when the engine is free, ~120 fps; ~290 ms at
-  6016×3384, ~39 fps). At the rate a return needs or more
-  (`EncoderProbe.returnBar`: 0.75 of the stream's rate, 60 at most, the
-  software encoder's cap, so 45 fps; but never more than 0.75 of what the
-  engine does alone at the test's size, from the best pixel rate any test
-  measured this run, 400 MP/s until one has) `hardwareIsBack` waits out a
-  switch, clears the flag and restarts a running stream on the hardware, like
-  a settings change (no focus change): "Hardware encoder is back (121 fps at
-  3024×1896 in a test, 45 needed); restarting the stream on it." (or "the
-  next stream uses it"). Slower: "Hardware encoder answers but is busy (8 fps
-  at 3024×1896 in a test, under the 45 fps a return needs; another app is
-  using it); next check in 60 s". No frame in 1 s: "Hardware encoder still
-  not answering after N ms; next check in 60 s". Either doubles the interval,
-  up to 300 s; so does a hang within 5 min of a return; a return that lasted
-  10 min resets it to 30 s. The first device after none gets a check at once
-  when the last is 30 s old, so its stream starts on the hardware (a software
-  start ~20 ms before is replaced). A hang reported by an encoder no newer
-  than the last return (`HEVCEncoder.serial`) is stale and ignored. One loop
-  and one test at a time: `stopRecheck` only cancels, and the task clears
-  `recheckTask` once its loop has ended, so a device that connects during a
-  test gets no second loop beside it (the ending task's tail starts one); a
-  test that ends with no device left is dropped without a line or a backoff.
-- Why a rate at the stream's size and not one small frame: at 03:26 on
-  2026-09-25, with another agent's Simulator recording (priority 80) and a
-  second SillHost on the engine, a 256×256 frame answered in 72 ms, the
-  stream went back to the hardware and ran at 12 fps there (it had run at ~57
-  on the software encoder), and no watchdog fires for a slow stream. Noah's
-  own Sill.app sat at 8–18 fps in the same minutes, and at 03:32:02 it fell
-  back once more (16, then 2 fps, then the watchdog), which the old build
-  keeps until it relaunches.
-- Why the bar follows the size (review, 2026-09-25): a fixed 45 fps asked more
-  than a free engine gives a large frame. Measured with the engine free (Noah's
-  Sill.app on the software encoder), as the probe was (frames drawn inside the
-  timing, utility QoS) and as it is: 6016×3384, a Retina 6K Desktop, 37 and
-  39 fps; 5120×2880 50 and 53; 3024×1904 115 and 121. So a host streaming a 6K
-  Desktop read "busy" at every check and stayed on the software encoder for
-  good. Now the first check there needs 15 fps (400 MP/s assumed) and, learned
-  from its test, the next 29; a starved session got a sixth of the free rate
-  or less, so busy still reads busy.
-- The session given up on reports on its way out: "Encoder (hardware HEVC
-  3024×1898): the stalled frame came back after 3.0 s; the encoder was busy,
-  not stuck." A stuck one never lets go, so it never prints.
-- Probes whose frame never comes back each hold a blocked thread; with 8 out
-  (`maxStuckProbes`, after 22–28 min of failed checks) the re-check stops
-  probing and says once that the encoder is stuck and a restart of the Mac
-  fixes it, and the menu shows "Hardware Encoder Stuck". A late frame counts
-  out again (`EncoderProbe.onStalledProbeBack`): under 8, the host says "a
-  check's frame came back after N s, so it is not stuck; checks resume",
-  clears the menu's line at once (a device connected or not) and, with a
-  device connected, checks at once instead of when the held-back loop wakes
-  (300 s).
-- Copy: the menu's "Hardware Encoder Busy — Streaming with the software
-  encoder, up to 60 fps, until it is free again." (one line, 373 pt: a menu
-  item's subtitle does not wrap, the old one was 422 pt) or "Hardware Encoder
-  Stuck — … Restarting the Mac fixes this."; the Streaming pane says the same
-  at length; `HostSettingsState.softwareEncoder`'s doc. The device's callout
-  says "‹Mac›’s hardware encoder is busy or not responding, so for now streams
-  run at up to 60 fps at Standard." (it said "until the Mac restarts"; it
-  promises neither now, as hosts before this change keep the fallback until
-  they relaunch), and goes away by itself when the host clears the flag.
-- Test hooks, read once and inert without them: `SILL_TEST_ENCODER_HANG=N`
-  (the first N hardware stream sessions hold frame 90 for 3 s before it goes
-  in: a busy engine; it prints a "TEST:" line), `SILL_TEST_PROBE_HOLD=S` (every
-  frame of every probe waits S s: 0.08 a starved engine, 2 a busy one, a huge
-  S a stuck one), `SILL_TEST_RECHECK_SECONDS=N` (intervals N to 10 N instead
-  of 30 to 300) and `SILL_TEST_PROBE_SIZE=WxH` (the re-check tests that size,
-  as for a Retina 5K or 6K Desktop on a smaller screen).
-- Diagnosis: `/usr/bin/log show --start '2026-09-24 18:55' --end '2026-09-24
-  19:05' --style compact --predicate 'sender == "AppleAVE2" AND (eventMessage
-  CONTAINS "HeartBeat" OR eventMessage CONTAINS "Resolution:" OR eventMessage
-  CONTAINS "AVE : open" OR eventMessage CONTAINS "AVE : close")'` (a session
-  whose completed count stops while its submitted one is ahead is starved;
-  "Priority: 80" beside it is the recorder), plus `process ==
-  "VTEncoderXPCService" AND eventMessage CONTAINS "videoencoder.peer"` to map
-  sessions (the next "AVE : open") to client PIDs.
-- Operational rule, from the same logs: while Noah streams, agents do not run
-  `simctl io recordVideo`, SillHost streams, ReelRenderer or encoder benchmarks;
-  each shares the one engine, and the recorder outranks Sill.
-- Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
-  60 (above every default session, still below the recorder's 80) and follows
-  live bitrate changes, but it changes the bitstream and rate control (frames
-  dropped at 8 Mbps in the rate test): a flagged experiment with iPad tests.
-Verified headless (the synthetic host; hardware runs kept to seconds, Noah's
-Sill.app streaming beside them): clean build (only the old CaptureProbe
-warning); the CLI against 76366e8 built from `git archive`, masked and
-sorted: idle identical, and with a client and a bitrate change identical but
-for `enc.mailboxDrop` counts, which follow the other encoder users of the
-moment (either build had them); `SILL_TEST_ENCODER_HANG=1` with a client: the
-hang at 1.5 s, the fallback, 1512×948, "came back after 3.0 s", back 30.0 s
-later (114 fps in the test) and 3024×1898 on the hardware at 60 fps for 67 s,
-the client getting frames every second but the hang's; `=2`, while another
-agent's Simulator recording and SillHost came and went: the check at 30 s
-"busy (25 fps …); next check in 60 s", back 60 s later at 114 fps, the
-second hang 3 s after the return and "next check in 120 s"; with
-`SILL_TEST_PROBE_HOLD=0.08` while the recorder and another SillHost really
-shared the engine (the test's own hardware stream ran at 16 fps): "busy
-(7 fps …)" at 30 s and "(8 fps …)" 60 s later, no return; the client leaving
-during a fallback: no session from the host in the kernel log for 40–45 s
-(the next check was due after 30), then a client again: the test at the
-Desktop's size (112 fps) and back ~100 ms after its stream started on the
-software encoder; `SILL_TEST_PROBE_HOLD=100000 SILL_TEST_RECHECK_SECONDS=1`
-with a client picking nothing: the launch fallback, then checks 1, 2, 4, 8,
-10, 10 and 10 s apart, all unanswered, and the stuck line after the 8th
-unanswered probe (the launch one and 7 checks); `SILL_TEST_PROBE_HOLD=2`:
-unanswered probes, each back 2 s later, never stuck; previews against
-76366e8: only menu.txt (the copy and a new `software-encoder-stuck` sample,
-its cards equal to the busy one's) and the General pane's "Running from" path
-differ.
-Review fixes (2026-09-25), verified headless: the host builds with no warning,
-iOS Debug with only the old `StreamClient` one; `returnBar` checked on its own
-(swiftc, 100,011 checks: 45 at Retina laptop sizes, also at 120 fps, 15 and 29
-at 6K, a free engine always passes, always the lower of the two shares), four
-mutants caught (the fixed 45, the engine term without its share, no 60 fps
-cap, an assumed rate above this engine); the CLI against 76366e8 (`git
-archive`), masked and sorted: idle identical, with a client and a bitrate
-change identical (a first pair differed by one `enc.mailboxDrop` in the
-base's first second); `SILL_TEST_ENCODER_HANG=1`: back 30.1 s after the
-fallback ("121 fps at 3024×1896 in a test, 45 needed"), the client getting
-frames every second but the hang's (40–57 fps on the software encoder, 60 on
-the hardware); `=2` with `SILL_TEST_PROBE_SIZE=6016x3384
-SILL_TEST_RECHECK_SECONDS=5`: "39 fps at 6016×3384 in a test, 15 needed", the
-second hang and "next check in 10 s", then "39 fps …, 29 needed"; the
-verifier's overlap run (`SILL_TEST_PROBE_HOLD=1000
-SILL_TEST_RECHECK_SECONDS=4`, a device leaving during a test and another
-arriving): one line, "next check in 8 s" (it was two, 8 then 16 s), none when
-nobody comes back, and the second device's own check 8 s later;
-`SILL_TEST_PROBE_HOLD=70 SILL_TEST_RECHECK_SECONDS=1`: the stuck line at
-65.0 s, the launch probe's frame back at 70.2 s, "a check's frame came back
-after 70.0 s, so it is not stuck; checks resume" and a check at once; with
-the device gone by then, the same line at 70.2 s and the next device checked
-the moment it connected.
-- **Untested, for Noah:** a build of this branch in /Applications
-  (`Scripts/make-app.sh --install --open` after the merge; only a new build
-  comes back by itself). Then, with the iPad streaming the Desktop, `xcrun
-  simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
-  simulator: the frame rate drops, and within a minute or so "switching to the
-  software encoder" and "the stalled frame came back" (the menu: "Hardware
-  Encoder Busy"); while it records, "answers but is busy" at each check, 30,
-  60, 120 s apart; stop the recording (Ctrl-C) and at the next check "Hardware
-  encoder is back" and the full resolution on the iPad. Also a window stream
-  and the virtual display through a return, and a 120 fps stream (the test
-  asks for 45 fps at its size). On a Mac with a Retina 5K or 6K display, a
-  return while the Desktop streams ("… in a test, N needed", N under 45 at
-  6K).
 
 Still open: the unexplained one-off stall where new clients received no catalog
 (2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
@@ -1127,20 +1373,31 @@ good.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
   `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
-  `QualityPreset`.
+  `QualityPreset` (Low, Efficient, Balanced, High, Pro, Ultra, Extreme). Remote access:
+  `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
+  `SignedMacInfo`, `PairRequest`, `PairResult`, `Goodbye`), `RemoteTLS.swift`
+  (the one TLS 1.3 builder for both doors' ends and the tests),
+  `RemoteIdentity.swift` (SPKI fingerprints, the Mac ID, the hand-built
+  certificate, keys), `Pairing.swift` (`PairingCode`, `PairingProof`,
+  `RecognitionTag`, `PairLink`), `AddressParser.swift`, `SafeText.swift`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
   viewports, falls back to the software encoder on a hang and re-checks the
-  hardware until it can go back (`recheckLoop`), stops capture when
-  the last client leaves, takes live settings between pipelines (`setTarget`,
-  from the app and from devices' kind 17, answered and published as kind 16;
-  a pick made during a restart runs after it) and writes `HostStatus`), `HostConfig` (the knobs: maxFPS, captureScale, bitrate
-  per 60 fps, prioritizeSpeed, virtualDisplay, directWireless; `standard` is the
-  CLI's values and the app's defaults), `HostStatus` (the snapshot the app shows, pushed on
-  events; `onChange` publishes the devices' settings state), `DeviceSettings`
-  (what a device may set, `HostConfig` ↔ wire), `HostLog` (the print shadow,
-  the app's ring and log file),
+  hardware until it can go back (`recheckLoop`), stops capture when the last
+  client leaves, takes live settings between pipelines (`setTarget`, from the
+  app and from devices' kind 17, at most four a second per connection,
+  answered and published as kind 16; a pick made during a restart runs after
+  it), keeps each connection's route (home or the remote door's: kind 21 only
+  from near the Mac, Direct Wireless never from away), sends kind 18 with the
+  catalog, says goodbye (kind 22) at quit, and writes `HostStatus`),
+  `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps,
+  prioritizeSpeed, virtualDisplay, directWireless, remoteAccess, remotePort,
+  internetAccess; `standard` is the CLI's values and the app's defaults),
+  `HostStatus` (the snapshot the app shows, pushed on events; `onChange`
+  publishes the devices' settings state), `DeviceSettings` (what a device may
+  set, `HostConfig` ↔ wire), `HostLog` (the print shadow, the app's ring and
+  log file),
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
@@ -1169,7 +1426,14 @@ good.
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit), `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
-  heartbeat when idle).
+  heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
+  (who may use which door; pure), `RefusalSummary` (one refusal line a minute),
+  `HostIdentity` (the `IdentityStore` protocol, `MemoryIdentityStore`, the TEST
+  ONLY `FileIdentityStore`, `PairedDevice`, the lock-protected trust snapshot
+  the door reads on the network queue), `KeychainIdentityStore` (Sill.app's),
+  `PairingWindow` (pure), `RemoteServer` (the remote door), `Reachability`,
+  `AddressList` (pure) and `RouterAddress` (read-only NAT-PMP/PCP),
+  `RemoteAccess` (main actor; ties them together, signs kind 18).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -1179,14 +1443,26 @@ good.
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
   (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` +
   `SettingsPanes`, `Permissions`, `LoginItem`, `LogWindow`, `MainMenu` (key
-  equivalents), `DebugHooks`, `AppLog` (its print shadow).
+  equivalents), `DebugHooks`, `AppLog` (its print shadow), `RemoteAccessPane`
+  (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
+  code), `PairingWindowAddress` (the address that window gives to type:
+  Tailscale's name and IPv4 first, another VPN's IP only under this network's
+  address; pure, checked with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
-  `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
-  every argument is checked before it connects, and a bad one exits 2).
+  `--expect=K=V[,…]` against the last kind 16, which it prints one per line,
+  and each second's frames with their kB (the encoder's output);
+  `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
+  `--stop-read@T`, `--pairing-wanted@T`; the remote door with `--tls
+  --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
+  `--expect-tls-fail`, printing kinds 18, 20 and 22; every argument is checked
+  before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
+  shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
+  [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
+  through).
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -1198,19 +1474,26 @@ good.
   `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
   the session's route word for the Settings panel,
   when a reconnect may take a Direct row, when a session over AWDL moves to
-  the network, the memory of Macs with Direct Wireless on; pure, checked with
-  swiftc), `StreamScreen`
+  the network, the memory of Macs with Direct Wireless on, the Remote rows and
+  when a lost saved Mac is dialed away from home; pure, checked with swiftc),
+  `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
   layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
   Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
-  Wired, Wi-Fi or Direct, the hint and Search Nearby, + DEBUG harness),
+  Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, +
+  DEBUG harness),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel). New files need their
-  four pbxproj entries by hand. Swift 5 language mode.
+  with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
+  from home, the slow-link callout). Remote access: `DeviceIdentity`,
+  `SavedMacs` (pure), `RemoteDialPolicy` (pure), `RemoteConnector`,
+  `StreamClient+Remote` (pairing, remote dials, the reconnect order, links),
+  `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
+  `PairingOverlay` (Pair This iPad…). New files need their four pbxproj
+  entries by hand. Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
@@ -1224,6 +1507,9 @@ swift run -c release SillHost --encoder-selftest   # is the hardware encoder ali
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
+swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
+swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
+swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
@@ -1272,6 +1558,23 @@ registration with AWDL adds 2, a peer-to-peer browse 1); `log` is a zsh
 builtin, hence `/usr/bin/log`, and `process == "kernel"` keeps the log tool's
 own line out. Enable and disable lines ("Enabling AWDL due to Mdns") show only
 when nothing else holds AWDL. Keep AWDL-on tests under 20 s and on test types.
+Remote access, headless: TEST ONLY variables, honoured only by a host that
+does not advertise: `SILL_TEST_REMOTE_DIR=<dir>` (the identity and trust list
+in a 0700 directory instead of memory or the keychain; the bare app's
+`-SillPairAfter <s>` leaves `pairing.url` and `pairing.code` there, 0600, never
+printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
+`SILL_TEST_ORIGIN=vpn|internet` (loopback counts as that origin) and
+`SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every headless host).
+The bare app takes `-remoteAccess 1 -remotePort P`, `-SillSetAfter '3
+remotePort=P2'`, `-SillPairAfter <s>` and `-SillUnpairAfter <s>`; its
+`-SillRenderPreviews` adds the Remote Access pane's states and the pairing
+window's. A session through a shaped link: `python3 Scripts/sillrelay.py
+--listen 0 --to 127.0.0.1:P --delay-ms 150 --rate-mbps 2`, then
+`sillclient.py RELAYPORT 90 desktop --tls --identity=$T/a --stats` after
+`--pair-url=URL` once. Never let a test binary take a connection from another
+machine: the Application Firewall prompts. Reset the app's remote settings with
+`for k in remoteAccess remotePort internetAccess remoteAddressName
+remoteDevicesSeen; do defaults delete me.saffer.sill.mac $k; done`.
 Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
 (outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
@@ -1280,10 +1583,23 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
 after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
-Wired and `noroute` none),
+Wired, `noroute` none and the remote cases none, where the route line says how),
 `-SillConnectCase looking|hint|nearby|methods|denied` (the connect screen in a discovery
 state; `methods` has a row ending in each word, none, and long names; the mock never
-browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
+browses) and remote access's `remote|addmac|addcode|addcodeerror|
+pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
+vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
+remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
+remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
+scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay), and in
+the normal app `-SillPairURL '<sill://pair…>'` (pair at launch, no
+confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
+`-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
+`'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
+that route), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`
+(a Secure Enclave device key, R0-a); `xcrun simctl openurl <udid>
+'sill://pair…'` shows the link's confirmation after the system's "Open in
+Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the

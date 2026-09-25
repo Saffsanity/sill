@@ -47,17 +47,29 @@ extension StreamClient {
 
     /// The rate the host should stream at for this device: the panel's ceiling (120 on ProMotion
     /// iPads and iPhones, 60 on the iPad mini and other 60 Hz panels), or 60 while Low Power Mode
-    /// is on, which caps the panel at 60 anyway. `StreamScreen` re-sends the viewport when either
-    /// changes, and the host restarts its capture and encoder at the new rate.
-    static func wantedFPS() -> Int {
+    /// is on, which caps the panel at 60 anyway, or while `remote` (away from home through a VPN or
+    /// over the internet: `RemoteRoute.capsFrameRate`). `StreamScreen` re-sends the viewport when
+    /// the first two change, and the host restarts its capture and encoder at the new rate. A LAN
+    /// device at 120 beside a remote one still keeps the shared stream at 120.
+    static func wantedFPS(remote: Bool = false) -> Int {
         let ceiling = screenMaximumFPS()
-        return ProcessInfo.processInfo.isLowPowerModeEnabled ? min(60, ceiling) : ceiling
+        let rate = ProcessInfo.processInfo.isLowPowerModeEnabled ? min(60, ceiling) : ceiling
+        return remote ? min(60, rate) : rate
     }
+
+    /// This session is away from home through a VPN or over the internet, so it asks for 60 fps.
+    var awayCapsFrameRate: Bool { remoteRoute?.capsFrameRate ?? false }
 
     /// The fastest rate this device's screen shows, Low Power Mode aside: 120 on ProMotion, 60 on
     /// the iPad mini and other 60 Hz panels. The Settings panel's frame rate note tells the two
     /// reasons for a 60 fps stream apart with it.
     static func screenMaximumFPS() -> Int {
+        #if DEBUG
+        // `-SillScreenFPS 120`: the simulator's 60 Hz screen stands in for a ProMotion one, so the
+        // 60 fps request away from home and its footnote can be checked there (S8).
+        let forced = UserDefaults.standard.integer(forKey: "SillScreenFPS")
+        if forced > 0 { return forced }
+        #endif
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         // `connectedScenes` is unordered: prefer the scene the user is looking at.
         let screen = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?.screen
