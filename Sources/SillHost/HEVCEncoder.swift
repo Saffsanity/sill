@@ -14,8 +14,8 @@ import StreamProtocol
 ///   the previous one's output handler has run. At most one frame is ever inside VT.
 /// - A watchdog on its own queue declares the session dead when a frame has been inside VT for
 ///   `hangAfter` seconds without an output. The owner is told (`onHung`) and starts over on the
-///   software encoder, and leaves it again once a probe finds the hardware answering
-///   (StreamCoordinator). It has fired for two different reasons:
+///   software encoder, and leaves it again once a re-check finds the hardware keeping up with the
+///   stream (StreamCoordinator, EncoderProbe). It has fired for two different reasons:
 ///   - Stuck. 2026-09-22 the Mac's hardware encoder wedged system-wide for about three hours: a
 ///     fresh session in a fresh process never returned a single frame. With the old direct call
 ///     that froze the capture queue, then `stopCapture`, then every later source switch.

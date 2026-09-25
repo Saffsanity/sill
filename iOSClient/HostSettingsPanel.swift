@@ -151,7 +151,9 @@ struct HostSettingsPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             if let state = client.settings.host, let shown = client.settings.displayed {
                 if state.softwareEncoder {
-                    Callout(text: "\(mac)’s hardware encoder isn’t responding, so streams run at up to 60 fps at Standard until the Mac restarts.")
+                    // Neither a restart nor a return is promised: hosts before 2026-09-25 keep the
+                    // software encoder until they relaunch, newer ones go back by themselves.
+                    Callout(text: "\(mac)’s hardware encoder is busy or not responding, so for now streams run at up to 60 fps at Standard.")
                 }
                 if let problem = client.settingsProblem {
                     Callout(text: problem)

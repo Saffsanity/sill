@@ -223,7 +223,9 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   encode at the same time (a video export, a render, a second SillHost) costs
   Sill frames too. The host then tests the hardware at the stream's size every
   30 s while a device is connected (longer while it stays busy) and goes back
-  to it by itself once it keeps up ("Hardware encoder is back"); "answers but
+  to it by itself once it keeps up ("Hardware encoder is back"): 45 fps in the
+  test, or for a frame too big for that even on a free engine (a Retina 6K
+  desktop), most of what the engine does alone at that size; "answers but
   is busy" means another app still holds it, and "the stalled frame came back
   after N s; the encoder was busy, not stuck" confirms it was busy. A
   stuck encoder is rarer (2026-09-22: every new session in every process took
@@ -231,7 +233,8 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   SillHost --encoder-selftest` settles it in five seconds without any
   permission, and a reboot fixes it. After 8 checks whose frames never came
   back the host stops checking and says so, and the menu shows "Hardware
-  Encoder Stuck".
+  Encoder Stuck" until one of those frames does come back ("so it is not
+  stuck; checks resume").
 - `swift run -c release SillHost --synthetic` streams a moving test pattern as
   the Desktop source with no Screen Recording needed: if the device shows the
   bar sweeping, the encoder, fallback and network are fine and the problem is

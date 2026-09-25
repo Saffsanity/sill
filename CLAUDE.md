@@ -818,8 +818,8 @@ only one. Protections now in the host:
 - The coordinator then restarts the source on the software encoder at half
   scale (slow, ~10 fps under load, but live) and says so in the log; three
   software hangs stop the stream instead of looping. Since 2026-09-25 that
-  lasts only until a re-check finds the hardware answering (below); before, it
-  lasted until the host relaunched.
+  lasts only until a re-check finds the hardware keeping up (below); before,
+  it lasted until the host relaunched.
 - Presentation timestamps are forced monotonic; a keyframe request re-encodes
   the last frame only when the window is static.
 - Never reconfigure a running SCStream (`updateConfiguration` also wedged it);
@@ -901,28 +901,37 @@ frames submitted | completed) shows neither was a wedge:
 What the host does now:
 - The fallback is temporary. `enterSoftwareFallback` (a hardware hang, or the
   launch probe) says "… (busy or stuck); switching to the software encoder at
-  half scale until the hardware answers again (next check in 30 s)." While a
+  half scale until the hardware keeps up again (next check in 30 s)." While a
   device is connected (an idle host opens no session; the task ends with the
   last device) `recheckLoop` tests the hardware at the size the stream would
   have on it (the running one's at full scale, else the Desktop's):
-  `EncoderProbe.throughput` sends 8 frames of a moving pattern through a quiet
-  session (no line, no counter: the stats line's `enc.out` is the menu's fps),
-  one at a time like a stream, off the main actor, and measures the rate they
-  come back at (~70 ms of the engine; 112–114 fps at 3024×1904 when it is
-  free). At 45 fps or more (0.75 of the stream's rate, 60 at most: the
-  software encoder's cap) `hardwareIsBack` waits out a switch, clears the
-  flag and restarts a running stream on the hardware, like a settings change
-  (no focus change): "Hardware encoder is back (114 fps at 3024×1896 in a
-  test); restarting the stream on it." (or "the next stream uses it").
-  Slower: "Hardware encoder answers but is busy (8 fps at 3024×1896 in a test,
-  under the 45 fps a return needs; another app is using it); next check in
-  60 s". No frame in 1 s: "Hardware encoder still not answering after N ms;
-  next check in 60 s". Either doubles the interval, up to 300 s; so does a
-  hang within 5 min of a return; a return that lasted 10 min resets it to
-  30 s. The first device after none gets a check at once when the last is
-  30 s old, so its stream starts on the hardware (a software start ~20 ms
-  before is replaced). A hang reported by an encoder no newer than the last
-  return (`HEVCEncoder.serial`) is stale and ignored.
+  `EncoderProbe.throughput` sends a moving pattern through a quiet session (no
+  line, no counter: the stats line's `enc.out` is the menu's fps), one frame
+  at a time like a stream, on a user-initiated GCD thread, and measures the
+  rate the last 7 of 10 frames come back at; its 3 frames are drawn before
+  the session opens and reused, and the first pass over them is left out
+  (~110 ms at 3024×1904 when the engine is free, ~120 fps; ~290 ms at
+  6016×3384, ~39 fps). At the rate a return needs or more
+  (`EncoderProbe.returnBar`: 0.75 of the stream's rate, 60 at most, the
+  software encoder's cap, so 45 fps; but never more than 0.75 of what the
+  engine does alone at the test's size, from the best pixel rate any test
+  measured this run, 400 MP/s until one has) `hardwareIsBack` waits out a
+  switch, clears the flag and restarts a running stream on the hardware, like
+  a settings change (no focus change): "Hardware encoder is back (121 fps at
+  3024×1896 in a test, 45 needed); restarting the stream on it." (or "the
+  next stream uses it"). Slower: "Hardware encoder answers but is busy (8 fps
+  at 3024×1896 in a test, under the 45 fps a return needs; another app is
+  using it); next check in 60 s". No frame in 1 s: "Hardware encoder still
+  not answering after N ms; next check in 60 s". Either doubles the interval,
+  up to 300 s; so does a hang within 5 min of a return; a return that lasted
+  10 min resets it to 30 s. The first device after none gets a check at once
+  when the last is 30 s old, so its stream starts on the hardware (a software
+  start ~20 ms before is replaced). A hang reported by an encoder no newer
+  than the last return (`HEVCEncoder.serial`) is stale and ignored. One loop
+  and one test at a time: `stopRecheck` only cancels, and the task clears
+  `recheckTask` once its loop has ended, so a device that connects during a
+  test gets no second loop beside it (the ending task's tail starts one); a
+  test that ends with no device left is dropped without a line or a backoff.
 - Why a rate at the stream's size and not one small frame: at 03:26 on
   2026-09-25, with another agent's Simulator recording (priority 80) and a
   second SillHost on the engine, a 256×256 frame answered in 72 ms, the
@@ -931,6 +940,15 @@ What the host does now:
   own Sill.app sat at 8–18 fps in the same minutes, and at 03:32:02 it fell
   back once more (16, then 2 fps, then the watchdog), which the old build
   keeps until it relaunches.
+- Why the bar follows the size (review, 2026-09-25): a fixed 45 fps asked more
+  than a free engine gives a large frame. Measured with the engine free (Noah's
+  Sill.app on the software encoder), as the probe was (frames drawn inside the
+  timing, utility QoS) and as it is: 6016×3384, a Retina 6K Desktop, 37 and
+  39 fps; 5120×2880 50 and 53; 3024×1904 115 and 121. So a host streaming a 6K
+  Desktop read "busy" at every check and stayed on the software encoder for
+  good. Now the first check there needs 15 fps (400 MP/s assumed) and, learned
+  from its test, the next 29; a starved session got a sixth of the free rate
+  or less, so busy still reads busy.
 - The session given up on reports on its way out: "Encoder (hardware HEVC
   3024×1898): the stalled frame came back after 3.0 s; the encoder was busy,
   not stuck." A stuck one never lets go, so it never prints.
@@ -938,20 +956,27 @@ What the host does now:
   (`maxStuckProbes`, after 22–28 min of failed checks) the re-check stops
   probing and says once that the encoder is stuck and a restart of the Mac
   fixes it, and the menu shows "Hardware Encoder Stuck". A late frame counts
-  out again.
+  out again (`EncoderProbe.onStalledProbeBack`): under 8, the host says "a
+  check's frame came back after N s, so it is not stuck; checks resume",
+  clears the menu's line at once (a device connected or not) and, with a
+  device connected, checks at once instead of when the held-back loop wakes
+  (300 s).
 - Copy: the menu's "Hardware Encoder Busy — Streaming with the software
   encoder, up to 60 fps, until it is free again." (one line, 373 pt: a menu
   item's subtitle does not wrap, the old one was 422 pt) or "Hardware Encoder
   Stuck — … Restarting the Mac fixes this."; the Streaming pane says the same
   at length; `HostSettingsState.softwareEncoder`'s doc. The device's callout
-  still says "until the Mac restarts" (iOS, not in this change); it goes away
-  by itself when the host clears the flag.
+  says "‹Mac›’s hardware encoder is busy or not responding, so for now streams
+  run at up to 60 fps at Standard." (it said "until the Mac restarts"; it
+  promises neither now, as hosts before this change keep the fallback until
+  they relaunch), and goes away by itself when the host clears the flag.
 - Test hooks, read once and inert without them: `SILL_TEST_ENCODER_HANG=N`
   (the first N hardware stream sessions hold frame 90 for 3 s before it goes
   in: a busy engine; it prints a "TEST:" line), `SILL_TEST_PROBE_HOLD=S` (every
   frame of every probe waits S s: 0.08 a starved engine, 2 a busy one, a huge
-  S a stuck one) and `SILL_TEST_RECHECK_SECONDS=N` (intervals N to 10 N
-  instead of 30 to 300).
+  S a stuck one), `SILL_TEST_RECHECK_SECONDS=N` (intervals N to 10 N instead
+  of 30 to 300) and `SILL_TEST_PROBE_SIZE=WxH` (the re-check tests that size,
+  as for a Retina 5K or 6K Desktop on a smaller screen).
 - Diagnosis: `/usr/bin/log show --start '2026-09-24 18:55' --end '2026-09-24
   19:05' --style compact --predicate 'sender == "AppleAVE2" AND (eventMessage
   CONTAINS "HeartBeat" OR eventMessage CONTAINS "Resolution:" OR eventMessage
@@ -993,6 +1018,29 @@ unanswered probes, each back 2 s later, never stuck; previews against
 76366e8: only menu.txt (the copy and a new `software-encoder-stuck` sample,
 its cards equal to the busy one's) and the General pane's "Running from" path
 differ.
+Review fixes (2026-09-25), verified headless: the host builds with no warning,
+iOS Debug with only the old `StreamClient` one; `returnBar` checked on its own
+(swiftc, 100,011 checks: 45 at Retina laptop sizes, also at 120 fps, 15 and 29
+at 6K, a free engine always passes, always the lower of the two shares), four
+mutants caught (the fixed 45, the engine term without its share, no 60 fps
+cap, an assumed rate above this engine); the CLI against 76366e8 (`git
+archive`), masked and sorted: idle identical, with a client and a bitrate
+change identical (a first pair differed by one `enc.mailboxDrop` in the
+base's first second); `SILL_TEST_ENCODER_HANG=1`: back 30.1 s after the
+fallback ("121 fps at 3024×1896 in a test, 45 needed"), the client getting
+frames every second but the hang's (40–57 fps on the software encoder, 60 on
+the hardware); `=2` with `SILL_TEST_PROBE_SIZE=6016x3384
+SILL_TEST_RECHECK_SECONDS=5`: "39 fps at 6016×3384 in a test, 15 needed", the
+second hang and "next check in 10 s", then "39 fps …, 29 needed"; the
+verifier's overlap run (`SILL_TEST_PROBE_HOLD=1000
+SILL_TEST_RECHECK_SECONDS=4`, a device leaving during a test and another
+arriving): one line, "next check in 8 s" (it was two, 8 then 16 s), none when
+nobody comes back, and the second device's own check 8 s later;
+`SILL_TEST_PROBE_HOLD=70 SILL_TEST_RECHECK_SECONDS=1`: the stuck line at
+65.0 s, the launch probe's frame back at 70.2 s, "a check's frame came back
+after 70.0 s, so it is not stuck; checks resume" and a check at once; with
+the device gone by then, the same line at 70.2 s and the next device checked
+the moment it connected.
 - **Untested, for Noah:** a build of this branch in /Applications
   (`Scripts/make-app.sh --install --open` after the merge; only a new build
   comes back by itself). Then, with the iPad streaming the Desktop, `xcrun
@@ -1003,7 +1051,9 @@ differ.
   60, 120 s apart; stop the recording (Ctrl-C) and at the next check "Hardware
   encoder is back" and the full resolution on the iPad. Also a window stream
   and the virtual display through a return, and a 120 fps stream (the test
-  asks for 45 fps at its size).
+  asks for 45 fps at its size). On a Mac with a Retina 5K or 6K display, a
+  return while the Desktop streams ("… in a test, N needed", N under 45 at
+  6K).
 
 Still open: the unexplained one-off stall where new clients received no catalog
 (2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
@@ -1096,8 +1146,9 @@ good.
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
   `--synthetic`), `HEVCEncoder` (VideoToolbox behind a one-slot mailbox with a
   hang watchdog; hardware or software; says whether a stalled frame came
-  back), `EncoderProbe` (one small frame through a hardware session: at
-  launch, and quietly for the re-check), `EncoderSelfTest`
+  back), `EncoderProbe` (one small frame through a hardware session at
+  launch; for the re-check a short quiet run at the stream's size, the rate it
+  keeps and the rate a return needs), `EncoderSelfTest`
   (`--encoder-selftest`), `CursorShapeWatcher` (NSCursor.currentSystem →
   `.cursorShape`), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
