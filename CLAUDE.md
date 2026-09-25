@@ -45,7 +45,7 @@ Apple's sources and every text to paste into App Store Connect;
   and CLAUDE.md keep both sides.
 - Verified on the merge: iOS Debug and Release for the simulator and Debug for
   a device, only the StreamClient capture warning; no package source differs
-  from main; both built Info.plists read `"ITSAppUsesNonExemptEncryption" =>
+  from ba91136; both built Info.plists read `"ITSAppUsesNonExemptEncryption" =>
   false` (Xcode's ProcessInfoPlistFile takes `iOSClient/Info.plist`), with
   `PrivacyInfo.xcprivacy` at the bundle root. Harness photos of the merge and
   of main's own build, compared pixel by pixel: 1000x710, 710x1000, 500x710 and
@@ -73,14 +73,26 @@ Apple's sources and every text to paste into App Store Connect;
   title 4 pt down). Now it rises no higher than 16 pt from the top, the same
   as scrolling: photographed at every height from 500 to 540, the title stays
   19.5 pt down up to 526 and then moves 1 pt a point (at the larger text, up
-  to 535); the 60 photos above are pixel for pixel the merge's.
+  to 535); the 60 photos above are pixel for pixel the merge's. The export
+  compliance key needed no change: the target generates its Info.plist from
+  `iOSClient/Info.plist` plus the build settings (GENERATE_INFOPLIST_FILE with
+  INFOPLIST_FILE), and clean Debug and Release builds of the result, for the
+  simulator and for a device, all carry `ITSAppUsesNonExemptEncryption` false
+  and `PrivacyInfo.xcprivacy` at the bundle root, with only the StreamClient
+  capture warning; `swift build -c release` builds, and again is a no-op. The
+  real app on the iPhone simulator (Bonjour listed this Mac; nothing
+  connected): the footer above the home indicator, at both text sizes.
+- Main moved on while this ran: PR #11 (encoder recovery) is b50e224, not
+  merged here; it overlaps this branch only in CLAUDE.md and README.md.
 - **Untested, for Noah:** the decisions: the domain, the contact address, and
   whether 1.0 keeps Remote Access, which main has had since ba91136 (the
   audit advised a 1.0 without it before it merged; the metadata's switch lists
   the cuts). On a device: the footer's links open Safari (the pages are not
-  served yet), VoiceOver reads the footer after the rows, the card's fields
-  with a hardware keyboard (the column at the top, the footer in view) and the
-  software one (the footer under it). The release: the Developer ID
+  served yet), VoiceOver reads the footer once, after the rows (its measuring
+  copy is hidden from it), the card's fields with a hardware keyboard (the
+  column at the top, the footer in view) and the software one (the footer
+  under it), and a phone held sideways, which only the harness drew here
+  (956x440). The release: the Developer ID
   certificate, notary credentials, release.sh for real, a first launch on a
   Mac that never had Sill, the site on GitHub Pages with its DNS record, the
   App Store Connect record (the checklist's part 1). The description's claims
