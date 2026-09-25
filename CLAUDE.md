@@ -8,6 +8,63 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The session follows the best path (2026-09-25, branch `follow-best-path` from
+main at 76366e8, after PRs #9 and #10).** Noah's tests: plugging the cable in
+left a Wi-Fi session on Wi-Fi until he reconnected (a TCP connection keeps its
+interface), and pulling it hung the session a while, then the connect screen,
+then Wi-Fi. A live session now follows the best path its Mac is reachable on,
+the cable over Wi-Fi over Direct (`DiscoveryPolicy.pathPlan`, pure;
+`StreamClient.followBestPath`), by the move from AWDL's make-before-break
+hand-over (the new connection's first window list must carry the same
+`launchID`). Up: once the network browser has listed the session's Mac on a
+wired interface for 2 s (`cableSettle`, counted again after a move off it),
+the Mac is dialled on it beside the Wi-Fi session (the wired dial; not ready in
+2.5 s, or waiting or failing, and the session stays on Wi-Fi) and handed over
+with the fence, and the readout says Wired. Down: when the cable's path is
+gone (iOS says so: the connection not viable, back to waiting, or a path
+update that is not satisfied and names the Mac's address; or the browser has
+dropped the cable and either an unsatisfied update names only the service or
+no pong has come back for 1 s, `pongSilence`), the Mac is dialled at once on
+the Wi-Fi interface it is listed on, or was within 5 s (`wifiFresh`; the row as
+listed after 2.5 s), what the device sends waits meanwhile
+(`SessionLink.hold`) and goes out first on the new connection with no fence
+(`adopt`), and the old connection is force-cancelled so nothing of it lands
+late; a path that comes back calls the move off (`unhold`). A connection
+already dead over the cable is rescued the same way at once (`reconnectNow`):
+the stream screen stays, no retry timer, and if the Mac stopped the stream
+meanwhile (zero devices) the new connection's first list picks the source
+again (the Desktop for a window that went). Never Wi-Fi to Wi-Fi, never off a
+working cable (a browser blink alone never moves it: its pongs keep coming),
+never off a Direct session but to the network, at most one move per 5 s each
+way (`pathHysteresis`); with no Wi-Fi to go to, the ordinary end and reconnect.
+DEBUG console: "path: the cable appeared: moving the session to anpi0", "path:
+the cable went away: moving to Wi-Fi on en0", "path: the cable went away with
+the connection: reconnecting over Wi-Fi on en0 now", "path: kept: …", and what
+iOS said ("path: the session's connection is not viable…", "path: iOS says the
+session's path is unsatisfied…"); `-SillPathTest` drives it in the simulator
+(ContentView's contract). Verified: the policy check at 253 (187 plus 66: the
+plan at every boundary, a 20,480-case grid, a model of plugs, pulls, blinks,
+silence and a loose cable), 48 of 48 mutants caught (25 plus 23); the fence
+check's eight modes (new: hold, holdclosed, unhold, adoptfence), six mutants of
+the new SessionLink code caught; in the simulator against `SillHost
+--synthetic`, dialling this Mac's own `fe80::…%en0` ("Wi-Fi") and
+`fe80::…%en14` (the USB cable to the iPad, "Wired"): the cable listed at 3 s,
+moved about 2 s later with the fence down in 1–2 ms; the path reported gone,
+on Wi-Fi 10–20 ms later without a fence; the connection cut, carried on over
+Wi-Fi in 10–20 ms with no connect screen and the Desktop picked again; the
+cable dropped with pongs silent, moved at the 1 s mark, with pongs flowing,
+kept; a loose cable moved up at 3.7, 8.9, 13.9 s and down at 4.6, 9.6, 14.6 s;
+no Wi-Fi, the ordinary end; the move from AWDL and PR #10's wired-dial
+fallbacks unchanged. **Untested, for Noah:** the real plug and pull on the
+iPad while streaming. Plugged in: a few seconds later "path: the cable
+appeared", the readout's Wired, and the host's "Client connected: …%anri0" (or
+`%en14`) then "Client left" for the Wi-Fi one. Pulled: within about a second
+the readout's Wi-Fi with no connect screen and the host's "Client connected"
+over Wi-Fi (`%en0`, or the iPad's Wi-Fi IPv4 address; the cable's connection
+leaves by itself, at the latest by eviction 4 s on); and which signal iOS gave
+first (the console's "path:" lines), since a pull's own signals have never
+been seen on a device.
+
 **Quality presets (2026-09-24, branch `quality-presets` from main at
 ad7fba2).** Noah's decisions: Maximum is renamed Pro; two presets above it,
 Ultra (80 Mbps) and Extreme (150 Mbps), for the USB cable or very fast Wi-Fi;
@@ -206,10 +263,11 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   `.ready` logged as ignored with the word kept (that session ran over Wi-Fi,
   `%en0` on the host: with Wi-Fi healthy the race took en0 in all three
   unscoped tries, and the night's cable session came right after an eviction
-  on Wi-Fi). A session over
-  the cable ends when it is pulled and comes back over Wi-Fi, "Wi-Fi" on both
-  ends; plugged back in, an established Wi-Fi session stays on Wi-Fi (TCP does
-  not move) until the next connection. On
+  on Wi-Fi). Until branch
+  `follow-best-path` a session over the cable ended when it was pulled and came
+  back over Wi-Fi, "Wi-Fi" on both ends, and plugged back in, an established
+  Wi-Fi session stayed on Wi-Fi (TCP does not move) until the next connection;
+  now it follows the cable (the step above). On
   the device, also compare each word with the host's "Client connected:
   fe80::…%anri0" line (`%anri0` or `%enN`: the cable; `%en0`: this Mac's
   Wi-Fi). Verified on the simulator: the policy check at 138, eight mutants
