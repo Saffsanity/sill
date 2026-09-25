@@ -101,16 +101,16 @@ enum EncoderProbe {
     /// inside overlap it; HEVCEncoder). The bar a return needs (`returnBar`) and the engine rate
     /// learned from the best test are then of the same kind as what the stream will get. Three
     /// frames are drawn before the session opens and then reused, as a capture stream reuses its
-    /// surfaces (never the same one inside twice), and the first pass over them is left out (the
-    /// session's warm-up, ~50 ms at Retina size, and each surface's first trip into the encoder):
-    /// drawing a frame costs milliseconds a stream never spends there (30 MB of fresh memory at
-    /// Retina 6K), and inside the timing it counted against the engine. `ok` false: a frame took
-    /// longer than `timeout` (it then counts as stuck until it comes back). `fps` nil: nothing
-    /// could be measured (no pixel buffers), so assume it keeps up. One at a time it took about
-    /// 110 ms at 3024×1904 when the engine was free (~120 fps; drawn inside the timing it measured
-    /// ~115) and 290 ms at 6016×3384 (~39 fps; ~37); a starved engine shows as a low rate, not as
-    /// no answer. Blocks the calling thread for up to (`frames` + 3) × `timeout`: never call it on
-    /// the main actor. `ms` leaves the drawing out.
+    /// surfaces, and the first pass over them is left out (the session's warm-up, ~50 ms at Retina
+    /// size, and each surface's first trip into the encoder): drawing a frame costs milliseconds a
+    /// stream never spends there (30 MB of fresh memory at Retina 6K), and inside the timing it
+    /// counted against the engine. `ok` false: a frame took longer than `timeout` (it then counts
+    /// as stuck until it comes back). `fps` nil: nothing could be measured (no pixel buffers), so
+    /// assume it keeps up. One at a time it took about 110 ms at 3024×1904 when the engine was
+    /// free (~120 fps; drawn inside the timing it measured ~115) and 290 ms at 6016×3384 (~39 fps;
+    /// ~37); a starved engine shows as a low rate, not as no answer. Blocks the calling thread for
+    /// up to (`frames` + 3) × `timeout`: never call it on the main actor. `ms` leaves the drawing
+    /// out.
     static func throughput(width: Int, height: Int, frames: Int = 7, timeout: TimeInterval = 1.0) -> (ok: Bool, fps: Double?, ms: Int) {
         let drawn = (0..<3).compactMap { testFrame(width: width, height: height, bar: $0) }
         let started = CFAbsoluteTimeGetCurrent()
@@ -130,8 +130,9 @@ enum EncoderProbe {
             enc.encode(drawn[sent % drawn.count], pts: CMTime(value: CMTimeValue(sent), timescale: 60))
             sent += 1
         }
-        // As many inside as the stream would have (fewer than the three surfaces, so none goes in
-        // twice); then one more each time one comes back, in the order they went in.
+        // As many inside as the stream would have, fewer than the three surfaces; then one more each
+        // time one comes back. VideoToolbox hands frames back in the order they went in, so the
+        // next surface is the one just back, never one still inside.
         while sent < min(enc.maxInFlight, drawn.count - 1, total) { send() }
         for back in 0..<total {
             guard done.wait(timeout: .now() + timeout) == .success else {

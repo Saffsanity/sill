@@ -1149,6 +1149,15 @@ check && ./check`, 63,778 checks, and `python3 mutants.py`):
   after death, the watchdog at 3 s, the waiting frame kept at death or never
   taken, no clock restart at the hand-over, a new frame's clock taken from an
   older one.
+- The throughput test's loop, the real `EncoderProbe.swift` and `Stats.swift`
+  against a stand-in `HEVCEncoder` whose frames come back in real time and in
+  decode order (scratchpad `two-in-flight/probecheck/`, 18 checks and a
+  `SILL_TEST_PROBE_HOLD=0.08` run): at 30 ms a frame, each on its own, 68 fps
+  with two inside where 4fe37d4's test reads 30; one engine at 30 ms a frame,
+  33 either way; never more frames inside than the encoder lets in, nor a
+  surface inside twice; a frame that never comes back: no answer after ~1.03
+  s, counted stuck, never reported back; one 1.5 s late: reported back once
+  after ~1.5 s and the count back down; the hold still reads 12 fps.
 - What the change assumes, from the same stand-in: with 15 ms on the chip and
   the rest overlapping, two inside give 60 fps at a 30 ms turnaround; if the
   encoder did the whole 30 ms one frame at a time, two inside would still give
