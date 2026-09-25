@@ -2,11 +2,12 @@ import Foundation
 
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
 /// from a network one, the word each row shows for how its Mac is reachable and the one the
-/// Settings panel shows for the session's own connection, when a reconnect may take a Direct row,
-/// and when a session over AWDL moves to the network. AWDL takes the radio off
-/// its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for it only when a Mac it
-/// has seen with Direct Wireless Connection on is missing from the network, or when the user taps
-/// Search Nearby, never while connected, and leaves it once the network lists that Mac again.
+/// Settings panel shows for the session's own connection, which interface a "Wired" row is dialled
+/// on, when a reconnect may take a Direct row, and when a session over AWDL moves to the network.
+/// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
+/// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
+/// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
+/// that Mac again.
 ///
 /// Pure logic, Foundation only: it is checked on its own with swiftc (H13 in
 /// docs/direct-wireless-plan.md), and StreamClient feeds it what its two browsers see.
@@ -151,10 +152,29 @@ enum DiscoveryPolicy {
         return nil
     }
 
+    /// A wired dial (`dialInterface`) not ready within this long is cancelled, and the row dialled
+    /// unconstrained instead, once; one that cannot go on (it fails, or waits) gives way at once.
+    /// Over the cable one was ready in 8–134 ms (Noah's iPad, 2026-09-25).
+    static let wiredWait = 2.5
+
+    /// The interface a row's Mac is dialled on, by a tap, an automatic reconnect or a session's move
+    /// to the network (Noah, 2026-09-25: a row that says Wired connects over the cable): the first
+    /// wired Ethernet interface its browser saw it on, so exactly when `method` says Wired, else nil,
+    /// and the row is dialled as listed, the system picking the link. Unconstrained, with the cable
+    /// and Wi-Fi both up, the same tap went either way (the Mac saw the iPad on %en0 at 7 ms, or on
+    /// %en14 at 1 ms). Over the cable iPadOS lists the Mac on anpi0 and en2, both wired Ethernet,
+    /// and either reaches it at 1–2 ms (the Mac sees %anri0 or %en14). A Direct row never: it is
+    /// dialled peer-to-peer, as listed.
+    static func dialInterface(direct: Bool, interfaces: [Interface]) -> String? {
+        guard !direct else { return nil }
+        return interfaces.first { $0.type == .wiredEthernet && !isPeerToPeer($0.name) }?.name
+    }
+
     /// How the session's own connection reaches the Mac: the word the Settings panel's readout
     /// ends in (Noah, 2026-09-24), where a row's `method` says where the browser saw the Mac. A
-    /// session can run over another link than its row's word, as no connection is pinned to an
-    /// interface (with Wi-Fi and the cable both up, either), so this reads the connection's path:
+    /// session can run over another link than its row's word (a Wired row's dial is pinned to the
+    /// cable, `dialInterface`, but the unconstrained dial it can give way to may take Wi-Fi, and a
+    /// session made before the cable came stays on Wi-Fi), so this reads the connection's path:
     /// the interface the Mac's address is scoped to when it is a link-local one, which is all the
     /// USB cable and AWDL carry (over the cable this device sees the Mac's address on en2, and the
     /// Mac logs the device's on en14 or anri0; over AWDL the Mac logs "fe80::…%awdl0"), else the

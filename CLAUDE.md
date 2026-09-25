@@ -149,12 +149,18 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   which needs the Access Wi-Fi Information entitlement and Location access,
   and Sill asks for neither. The word follows the browser as interfaces come
   and go (the cable in or out), and the DEBUG console says what it was read
-  from ("discovery: <Mac>: Wired, seen on …"). It is not the route: no
-  connection is pinned to an interface (no `requiredInterfaceType`; pinning
-  is Noah's call), so with Wi-Fi and the cable both up a session can run over
-  either, whatever the word (Sill.log, 2026-09-24: a reconnect over `%anri0`
-  at 15:33:01; at 17:43:56, with the cable still up, a new connection over
-  `%en0`). The route is the Settings panel's (branch
+  from ("discovery: <Mac>: Wired, seen on …"). A row that says "Wired" is
+  dialled over the cable (Noah, 2026-09-25, branch `prefer-cable`: unpinned,
+  with Wi-Fi and the cable both up, the same tap reached the Mac over `%en0`
+  at 7 ms one time and over `%en14` at 1 ms another): a tap, an automatic
+  reconnect and a move from AWDL resolve its Bonjour service on the first
+  wired interface the browser saw it on (`DiscoveryPolicy.dialInterface`;
+  anpi0 on the iPad, which the Mac logs as `%anri0`, 1–2 ms; en2 gives
+  `%en14`), and a dial not ready within 2.5 s (`wiredWait`), or failing,
+  gives way to the row as listed, unconstrained, once, which can take Wi-Fi
+  (DEBUG console: "dialing <Mac> on anpi0 (wired)", "wired dial did not
+  connect in 2.5 s; dialing unconstrained"; `-SillWiredTest HOST:PORT` runs
+  that fallback in the simulator). The route is the Settings panel's (branch
   `connection-route-in-settings`): its readout ends in how this session's own
   connection reaches the Mac, "… · 15 Mbps · Wi-Fi", "Wired" or "Direct"
   (`DiscoveryPolicy.route`, `StreamClient.route`): the interface the Mac's

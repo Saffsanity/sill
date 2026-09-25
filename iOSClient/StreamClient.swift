@@ -14,8 +14,12 @@ struct FoundMac: Identifiable, Hashable {
     let direct: Bool
     /// How the Mac is reachable, the word at the end of its row ("Wired", "Wi-Fi", "Direct"), or nil
     /// when the interfaces it was seen on do not say (DiscoveryPolicy.method). Only shown: which
-    /// route a tap takes is `direct`'s alone.
+    /// route a tap takes is `direct`'s and `wired`'s.
     let method: DiscoveryPolicy.Method?
+    /// The wired Ethernet interface the network browser saw the Mac on, which a tap, an automatic
+    /// reconnect and a move dial it on first (DiscoveryPolicy.dialInterface, `wiredDial`): set
+    /// exactly when a network row says "Wired", nil for the rest, which are dialled as listed.
+    let wired: NWInterface?
     var id: String { name }   // unique: DiscoveryPolicy.rows lists a name once
 }
 
@@ -348,9 +352,10 @@ final class StreamClient: ObservableObject {
 
     /// The rows, each with the endpoint of the browser that listed it: a network row always the
     /// network browser's, so at home a Mac is never reached over AWDL. Each row's word comes from
-    /// the interfaces that same browser saw its Mac on (DiscoveryPolicy.method): a browser reports
+    /// the interfaces that same browser saw its Mac on (DiscoveryPolicy.method), and so does the
+    /// wired interface a "Wired" row is dialled on (DiscoveryPolicy.dialInterface): a browser reports
     /// one result per Mac with every interface it is seen on, and reports it again when one comes
-    /// or goes, so plugging the cable in or out changes the word. Main thread.
+    /// or goes, so plugging the cable in or out changes both. Main thread.
     private func recomputeMacs() {
         var network = networkResults.map { (name: Self.serviceName(of: $0), endpoint: $0.endpoint, interfaces: $0.interfaces) }
         #if DEBUG
@@ -363,8 +368,11 @@ final class StreamClient: ObservableObject {
         sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         let next = rows.compactMap { row -> FoundMac? in
             guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
+            let interfaces = seen.interfaces.map(Self.policyInterface)
+            let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: interfaces)
             return FoundMac(name: row.name, endpoint: seen.endpoint, direct: row.direct,
-                            method: DiscoveryPolicy.method(direct: row.direct, interfaces: seen.interfaces.map(Self.policyInterface)))
+                            method: DiscoveryPolicy.method(direct: row.direct, interfaces: interfaces),
+                            wired: wired.flatMap { name in seen.interfaces.first { $0.name == name } })
         }
         guard next != macs else { return }
         #if DEBUG
@@ -458,7 +466,8 @@ final class StreamClient: ObservableObject {
         return "\(result.endpoint)"
     }
 
-    /// A row of the connect screen. Only a direct row is connected with peer-to-peer allowed.
+    /// A row of the connect screen. Only a direct row is connected with peer-to-peer allowed; a row
+    /// that says "Wired" is dialled over its wired interface first (`wiredDial`).
     func connect(to mac: FoundMac) {
         #if DEBUG
         if mockDiscovery {
@@ -466,7 +475,28 @@ final class StreamClient: ObservableObject {
             return
         }
         #endif
-        connect(to: mac.endpoint, name: mac.name, peerToPeer: mac.direct)
+        if let wired = wiredDial(for: mac) {
+            #if DEBUG
+            print("dialing \(mac.name) on \(wired.via)")
+            #endif
+            connect(to: wired.endpoint, name: mac.name, fallback: mac.endpoint)
+        } else {
+            connect(to: mac.endpoint, name: mac.name, peerToPeer: mac.direct)
+        }
+    }
+
+    /// Where a row whose Mac the network browser saw on a wired interface (`FoundMac.wired`, the
+    /// row says "Wired") is dialled first: its Bonjour service resolved on that interface alone, so
+    /// the connection runs over the cable (with Wi-Fi up too, an unconstrained dial took either,
+    /// 2026-09-25), and how the DEBUG console names it. Nil for any other row, dialled as listed.
+    /// Main thread.
+    private func wiredDial(for mac: FoundMac) -> (endpoint: NWEndpoint, via: String)? {
+        guard !mac.direct else { return nil }
+        #if DEBUG
+        if let test = Self.wiredTest { return (test, "\(test) (wired test)") }
+        #endif
+        guard let wired = mac.wired, case .service(let name, let type, let domain, _) = mac.endpoint else { return nil }
+        return (.service(name: name, type: type, domain: domain, interface: wired), "\(wired.name) (wired)")
     }
 
     /// The Mac we were talking to is listed again: reconnect without being asked, to its network row
@@ -502,7 +532,10 @@ final class StreamClient: ObservableObject {
     /// Connects to a Bonjour result's endpoint, or straight to an address (DEBUG `-SillConnect`,
     /// later "add a Mac by address"). `name` is what the status line calls the Mac until its window
     /// list brings its own name. `peerToPeer` only for a Mac seen over peer-to-peer Wi-Fi alone.
-    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false) {
+    /// With a `fallback` this is a wired dial (`wiredDial`): not ready within
+    /// DiscoveryPolicy.wiredWait, or unable to go on, it gives way to `fallback`, the row as
+    /// listed, dialled unconstrained (`dialUnconstrained`).
+    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false, fallback: NWEndpoint? = nil) {
         // One connection at a time. A tap on the connect screen racing the reconnect timer used to
         // open two: both then read from whichever `connection` pointed at, interleaving headers
         // and payloads, while the other was never read and the host evicted it after 4 s.
@@ -544,6 +577,10 @@ final class StreamClient: ObservableObject {
                 self.readHeader(on: c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
+                if let fallback {   // a wired dial that cannot go on (the cable just pulled, say)
+                    DispatchQueue.main.async { self.dialUnconstrained(after: c, fallback, name: name, why: "is waiting (\(e))") }
+                    return
+                }
                 DispatchQueue.main.async { self.status = "Waiting for \(name)…" }
                 // A connection that never gets past waiting would block every reconnect path
                 // (they all require `connection == nil`): give it five seconds, then let it go.
@@ -553,7 +590,13 @@ final class StreamClient: ObservableObject {
                 }
             case .failed(let e):
                 print("connection failed: \(e)")
-                self.connectionLost(c)
+                if let fallback {
+                    // Queued before the cancel's .cancelled, whose connectionLost then finds `c`
+                    // replaced by the unconstrained dial.
+                    DispatchQueue.main.async { self.dialUnconstrained(after: c, fallback, name: name, why: "failed (\(e))") }
+                } else {
+                    self.connectionLost(c)
+                }
                 c.cancel()   // Network.framework releases a failed connection only once cancelled
             case .cancelled:
                 // Either disconnect() cancelled it (state already cleaned up) or the host closed it.
@@ -565,6 +608,26 @@ final class StreamClient: ObservableObject {
         followRoute(of: c)
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
+        if let fallback {
+            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
+                self?.dialUnconstrained(after: c, fallback, name: name, why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
+            }
+        }
+    }
+
+    /// A wired dial, `c`, that has not connected: cancelled, and `fallback`, the row as listed,
+    /// dialled unconstrained, as it was before the wired preference, once (it has no fallback of
+    /// its own), under the status line the dial showed ("Reconnecting…" stays). Only while `c` is
+    /// still the connection and not ready: a tap may have replaced it meanwhile, or it connected at
+    /// the last moment. Main thread.
+    private func dialUnconstrained(after c: NWConnection, _ fallback: NWEndpoint, name: String, why: String) {
+        guard connection === c, !connected, c.state != .ready else { return }
+        #if DEBUG
+        print("wired dial \(why); dialing unconstrained")
+        #endif
+        let shown = status
+        connect(to: fallback, name: name)   // cancels `c`, whose .cancelled finds it replaced
+        status = shown
     }
 
     /// Every connection to a Mac: TCP without Nagle, the interactive video class, and peer-to-peer
@@ -613,14 +676,29 @@ final class StreamClient: ObservableObject {
     /// sent the running stream: no connect screen, no Desktop restart. A network connection that
     /// fails, has not shown its host within 5 s, or reaches another Mac changes nothing: the
     /// session stays direct and the next try waits `moveRetry` (after another Mac, a new listing
-    /// too). Main thread.
+    /// too). A row that says "Wired" is dialled over its wired interface first (`wiredDial`), as a
+    /// tap on it is. Main thread.
     private func move(to mac: FoundMac) {
         lastMoveAttempt = ProcessInfo.processInfo.systemUptime
         status = "Switching to Wi\u{2011}Fi…"
-        #if DEBUG
-        print("discovery: moving the session to the network")
-        #endif
-        let c = NWConnection(to: mac.endpoint, using: Self.connectionParameters(peerToPeer: false))
+        if let wired = wiredDial(for: mac) {
+            #if DEBUG
+            print("discovery: moving the session to the network on \(wired.via)")
+            #endif
+            startMove(to: wired.endpoint, fallback: mac.endpoint)
+        } else {
+            #if DEBUG
+            print("discovery: moving the session to the network")
+            #endif
+            startMove(to: mac.endpoint, fallback: nil)
+        }
+    }
+
+    /// The move's network connection, to `endpoint`, with its own 5 s. With a `fallback` it is a
+    /// wired dial, which gives way to `fallback` dialled unconstrained when not ready within
+    /// DiscoveryPolicy.wiredWait, or unable to go on (`moveUnconstrained`). Main thread.
+    private func startMove(to endpoint: NWEndpoint, fallback: NWEndpoint?) {
+        let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: false))
         moving = c
         // One handler for both lives of `c`: until it takes over, `moveEnded` acts (it checks
         // `moving`); after, `connectionLost` does (it checks `connection`).
@@ -629,8 +707,14 @@ final class StreamClient: ObservableObject {
             switch state {
             case .ready:
                 self.probeMove(c)
+            case .waiting(let e):
+                guard let fallback else { break }
+                DispatchQueue.main.async { self.moveUnconstrained(after: c, fallback, why: "is waiting (\(e))") }
             case .failed(let e):
                 print("move to the network failed: \(e)")
+                if let fallback {   // queued first: the moveEnded below then finds the move gone on
+                    DispatchQueue.main.async { self.moveUnconstrained(after: c, fallback, why: "failed (\(e))") }
+                }
                 c.cancel()
                 self.connectionLost(c)
                 DispatchQueue.main.async { self.moveEnded(c) }
@@ -643,6 +727,11 @@ final class StreamClient: ObservableObject {
         }
         followRoute(of: c)   // from the hand-over on
         c.start(queue: queue)
+        if let fallback {
+            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
+                self?.moveUnconstrained(after: c, fallback, why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
+            }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.moving === c else { return }
             // Not taken over in 5 s: stay direct. The move ends before `c` is cancelled: a `.ready`
@@ -651,6 +740,18 @@ final class StreamClient: ObservableObject {
             self.moveEnded(c)
             c.cancel()
         }
+    }
+
+    /// The move's wired dial, `c`, has not connected: the move goes on over the network row as
+    /// listed, dialled unconstrained, once, with 5 s of its own, and `c` is cancelled. Only while
+    /// `c` is still the move's and not ready. Main thread.
+    private func moveUnconstrained(after c: NWConnection, _ fallback: NWEndpoint, why: String) {
+        guard moving === c, c.state != .ready else { return }
+        #if DEBUG
+        print("discovery: the wired move \(why); moving unconstrained")
+        #endif
+        startMove(to: fallback, fallback: nil)   // `moving` from here: `c`'s moveEnded does nothing
+        c.cancel()
     }
 
     /// On `queue`, once the network connection is ready: reads it up to its first window list,
@@ -1413,10 +1514,30 @@ extension StreamClient {
     /// Bonjour, never finds it and backs off to 10 s: harmless in a debug build.
     func connectFromLaunchArgument() {
         guard let raw = UserDefaults.standard.string(forKey: "SillConnect"),
+              let address = Self.address(argument: "SillConnect") else { return }
+        if let test = Self.wiredTest {
+            print("dialing \(raw) on \(test) (wired test)")
+            connect(to: test, name: raw, fallback: address)
+        } else {
+            connect(to: address, name: raw)
+        }
+    }
+
+    /// `-SillWiredTest host:port`: the fallback of a wired dial, under test in the simulator against
+    /// a synthetic host. `-SillConnect`'s dial, a network row's (any row not Direct counts as
+    /// Wired) and a move's under `-SillMoveTest` go to that address first, the way a "Wired" row's
+    /// goes to its cable, with the address they would have dialled as the fallback: `192.0.2.1:9`
+    /// (TEST-NET-1, never answers) is given up after DiscoveryPolicy.wiredWait, `127.0.0.1:1`
+    /// (nothing listens) at once.
+    private static let wiredTest = address(argument: "SillWiredTest")
+
+    /// A `host:port` launch argument as an address.
+    private static func address(argument key: String) -> NWEndpoint? {
+        guard let raw = UserDefaults.standard.string(forKey: key),
               let colon = raw.lastIndex(of: ":"),
               let number = UInt16(raw[raw.index(after: colon)...]),
-              let port = NWEndpoint.Port(rawValue: number) else { return }
-        connect(to: .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port), name: raw)
+              let port = NWEndpoint.Port(rawValue: number) else { return nil }
+        return .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port)
     }
     #endif
 }
