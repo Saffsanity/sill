@@ -169,7 +169,7 @@ private struct StreamingPane: View {
                     Text("Standard").tag(CGFloat(1))
                 }
             } footer: {
-                Footnote("Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. Changes apply at once: the current stream restarts for a moment.")
+                Footnote("Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. \(QualityPreset.fastLinkNote) Changes apply at once: the current stream restarts for a moment.")
             }
             Section {
                 Toggle("Prioritize encoding speed", isOn: $settings.config.prioritizeSpeed)

@@ -301,11 +301,12 @@ struct HostSettingsPanel: View {
         return text
     }
 
-    /// Under the stream rows. A frame rate limit above what this screen shows changes nothing for
-    /// it, which is worth saying on a 60 Hz device.
+    /// Under the stream rows: what Quality counts and what its top presets need (the Mac's
+    /// Settings › Streaming says the same). A frame rate limit above what this screen shows changes
+    /// nothing for it, which is worth saying on a 60 Hz device.
     private var streamFooter: String {
         _ = powerState
-        var text = "Quality is per 60 fps; a 120 fps stream gets twice as much."
+        var text = "Quality is per 60 fps; a 120 fps stream gets twice as much. " + QualityPreset.fastLinkNote
         let wanted = StreamClient.wantedFPS()
         guard wanted < 120 else { return text }
         if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {

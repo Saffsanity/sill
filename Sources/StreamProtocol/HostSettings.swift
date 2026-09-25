@@ -159,9 +159,15 @@ public enum SettingsChoices {
 }
 
 /// Bitrate presets, per 60 fps (a 120 fps stream gets twice as much). Balanced is the CLI's value.
-/// Here rather than in the app so the Mac and the device name the presets the same way.
+/// Here rather than in the app so the Mac and the device name the presets the same way. Ascending:
+/// every menu and picker on both ends lists `allCases` in this order. The raw values are what the
+/// defaults and kinds 16/17 carry, so a rename (Maximum became Pro) changes nothing stored or sent.
+/// A new raw value is new to `SettingsChoices` too: an older host refuses it and an older device
+/// shows it as "Custom — N Mbps". All stay within `HostConfig.validated()`'s 200 Mbps.
 public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
-    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, maximum = 40_000_000
+    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, pro = 40_000_000
+    /// For the USB cable or very fast Wi-Fi (`fastLinkNote`).
+    case ultra = 80_000_000, extreme = 150_000_000
 
     public var id: Int { rawValue }
 
@@ -170,12 +176,20 @@ public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
         case .efficient: "Efficient"
         case .balanced: "Balanced"
         case .high: "High"
-        case .maximum: "Maximum"
+        case .pro: "Pro"
+        case .ultra: "Ultra"
+        case .extreme: "Extreme"
         }
     }
 
     /// "Balanced — 15 Mbps".
     public var title: String { "\(name) — \(rawValue / 1_000_000) Mbps" }
+
+    /// The one sentence, in the Mac's Settings › Streaming footer and the device's Quality footer,
+    /// on what the top presets need.
+    public static var fastLinkNote: String {
+        "\(ultra.name) and \(extreme.name) need the USB cable or very fast Wi\u{2011}Fi; if the picture lags, step down."
+    }
 
     /// The label for any stored bitrate: a preset's title, or "Custom — 12 Mbps" for one set by
     /// hand (`defaults write`, a launch argument).

@@ -35,6 +35,14 @@ stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
 has no room for the icon.
 
+Quality is the stream's bitrate per 60 fps (a 120 fps stream gets twice as
+much): Efficient 8 Mbps, Balanced 15 (the default, and the command-line
+host's), High 25, Pro 40, Ultra 80 and Extreme 150. Ultra and Extreme need the
+USB cable or very fast Wi-Fi; if the picture lags (the device's frame age in
+the menu climbs), step down. Any other value from 1 to 200 Mbps can be set by
+hand (quit Sill, `defaults write me.saffer.sill.mac bitrate -int 60000000`,
+open it again) and shows as Custom; a device can pick only the presets.
+
 Permissions:
 
 - The first launch opens Settings on Permissions. Screen Recording and
@@ -141,7 +149,7 @@ The stream rate is the device's own: each client reports its panel's ceiling
 (120 on ProMotion iPads and iPhones, 60 on the iPad mini) and 60 while Low
 Power Mode is on; the host runs capture, encoder and the virtual display at
 that rate, capped by maxFPS, and restarts when it changes. Bitrate scales
-with the rate (the knob is per 60 fps).
+with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 ## iOS client (5 minutes)
 
