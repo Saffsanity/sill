@@ -64,7 +64,7 @@ enum StatusText {
                                    action: .none))
         } else if s.softwareEncoder {
             attention.append(.init(title: "Hardware Encoder Busy",
-                                   subtitle: "Streaming with the software encoder, up to 60 fps, until it answers again.",
+                                   subtitle: "Streaming with the software encoder, up to 60 fps, until it is free again.",
                                    action: .none))
         }
 
