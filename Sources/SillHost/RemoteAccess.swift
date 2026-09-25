@@ -82,6 +82,8 @@ package final class RemoteAccess {
 
     /// Loads (or creates) the identity and the trust list from `store`. A failure leaves the host
     /// without an identity: no TXT tag, no kind 18, no remote door; `identityProblem` says why.
+    /// That includes a trust list that cannot be read: kept with an empty list, the store would
+    /// save the next pairing over it and every earlier pairing would be gone.
     package init(store: IdentityStore) {
         var identity: HostIdentity?
         var problem: String?
@@ -92,8 +94,8 @@ package final class RemoteAccess {
             guard let id = HostIdentity(privateKey: key, recognitionKey: recognition) else {
                 throw IdentityStoreError("the key could not make a TLS identity")
             }
-            identity = id
             paired = try store.loadPaired()
+            identity = id
         } catch {
             problem = "\(error)"
         }

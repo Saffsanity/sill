@@ -48,8 +48,8 @@ final class StreamServer {
         /// Remote clients: no keyframe has reached it since it was admitted or the stream changed,
         /// so the next one goes out whatever its queue holds.
         var awaitingFirstKeyframe = true
-        /// Remote clients: a frame was dropped for it and a keyframe should be asked for, at most
-        /// every `remoteKeyframeSpacing` across all remote clients.
+        /// Remote clients: a frame was dropped for it and a keyframe should be asked for, when
+        /// `remoteKeyframeDue` (at most every 2 s across all remote clients, later beside a home one).
         var keyframeWanted = false
         /// When a message was last handed to it (remote clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
@@ -251,13 +251,39 @@ final class StreamServer {
     func arrival(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?) {
         guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, scope) = Self.addressText(host)
-        var local: String?
-        if case .hostPort(let lh, _)? = c.currentPath?.localEndpoint { local = Self.addressText(lh).text }
+        return arrival(remote: remote, scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"), local: Self.pathLocal(c))
+    }
+
+    /// The same before `c` starts: the remote door's check, because a started TLS connection
+    /// answers a ClientHello that is already waiting with the whole server flight, the Mac's
+    /// certificate included, before any state callback runs (review, 2026-09-24: refused hellos
+    /// got about 660 bytes back while the check waited for `.preparing`). An accepted connection
+    /// has its path already in `newConnectionHandler` (measured on loopback the same day); should
+    /// one not, the local address is the one the kernel's route back to the peer sends from. Nil
+    /// when neither is known: `.preparing` judges it then, as before.
+    func arrivalBeforeStart(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?)? {
+        guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
+        let (remote, endpointScope) = Self.addressText(host)
+        let scope = endpointScope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)")
+        var local = Self.pathLocal(c)
+        if local == nil, scope == nil, let source = IPBytes.parse(remote), !IPBytes.isLoopback(source) {
+            guard let routed = InterfaceSnapshot.routeSource(to: source) else { return nil }
+            local = IPBytes.text(routed)
+        }
+        return arrival(remote: remote, scope: scope, local: local)
+    }
+
+    /// The local address of `c`'s path, where it arrived; nil while it has no path.
+    private static func pathLocal(_ c: NWConnection) -> String? {
+        guard case .hostPort(let host, _)? = c.currentPath?.localEndpoint else { return nil }
+        return addressText(host).text
+    }
+
+    private func arrival(remote: String, scope: String?, local: String?) -> (origin: OriginPolicy.Origin, interface: String?) {
         let interfaces = InterfaceSnapshot.shared.interfaces()
-        let s = scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)")
-        var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: s, interfaces: interfaces)
+        var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: scope, interfaces: interfaces)
         if testHost, o == .loopback, let t = Self.testOrigin { o = t }
-        return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: s, interfaces: interfaces))
+        return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: scope, interfaces: interfaces))
     }
 
     /// A test host (it does not advertise): the only kind that honours TEST ONLY variables.
@@ -732,6 +758,7 @@ final class StreamServer {
         let data = message.serialized()
         queue.async { [self] in
             if message.kind == .parameterSets { lastParameterSets = data }
+            if message.kind == .frame, message.isKeyframe { lastKeyframeAt = Date().timeIntervalSince1970 }
             var wantKeyframe = false
             defer { if wantKeyframe { onKeyframeNeeded?() } }
             for client in clients.values where client.connection.state == .ready {
@@ -764,16 +791,16 @@ final class StreamServer {
     /// keyframe, and the client waits for a keyframe. A keyframe is sent to a waiting client only
     /// when its queue has room, or when it has had none since it was admitted or the stream changed.
     /// Keyframes are asked for at most every `remoteKeyframeSpacing` for all remote clients
-    /// together, so a slow link cannot turn the stream into a keyframe storm. Returns whether to ask
-    /// for one now. On `queue`. No new Stats key: skipped frames count as net.waitKey, dropped ones
-    /// as net.dropped, sent ones as net.sent.
+    /// together (later beside a home client: `remoteKeyframeDue`), so a slow link cannot turn the
+    /// stream into a keyframe storm. Returns whether to ask for one now. On `queue`. No new Stats
+    /// key: skipped frames count as net.waitKey, dropped ones as net.dropped, sent ones as net.sent.
     private func paceRemote(_ client: Client, message: StreamMessage, data: Data) -> Bool {
         var ask = false
         if client.needsKeyframe {
             guard message.isKeyframe else {
                 Stats.shared.bump("net.waitKey")
                 let now = Date().timeIntervalSince1970
-                if client.keyframeWanted, client.inflight <= 2, now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacing {
+                if client.keyframeWanted, client.inflight <= 2, remoteKeyframeDue(now) {
                     lastRemoteKeyframeRequest = now
                     client.keyframeWanted = false
                     ask = true
@@ -803,7 +830,26 @@ final class StreamServer {
 
     /// When a keyframe was last asked for on behalf of a remote client.
     private var lastRemoteKeyframeRequest: TimeInterval = 0
+    /// When the last keyframe went out, of any kind (the encoder's own, or one asked for).
+    private var lastKeyframeAt: TimeInterval = 0
     static let remoteKeyframeSpacing: TimeInterval = 2
+    /// The encoder's own keyframe interval: HEVCEncoder's `fps * 4` frames.
+    static let remoteKeyframeSpacingBesideHome: TimeInterval = 4
+
+    /// Whether a keyframe may be asked for on a remote client's behalf now: alone, 2 s after the
+    /// last such request. It is encoded once and goes to every client, though, so while a home
+    /// client is connected the request also waits until 4 s have passed since the last keyframe of
+    /// any kind. The encoder's own is due by then, so a slow remote link gives a device on the LAN
+    /// no more keyframes than the encoder's interval would, where each one showed as a 50–100 ms
+    /// hitch (the trackpad stutter's cause 2); it only brings one forward when frames come slower
+    /// than the stream's rate. The remote device waits longer after a drop in exchange. On `queue`.
+    private func remoteKeyframeDue(_ now: TimeInterval) -> Bool {
+        guard clients.values.contains(where: { !$0.route.isRemote }) else {
+            return now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacing
+        }
+        return now - lastRemoteKeyframeRequest >= Self.remoteKeyframeSpacingBesideHome
+            && now - lastKeyframeAt >= Self.remoteKeyframeSpacingBesideHome
+    }
 
     /// A peer that has not drained a single video frame for this long stopped reading (app killed,
     /// device asleep). Time-based rather than a frame count: a slow decoder (the simulator at full

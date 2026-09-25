@@ -7,9 +7,11 @@ import StreamProtocol
 /// present self-signed P-256 certificates and pin each other's key (RemoteTLS). No Bonjour.
 ///
 /// Before admission a connection is cheap to refuse: at most 8 pending in all and 2 per source,
-/// a source with 5 failures in 60 s is refused for 300 s, and 10 s from accept to admission (TLS,
-/// plus the one kind 19 of a pairing connection). Sources the Mac's internet switch does not admit
-/// are cancelled before TLS. The verify block decides trust from the lock-protected TrustSnapshot
+/// a source the door refused 5 times in 60 s is refused for 300 s (an attempt the device itself
+/// abandons is no refusal, and a paired key clears the count), and 10 s from accept to admission
+/// (TLS, plus the one kind 19 of a pairing connection). Sources the Mac's internet switch does not
+/// admit are cancelled before the connection starts, so they get no byte, and judged again at
+/// `.ready` and at kind 19. The verify block decides trust from the lock-protected TrustSnapshot
 /// and the negotiated ALPN: `sill/1` only for a paired key, `sill-pair/1` only while a pairing
 /// window is open. Refusals are counted and reported at most once a minute.
 ///
@@ -62,8 +64,9 @@ final class RemoteServer {
         let source: String
         var origin: OriginPolicy.Origin?
         var interface: String?
-        /// Counted in the minute's summary already.
-        var reported = false
+        /// The door refused it (counted in the minute's summary already), so its end counts one
+        /// failure for its source.
+        var refused = false
         var deadline: DispatchWorkItem?
     }
     private var pending: [ObjectIdentifier: Pending] = [:]
@@ -213,6 +216,15 @@ final class RemoteServer {
             refusals.count("limit")
             return
         }
+        // The origin before the connection starts: once started, TLS answers a ClientHello that is
+        // already waiting with the whole server flight, the Mac's certificate included, before any
+        // state callback could refuse it. A source the internet switch does not admit gets no byte.
+        if let a = server.arrivalBeforeStart(of: c), !OriginPolicy.remoteAdmits(a.origin, internetAccess: trust.snapshot.internetAccess) {
+            c.cancel()
+            refusals.count("internet")
+            countFailure(source, now)
+            return
+        }
         let fromSource = pending.values.filter { $0.source == source }.count
         guard pending.count < Self.maxPending, fromSource < Self.maxPendingPerSource else {
             c.cancel()
@@ -233,27 +245,31 @@ final class RemoteServer {
             _ = checkOrigin(id, c)
         case .ready:
             readyArrived(id, c)
-        case .failed:
+        case .failed(let e):
             c.cancel()
-            endedBeforeAdmission(id)
+            endedBeforeAdmission(id, error: e)
         case .cancelled:
-            endedBeforeAdmission(id)
+            endedBeforeAdmission(id, error: nil)
         default:
             break
         }
     }
 
-    /// At the first state with a path: a source the door does not admit is cancelled before TLS
-    /// gets anywhere. False when it was refused.
+    /// The origin, classified once from the connection's own path, judged against the internet
+    /// switch as it is now: at `.preparing` (behind the check before start), again at `.ready` and
+    /// at a pairing's kind 19, so a switch turned off during the handshake refuses a connection not
+    /// yet admitted. Admitted ones are `closeSessions`' (RemoteAccess changes the snapshot before it
+    /// queues that), so none slips between the two. False when refused, or no longer pending.
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id] else { return false }
-        if p.origin != nil { return true }
-        let (origin, interface) = server.arrival(of: c)
-        p.origin = origin
-        p.interface = interface
-        pending[id] = p
-        guard OriginPolicy.remoteAdmits(origin, internetAccess: trust.snapshot.internetAccess) else {
-            report(id, "internet")
+        if p.origin == nil {
+            let (origin, interface) = server.arrival(of: c)
+            p.origin = origin
+            p.interface = interface
+            pending[id] = p
+        }
+        guard let origin = p.origin, OriginPolicy.remoteAdmits(origin, internetAccess: trust.snapshot.internetAccess) else {
+            refuse(id, "internet")
             c.cancel()
             return false
         }
@@ -267,7 +283,7 @@ final class RemoteServer {
         case RemoteTLS.sessionALPN?: admitSession(id, c, fp)
         case RemoteTLS.pairingALPN?: readPairRequest(id, c, fp)
         default:
-            report(id, "unpaired")
+            refuse(id, "unpaired")
             c.cancel()
         }
     }
@@ -276,12 +292,13 @@ final class RemoteServer {
     private func admitSession(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data?) {
         let t = trust.snapshot
         guard let fp, let name = t.paired[fp] else {
-            report(id, "unpaired")
+            refuse(id, "unpaired")
             c.cancel()
             return
         }
         guard let p = pending.removeValue(forKey: id) else { return }
         p.deadline?.cancel()
+        forgive(p.source)
         guard t.remoteAccess else {
             StreamServer.sayGoodbye(Goodbye.remoteOff, on: c, queue: queue)
             return
@@ -299,29 +316,34 @@ final class RemoteServer {
 
     /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, judged on
     /// the main actor, answered with one kind 20, then closed once that is sent (or after 250 ms).
+    /// A device that goes away before its kind 19 is not refused, only closed.
     private func readPairRequest(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data?) {
         guard trust.snapshot.pairingOpen, let fp else {
-            report(id, "unpaired")
+            refuse(id, "unpaired")
             c.cancel()
             return
         }
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
             guard let self else { return }
-            guard let data, let h = StreamMessage.parseHeader(data), h.kind == .pairRequest,
+            guard let data else { c.cancel(); return }
+            guard let h = StreamMessage.parseHeader(data), h.kind == .pairRequest,
                   h.payloadLength > 0, h.payloadLength <= StreamMessage.maxPairingPayload else {
-                self.report(id, "unpaired")
+                self.refuse(id, "unpaired")
                 c.cancel()
                 return
             }
             c.receive(minimumIncompleteLength: h.payloadLength, maximumLength: h.payloadLength) { [weak self] data, _, _, _ in
                 guard let self else { return }
-                guard let data, let request = Wire.decode(PairRequest.self, from: data), var p = self.pending.removeValue(forKey: id) else {
-                    self.report(id, "unpaired")
+                guard let data else { c.cancel(); return }
+                guard let request = Wire.decode(PairRequest.self, from: data) else {
+                    self.refuse(id, "unpaired")
                     c.cancel()
                     return
                 }
+                // The internet switch as it is now (it may have gone off since `.ready`). Gone from
+                // `pending`: the deadline passed while the payload came in.
+                guard self.checkOrigin(id, c), let p = self.pending.removeValue(forKey: id) else { c.cancel(); return }
                 p.deadline?.cancel()
-                p.deadline = nil
                 guard let judge = self.onPairAttempt else { c.cancel(); return }
                 let queue = self.queue
                 judge(PairAttempt(request: request, deviceFingerprint: fp, source: p.source)) { result in
@@ -336,34 +358,66 @@ final class RemoteServer {
         }
     }
 
-    /// Counts one refusal for the minute's summary, once per connection.
-    private func report(_ id: ObjectIdentifier, _ category: String) {
-        guard var p = pending[id], !p.reported else { return }
-        p.reported = true
+    /// The door refuses a pending connection: one count for the minute's summary (once per
+    /// connection), and its end then counts one failure for its source.
+    private func refuse(_ id: ObjectIdentifier, _ category: String) {
+        guard var p = pending[id], !p.refused else { return }
+        p.refused = true
         pending[id] = p
         refusals.count(category)
     }
 
     private func deadlinePassed(_ id: ObjectIdentifier) {
         guard let p = pending[id] else { return }
-        report(id, "unpaired")
+        refuse(id, "unpaired")
         p.connection.cancel()        // `.cancelled` then counts the failure
     }
 
-    /// A connection that ended before it was admitted: one failure for its source (5 in 60 s → a
-    /// backoff), and a refusal for the summary unless one was counted already.
-    private func endedBeforeAdmission(_ id: ObjectIdentifier) {
+    /// A connection that ended before it was admitted counts one failure for its source (5 in 60 s
+    /// → a backoff) only when the door refused it: marked by `refuse`, or a handshake the door
+    /// failed (`doorRefused`, counted for the summary here). A peer that went away by itself counts
+    /// for nothing, so a device cancelling the losers of its own staggered dial, or giving up on a
+    /// Mac whose key it no longer pins, never locks its address out.
+    private func endedBeforeAdmission(_ id: ObjectIdentifier, error: NWError?) {
         guard let p = pending.removeValue(forKey: id) else { return }
         p.deadline?.cancel()
-        if !p.reported { refusals.count("unpaired") }
-        let now = CFAbsoluteTimeGetCurrent()
-        var list = (failures[p.source] ?? []).filter { now - $0 < Self.failureWindow }
+        var refused = p.refused
+        if !refused, let error, Self.doorRefused(error) {
+            refused = true
+            refusals.count("unpaired")
+        }
+        if refused { countFailure(p.source, CFAbsoluteTimeGetCurrent()) }
+    }
+
+    /// One failure for `source`; the fifth within a minute starts its backoff.
+    private func countFailure(_ source: String, _ now: CFAbsoluteTime) {
+        var list = (failures[source] ?? []).filter { now - $0 < Self.failureWindow }
         list.append(now)
         if list.count >= Self.failuresForBackoff {
-            backoffUntil[p.source] = now + backoff
+            backoffUntil[source] = now + backoff
             list = []
         }
-        failures[p.source] = list
+        failures[source] = list
+    }
+
+    /// A source that proved itself (a paired key at `.ready`) starts clean: what its earlier
+    /// attempts cost is not held against it.
+    private func forgive(_ source: String) {
+        failures[source] = nil
+        backoffUntil[source] = nil
+    }
+
+    /// The statuses Network.framework reports on the Mac's side for a handshake the door itself
+    /// failed (measured on loopback, 2026-09-24): the verify block refused the key (-9808
+    /// errSSLBadCert: not paired, no application protocol, not P-256), no certificate (-9863), an
+    /// application protocol the door does not offer (-9810), not TLS 1.3 or not TLS at all (-9836,
+    /// -9858). A peer going away reads otherwise: an attempt cancelled mid-handshake is -9816
+    /// (errSSLClosedNoNotify) or ECONNRESET, a device refusing the Mac's key (another pin) -9825.
+    static let doorRefusals: Set<OSStatus> = [-9808, -9863, -9810, -9836, -9858]
+
+    static func doorRefused(_ error: NWError) -> Bool {
+        guard case .tls(let status) = error else { return false }
+        return doorRefusals.contains(status)
     }
 
     /// Forgets stale per-source records, so a scan from many addresses cannot grow them for ever.

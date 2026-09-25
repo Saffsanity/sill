@@ -58,12 +58,15 @@ public enum RemoteTLS {
             sec_protocol_options_add_tls_application_protocol(sp, alpn)
             sec_protocol_options_set_tls_server_name(sp, serverName)
         }
-        sec_protocol_options_set_verify_block(sp, { metadata, trust, complete in
-            // Never SecTrustEvaluate: the pin is the whole of trust. The leaf is the peer's own
-            // certificate; anything but a P-256 key gives nil, which no pin matches.
-            let t = sec_trust_copy_ref(trust).takeRetainedValue()
-            let leaf = (SecTrustCopyCertificateChain(t) as? [SecCertificate])?.first
-            complete(verify(leaf.flatMap { SPKI.fingerprint(of: $0) }, negotiatedALPN(metadata)))
+        sec_protocol_options_set_verify_block(sp, { metadata, _, complete in
+            // The pin is the whole of trust, so the trust object is never touched: even copying its
+            // chain evaluates it, and an evaluation may have trustd fetch an issuer that the peer's
+            // certificate names (an AIA URL), holding this queue, which the host's stream shares,
+            // for seconds per unreachable URL before any pin is checked (review, 2026-09-24: 3 s
+            // each, and the home door's frames stopped meanwhile). The leaf is read as the peer
+            // sent it: no evaluation, no network. Anything but a P-256 key gives nil, which no pin
+            // matches.
+            complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, negotiatedALPN(metadata)))
         }, queue)
         return options
     }
@@ -109,11 +112,17 @@ public enum RemoteTLS {
     /// or its key is not P-256.
     public static func peerFingerprint(_ connection: NWConnection) -> Data? {
         guard let m = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
+        return peerLeaf(m.securityProtocolMetadata).flatMap { SPKI.fingerprint(of: $0) }
+    }
+
+    /// The first certificate the peer sent (its own), exactly as the handshake carried it. Never
+    /// evaluated, so reading it can never wait on the network (see the verify block).
+    static func peerLeaf(_ metadata: sec_protocol_metadata_t) -> SecCertificate? {
         var leaf: SecCertificate?
-        _ = sec_protocol_metadata_access_peer_certificate_chain(m.securityProtocolMetadata) { cert in
+        _ = sec_protocol_metadata_access_peer_certificate_chain(metadata) { cert in
             if leaf == nil { leaf = sec_certificate_copy_ref(cert).takeRetainedValue() }
         }
-        return leaf.flatMap { SPKI.fingerprint(of: $0) }
+        return leaf
     }
 
     /// The `copy_` form where it exists: the `get_` one is deprecated from macOS 15.5 and iOS 18.5,

@@ -68,10 +68,14 @@ package final class HostIdentity: @unchecked Sendable {
 package protocol IdentityStore: AnyObject {
     /// For the log: "in memory", "in the test directory …".
     var summary: String { get }
-    /// The Mac's P-256 private key, created on first use.
+    /// The Mac's P-256 private key, created on first use. Only a key that does not exist yet is
+    /// created: any other failure to read one throws, since a new key is a new Mac ID and breaks
+    /// every pin.
     func loadOrCreateKey() throws -> SecKey
-    /// 32 random bytes, created on first use.
+    /// 32 random bytes, created on first use (the same rule).
     func loadOrCreateRecognitionKey() throws -> Data
+    /// The trust list: empty only when none was ever saved. One that cannot be read throws, or the
+    /// next save would replace it.
     func loadPaired() throws -> [PairedDevice]
     func savePaired(_ devices: [PairedDevice]) throws
     /// TEST ONLY: a directory where a test hook may leave the current pairing link and code (the
@@ -122,23 +126,37 @@ package final class MemoryIdentityStore: IdentityStore {
 /// TEST ONLY (SILL_TEST_REMOTE_DIR=<dir>, honoured only by a host that does not advertise): the
 /// identity and trust list in a directory of mode 0700, each file 0600, so a test can pair, restart
 /// the host and find the same Mac ID and pairings, without the login keychain.
-/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`.
+/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`, and
+/// `.lock`, which one host holds for as long as it uses the directory: two hosts sharing it would
+/// each save their own list over the other's.
 package final class FileIdentityStore: IdentityStore {
     package let directory: URL
+    /// The open `.lock`, flock'ed exclusively; closing it (or the process ending) lets it go.
+    private let lock: Int32
 
     package init(directory: URL) throws {
         self.directory = directory
         let fm = FileManager.default
         try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        let path = directory.appendingPathComponent(".lock").path
+        let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw IdentityStoreError("\(path) could not be opened (errno \(errno))") }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            close(fd)
+            throw IdentityStoreError("\(directory.path) is in use by another Sill host")
+        }
+        lock = fd
     }
+
+    deinit { close(lock) }
 
     package var summary: String { "in the test directory \(directory.path)" }
     package var testDirectory: URL? { directory }
 
     package func loadOrCreateKey() throws -> SecKey {
         let url = directory.appendingPathComponent("host-key")
-        if let data = try? Data(contentsOf: url) {
+        if let data = try Self.read(url) {
             guard let key = RemoteKey.importPrivate(data) else { throw IdentityStoreError("\(url.path) is not a P-256 key") }
             return key
         }
@@ -149,7 +167,7 @@ package final class FileIdentityStore: IdentityStore {
 
     package func loadOrCreateRecognitionKey() throws -> Data {
         let url = directory.appendingPathComponent("recognition-key")
-        if let data = try? Data(contentsOf: url) {
+        if let data = try Self.read(url) {
             guard data.count == 32 else { throw IdentityStoreError("\(url.path) is not 32 bytes") }
             return data
         }
@@ -160,9 +178,22 @@ package final class FileIdentityStore: IdentityStore {
 
     package func loadPaired() throws -> [PairedDevice] {
         let url = directory.appendingPathComponent("paired.json")
-        guard let data = try? Data(contentsOf: url) else { return [] }
+        guard let data = try Self.read(url) else { return [] }
         guard let list = try? JSONDecoder().decode([PairedDevice].self, from: data) else { throw IdentityStoreError("\(url.path) is damaged") }
         return list
+    }
+
+    /// The file's bytes, or nil when it does not exist yet. Anything else (no permission, an I/O
+    /// error) throws: taken for "missing", it would make a new key (a new Mac ID, every pin broken)
+    /// or an empty trust list that the next pairing saves over the real one.
+    private static func read(_ url: URL) throws -> Data? {
+        do {
+            return try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        } catch {
+            throw IdentityStoreError("\(url.path) could not be read (\(error.localizedDescription))")
+        }
     }
 
     package func savePaired(_ devices: [PairedDevice]) throws {

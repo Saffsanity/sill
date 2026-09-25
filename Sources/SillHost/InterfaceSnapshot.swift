@@ -5,7 +5,8 @@ import Darwin
 /// point-to-point, loopback), each address with its prefix length. Both doors' origin checks read
 /// it (`interfaces()`), and the remote door's address list reads the point-to-point tunnels that
 /// are not network services from it. Cached for 2 s, so a burst of connections costs one read and
-/// neither door needs a SystemConfiguration watcher.
+/// neither door needs a SystemConfiguration watcher. `routeSource(to:)` asks the kernel which of
+/// these addresses its route to a peer uses.
 ///
 /// Thread-safe: the doors call it on the network queue, the address list on its own queue.
 final class InterfaceSnapshot: @unchecked Sendable {
@@ -102,5 +103,45 @@ final class InterfaceSnapshot: @unchecked Sendable {
 
     private static func ones(_ mask: [UInt8]) -> Int {
         mask.reduce(0) { $0 + $1.nonzeroBitCount }
+    }
+
+    /// The address of this Mac that the kernel's route to `destination` (4 or 16 bytes) sends
+    /// from, found by connecting a UDP socket, which sends nothing: where a connection from there
+    /// arrived, for a check that runs before the connection has a path. Nil without a route.
+    static func routeSource(to destination: [UInt8]) -> [UInt8]? {
+        let v4 = destination.count == 4
+        guard v4 || destination.count == 16 else { return nil }
+        let fd = socket(v4 ? AF_INET : AF_INET6, SOCK_DGRAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var remote = sockaddr_storage()
+        let length: socklen_t
+        if v4 {
+            var sin = sockaddr_in()
+            length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            sin.sin_len = UInt8(length)
+            sin.sin_family = sa_family_t(AF_INET)
+            sin.sin_port = in_port_t(9).bigEndian          // any port: nothing is sent
+            withUnsafeMutableBytes(of: &sin.sin_addr) { $0.copyBytes(from: destination) }
+            withUnsafeMutableBytes(of: &remote) { $0.storeBytes(of: sin, as: sockaddr_in.self) }
+        } else {
+            var sin6 = sockaddr_in6()
+            length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+            sin6.sin6_len = UInt8(length)
+            sin6.sin6_family = sa_family_t(AF_INET6)
+            sin6.sin6_port = in_port_t(9).bigEndian
+            withUnsafeMutableBytes(of: &sin6.sin6_addr) { $0.copyBytes(from: destination) }
+            withUnsafeMutableBytes(of: &remote) { $0.storeBytes(of: sin6, as: sockaddr_in6.self) }
+        }
+        let connected = withUnsafePointer(to: &remote) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, length) } }
+        guard connected == 0 else { return nil }
+        var local = sockaddr_storage()
+        var localLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let named = withUnsafeMutablePointer(to: &local) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &localLength) } }
+        guard named == 0 else { return nil }
+        return withUnsafeBytes(of: &local) { raw in
+            v4 ? withUnsafeBytes(of: raw.load(as: sockaddr_in.self).sin_addr) { Array($0) }
+               : withUnsafeBytes(of: raw.load(as: sockaddr_in6.self).sin6_addr) { Array($0) }
+        }
     }
 }
