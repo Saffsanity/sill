@@ -817,7 +817,9 @@ only one. Protections now in the host:
   queue declares the session hung after 1.5 s and calls `onHung`.
 - The coordinator then restarts the source on the software encoder at half
   scale (slow, ~10 fps under load, but live) and says so in the log; three
-  software hangs stop the stream instead of looping.
+  software hangs stop the stream instead of looping. Since 2026-09-25 that
+  lasts only until a re-check finds the hardware answering (below); before, it
+  lasted until the host relaunched.
 - Presentation timestamps are forced monotonic; a keyframe request re-encodes
   the last frame only when the window is static.
 - Never reconfigure a running SCStream (`updateConfiguration` also wedged it);
@@ -846,6 +848,136 @@ Diagnosis tools: `swift run -c release CaptureProbe <window> [s] [--encode]
 [--synthetic] [--software] [--h264] [--lowres]` (capture vs encode, hardware vs
 software) and `sample <pid> 2` (a wedged encode shows as
 VTCompressionSessionEncodeFrameWithOutputHandler → RemoteVideoEncoder).
+
+**Busy, not stuck (2026-09-24; fixed 2026-09-25, branch `encoder-recovery`
+from main at 76366e8).** Sill.app's watchdog fired twice on 2026-09-24 and
+both times the host stayed on the software encoder until it relaunched, which
+was Noah's poor frame rate (~3 h at 1512×982, 46–55 fps with motion, 6–46 fps
+at the end, through 18 settings changes the fallback's caps made useless). The
+kernel's AppleAVE2 log (every hardware session's open with its size, bitrate
+and firmware "Priority", and a HeartBeat every 5 s listing each session's
+frames submitted | completed) shows neither was a wedge:
+- 19:00:21 (40 Mbps, the Retina desktop at 60 fps, a 61 s old session): the
+  iOS Simulator's screen recorder (SimRenderServer, what `simctl io
+  recordVideo` drives: H.264 2064×2752 of the iPad Pro 13" simulator, 38 Mbps,
+  priority 80) shared the one encoder engine with Sill and an agent's `SillHost
+  --synthetic` (both priority 0). Sill fell to 7–8 fps, then its frame waited
+  ~8.6 s; the invalidate blocked 7.06 s, off-thread, and the frame completed
+  0.3 s after the other SillHost process died. A fresh 256×256 probe answered
+  within 270 ms with the recorder still running, while the next stream-size
+  sessions stalled again (0.3–9.5 s).
+- 23:30:04 (150 Mbps, a 36 s old session, running 57–58 fps alone): the
+  recorder opened a session at 23:29:45.2 and Sill fell from 58 to 22 fps in
+  that second, then ran 13–45 fps; a frame waited ~1.8 s and completed (the
+  invalidate took 0.17 s). A near miss at 23:27:54 (57 → 2–34 fps) came from
+  the same recorder. The render and the benchmarks named at the time ran later.
+- 424 hardware HEVC sessions from 17:40 to 02:30: 47 overlapped a recorder
+  session and 7 of those stalled (median 39 fps); the other 377 had no stall
+  (median 60), including a priority-0 H.264 2064×2752 benchmark beside HEVC
+  3024×1968 at 40–150 Mbps (both 28–46 fps, a fair share). Ruled out: the
+  bitrate (hang 1 was at 40 Mbps), 120 fps (both at 60), session churn (22
+  bitrate restarts ran clean) and invalidating with a frame inside (both
+  frames completed). No "Frame POC timed out" line, the 2026-09-22 signature,
+  anywhere in the period (the log store no longer has 09-22's AppleAVE2 lines).
+- Priorities, measured with one 256×256 frame per configuration: real-time
+  HEVC and H.264 0, not real-time 0, `EnableLowLatencyRateControl` 60 (RCMode
+  20), the recorder 80. No public key sets it. One engine on this M2 Pro:
+  unthrottled HEVC 3024×1968 runs ~105–115 fps (~650 MP/s), so the Retina
+  desktop at 60 fps takes 55–65 % of it and any other encode costs Sill frames
+  without a hang (a 3024×1904 test beside Noah's 1512×982 desktop: both at
+  57–60 fps for ~4 s, then both at ~50, 2026-09-25). A Retina desktop at 120 fps
+  (~713 MP/s) exceeds it alone (untested).
+- A bitrate change still needs a new session (measured 2026-09-25, 1512×948 at
+  60 fps, blocky noise): VideoToolbox takes AverageBitRate and DataRateLimits
+  on a live session and reads them back, but the hardware HEVC rate control
+  does not follow: raised 8 → 40 Mbps the output stayed at 9.6 Mbps for 5 s,
+  across an IDR and a forced keyframe (a session made at 40: 28 Mbps); lowered
+  40 → 8 it dropped 41 of the next 60 frames. Hardware H.264 the same. The
+  software encoder follows (7.9 → 19.5 Mbps in 2 s) and so does low-latency
+  rate control (8 → 38 Mbps within 1 s). `restartNeeded` keeps the bitrate.
+- `VTCompressionSessionInvalidate` waits for a frame still inside (17 ms for a
+  3024×1898 frame in flight, whose output handler runs first).
+
+What the host does now:
+- The fallback is temporary. `enterSoftwareFallback` (a hardware hang, or the
+  launch probe) says "… (busy or stuck); switching to the software encoder at
+  half scale until the hardware answers again (next check in 30 s)." While a
+  device is connected (an idle host opens no session; the task ends with the
+  last device) `recheckLoop` probes a 256×256 hardware session, quiet (no line,
+  no counter: the stats line's `enc.out` is the menu's fps), off the main
+  actor, 1 s at most. An answer: `hardwareIsBack` waits out a switch, clears
+  the flag, and restarts a running stream on the hardware, like a settings
+  change (no focus change): "Hardware encoder is back (answered in 20 ms);
+  restarting the stream on it." (or "the next stream uses it"). No answer:
+  "Hardware encoder still not answering after N ms; next check in 60 s", the
+  interval doubling to 300 s. A hang within 5 min of a return doubles it too (a
+  small probe can pass while a big session still starves); a return that
+  lasted 10 min resets it to 30 s. The first device after none gets a check at
+  once when the last is 30 s old, so its stream starts on the hardware (a
+  software start ~20 ms before is replaced). A hang reported by an encoder no
+  newer than the last return (`HEVCEncoder.serial`) is stale and ignored.
+- The session given up on reports on its way out: "Encoder (hardware HEVC
+  3024×1898): the stalled frame came back after 3.0 s; the encoder was busy,
+  not stuck." A stuck one never lets go, so it never prints.
+- Probes whose frame never comes back each hold a blocked thread; with 8 out
+  (`maxStuckProbes`, after 22–28 min of failed checks) the re-check stops
+  probing and says once that the encoder is stuck and a restart of the Mac
+  fixes it, and the menu shows "Hardware Encoder Stuck". A late frame counts
+  out again.
+- Copy: the menu's "Hardware Encoder Busy — Streaming with the software
+  encoder, up to 60 fps, until it answers again." (one line, 383 pt: a menu
+  item's subtitle does not wrap, the old one was 422 pt) or "Hardware Encoder
+  Stuck — … Restarting the Mac fixes this."; the Streaming pane says the same
+  at length; `HostSettingsState.softwareEncoder`'s doc. The device's callout
+  still says "until the Mac restarts" (iOS, not in this change); it goes away
+  by itself when the host clears the flag.
+- Test hooks, read once and inert without them: `SILL_TEST_ENCODER_HANG=N`
+  (the first N hardware stream sessions hold frame 90 for 3 s before it goes
+  in: a busy engine; it prints a "TEST:" line), `SILL_TEST_PROBE_HOLD=S` (every
+  probe's frame waits S s; a huge S is a stuck encoder) and
+  `SILL_TEST_RECHECK_SECONDS=N` (intervals N to 10 N instead of 30 to 300).
+- Diagnosis: `/usr/bin/log show --start '2026-09-24 18:55' --end '2026-09-24
+  19:05' --style compact --predicate 'sender == "AppleAVE2" AND (eventMessage
+  CONTAINS "HeartBeat" OR eventMessage CONTAINS "Resolution:" OR eventMessage
+  CONTAINS "AVE : open" OR eventMessage CONTAINS "AVE : close")'` (a session
+  whose completed count stops while its submitted one is ahead is starved;
+  "Priority: 80" beside it is the recorder), plus `process ==
+  "VTEncoderXPCService" AND eventMessage CONTAINS "videoencoder.peer"` to map
+  sessions (the next "AVE : open") to client PIDs.
+- Operational rule, from the same logs: while Noah streams, agents do not run
+  `simctl io recordVideo`, SillHost streams, ReelRenderer or encoder benchmarks;
+  each shares the one engine, and the recorder outranks Sill.
+- Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
+  60 (above every default session, still below the recorder's 80) and follows
+  live bitrate changes, but it changes the bitstream and rate control (frames
+  dropped at 8 Mbps in the rate test): a flagged experiment with iPad tests.
+Verified headless (the synthetic host; hardware runs kept to seconds, Noah's
+Sill.app streaming beside them): clean build (only the old CaptureProbe
+warning); the CLI against 76366e8 built from `git archive`, idle and with a
+client and a bitrate change, masked and sorted: identical;
+`SILL_TEST_ENCODER_HANG=1` with a client: the hang at 1.5 s, the fallback,
+1512×948, "came back after 3.0 s", "Hardware encoder is back (answered in
+20 ms)" 30.0 s later and 3024×1898 again, the client getting frames every
+second but the hang's; `=2`: the second hang 3.5 s after the return, "next
+check in 60 s", back 60.0 s later; the client leaving during a fallback: no
+probe session in the kernel log for 45 s (the next check was due after 30),
+then a client again: a check at once and back 20 ms after its stream started;
+`SILL_TEST_PROBE_HOLD=100000 SILL_TEST_RECHECK_SECONDS=1` with a client
+picking nothing: the launch fallback, then checks 1, 2, 4, 8, 10, 10 and 10 s
+apart, all unanswered, and the stuck line after the 8th unanswered probe (the
+launch one and 7 checks); `SILL_TEST_PROBE_HOLD=2`: nine unanswered probes,
+each back 2 s later, never stuck; previews against 76366e8: only menu.txt (the
+copy and a new `software-encoder-stuck` sample, its cards equal to the busy
+one's) and the General pane's "Running from" path differ.
+- **Untested, for Noah:** a build of this branch in /Applications
+  (`Scripts/make-app.sh --install --open` after the merge; the Sill.app
+  relaunched at 02:26 is on the hardware encoder, but only a new build comes
+  back by itself). Then, with the iPad streaming, `xcrun simctl io booted
+  recordVideo /tmp/x.mov` for a minute on a booted iPad Pro 13" simulator: the
+  frame rate drops, and maybe "switching to the software encoder" and "the
+  stalled frame came back" with "Hardware Encoder Busy" in the menu; stop the
+  recording (Ctrl-C) and within 30–60 s "Hardware encoder is back" and the full
+  resolution on the iPad.
 
 Still open: the unexplained one-off stall where new clients received no catalog
 (2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
@@ -923,7 +1055,8 @@ good.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
-  viewports, falls back to the software encoder on a hang, stops capture when
+  viewports, falls back to the software encoder on a hang and re-checks the
+  hardware until it can go back (`recheckLoop`), stops capture when
   the last client leaves, takes live settings between pipelines (`setTarget`,
   from the app and from devices' kind 17, answered and published as kind 16;
   a pick made during a restart runs after it) and writes `HostStatus`), `HostConfig` (the knobs: maxFPS, captureScale, bitrate
@@ -936,7 +1069,9 @@ good.
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
   `--synthetic`), `HEVCEncoder` (VideoToolbox behind a one-slot mailbox with a
-  hang watchdog; hardware or software), `EncoderSelfTest`
+  hang watchdog; hardware or software; says whether a stalled frame came
+  back), `EncoderProbe` (one small frame through a hardware session: at
+  launch, and quietly for the re-check), `EncoderSelfTest`
   (`--encoder-selftest`), `CursorShapeWatcher` (NSCursor.currentSystem →
   `.cursorShape`), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
