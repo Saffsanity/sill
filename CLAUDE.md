@@ -8,28 +8,38 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
-**Public README (2026-09-25, branch `public-readme` from main at b50e224).**
-For the repository going public at launch: `README.md` is the public front
-page, everything the old README said is in `docs/DEVELOPMENT.md` (word for
-word but for local paths, cross-references and two notes on the iOS project),
-`LICENSE` is the Apache License 2.0 as apache.org publishes it with "Copyright
-2026 Noah Saffer" in its appendix, and `.github/FUNDING.yml` names GitHub
-Sponsors (Saffsanity) and Ko-fi (see Layout for all four). The README claims
-only what the site and this file back: Apple silicon and macOS 14, iOS 17, no
-latency figures, and the home connection's lack of encryption said plainly.
-- **For Noah:** the Ko-fi handle (a placeholder in FUNDING.yml and in the
-  README's one Ko-fi link; for Sponsors only, delete both); Sponsorships turned
-  on in the repository's settings (General, Features), or GitHub shows no
-  Sponsor button (github.com/sponsors/Saffsanity is live since 2026-09-25);
-  Apache-2.0 or MPL-2.0, still open in docs/BRIEF.md (for MPL-2.0, replace
-  LICENSE and the README's License section); the App Store badge and the
-  sentence under the README's links, as the listing and the first notarized
-  Sill for Mac come out.
-- Merging: the open branches that edit the old README put that text in
-  docs/DEVELOPMENT.md: app-store-readiness's release paragraph under
-  Releasing (its Layout list fits the Overview), follow-best-path's cable
-  paragraph after step 3 of The iOS app, encoder-two-in-flight's stats-line
-  bullet under Troubleshooting.
+**Public README (2026-09-25, branch `public-readme` from main at b50e224,
+draft PR #15).** For the repository going public at launch: `README.md` is the
+public front page, everything the old README said is in `docs/DEVELOPMENT.md`
+(word for word but for local paths, cross-references and two notes on the iOS
+project, plus the two cable sentences main's README gained from
+follow-best-path, PR #12, after this branch began), `LICENSE` is the Apache
+License 2.0 as apache.org publishes it with "Copyright 2026 Noah Saffer" in
+its appendix, and `.github/FUNDING.yml` names GitHub Sponsors (Saffsanity)
+only, until there is a Ko-fi handle (see Layout for all four). The README
+claims only what the site and this file back: Apple silicon and macOS 14, iOS
+17, no latency figures, and the home connection's lack of encryption said
+plainly.
+- **For Noah:** Sponsorships turned on in the repository's settings (General,
+  Features), or GitHub shows no Sponsor button (github.com/sponsors/Saffsanity
+  is live since 2026-09-25); a Ko-fi handle, if wanted, goes in two places, a
+  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; Apache-2.0 or
+  MPL-2.0, still open in docs/BRIEF.md (for MPL-2.0, replace LICENSE and the
+  README's License section); the App Store badge and the sentence under the
+  README's links, as the listing and the first notarized Sill for Mac come
+  out.
+- Merging: main gained follow-best-path (PR #12, cea195c) after this branch
+  began, so PR #15 conflicts in README.md and CLAUDE.md: take this branch's
+  README.md (DEVELOPMENT.md's step 3 of The iOS app already has PR #12's
+  cable sentences) and keep both Current step entries. The open branches that
+  edit the old README put that text in docs/DEVELOPMENT.md:
+  app-store-readiness's release paragraph under Releasing (its Layout list
+  fits the Overview), encoder-two-in-flight's stats-line bullet and its
+  Resolution note under What to try if it's slow, and update-notice's (local,
+  not pushed) Updates paragraph under Sill.app, the menu bar host, its
+  Distribution text under Releasing and its device-hello paragraph after the
+  gear paragraph of The iOS app. A change the public README describes (pairing
+  at home, say) also updates README.md's How it works and Good to know.
 
 **The hardware encoder: busy, not stuck (2026-09-24; fixed 2026-09-25, branch
 `encoder-recovery` from main at 76366e8, with main at ba91136 merged in: the
@@ -1529,8 +1539,9 @@ good.
   and its download, support and privacy pages, a commented App Store badge
   slot, requirements, how it works, tips, building from source in brief,
   contributing, the license. `LICENSE` — the Apache License 2.0.
-  `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors and Ko-fi. Tip
-  links live there and on the site, never in the iOS app.
+  `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
+  line joins it once there is a Ko-fi handle). Tip links live there, in the
+  README's Tips and on the site, never in the iOS app.
 
 ## Build and run
 

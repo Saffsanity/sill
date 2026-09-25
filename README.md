@@ -21,17 +21,18 @@ server in between.
      as the App Store listing and the first notarized build of Sill for Mac come
      out, and delete it once both have. -->
 
-The first build of Sill for Mac is being prepared, and the iPhone and iPad app
-is not on the App Store yet. Until then, you can build both from source.
+The first public build of Sill for Mac is being prepared, and the iPhone and
+iPad app is not on the App Store yet. Until then, you can build both from
+source.
 
 ## Requirements
 
 - A Mac with Apple silicon, on macOS 14 or later.
 - An iPhone or iPad with iOS 17 or iPadOS 17 or later.
 - On your Mac, Sill asks for Screen Recording, to show your windows, and
-  Accessibility, to click, scroll and type for you. On macOS 15 or later, also
-  allow Local Network. On your iPhone or iPad, Sill asks for Local Network, to
-  find your Mac.
+  Accessibility, to click, scroll and type for you and to move and size the
+  window it shows. On macOS 15 or later, also allow Local Network. On your
+  iPhone or iPad, Sill asks for Local Network, to find your Mac.
 - Your Mac and your device on the same network, joined by a USB cable, or near
   each other with Direct Wireless Connection on. Away from home, your own VPN,
   such as Tailscale, with Remote Access on.
@@ -48,8 +49,8 @@ is not on the App Store yet. Until then, you can build both from source.
   current.
 - **Your input** goes back the same way: taps and clicks, scrolls with
   momentum, the on-screen trackpad, keys and typed text, and Apple Pencil as
-  the pointer. Sill for Mac turns it into mouse and keyboard events, which is
-  what Accessibility is for.
+  the pointer. Sill for Mac turns it into mouse and keyboard events, which
+  needs Accessibility.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
@@ -64,10 +65,10 @@ is not on the App Store yet. Until then, you can build both from source.
 
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
 does not play sound from your Mac. On your local network, over the cable and
-over Direct Wireless Connection, the connection is not encrypted, and any
-iPhone or iPad with Sill on the same network (or nearby, with Direct Wireless
-Connection on) can connect while Sill runs on your Mac. Use it on networks you
-trust.
+over Direct Wireless Connection, the connection is not encrypted. While Sill
+runs, any iPhone or iPad with Sill on the same network can connect to your
+Mac, and so can one nearby while Direct Wireless Connection is on. Use it on
+networks you trust.
 
 ## Tips
 
