@@ -52,6 +52,9 @@ final class HEVCEncoder {
     /// Increases with every encoder this process creates, so the owner can tell an encoder made
     /// before some moment from one made after it (`latestSerial` then).
     let serial: Int
+    /// How many frames this session lets inside VideoToolbox at once: two on the hardware encoder,
+    /// one on the software encoder (`EncoderMailbox`). EncoderProbe's test keeps as many inside.
+    let maxInFlight: Int
     private var session: VTCompressionSession?
 
     /// Called on VideoToolbox's callback thread with one access unit (length-prefixed NALs).
@@ -102,6 +105,7 @@ final class HEVCEncoder {
         self.software = software
         self.quiet = quiet
         mailbox = EncoderMailbox(software: software)
+        maxInFlight = mailbox.limit
         Self.serialLock.lock(); Self.lastSerial += 1; serial = Self.lastSerial; Self.serialLock.unlock()
         var s: VTCompressionSession?
         var spec: [CFString: Any] = [:]

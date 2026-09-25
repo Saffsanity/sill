@@ -4,8 +4,9 @@ import CoreMedia
 
 /// Frames through a new hardware HEVC session, to learn whether the encoder can carry a stream:
 /// at launch one small frame (`hardwareResponds`, about 100 ms when healthy), and while the host
-/// streams on the software encoder a short run at the stream's own size (`throughput`, the
-/// coordinator's re-check), held against the rate a return needs (`returnBar`).
+/// streams on the software encoder a short run at the stream's own size with two frames inside
+/// like a stream's (`throughput`, the coordinator's re-check), held against the rate a return
+/// needs (`returnBar`).
 ///
 /// A probe that gets no answer is one of two things. On 2026-09-22 the Mac's hardware encoder was
 /// stuck system-wide for about three hours: every session took a frame and never answered, and
@@ -40,8 +41,10 @@ enum EncoderProbe {
 
     /// What one encoder engine is taken to do alone, in pixels a second, until a test has measured
     /// more (the coordinator keeps the best any test measured): well under what this M2 Pro's engine
-    /// does in `throughput` (700–800 MP/s: ~120 fps at 3024×1904, ~39 at 6016×3384, 2026-09-25), so
-    /// `returnBar` never asks a slower engine for more than it has.
+    /// did in `throughput` one frame at a time (700–800 MP/s: ~120 fps at 3024×1904, ~39 at
+    /// 6016×3384, 2026-09-25; with two inside, as the test now runs, a free engine can only
+    /// return frames as fast or faster), so `returnBar` never asks a slower engine for more than
+    /// it has.
     static let assumedEnginePixelRate = 400e6
 
     /// The rate `throughput` must measure at `pixels` a frame for the stream to go back to the
@@ -52,7 +55,7 @@ enum EncoderProbe {
     /// but a free engine tests a Retina 6K Desktop (6016×3384) at 37–39 fps, and a fixed 45 kept
     /// such a host on the software encoder for good (5K, 5120×2880: 50–53). The same share of the
     /// engine's own rate still tells busy from free there: a starved session got a sixth of it or
-    /// less.
+    /// less. (All measured one frame at a time, before the test kept two inside.)
     static func returnBar(streamFPS: Int, pixels: Int, enginePixelRate: Double, share: Double = 0.75) -> Double {
         let byStream = Double(min(streamFPS, 60)) * share
         let byEngine = enginePixelRate / Double(max(pixels, 1)) * share
@@ -89,19 +92,25 @@ enum EncoderProbe {
     }
 
     /// Whether the hardware keeps up with a stream of this size now: frames of a moving test
-    /// pattern through a quiet hardware session (no line, no counter), one at a time as a stream
-    /// sends them (the next goes in when the last came back), and the rate the last `frames` of
-    /// them came back at. Three frames are drawn before the session opens and then reused, as a
-    /// capture stream reuses its surfaces, and the first pass over them is left out (the session's
-    /// warm-up, ~50 ms at Retina size, and each surface's first trip into the encoder): drawing a
-    /// frame costs milliseconds a stream never spends there (30 MB of fresh memory at Retina 6K),
-    /// and inside the timing it counted against the engine. `ok` false: a frame took longer than
-    /// `timeout` (it then counts as stuck until it comes back). `fps` nil: nothing could be
-    /// measured (no pixel buffers), so assume it keeps up. About 110 ms at 3024×1904 when the
-    /// engine is free (~120 fps; drawn inside the timing it measured ~115) and 290 ms at 6016×3384
-    /// (~39 fps; ~37); a starved engine shows as a low rate, not as no answer. Blocks the calling
-    /// thread for up to (`frames` + 3) × `timeout`: never call it on the main actor. `ms` leaves
-    /// the drawing out.
+    /// pattern through a quiet hardware session (no line, no counter), kept inside it as a stream
+    /// keeps them (two at once since 2026-09-25, `HEVCEncoder.maxInFlight`: the next goes in each
+    /// time one comes back), and the rate the last `frames` of them came back at. Two, not one at a
+    /// time as before: the rate a stream reaches is the rate with two inside, and one at a time
+    /// measured the turnaround instead, which reads low wherever part of a frame's time is spent
+    /// beside the encoder chip (the Retina Desktop's slow state: 33 fps one at a time, where two
+    /// inside overlap it; HEVCEncoder). The bar a return needs (`returnBar`) and the engine rate
+    /// learned from the best test are then of the same kind as what the stream will get. Three
+    /// frames are drawn before the session opens and then reused, as a capture stream reuses its
+    /// surfaces (never the same one inside twice), and the first pass over them is left out (the
+    /// session's warm-up, ~50 ms at Retina size, and each surface's first trip into the encoder):
+    /// drawing a frame costs milliseconds a stream never spends there (30 MB of fresh memory at
+    /// Retina 6K), and inside the timing it counted against the engine. `ok` false: a frame took
+    /// longer than `timeout` (it then counts as stuck until it comes back). `fps` nil: nothing
+    /// could be measured (no pixel buffers), so assume it keeps up. One at a time it took about
+    /// 110 ms at 3024×1904 when the engine was free (~120 fps; drawn inside the timing it measured
+    /// ~115) and 290 ms at 6016×3384 (~39 fps; ~37); a starved engine shows as a low rate, not as
+    /// no answer. Blocks the calling thread for up to (`frames` + 3) × `timeout`: never call it on
+    /// the main actor. `ms` leaves the drawing out.
     static func throughput(width: Int, height: Int, frames: Int = 7, timeout: TimeInterval = 1.0) -> (ok: Bool, fps: Double?, ms: Int) {
         let drawn = (0..<3).compactMap { testFrame(width: width, height: height, bar: $0) }
         let started = CFAbsoluteTimeGetCurrent()
@@ -114,14 +123,23 @@ enum EncoderProbe {
         enc.onEncoded = { _, _, _ in done.signal() }
         enc.testHoldEachFrame = testHold
         let timed = max(1, frames)
+        let total = drawn.count + timed
         var timedFrom: CFAbsoluteTime = 0
-        for i in 0..<(drawn.count + timed) {
-            enc.encode(drawn[i % drawn.count], pts: CMTime(value: CMTimeValue(i), timescale: 60))
+        var sent = 0
+        func send() {
+            enc.encode(drawn[sent % drawn.count], pts: CMTime(value: CMTimeValue(sent), timescale: 60))
+            sent += 1
+        }
+        // As many inside as the stream would have (fewer than the three surfaces, so none goes in
+        // twice); then one more each time one comes back, in the order they went in.
+        while sent < min(enc.maxInFlight, drawn.count - 1, total) { send() }
+        for back in 0..<total {
             guard done.wait(timeout: .now() + timeout) == .success else {
                 giveUp(enc)
                 return (false, nil, elapsed())
             }
-            if i == drawn.count - 1 { timedFrom = CFAbsoluteTimeGetCurrent() }   // the warm-up pass is back
+            if back == drawn.count - 1 { timedFrom = CFAbsoluteTimeGetCurrent() }   // the warm-up pass is back
+            if sent < total { send() }
         }
         let span = CFAbsoluteTimeGetCurrent() - timedFrom
         withExtendedLifetime(enc) {}
