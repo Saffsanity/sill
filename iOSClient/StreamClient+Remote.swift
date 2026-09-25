@@ -149,7 +149,8 @@ extension StreamClient {
         let name = savedMac(macID) != nil ? displayName(macID) : (macs.first { $0.macID == macID }?.name ?? "the Mac")
         if reconnect?.macID == macID { reconnect = nil }
         savedMacs.removeAll { $0.macID == macID }
-        networkLastListed[macID] = nil
+        savedSightings.since[macID] = nil
+        savedSightings.leftAt[macID] = nil
         persistSavedMacs()
         status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
     }
@@ -487,7 +488,7 @@ extension StreamClient {
                 status = "Stopped trying to reach \(r.name). Tap it to try again."
             } else {
                 let due = DiscoveryPolicy.remoteDialDue(listed: network != nil || direct != nil, lostAt: r.lostAt,
-                                                        networkLeftAt: networkLastListed[id], rememberedDirect: r.rememberedDirect,
+                                                        networkLeftAt: savedSightings.leftAt[id], rememberedDirect: r.rememberedDirect,
                                                         pathChangedSinceLoss: pathSignature != r.pathAtLoss, now: now)
                 if due.dial, now >= r.nextRemoteAt {
                     dialSaved(id, why: .automatic)

@@ -306,9 +306,10 @@ final class StreamClient: ObservableObject {
     /// When each Direct row was first seen as one (DiscoveryPolicy.directSince): an automatic
     /// reconnect takes a Direct row only once it has stayed Direct for `directWait`.
     var directSince: [String: Double] = [:]
-    /// What the network browser has shown of each Mac (DiscoveryPolicy.sightings): an automatic
-    /// reconnect does not take a Mac's Direct row within `networkGrace` of the network last listing
-    /// it, and a session over AWDL moves to the network once it has listed the Mac for `moveAfter`.
+    /// What the network browser has shown of each Mac, by Bonjour name (DiscoveryPolicy.sightings):
+    /// an automatic reconnect does not take a Mac's Direct row within `networkGrace` of the network
+    /// last listing it, and a session over AWDL moves to the network once it has listed the Mac for
+    /// `moveAfter`.
     var sightings = DiscoveryPolicy.NetworkSightings()
     /// A session over AWDL moving to the network: the network connection opened beside it, until it
     /// has shown it reaches this session's host and takes over (`finishMove`), or gives up
@@ -343,9 +344,12 @@ final class StreamClient: ObservableObject {
     /// -Sill.directWirelessMacs '("Mac mini")', or '()' to clear it.
     var directWirelessMacs = UserDefaults.standard.stringArray(forKey: StreamClient.directWirelessMacsKey) ?? []
     private static let directWirelessMacsKey = "Sill.directWirelessMacs"
-    /// When the network browser last listed each saved Mac (systemUptime), by Mac ID: a Mac it
-    /// listed moments ago is taken to be blinking, not gone (DiscoveryPolicy.remoteDialDue).
-    var networkLastListed: [String: Double] = [:]
+    /// What the network browser has shown of each saved Mac, by Mac ID (DiscoveryPolicy.sightings,
+    /// the rule `sightings` follows by Bonjour name; the ID outlasts a rename to "Mac mini (2)"): a
+    /// lost saved Mac gets no remote dial within `networkGrace` of the moment its network row went,
+    /// since a Mac the network listed moments ago is taken to be blinking, not gone
+    /// (DiscoveryPolicy.remoteDialDue).
+    var savedSightings = DiscoveryPolicy.NetworkSightings()
     #if DEBUG
     /// Harness connect cases: the discovery state is seeded, no browser ever runs, and Search Nearby
     /// or a row's tap only change what is shown.
@@ -590,7 +594,10 @@ final class StreamClient: ObservableObject {
                             method: DiscoveryPolicy.method(direct: row.direct, interfaces: interfaces),
                             wired: wired.flatMap { name in seen.interfaces.first { $0.name == name } })
         }
-        for mac in next where mac.route == .network { if let id = mac.macID { networkLastListed[id] = now } }
+        // The moment a saved Mac's network row goes is what holds back its remote dial; the last
+        // look while it was listed can be the connect, hours before the loss.
+        let networkIDs = Set(next.filter { $0.route == .network }.compactMap(\.macID))
+        savedSightings = DiscoveryPolicy.sightings(savedSightings, listed: networkIDs, now: now)
         let names = SavedMacs.displayNames(savedMacs)
         let saved = savedMacs.sorted { $0.pairedAt < $1.pairedAt }.map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
         let remote = DiscoveryPolicy.remoteRows(saved: saved, listedIDs: Set(next.compactMap(\.macID)), now: now,

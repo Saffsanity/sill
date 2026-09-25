@@ -241,8 +241,9 @@ enum DiscoveryPolicy {
         return next
     }
 
-    /// What the network browser has shown of each Mac, by Bonjour name, for the two decisions that
-    /// must not trust one moment's view of it.
+    /// What the network browser has shown of each Mac, for the decisions that must not trust one
+    /// moment's view of it: by Bonjour name for a reconnect's Direct row and the move
+    /// (StreamClient.sightings), by Mac ID for a saved Mac's remote dial (StreamClient.savedSightings).
     struct NetworkSightings: Equatable {
         /// Listed now, each since when without a break.
         var since: [String: Double] = [:]
@@ -334,9 +335,9 @@ enum DiscoveryPolicy {
     /// while a network or Direct row lists it (the row takes it), never once `redialWindow` has
     /// passed. Due `remoteWait` after the loss (`directWait`, the wait an automatic reconnect gives
     /// a Direct row, for a Mac remembered with Direct Wireless on), and not within `networkGrace` of
-    /// the network last listing it (a Mac the network listed moments ago is taken to be blinking,
-    /// not gone) unless this device's path changed since the loss (it left home, or Wi‑Fi became
-    /// cellular).
+    /// the network last listing it, the moment its row went (`NetworkSightings.leftAt`; a Mac the
+    /// network listed moments ago is taken to be blinking, not gone) unless this device's path
+    /// changed since the loss (it left home, or Wi‑Fi became cellular).
     static func remoteDialDue(listed: Bool, lostAt: Double, networkLeftAt: Double?, rememberedDirect: Bool,
                               pathChangedSinceLoss: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
         guard !listed, now < lostAt + redialWindow else { return (false, nil) }
