@@ -156,11 +156,12 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   reconnect and a move from AWDL resolve its Bonjour service on the first
   wired interface the browser saw it on (`DiscoveryPolicy.dialInterface`;
   anpi0 on the iPad, which the Mac logs as `%anri0`, 1–2 ms; en2 gives
-  `%en14`), and a dial not ready within 2.5 s (`wiredWait`), or failing,
-  gives way to the row as listed, unconstrained, once, which can take Wi-Fi
-  (DEBUG console: "dialing <Mac> on anpi0 (wired)", "wired dial did not
-  connect in 2.5 s; dialing unconstrained"; `-SillWiredTest HOST:PORT` runs
-  that fallback in the simulator). The route is the Settings panel's (branch
+  `%en14`), and a dial not ready within 2.5 s (`wiredWait`), or failing or
+  waiting (at once), gives way to the row as listed, unconstrained, once,
+  which can take Wi-Fi (DEBUG console: "dialing <Mac> on anpi0 (wired)",
+  "wired dial did not connect in 2.5 s; dialing unconstrained";
+  `-SillWiredTest HOST:PORT` runs that fallback in the simulator). The route
+  is the Settings panel's (branch
   `connection-route-in-settings`): its readout ends in how this session's own
   connection reaches the Mac, "… · 15 Mbps · Wi-Fi", "Wired" or "Direct"
   (`DiscoveryPolicy.route`, `StreamClient.route`): the interface the Mac's

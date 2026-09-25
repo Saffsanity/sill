@@ -677,7 +677,10 @@ final class StreamClient: ObservableObject {
     /// fails, has not shown its host within 5 s, or reaches another Mac changes nothing: the
     /// session stays direct and the next try waits `moveRetry` (after another Mac, a new listing
     /// too). A row that says "Wired" is dialled over its wired interface first (`wiredDial`), as a
-    /// tap on it is. Main thread.
+    /// tap on it is; the wired connection, not ready within DiscoveryPolicy.wiredWait (2.5 s), or
+    /// failing or waiting (at once), does not end the move but gives way to the row as listed,
+    /// dialled unconstrained with 5 s of its own (`moveUnconstrained`), so a move whose wired dial
+    /// did not connect can take up to 7.5 s in all. Main thread.
     private func move(to mac: FoundMac) {
         lastMoveAttempt = ProcessInfo.processInfo.systemUptime
         status = "Switching to Wi\u{2011}Fi…"

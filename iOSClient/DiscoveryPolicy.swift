@@ -39,8 +39,10 @@ enum DiscoveryPolicy {
     /// A session over AWDL moves to the network once the network has listed the same Mac this long
     /// without a break (a blink restarts it).
     static let moveAfter = 2.0
-    /// After a move that did not complete (the network connection failed, was not ready in 5 s, or
-    /// reached another Mac), the wait before the next try.
+    /// After a move that did not complete (its last network connection failed, had not shown its
+    /// host within 5 s, or reached another Mac; a move to a row that says Wired tries its wired
+    /// interface first, StreamClient.move), the wait before the next try, counted from the
+    /// move's start.
     static let moveRetry = 10.0
 
     struct Input: Equatable {
