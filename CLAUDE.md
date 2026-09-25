@@ -47,22 +47,30 @@ says; remote access works as its entries say. Where the two meet:
   the remote rule.
 - Verified without devices: iOS Debug and Release for the simulator and Debug
   for the iPad (build only, not installed), only the old `StreamClient`
-  capture warning; `swift build -c release` (Sources, Package.swift and
-  Scripts are main's byte for byte). Pure checks against the merged files:
+  capture warning; `swift build -c release`, and clean, only the CaptureProbe
+  warning (Sources, Package.swift and Scripts are main's byte for byte). Pure
+  checks against the merged files:
   this branch's policy check 277 of 277 and its 61 mutants; main's 187 of 187,
   its 25 mutants (D1's text made unique: `wifiInterface` has the same guard)
   and the 20 older ones; the remote rule's 9 checks on top of the 277 (286:
   a 12,288-case grid, a model) and 9 mutants of it, 70 of 70 with the 61;
   remote access's rules check 64 of 64 and 35 of 35; the fence check's 12
   modes and 16 of 16 mutants. On a simulator of its own against the merged
-  `SillHost --synthetic`, one host at a time: close, close-fallback,
-  refused-cable (the other launch now a Python stand-in, so one real host
-  suffices) and silent-cable, 17 of 17 checks, as before the merge; then
-  Noah's iPad connected to Sill.app and the run stopped. Not run yet: the
-  other 14 scenarios and remote access's pairing, remote session (the plan
-  keeps it) and its remote redial; the runner
-  (`scratchpad/integrate-12/sim/simmerge.py`) runs them when no device is
-  connected, and stops its host the moment one connects.
+  `SillHost --synthetic`, one host at a time (21 hosts, the longest 49 s):
+  this branch's 18 scenarios as before the merge (refused-cable's other
+  launch now a Python stand-in, so one real host suffices); remote access's
+  pairing by link, a remote session by address that the plan keeps where it
+  is (its "path: kept: a remote session…", no route word, no move) and, its
+  host gone and back, the ordinary end and an automatic remote redial, no
+  rescue; and close-slow (the connection closed over the cable, the cable's
+  dial never answering, the row as listed never sending a list: the session
+  ends 7.5 s later with #13's words), 66 of 66 checks. close-slow on the merge
+  commit's own build printed "connection silent for 6 s: lost" seven times,
+  0.25 s apart, until the move ended; with the fix-up, never. The first run
+  stopped after four scenarios when Noah's iPad connected to Sill.app: that
+  host had passed the check before it started and ran 24 s beside his stream,
+  so the runner (`scratchpad/integrate-12/sim/simmerge.py`) now also kills its
+  host the moment Sill.log shows a device connecting.
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
