@@ -970,11 +970,35 @@ good.
   equivalents), `DebugHooks`, `AppLog` (its print shadow).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
-  installs the bundle; `Scripts/sillclient.py` is the wire-format test client
+  installs the bundle; `Scripts/release.sh` (M6) makes the download from it:
+  `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
+  service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
+  the ticket stapled, the zip made again with the ticket inside, and a copy
+  unpacked from it checked with `stapler validate` and `spctl` ("Notarized
+  Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
+  `site/download.html`. It refuses to start, before building, without a
+  Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
+  keychain) or the profile, and `--dry-run` stops before notarytool (the
+  profile only warned about); sourced, it only defines its functions.
+  `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
   every argument is checked before it connects, and a bad one exits 2).
+- `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
+  `index.html`, `download.html` (the current release's version, link and
+  SHA-256, set by hand from release.sh's output), `privacy.html` (the policy
+  App Store Connect and the app link to), `support.html`, `style.css` (system
+  fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
+  scripts and nothing loaded from elsewhere: every page's
+  Content-Security-Policy is `default-src 'none'`. Links are relative
+  (`download.html`), so it renders from the folder; GitHub Pages also serves
+  each page without `.html`, the form the app and App Store Connect use
+  (`/download`, `/privacy`, `/support`). Remote Access paragraphs sit between
+  `<!-- Remote Access` and `<!-- /Remote Access -->`, to cut for a release
+  without it. `docs/release-checklist.md` is the order of work: the one-time
+  setup (Developer ID, notary credentials, hosting and DNS, the App Store
+  Connect record) and every release's steps.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -1026,6 +1050,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
+SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
+python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.

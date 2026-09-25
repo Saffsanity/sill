@@ -98,14 +98,18 @@ setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 `prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
 
-Distribution (M6): `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
-Scripts/make-app.sh --release` (it refuses to finish with any other kind of
-signature, which notarization would reject), then `ditto -c -k --keepParent
-.build/Sill.app .build/Sill.zip`, `xcrun notarytool submit .build/Sill.zip --keychain-profile
-sill-notary --wait` and `xcrun stapler staple .build/Sill.app`. Store the
-notary credentials in the keychain profile yourself first
-(`xcrun notarytool store-credentials sill-notary`). A Developer ID signature
-has a different designated requirement, so permissions are granted once more.
+Distribution (M6): `Scripts/release.sh` makes the download. It runs
+`make-app.sh --release` (which refuses any signature but Developer ID), zips
+the app, sends it to Apple's notary service and waits, staples the ticket,
+zips it again so the download carries the ticket, checks a copy unpacked from
+that zip with `stapler validate` and `spctl`, and prints the zip's path and
+SHA-256. It needs `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'`
+and `SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
+store-credentials sill-notary`), and refuses to start without them.
+`--dry-run` needs only the identity and stops before anything goes to Apple.
+The one-time setup and each release's steps are in docs/release-checklist.md.
+A Developer ID signature has a different designated requirement, so
+permissions are granted once more.
 
 ### The command-line host
 
@@ -238,3 +242,20 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - Single window at a time, no encryption. The device reconnects on a timer
   when the Mac drops it.
 - Bonjour only. iCloud auto-pairing comes with milestone 5.
+
+## Layout
+
+- `Sources/`: the Swift package. `StreamProtocol` (the wire format, shared
+  with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
+  `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
+- `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
+- `Packaging/`: Sill.app's Info.plist and entitlements.
+- `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
+  zip people download) and `sillclient.py` (a wire-format test client).
+- `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
+  policy and support. Preview it with
+  `python3 -m http.server 8000 --directory site`.
+- `docs/`: the brief, the plans, `app-store-metadata.md` (what App Store
+  Connect asks for) and `release-checklist.md` (the order of work for a
+  release).
+- `design/`: the app icon.
