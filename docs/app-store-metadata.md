@@ -21,7 +21,7 @@ literally, and the command under the table changes every copy in this file.
 | Mac download | `https://sill.saffer.me/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `SUPPORT_EMAIL_PLACEHOLDER` | Placeholder. Never ship it. |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
-| Remote Access in 1.0 | Included | Open: it is PR #13. See the switch below. |
+| Remote Access in 1.0 | Undecided: main lacks it | Noah decides, before anything is pasted, whether 1.0 ships from main without it (the audit's advice) or waits for PR #13. |
 
 To change the domain or fill in the contact address in this file:
 
@@ -33,8 +33,8 @@ The app's own copy of the site and of the download, support and privacy links
 is `iOSClient/SillLinks.swift`.
 
 **Remote Access switch.** The blocks below describe a 1.0 that includes Remote
-Access (PR #13). Guideline 2.3.1(a) forbids describing what the build lacks, so
-if 1.0 ships from main without it, make these cuts:
+Access (PR #13), which main lacks today. Guideline 2.3.1(a) forbids describing
+what the build lacks, so if 1.0 ships from main, make every one of these cuts:
 
 | Where | Cut |
 |---|---|
@@ -43,12 +43,16 @@ if 1.0 ships from main without it, make these cuts:
 | Review notes | Delete from `REMOTE ACCESS` to the end (the local-only size is given). |
 | What's New | Use the local-only line. |
 | Demo video | Skip shot 11. |
+| Site | Delete every block marked `<!-- Remote Access`. Step 3 of the release checklist has the check. |
 | Export compliance | Nothing changes: the key stays NO either way. |
 
 ## Before you submit
 
 These texts are only true once these are:
 
+- The paste blocks match the build. Main has no Remote Access today, and the
+  audit advised shipping 1.0 from main. For a build without it, make every cut
+  in the Remote Access switch above, the site's included.
 - The support, privacy and download URLs load in a private window, signed out.
   The support page shows a way to reach you (guideline 1.5).
 - Sill for Mac at the download URL is Developer ID signed, notarized and
@@ -258,6 +262,8 @@ Good to know
 • Sill for Mac comes from sill.saffer.me, not the Mac App Store.
 ```
 
+Local-only build: delete the bullet that starts "Away from home".
+
 Before the source is public with a LICENSE file, don't call Sill open source
 anywhere in the listing (2.3.1(a)). Once it is, a line such as "Sill is free
 and open source." can join "Private".
@@ -435,7 +441,7 @@ together with a camera:
 | 8 | Keyboard: type a sentence into the note | The letters appearing on the Mac too |
 | 9 | Turn the iPad upright: the laptop layout; move the pointer with the trackpad, click, two-finger scroll; switch windows from a thumbnail; touch and hold one for its window buttons | The trackpad driving the Mac's pointer |
 | 10 | Settings (the gear): change Quality, show the same value in the Sill menu on the Mac, then Disconnect | The panel and the Mac's menu agreeing; the iPad back on "Connect to a Mac" |
-| 11 | Remote Access: Remote Access… in the Sill menu, Pair iPhone or iPad…, Add a Mac… on the iPad, the camera reading the code, "Paired with …"; then the iPad on cellular or a hotspot with the VPN on, connecting and streaming | The code scanned, then the stream with the iPad off the Mac's network |
+| 11 | Only for a build with Remote Access: Remote Access… in the Sill menu, Pair iPhone or iPad…, Add a Mac… on the iPad, the camera reading the code, "Paired with …"; then the iPad on cellular or a hotspot with the VPN on, connecting and streaming | The code scanned, then the stream with the iPad off the Mac's network |
 | 12 | The same Mac on an iPhone: connect, pick a window, type a word | The app on iPhone too |
 
 Optional, if time allows: an iPad on a USB-C cable (the row says "Wired"), and
@@ -567,7 +573,7 @@ Safe:
 
 - Limits, measured on the blocks in this file by a script: name 4 characters;
   fallbacks 23 and 21; subtitle 27 of 30; promotional text 164 of 170;
-  description 2,062 of 4,000 characters; keywords
+  description 2,062 (local-only 1,906) of 4,000 characters; keywords
   95 bytes (local-only 97) of 100, each
   keyword at least three characters, no spaces, no repeats; review notes
   3,553 bytes (local-only 2,845) of 4,000, all ASCII;
