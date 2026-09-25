@@ -203,7 +203,15 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## What to try if it's slow
 
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Read the host's stats line. `enc.out` near 33 with `enc.mailboxDrop` about 24
+  a second while ~57 frames are captured is the hardware encoder's slow state at
+  the Retina Desktop's size (about 30 ms a frame; it can set in after a few
+  seconds of few frames, at any bitrate). The host used to let one frame into
+  the encoder at a time, which capped the stream at 33 fps; since 2026-09-25 it
+  lets in two, which should carry the full rate. `enc.mailboxDrop` counts the
+  frames that found no room.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
+  it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.

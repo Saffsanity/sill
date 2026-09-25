@@ -19,7 +19,7 @@ import StreamProtocol
 ///   which keeps this bookkeeping and is checked on its own). VT hands outputs back in decode
 ///   order, which without reordering is the order the frames went in.
 ///   Why two (2026-09-25): at the Retina Desktop's size (3024×1964) the hardware encoder can fall
-///   into a slow state, usually after a few seconds of sparse frames, at any bitrate, where each
+///   into a slow state, often after a few seconds of fewer frames, at any bitrate, where each
 ///   frame takes 29–30 ms from submit to output (15 ms on the encoder chip by the kernel's
 ///   AppleAVE2 counters, against 9 ms in the fast state; the rest outside them). With one frame
 ///   inside, the output rate was exactly one over that: 33 fps, with ~24 `enc.mailboxDrop` a
