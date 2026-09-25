@@ -46,7 +46,10 @@ still gets double, so Extreme at 120 fps is 300 Mbps); no Unlimited.
   random runs; the panel in the simulator at 1000×710 and 500×710 (also at
   xxLarge text), menu open and closed, picking Extreme, and live against this
   host (a restart at 150 Mbps) and against ad7fba2's (refused, back to
-  Balanced).
+  Balanced); the harness's `vdstream` case, now Extreme at 120 fps (300 Mbps,
+  the longest readout), at all four sizes and at xLarge and xxLarge text: the
+  readout wraps at xxLarge, and at 710×500 already at xLarge; the header and
+  Disconnect stay put and the rows scroll.
 - **Untested, for Noah:** Ultra and Extreme on the iPad over the USB cable and
   over Wi-Fi, streaming a busy window (the synthetic pattern compresses to
   under 1 Mbps whatever the target): watch the frame age in the host's
@@ -851,11 +854,11 @@ good.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding),
-  `HostSettings` (UserDefaults, quality presets), `StatusItemController`
-  (+ `MenuBuilder`), `StatusText` (all status copy), `StatusCard`,
-  `StatusGlyph`, `SettingsWindow` + `SettingsPanes`, `Permissions`,
-  `LoginItem`, `LogWindow`, `MainMenu` (key equivalents), `DebugHooks`,
-  `AppLog` (its print shadow).
+  `HostSettings` (UserDefaults; the presets are StreamProtocol's
+  `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
+  (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` +
+  `SettingsPanes`, `Permissions`, `LoginItem`, `LogWindow`, `MainMenu` (key
+  equivalents), `DebugHooks`, `AppLog` (its print shadow).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client
