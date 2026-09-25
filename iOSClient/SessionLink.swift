@@ -19,6 +19,12 @@ import Network
 /// then go out on the new connection ahead of anything later. The wait is one round trip of the
 /// old connection, once per move.
 ///
+/// A session whose connection has lost its path (the cable pulled: StreamClient.followBestPath)
+/// moves without a fence, since nothing sent on that connection comes back: from the moment the
+/// move starts, what the device sends waits here (`hold`), in order, instead of going into a
+/// connection that cannot deliver it, and goes out on the new connection first once it takes the
+/// session (`adopt`), or back on the old one should the move not complete (`unhold`).
+///
 /// Foundation and Network only: it is checked on its own with swiftc against a local stand-in for
 /// the Mac whose old connection is slow (docs/direct-wireless-plan.md, the review fixes).
 final class SessionLink {
@@ -31,8 +37,8 @@ final class SessionLink {
     private struct Fence {
         let old: NWConnection
         /// The fence ping's payload, echoed unchanged in its pong: random, so no other ping's pong
-        /// can pass for it.
-        let nonce: Data
+        /// can pass for it. Nil for a hold, which sends no ping.
+        let nonce: Data?
         let since = ProcessInfo.processInfo.systemUptime
         var held: [Data] = []
     }
@@ -81,16 +87,48 @@ final class SessionLink {
     /// the held messages go out on the session's connection. Nil when it ended no fence.
     func fenceReturned(_ payload: Data, on old: NWConnection) -> Released? {
         lock.lock(); defer { lock.unlock() }
-        guard let f = fence, f.old === old, payload == f.nonce else { return nil }
+        guard let f = fence, f.old === old, let nonce = f.nonce, payload == nonce else { return nil }
         return releaseLocked()
     }
 
     /// Ends `old`'s fence without its pong: `old` closed (what it had not delivered never will be),
     /// or the pong is taking too long. The held messages go out on the session's connection now.
-    /// Nil when `old` had no fence.
+    /// Nil when `old` had no fence. A hold is not a fence: its connection closing leaves what it
+    /// holds waiting for `adopt`.
     func release(_ old: NWConnection) -> Released? {
         lock.lock(); defer { lock.unlock() }
-        guard fence?.old === old else { return nil }
+        guard let f = fence, f.old === old, f.nonce != nil else { return nil }
+        return releaseLocked()
+    }
+
+    /// The session's connection, `c`, has lost its path and a move to another begins: what goes to
+    /// the Mac waits here, in order, until `adopt` or `unhold`. False when `c` is not the session's
+    /// connection or a hand-over is already under way (whose fence then holds it, `adopt` ending
+    /// that too).
+    @discardableResult
+    func hold(_ c: NWConnection) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard current === c, fence == nil else { return false }
+        fence = Fence(old: c, nonce: nil)
+        return true
+    }
+
+    /// Makes `new` the session's connection with no fence of its own: the old one's path is gone,
+    /// or the old one is, so a fence ping could never come back. What a hold kept goes out on `new`
+    /// first, in order; nil when there was none. A fence still up from an earlier hand-over stays up
+    /// (its old connection may still be delivering), and what it holds goes out on `new` when it ends.
+    func adopt(_ new: NWConnection) -> Released? {
+        lock.lock(); defer { lock.unlock() }
+        current = new
+        guard let f = fence, f.nonce == nil else { return nil }
+        return releaseLocked()
+    }
+
+    /// Ends the hold on `c` without a move: what waited goes out on it after all, in order (its
+    /// path came back, or the move did not complete). Nil when `c` had no hold.
+    func unhold(_ c: NWConnection) -> Released? {
+        lock.lock(); defer { lock.unlock() }
+        guard let f = fence, f.old === c, f.nonce == nil else { return nil }
         return releaseLocked()
     }
 
@@ -101,8 +139,8 @@ final class SessionLink {
         return Released(held: f.held.count, seconds: ProcessInfo.processInfo.systemUptime - f.since)
     }
 
-    /// The session ended during a hand-over: what was held goes nowhere. Returns the old connection,
-    /// for the caller to close.
+    /// The session ended during a hand-over or a hold: what was held goes nowhere. Returns the old
+    /// connection, for the caller to close.
     func dropHandOver() -> NWConnection? {
         lock.lock(); defer { lock.unlock() }
         let old = fence?.old
