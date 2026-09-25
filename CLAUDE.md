@@ -145,13 +145,16 @@ fixes of step 9's first review round (below); the rest of step 9 is next.
   carries a recognition tag (`r`) only paired devices can read.
 - Pairing: the Mac's window shows a QR code (`sill://pair?…`, pinned to the
   Mac's key) and a 12-digit code (Damm check digit; PBKDF2 600k), 5 minutes,
-  single use, five wrong tries, and the address to type with the code: the
-  VPN's name (Tailscale's MagicDNS name) and that VPN's IPv4 under it ("or
-  100.65.142.55"), else a VPN IP, else this network's address
-  (`PairingWindowAddress`, pure; Noah, 2026-09-25: from an iPhone's hotspot
-  this network's address answered nothing, the Tailscale name and address both
-  paired; checked with swiftc, 36 checks and 15 of 15 mutants, and
-  photographed as the previews' `pairing-novpn` and `pairing-longname`).
+  single use, five wrong tries, and the address to type with the code:
+  Tailscale's MagicDNS name and its IPv4 under it ("or 100.65.142.55"), else a
+  Tailscale IP (100.64/10, else fd7a:115c:a1e0::/48), else this network's
+  address with any other VPN's IP under it ("or 10.8.0.6"). Another VPN never
+  takes this network's place, since NordVPN's or WARP's address answers from
+  nowhere; which of the two goes first is Noah's call. `PairingWindowAddress`
+  decides, pure (Noah, 2026-09-25: from an iPhone's hotspot this network's
+  address answered nothing, the Tailscale name and address both paired;
+  checked with swiftc, 80 checks and 35 of 35 mutants, and photographed as the
+  previews' `pairing-novpn`, `pairing-othervpn` and `pairing-longname`).
   Sill.app: Settings › Remote Access (a fifth tab: the switch, the addresses,
   the port, paired devices, the internet switch with the router's answer, the
   address name, sleep), the menu's Remote Access… and Pair iPhone or iPad…,
@@ -201,7 +204,20 @@ fixes of step 9's first review round (below); the rest of step 9 is next.
   while it streams; R8 a rebuild keeps port, Mac ID and pairing; R9 Pair This
   iPad… at home; R10 the port forward; R11 Direct Wireless at the café; R12
   VoiceOver and a hardware keyboard (Esc never reaches an app in the iPadOS 27
-  simulator; only ⌘. was tested); R13 mixed builds.
+  simulator; only ⌘. was tested); R13 mixed builds. Also the pairing window's
+  Address row, live (only its offscreen previews were seen): with this build's
+  Sill.app, Pair iPhone or iPad… reads noahs-macbook-pro.tailc94091.ts.net
+  with "or 100.65.142.55" muted under it (what `SillHost --print-reachability`
+  lists); with the window open, Tailscale off on the Mac gives 10.128.0.34
+  alone and a window 18 pt shorter, and back on the name and the "or" line
+  return (100.65.142.55 alone for a few seconds, until MagicDNS answers, is
+  expected; note it if it stays); each line selects without "or" and pastes
+  (Universal Clipboard) or types into Enter Code Instead (a code works once:
+  New Code, or reopen the window, for a second try); VoiceOver reads "or
+  100.65.142.55" as one element. And a decision: beside a VPN that is not
+  Tailscale (NordVPN, WARP, a work VPN, your own WireGuard) the window shows
+  this network's address with that VPN's IP under it; the other order, or
+  this network's address alone, is one line in `PairingWindowAddress.choose`.
 - Known: the simulator iPad Pro 13" is shared with other work, so a test that
   installs the app there can replace someone else's build (the iPad Pro 11"
   was used for S8); an unsigned simulator build cannot use the keychain on a
@@ -1181,8 +1197,9 @@ good.
   `SettingsPanes`, `Permissions`, `LoginItem`, `LogWindow`, `MainMenu` (key
   equivalents), `DebugHooks`, `AppLog` (its print shadow), `RemoteAccessPane`
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
-  code), `PairingWindowAddress` (the address that window gives to type: a
-  VPN's name and IPv4 first; pure, checked with swiftc).
+  code), `PairingWindowAddress` (the address that window gives to type:
+  Tailscale's name and IPv4 first, another VPN's IP only under this network's
+  address; pure, checked with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client

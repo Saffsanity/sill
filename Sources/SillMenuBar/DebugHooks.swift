@@ -418,11 +418,13 @@ extension DebugHooks {
         var remoteAccess = true
     }
 
-    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,longname}. A stand-in
-    /// Mac key (the plan's SHA-256("mac") vector) and the plan's example code: nothing here pairs
-    /// anything. The address to type is Tailscale's name with its IPv4 under it; `novpn` has no VPN,
-    /// so this network's address, and `longname` is the widest the row gets: a 40-character
-    /// MagicDNS name, on a port other than 7455.
+    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,othervpn,longname}. A
+    /// stand-in Mac key (the plan's SHA-256("mac") vector) and the plan's example code: nothing here
+    /// pairs anything. The address to type is Tailscale's name with its IPv4 under it; `novpn` has
+    /// no VPN, so this network's address; `othervpn` has a VPN that is not Tailscale, so this
+    /// network's address with that VPN's IPv4 under it; `longname` has a long MagicDNS name, 40
+    /// characters, on a port other than 7455. Not the longest there can be: LocalHostName allows 63
+    /// characters, and from about 46 with a port (52 without) a name wraps after a hyphen, never cut.
     static func pairingSamples() -> [PairingSample] {
         let fingerprint = Data((0..<32).map { UInt8(truncatingIfNeeded: $0 &* 37 &+ 11) })
         func makeLink(port: Int, _ addresses: [String]) -> PairLink {
@@ -445,6 +447,7 @@ extension DebugHooks {
         }
         let open = RemoteStatus.Pairing.open(requestedBy: nil, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil)
         let wifi = [MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi")]
+        let otherVPN = [MacAddress(host: "10.8.0.6", kind: MacAddress.vpn, via: "WireGuard")] + wifi
         let longName = "christinas-macbook-pro.tailc94091.ts.net"
         let long = [MacAddress(host: longName, kind: MacAddress.vpn, via: "Tailscale")] + tailscaleAddresses.dropFirst()
         let longLink = makeLink(port: 17455, [longName, "100.101.102.103", "fd7a:115c:a1e0::1234", "192.168.1.20"])
@@ -459,6 +462,8 @@ extension DebugHooks {
             PairingSample(name: "expired", offer: offer(), status: status(.expired)),
             PairingSample(name: "remoteoff", offer: offer(), status: status(open), remoteAccess: false),
             PairingSample(name: "novpn", offer: offer(link: makeLink(port: 7455, ["192.168.1.20"])), status: status(open, addresses: wifi)),
+            PairingSample(name: "othervpn", offer: offer(link: makeLink(port: 7455, ["10.8.0.6", "192.168.1.20"])),
+                          status: status(open, addresses: otherVPN)),
             PairingSample(name: "longname", offer: offer(link: longLink), status: status(open, addresses: long, port: 17455)),
         ]
     }

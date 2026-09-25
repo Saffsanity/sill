@@ -235,8 +235,9 @@ struct PairDeviceView: View {
         return "Works once, for the next \(left / 60):\(String(format: "%02d", left % 60))."
     }
 
-    /// What to type on the device: a VPN's name with that VPN's IPv4 under it, else a VPN IP, else
-    /// this network's address, with the port when it is not the usual one (`PairingWindowAddress`).
+    /// What to type on the device: Tailscale's name with its IPv4 under it, else a Tailscale IP,
+    /// else this network's address with another VPN's IP under it, with the port when it is not
+    /// the usual one (`PairingWindowAddress`).
     private var address: PairingWindowAddress.Choice {
         PairingWindowAddress.choose(from: status.addresses, lan: status.lanAddress, port: offer.port,
                                     defaultPort: HostConfig.defaultRemotePort)

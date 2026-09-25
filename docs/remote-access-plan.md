@@ -1160,8 +1160,8 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 │                 ██ ██ ██ ▀▄█ ██ ██ ██   (220 pt)    │   scale, no interpolation, always dark on white
 │                 ██▄▄▄▄██ █▀▄ ██▄▄▄▄██               │   with a 4-module quiet zone
 │ Can’t scan? Tap Enter Code Instead, and type:       │
-│   Address   mac-mini.tail1234.ts.net                │   a VPN's name, that VPN's IPv4 under it (muted),
-│             or 100.101.102.103                      │   else a VPN IP, else this network's address (below)
+│   Address   mac-mini.tail1234.ts.net                │   Tailscale's name, its IPv4 under it (muted), else
+│             or 100.101.102.103                      │   a Tailscale IP, else this network's address (below)
 │   Code      4829 1355 7208                          │   22 pt monospaced digits, selectable
 │ Works once, for the next 4:58.                      │   updating, not announced every second
 │ A paired device can see and control this Mac.       │
@@ -1190,16 +1190,26 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
   its MagicDNS name both paired. So the window shows those two instead:
   1. the first VPN with a name (Tailscale's MagicDNS name), with that VPN's first IPv4 under it,
      muted: "or 100.65.142.55";
-  2. else the first VPN IPv4, else the first VPN IPv6;
-  3. else this network's address (no VPN at all), as before;
-  4. else the first address listed, as before (with no VPN and no LAN address only an internet
+  2. else the first VPN IPv4 in Tailscale's 100.64.0.0/10, else the first VPN IPv6 in its
+     fd7a:115c:a1e0::/48, alone, whichever VPN is listed first (open-source tailscaled's unnamed
+     "VPN (utun4)" included; Headscale's tailnets use the same ranges);
+  3. else this network's address, as before, with another VPN's first IPv4 (else IPv6) under it,
+     muted: "or 10.8.0.6". Another VPN's address never takes this network's place: a privacy
+     VPN's answers from nowhere (NordVPN's NordLynx gives every Mac 10.5.0.2, Cloudflare WARP
+     172.16.0.2), while this network's answers at home and through a VPN into the home network
+     (the pane's LAN row, the README's second way in). The order of the two is Noah's call (the
+     review of ae7f5c9); this one keeps the line the window gave before his decision first;
+  4. else another VPN's first IPv4, else its first IPv6 (no LAN address), as before;
+  5. else the first address listed, as before (with no VPN and no LAN address only an internet
      address or a test host's 127.0.0.1 is left);
-  5. else "this Mac’s address".
-  - VPNs are picked by their kind and names told from IPs by the address parser, never by the
-    text. Each value carries the port when it is not 7455 (an address name's own port first).
+  6. else "this Mac’s address".
+  - VPNs are picked by their kind, names told from IPs by the address parser and Tailscale's
+    addresses by the parsed address's range (the device's `RemoteDialPolicy.isVPNAddress` has the
+    same ranges), never by the text of a name or a service. Each value carries the port when it is
+    not 7455 (an address name's own port first).
   - Both lines are selectable, "or" apart from the address; the window has no Copy button (the
     pane's rows have them). The router's address and the address name stay in the pane, unless
-    nothing else is listed (step 4).
+    nothing else is listed (step 5).
 
 #### 6.3 Status menu and card (`StatusItemController.swift`, `StatusText.swift`)
 
@@ -1260,9 +1270,11 @@ An `NSWindowController` hosting a SwiftUI `PairDeviceView`.
 - **`-SillUnpairAfter <s>`** removes every paired device.
 - **`-SillRenderPreviews`** adds:
   - `pane-remote-{off,tailscale,notconnected,novpn,internet,cgnat,doublenat,inuse,keychain}-{light,dark}.png`;
-  - `pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,longname}-{light,dark}.png`
-    (`novpn`: this network's address; `longname`: a 40-character MagicDNS name on port 17455, the
-    widest the Address row gets);
+  - `pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,othervpn,longname}-{light,dark}.png`
+    (`novpn`: this network's address; `othervpn`: this network's address with a WireGuard tunnel's
+    10.8.0.6 under it; `longname`: a long name, 40 characters, on port 17455, on one line. Not the
+    longest: LocalHostName allows 63 characters, and from about 46 with the port (52 without) a
+    MagicDNS name wraps after a hyphen, never cut);
   - menu.txt's two new items;
   - a card sample with a remote device.
 - **Packaging/Info.plist:** unchanged. Listening and accepting need no Local Network access (TN3179),
@@ -2216,6 +2228,8 @@ the plan.
   and Settings in the macOS 26 look (only offscreen renders were checked); one unexplained failure
   in four runs of the outside-link UI test (the first after a rebuild: the pairing dial was refused
   and no log was captured; three reruns passed).
+- The pairing window's Address row, live (added after cb0ec55; only its offscreen previews were
+  seen): what to check is at the end of these Results, after the row's review.
 
 **Merged with main (2026-09-25).** Main's PRs #6–#10 came in by one merge (0f7f50d), not a rebase:
 the Direct Wireless fixes, the connect screen's Wired/Wi-Fi/Direct, the quality presets, the route
@@ -2254,3 +2268,44 @@ settings: only the four waiting-state pairing samples changed, each 18 pt taller
 the Address row's band different, plus the new `novpn` and `longname`, light and dark. The value
 column is 336.5 pt wide: Noah's name takes 229, the 40-character name on port 17455 292; a
 57-character one wraps after a hyphen and is never cut.
+
+**The Address row's review (2026-09-25).** Three confirmed findings, one commit.
+- Another VPN hid this network's address. ae7f5c9 put the first VPN IPv4 of any VPN first, so a Mac
+  on NordVPN, Mullvad, Cloudflare WARP or a work VPN beside Wi‑Fi 192.168.1.20 gave only 10.5.0.2,
+  10.64.12.34, 172.16.0.2 or 10.200.1.5 (cb0ec55 gave 192.168.1.20), and with Tailscale's MagicDNS
+  name missing, a VPN whose name sorts before "Tailscale" came before 100.65.142.55. The typed path
+  dials exactly the address typed, and NordLynx gives every client 10.5.0.2 and WARP 172.16.0.2,
+  so nothing answered there. Now only Tailscale's ranges take this network's place (§6.2 step 2,
+  by the parsed address) and another VPN's address goes under this network's (step 3). Noah's
+  decision covered Tailscale only, so the order for other VPNs is his call: this one keeps
+  cb0ec55's first line, and the other order, or this network's address alone, is one line in
+  `PairingWindowAddress.choose`.
+- `longname` is not the widest the row gets (§6.6 and the DebugHooks comment said so); a name from
+  about 46 characters with the port wraps.
+- Noah's list had nothing for the row, which only offscreen previews had shown (below).
+
+Checked: the rule with swiftc against StreamProtocol's sources and the real `AddressList.build`, 80
+checks (the review's scenarios A–K: NordVPN, Mullvad, WARP and a work VPN beside Wi‑Fi, each also
+beside Tailscale without its name; a WireGuard mesh; open-source tailscaled on an unnamed utun; an
+exit node; the ranges' edges 100.63.255.255, 100.64.0.0, 100.127.255.255, 100.128.0.0,
+fd7a:115c:a1df:ffff::1, fd7a:115c:a1e0:: and fd7a:115c:a1e1::1, an uppercase and an IPv4-mapped
+form; a range, not a service's name, deciding; and 5,000 random runs against a restatement of the
+rule, 1,686 of them without a VPN and 1,947 with a LAN address and no Tailscale, each giving the
+first line cb0ec55 gave) and 35 of 35 mutants caught (among them ae7f5c9's rule, the prototype's
+order, each range edge and a /32 or /16 read of the IPv6 range); this Mac's live list
+(`SillHost --print-reachability`) still gives the name with "or 100.65.142.55", without
+Tailscale's entries 10.128.0.34 alone, and without the name 100.65.142.55 alone; a clean release
+build (only the CaptureProbe warning) and `make-app.sh` without `--install`; the previews from the bundle against 78d76e0's, rendered back
+to back with the same saved settings: every file byte for byte the same (the nine pairing samples
+and menu.txt among them) but for the new `othervpn`, light and dark, and the General pane, whose
+"Running from" path and build number are each bundle's own. Nothing in Sources/SillHost,
+SillHostCLI or StreamProtocol changed, so the CLI's output cannot.
+
+**Not verified here, for Noah (the Address row).** With this build's Sill.app, Pair iPhone or iPad…
+should read noahs-macbook-pro.tailc94091.ts.net with "or 100.65.142.55" muted under it (what
+`SillHost --print-reachability` lists). With the window open, Tailscale off on the Mac: 10.128.0.34
+alone, and the window 18 pt shorter; back on: the name and the "or" line return (100.65.142.55 alone
+for a few seconds, until MagicDNS answers, is expected; note it if it stays). Each line can be
+selected without "or" coming along, and pasted (Universal Clipboard) or typed into Enter Code
+Instead; a code works once, so New Code or reopening the window gives a second try. VoiceOver reads
+"or 100.65.142.55" as one element.
