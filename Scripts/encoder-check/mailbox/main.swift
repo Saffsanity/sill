@@ -144,9 +144,11 @@ final class StandIn {
         expect(box.inside.count <= box.places, "\(at): \(box.inside.count) inside, over the \(box.places) places open")
         expect(box.places == (box.anyReturned ? box.limit : 1), "\(at): \(box.places) places open, returned before: \(box.anyReturned)")
         if box.waiting != nil { expect(!box.dead && box.inside.count == box.places, "\(at): a frame waits while a place is free or the session is dead") }
+        expect(box.handed.isSubset(of: Set(box.inside.keys)), "\(at): handed over \(box.handed.sorted()), not all inside \(box.inside.keys.sorted())")
         if !box.dead {
             let bookkept = Set(box.inside.keys), real = Set(vtHolds.keys).union(onQueue)
             expect(bookkept == real, "\(at): the mailbox has \(bookkept.sorted()) inside, the queue and VideoToolbox hold \(real.sorted())")
+            expect(Set(vtHolds.keys).isSubset(of: box.handed), "\(at): VideoToolbox holds \(vtHolds.keys.sorted()), handed over \(box.handed.sorted())")
         }
     }
 
@@ -788,6 +790,24 @@ for limit in [twoInside, oneInside] {
     s2.startWatchdog(until: 7)
     c2.run(until: 7)
     expect(s2.hungAt != nil && s2.vtHolds.count == limit, "stuck mid-stream: \(s2.vtHolds.count) frames left inside, not \(limit)")
+}
+
+// S14: one engine doing one frame at a time, T seconds each. With two inside, the frame behind
+// waits T for the engine and then takes T of its own; its clock starts again when the one ahead
+// comes back, so the watchdog fires only when a frame itself takes over hangAfter, as with one
+// inside. (Before, two inside fired it at 0.8, 1.0 and 1.4 s a frame: 2T from the hand-over.)
+for (limit, t, fires) in [(twoInside, 0.8, false), (twoInside, 1.0, false), (twoInside, 1.4, false), (twoInside, 2.0, true),
+                          (oneInside, 1.4, false), (oneInside, 2.0, true)] {
+    scenarioName = "serial engine at \(t) s a frame, \(limit) inside"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: limit, engine: .serial(pre: 0, chip: t, post: 0))
+    s.inOrder = true
+    schedule(s, captures: captureTimes(fps: fps, from: 0, to: 8))
+    s.startWatchdog(until: 10)
+    clock.run(until: 10)
+    print(line(scenarioName, s, summary(s, from: 0, to: 8)))
+    expect((s.hungAt != nil) == fires, "serial engine at \(t) s a frame, \(limit) inside: watchdog \(s.hungAt.map { "at \($0) s" } ?? "never"), expected \(fires ? "to fire" : "never")")
+    if limit == twoInside, !fires { expect(s.maxVTHolds == 2, "serial engine at \(t) s: VideoToolbox never held two") }
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")

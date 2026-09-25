@@ -196,5 +196,27 @@ do {
     expect(fifth.ok == [false] && fifth.alive.count == hardwareLimit, "a re-check stuck at its 5th frame keeps \(fifth.alive.count), not \(hardwareLimit)")
 }
 
+// E4: one engine doing one frame at a time, 0.9 s each: slow, not hung. With two inside the frame
+// behind waits 0.9 s for the engine, then takes its own 0.9 s; its watchdog clock starts again when
+// the one ahead comes back, so the watchdog stays quiet, as with one inside (it fired at ~2 s
+// before: 1.8 s from the hand-over).
+do {
+    FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.9) }, serial: true)
+    let hungAt = Shared<Double?>(nil)
+    let enc = makeEncoder()
+    let session = FakeVT.lastSession
+    let t0 = CACurrentMediaTime()
+    enc.onHung = { hungAt.value = CACurrentMediaTime() - t0 }
+    let outs = Outputs()
+    enc.onEncoded = { _, key, _ in outs.add(key: key) }
+    let capture = DispatchQueue(label: "capture", qos: .userInteractive)
+    feed(enc, count: 240, capture: capture)
+    let held = FakeVT.lock.run { FakeVT.maxHeld[session] ?? 0 }
+    print("serial engine at 0.9 s a frame for 4 s: \(outs.all.count) out, at most \(held) inside, watchdog \(hungAt.value.map { String(format: "at %.2f s", $0) } ?? "quiet")")
+    expect(hungAt.value == nil, "serial engine at 0.9 s a frame: the watchdog fired at \(hungAt.value ?? -1) s")
+    expect(held == hardwareLimit, "serial engine at 0.9 s a frame: at most \(held) inside, not \(hardwareLimit)")
+    withExtendedLifetime(enc) {}
+}
+
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

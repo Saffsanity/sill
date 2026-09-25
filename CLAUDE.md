@@ -1163,6 +1163,22 @@ Review fixes, each shown by an encoder-free check (`Scripts/encoder-check/run.sh
   new mutants (the gate removed; the session never counted as having let go)
   hold it, and the probe check's stand-in refuses a second frame sent before
   one came back (22 checks, with the first frame stuck and one inside).
+- The watchdog times a frame that waited inside behind another from when that
+  one came back (`EncoderMailbox.returned` restarts the clock of every frame
+  handed over after it; `handed` tells those from frames still on
+  `encodeQueue`, which keep theirs). Two inside on an engine that does one
+  frame at a time gave the second frame half of `hangAfter`: it waited a whole
+  turnaround behind the first on its own clock, so the watchdog fired at ~0.77
+  s a frame instead of 1.5 s (at 0.8, 1.0 and 1.4 s a frame, where one inside
+  never fires). A frame handed over before the one back keeps its clock, so one
+  stuck ahead of the others still fires 1.5–2.0 s after it went in, whatever
+  order the rest come back in. The mailbox check's serial engine at 0.8, 1.0
+  and 1.4 s a frame stays quiet with two inside (2.0 fires, as with one), with
+  five new mutants (no restart: fires at 4.0 s; restarting frames still on the
+  queue: a blocked encode call caught at 3.0 s, not by 2.5; restarting frames
+  ahead: a stuck frame caught at 7.5 s; the handed set not kept); the encoder
+  check's real-time stream against 0.9 s a frame on one engine stays quiet
+  under the experiment (without the restart: fired at 2.6 s).
 
 The first round (two inside by default) was verified without the hardware
 encoder: clean builds at each commit (only the old CaptureProbe warning); the

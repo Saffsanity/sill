@@ -33,8 +33,9 @@ import StreamProtocol
 ///   ~55 fps, and would then be kept only while it adds frames (CLAUDE.md, "The 33 fps plateau").
 ///   Under it too a second frame goes in only once the session has let go of one
 ///   (`EncoderMailbox.places`), so a session stuck on its first frame holds one surface for good.
-/// - A watchdog on its own queue declares the session dead when the frame inside VT longest has
-///   been there `hangAfter` seconds without an output. The owner is told (`onHung`) and starts
+/// - A watchdog on its own queue declares the session dead when a frame has been inside VT
+///   `hangAfter` seconds without an output (one that waited inside behind another is timed from
+///   when that one came back: `EncoderMailbox.returned`). The owner is told (`onHung`) and starts
 ///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping
 ///   up with the stream (StreamCoordinator, EncoderProbe). It has fired for two different reasons:
 ///   - Stuck. 2026-09-22 the Mac's hardware encoder wedged system-wide for about three hours: a
