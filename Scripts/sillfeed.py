@@ -17,6 +17,7 @@ usage: sillfeed.py PORT [flags...]      (PORT 0: any free port; the first line s
   --redirect URL     answer 302 with this Location
   --set-cookie       every answer sets a cookie (the check must never send one back)
   --bind ADDR        listen on ADDR (default 127.0.0.1; ::1 for IPv6)
+  --all-headers      also print every header of each request, one line each
 Every request is printed on one line: the time, the path, and the headers the check sends or must
 never send (User-Agent, Accept, X-GitHub-Api-Version, If-None-Match, Cookie, Authorization), then
 the status answered. GET /__control?key=value&... changes the flags above while it runs (keys:
@@ -30,10 +31,12 @@ if not args or not args[0].isdigit():
     print(__doc__, file=sys.stderr); sys.exit(2)
 port = int(args[0])
 cfg = {"tag": "v0.4.0", "status": 200, "etag": None, "noetag": False, "draft": False, "prerelease": False, "htmlurl": None,
-       "body": None, "big": 0, "slow": 0.0, "reset": None, "redirect": None, "setcookie": False, "bind": "127.0.0.1"}
+       "body": None, "big": 0, "slow": 0.0, "reset": None, "redirect": None, "setcookie": False, "bind": "127.0.0.1",
+       "allheaders": False}
 VALUED = {"--tag": "tag", "--status": "status", "--etag": "etag", "--html-url": "htmlurl", "--body": "body", "--big": "big",
           "--slow": "slow", "--reset": "reset", "--redirect": "redirect", "--bind": "bind"}
-SWITCH = {"--no-etag": "noetag", "--draft": "draft", "--prerelease": "prerelease", "--set-cookie": "setcookie"}
+SWITCH = {"--no-etag": "noetag", "--draft": "draft", "--prerelease": "prerelease", "--set-cookie": "setcookie",
+          "--all-headers": "allheaders"}
 INTS = {"status", "big"}
 FLOATS = {"slow", "reset"}
 i = 1
@@ -112,6 +115,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t = time.time()
         print(f"{time.strftime('%H:%M:%S', time.localtime(t))}.{int(t % 1 * 1000):03d} GET {self.path} {seen} -> {status}"
               f" ({len(out[0])} bytes)", flush=True)
+        if cfg["allheaders"]:
+            for name, value in h.items(): print(f"  header {name}: {value}", flush=True)
         try:
             self.answer(status, *out)
         except (BrokenPipeError, ConnectionResetError):

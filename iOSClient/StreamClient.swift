@@ -484,6 +484,9 @@ final class StreamClient: ObservableObject {
     private(set) var savedMacsSeeded = false
 
     init() {
+        // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
+        // the network queue, where connections become ready and send it, must not be first to touch.
+        _ = Self.helloPayload
         #if DEBUG
         // Read from the command line itself: the argument domain drops a value that starts like a
         // property list but is not one, and JSON's "[" is such a start.

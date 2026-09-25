@@ -17,10 +17,11 @@ import StreamProtocol
 /// last, one a period otherwise, and never a retry of a 404, 403, 429 or 5xx before the next period.
 ///
 /// What goes out: GET the feed with `User-Agent: Sill/‹version›`, GitHub's Accept and API version
-/// headers, and If-None-Match with a stored ETag and release; an ephemeral session with no cookies,
-/// no cache and no credentials; redirects only to https://api.github.com/. Never a token, an
-/// identifier or anything about the Mac or its devices. Errors are one log line and the pane's
-/// line, never an alert (AppDelegate's modal-loop rule).
+/// headers, `Accept-Language: en`, and If-None-Match with a stored ETag and release (URLSession adds
+/// Host, Accept-Encoding and Connection); an ephemeral session with no cookies, no cache and no
+/// credentials; redirects only to https://api.github.com/. Never a token, an identifier or anything
+/// about the Mac or its devices. Errors are one log line and the pane's line, never an alert
+/// (AppDelegate's modal-loop rule).
 ///
 /// Main actor; the timers are run-loop timers that hop here with a Task.
 @MainActor @Observable
@@ -94,9 +95,12 @@ final class UpdateChecker {
         c.urlCredentialStorage = nil
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.waitsForConnectivity = false
+        // Accept-Language fixed: URLSession would otherwise send this Mac's preferred languages.
+        // What else it adds (Host, Accept-Encoding, Connection) says nothing about the Mac.
         c.httpAdditionalHeaders = ["User-Agent": "Sill/\(configuration.running ?? "unknown")",
                                    "Accept": "application/vnd.github+json",
-                                   "X-GitHub-Api-Version": "2022-11-28"]
+                                   "X-GitHub-Api-Version": "2022-11-28",
+                                   "Accept-Language": "en"]
         session = URLSession(configuration: c)
     }
 
@@ -245,7 +249,8 @@ final class UpdateChecker {
 
     /// One GET, as UpdatePolicy reads it: the status, at most `maxBody` of the body, the ETag and
     /// the rate limit's reset; a redirect other than to api.github.com refused; a URLError's code.
-    private static func fetch(_ request: URLRequest, session: URLSession) async -> UpdatePolicy.Answer {
+    /// Off the main actor: the body is read a byte at a time.
+    nonisolated private static func fetch(_ request: URLRequest, session: URLSession) async -> UpdatePolicy.Answer {
         let guardian = RedirectGuard()
         do {
             let (bytes, response) = try await session.bytes(for: request, delegate: guardian)
