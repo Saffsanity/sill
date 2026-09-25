@@ -264,7 +264,15 @@ struct ConnectScreen: View {
                     column.padding(.vertical, 16)
                 }
                 .scrollIndicatorsFlash(onAppear: true)
-                footer.padding(.top, 8)
+                // The rows fade into the edge above the footer instead of being cut off there.
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 24)
+                    }
+                }
+                footer.padding(.top, 12)
             }
         }
     }
@@ -380,6 +388,8 @@ struct ConnectScreen: View {
         Link(destination: url) {
             Text(title)
                 .foregroundStyle(Palette.accent)
+                // A link centres a label that wraps (a longer address); keep it on the footer's edge.
+                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, Self.linkReach)
                 .contentShape(Rectangle())
