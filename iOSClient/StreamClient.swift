@@ -247,13 +247,21 @@ final class StreamClient: ObservableObject {
     private var pathSignals = PathSignals()
     /// When the session connection last brought back a pong, or became the session's.
     private var lastPongAt = 0.0
-    /// The session connection failed or closed, and a move to Wi-Fi carries the session on
-    /// (DiscoveryPolicy's `reconnectNow`): the stream screen stays until the move takes over, and
-    /// the session ends if it does not (`moveEnded`).
+    /// The session connection failed or closed, and a move carries the session on
+    /// (DiscoveryPolicy's `reconnectNow`: over the cable again, or to Wi-Fi): the stream screen stays
+    /// until the move takes over, and the session ends if it does not (`moveEnded`).
     private var sessionDead = false
-    /// When this session's last move up (to the cable, or from AWDL) and down (to Wi-Fi) started.
+    /// When this session's last move up (to the cable, or from AWDL, or a reconnect over the cable)
+    /// and down (to Wi-Fi) started.
     private var lastMoveUp: Double?
     private var lastMoveDown: Double?
+    /// The listing of the cable (its `paths.wiredSince`) the last move up went to; the one a move
+    /// up found to reach another Mac, or another launch of Sill, which is not tried again while it
+    /// lasts; and the moves up to one listing that did not complete, in a row, after which the next
+    /// waits longer (DiscoveryPolicy.upWait).
+    private var upListing: Double?
+    private var refusedCable: Double?
+    private var failedUps: (listing: Double, count: Int)?
     /// The plan's next look: the cable's 2 s, the hysteresis, the pong silence mark.
     private var pathCheck: DispatchWorkItem?
     /// After a move without a fence, what the session was watching: the Mac may have counted no
@@ -640,10 +648,15 @@ final class StreamClient: ObservableObject {
         hostName = name
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
+        var wasReady = false   // the handler runs on `queue`, one state at a time
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
+                // Ready again after waiting: the session reads `c` already (a second read loop would
+                // split its messages), and its path is back.
+                guard !wasReady else { self.sessionReadyAgain(c); return }
+                wasReady = true
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
                 let path = c.currentPath
                 DispatchQueue.main.async {
@@ -807,13 +820,18 @@ final class StreamClient: ObservableObject {
     private func startMove(to endpoint: NWEndpoint, kind: MoveKind, fallback: NWEndpoint?) {
         let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: false))
         moving = Move(connection: c, kind: kind)
-        let givesUp = kind == .toCable
+        // A move up gives up; a reconnect over the cable (`sessionDead`) has the row as listed for
+        // its fallback instead, whose own dial has the move's 5 s.
+        let givesUp = kind == .toCable && !sessionDead
+        var wasReady = false   // the handler runs on `queue`, one state at a time
         // One handler for both lives of `c`: until it takes over, `moveEnded` acts (it checks
         // `moving`); after, `connectionLost` and `sessionWaiting` do (they check `connection`).
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
+                guard !wasReady else { self.sessionReadyAgain(c); return }   // as in `connect`
+                wasReady = true
                 self.probeMove(c)
             case .waiting(let e):
                 self.sessionWaiting(c)
@@ -865,8 +883,11 @@ final class StreamClient: ObservableObject {
     private func moveUnconstrained(after c: NWConnection, _ fallback: NWEndpoint, why: String) {
         guard let move = moving, move.connection === c, c.state != .ready else { return }
         #if DEBUG
-        print(move.kind == .fromDirect ? "discovery: the wired move \(why); moving unconstrained"
-              : "path: the dial on Wi\u{2011}Fi \(why); dialing the row as listed")
+        switch move.kind {
+        case .fromDirect: print("discovery: the wired move \(why); moving unconstrained")
+        case .toCable: print("path: the dial on the cable \(why); dialing the row as listed")
+        case .toWifi: print("path: the dial on Wi\u{2011}Fi \(why); dialing the row as listed")
+        }
         #endif
         startMove(to: fallback, kind: move.kind, fallback: nil)   // `moving` from here: `c`'s moveEnded does nothing
         c.cancel()
@@ -927,7 +948,10 @@ final class StreamClient: ObservableObject {
             } else {
                 // Sill relaunched on the Mac, most likely: the session's own connection is to the
                 // launch that went, and the reconnect joins the new one when that connection ends.
+                // Or another Mac of this name on the cable: a move up does not try that listing of
+                // the cable again (DiscoveryPolicy's `refusedCable`).
                 print("path: move refused: \(hostName) there is another Mac, or another launch of Sill")
+                if move.kind == .toCable, !sessionDead { refusedCable = upListing }
             }
             c.cancel()   // moveEnded, from .cancelled
             return
@@ -938,13 +962,15 @@ final class StreamClient: ObservableObject {
     /// The move's connection reaches this session's host: it takes the session over and the old one
     /// closes. The session reads it at once (first what `probeMove` kept). What this device sends
     /// waits until the Mac has read everything sent on the old connection (SessionLink's fence): a
-    /// release sent now must not overtake its press still on the slow link. Not when the old
-    /// connection's path is gone (the cable pulled) or the connection is: its fence could never come
-    /// back, so what waited since the move began (SessionLink's hold) goes out on the new connection
-    /// at once, and the old one is dropped with whatever it still held, which must not reach the Mac
-    /// late should its path come back. What any new connection starts afresh starts afresh here too,
-    /// the screen aside: the Mac's settings come again on this connection (the ledger's rule 7), the
-    /// Desktop rule starts over, and the panel gives the first state its two seconds. Main thread.
+    /// release sent now must not overtake its press still on the slow link. So for a move up (from
+    /// AWDL, or to the cable) even when iOS has said the old connection's path is gone, which can
+    /// pass: a fence that never comes back is let go after `fenceTimeout`. Not for a move to Wi-Fi,
+    /// whose old path is gone, nor when the old connection is (a reconnect): what waited since the
+    /// move began (SessionLink's hold) goes out on the new connection at once, and the old one is
+    /// dropped with whatever it still held, which must not reach the Mac late should its path come
+    /// back. What any new connection starts afresh starts afresh here too, the screen aside: the
+    /// Mac's settings come again on this connection (the ledger's rule 7), the Desktop rule starts
+    /// over, and the panel gives the first state its two seconds. Main thread.
     private func finishMove(_ c: NWConnection, kind: MoveKind, kept: [(header: StreamHeader, payload: Data)]) {
         moving = nil
         // The session this move was for must still run: over AWDL for a move from AWDL (a direct
@@ -954,7 +980,8 @@ final class StreamClient: ObservableObject {
         // From here `c` is the session's: the old connection's pings and one-second windows stop at
         // their next turn, since each checks that it is still `connection`, and its read loop goes on
         // only until the fence's pong (`deliver`), or stops at once without a fence.
-        let fenced = kind != .toWifi && !sessionDead && !pathSignals.reported
+        let reconnected = sessionDead
+        let fenced = kind != .toWifi && !reconnected
         if fenced {
             let nonce = withUnsafeBytes(of: UInt64.random(in: .min ... .max)) { Data($0) }
             let fencePing = StreamMessage(kind: .ping, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: nonce)
@@ -962,11 +989,14 @@ final class StreamClient: ObservableObject {
         } else {
             let released = link.adopt(c)
             old.forceCancel()
+            closeSoon(released?.close ?? [])
             resumeSource = active == .none ? nil : active
             #if DEBUG
-            print("path: no fence (the old connection's path is gone): \(released?.held ?? 0) held messages went out on the new connection")
+            let waiting = (released?.waiting ?? 0) > 0 ? " (\(released!.waiting) wait for an earlier hand-over's fence)" : ""
+            print("path: no fence (the old connection\(reconnected ? " is gone" : "'s path is gone")): \(released?.held ?? 0) held messages went out on the new connection\(waiting)")
             #endif
         }
+        if kind == .toCable, !reconnected { failedUps = nil }   // a move up that completed: the back-off starts again
         connectedDirectly = false
         sessionDead = false
         pathSignals = PathSignals()
@@ -983,7 +1013,7 @@ final class StreamClient: ObservableObject {
         #if DEBUG
         switch kind {
         case .fromDirect: print("discovery: the session moved to the network")
-        case .toCable: print("path: the session moved to the cable")
+        case .toCable: print(reconnected ? "path: the session carried on over a new connection (the cable's dial)" : "path: the session moved to the cable")
         case .toWifi: print("path: the session moved to Wi\u{2011}Fi")
         }
         #endif
@@ -1007,24 +1037,42 @@ final class StreamClient: ObservableObject {
     }
 
     /// A move's fence is down: the Mac has read everything sent on the direct connection (or it
-    /// closed, or never answered), and what waited has gone out on the network connection. The
-    /// direct one closes half a second later, once the viewport, which went first, has reached the
-    /// Mac. Any thread.
+    /// closed, or never answered), and what waited has gone out on the network connection, unless
+    /// another fence or a hold still stands (two hand-overs in a row). The old connections close
+    /// once what waited has gone out (`Released.close`). Any thread.
     private func fenceEnded(_ old: NWConnection, _ released: SessionLink.Released, why: String) {
         #if DEBUG
-        print("discovery: fence down (\(why)) after \(Int((released.seconds * 1000).rounded())) ms; \(released.held) held messages went out over the network")
+        let waiting = released.waiting > 0 ? " (\(released.waiting) still wait for another fence, or a hold)" : ""
+        print("discovery: fence down (\(why)) after \(Int((released.seconds * 1000).rounded())) ms; \(released.held) held messages went out over the network\(waiting)")
         #endif
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { old.cancel() }
+        closeSoon(released.close)
+    }
+
+    /// Old connections whose fences are down, now that what waited has gone out on the session's
+    /// connection: each closes half a second later, once the viewport, which went first, has
+    /// reached the Mac. Any thread.
+    private func closeSoon(_ olds: [NWConnection]) {
+        guard !olds.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { for c in olds { c.cancel() } }
     }
 
     /// The move's connection closed before it took the session over, or reached another Mac or
     /// launch: the session stays where it was. From AWDL, the next try waits `moveRetry`; for
-    /// `followBestPath`'s, the plan looks again (its hysteresis). A move off the cable gives back
-    /// what it held to the cable's connection, whose path may yet come back; one whose old
-    /// connection is gone too ends the session. Main thread.
+    /// `followBestPath`'s, the plan looks again (its hysteresis; after a move up, longer each time:
+    /// DiscoveryPolicy.upWait). A move off the cable gives back what it held to the cable's
+    /// connection, whose path may yet come back. A reconnect (the old connection gone) that did not
+    /// complete ends the session. Main thread.
     private func moveEnded(_ c: NWConnection) {
         guard let move = moving, move.connection === c else { return }
         moving = nil
+        if sessionDead {
+            #if DEBUG
+            print(move.kind == .toCable ? "path: the reconnect over the cable did not complete, and the old connection is gone: the session ends"
+                  : "path: the move to Wi\u{2011}Fi did not complete, and the old connection is gone: the session ends")
+            #endif
+            endSession()
+            return
+        }
         if connected { status = "Connected to \(hostName)" }
         switch move.kind {
         case .fromDirect:
@@ -1033,19 +1081,16 @@ final class StreamClient: ObservableObject {
             #endif
             moveToNetworkIfListed()
         case .toCable:
+            if let listing = upListing {
+                failedUps = (listing, failedUps.map { $0.listing == listing ? $0.count + 1 : 1 } ?? 1)
+            }
             #if DEBUG
-            print("path: the move to the cable did not complete; the session stays on Wi\u{2011}Fi")
+            print("path: the move to the cable did not complete (\(failedUps?.count ?? 0) in a row); the session stays on Wi\u{2011}Fi")
             #endif
             followBestPath()
         case .toWifi:
-            if sessionDead {
-                #if DEBUG
-                print("path: the move to Wi\u{2011}Fi did not complete, and the old connection is gone: the session ends")
-                #endif
-                endSession()
-                return
-            }
             let released = connection.flatMap { link.unhold($0) }
+            closeSoon(released?.close ?? [])
             #if DEBUG
             print("path: the move to Wi\u{2011}Fi did not complete; the session stays on the cable (\(released?.held ?? 0) held messages went out on it)")
             #endif
@@ -1062,7 +1107,7 @@ final class StreamClient: ObservableObject {
             moving = nil
             move.connection.cancel()
         }
-        link.dropHandOver()?.cancel()
+        for c in link.dropHandOver() { c.cancel() }
     }
 
     // MARK: Following the best path
@@ -1071,9 +1116,11 @@ final class StreamClient: ObservableObject {
     /// a session over Wi-Fi moves to the cable once the network browser has listed its Mac on it for
     /// `cableSettle`, one over the cable moves to Wi-Fi at once when the cable's path is gone, each by
     /// the make-before-break move a session over AWDL takes to the network, and at most once per
-    /// `pathHysteresis` each way. Called when the browsers' results change, when iOS says something of
-    /// the session connection's path, at the session's first window list, after a move, and at the
-    /// plan's own look again. Main thread.
+    /// `pathHysteresis` each way (up, longer after moves that did not complete, and never again to a
+    /// listing of the cable that reached another Mac). A move may start while an earlier hand-over's
+    /// fence is still up: SessionLink keeps what waits until every fence is down. Called when the
+    /// browsers' results change, when iOS says something of the session connection's path, at the
+    /// session's first window list, after a move, and at the plan's own look again. Main thread.
     private func followBestPath() {
         pathCheck?.cancel()
         pathCheck = nil
@@ -1087,6 +1134,7 @@ final class StreamClient: ObservableObject {
             moving = nil
             move.connection.cancel()
             let released = connection.flatMap { link.unhold($0) }
+            closeSoon(released?.close ?? [])
             #if DEBUG
             print("path: the cable's path came back: the move to Wi\u{2011}Fi is called off (\(released?.held ?? 0) held messages went out on the cable)")
             #endif
@@ -1095,7 +1143,10 @@ final class StreamClient: ObservableObject {
         switch DiscoveryPolicy.pathPlan(input) {
         case .stay(let why, let at):
             #if DEBUG
-            if why != lastKept { lastKept = why; print("path: kept: \(why.text)") }
+            if why != lastKept {
+                lastKept = why
+                print("path: kept: \(why.text)\(at.map { String(format: " (looking again in %.1f s)", $0 - now) } ?? "")")
+            }
             #endif
             if let at {
                 let work = DispatchWorkItem { [weak self] in self?.followBestPath() }
@@ -1106,17 +1157,17 @@ final class StreamClient: ObservableObject {
             guard let mac = macs.first(where: { $0.name == hostName && !$0.direct }), let wired = wiredDial(for: mac) else { return }
             #if DEBUG
             lastKept = nil
-            print("path: the cable appeared: moving the session to \(interface)")
+            print(input.upFailures > 0 ? "path: the cable is still listed: moving the session to \(interface) again (\(input.upFailures) did not complete)"
+                  : "path: the cable appeared: moving the session to \(interface)")
             print("path: dialing \(hostName) on \(wired.via)")
             #endif
             lastMoveUp = now
+            upListing = input.wiredSince
             startMove(to: wired.endpoint, kind: .toCable, fallback: nil)
         case .moveTo(.wifi, let interface):
             _ = moveToWifi(interface, now: now, why: "the cable went away: moving to Wi\u{2011}Fi on \(interface)")
-        case .reconnectNow(let interface):
-            if !moveToWifi(interface, now: now, why: "the cable went away with the connection: reconnecting over Wi\u{2011}Fi on \(interface) now") {
-                endSession()
-            }
+        case .reconnectNow(let method, let interface):
+            if !reconnectNow(method, interface, now: now) { endSession() }
         case .moveTo(.direct, _):
             break   // never planned: nothing moves a session to Direct
         }
@@ -1124,17 +1175,19 @@ final class StreamClient: ObservableObject {
 
     /// The session as DiscoveryPolicy.pathPlan reads it. Main thread.
     private func pathInput(now: Double) -> DiscoveryPolicy.PathInput {
-        DiscoveryPolicy.PathInput(now: now, route: connectedDirectly ? .direct : route, dead: sessionDead,
-                                  pathReported: pathSignals.reported, pathHinted: pathSignals.hinted, lastPong: lastPongAt,
-                                  wired: paths.wired[hostName], wiredSince: paths.wiredSince[hostName],
-                                  wifi: DiscoveryPolicy.freshWifi(paths, name: hostName, now: now),
-                                  lastUp: lastMoveUp, lastDown: lastMoveDown)
+        let listing = paths.wiredSince[hostName]
+        return DiscoveryPolicy.PathInput(now: now, route: connectedDirectly ? .direct : route, dead: sessionDead,
+                                         pathReported: pathSignals.reported, pathHinted: pathSignals.hinted, lastPong: lastPongAt,
+                                         wired: paths.wired[hostName], wiredSince: listing,
+                                         wifi: DiscoveryPolicy.freshWifi(paths, name: hostName, now: now),
+                                         lastUp: lastMoveUp, lastDown: lastMoveDown, refusedCable: refusedCable,
+                                         upFailures: failedUps.map { $0.listing == listing ? $0.count : 0 } ?? 0)
     }
 
     /// Moves the session off the cable to Wi-Fi: the Mac's network row, or the last one that listed
     /// it on Wi-Fi while the browser lists none for a moment (DiscoveryPolicy.wifiFresh), dialled on
-    /// its Wi-Fi interface (`wifiDial`). From now on what this device sends waits (SessionLink's
-    /// hold) and goes out on the new connection first. False when there is no row to dial. Main thread.
+    /// its Wi-Fi interface (`wifiDial`). From now on what this device sends waits (`holdSends`) and
+    /// goes out on the new connection first. False when there is no row to dial. Main thread.
     private func moveToWifi(_ interface: String, now: Double, why: String) -> Bool {
         let listed = macs.first { $0.name == hostName && !$0.direct && paths.wifi[hostName] != nil }
         guard let mac = listed ?? lastWifiRow[hostName], let old = connection else { return false }
@@ -1145,22 +1198,61 @@ final class StreamClient: ObservableObject {
         print("path: dialing \(hostName) on \(dial.via)")
         #endif
         lastMoveDown = now
-        link.hold(old)
+        holdSends(old)
         startMove(to: dial.endpoint, kind: .toWifi, fallback: dial.fallback)
         return true
     }
 
-    /// The session connection, `c`, failed or closed. When it ran over the cable and its Mac is on
-    /// Wi-Fi, listed now or within DiscoveryPolicy.wifiFresh (the plan's `reconnectNow`), the
-    /// session is not over: it goes on over Wi-Fi at once, without the connect screen or the
-    /// reconnect's retry timer, by a move to Wi-Fi (one already under way carries it on), and ends
-    /// only if that does not complete (`moveEnded`). False when the ordinary end applies. Main thread.
+    /// Carries a session whose connection has gone on over a new one at once (DiscoveryPolicy's
+    /// `reconnectNow`): over the cable again when the browser still lists it and iOS said nothing
+    /// of the path (the Mac closed the connection: it evicts a device that stopped reading, one
+    /// suspended in the background for 4 s or more, say), dialled as a tap on its Wired row dials
+    /// it, the cable first and the row as listed after DiscoveryPolicy.wiredWait or at once when the
+    /// cable's dial cannot go on; else to Wi-Fi (`moveToWifi`). A move to Wi-Fi would bring the
+    /// session back to the cable 2 s later. False when there is no row to dial. Main thread.
+    private func reconnectNow(_ method: DiscoveryPolicy.Method, _ interface: String, now: Double) -> Bool {
+        switch method {
+        case .wifi:
+            return moveToWifi(interface, now: now, why: "the cable went away with the connection: reconnecting over Wi\u{2011}Fi on \(interface) now")
+        case .wired:
+            guard let mac = macs.first(where: { $0.name == hostName && !$0.direct }), let wired = wiredDial(for: mac),
+                  let old = connection else { return false }
+            #if DEBUG
+            lastKept = nil
+            print("path: the connection went away, the cable did not: reconnecting over it on \(interface) now")
+            print("path: dialing \(hostName) on \(wired.via), then the row as listed")
+            #endif
+            lastMoveUp = now
+            holdSends(old)
+            startMove(to: wired.endpoint, kind: .toCable, fallback: mac.endpoint)
+            return true
+        case .direct:
+            return false   // never planned
+        }
+    }
+
+    /// From now on what this device sends waits (SessionLink's hold) for the move that carries the
+    /// session on, also past a fence still up from an earlier hand-over. `old` is the session's
+    /// connection; were it not, nothing it holds would be sent on it anyway. Main thread.
+    private func holdSends(_ old: NWConnection) {
+        guard !link.hold(old) else { return }
+        #if DEBUG
+        print("path: nothing held: the connection moved from is no longer the session's")
+        #endif
+    }
+
+    /// The session connection, `c`, failed or closed. When it ran over the cable (the plan's
+    /// `reconnectNow`), the session is not over: it goes on at once, without the connect screen or
+    /// the reconnect's retry timer, over the cable again when the browser still lists it and iOS
+    /// said nothing of its path, else over Wi-Fi when the Mac is listed there now or was within
+    /// DiscoveryPolicy.wifiFresh (a move to Wi-Fi already under way carries it on), and ends only if
+    /// that does not complete (`moveEnded`). False when the ordinary end applies. Main thread.
     private func rescue(from c: NWConnection) -> Bool {
         guard connected, sessionListed else { return false }
         let now = ProcessInfo.processInfo.systemUptime
         var input = pathInput(now: now)
         input.dead = true
-        guard case .reconnectNow(let interface) = DiscoveryPolicy.pathPlan(input) else { return false }
+        guard case .reconnectNow(let method, let interface) = DiscoveryPolicy.pathPlan(input) else { return false }
         sessionDead = true
         if let move = moving {
             if move.kind == .toWifi {
@@ -1172,21 +1264,32 @@ final class StreamClient: ObservableObject {
             moving = nil   // a move to the cable cannot be, over the cable; one from AWDL neither
             move.connection.cancel()
         }
-        if moveToWifi(interface, now: now, why: "the cable went away with the connection: reconnecting over Wi\u{2011}Fi on \(interface) now") {
-            return true
-        }
+        if reconnectNow(method, interface, now: now) { return true }
         sessionDead = false
         return false
     }
 
     /// The session connection went back to waiting (any thread): when it is the session's, its path
-    /// is gone (DiscoveryPolicy's `pathReported`).
+    /// is gone (DiscoveryPolicy's `pathReported`) until it is ready again (`sessionReadyAgain`).
     private func sessionWaiting(_ c: NWConnection) {
         DispatchQueue.main.async {
             guard self.connected, self.connection === c, !self.pathSignals.waiting else { return }
             self.pathSignals.waiting = true
             #if DEBUG
             print("path: the session's connection is waiting again: its path is gone")
+            #endif
+            self.followBestPath()
+        }
+    }
+
+    /// A connection that was ready is ready again, after waiting (any thread): when it is the
+    /// session's, its path is back. Nothing else of `.ready` runs again. Main thread from here.
+    private func sessionReadyAgain(_ c: NWConnection) {
+        DispatchQueue.main.async {
+            guard self.connected, self.connection === c, self.pathSignals.waiting else { return }
+            self.pathSignals.waiting = false
+            #if DEBUG
+            print("path: the session's connection is ready again: its path is back")
             #endif
             self.followBestPath()
         }
@@ -1243,6 +1346,9 @@ final class StreamClient: ObservableObject {
         sessionDead = false
         lastMoveUp = nil
         lastMoveDown = nil
+        upListing = nil
+        refusedCable = nil
+        failedUps = nil
         resumeSource = nil
         #if DEBUG
         lastKept = nil
@@ -1296,10 +1402,17 @@ final class StreamClient: ObservableObject {
     /// wired interface, anpi0, and a session on the cable has its path back), `-cable` (the row loses
     /// it, and a session on the cable is reported unsatisfied, as iOS reports a pulled cable), `cut`
     /// (the row loses it, and a session on the cable has its connection closed at once, with nothing
-    /// reported first), `-row` (the row loses it, nothing else), `mute` (the session's pongs stop
-    /// counting, as over a cable gone silent), `-wifi` and `+wifi` (the row loses or gains en0). On a
-    /// Mac with the iPad on its cable, its own `fe80::…%en14` address reads "Wired" and
-    /// `fe80::…%en0` "Wi-Fi" (the scope), so the route word changes at each hand-over as it would.
+    /// reported first), `close` (the session's connection closed at once, the row as it is and
+    /// nothing reported: the Mac closing it, as it evicts a device that stopped reading), `-row` (the
+    /// row loses it, nothing else), `mute` (the session's pongs stop counting, as over a cable gone
+    /// silent), `-wifi` and `+wifi` (the row loses or gains en0). On a Mac with the iPad on its
+    /// cable, its own `fe80::…%en14` address reads "Wired" and `fe80::…%en0` "Wi-Fi" (the scope),
+    /// so the route word changes at each hand-over as it would. A `cable=` that never answers
+    /// (192.0.2.1:9), refuses (127.0.0.1:1), accepts and says nothing, or is another synthetic host
+    /// (another launch) makes each move to the cable fail its way. `direct` makes the session count
+    /// as one over AWDL (as `-SillMoveTest` does), so the row is where the move from AWDL takes it
+    /// once listed for 2 s: behind delay proxies, a move to the cable can then land while that
+    /// move's fence is still up.
     struct PathTest {
         static let cableName = "anpi0"
         static let wifiName = "en0"
@@ -1324,8 +1437,11 @@ final class StreamClient: ObservableObject {
         guard pathTest == nil else { return }
         var wifi: NWEndpoint?, cable: NWEndpoint?
         var events: [(at: Double, what: String)] = []
+        var direct = false
         for token in spec.split(separator: " ").map(String.init) {
-            if token.hasPrefix("wifi=") {
+            if token == "direct" {
+                direct = true
+            } else if token.hasPrefix("wifi=") {
                 wifi = Self.address(String(token.dropFirst(5)))
             } else if token.hasPrefix("cable=") {
                 cable = Self.address(String(token.dropFirst(6)))
@@ -1339,6 +1455,10 @@ final class StreamClient: ObservableObject {
         }
         pathTest = PathTest(name: name, wifi: wifi, cable: cable)
         print("path test: \(name) listed on \(PathTest.wifiName) (dialled at \(wifi)); its cable dialled at \(cable)")
+        if direct {
+            connectedDirectly = true
+            print("path test: this session counts as direct")
+        }
         discoveryChanged()
         for event in events {
             DispatchQueue.main.asyncAfter(deadline: .now() + event.at) { [weak self] in self?.pathTestEvent(event.what) }
@@ -1362,6 +1482,8 @@ final class StreamClient: ObservableObject {
         case "cut":
             test.cableListed = false
             if onCable, let c = connection { c.forceCancel() }   // its .cancelled reaches connectionLost
+        case "close":
+            connection?.forceCancel()   // its .cancelled reaches connectionLost
         case "-row":
             test.cableListed = false
         case "mute":

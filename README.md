@@ -167,7 +167,9 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    that not connect within 2.5 s, over whichever link the device picks); the
    Settings panel's readout ends in the link the connection does take. A
    session follows the cable: plugged in, it moves there about 2 s later;
-   pulled, it moves to Wi-Fi at once, without the connect screen.
+   pulled, it moves to Wi-Fi at once, without the connect screen; dropped by
+   the Mac while the cable stays in (Sill away in the background, say), it
+   reconnects over the cable.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.

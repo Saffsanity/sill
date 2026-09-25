@@ -331,9 +331,11 @@ enum DiscoveryPolicy {
     // best path its Mac is reachable on, the cable over Wi-Fi over Direct (`Method.rank`), with the
     // make-before-break hand-over of the move from AWDL (StreamClient.followBestPath): up to the
     // cable once the network browser has listed the Mac on it for `cableSettle`, down to Wi-Fi at
-    // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works,
+    // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works
+    // (a connection the Mac closed while the cable stays listed is made again over the cable),
     // never off a Direct session but to the network (`moveToNetwork`), and at most one move per
-    // `pathHysteresis` each way.
+    // `pathHysteresis` each way; a cable listing that reaches another Mac is not tried again, and
+    // one whose moves do not complete is tried less and less often (`upWait`).
 
     /// A wired interface must stay listed this long before a session over Wi-Fi moves to it: a
     /// cable comes up in steps (iPadOS brings up anpi0 and en2, and the Mac's records follow on
@@ -350,6 +352,18 @@ enum DiscoveryPolicy {
     /// connection that has brought back no pong for this long has lost its path, whatever iOS says
     /// of it: a ping goes every 0.25 s, and over the cable its pong is back in 1–2 ms.
     static let pongSilence = 1.0
+    /// The longest wait between two moves up to one listing of the cable (`upWait`).
+    static let upBackoffCap = 60.0
+
+    /// How long after the last move up the next may start, when the last `failures` moves up to this
+    /// listing of the cable in a row did not complete (the wired dial not ready within `wiredWait`,
+    /// waiting or failing, or no window list within 5 s): `pathHysteresis`, doubled for each, up to
+    /// `upBackoffCap` (5, 10, 20, 40, then 60 s). A cable the browser lists but that does not carry
+    /// the Mac is then not dialled every 5 s for as long as it stays in; a move up that completes,
+    /// or a new listing (the cable out and in again), starts again at `pathHysteresis`.
+    static func upWait(failures: Int) -> Double {
+        min(pathHysteresis * Double(1 << min(max(failures, 0), 4)), upBackoffCap)
+    }
 
     /// What the network browser has shown of each Mac's paths, by Bonjour name.
     struct PathSightings: Equatable {
@@ -425,15 +439,21 @@ enum DiscoveryPolicy {
         var wired: String?
         var wiredSince: Double?
         var wifi: String?
-        /// When this session's last move up (to the cable; one from AWDL counts) and down (to
-        /// Wi-Fi) started.
+        /// When this session's last move up (to the cable; one from AWDL counts, and so does a
+        /// reconnect over the cable) and down (to Wi-Fi) started.
         var lastUp: Double?
         var lastDown: Double?
+        /// The listing of the cable (its `wiredSince`) a move up found to reach another Mac, or
+        /// another launch of Sill: not tried again while it lasts, as `moveToNetwork`'s
+        /// `refusedListing`. A new listing (the cable out and in again) is tried afresh.
+        var refusedCable: Double? = nil
+        /// Moves up to the listing of the cable now listed that did not complete, in a row (`upWait`).
+        var upFailures = 0
     }
 
     /// Why a session stays on its path, for the DEBUG console's "kept: …".
     enum Keep: Equatable {
-        case routeUnknown, direct, cable, cableUnlisted, wifi, cableSettling, upTooSoon, noWifi, downTooSoon, lost
+        case routeUnknown, direct, cable, cableUnlisted, wifi, cableSettling, upTooSoon, cableFailing, cableRefused, noWifi, downTooSoon, lost
 
         var text: String {
             switch self {
@@ -444,6 +464,8 @@ enum DiscoveryPolicy {
             case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"
             case .cableSettling: return "the cable appeared; waiting for it to settle"
             case .upTooSoon: return "the cable is up, but the last move to it was under 5 s ago"
+            case .cableFailing: return "the cable is up, but the last move to it did not complete; the next waits longer"
+            case .cableRefused: return "the cable reaches another Mac, or another launch of Sill; not tried again until it is plugged in again"
             case .noWifi: return "the cable went away, and the Mac is not on Wi\u{2011}Fi"
             case .downTooSoon: return "the cable went away, but the last move to Wi\u{2011}Fi was under 5 s ago"
             case .lost: return "Wi\u{2011}Fi's path is gone, and there is no cable"
@@ -457,9 +479,11 @@ enum DiscoveryPolicy {
         /// Dial the Mac on `interface` beside the session and hand the session over: up to the
         /// cable with the fence, down to Wi-Fi without one (nothing on the old path comes back).
         case moveTo(Method, interface: String)
-        /// The connection is dead, and it ran over the cable: dial the Mac on Wi-Fi on `interface`
-        /// now, not after the reconnect's retry timer.
-        case reconnectNow(interface: String)
+        /// The connection is dead, and it ran over the cable: dial the Mac now, not after the
+        /// reconnect's retry timer. Over the cable again on `interface` (`.wired`: the browser still
+        /// lists it and nothing said its path went, so the Mac closed the connection, the row as
+        /// listed as the fallback, as a tap on a Wired row), or on Wi-Fi on `interface` (`.wifi`).
+        case reconnectNow(Method, interface: String)
     }
 
     /// Whether the session connection's path is gone: it is dead, iOS says so (`pathReported`), or,
@@ -473,22 +497,27 @@ enum DiscoveryPolicy {
     }
 
     /// What a live session does about its path now (Noah, 2026-09-25): move up to the cable, down to
-    /// Wi-Fi, reconnect over Wi-Fi at once, or stay. Up, from Wi-Fi only, once the cable has been
-    /// listed for `cableSettle` (counted again from a move off it) and not within `pathHysteresis`
-    /// of the last move up; the connection's own state does not matter, as the cable is better
-    /// either way, unless it is dead. Down, from the cable only, and only once its path is gone
-    /// (`pathGone`), to the Wi-Fi the Mac is listed on now or was within `wifiFresh`, not within
-    /// `pathHysteresis` of the last move down; with the connection dead, a reconnect over Wi-Fi at
-    /// once instead. Nothing ever moves a session to Direct or off it (the reconnect and
-    /// `moveToNetwork` do), from Wi-Fi to Wi-Fi, or off a cable that works.
+    /// Wi-Fi, reconnect at once, or stay. Up, from Wi-Fi only, once the cable has been listed for
+    /// `cableSettle` (counted again from a move off it) and not within `upWait` of the last move up
+    /// (`pathHysteresis`, longer after moves up that did not complete), never to a listing found to
+    /// reach another Mac (`refusedCable`); the connection's own state does not matter, as the cable
+    /// is better either way, unless it is dead. Down, from the cable only, and only once its path is
+    /// gone (`pathGone`), to the Wi-Fi the Mac is listed on now or was within `wifiFresh`, not within
+    /// `pathHysteresis` of the last move down. A dead connection over the cable is made again at
+    /// once instead: over the cable when the browser still lists it and iOS said nothing of the
+    /// path (the Mac closed it: it evicts a device that stops reading, one suspended in the
+    /// background, say; over Wi-Fi the session would be back on the cable 2 s later), else over
+    /// Wi-Fi. Nothing ever moves a session to Direct or off it (the reconnect and `moveToNetwork`
+    /// do), from Wi-Fi to Wi-Fi, or off a cable that works.
     static func pathPlan(_ i: PathInput) -> PathPlan {
         guard let route = i.route else { return .stay(.routeUnknown, recheckAt: nil) }
         if route == .direct { return .stay(.direct, recheckAt: nil) }
         if !i.dead, Method.wired.rank > route.rank, let wired = i.wired, let since = i.wiredSince {
+            if since == i.refusedCable { return .stay(.cableRefused, recheckAt: nil) }
             let settled = max(since, i.lastDown ?? since) + cableSettle
-            let due = max(settled, (i.lastUp ?? -.infinity) + pathHysteresis)
+            let due = max(settled, (i.lastUp ?? -.infinity) + upWait(failures: i.upFailures))
             if i.now >= due { return .moveTo(.wired, interface: wired) }
-            return .stay(due > settled ? .upTooSoon : .cableSettling, recheckAt: due)
+            return .stay(due > settled ? (i.upFailures > 0 ? .cableFailing : .upTooSoon) : .cableSettling, recheckAt: due)
         }
         let gone = pathGone(i)
         if route == .wifi { return .stay(gone ? .lost : .wifi, recheckAt: nil) }
@@ -497,8 +526,9 @@ enum DiscoveryPolicy {
             if i.wired == nil { return .stay(.cableUnlisted, recheckAt: i.lastPong + pongSilence) }
             return .stay(.cable, recheckAt: nil)
         }
+        if i.dead, !i.pathReported, let wired = i.wired { return .reconnectNow(.wired, interface: wired) }
         guard let wifi = i.wifi else { return .stay(.noWifi, recheckAt: nil) }
-        if i.dead { return .reconnectNow(interface: wifi) }
+        if i.dead { return .reconnectNow(.wifi, interface: wifi) }
         if let last = i.lastDown, i.now < last + pathHysteresis {
             return .stay(.downTooSoon, recheckAt: last + pathHysteresis)
         }

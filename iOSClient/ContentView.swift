@@ -97,12 +97,16 @@ struct ContentView: View {
 ///   the row's Wi-Fi and to its cable goes), then events `SECONDS:WHAT` from the first `.ready`:
 ///   `+cable` (the row gains anpi0), `-cable` (it loses it, and a session on the cable is reported
 ///   unsatisfied, as iOS reports a pulled cable), `cut` (it loses it, and a session on the cable is
-///   closed at once), `-row` (it loses it, nothing more), `mute` (pongs stop counting), `-wifi`,
-///   `+wifi`. With the iPad on this Mac's cable, this Mac's own `fe80::…%en14` reads "Wired" and
-///   `fe80::…%en0` "Wi-Fi": `-SillConnect fe80::…%en0:PORT -SillPathTest 'wifi=fe80::…%en0:PORT
-///   cable=fe80::…%en14:PORT 3:+cable'` moves the session to the cable 2 s after the cable is
-///   listed, and the host logs "Client connected: …%en14" and "Client left: …%en0". The console
-///   says what happened ("path: …").
+///   closed at once), `close` (the session's connection closed at once, the row as it is: the Mac
+///   evicting the device), `-row` (it loses it, nothing more), `mute` (pongs stop counting),
+///   `-wifi`, `+wifi`. A `cable=` that never answers (`192.0.2.1:9`), refuses (`127.0.0.1:1`) or
+///   is another synthetic host fails each move to the cable (tried less often each time, and
+///   another host's listing not again). `direct` counts the session as one over AWDL, so the row
+///   is where the move from AWDL takes it. With the iPad on this Mac's cable, this Mac's own
+///   `fe80::…%en14` reads "Wired" and `fe80::…%en0` "Wi-Fi": `-SillConnect fe80::…%en0:PORT
+///   -SillPathTest 'wifi=fe80::…%en0:PORT cable=fe80::…%en14:PORT 3:+cable'` moves the session to
+///   the cable 2 s after the cable is listed, and the host logs "Client connected: …%en14" and
+///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
