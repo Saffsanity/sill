@@ -98,6 +98,10 @@ package final class StreamCoordinator {
     /// A hang this soon after a return doubles the interval; a return that lasted this long resets it.
     private static let returnDidNotLast: TimeInterval = 300
     private static let returnLasted: TimeInterval = 600
+    /// A return needs the hardware to keep up with this share of the stream's rate (60 at most,
+    /// what the software encoder gives) in the re-check's test: 45 fps for a 60 or 120 fps stream.
+    /// Two ordinary sessions share the engine at ~50 fps each; a starved one runs at 7–18.
+    private static let returnRate = 0.75
     /// Probes whose frame never came back each hold a blocked thread (a stuck encoder never lets
     /// go); with this many out, the re-check stops probing until one comes back. A busy encoder
     /// hands them back within seconds, so only a stuck one reaches it (after 22–28 min of checks
@@ -1259,10 +1263,11 @@ package final class StreamCoordinator {
         recheckTask = nil
     }
 
-    /// Main actor. Waits for `recheckDue`, probes the hardware with one small frame off the main
-    /// actor (1 s at most, no line, no counter), and on an answer goes back to it. A check with no
-    /// answer prints one line and doubles the wait. Ends when cancelled (no device), when the
-    /// hardware is back, or when the host shuts down.
+    /// Main actor. Waits for `recheckDue`, runs a short test of the hardware at the stream's size
+    /// off the main actor (`EncoderProbe.throughput`: no line, no counter), and goes back to it when
+    /// it keeps up. A check where it does not (no answer, or too slow: busy) prints one line and
+    /// doubles the wait. Ends when cancelled (no device), when the hardware is back, or when the
+    /// host shuts down.
     private func recheckLoop() async {
         while !Task.isCancelled, useSoftwareEncoder, !shuttingDown {
             let wait = recheckDue - CFAbsoluteTimeGetCurrent()
@@ -1283,19 +1288,26 @@ package final class StreamCoordinator {
                 continue
             }
             status.update { $0.hardwareEncoderStuck = false }   // a probe came back: checking again
-            let (ok, ms) = await withCheckedContinuation { (c: CheckedContinuation<(ok: Bool, ms: Int), Never>) in
-                // The probe waits on a semaphore for up to 1 s: a GCD thread, not the main actor or
-                // a Swift concurrency thread.
-                DispatchQueue.global(qos: .utility).async { c.resume(returning: EncoderProbe.probe(timeout: 1, quiet: true)) }
+            // At the size the stream would have on the hardware, and fast enough for it: a small
+            // frame answers even while a busy engine starves a stream (EncoderProbe).
+            let size = hardwareProbeSize
+            let needed = Double(min(wantedFPS, 60)) * Self.returnRate
+            let result = await withCheckedContinuation { (c: CheckedContinuation<(ok: Bool, fps: Double?, ms: Int), Never>) in
+                // The probe waits on a semaphore, up to 1 s a frame: a GCD thread, not the main
+                // actor or a Swift concurrency thread.
+                DispatchQueue.global(qos: .utility).async {
+                    c.resume(returning: EncoderProbe.throughput(width: size.width, height: size.height))
+                }
             }
             let now = CFAbsoluteTimeGetCurrent()
             lastRecheck = now
             guard useSoftwareEncoder, !shuttingDown else { return }
-            if ok {
+            let measured = result.fps.map { "\(Int($0.rounded())) fps at \(size.width)×\(size.height)" } ?? "answered at \(size.width)×\(size.height)"
+            if result.ok, (result.fps ?? .infinity) >= needed {
                 // Taken even if the last device left meanwhile: the next stream then starts on it.
                 // In a task of its own, which cancelling the re-check cannot reach: the restart's
                 // own waits (Task.sleep in the stage and here) must not end early.
-                let back = await Task { @MainActor in await self.hardwareIsBack(ms: ms) }.value
+                let back = await Task { @MainActor in await self.hardwareIsBack(measured: measured) }.value
                 // Back: the loop ends, unless the restart's new session already hung and set the
                 // flag and the next check again (then it goes on). A later hang starts a new
                 // re-check (startRecheck).
@@ -1304,15 +1316,31 @@ package final class StreamCoordinator {
             }
             recheckInterval = min(recheckInterval * 2, Self.recheckMaxInterval)
             recheckDue = now + recheckInterval
-            print("Hardware encoder still not answering after \(ms) ms; next check in \(Int(recheckInterval)) s.")
+            if result.ok {
+                print("Hardware encoder answers but is busy (\(measured) in a test, under the \(Int(needed)) fps a return needs; another app is using it); next check in \(Int(recheckInterval)) s.")
+            } else {
+                print("Hardware encoder still not answering after \(result.ms) ms; next check in \(Int(recheckInterval)) s.")
+            }
         }
     }
 
-    /// A re-check found the hardware answering: the next pipeline uses it, and a running stream
+    /// The size a hardware stream would have now: the running one's at the full capture scale, or
+    /// the Desktop's while nothing streams (a device asks for the Desktop first).
+    private var hardwareProbeSize: (width: Int, height: Int) {
+        if active != .none, let enc = encoder {
+            let factor = enc.software ? scale / min(scale, 1.0) : 1   // the software encoder runs at points
+            return (evenPixels(CGFloat(enc.width) * factor), evenPixels(CGFloat(enc.height) * factor))
+        }
+        if synthetic { return (evenPixels(1512 * scale), evenPixels(949 * scale)) }
+        if let d = catalog.display { return (evenPixels(CGFloat(d.width) * scale), evenPixels(CGFloat(d.height) * scale)) }
+        return (evenPixels(1920 * scale), evenPixels(1080 * scale))
+    }
+
+    /// A re-check found the hardware keeping up: the next pipeline uses it, and a running stream
     /// restarts on it now (one restart, like a settings change: Mac focus is left alone). Waits out
     /// a switch in flight first, which may be building a software encoder; false when it never
     /// settled, and the re-check tries again later.
-    private func hardwareIsBack(ms: Int) async -> Bool {
+    private func hardwareIsBack(measured: String) async -> Bool {
         var waited = 0
         while switching {
             guard waited < 50 else { return false }
@@ -1328,10 +1356,10 @@ package final class StreamCoordinator {
         status.update { $0.softwareEncoder = false; $0.hardwareEncoderStuck = false }
         Stats.shared.bump("enc.hardwareBack")
         if active != .none {
-            print("Hardware encoder is back (answered in \(ms) ms); restarting the stream on it.")
+            print("Hardware encoder is back (\(measured) in a test); restarting the stream on it.")
             await select(active)   // nothing awaited since `switching` read false: this select runs
         } else {
-            print("Hardware encoder is back (answered in \(ms) ms); the next stream uses it.")
+            print("Hardware encoder is back (\(measured) in a test); the next stream uses it.")
         }
         return true
     }

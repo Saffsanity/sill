@@ -48,9 +48,10 @@ final class HEVCEncoder {
     /// Never called while the frame stays inside, which is what a stuck encoder does. Set it before
     /// the encoder is released.
     var onStalledFrameBack: ((TimeInterval) -> Void)?
-    /// TEST ONLY (EncoderProbe's SILL_TEST_PROBE_HOLD): the first frame waits this long on
-    /// `encodeQueue` before it goes in, as in a busy encoder (seconds) or a stuck one (for good).
-    var testHoldFirstFrame: TimeInterval = 0
+    /// TEST ONLY (EncoderProbe's SILL_TEST_PROBE_HOLD): every frame waits this long on
+    /// `encodeQueue` before it goes in, as in a starved encoder (tens of ms), a busy one (seconds)
+    /// or a stuck one (for good).
+    var testHoldEachFrame: TimeInterval = 0
 
     private static let serialLock = NSLock()
     private static var lastSerial = 0
@@ -237,7 +238,7 @@ final class HEVCEncoder {
         outstandingID = id
         lock.unlock()
 
-        if id == 1, testHoldFirstFrame > 0 { Thread.sleep(forTimeInterval: testHoldFirstFrame) }
+        if testHoldEachFrame > 0 { Thread.sleep(forTimeInterval: testHoldEachFrame) }
         if id == TestHang.frame, !quiet, !software, TestHang.take() {
             // TEST ONLY (SILL_TEST_ENCODER_HANG): this frame waits here, then goes in late and comes
             // back, as frames did in a busy engine on 2026-09-24. The watchdog fires meanwhile.
