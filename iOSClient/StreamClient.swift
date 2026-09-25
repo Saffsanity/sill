@@ -167,6 +167,8 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// Harness `pending` case: the mock never answers and never times out.
     var mockFrozen = false
+    /// The harness's remote cases: one second's numbers, as the network queue would publish them.
+    func showMockLinkStats(_ stats: LinkStats) { linkStats = stats }
     #endif
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions

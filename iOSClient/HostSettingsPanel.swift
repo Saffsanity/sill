@@ -20,6 +20,9 @@ struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
     let close: () -> Void
+    /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
+    /// pairing overlay.
+    var pairThisDevice: () -> Void = {}
 
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
@@ -29,6 +32,15 @@ struct HostSettingsPanel: View {
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
+    /// screen shows the last groups (Direct Wireless, Away from home).
+    private static var startsAtEnd: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +51,7 @@ struct HostSettingsPanel: View {
                 ScrollView { middle }
                     .scrollIndicatorsFlash(onAppear: true)
                     .scrollBounceBehavior(.basedOnSize)
+                    .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
             }
             foot
         }
@@ -98,15 +111,21 @@ struct HostSettingsPanel: View {
                             Text("On the virtual display")
                         }
                         // How this device reaches the Mac: over peer-to-peer Wi-Fi, which the Direct
-                        // Wireless Connection row can turn off.
+                        // Wireless Connection row can turn off; or from afar, with the round trip
+                        // (it needs no clock agreement between the two devices, unlike frame age).
                         if client.connectedDirectly {
                             Text("Connected directly")
+                        } else if case .remote(let r)? = client.route {
+                            // Wraps like the readout above (larger text on the outer display cut it off).
+                            Text("Connected \(r.phrase) · \(Self.rttText(client.linkStats))")
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Self.spokenReadout(state.stream, direct: client.connectedDirectly))
+                    .accessibilityLabel(Self.spokenReadout(state.stream, direct: client.connectedDirectly,
+                                                           remote: remoteRoute, rttMs: client.linkStats?.rtt?.median))
                 }
             }
             Spacer(minLength: 8)
@@ -199,13 +218,17 @@ struct HostSettingsPanel: View {
                         }
                         // A warning about turning it off, so only while the switch shows on.
                         .accessibilityHint(client.connectedDirectly && direct ? "Turning this off can disconnect this \(device)." : "")
+                        // From afar the Mac refuses it anyway: how devices near the Mac reach it is
+                        // theirs and the Mac's to change.
+                        .disabled(remoteRoute != nil)
                         .rowFrame()
                     }
-                    Footnote(text: directFooter(on: direct))
+                    Footnote(text: remoteRoute != nil ? "Change this on \(mac), or from a device near it." : directFooter(on: direct))
                 }
                 if !state.persistent {
                     Footnote(text: "SillHost keeps these until it quits.")
                 }
+                awayFromHome
             } else if olderMac {
                 Label("Update Sill on \(mac) to change these from here.", systemImage: "arrow.down.circle")
                     .font(.body)
@@ -269,6 +292,65 @@ struct HostSettingsPanel: View {
         Binding(get: { value }, set: { client.changeSettings(change($0)) })
     }
 
+    // MARK: Away from home
+
+    /// This connection's way in from afar, when it is one.
+    private var remoteRoute: RemoteRoute? {
+        if case .remote(let r)? = client.route { return r }
+        return nil
+    }
+
+    /// The last group (docs/remote-access-plan.md §7.11): whether this device can reach the Mac
+    /// away from home, from the Mac's kind 18. None from an older Mac (no kind 18 on this connection).
+    @ViewBuilder private var awayFromHome: some View {
+        if let info = client.macInfo {
+            Text("Away from home")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+                .accessibilityAddTraits(.isHeader)
+            if client.macInfoSaved {
+                Rows {
+                    Label("Paired for remote access", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(Palette.text)
+                        .rowFrame()
+                }
+                if let r = remoteRoute {
+                    Footnote(text: "Connected \(r.phrase).")
+                } else {
+                    Footnote(text: "Away from home, Sill reaches \(mac) \(Self.reach(info)).")
+                }
+            } else if info.remoteAccess {
+                Rows {
+                    Button(action: pairThisDevice) {
+                        Text("Pair This \(device)…")
+                            .foregroundStyle(Palette.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .rowFrame()
+                }
+                Footnote(text: "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device).")
+            } else {
+                Footnote(text: "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac.")
+            }
+        }
+    }
+
+    /// "through Tailscale (mac-mini.tail1234.ts.net)": the first VPN or internet address the Mac
+    /// gave; otherwise "through your VPN or the internet".
+    static func reach(_ info: MacInfo) -> String {
+        guard let a = info.addresses.first(where: { $0.kind == MacAddress.vpn || $0.kind == MacAddress.internet }) else {
+            return "through your VPN or the internet"
+        }
+        if a.kind == MacAddress.internet { return "over the internet (\(a.host))" }
+        let name = a.via.isEmpty || a.via.hasPrefix("VPN (") ? "your VPN" : a.via
+        return "through \(name) (\(a.host))"
+    }
+
     // MARK: Copy
 
     /// Under the Mac's name: what actually runs, which confirms a change took effect and shows
@@ -279,8 +361,16 @@ struct HostSettingsPanel: View {
         return "\(s.width)×\(s.height) · \(s.fps)\u{00A0}fps · \(s.mbps)\u{00A0}Mbps"
     }
 
-    static func spokenReadout(_ stream: RunningStream?, direct: Bool = false) -> String {
-        let link = direct ? ", connected directly" : ""
+    /// "48 ms", the last second's median round trip; "–" for a second without a pong.
+    static func rttText(_ stats: StreamClient.LinkStats?) -> String {
+        stats?.rtt.map { "\($0.median)\u{00A0}ms" } ?? "–"
+    }
+
+    static func spokenReadout(_ stream: RunningStream?, direct: Bool = false, remote: RemoteRoute? = nil, rttMs: Int? = nil) -> String {
+        var link = direct ? ", connected directly" : ""
+        if let remote {
+            link = ", connected \(remote.phrase)" + (rttMs.map { ", \($0) millisecond round trip" } ?? "")
+        }
         guard let s = stream else { return "Not streaming" + link }
         return "Streaming \(s.width) by \(s.height), \(s.fps) frames per second, \(s.mbps) megabits per second"
             + (s.onVirtualDisplay ? ", on the virtual display" : "") + link

@@ -77,13 +77,25 @@ struct ContentView: View {
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
-///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
-///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it); and away from
+///   home: `remote` (through Tailscale, 48 ms, saved), `remoteinternet`, `remoteslow` (the slow-link
+///   callout), `remotepair` (Pair This iPad…), `remoteoff` or `noremote` (no kind 18: no group)
+///   (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s.
+/// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a network row and Direct
-///   rows) or `denied` (Local Network access denied: the status says what to do, no hint).
-///   Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
-///   change what it shows (see `MockCatalog.ConnectCase`).
+///   rows) or `denied` (Local Network access denied: the status says what to do, no hint); or
+///   remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
+///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
+///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
+///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
+///   browses; Search Nearby and a row's tap only change what it shows (see
+///   `MockCatalog.ConnectCase`).
+/// * Real pairing, in the normal app (not the harness): `-SillPairURL '<sill://pair…>'` pairs
+///   with that link at launch without the confirmation; `-SillPairCode <12 digits>
+///   -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first saved Mac as a
+///   tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and this device's key;
+///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -112,6 +124,8 @@ struct LayoutHarness: View {
         let settingsCase: MockCatalog.SettingsCase
         /// The connect screen in a discovery state, instead of the stream screen. Ignored when `live`.
         let connectCase: MockCatalog.ConnectCase?
+        /// The stream screen under the pairing overlay.
+        let scanOverlay: Bool
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -129,7 +143,8 @@ struct LayoutHarness: View {
                         mockActive: mockActive(defaults.string(forKey: "SillActive")),
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
-                        connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""))
+                        connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
+                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"))
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -195,94 +210,209 @@ struct LayoutHarness: View {
                     ConnectScreen(client: live)
                 }
             }
-        } else if spec.connectCase != nil {
+        } else if let c = spec.connectCase {
+            let options = MockCatalog.connectScreenOptions(c)
             ZStack {
                 Color.black
-                ConnectScreen(client: mock)
+                ConnectScreen(client: mock, adding: options.adding, typed: options.typed, scannerOverride: options.scanner)
             }
         } else {
             StreamScreen(client: mock,
                          drawerOpen: spec.drawerOpen,
                          keyboardShown: spec.keyboardShown,
                          scaleOpen: spec.scaleOpen, textScale: spec.textScale,
-                         settingsOpen: spec.settingsOpen)
+                         settingsOpen: spec.settingsOpen,
+                         pairingOverlay: spec.scanOverlay, scannerOverride: .placeholder)
         }
     }
 }
 #endif
 
-/// Before a Mac is picked: the Macs the browsers found, as drawer-style rows ("Direct" for one
-/// reached over peer-to-peer Wi-Fi), and, when none turns up on the network, why, with Search Nearby.
+/// Before a Mac is picked: the Macs the browsers found and the saved ones they do not list, as
+/// drawer-style rows ("Direct" for one reached over peer-to-peer Wi-Fi, "Remote" for a saved Mac
+/// dialed through its VPN or the internet); when none turns up on the network, why, with Search
+/// Nearby; and Add a Mac… last, which unfolds the pairing card in the column's place
+/// (docs/remote-access-plan.md §7.8, §7.10). A saved Mac's row has a menu: Connect or Connect
+/// Remotely, and Forget.
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
+    @State private var adding: Bool
+    @State private var typed: Bool
+    /// A field of the card has the keyboard.
+    @State private var editing = false
+    /// The DEBUG harness's stand-in for the camera (the simulator has none); nil on a device.
+    let scannerOverride: CodeScanner.Mode?
+    @AccessibilityFocusState private var titleFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
+        self.client = client
+        self.scannerOverride = scannerOverride
+        _adding = State(initialValue: adding)
+        _typed = State(initialValue: typed)
+    }
+
+    private var device: String { StreamClient.deviceWord }
+    private var scannerMode: CodeScanner.Mode { scannerOverride ?? CodeScanner.currentMode }
+    /// Where the scanner cannot run (the simulator), the card starts on the typed path.
+    private var scannerUsable: Bool { scannerOverride != nil || CodeScanner.isSupported }
 
     var body: some View {
+        GeometryReader { geo in
+            let layout = ConnectLayout(size: geo.size)
+            // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
+            // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
+            // safe area below, so nothing else moves.
+            let toTop = editing && !layout.topHalf
+            column(layout)
+                .frame(width: adding && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth, alignment: .leading)
+                // Placed by its leading edge, not centred: the side-by-side card is wider than the
+                // rows, and centring it moved the title sideways as the card unfolded.
+                .padding(.leading, layout.columnX)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, toTop ? 16 : 0)
+                // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing crosses
+                // the crease and the keyboard has the lower half. With a field's keyboard up: at the
+                // top. Elsewhere centred, as before.
+                .frame(maxWidth: .infinity, maxHeight: layout.topHalf ? min(geo.size.height / 2, 500) : (toTop ? nil : .infinity),
+                       alignment: toTop ? .top : .center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: layout.topHalf || toTop ? .top : .center)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onChange(of: client.pairing) { old, new in
+            // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
+            if case .paired = old, new == .idle, !client.connected { fold() }
+        }
+    }
+
+    private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connect to a Mac")
+            // Leading, so the title never jumps sideways when the hint, a row or the card widens the
+            // column. Vertically it is still centred: what adds height moves it up by half as much.
+            Text(adding || client.pendingLink != nil ? "Add a Mac" : "Connect to a Mac")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .padding(.horizontal, 10)
+                .accessibilityAddTraits(adding ? .isHeader : [])
+                .accessibilityFocused($titleFocused)
 
-            Text(client.status)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.muted)
+            if let link = client.pendingLink {
+                LinkConfirmation(link: link, pair: {
+                    // The card shows the pairing's progress; should it fail, the scanner (or the
+                    // typed path where there is none) is there to try again.
+                    typed = !scannerUsable
+                    adding = true
+                    client.confirmPendingLink()
+                }, cancel: { client.cancelPendingLink() })
                 .padding(.horizontal, 10)
-                .padding(.bottom, 4)
-
-            ForEach(client.macs) { mac in
-                DrawerRow(height: 50, highlighted: false, title: mac.name,
-                          trailing: mac.route == .direct ? "Direct" : mac.route == .remote ? "Remote" : nil,
-                          action: { client.connect(to: mac) }) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
-                        Image(systemName: "desktopcomputer")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 32, height: 32)
-                }
-                .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
-                                   : mac.route == .remote ? "Connects through your VPN or the internet." : "")
-            }
-
-            if client.showsNearbyHint {
-                Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            } else if adding {
+                AddMacCard(client: client, layout: layout, typed: $typed, scannerMode: scannerMode, close: fold, editing: $editing)
                     .padding(.horizontal, 10)
-                // Once the nearby search runs, a line in the button's place says so, whatever the
-                // status line says (a disconnect's message stays there), at the button's height so
-                // nothing moves.
-                if client.searchingNearby {
-                    Text("Also looking nearby")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Palette.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, 10)
-                } else {
-                    Button(action: {
-                        client.searchNearby()
-                        // The button leaves from under VoiceOver's cursor: say what it started.
-                        AccessibilityNotification.Announcement("Also looking nearby").post()
-                    }) {
-                        Text("Search Nearby")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, 10)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
-                }
+                    .padding(.top, 4)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            } else {
+                rows
             }
         }
-        // Leading, so the title never jumps sideways when the hint or the first row widens the
-        // column. Vertically it is still centred: what adds height moves it up by half as much.
-        .frame(width: 380, alignment: .leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder private var rows: some View {
+        Text(client.status)
+            .font(.system(size: 13))
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
+
+        ForEach(client.macs) { mac in
+            DrawerRow(height: 50, highlighted: false, title: mac.name,
+                      trailing: mac.route == .direct ? "Direct" : mac.route == .remote ? "Remote" : nil,
+                      action: { client.connect(to: mac) }) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 32, height: 32)
+            }
+            .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
+                               : mac.route == .remote ? "Connects through your VPN or the internet." : "")
+            .contextMenu { menu(for: mac) }
+        }
+
+        if client.showsNearbyHint {
+            Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill. Away from home, add it once with a code from your Mac.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+            // Once the nearby search runs, a line in the button's place says so, whatever the
+            // status line says (a disconnect's message stays there), at the button's height so
+            // nothing moves.
+            if client.searchingNearby {
+                Text("Also looking nearby")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 10)
+            } else {
+                Button(action: {
+                    client.searchNearby()
+                    // The button leaves from under VoiceOver's cursor: say what it started.
+                    AccessibilityNotification.Announcement("Also looking nearby").post()
+                }) {
+                    Text("Search Nearby")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
+            }
+        }
+
+        // Always the last line, from the first frame, so nothing moves when it is needed.
+        Button(action: unfold) {
+            Text("Add a Mac…")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Pairs this \(device) with a Mac so you can reach it away from home.")
+    }
+
+    /// A saved Mac's row: Connect (a Remote row) or Connect Remotely (its network row, to try the
+    /// VPN path at home), and Forget. Other Macs' rows have no menu.
+    @ViewBuilder private func menu(for mac: FoundMac) -> some View {
+        if let id = mac.macID {
+            if mac.route == .remote {
+                Button { client.connect(to: mac) } label: { Label("Connect", systemImage: "globe") }
+            } else if mac.route == .network {
+                Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
+            }
+            let name = client.savedMac(id) != nil ? client.displayName(id) : mac.name
+            Button(role: .destructive) { client.forget(id) } label: { Label("Forget \(name)", systemImage: "trash") }
+        }
+    }
+
+    private func unfold() {
+        client.pairing = .idle
+        typed = !scannerUsable
+        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) { adding = true }
+        titleFocused = true
+    }
+
+    private func fold() {
+        client.cancelPairing()
+        editing = false
+        withAnimation(.easeOut(duration: 0.18)) { adding = false }
+        titleFocused = true
     }
 }

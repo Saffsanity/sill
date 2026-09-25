@@ -146,7 +146,7 @@ extension StreamClient {
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
     /// status line says so.
     func forget(_ macID: String) {
-        let name = displayName(macID)
+        let name = savedMac(macID) != nil ? displayName(macID) : (macs.first { $0.macID == macID }?.name ?? "the Mac")
         if reconnect?.macID == macID { reconnect = nil }
         savedMacs.removeAll { $0.macID == macID }
         networkLastListed[macID] = nil
@@ -158,7 +158,9 @@ extension StreamClient {
     func cancelPairing() {
         pairingDial?.cancel()
         pairingDial = nil
-        pairing = .idle
+        // Only a change publishes: Cancel's shortcut runs inside a view update, where a needless
+        // publish draws SwiftUI's "Publishing changes from within view updates" warning.
+        if pairing != .idle { pairing = .idle }
     }
 
     /// At launch: saved Macs without this device's key (a restore from a backup: the key is
