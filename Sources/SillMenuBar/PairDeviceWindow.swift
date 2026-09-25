@@ -174,7 +174,19 @@ struct PairDeviceView: View {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 6) {
                     GridRow {
                         Text("Address").foregroundStyle(.secondary)
-                        Text(address).textSelection(.enabled)
+                        let shown = address
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(shown.primary).textSelection(.enabled)
+                            if let other = shown.secondary {
+                                // "or" is a text of its own, so selecting the address never takes it along.
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Text("or")
+                                    Text(other).textSelection(.enabled)
+                                }
+                                .foregroundStyle(.secondary)
+                                .accessibilityElement(children: .combine)
+                            }
+                        }
                     }
                     GridRow {
                         Text("Code").foregroundStyle(.secondary)
@@ -223,16 +235,11 @@ struct PairDeviceView: View {
         return "Works once, for the next \(left / 60):\(String(format: "%02d", left % 60))."
     }
 
-    /// What to type on the device: this network's address first, else a VPN's name, else a VPN
-    /// IP, with the port when it is not the usual one.
-    private var address: String {
-        let host = status.lanAddress
-            ?? status.addresses.first { $0.kind == MacAddress.vpn }?.host
-            ?? status.addresses.first?.host
-            ?? "this Mac’s address"
-        guard case .success(var parsed) = AddressParser.parse(host) else { return host }
-        if offer.port != HostConfig.defaultRemotePort { parsed.port = offer.port }
-        return parsed.text
+    /// What to type on the device: a VPN's name with that VPN's IPv4 under it, else a VPN IP, else
+    /// this network's address, with the port when it is not the usual one (`PairingWindowAddress`).
+    private var address: PairingWindowAddress.Choice {
+        PairingWindowAddress.choose(from: status.addresses, lan: status.lanAddress, port: offer.port,
+                                    defaultPort: HostConfig.defaultRemotePort)
     }
 
     // MARK: Buttons

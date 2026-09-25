@@ -418,24 +418,36 @@ extension DebugHooks {
         var remoteAccess = true
     }
 
-    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff}. A stand-in Mac key (the
-    /// plan's SHA-256("mac") vector) and the plan's example code: nothing here pairs anything.
+    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,longname}. A stand-in
+    /// Mac key (the plan's SHA-256("mac") vector) and the plan's example code: nothing here pairs
+    /// anything. The address to type is Tailscale's name with its IPv4 under it; `novpn` has no VPN,
+    /// so this network's address, and `longname` is the widest the row gets: a 40-character
+    /// MagicDNS name, on a port other than 7455.
     static func pairingSamples() -> [PairingSample] {
         let fingerprint = Data((0..<32).map { UInt8(truncatingIfNeeded: $0 &* 37 &+ 11) })
-        let links = ["192.168.1.20", "mac-mini.tail1234.ts.net", "100.101.102.103"].compactMap { text -> ParsedAddress? in
-            if case .success(let a) = AddressParser.parse(text) { return a }
-            return nil
+        func makeLink(port: Int, _ addresses: [String]) -> PairLink {
+            let parsed = addresses.compactMap { text -> ParsedAddress? in
+                if case .success(let a) = AddressParser.parse(text) { return a }
+                return nil
+            }
+            return PairLink(fingerprint: fingerprint, secret: Data(repeating: 0x16, count: 16), name: "Mac mini", port: port, addresses: parsed)
         }
-        let link = PairLink(fingerprint: fingerprint, secret: Data(repeating: 0x16, count: 16), name: "Mac mini", port: 7455, addresses: links)
+        let standard = makeLink(port: 7455, ["192.168.1.20", "mac-mini.tail1234.ts.net", "100.101.102.103"])
         let expires = previewNow.addingTimeInterval(298)
-        func offer(_ requestedBy: String? = nil) -> RemoteAccess.PairingOffer {
-            RemoteAccess.PairingOffer(url: link.url, code: "482913557208", expiresAt: expires, requestedBy: requestedBy, port: 7455, again: false)
+        func offer(_ requestedBy: String? = nil, link: PairLink? = nil) -> RemoteAccess.PairingOffer {
+            let link = link ?? standard
+            return RemoteAccess.PairingOffer(url: link.url, code: "482913557208", expiresAt: expires, requestedBy: requestedBy,
+                                             port: link.port, again: false)
         }
-        func status(_ pairing: RemoteStatus.Pairing) -> RemoteStatus {
-            RemoteStatus(remoteAccess: true, listener: .listening(7455), addresses: tailscaleAddresses, lanAddress: "192.168.1.20",
-                         pairing: pairing)
+        func status(_ pairing: RemoteStatus.Pairing, addresses: [MacAddress]? = nil, port: Int = 7455) -> RemoteStatus {
+            RemoteStatus(remoteAccess: true, listener: .listening(port), addresses: addresses ?? tailscaleAddresses,
+                         lanAddress: "192.168.1.20", pairing: pairing)
         }
         let open = RemoteStatus.Pairing.open(requestedBy: nil, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil)
+        let wifi = [MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi")]
+        let longName = "christinas-macbook-pro.tailc94091.ts.net"
+        let long = [MacAddress(host: longName, kind: MacAddress.vpn, via: "Tailscale")] + tailscaleAddresses.dropFirst()
+        let longLink = makeLink(port: 17455, [longName, "100.101.102.103", "fd7a:115c:a1e0::1234", "192.168.1.20"])
         return [
             PairingSample(name: "waiting", offer: offer(), status: status(open)),
             PairingSample(name: "requested", offer: offer("iPad (iPad14,1)"),
@@ -446,6 +458,8 @@ extension DebugHooks {
             PairingSample(name: "stopped", offer: offer(), status: status(.stopped)),
             PairingSample(name: "expired", offer: offer(), status: status(.expired)),
             PairingSample(name: "remoteoff", offer: offer(), status: status(open), remoteAccess: false),
+            PairingSample(name: "novpn", offer: offer(link: makeLink(port: 7455, ["192.168.1.20"])), status: status(open, addresses: wifi)),
+            PairingSample(name: "longname", offer: offer(link: longLink), status: status(open, addresses: long, port: 17455)),
         ]
     }
 }
