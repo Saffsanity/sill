@@ -63,7 +63,13 @@ These texts are only true once these are:
   (it is 0.1 today), so the build attaches to the 1.0 version record.
 - Every claim in the description has been seen working on a device. Still
   open: the USB cable on an iPhone (verified on the iPad mini only; if it
-  fails, write "a USB cable (iPad)") and Apple Pencil hover.
+  fails, write "a USB cable (iPad)"), Apple Pencil hover, and 120 frames per
+  second, which no device has shown yet (the iPad mini is 60 Hz). For that
+  one, stream a moving window, then the whole desktop, to a ProMotion iPhone
+  or iPad. Sill.app's log should say "Streaming … 120 fps", and its `client …`
+  lines for the device, or the device's row in the Sill menu, should stay near
+  120 fps. If they don't, delete the bullet "Up to 120 frames per second…". If
+  120 holds only for some sources, say which in the bullet.
 - The screenshots come from the build you submit.
 
 Create the app record (section 1) now. It holds the name without submitting
