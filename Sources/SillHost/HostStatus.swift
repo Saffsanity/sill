@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import StreamProtocol
 
 /// What the host is doing, as plain values for the menu bar app: the menu, the status item and
 /// Settings read it; nothing in the host reads it back. The coordinator pushes a change at the
@@ -39,14 +40,18 @@ package struct HostStatusSnapshot: Equatable {
         package var rttMs: Int?
         /// How it reaches this Mac, as this Mac's side of its connection says (ClientLink.route): at
         /// connect, then whenever the connection's path changes. Nil when the connection does not
-        /// say (loopback, a VPN, an interface of no known kind). Shown, never acted on.
+        /// say (loopback, a VPN, an interface of no known kind), and always on the remote door.
+        /// Shown, never acted on.
         package var route: ClientLink.Route?
+        /// Nil on the home door; "through Tailscale", "through your VPN", "over the internet" or "by
+        /// address" on the remote door. The card shows it instead of `route` (StatusText).
+        package var remoteRoute: String?
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
-                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil) {
+                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil) {
             self.id = id; self.endpoint = endpoint; self.name = name
             self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs
-            self.route = route
+            self.route = route; self.remoteRoute = remoteRoute
         }
     }
 
@@ -92,8 +97,93 @@ package struct HostStatusSnapshot: Equatable {
     package var lastStageFailure: String?
     /// --synthetic: the Desktop is a test pattern and the host is not advertised.
     package var synthetic = false
+    /// Remote access, on a host with an identity (Sill.app, SillHost --remote); nil otherwise.
+    package var remote: RemoteStatus?
+
+    /// Devices connected through the remote door: while any is, the app keeps the Mac from idle
+    /// sleep (it could not be woken from away).
+    package var remoteDeviceCount: Int { devices.filter { $0.remoteRoute != nil }.count }
 
     package init() {}
+}
+
+/// The remote door as the Mac's pane and menu show it. Never a pairing code or secret: those reach
+/// the app and the CLI only through `RemoteAccess.onPairingOffer`.
+package struct RemoteStatus: Equatable {
+    package enum Listener: Equatable {
+        case off
+        case listening(Int)
+        /// EADDRINUSE: another app has the port; retried every 30 s and on network changes.
+        case portInUse(Int)
+        case failed(String)
+    }
+    /// The router's own internet address, asked read-only while the internet switch is on.
+    package enum Router: Equatable {
+        case off, asking
+        case address(String)
+        /// The router's address is itself in 100.64/10: the provider shares it among many homes.
+        case carrierNAT(String)
+        /// The router sits behind another router (a private address, or kDNSServiceErr_DoubleNAT).
+        case doubleNAT
+        case noAnswer
+    }
+    package enum Pairing: Equatable {
+        case closed
+        case open(requestedBy: String?, expiresAt: Date, triesLeft: Int, lastWrongFrom: String?)
+        /// The last window paired this device (its name).
+        case paired(String)
+        /// Five wrong codes.
+        case stopped
+        case expired
+    }
+
+    package var remoteAccess: Bool
+    package var internetAccess: Bool
+    package var listener: Listener
+    /// In dial order, as kind 18 carries them.
+    package var addresses: [MacAddress]
+    /// Named VPN services with no address: "Tailscale" shows as "Tailscale — Not connected".
+    package var vpnDown: [String]
+    /// This network's address, for the port-forward instruction and the typed pairing path.
+    package var lanAddress: String?
+    package var router: Router
+    /// The address name setting, as shown.
+    package var addressName: String
+    package var pairing: Pairing
+    package var paired: [PairedDeviceSummary]
+    /// "The keychain couldn’t be used: …" when the identity could not be loaded.
+    package var identityProblem: String?
+
+    package init(remoteAccess: Bool = false, internetAccess: Bool = false, listener: Listener = .off, addresses: [MacAddress] = [],
+                 vpnDown: [String] = [], lanAddress: String? = nil, router: Router = .off, addressName: String = "",
+                 pairing: Pairing = .closed, paired: [PairedDeviceSummary] = [], identityProblem: String? = nil) {
+        self.remoteAccess = remoteAccess; self.internetAccess = internetAccess; self.listener = listener
+        self.addresses = addresses; self.vpnDown = vpnDown; self.lanAddress = lanAddress; self.router = router
+        self.addressName = addressName; self.pairing = pairing; self.paired = paired; self.identityProblem = identityProblem
+    }
+}
+
+/// One paired device as the pane lists it.
+package struct PairedDeviceSummary: Equatable, Identifiable {
+    /// The device's full fingerprint (base64url): what Remove and Rename name.
+    package var id: String
+    /// "5KD2Q7": the first characters of the fingerprint in Crockford form, for display.
+    package var keyPrefix: String
+    package var name: String
+    package var model: String?
+    package var pairedAt: Date
+    /// "qr" or "code".
+    package var method: String
+    /// When it last connected from away, and how ("through Tailscale"); nil when it never has (the
+    /// app keeps these across launches).
+    package var lastSeen: Date?
+    package var lastRoute: String?
+
+    package init(id: String, keyPrefix: String, name: String, model: String?, pairedAt: Date, method: String,
+                 lastSeen: Date? = nil, lastRoute: String? = nil) {
+        self.id = id; self.keyPrefix = keyPrefix; self.name = name; self.model = model; self.pairedAt = pairedAt
+        self.method = method; self.lastSeen = lastSeen; self.lastRoute = lastRoute
+    }
 }
 
 /// The observable holder of the snapshot. The coordinator writes it (main actor, only when a value

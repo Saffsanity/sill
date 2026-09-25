@@ -3,8 +3,10 @@ import Foundation
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
 /// from a network one, the word each row shows for how its Mac is reachable and the one the
 /// Settings panel shows for the session's own connection, which interface a "Wired" row is dialled
-/// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network, and
-/// when a live session moves to the cable that came or off the one that went (`pathPlan`).
+/// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network,
+/// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
+/// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
+/// dialed away from home.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -260,8 +262,9 @@ enum DiscoveryPolicy {
         return next
     }
 
-    /// What the network browser has shown of each Mac, by Bonjour name, for the two decisions that
-    /// must not trust one moment's view of it.
+    /// What the network browser has shown of each Mac, for the decisions that must not trust one
+    /// moment's view of it: by Bonjour name for a reconnect's Direct row and the move
+    /// (StreamClient.sightings), by Mac ID for a saved Mac's remote dial (StreamClient.savedSightings).
     struct NetworkSightings: Equatable {
         /// Listed now, each since when without a break.
         var since: [String: Double] = [:]
@@ -333,9 +336,10 @@ enum DiscoveryPolicy {
     // cable once the network browser has listed the Mac on it for `cableSettle`, down to Wi-Fi at
     // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works
     // (a connection the Mac closed while the cable stays listed is made again over the cable),
-    // never off a Direct session but to the network (`moveToNetwork`), and at most one move per
-    // `pathHysteresis` each way; a cable listing that reaches another Mac is not tried again, and
-    // one whose moves do not complete is tried less and less often (`upWait`).
+    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (only
+    // the remote reconnect moves one, and not home: remote access's merge left that for later), and
+    // at most one move per `pathHysteresis` each way; a cable listing that reaches another Mac is not
+    // tried again, and one whose moves do not complete is tried less and less often (`upWait`).
 
     /// A wired interface must stay listed this long before a session over Wi-Fi moves to it: a
     /// cable comes up in steps (iPadOS brings up anpi0 and en2, and the Mac's records follow on
@@ -449,16 +453,22 @@ enum DiscoveryPolicy {
         var refusedCable: Double? = nil
         /// Moves up to the listing of the cable now listed that did not complete, in a row (`upWait`).
         var upFailures = 0
+        /// The session runs through the remote door (a saved Mac dialed away from home): it never
+        /// moves here, whatever its path and the browser say, as a Direct session does not; it
+        /// moves only by the remote reconnect's rules (StreamClient+Remote), and never home to the
+        /// network (docs/remote-access-plan.md).
+        var remote = false
     }
 
     /// Why a session stays on its path, for the DEBUG console's "kept: …".
     enum Keep: Equatable {
-        case routeUnknown, direct, cable, cableUnlisted, wifi, cableSettling, upTooSoon, cableFailing, cableRefused, noWifi, downTooSoon, lost
+        case routeUnknown, direct, remote, cable, cableUnlisted, wifi, cableSettling, upTooSoon, cableFailing, cableRefused, noWifi, downTooSoon, lost
 
         var text: String {
             switch self {
             case .routeUnknown: return "the session's path is not known"
             case .direct: return "over Direct, the session moves only to the network"
+            case .remote: return "a remote session moves only by the remote reconnect"
             case .cable: return "on the cable"
             case .cableUnlisted: return "on the cable, which the network no longer lists; its pongs say it works"
             case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"
@@ -508,8 +518,10 @@ enum DiscoveryPolicy {
     /// path (the Mac closed it: it evicts a device that stops reading, one suspended in the
     /// background, say; over Wi-Fi the session would be back on the cable 2 s later), else over
     /// Wi-Fi. Nothing ever moves a session to Direct or off it (the reconnect and `moveToNetwork`
-    /// do), from Wi-Fi to Wi-Fi, or off a cable that works.
+    /// do), from Wi-Fi to Wi-Fi, or off a cable that works, and nothing here moves a remote session
+    /// (`remote`), whatever its path says.
     static func pathPlan(_ i: PathInput) -> PathPlan {
+        if i.remote { return .stay(.remote, recheckAt: nil) }
         guard let route = i.route else { return .stay(.routeUnknown, recheckAt: nil) }
         if route == .direct { return .stay(.direct, recheckAt: nil) }
         if !i.dead, Method.wired.rank > route.rank, let wired = i.wired, let since = i.wiredSince {
@@ -542,5 +554,43 @@ enum DiscoveryPolicy {
         var next = list.filter { $0 != mac }
         if on { next.insert(mac, at: 0) }
         return Array(next.prefix(memoryCap))
+    }
+
+    // MARK: Saved Macs away from home (docs/remote-access-plan.md §7.3–7.4)
+
+    /// A saved Mac that no browser lists shows as a Remote row once the network has had this long.
+    static let remoteWait = 3.0
+    /// After a session ends by itself, automatic remote dials stop this long after the loss.
+    static let redialWindow = 120.0
+    /// A failed automatic remote dial is tried again after 2, 4, 8, then every 10 s.
+    static let remoteRetry: [Double] = [2, 4, 8, 10]
+
+    /// The Remote rows: saved Macs that neither browser lists, in the order given, once the
+    /// network has had its `networkFirst` seconds, or at once when Local Network access is denied
+    /// (then they are the only route left).
+    static func remoteRows(saved: [(macID: String, name: String)], listedIDs: Set<String>, now: Double,
+                           searchingSince: Double, localNetworkDenied: Bool) -> [(macID: String, name: String)] {
+        guard localNetworkDenied || now >= searchingSince + networkFirst else { return [] }
+        return saved.filter { !listedIDs.contains($0.macID) }
+    }
+
+    /// Whether an automatic remote dial of a lost saved Mac is due now, or when to look again. Never
+    /// while a network or Direct row lists it (the row takes it), never once `redialWindow` has
+    /// passed. Due `remoteWait` after the loss (`directWait`, the wait an automatic reconnect gives
+    /// a Direct row, for a Mac remembered with Direct Wireless on), and not within `networkGrace` of
+    /// the network last listing it, the moment its row went (`NetworkSightings.leftAt`; a Mac the
+    /// network listed moments ago is taken to be blinking, not gone) unless this device's path
+    /// changed since the loss (it left home, or Wi‑Fi became cellular).
+    static func remoteDialDue(listed: Bool, lostAt: Double, networkLeftAt: Double?, rememberedDirect: Bool,
+                              pathChangedSinceLoss: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
+        guard !listed, now < lostAt + redialWindow else { return (false, nil) }
+        var due = lostAt + (rememberedDirect ? directWait : remoteWait)
+        if !pathChangedSinceLoss, let left = networkLeftAt { due = max(due, left + networkGrace) }
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// The wait before the next automatic remote dial after `failures` failed ones.
+    static func remoteRetryDelay(afterFailures failures: Int) -> Double {
+        remoteRetry[min(max(failures, 1), remoteRetry.count) - 1]
     }
 }
