@@ -42,8 +42,9 @@ final class StreamClient: ObservableObject {
     /// How the session's connection reaches the Mac, the word the Settings panel's readout ends in
     /// (DiscoveryPolicy.route): "Wired", "Wi-Fi" or "Direct", nil when its path does not say and
     /// while disconnected. It follows the connection that carries the session: read when it is
-    /// ready, again when a move hands the session over, and on every path update of that
-    /// connection (`followRoute`). Only shown; `connectedDirectly` is what routing reads.
+    /// ready, again when a move hands the session over, and on each path update of that
+    /// connection that describes it (`followRoute`; the others keep the word). Only shown;
+    /// `connectedDirectly` is what routing reads.
     @Published var route: DiscoveryPolicy.Method?
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
@@ -829,14 +830,6 @@ final class StreamClient: ObservableObject {
         return path.availableInterfaces.contains { DiscoveryPolicy.isPeerToPeer($0.name) }
     }
 
-    /// The session route over `path` (DiscoveryPolicy.route): the interface the Mac's address is
-    /// scoped to, as the address itself types it, else the path's interfaces. Any thread.
-    private static func route(of path: NWPath?) -> DiscoveryPolicy.Method? {
-        guard let path else { return nil }
-        return DiscoveryPolicy.route(scope: scopedInterface(path).map(policyInterface),
-                                     path: path.availableInterfaces.map(policyInterface))
-    }
-
     /// The interface a link-local address of the Mac is scoped to (the USB cable, AWDL, a Wi-Fi
     /// link-local address); nil for IPv4 and a global IPv6 address, which carry none.
     private static func scopedInterface(_ path: NWPath) -> NWInterface? {
@@ -844,25 +837,74 @@ final class StreamClient: ObservableObject {
         return address.interface
     }
 
-    /// `route` from the session connection's path: `fresh` for a connection that has just come to
-    /// carry the session (ready, or handed a move), else a path update. Main thread.
+    /// Whether the path names the Mac by its IP address, as the connection's own path does. A path
+    /// update of a connection to a Bonjour row can name the service instead, or nothing: that path
+    /// describes the service's resolution, not the connection (DiscoveryPolicy.describesFlow).
+    private static func namesAddress(_ path: NWPath) -> Bool {
+        switch path.remoteEndpoint {
+        case .hostPort(.ipv4, _)?, .hostPort(.ipv6, _)?: return true
+        default: return false
+        }
+    }
+
+    /// The interface this device's own address on the connection is on, when the path's local
+    /// endpoint names one (either family): the session route's witness after the Mac's scope, for
+    /// a connection whose remote address carries none (IPv4, a global IPv6 address).
+    private static func localInterface(_ path: NWPath) -> NWInterface? {
+        guard case .hostPort(let host, _)? = path.localEndpoint else { return nil }
+        return host.interface
+    }
+
+    /// `route` after a reading of the session connection's path (DiscoveryPolicy.sessionRoute):
+    /// `fresh` for a connection that has just come to carry the session (ready, or handed a move),
+    /// which always counts, else a path update, which counts only when it describes the connection
+    /// (DiscoveryPolicy.describesFlow: satisfied, and naming the Mac's IP address); any other update
+    /// keeps the word. The witness: the Mac's scoped address, else this device's own address's
+    /// interface, else the path's interfaces, each as the address or path itself types it. Main
+    /// thread.
     private func setRoute(from path: NWPath?, fresh: Bool = false) {
-        let next = Self.route(of: path)
+        let describes = DiscoveryPolicy.describesFlow(fresh: fresh, hasAddress: path.map(Self.namesAddress) ?? false,
+                                                      satisfied: path?.status == .satisfied)
+        let scope = path.flatMap(Self.scopedInterface)
+        let local = path.flatMap(Self.localInterface)
+        let next = DiscoveryPolicy.sessionRoute(current: route, scope: scope.map(Self.policyInterface),
+                                                local: local.map(Self.policyInterface),
+                                                path: path?.availableInterfaces.map(Self.policyInterface) ?? [],
+                                                describesFlow: describes)
         #if DEBUG
-        // What the word was read from, to check it on a device (the cable in and out).
-        if fresh || next != route {
-            let scope = path.flatMap(Self.scopedInterface).map { "the Mac's address on \($0.name) (\($0.type)); " } ?? ""
-            let interfaces = path?.availableInterfaces.map { "\($0.name) (\($0.type))" }.joined(separator: ", ") ?? "none"
-            print("session: \(next?.word ?? "no word"), read from \(scope)path \(interfaces)")
+        // What the word was read from, or why an update was not read, to check it on a device (the
+        // cable in and out).
+        let interfaces = path.map { Self.listed($0.availableInterfaces) } ?? "none"
+        if !describes, let path {
+            let status = path.status == .satisfied ? "" : " (\(path.status))"
+            let endpoint = Self.namesAddress(path) ? ""
+                : path.remoteEndpoint.map { " without an address (for \($0))" } ?? " without an endpoint"
+            print("session: kept \(route?.word ?? "no word"); ignored a path update\(status)\(endpoint): \(interfaces)")
+        } else if fresh || next != route {
+            let witness = scope.map { "the Mac's address on \(Self.listed([$0])); " }
+                ?? local.map { "this device's address on \(Self.listed([$0])); " } ?? ""
+            print("session: \(next?.word ?? "no word"), read from \(witness)path \(interfaces)")
         }
         #endif
         if next != route { route = next }
     }
 
+    #if DEBUG
+    /// Interfaces as the DEBUG console names them: "en2 (wiredEthernet), en0 (wifi)", or "none".
+    private static func listed(_ interfaces: [NWInterface]) -> String {
+        interfaces.isEmpty ? "none" : interfaces.map { "\($0.name) (\($0.type))" }.joined(separator: ", ")
+    }
+    #endif
+
     /// Keeps `route` in step with `c`'s path while `c` carries the session: a move's network
-    /// connection only from its hand-over on, the direct one it replaced no longer. An established
-    /// TCP connection keeps its interface, so this rarely changes anything: a cable pulled
-    /// mid-session ends the connection instead, and the reconnect reads its own route when ready.
+    /// connection only from its hand-over on, the direct one it replaced no longer. Only an update
+    /// that describes the connection may change the word (`setRoute`): iPadOS also sends ones that
+    /// describe a Bonjour row's resolution instead, naming the service rather than the Mac's address
+    /// ("en0 (wifi), en0 (wifi)" for a session on the cable's en2, 2026-09-25), and those keep it;
+    /// the DEBUG console logs each.
+    /// An established TCP connection keeps its interface, so an update that counts rarely changes
+    /// anything: a cable pulled mid-session ends the connection instead, and the reconnect reads
+    /// its own route when ready.
     private func followRoute(of c: NWConnection) {
         c.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async {

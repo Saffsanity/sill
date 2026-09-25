@@ -132,8 +132,8 @@ enum DiscoveryPolicy {
     /// A row's method, from the interfaces its own browser saw its Mac on (Noah, 2026-09-24). A
     /// Direct row is Direct: seen over peer-to-peer Wi-Fi alone, the one kind connected with it. A
     /// network row takes the best of the network browser's interfaces: Wired for a wired Ethernet
-    /// one (an Ethernet adapter, and the USB cable to the Mac, which the host logs on anri0 or enN,
-    /// if the device types it so: the DEBUG console's "discovery:" lines show what it reports),
+    /// one (an Ethernet adapter, and the USB cable to the Mac, whose ends iPadOS names anpi0 and en2
+    /// and types so, 2026-09-25: the DEBUG console's "discovery:" lines show what it reports),
     /// else Wi-Fi for a Wi-Fi one that is not peer-to-peer (awdl0 and llw0 report .wifi too), else
     /// nothing: a VPN, loopback, cellular, a type this code does not know, or no interface
     /// reported. A row says nothing rather than something it cannot tell. A Mac seen on several
@@ -156,9 +156,11 @@ enum DiscoveryPolicy {
     /// session can run over another link than its row's word, as no connection is pinned to an
     /// interface (with Wi-Fi and the cable both up, either), so this reads the connection's path:
     /// the interface the Mac's address is scoped to when it is a link-local one, which is all the
-    /// USB cable and AWDL carry (the Mac logs such a device at "fe80::…%anri0" or "fe80::…%awdl0"),
-    /// else the path's interfaces when they all say the same, else nothing: the simulator's path
-    /// to its own Mac lists lo0 alone, and a word for a path that says two things would be a guess.
+    /// USB cable and AWDL carry (over the cable this device sees the Mac's address on en2, and the
+    /// Mac logs the device's on en14 or anri0; over AWDL the Mac logs "fe80::…%awdl0"), else the
+    /// path's interfaces when they all say the same, else nothing: the simulator's path to its own
+    /// Mac lists lo0 alone, and a word for a path that says two things would be a guess. Which
+    /// readings count, and this device's own address as a witness between the two: `sessionRoute`.
     /// The Mac's card names its own side by the same rule (ClientLink.route), so the two can
     /// differ: this device on Wi-Fi, the Mac on Ethernet.
     static func route(scope: Interface?, path: [Interface]) -> Method? {
@@ -168,9 +170,35 @@ enum DiscoveryPolicy {
         return first
     }
 
+    /// Whether a reading of the session connection's path describes that connection, and so may
+    /// change the session's word (`sessionRoute`): the reading taken when the connection becomes
+    /// ready or takes a move's session over (`fresh`) always does, a later path update only when it
+    /// is satisfied and names the Mac by its IP address. A connection to a Bonjour row also gets
+    /// updates that describe the service's resolution instead: they name the service, not an
+    /// address, and list the interfaces it resolves on, each twice, "en0 (wifi), en0 (wifi)" (the
+    /// device's default route) after the connection is ready (Noah's iPad, 2026-09-25). That day,
+    /// on the cable with Wi-Fi on, the first reading said Wired (the Mac's address on en2) and such
+    /// updates then made it Wi-Fi, while the connection stayed on en2 for its whole life (the Mac
+    /// saw it on en14 at 1–3 ms throughout). An update naming nothing is ignored the same way.
+    static func describesFlow(fresh: Bool, hasAddress: Bool, satisfied: Bool) -> Bool {
+        fresh || (hasAddress && satisfied)
+    }
+
+    /// The session's word after one reading of its connection's path: `current` when the reading
+    /// does not describe the connection (`describesFlow`), else `route` over it whatever `current`
+    /// was (a move's hand-over replaces the direct connection's word, with none if it must). The
+    /// witness is the interface the Mac's address is scoped to, else the one this device's own
+    /// address is on (`local`: an IPv4 connection's remote address carries no scope), else the
+    /// path's interfaces.
+    static func sessionRoute(current: Method?, scope: Interface?, local: Interface?, path: [Interface], describesFlow: Bool) -> Method? {
+        guard describesFlow else { return current }
+        return route(scope: scope ?? local, path: path)
+    }
+
     /// One interface's word: Direct for peer-to-peer Wi-Fi (by name: awdl0 and llw0 report .wifi),
-    /// Wired for wired Ethernet (the USB cable to the Mac, if iPadOS types it so, and an adapter),
-    /// Wi-Fi for the rest of Wi-Fi, and nothing for loopback, cellular, a VPN or an unknown type.
+    /// Wired for wired Ethernet (the USB cable to the Mac, which iPadOS names anpi0 and en2, and an
+    /// adapter), Wi-Fi for the rest of Wi-Fi, and nothing for loopback, cellular, a VPN or an
+    /// unknown type.
     static func method(of interface: Interface) -> Method? {
         if isPeerToPeer(interface.name) { return .direct }
         switch interface.type {

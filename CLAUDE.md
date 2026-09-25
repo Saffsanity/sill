@@ -159,10 +159,21 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   connection reaches the Mac, "… · 15 Mbps · Wi-Fi", "Wired" or "Direct"
   (`DiscoveryPolicy.route`, `StreamClient.route`): the interface the Mac's
   address is scoped to (the cable and AWDL carry only link-local addresses),
-  else the path's interfaces when they all agree, else no word (the
-  simulator's path to its own Mac is lo0 alone). Read at `.ready`, again at a
-  move's hand-over, and on the session connection's path updates; the DEBUG
-  console prints "session: <word>, read from …". "Direct" there replaced the
+  else the one this device's own address is on (an IPv4 connection's remote
+  address has no scope), else the path's interfaces when they all agree, else
+  no word (the simulator's path to its own Mac is lo0 alone). Read at
+  `.ready`, again at a move's hand-over, and on those path updates of the
+  session connection that describe it, satisfied and naming the Mac's IP
+  address (`DiscoveryPolicy.describesFlow`, `sessionRoute`); any other update
+  keeps the word. A connection to a Bonjour row also gets updates for the
+  service's resolution, which name the service instead of an address and list
+  "en0 (wifi), en0 (wifi)", the device's default route, whatever link carries
+  the connection: on 2026-09-25, on the cable with Wi-Fi on, they turned a
+  session's right "Wired" into "Wi-Fi" while its connection stayed on en2 (the
+  Mac saw it on `%en14` at 1–3 ms throughout). The DEBUG console prints
+  "session: <word>, read from …" and, for each update it skips, "session: kept
+  <word>; ignored a path update without an address (for <service>): …".
+  "Direct" there replaced the
   header's "Connected directly" line (the footer's warning and the switch's
   hint stay), and a no-break space before each "·" makes a wrap at larger
   text fall after one. The Mac's card names its own side the same way (see
@@ -174,12 +185,21 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   after a "·", never truncates, never splits "Wi-Fi"); live against a
   synthetic host: by 127.0.0.1 no word, by this Mac's `fe80::…%en0` "Wi-Fi",
   and `-SillMoveTest to:` from the first to the second gains "Wi-Fi" at the
-  hand-over. This Mac types its anri0 (the iPad's cable, up that evening) and
-  en14 as wired Ethernet (the simulator's browser saw both). Untested on a
-  device: whether iPadOS types the cable to the Mac
-  (anri0 or enN on the host, both USB Ethernet there) as wired Ethernet (a
-  session over the cable says "Wired" on the Mac's card either way; the
-  panel's word and its "session:" line tell the iPad's side). A session over
+  hand-over. What each end calls the cable (2026-09-25): iPadOS names its ends
+  anpi0 and en2 and types both as wired Ethernet (the connect screen's row
+  says "Wired", seen on anpi0, en2 and en0, and a session over it reads the
+  Mac's address on en2); macOS names its end en14 (anri0 on other days; both
+  up that night), wired Ethernet too (the simulator's browser saw both).
+  The fix for the updates above, verified on the iPad: the policy check at 174
+  (155 plus 19), 18 mutants caught (the route's 8 plus 10); "session: Wired,
+  read from the Mac's address on en2" at `.ready` (a row resolved on en2 and
+  tapped by a scratch build, and `-SillConnect` to the Mac's en14 address) and
+  at a move's hand-over from awdl0, the host on `%en14` each time; a row's
+  unscoped updates after
+  `.ready` logged as ignored with the word kept (that session ran over Wi-Fi,
+  `%en0` on the host: with Wi-Fi healthy the race took en0 in all three
+  unscoped tries, and the night's cable session came right after an eviction
+  on Wi-Fi). A session over
   the cable ends when it is pulled and comes back over Wi-Fi, "Wi-Fi" on both
   ends; plugged back in, an established Wi-Fi session stays on Wi-Fi (TCP does
   not move) until the next connection. On
