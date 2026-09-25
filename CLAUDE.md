@@ -997,8 +997,13 @@ good.
   Wired, Wi-Fi or Direct, the hint and Search Nearby, + DEBUG harness),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel). New files need their
-  four pbxproj entries by hand. Swift 5 language mode.
+  with swiftc), `HostSettingsPanel` (the Settings panel).
+  `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
+  it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
+  use of a required-reason API (file dates, disk space, `mach_absolute_time`,
+  active keyboards) must add its category and reason there before the next
+  upload. New files need their four pbxproj entries by hand.
+  Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
