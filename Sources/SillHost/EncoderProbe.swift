@@ -125,17 +125,21 @@ enum EncoderProbe {
             enc.encode(drawn[sent % drawn.count], pts: CMTime(value: CMTimeValue(sent), timescale: 60))
             sent += 1
         }
-        // As many inside as the stream would have (one; two under the experiment), fewer than the
-        // three surfaces; then one more each time one comes back. VideoToolbox hands frames back in
-        // the order they went in, so the next surface is the one just back, never one still inside.
-        while sent < min(enc.maxInFlight, drawn.count - 1, total) { send() }
+        // The first frame alone: a session lets a second in only once it has let go of one
+        // (`EncoderMailbox.places`), and one stuck on its first frame then holds one test frame, not
+        // two. After it, as many inside as the stream would have (one; two under the experiment),
+        // fewer than the three surfaces, and one more each time one comes back. VideoToolbox hands
+        // frames back in the order they went in, so the next surface is the one just back, never
+        // one still inside.
+        let keep = min(enc.maxInFlight, drawn.count - 1)
+        send()
         for back in 0..<total {
             guard done.wait(timeout: .now() + timeout) == .success else {
                 giveUp(enc)
                 return (false, nil, elapsed())
             }
             if back == drawn.count - 1 { timedFrom = CFAbsoluteTimeGetCurrent() }   // the warm-up pass is back
-            if sent < total { send() }
+            while sent < total, sent - (back + 1) < keep { send() }
         }
         let span = CFAbsoluteTimeGetCurrent() - timedFrom
         withExtendedLifetime(enc) {}

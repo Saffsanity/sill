@@ -31,6 +31,8 @@ import StreamProtocol
 ///   slow state, and at 120 fps (8.3 ms between frames against a 9 ms encode) even in the fast
 ///   one. So it stays off until a run on an engine nobody else uses shows the slow state lifted to
 ///   ~55 fps, and would then be kept only while it adds frames (CLAUDE.md, "The 33 fps plateau").
+///   Under it too a second frame goes in only once the session has let go of one
+///   (`EncoderMailbox.places`), so a session stuck on its first frame holds one surface for good.
 /// - A watchdog on its own queue declares the session dead when the frame inside VT longest has
 ///   been there `hangAfter` seconds without an output. The owner is told (`onHung`) and starts
 ///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping

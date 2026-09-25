@@ -1145,6 +1145,25 @@ probe's let two, a software session one, and the TEST line prints once; a
 stream at 60 fps against 30 ms frames runs at 30 fps with one inside and 59
 with two.
 
+Review fixes, each shown by an encoder-free check (`Scripts/encoder-check/run.sh`):
+- A second frame goes in only once the session has let go of one
+  (`EncoderMailbox.places`: one until its first output or refusal, then the
+  limit), and the re-check's test sends its first frame alone. Under the
+  experiment a session stuck on its first frame, as every session and probe
+  was through the 2026-09-22 wedge, pinned two surfaces for good instead of
+  one (VideoToolbox never lets go; the watchdog and the restart end only the
+  old SCStream's hold on them): eight wedged re-checks (`maxStuckProbes`) kept
+  16 test frames, ~140 MB at 3024×1964 and ~490 MB at 6016×3384. Now the
+  encoder check's stream stuck on its first frame, and one whose first encode
+  call never returns, keeps 1 frame at either limit (2 with the gate removed,
+  under the experiment); stuck at its 50th frame, as many as the limit (1; 2
+  under the experiment); eight re-checks stuck on their first frame keep 8; a
+  busy session keeps none once its frame is back. The mailbox check's new
+  scenario (stuck on the first frame, and mid-stream, at both limits) and two
+  new mutants (the gate removed; the session never counted as having let go)
+  hold it, and the probe check's stand-in refuses a second frame sent before
+  one came back (22 checks, with the first frame stuck and one inside).
+
 The first round (two inside by default) was verified without the hardware
 encoder: clean builds at each commit (only the old CaptureProbe warning); the
 encoder-free check, the real

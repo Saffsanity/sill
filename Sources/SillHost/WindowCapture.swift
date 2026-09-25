@@ -31,10 +31,12 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         // VideoToolbox, one waiting in its mailbox; its last frame is always one of them), three
         // under the plateau experiment's two inside (HEVCEncoder), which still leaves two to
         // render into and deliver, the margin the default depth of 3 leaves an app that holds one.
-        // A stuck encoder never lets go of the frames inside it: they stay allocated as long as
-        // the process lives, and count against this stream until the watchdog gives up (1.5 s)
-        // and the source restarts on a new one. The waiting frame is replaced as each new frame
-        // arrives, so capture never stalls meanwhile.
+        // A stuck encoder never lets go of the frames inside it: one if it stuck on its first frame
+        // (every session did through the 2026-09-22 wedge; a second goes in only once a session
+        // has let go of one), up to two under the experiment if it stuck mid-stream. They stay
+        // allocated as long as the process lives, and count against this stream until the
+        // watchdog gives up (1.5 s) and the source restarts on a new one. The waiting frame is
+        // replaced as each new frame arrives, so capture never stalls meanwhile.
         config.queueDepth = 5
         config.showsCursor = showsCursor
         config.colorSpaceName = CGColorSpace.sRGB

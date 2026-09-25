@@ -141,8 +141,9 @@ final class StandIn {
     /// inside VideoToolbox, never more than the limit, and a waiting frame means all places are taken.
     func invariants(_ at: String) {
         guard !gone else { return }
-        expect(box.inside.count <= box.limit, "\(at): \(box.inside.count) inside, over the limit of \(box.limit)")
-        if box.waiting != nil { expect(!box.dead && box.inside.count == box.limit, "\(at): a frame waits while a place is free or the session is dead") }
+        expect(box.inside.count <= box.places, "\(at): \(box.inside.count) inside, over the \(box.places) places open")
+        expect(box.places == (box.anyReturned ? box.limit : 1), "\(at): \(box.places) places open, returned before: \(box.anyReturned)")
+        if box.waiting != nil { expect(!box.dead && box.inside.count == box.places, "\(at): a frame waits while a place is free or the session is dead") }
         if !box.dead {
             let bookkept = Set(box.inside.keys), real = Set(vtHolds.keys).union(onQueue)
             expect(bookkept == real, "\(at): the mailbox has \(bookkept.sorted()) inside, the queue and VideoToolbox hold \(real.sorted())")
@@ -233,6 +234,7 @@ final class StandIn {
         vtHolds[id] = f
         maxVTHolds = max(maxVTHolds, vtHolds.count)
         expect(vtHolds.count <= box.limit, "VideoToolbox holds \(vtHolds.count) frames at \(clock.now), over the limit of \(box.limit)")
+        if !box.anyReturned { expect(vtHolds.count <= 1, "VideoToolbox holds \(vtHolds.count) frames before the session let go of one") }
         let done: Double?
         switch engine {
         case .independent(let turnaround): done = turnaround(f).map { clock.now + $0 }
@@ -618,21 +620,23 @@ do {
     expectAllSettled(s)
 }
 
-// S9: EncoderProbe's giveUp (`abandon`) with two inside, and with none.
+// S9: EncoderProbe's giveUp (`abandon`) with two inside (after a first frame came back: before
+// that one goes in at a time), and with none.
 do {
     scenarioName = "abandon"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index < 2 ? 5 : 0.009 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index == 1 || $0.index == 2 ? 5 : 0.009 })
     s.clock.at(0) { s.capture(index: 0) }
-    s.clock.at(0.01) { s.capture(index: 1) }
-    s.clock.at(0.02) { s.capture(index: 2) }
+    s.clock.at(0.05) { s.capture(index: 1) }
+    s.clock.at(0.06) { s.capture(index: 2) }
+    s.clock.at(0.07) { s.capture(index: 3) }
     clock.run(until: 1.0)
     expect(s.vtHolds.count == 2 && s.box.waiting != nil, "abandon: \(s.vtHolds.count) inside, waiting \(s.box.waiting != nil)")
     expect(s.abandon(), "abandon with two inside returned false")
-    s.clock.at(1.1) { s.capture(index: 3) }
+    s.clock.at(1.1) { s.capture(index: 4) }
     clock.run()
-    expect(s.late == 2 && s.out == 0 && s.deadDrop == 1, "abandon: late \(s.late), out \(s.out), deadDrop \(s.deadDrop)")
-    expect(s.release() == .stalled(since: 0), "abandon: teardown not stalled since 0")
+    expect(s.late == 2 && s.out == 1 && s.deadDrop == 1, "abandon: late \(s.late), out \(s.out), deadDrop \(s.deadDrop)")
+    expect(s.release() == .stalled(since: 0.05), "abandon: teardown not stalled since 0.05")
     scenarioName = "abandon, nothing inside"
     let c2 = Clock()
     let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { _ in 0.009 })
@@ -753,6 +757,37 @@ do {
     } else {
         expect(false, "blocked call: the watchdog never fired")
     }
+}
+
+// S13: a session stuck on its very first frame (every session through the 2026-09-22 wedge) keeps
+// one frame inside whatever the limit: a second goes in only once the session has let go of one,
+// so the stuck encoder holds one surface for good. Stuck mid-stream, it holds as many as the limit.
+for limit in [twoInside, oneInside] {
+    scenarioName = "stuck on its first frame, \(limit) inside"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: limit, engine: .independent { $0.index == 0 ? nil : 0.009 })
+    s.inOrder = true
+    schedule(s, captures: captureTimes(fps: fps, from: 0, to: 4))
+    s.startWatchdog(until: 5)
+    clock.run(until: 5)
+    print(line(scenarioName, s, summary(s, from: 0, to: 1)))
+    expect(s.maxVTHolds == 1, "stuck on its first frame: VideoToolbox held \(s.maxVTHolds) frames, not 1")
+    expect(s.handOvers.count == 1 && s.out == 0, "stuck on its first frame: \(s.handOvers.count) handed over, \(s.out) out")
+    if let hungAt = s.hungAt {
+        expect(hungAt > 1.5 && hungAt <= 2.0 + 1e-9, "stuck on its first frame: the watchdog fired at \(hungAt), not within (1.5, 2.0]")
+    } else {
+        expect(false, "stuck on its first frame: the watchdog never fired")
+    }
+    expect(s.vtHolds.count == 1, "stuck on its first frame: \(s.vtHolds.count) frames left inside, not 1")
+    expect(s.release() == .stalled(since: 0), "stuck on its first frame: teardown not stalled since 0")
+    scenarioName = "stuck mid-stream, \(limit) inside"
+    let c2 = Clock()
+    let s2 = StandIn(clock: c2, limit: limit, engine: .independent { $0.index == 100 ? nil : 0.030 })
+    s2.inOrder = true
+    schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 6))
+    s2.startWatchdog(until: 7)
+    c2.run(until: 7)
+    expect(s2.hungAt != nil && s2.vtHolds.count == limit, "stuck mid-stream: \(s2.vtHolds.count) frames left inside, not \(limit)")
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")

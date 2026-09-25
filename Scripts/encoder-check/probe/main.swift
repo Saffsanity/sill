@@ -7,8 +7,9 @@ import CoreVideo
 // stand-in HEVCEncoder whose frames come back after programmable delays in real time. It checks
 // that the test keeps exactly as many frames inside as the encoder lets in (never more: a third
 // would wait in the mailbox and a fourth would push it out, so the test would wait for a frame
-// that never comes), never the same surface inside twice, measures the rate with two inside, and
-// gives up and counts a stuck frame as before. Nothing here links VideoToolbox.
+// that never comes; and one until the session has let go of a frame, as EncoderMailbox.places
+// has it), never the same surface inside twice, measures the rate with one and with two inside,
+// and gives up and counts a stuck frame as before. Nothing here links VideoToolbox.
 //
 //   Scripts/encoder-check/run.sh probe      (from the repository's root; also runs the hold case)
 // or by hand:
@@ -43,6 +44,9 @@ final class HEVCEncoder {
     private let lock = NSLock()
     private var inside: [Int: (buffer: CVPixelBuffer, since: Double, back: Double?)] = [:]
     private var dead = false
+    /// A frame has come back: from then on `maxInFlight` may be inside, before it one (as the real
+    /// encoder's mailbox has it).
+    private var anyBack = false
     private var next = 0
     private var engineFree = 0.0
     private let queue = DispatchQueue(label: "standin.encode")
@@ -57,8 +61,9 @@ final class HEVCEncoder {
         lock.lock()
         StandInConfig.encodes += 1
         let index = next; next += 1
-        if inside.count >= maxInFlight {
-            StandInConfig.violations.append("frame \(index) sent with \(inside.count) inside (limit \(maxInFlight)): it would wait in the mailbox")
+        let places = anyBack ? maxInFlight : 1
+        if inside.count >= places {
+            StandInConfig.violations.append("frame \(index) sent with \(inside.count) inside (\(places) places open): it would wait in the mailbox")
         }
         if inside.values.contains(where: { $0.buffer === pixelBuffer }) {
             StandInConfig.violations.append("frame \(index): a surface already inside went in again")
@@ -97,6 +102,7 @@ final class HEVCEncoder {
         } else if inside.removeValue(forKey: index) != nil {
             finished.remove(index); out.append(index)
         }
+        if !out.isEmpty { anyBack = true }
         let forward = !dead
         lock.unlock()
         if forward { for _ in out { onEncoded?(Data(), false, nil) } }
@@ -154,7 +160,9 @@ if CommandLine.arguments.dropFirst().first == "hold" {
     // SILL_TEST_PROBE_HOLD=0.08: every frame waits 80 ms on the serial queue before it goes in.
     reset(engine: .independent(0.009))
     let r = run("hold 0.08 s a frame, 9 ms each, two inside")
-    expect(r.ok && r.fps.map { $0 > 11 && $0 < 13 } == true, "hold 0.08: \(r.fps ?? -1) fps, not ~12")
+    // Serial on encodeQueue: one hold after another, ~12.5 fps less the sleeps' overshoot (11.1 to
+    // 11.6 while Sill.app streamed beside); two holds at once would read ~25.
+    expect(r.ok && r.fps.map { $0 > 10 && $0 < 13 } == true, "hold 0.08: \(r.fps ?? -1) fps, not ~12")
     print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
     exit(failures == 0 ? 0 : 1)
 }
@@ -202,6 +210,23 @@ do {
     expect(EncoderProbe.stuckProbes == before + 1, "stuck: stuckProbes \(EncoderProbe.stuckProbes), not \(before + 1)")
     Thread.sleep(forTimeInterval: 0.5)
     expect(backs.isEmpty, "stuck: a stalled frame reported back")
+}
+do {
+    // The first frame never comes back (every session through the 2026-09-22 wedge): the test
+    // sent it alone, so the session holds one test frame, not two.
+    reset(engine: .independent(0.010), stuck: [0])
+    let before = EncoderProbe.stuckProbes
+    let r = run("frame 0 never comes back, two inside")
+    expect(!r.ok && StandInConfig.encodes == 1 && StandInConfig.maxInside == 1,
+           "stuck on the first frame: ok \(r.ok), \(StandInConfig.encodes) sent, \(StandInConfig.maxInside) inside at most, not 1")
+    expect(EncoderProbe.stuckProbes == before + 1, "stuck on the first frame: stuckProbes \(EncoderProbe.stuckProbes), not \(before + 1)")
+    // One inside (the default): frames 0 to 4 sent one at a time, frame 4 never back.
+    reset(limit: 1, engine: .independent(0.010), stuck: [4])
+    let before1 = EncoderProbe.stuckProbes
+    let r1 = run("frame 4 never comes back, one inside")
+    expect(!r1.ok && StandInConfig.encodes == 5 && StandInConfig.maxInside == 1,
+           "one inside, frame 4 stuck: ok \(r1.ok), \(StandInConfig.encodes) sent, \(StandInConfig.maxInside) inside at most")
+    expect(EncoderProbe.stuckProbes == before1 + 1, "one inside, frame 4 stuck: stuckProbes \(EncoderProbe.stuckProbes), not \(before1 + 1)")
 }
 do {
     // A frame 1.5 s late (a busy encoder): no answer in time, stuck until it comes back, then

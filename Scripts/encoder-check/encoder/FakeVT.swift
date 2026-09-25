@@ -43,9 +43,10 @@ func seqOf(_ b: CVBuffer) -> Int {
 }
 
 /// EncoderProbe's own test frames: CoreVideo's CVPixelBufferCreate (shadowed for this module), with
-/// a tracker numbered from 1_000_001.
+/// a tracker numbered from 1_000_001. `probeSeqNow`: the last number given out.
 private let probeSeqLock = UnfairLock()
 private var probeSeq = 1_000_000
+var probeSeqNow: Int { probeSeqLock.run { probeSeq } }
 @discardableResult
 func CVPixelBufferCreate(_ allocator: CFAllocator?, _ width: Int, _ height: Int, _ format: OSType, _ attrs: CFDictionary?,
                          _ out: UnsafeMutablePointer<CVPixelBuffer?>) -> CVReturn {

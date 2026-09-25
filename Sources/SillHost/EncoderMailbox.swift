@@ -2,7 +2,7 @@ import Foundation
 import CoreMedia
 
 /// HEVCEncoder's frames on their way into VideoToolbox, kept apart from VideoToolbox itself: the
-/// frames inside it (at most `limit`), the one-slot mailbox behind them (a newer frame replaces a
+/// frames inside it (at most `places`), the one-slot mailbox behind them (a newer frame replaces a
 /// waiting one), the watchdog's clock, and what the next frame to go in carries (a timestamp
 /// later than the last one's, a requested keyframe). No locking and no dispatching: HEVCEncoder
 /// keeps it under its lock, makes the VideoToolbox calls and queues the hand-overs on its serial
@@ -19,10 +19,12 @@ struct EncoderMailbox<Frame> {
     /// The frames let in and not yet back, by id, each with the time it went in: when it was let
     /// in, and again when `submit` hands it to VideoToolbox. A dead session never clears this.
     private(set) var inside: [Int: CFTimeInterval] = [:]
-    /// The newest frame that found `limit` frames inside.
+    /// The newest frame that found every place taken.
     private(set) var waiting: Frame?
     /// The watchdog gave up on this session, or its owner did: nothing goes in or out any more.
     private(set) var dead = false
+    /// VideoToolbox has let go of a frame of this session (an output, or a refusal).
+    private(set) var anyReturned = false
     /// The last timestamp handed to VideoToolbox. Timestamps never go backwards (frame reordering
     /// is off): see `handOver`.
     private(set) var lastPTS: CMTime = .invalid
@@ -37,10 +39,16 @@ struct EncoderMailbox<Frame> {
         self.limit = max(1, limit)
     }
 
+    /// Frames that may be inside now: one until the session has let go of a frame, `limit` from
+    /// then on. A session stuck on its first frame, as every session was through the 2026-09-22
+    /// wedge, then holds that one surface for good and not `limit` of them: a stuck encoder never
+    /// lets go of what it holds.
+    var places: Int { anyReturned ? limit : 1 }
+
     enum Admission: Equatable {
         /// Let in as frame `id`: hand it to VideoToolbox (`handOver`, then the encode call).
         case goesIn(id: Int)
-        /// `limit` frames are inside: it waits in the mailbox. `replaced`: it pushed out an older
+        /// Every place is taken: it waits in the mailbox. `replaced`: it pushed out an older
         /// waiting frame, which is dropped (the newer frame wins).
         case waits(replaced: Bool)
         /// The session is dead: dropped.
@@ -50,7 +58,7 @@ struct EncoderMailbox<Frame> {
     /// A new frame, from the capture or a keyframe's re-encode.
     mutating func admit(_ frame: Frame, now: CFTimeInterval) -> Admission {
         guard !dead else { return .dropped }
-        if inside.count < limit { return .goesIn(id: letIn(now: now)) }
+        if inside.count < places { return .goesIn(id: letIn(now: now)) }
         let replaced = waiting != nil
         waiting = frame
         return .waits(replaced: replaced)
@@ -107,6 +115,7 @@ struct EncoderMailbox<Frame> {
     mutating func returned(_ id: Int, now: CFTimeInterval) -> Return {
         guard !dead else { return .late }
         guard inside.removeValue(forKey: id) != nil else { return .duplicate }
+        anyReturned = true
         guard let frame = waiting else { return .freed }
         waiting = nil
         return .next(frame, id: letIn(now: now))

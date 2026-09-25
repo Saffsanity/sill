@@ -117,5 +117,84 @@ do {
     withExtendedLifetime(enc) {}
 }
 
+/// A value shared between threads.
+final class Shared<T> {
+    private let lock = UnfairLock()
+    private var v: T
+    init(_ v: T) { self.v = v }
+    var value: T { get { lock.run { v } } set { lock.run { v = newValue } } }
+}
+
+/// A stream fed at 60 fps from a capture queue, each frame a new one numbered from `base`, until
+/// the watchdog reports a hang or `seconds` pass; then the owner lets go of the encoder, as the
+/// coordinator does when it restarts the source. The frames still alive `settle` seconds later are
+/// the ones the encoder (or the stand-in VideoToolbox) never let go of.
+func streamThenRelease(base: Int, seconds: Double, settle: Double) -> (hungAt: Double?, alive: [Int]) {
+    let t0 = CACurrentMediaTime()
+    let hungAt = Shared<Double?>(nil)
+    var enc: HEVCEncoder? = makeEncoder()
+    enc!.onHung = { hungAt.value = CACurrentMediaTime() - t0 }
+    let capture = DispatchQueue(label: "capture", qos: .userInteractive)
+    let count = Int(seconds * 60)
+    for i in 0..<count {
+        sleepUntil(t0 + Double(i) / 60)
+        if hungAt.value != nil { break }
+        let e = enc!
+        // Each in its own pool: the main thread's is never drained here, and would keep frames.
+        autoreleasepool { capture.sync { e.encode(makeFrame(seq: base + i), pts: CMTime(value: CMTimeValue(i), timescale: 60)) } }
+    }
+    enc = nil
+    Thread.sleep(forTimeInterval: settle)
+    return (hungAt.value, Tracker.alive.filter { $0 >= base && $0 < base + count })
+}
+
+/// `n` re-checks' tests in a row; the test frames still alive `settle` seconds after the last.
+func probesThenSettle(_ n: Int, settle: Double) -> (ok: [Bool], alive: [Int]) {
+    let from = probeSeqNow + 1
+    var ok: [Bool] = []
+    for _ in 0..<n { autoreleasepool { ok.append(EncoderProbe.throughput(width: 16, height: 16).ok) } }
+    let to = probeSeqNow
+    Thread.sleep(forTimeInterval: settle)
+    return (ok, Tracker.alive.filter { $0 >= from && $0 <= to })
+}
+
+// E3: what a stuck encoder keeps for good. A session stuck on its first frame (every session and
+// probe through the 2026-09-22 wedge) keeps that one frame whatever the limit: a second goes in
+// only once the session has let go of one. Stuck mid-stream it keeps as many as it lets in. A busy
+// encoder hands everything back.
+do {
+    FakeVT.reset(plan: { _, call, _, software in call == 1 && !software ? .stuck : .returnAfter(0.005) })
+    let r = streamThenRelease(base: 10_000, seconds: 3, settle: 0.5)
+    print("stream stuck on its first frame: hung at \(r.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(r.alive)")
+    expect(r.hungAt != nil && r.alive == [10_000], "stuck on its first frame: frames kept \(r.alive), not [10000]")
+
+    FakeVT.reset(plan: { _, call, _, software in call == 1 && !software ? .blockCall : .returnAfter(0.005) })
+    let b = streamThenRelease(base: 20_000, seconds: 3, settle: 0.5)
+    print("stream whose first encode call never returns: hung at \(b.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(b.alive)")
+    expect(b.hungAt != nil && b.alive == [20_000], "first call blocked: frames kept \(b.alive), not [20000]")
+
+    FakeVT.reset(plan: { _, call, _, software in call == 50 && !software ? .stuck : .returnAfter(0.005) })
+    let m = streamThenRelease(base: 30_000, seconds: 4, settle: 0.5)
+    print("stream stuck at its 50th frame: hung at \(m.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(m.alive)")
+    expect(m.hungAt != nil && m.alive.count == hardwareLimit, "stuck mid-stream: \(m.alive.count) frames kept, not \(hardwareLimit)")
+
+    FakeVT.reset(plan: { _, call, _, software in call == 50 && !software ? .returnAfter(2.5) : .returnAfter(0.005) })
+    let busy = streamThenRelease(base: 40_000, seconds: 4, settle: 3.0)
+    print("stream whose 50th frame comes back after 2.5 s: hung at \(busy.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(busy.alive)")
+    expect(busy.hungAt != nil && busy.alive.isEmpty, "busy: frames kept \(busy.alive) after they came back")
+
+    FakeVT.reset(plan: { _, call, _, _ in call == 1 ? .stuck : .returnAfter(0.005) })
+    let stuckBefore = EncoderProbe.stuckProbes
+    let wedge = probesThenSettle(8, settle: 0.5)
+    print("eight re-checks, each stuck on its first frame: ok \(wedge.ok.filter { $0 }.count) of 8, test frames kept \(wedge.alive.count), stuckProbes \(EncoderProbe.stuckProbes - stuckBefore) more")
+    expect(wedge.ok.allSatisfy { !$0 } && wedge.alive.count == 8, "eight wedged re-checks keep \(wedge.alive.count) test frames, not 8")
+    expect(EncoderProbe.stuckProbes - stuckBefore == 8, "eight wedged re-checks: stuckProbes up by \(EncoderProbe.stuckProbes - stuckBefore), not 8")
+
+    FakeVT.reset(plan: { _, call, _, _ in call == 5 ? .stuck : .returnAfter(0.005) })
+    let fifth = probesThenSettle(1, settle: 0.5)
+    print("a re-check stuck at its 5th frame: ok \(fifth.ok), test frames kept \(fifth.alive.count)")
+    expect(fifth.ok == [false] && fifth.alive.count == hardwareLimit, "a re-check stuck at its 5th frame keeps \(fifth.alive.count), not \(hardwareLimit)")
+}
+
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)
