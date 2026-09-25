@@ -164,7 +164,7 @@ enum MockCatalog {
             client.route = .remote(.vpn("Tailscale"))
             client.macInfo = macInfo()
             client.macInfoSaved = true
-            client.showMockLinkStats(linkStats(rtt: c == .remoteslow ? 320 : 48))
+            client.showMockLinkStats(linkStats(rtt: c == .remoteslow ? 320 : 48), slow: c == .remoteslow)
             state.stream = RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false)
         case .remoteinternet:
             client.route = .remote(.internet)

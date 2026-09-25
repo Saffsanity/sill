@@ -178,6 +178,11 @@ struct HostSettingsPanel: View {
                 if let problem = client.settingsProblem {
                     Callout(text: problem)
                 }
+                // Away from home on a slow link: what helps. It goes when the link recovers, and
+                // with the panel.
+                if remoteRoute != nil, client.slowLink {
+                    Callout(text: "The picture is arriving slowly from \(mac). Choose Low quality or Standard resolution.")
+                }
                 streamRows(shown)
                 Footnote(text: streamFooter)
                 // As in the Mac's Settings › Streaming: its own group, the Mac's name for it, and
@@ -389,13 +394,16 @@ struct HostSettingsPanel: View {
     }
 
     /// Under the stream rows. A frame rate limit above what this screen shows changes nothing for
-    /// it, which is worth saying on a 60 Hz device.
+    /// it, which is worth saying on a 60 Hz device; away from home this device asks for 60 fps.
     private var streamFooter: String {
         _ = powerState
         var text = "Quality is per 60 fps; a 120 fps stream gets twice as much."
-        let wanted = StreamClient.wantedFPS()
+        let away = client.awayCapsFrameRate
+        let wanted = StreamClient.wantedFPS(remote: away)
         guard wanted < 120 else { return text }
-        if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {
+        if away, StreamClient.wantedFPS() > wanted {
+            text += " Away from home, this \(device) asks for \(wanted) fps, which halves the data your Mac sends."
+        } else if ProcessInfo.processInfo.isLowPowerModeEnabled, StreamClient.screenMaximumFPS() >= 120 {
             text += " Low Power Mode holds this \(device) to \(wanted) fps."
         } else {
             text += " This \(device) shows up to \(wanted) fps."

@@ -277,6 +277,21 @@ extension StreamClient {
         connector.start()
     }
 
+    #if DEBUG
+    /// `-SillRemoteRoute vpn|internet`: a remote session to a test host on loopback counts as one
+    /// through Tailscale or over the internet, so the simulator can check the 60 fps request and
+    /// the slow-link callout (S8).
+    static var testRoute: RemoteRoute? {
+        switch UserDefaults.standard.string(forKey: "SillRemoteRoute") {
+        case "vpn": return .vpn("Tailscale")
+        case "internet": return .internet
+        default: return nil
+        }
+    }
+    #else
+    static var testRoute: RemoteRoute? { nil }
+    #endif
+
     func cancelRemoteDial() {
         remoteDial?.cancel()
         remoteDial = nil
@@ -289,7 +304,7 @@ extension StreamClient {
         // VPN" (a LAN address reached through a VPN into the home network, an unnamed tunnel).
         let c0 = w.candidate
         let service = c0.kind == MacAddress.vpn && !c0.via.isEmpty && !c0.via.hasPrefix("VPN (") ? c0.via : nil
-        let route: RemoteRoute = w.usedTunnel ? .vpn(service) : (c0.kind == MacAddress.internet ? .internet : .address)
+        let route: RemoteRoute = Self.testRoute ?? (w.usedTunnel ? .vpn(service) : (c0.kind == MacAddress.internet ? .internet : .address))
         #if DEBUG
         print("remote: \(w.candidate.key) is ready (\(route.phrase)); waiting for the window list")
         #endif

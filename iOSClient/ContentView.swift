@@ -95,7 +95,10 @@ struct ContentView: View {
 ///   with that link at launch without the confirmation; `-SillPairCode <12 digits>
 ///   -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first saved Mac as a
 ///   tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and this device's key;
-///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties).
+///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties);
+///   `-SillRemoteRoute vpn|internet` makes a remote session to a test host on loopback count as
+///   one through Tailscale or over the internet (the 60 fps request, the slow-link callout), and
+///   `-SillScreenFPS 120` makes the simulator's screen count as a 120 Hz one (also in the mock).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back

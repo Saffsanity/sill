@@ -164,14 +164,18 @@ public enum SettingsChoices {
 }
 
 /// Bitrate presets, per 60 fps (a 120 fps stream gets twice as much). Balanced is the CLI's value.
-/// Here rather than in the app so the Mac and the device name the presets the same way.
+/// Here rather than in the app so the Mac and the device name the presets the same way. Low is for
+/// a slow link away from home (docs/remote-access-plan.md §7.11); it comes first so every menu reads
+/// from the least to the most. An older device shows it as "Custom — 4 Mbps", and an older Mac
+/// refuses it from a device.
 public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
-    case efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, maximum = 40_000_000
+    case low = 4_000_000, efficient = 8_000_000, balanced = 15_000_000, high = 25_000_000, maximum = 40_000_000
 
     public var id: Int { rawValue }
 
     public var name: String {
         switch self {
+        case .low: "Low"
         case .efficient: "Efficient"
         case .balanced: "Balanced"
         case .high: "High"

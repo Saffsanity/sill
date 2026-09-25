@@ -51,6 +51,11 @@ enum RemoteRoute: Equatable {
     /// Anything else: an address reached directly (the tests' 127.0.0.1, a LAN address).
     case address
 
+    /// Through a VPN or over the internet this device asks for at most 60 fps (§7.6): half the data
+    /// of a 120 fps stream, on the link that is usually the slow part. By address (a LAN address,
+    /// the tests' loopback) runs as at home.
+    var capsFrameRate: Bool { self != .address }
+
     /// "through Tailscale", "through your VPN", "over the internet", "by address".
     var phrase: String {
         switch self {
@@ -167,8 +172,9 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// Harness `pending` case: the mock never answers and never times out.
     var mockFrozen = false
-    /// The harness's remote cases: one second's numbers, as the network queue would publish them.
-    func showMockLinkStats(_ stats: LinkStats) { linkStats = stats }
+    /// The harness's remote cases: one second's numbers, as the network queue would publish them,
+    /// and whether five of them made a slow link.
+    func showMockLinkStats(_ stats: LinkStats, slow: Bool = false) { linkStats = stats; slowLink = slow }
     #endif
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
@@ -194,6 +200,13 @@ final class StreamClient: ObservableObject {
     /// before the first one closes and after a disconnect. The HUD shows it, and
     /// `ClientStatsReporter` sends each one to the host exactly once. Main thread.
     @Published private(set) var linkStats: LinkStats?
+
+    /// The Settings panel's slow-link callout (docs/remote-access-plan.md §7.11): on a remote route,
+    /// the median of the last five one-second round-trip medians is over 250 ms
+    /// (`isSlowLink`). Main thread.
+    @Published private(set) var slowLink = false
+    /// The last five seconds' round-trip medians that had a pong, oldest first. Main thread.
+    private var recentRttMedians: [Int] = []
 
     /// One second of measurements.
     struct LinkStats: Equatable {
@@ -771,6 +784,8 @@ final class StreamClient: ObservableObject {
         macInfoSaved = false
         macInfoAt = nil
         linkStats = nil
+        recentRttMedians = []
+        slowLink = false
         localPointer = nil
         cursorShape = nil
         connected = false
@@ -1133,8 +1148,21 @@ final class StreamClient: ObservableObject {
         DispatchQueue.main.async {
             guard self.connection === c else { return }   // torn down meanwhile: stay nil
             self.linkStats = stats
-            if let rtt = stats.rtt { self.lastRttMaxMs = rtt.max }   // for the settings timeout
+            if let rtt = stats.rtt {
+                self.lastRttMaxMs = rtt.max   // for the settings timeout
+                self.recentRttMedians = Array((self.recentRttMedians + [rtt.median]).suffix(5))
+            }
+            let slow = self.route?.isRemote == true && Self.isSlowLink(self.recentRttMedians)
+            if slow != self.slowLink { self.slowLink = slow }
         }
+    }
+
+    /// The slow-link test: five seconds' round-trip medians whose median is over 250 ms. Judged by
+    /// round trip, because a still window legitimately sends no frames; seconds without a pong do
+    /// not count either way.
+    static func isSlowLink(_ medians: [Int]) -> Bool {
+        guard medians.count >= 5 else { return false }
+        return medians.suffix(5).sorted()[2] > 250
     }
 
     /// Liveness, on every route: nothing received for `livenessFloor` seconds, or four times the

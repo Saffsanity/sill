@@ -211,7 +211,7 @@ struct StreamScreen: View {
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: StreamClient.wantedFPS()))
+                                         fps: StreamClient.wantedFPS(remote: client.awayCapsFrameRate)))
         }
     }
 
