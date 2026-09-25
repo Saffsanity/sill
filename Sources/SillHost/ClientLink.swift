@@ -5,8 +5,9 @@ import Foundation
 /// Wireless Connection off disconnects the devices that come over AWDL (StreamServer), and only
 /// those; the menu card names each device's route (StatusText).
 ///
-/// Foundation only, so it is checked on its own with swiftc: no test can reach awdl0 headless
-/// (docs/direct-wireless-plan.md, "Fixes after Noah's first sessions").
+/// Foundation only, so it is checked on its own with swiftc, given a package name for its `package`
+/// access (`swiftc -package-name sill ClientLink.swift main.swift`, the checks in main.swift): no
+/// test can reach awdl0 headless (docs/direct-wireless-plan.md, "Fixes after Noah's first sessions").
 ///
 /// What a connection shows (2026-09-24, Sill.log and a local probe): an accepted connection's
 /// endpoint is the device's address, and a link-local address carries the interface it lives on,

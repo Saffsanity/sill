@@ -110,12 +110,23 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   to this Mac's own address lists en0 and lo0: no word). Read when the client is
   ready and on each path update, shown only (`HostStatusSnapshot.Device.route`);
   no wire change. Each end names its own link, so an iPad on Wi-Fi streaming
-  from a Mac on Ethernet says "Wi-Fi" while the card says "Wired". Verified: the
-  link check at 89 (PR #6's 40 plus 49), 14 mutants caught; the real host in a
-  scratch package (loopback, `fe80::1%lo0` and `::1` clients: no word; with the
-  lo0 stand-in, Direct on the device rows and on the source row only while one
-  is connected); previews: only the five cards with a device and their menu.txt
-  lines differ from a1484f9; the CLI identical to a1484f9 (masked).
+  from a Mac on Ethernet says "Wi-Fi" while the card says "Wired". A still
+  picture's rate reads "120 fps, still", as wide as a one-digit count ("5 of
+  120 fps"): "120 fps, nothing changing" (the plan's copy) plus the word
+  wrapped the row only while still, and the open menu, which resizes the card
+  on every change, jumped a line each time a window stopped or started
+  changing. The wording is Noah's call. Over 405 layouts (three sizes, 60 and
+  120 fps, 8 to 200 Mbps, each word or none, each suffix, the real StatusCard)
+  a row's line count never changes between still and changing unless the
+  count's own digits change it (16 layouts, all without a word; with "nothing
+  changing" 198 did); the `still-window` preview is the widest case the menu
+  offers. Verified: the link check at 89 (PR #6's 40 plus 49;
+  `swiftc -package-name sill`), 14 mutants caught; the real host in a scratch
+  package (loopback, `fe80::1%lo0` and `::1` clients: no word; with the lo0
+  stand-in, Direct on the device rows and on the source row only while one is
+  connected); previews: only the five cards with a device, the new
+  `still-window` and their menu.txt lines differ from a1484f9; the CLI
+  identical to a1484f9 (masked).
 - iOS: the network browser and connections to the Macs it lists never use
   peer-to-peer. A nearby (peer-to-peer) browser runs only while not connected,
   and only when a Mac this device last saw with the setting on
@@ -907,7 +918,8 @@ good.
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL and
   SILL_TEST_PEER_TO_PEER_INTERFACE), `ClientLink` (which route a client came
   by, from its endpoint's scope, and the menu card's word for it: Wired, Wi-Fi,
-  Direct or none; pure, checked with swiftc),
+  Direct or none; pure, checked on its own with `swiftc -package-name sill`,
+  which its `package` access needs),
   `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
   events and Spotlight ignored them), HID keys),

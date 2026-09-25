@@ -130,9 +130,9 @@ enum StatusText {
         return name.isEmpty ? device : name
     }
 
-    /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps", and
-    /// with one device, how it is connected: "… · 30 Mbps · Wi-Fi". With two or more, each
-    /// device's own row says it.
+    /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps" (a still
+    /// picture: "120 fps, still"), and with one device, how it is connected: "… · 30 Mbps · Wi-Fi".
+    /// With two or more, each device's own row says it.
     private static func sourceRow(_ s: HostStatusSnapshot) -> StatusPresentation.Row? {
         guard let stream = s.stream else { return nil }
         let title: String, symbol: String
@@ -142,8 +142,12 @@ enum StatusText {
         case .testPattern: title = "Test Pattern"; symbol = "checkerboard.rectangle"
         }
         // The encoder only produces a frame when the picture changed (ScreenCaptureKit delivers
-        // frames on repaint), so 0 means a still window, not a stalled stream.
-        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, nothing changing"
+        // frames on repaint), so 0 means a still window, not a stalled stream. "120 fps, still" is
+        // about as wide as a one-digit count ("5 of 120 fps"), so a row wraps the same still as
+        // changing, unless the count's own digits tip it: the open menu resizes the card on every
+        // change, and "nothing changing" with the route word made it jump a line each time a
+        // window stopped or started changing.
+        let rate = s.encodedFPS > 0 ? "\(min(s.encodedFPS, stream.fps)) of \(stream.fps) fps" : "\(stream.fps) fps, still"
         var detail = "\(stream.width)×\(stream.height) · \(rate) · \(stream.mbps) Mbps"
         if s.devices.count == 1, let route = s.devices[0].route { detail += " · \(word(route))" }
         if stream.onVirtualDisplay {
