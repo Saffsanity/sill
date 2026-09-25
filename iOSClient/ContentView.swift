@@ -38,10 +38,13 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             client.startBrowsing()
+            client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
             client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
             #endif
         }
+        // sill://pair from the Camera, Messages or `xcrun simctl openurl`: a confirmation first.
+        .onOpenURL { client.handleOpenURL($0) }
     }
 }
 
@@ -94,16 +97,32 @@ struct ContentView: View {
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
-///   `direct`, `directlink` (connected over it) or `nodirect` (a host without it) (see
-///   `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's route, the
-///   readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired) and `noroute`
-///   (none, as a connection whose path says nothing).
+///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
+///   `noroute`; and away from home: `remote` (through Tailscale, 48 ms, saved), `remoteinternet`,
+///   `remoteslow` (the slow-link callout), `remotepair` (Pair This iPad…), `remoteoff` or
+///   `noremote` (no kind 18: no group) (see `MockCatalog.SettingsCase`). The mock answers a pick
+///   after 0.35 s. The session's route, the readout's last word: Wi-Fi, except `directlink`
+///   (Direct), `wired` (Wired), `noroute` (none, as a connection whose path says nothing) and the
+///   remote cases (none: the route line under it says how instead).
+/// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
-///   `denied` (Local Network access denied: the status says what to do, no hint).
-///   Ignored with `-SillLive 1`. The mock never browses; Search Nearby and a row's tap only
-///   change what it shows (see `MockCatalog.ConnectCase`).
+///   `denied` (Local Network access denied: the status says what to do, no hint); or remote
+///   access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
+///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
+///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
+///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
+///   browses; Search Nearby and a row's tap only change what it shows (see
+///   `MockCatalog.ConnectCase`).
+/// * Real pairing, in the normal app (not the harness): `-SillPairURL '<sill://pair…>'` pairs
+///   with that link at launch without the confirmation; `-SillPairCode <12 digits>
+///   -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first saved Mac as a
+///   tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and this device's key;
+///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties);
+///   `-SillRemoteRoute vpn|internet` makes a remote session to a test host on loopback count as
+///   one through Tailscale or over the internet (the 60 fps request, the slow-link callout), and
+///   `-SillScreenFPS 120` makes the simulator's screen count as a 120 Hz one (also in the mock).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -132,6 +151,8 @@ struct LayoutHarness: View {
         let settingsCase: MockCatalog.SettingsCase
         /// The connect screen in a discovery state, instead of the stream screen. Ignored when `live`.
         let connectCase: MockCatalog.ConnectCase?
+        /// The stream screen under the pairing overlay.
+        let scanOverlay: Bool
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -149,7 +170,8 @@ struct LayoutHarness: View {
                         mockActive: mockActive(defaults.string(forKey: "SillActive")),
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
-                        connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""))
+                        connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
+                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"))
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -195,6 +217,7 @@ struct LayoutHarness: View {
         .onAppear {
             if spec.live {
                 live.startBrowsing()
+                live.startRemote()
                 live.connectFromLaunchArgument()
             }
         }
@@ -214,32 +237,55 @@ struct LayoutHarness: View {
                     ConnectScreen(client: live)
                 }
             }
-        } else if spec.connectCase != nil {
+        } else if let c = spec.connectCase {
+            let options = MockCatalog.connectScreenOptions(c)
             ZStack {
                 Color.black
-                ConnectScreen(client: mock)
+                ConnectScreen(client: mock, adding: options.adding, typed: options.typed, scannerOverride: options.scanner)
             }
         } else {
             StreamScreen(client: mock,
                          drawerOpen: spec.drawerOpen,
                          keyboardShown: spec.keyboardShown,
                          scaleOpen: spec.scaleOpen, textScale: spec.textScale,
-                         settingsOpen: spec.settingsOpen)
+                         settingsOpen: spec.settingsOpen,
+                         pairingOverlay: spec.scanOverlay, scannerOverride: .placeholder)
         }
     }
 }
 #endif
 
-/// Before a Mac is picked: the Macs the browsers found, as drawer-style rows that end in how each is
-/// reachable ("Wired", "Wi-Fi", or "Direct" for one reached over peer-to-peer Wi-Fi; nothing when
-/// the device cannot tell), and, when none turns up on the network, why, with Search Nearby. Along
-/// the bottom, a footer says Sill needs its free Mac app and where to get it, and links support
-/// and the privacy policy (App Review guidelines 1.5, 2.1 and 5.1.1(i)). None of it shows while
-/// connected: the stream screen takes this one's place (`ContentView`).
+/// Before a Mac is picked: the Macs the browsers found and the saved ones they do not list, as
+/// drawer-style rows that end in how each is reachable ("Wired", "Wi-Fi", or "Direct" for one
+/// reached over peer-to-peer Wi-Fi; "Remote" for a saved Mac dialed through its VPN or the internet;
+/// nothing when the device cannot tell); when none turns up on the network, why, with Search
+/// Nearby; and Add a Mac… last, which unfolds the pairing card in the column's place
+/// (docs/remote-access-plan.md §7.8, §7.10). A saved Mac's row has a menu: Connect or Connect
+/// Remotely, and Forget. Along the bottom, a footer says Sill needs its free Mac app and where to
+/// get it, and links support and the privacy policy (App Review guidelines 1.5, 2.1 and 5.1.1(i)).
+/// None of it shows while connected: the stream screen takes this one's place (`ContentView`).
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
+    @State private var adding: Bool
+    @State private var typed: Bool
+    /// A field of the card has the keyboard.
+    @State private var editing = false
+    /// The DEBUG harness's stand-in for the camera (the simulator has none); nil on a device.
+    let scannerOverride: CodeScanner.Mode?
+    @AccessibilityFocusState private var titleFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var device: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
+        self.client = client
+        self.scannerOverride = scannerOverride
+        _adding = State(initialValue: adding)
+        _typed = State(initialValue: typed)
+    }
+
+    private var device: String { StreamClient.deviceWord }
+    private var scannerMode: CodeScanner.Mode { scannerOverride ?? CodeScanner.currentMode }
+    /// Where the scanner cannot run (the simulator), the card starts on the typed path.
+    private var scannerUsable: Bool { scannerOverride != nil || CodeScanner.isSupported }
 
     /// The least room between the column and the footer.
     private static let footerGap: CGFloat = 24
@@ -249,110 +295,220 @@ struct ConnectScreen: View {
     private static let linkReach: CGFloat = 14
 
     var body: some View {
-        // The column centred on the screen, where it sat before there was a footer, and the footer
-        // along the bottom: the footer never moves the title. Only a column that would come within
-        // the gap of the footer rises to keep it. One too tall for that even at the top (many Macs
-        // on a phone held sideways) scrolls above the footer, which stays in reach, as the Settings
-        // panel keeps its header and foot.
-        ViewThatFits(in: .vertical) {
-            ColumnOverFooter(gap: Self.footerGap) {
-                column
-                footer
-            }
+        GeometryReader { geo in
+            let layout = ConnectLayout(size: geo.size)
+            // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
+            // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
+            // safe area below, so nothing else moves (the footer stays under the keyboard).
+            let toTop = editing && !layout.topHalf
+            // The column where it sat before there was a footer, and the footer along the bottom:
+            // the footer never moves the title. Only a column that would come within the gap of the
+            // footer rises to keep it; one too tall for that even at the top (many Macs on a phone
+            // held sideways) scrolls above the footer, which stays in reach, as the Settings panel
+            // keeps its header and foot. One scroll view whatever the fit, so a fit that changes
+            // (the card's words folding while a field has the keyboard, a row more) never builds
+            // the column anew: the card keeps its fields and its camera.
             VStack(spacing: 0) {
-                ScrollView {
-                    column.padding(.vertical, 16)
+                ScrollView(.vertical) {
+                    ColumnOverFooter(
+                        // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing
+                        // crosses the crease and the keyboard has the lower half (the footer stays along
+                        // the bottom, under the keyboard while it is up). Elsewhere centred in the whole
+                        // height, as before.
+                        centreHeight: layout.topHalf ? min(geo.size.height / 2, 500) : geo.size.height,
+                        visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
+                        column(layout)
+                            .frame(width: adding && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
+                                   alignment: .leading)
+                            // Placed by its leading edge, not centred: the side-by-side card is wider
+                            // than the rows, and centring it moved the title sideways as the card
+                            // unfolded.
+                            .padding(.leading, layout.columnX)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // The footer's height, measured here; the one shown is the one below.
+                        footer(layout)
+                            .hidden()
+                            .accessibilityHidden(true)
+                    }
                 }
+                .scrollBounceBehavior(.basedOnSize)
                 .scrollIndicatorsFlash(onAppear: true)
-                // The rows fade into the edge above the footer instead of being cut off there.
+                // A column that scrolls fades out above the footer instead of being cut off at it, and
+                // keeps a little room before it. Both are in the gap, which a column that fits keeps
+                // clear, so neither ever reaches one.
                 .mask {
                     VStack(spacing: 0) {
                         Color.black
                         LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 24)
+                            .frame(height: Self.footerGap / 2)
+                        Color.clear.frame(height: Self.footerGap / 2)
                     }
                 }
-                footer.padding(.top, 12)
+                footer(layout)
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onChange(of: client.pairing) { old, new in
+            // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
+            if case .paired = old, new == .idle, !client.connected { fold() }
+        }
+        // VoiceOver hears each status line (§7.8): a remote dial and why it failed, a reconnect,
+        // "Stopped trying…", "… is saved", Forget, and the line a session ended with (why the Mac
+        // closed it), which is already set when this screen comes back. A changed Text alone is
+        // never spoken, and the rows keep the focus.
+        .onAppear { announce(client.status) }
+        .onChange(of: client.status) { _, line in announce(line) }
     }
 
-    private var column: some View {
+    /// Not the idle "Looking for Macs…" lines, which change as the search does.
+    private func announce(_ line: String) {
+        guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
+        AccessibilityNotification.Announcement(line).post()
+    }
+
+    private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connect to a Mac")
+            // Leading, so the title never jumps sideways when the hint, a row or the card widens the
+            // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
+            // by half as much.
+            Text(adding || client.pendingLink != nil ? "Add a Mac" : "Connect to a Mac")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .padding(.horizontal, 10)
+                .accessibilityAddTraits(adding ? .isHeader : [])
+                .accessibilityFocused($titleFocused)
 
-            Text(client.status)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.muted)
+            if let link = client.pendingLink {
+                LinkConfirmation(link: link, pair: {
+                    // The card shows the pairing's progress; should it fail, the scanner (or the
+                    // typed path where there is none) is there to try again.
+                    typed = !scannerUsable
+                    adding = true
+                    client.confirmPendingLink()
+                }, cancel: { client.cancelPendingLink() })
                 .padding(.horizontal, 10)
-                .padding(.bottom, 4)
-
-            ForEach(client.macs) { mac in
-                // The kind of link, never the Wi-Fi network's name: that needs Location access,
-                // which Sill does not ask for (DiscoveryPolicy.method).
-                DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.method?.word,
-                          action: { client.connect(to: mac) }) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
-                        Image(systemName: "desktopcomputer")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 32, height: 32)
-                }
-                .accessibilityLabel(mac.method.map { "\(mac.name), \($0.word)" } ?? mac.name)
-                .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network" : "")
-            }
-
-            if client.showsNearbyHint {
-                Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            } else if adding {
+                AddMacCard(client: client, layout: layout, typed: $typed, scannerMode: scannerMode, close: fold, editing: $editing)
                     .padding(.horizontal, 10)
-                // Once the nearby search runs, a line in the button's place says so, whatever the
-                // status line says (a disconnect's message stays there), at the button's height so
-                // nothing moves.
-                if client.searchingNearby {
-                    Text("Also looking nearby")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Palette.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, 10)
-                } else {
-                    Button(action: {
-                        client.searchNearby()
-                        // The button leaves from under VoiceOver's cursor: say what it started.
-                        AccessibilityNotification.Announcement("Also looking nearby").post()
-                    }) {
-                        Text("Search Nearby")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, 10)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
-                }
+                    .padding(.top, 4)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            } else {
+                rows
             }
         }
-        // Leading, so the title never jumps sideways when the hint or the first row widens the
-        // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
-        // by half as much.
-        .frame(width: 380, alignment: .leading)
-        .frame(maxWidth: .infinity)
     }
+
+    @ViewBuilder private var rows: some View {
+        Text(client.status)
+            .font(.system(size: 13))
+            .foregroundStyle(Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
+
+        ForEach(client.macs) { mac in
+            // The kind of link, never the Wi-Fi network's name: that needs Location access, which
+            // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
+            // from home.
+            DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.word,
+                      action: { client.connect(to: mac) }) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(mac.word.map { "\(mac.name), \($0)" } ?? mac.name)
+            .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
+                               : mac.route == .remote ? "Connects through your VPN or the internet." : "")
+            .contextMenu { menu(for: mac) }
+        }
+
+        if client.showsNearbyHint {
+            Text("Your Mac has to be on the same Wi\u{2011}Fi network as this \(device), or have Direct Wireless Connection turned on in Sill. Away from home, add it once with a code from your Mac.")
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+            // Once the nearby search runs, a line in the button's place says so, whatever the
+            // status line says (a disconnect's message stays there), at the button's height so
+            // nothing moves.
+            if client.searchingNearby {
+                Text("Also looking nearby")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 10)
+            } else {
+                Button(action: {
+                    client.searchNearby()
+                    // The button leaves from under VoiceOver's cursor: say what it started.
+                    AccessibilityNotification.Announcement("Also looking nearby").post()
+                }) {
+                    Text("Search Nearby")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Also looks for a Mac with Direct Wireless Connection turned on, without a Wi\u{2011}Fi network.")
+            }
+        }
+
+        // Always the last line, from the first frame, so nothing moves when it is needed.
+        Button(action: unfold) {
+            Text("Add a Mac…")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Pairs this \(device) with a Mac so you can reach it away from home.")
+    }
+
+    /// A saved Mac's row: Connect (a Remote row) or Connect Remotely (its network row, to try the
+    /// VPN path at home), and Forget. Other Macs' rows have no menu.
+    @ViewBuilder private func menu(for mac: FoundMac) -> some View {
+        if let id = mac.macID {
+            if mac.route == .remote {
+                Button { client.connect(to: mac) } label: { Label("Connect", systemImage: "globe") }
+            } else if mac.route == .network {
+                Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
+            }
+            let name = client.savedMac(id) != nil ? client.displayName(id) : mac.name
+            Button(role: .destructive) { client.forget(id) } label: { Label("Forget \(name)", systemImage: "trash") }
+        }
+    }
+
+    private func unfold() {
+        client.pairing = .idle
+        typed = !scannerUsable
+        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) { adding = true }
+        titleFocused = true
+    }
+
+    private func fold() {
+        client.cancelPairing()
+        editing = false
+        withAnimation(.easeOut(duration: 0.18)) { adding = false }
+        titleFocused = true
+    }
+
+    // MARK: The footer
 
     /// For someone who found Sill here first, and for App Review: what else it needs, where to get
     /// it, where to get help, and the privacy policy. Muted and 13 pt like the status line, but it
     /// follows the text size, up to the Settings panel's cap (the column keeps its fixed sizes); it
     /// wraps, never truncates. Each link opens in Safari (a Link hands its URL to the environment's
     /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
-    private var footer: some View {
+    private func footer(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Needs the free Sill app on your Mac.")
                 .foregroundStyle(Palette.muted)
@@ -375,11 +531,12 @@ struct ConnectScreen: View {
         .font(.footnote)
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .padding(.horizontal, 10)
-        // Under the column's own edge, so the two line up. On a screen narrower than the column (a
-        // window in Slide Over) it takes the screen's width instead, so the links go to a second
-        // line rather than past the edge.
-        .frame(maxWidth: 380, alignment: .leading)
-        .frame(maxWidth: .infinity)
+        // Under the column's own edge and as wide as the rows, so the two line up; on a screen
+        // narrower than 412 pt (a phone, a window in Slide Over) that is the screen's width less
+        // the margins, so the links go to a second line rather than past the edge.
+        .frame(width: layout.columnWidth, alignment: .leading)
+        .padding(.leading, layout.columnX)
+        .frame(maxWidth: .infinity, alignment: .leading)
         // Room for the last link's tap area, which then stays on the screen.
         .padding(.bottom, Self.linkReach)
     }
@@ -418,30 +575,57 @@ struct ConnectScreen: View {
     }
 }
 
-/// The connect screen's column and footer: the column centred in the whole height, where it sat
-/// before there was a footer, and the footer along the bottom. A column that would come within
-/// `gap` of the footer rises to keep the gap, no higher than the top. Its ideal height is both
-/// parts and the gap, so under `ViewThatFits` a column that cannot keep the gap goes to the
-/// scrolling form instead.
+/// The connect screen's column inside the scroll view that sits above its footer. The column sits
+/// where it would without a footer: centred in `centreHeight` (the whole height, or the Duo's top
+/// half) or, while a field has the keyboard, at the top. A column that would come within `gap` of
+/// the footer rises to keep it, no higher than the top. The content is then exactly the scroll
+/// view's height, so nothing scrolls; a column that cannot keep the gap even at the top makes the
+/// content taller, 16 pt of room above it, and scrolls.
+///
+/// The second subview is the footer again, hidden, which only gives the footer's height: the scroll
+/// view is `visibleHeight` less that, and its content never learns its container's height.
 private struct ColumnOverFooter: Layout {
+    /// The height the column is centred in, from the top.
+    let centreHeight: CGFloat
+    /// The scroll view and the footer together: the screen's height.
+    let visibleHeight: CGFloat
     let gap: CGFloat
+    /// A field has the keyboard: the column at the top.
+    let atTop: Bool
+    /// Above the column while it is at the top: with a field's keyboard up, or scrolling.
+    private let topRoom: CGFloat = 16
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let (column, footer) = sizes(width: proposal.width, subviews) else { return .zero }
-        let needed = column.height + gap + footer.height
-        let height = proposal.height.flatMap { $0.isFinite ? max($0, needed) : nil } ?? needed
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(column.width, footer.width)
-        return CGSize(width: width, height: height)
+        let room = visibleHeight - footer.height
+        // A point short of the scroll view while it fits, so no rounding ever lets it scroll.
+        return CGSize(width: width, height: fits(column: column.height, room: room) ? max(0, room - 1)
+                                                                                   : topRoom + column.height + gap)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
-        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.maxY - footer.height), anchor: .topLeading,
-                          proposal: ProposedViewSize(width: bounds.width, height: footer.height))
-        let centred = bounds.midY - column.height / 2
-        let clear = bounds.maxY - footer.height - gap - column.height
-        subviews[0].place(at: CGPoint(x: bounds.minX, y: max(bounds.minY, min(centred, clear))), anchor: .topLeading,
+        let room = visibleHeight - footer.height
+        let y: CGFloat
+        if !fits(column: column.height, room: room) {
+            y = topRoom
+        } else if atTop {
+            y = topRoom
+        } else {
+            let centred = centreHeight / 2 - column.height / 2
+            let clear = room - gap - column.height
+            y = max(0, min(centred, clear))
+        }
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + y), anchor: .topLeading,
                           proposal: ProposedViewSize(width: bounds.width, height: column.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: footer.height))
+    }
+
+    /// Whether the column keeps the gap above the footer without scrolling.
+    private func fits(column: CGFloat, room: CGFloat) -> Bool {
+        (atTop ? topRoom : 0) + column + gap <= room
     }
 
     /// The column's and the footer's heights at this width, each as tall as it wants.

@@ -19,6 +19,11 @@ struct MenuEntry: Equatable {
         case setMaxFPS(Int), setBitrate(Int), setCaptureScale(CGFloat)
         case toggleLaunchAtLogin
         case showLog, showSettings, quit
+        /// Settings on one tab (Remote Access…); the plain `showSettings` stays for ⌘,. (Swift
+        /// allows no second case named `showSettings`.)
+        case showSettingsTab(SettingsTab)
+        /// Pair iPhone or iPad…: a pairing window, or the open one brought forward.
+        case showPairing
     }
 
     var kind: Kind
@@ -54,6 +59,7 @@ enum MenuBuilder {
             let action: MenuEntry.Action = switch a.action {
             case .allowScreenRecording: .allowScreenRecording
             case .allowAccessibility: .allowAccessibility
+            case .showRemoteAccess: .showSettingsTab(.remoteAccess)
             case .none: .none
             }
             menu.append(MenuEntry(kind: .item, title: a.title, subtitle: a.subtitle, enabled: action != .none,
@@ -86,6 +92,11 @@ enum MenuBuilder {
         menu.append(MenuEntry(kind: .item, title: "Direct Wireless Connection",
                               subtitle: "No shared network needed; Wi\u{2011}Fi streams can stutter",
                               checked: config.directWireless, action: .setDirectWireless(!config.directWireless)))
+        // Opens the pane rather than toggling: turning it on is worth reading what it does, and the
+        // internet switch stays one deliberate step deeper, never in the menu.
+        if let note = p.remoteAccessNote {
+            menu.append(MenuEntry(kind: .item, title: "Remote Access…", subtitle: note, action: .showSettingsTab(.remoteAccess)))
+        }
         var loginNote: String?
         if !login.available { loginNote = "Available when Sill runs from its app bundle" }
         else if let error = login.error { loginNote = error }
@@ -104,6 +115,9 @@ enum MenuBuilder {
         ]))
         menu.append(.separator)
 
+        if p.remoteAccessNote != nil {
+            menu.append(MenuEntry(kind: .item, title: "Pair iPhone or iPad…", enabled: p.canPair, action: .showPairing))
+        }
         menu.append(MenuEntry(kind: .item, title: "Show Log…", action: .showLog))
         menu.append(MenuEntry(kind: .item, title: "Settings…", key: ",", action: .showSettings))
         menu.append(.separator)
@@ -254,6 +268,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .toggleLaunchAtLogin: model.loginItem.set(!model.loginItem.isOn)
         case .showLog: model.showLog?()
         case .showSettings: model.showSettings?(nil)
+        case .showSettingsTab(let tab): model.showSettings?(tab)
+        case .showPairing: model.pairDevice()
         case .quit: NSApp.terminate(nil)
         }
     }

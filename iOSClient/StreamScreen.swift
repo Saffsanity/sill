@@ -86,6 +86,12 @@ struct StreamScreen: View {
     /// The keyboard was up (the overlay first responder) when the panel opened: closing the panel
     /// puts it back.
     @State private var keyboardBeforeSettings = false
+    /// Pair This iPad… (the panel's Away from home group): the pairing overlay covers the stream.
+    /// Up here, like the panel, so a rotation keeps it. An outside sill://pair link shows the same
+    /// overlay with its confirmation.
+    @State private var pairingOverlay = false
+    /// The DEBUG harness's stand-in for the camera (the simulator has none); nil on a device.
+    private var scannerOverride: CodeScanner.Mode? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
@@ -97,13 +103,16 @@ struct StreamScreen: View {
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
     /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
     init(client: StreamClient, drawerOpen: Bool = false, keyboardShown: Bool = false,
-         scaleOpen: Bool = false, textScale: Double? = nil, settingsOpen: Bool = false) {
+         scaleOpen: Bool = false, textScale: Double? = nil, settingsOpen: Bool = false,
+         pairingOverlay: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
         _drawerOpen = State(initialValue: drawerOpen)
         _keyboardShown = State(initialValue: keyboardShown)
         _scaleOpen = State(initialValue: scaleOpen)
         _textScale = State(initialValue: textScale)
         _settingsOpen = State(initialValue: settingsOpen)
+        _pairingOverlay = State(initialValue: pairingOverlay)
+        self.scannerOverride = scannerOverride
     }
     #endif
 
@@ -111,15 +120,29 @@ struct StreamScreen: View {
         // Which layout, and at which size — see `DuoLayout` for the thresholds and the Duo posture
         // behind each one.
         GeometryReader { geo in
-            switch DuoLayout.of(geo.size) {
-            case .innerLandscape:
-                landscape(bar: .regular)
-            case .outerLandscape:
-                landscape(bar: .compact)
-            case .innerPortrait:
-                portrait(metrics: .regular)
-            case .outerPortrait:
-                portrait(metrics: .compact)
+            ZStack {
+                Group {
+                    switch DuoLayout.of(geo.size) {
+                    case .innerLandscape:
+                        landscape(bar: .regular)
+                    case .outerLandscape:
+                        landscape(bar: .compact)
+                    case .innerPortrait:
+                        portrait(metrics: .regular)
+                    case .outerPortrait:
+                        portrait(metrics: .compact)
+                    }
+                }
+                // Under the pairing overlay nothing takes a touch: not the bar, and not the
+                // stream's UIKit input view.
+                .allowsHitTesting(!overlayShown)
+                // A sibling in the same stack, not an `.overlay`: over the stream's UIKit input
+                // view, only a sibling drawn after it received the touches (measured on the
+                // simulator: an overlay's buttons were drawn but never tapped).
+                if overlayShown {
+                    PairingOverlay(client: client, scannerMode: scannerOverride ?? CodeScanner.currentMode,
+                                   close: { withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = false } })
+                }
             }
         }
         .background(Color.black)
@@ -131,6 +154,10 @@ struct StreamScreen: View {
             }
         }
         .animation(.spring(duration: 0.25, bounce: 0.2), value: windowMenu)
+        .onChange(of: client.pendingLink) { _, link in
+            // An outside link while streaming: the panel and the keyboard go first, as for Pair This iPad….
+            if link != nil { openLinkOverlay() }
+        }
         .onChange(of: scenePhase) { _, phase in
             // A gesture cut short by a scene change never ends: put the transient UI away.
             if phase != .active { scaleOpen = false; windowMenu = nil }
@@ -144,6 +171,8 @@ struct StreamScreen: View {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
+            // A link that came in before this connection did waits here now.
+            if client.pendingLink != nil { openLinkOverlay() }
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
@@ -184,11 +213,47 @@ struct StreamScreen: View {
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: StreamClient.wantedFPS()))
+                                         fps: StreamClient.wantedFPS(remote: client.awayCapsFrameRate)))
         }
     }
 
     private func closeWindowMenu() { windowMenu = nil }
+
+    /// Pair This iPad…, or an outside link waiting for its confirmation.
+    private var overlayShown: Bool { pairingOverlay || client.pendingLink != nil }
+
+    /// Pair This iPad…: the panel and the keyboard are put away first, so no key reaches the Mac
+    /// while the code is typed, then the overlay covers the stream. What an earlier pairing left
+    /// (a "Paired with…" whose fade never ran, an error) goes first: the overlay would show it,
+    /// and a stale "Paired" closed it after a second.
+    private func openPairingOverlay() {
+        putAwayForOverlay()
+        client.cancelPairing()
+        withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = true }
+    }
+
+    /// An outside link to confirm over the stream. The overlay is held open, not shown only while
+    /// the link waits: Pair clears the link, and the overlay went with it, before "Pairing with…",
+    /// any error or "Paired with…" could show. A pairing still running is left alone; one that
+    /// ended earlier leaves nothing behind.
+    private func openLinkOverlay() {
+        putAwayForOverlay()
+        if !pairingOverlay {
+            switch client.pairing {
+            case .working, .idle: break
+            case .failed, .paired: client.pairing = .idle
+            }
+        }
+        withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = true }
+    }
+
+    private func putAwayForOverlay() {
+        setSettings(false, restoreKeyboard: false)
+        withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+        windowMenu = nil
+        scaleOpen = false
+        overlay.setKeyboard(shown: false)
+    }
 
     /// Opens or closes the Settings panel. Opening puts the drawer, the traffic lights and the Aa
     /// ruler away and takes the keyboard down: with the overlay not first responder no hardware
@@ -242,7 +307,8 @@ struct StreamScreen: View {
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              settingsTransition: { settingsTransition(anchor: $0) },
-                             onPanelSize: { panelSize = $0 })
+                             onPanelSize: { panelSize = $0 },
+                             pairThisDevice: openPairingOverlay)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -296,7 +362,7 @@ struct StreamScreen: View {
                     .onTapGesture { setSettings(false) }
                     .accessibilityHidden(true)
 
-                HostSettingsPanel(client: client, close: { setSettings(false) })
+                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay)
                     .frame(width: bar.settingsWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)

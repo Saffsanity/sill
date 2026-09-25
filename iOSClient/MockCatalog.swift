@@ -104,16 +104,40 @@ enum MockCatalog {
         case nodirect    // a host without the setting (the ipad-host-settings build): no row
         case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
         case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
+        case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired for remote access
+        case remoteinternet  // connected over the internet, 120 ms
+        case remoteslow      // through Tailscale on a slow link (320 ms): the slow-link callout
+        case remotepair      // at home, Remote Access on, not saved: Pair This iPad…
+        case remoteoff       // at home, Remote Access off: the footnote only
+        case noremote        // at home, an older Mac without kind 18: no Away from home group
+    }
+
+    /// The Mac's kind 18 in the remote cases: Tailscale's name and addresses, and Wi‑Fi.
+    static func macInfo(remoteAccess: Bool = true, internet: Bool = false) -> MacInfo {
+        var addresses = [MacAddress(host: "mac-mini.tail1234.ts.net", kind: MacAddress.vpn, via: "Tailscale"),
+                         MacAddress(host: "100.101.102.103", kind: MacAddress.vpn, via: "Tailscale"),
+                         MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi")]
+        if internet { addresses.append(MacAddress(host: "203.0.113.9", kind: MacAddress.internet, via: "Router")) }
+        return MacInfo(macID: "A3C5HR4RBV67YR21", name: "Mac mini", issuedAt: 1_790_265_600, remoteAccess: remoteAccess,
+                       remotePort: 7455, internet: internet, addresses: remoteAccess ? addresses : [])
+    }
+
+    /// One second of link numbers with this round trip (ms), for the route line.
+    static func linkStats(rtt: Double) -> StreamClient.LinkStats {
+        StreamClient.LinkStats(fps: 60, frameAge: StreamClient.MedianMax([rtt / 2 + 4]),
+                               rtt: StreamClient.MedianMax([rtt - 2, rtt, rtt + 3]))
     }
 
     /// Lays a case's state into the client as if the Mac had sent it on this connection.
     private static func seed(_ client: StreamClient, settings c: SettingsCase) {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
         // How this session reaches the Mac: read from the connection, whatever the Mac runs.
+        // Away from home the route line under the readout says how instead (the remote cases), and
+        // the readout ends in the bitrate.
         switch c {
         case .directlink: client.route = .direct
         case .wired: client.route = .wired
-        case .noroute: client.route = nil
+        case .noroute, .remote, .remoteinternet, .remoteslow: client.route = nil
         default: client.route = .wifi
         }
         guard c != .legacy else { return }
@@ -147,9 +171,25 @@ enum MockCatalog {
             client.connectedDirectly = true
         case .nodirect:
             state.settings.directWireless = nil
-        case .default, .legacy, .pending, .timeout, .wired, .noroute:
+        case .remote, .remoteslow:
+            client.remoteRoute = .vpn("Tailscale")
+            client.macInfo = macInfo()
+            client.macInfoSaved = true
+            client.showMockLinkStats(linkStats(rtt: c == .remoteslow ? 320 : 48), slow: c == .remoteslow)
+            state.stream = RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false)
+        case .remoteinternet:
+            client.remoteRoute = .internet
+            client.macInfo = macInfo(internet: true)
+            client.macInfoSaved = true
+            client.showMockLinkStats(linkStats(rtt: 120))
+        case .remotepair:
+            client.macInfo = macInfo()
+        case .remoteoff:
+            client.macInfo = macInfo(remoteAccess: false)
+        case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
         }
+        if client.macInfo != nil { client.macInfoAt = Date().addingTimeInterval(-59) }
         var ledger = SettingsLedger()
         _ = ledger.receive(state)
         if c == .pending {
@@ -170,6 +210,36 @@ enum MockCatalog {
         case nearby    // searching nearby: a Wi-Fi row, then Direct rows (one with a long name)
         case methods   // every word a row can end in: Wired, Wi-Fi, none, long names with Wired and Wi-Fi, Direct
         case denied    // Local Network access denied: the status says what to do, and no hint
+        case remote        // a network row, a Direct row and two Remote rows (a long name, a "(2)")
+        case addmac        // Add a Mac unfolded, scanning (a drawn viewfinder: the simulator has no camera)
+        case addcode       // the typed path, empty
+        case addcodeerror  // the typed path after a wrong code: "That code didn’t work…"
+        case pairing       // "Pairing with Mac mini…"
+        case remotedial    // "Connecting to Mac mini remotely…"
+        case remotefail    // a remote dial's failure, -SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff
+        case camera        // Add a Mac with the camera refused
+        case externalpair  // an outside sill://pair link waiting for its confirmation
+    }
+
+    /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
+    /// viewfinder's stand-in.
+    static func connectScreenOptions(_ c: ConnectCase) -> (adding: Bool, typed: Bool, scanner: CodeScanner.Mode) {
+        switch c {
+        case .addmac, .pairing: return (true, false, .placeholder)
+        case .addcode, .addcodeerror: return (true, true, .placeholder)
+        case .camera: return (true, false, .denied)
+        default: return (false, false, .placeholder)
+        }
+    }
+
+    /// A stand-in pairing link: a made-up key and secret, so nothing pairs with it.
+    static var mockLink: PairLink {
+        let addresses = ["192.168.1.20", "mac-mini.tail1234.ts.net"].compactMap { text -> ParsedAddress? in
+            if case .success(let a) = AddressParser.parse(text) { return a }
+            return nil
+        }
+        return PairLink(fingerprint: Data((0..<32).map { UInt8($0 &* 7 &+ 3) }), secret: Data(repeating: 0x16, count: 16),
+                        name: "Mac mini", port: 7455, addresses: addresses)
     }
 
     static func connectClient(_ c: ConnectCase) -> StreamClient {
@@ -180,8 +250,11 @@ enum MockCatalog {
         /// mock never dials.
         func mac(_ name: String, _ method: DiscoveryPolicy.Method?) -> FoundMac {
             FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
-                     direct: method == .direct, method: method, wired: nil)
+                     route: method == .direct ? .direct : .network, method: method)
         }
+        func remote(_ name: String, _ id: String) -> FoundMac { FoundMac(name: name, endpoint: nil, route: .remote, macID: id) }
+        let remoteRows = [mac("Studio", .wifi), mac("Mac mini", .direct),
+                          remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21"), remote("Mac mini (2)", "0123456789ABCDEF")]
         switch c {
         case .looking:
             break
@@ -206,8 +279,50 @@ enum MockCatalog {
                            mac("MacBook Air", .direct)]
         case .denied:
             client.status = StreamClient.allowLocalNetwork
+        case .remote:
+            // The long name checks that "Remote" never truncates: the title does.
+            client.macs = remoteRows
+        case .addmac, .addcode, .camera:
+            break
+        case .addcodeerror:
+            client.pairing = .failed(.wrongCode(triesLeft: 4))
+        case .pairing:
+            client.pairing = .working("Pairing with Mac mini…")
+        case .remotedial:
+            client.macs = remoteRows
+            client.status = "Connecting to Mac mini remotely…"
+        case .remotefail:
+            client.macs = remoteRows
+            client.status = failureCopy(UserDefaults.standard.string(forKey: "SillRemoteFailure") ?? "timeout")
+        case .externalpair:
+            client.pendingLink = mockLink
         }
         return client
+    }
+
+    /// The status line of each remote failure, in the words the device uses (RemoteCopy).
+    static func failureCopy(_ kind: String) -> String {
+        let device = StreamClient.deviceWord
+        let vpn = RemoteDialPolicy.Candidate(host: "100.101.102.103", port: 7455, kind: MacAddress.vpn, via: "Tailscale")
+        let name = RemoteDialPolicy.Candidate(host: "mac-mini.tail1234.ts.net", port: 7455, kind: MacAddress.vpn, via: "Tailscale")
+        let router = RemoteDialPolicy.Candidate(host: "203.0.113.9", port: 7455, kind: MacAddress.internet, via: "Router")
+        func copy(_ f: RemoteDialPolicy.Failure, _ c: RemoteDialPolicy.Candidate?) -> String {
+            RemoteCopy.dialFailure(f, mac: "Mac mini", candidate: c, vpnName: "Tailscale", device: device)
+        }
+        switch kind {
+        case "vpnoff": return copy(.vpnOff, vpn)
+        case "refused": return copy(.refused, vpn)
+        case "dns": return copy(.nameNotFound, name)
+        case "wrongmac": return copy(.wrongMac, vpn)
+        case "revoked": return copy(.revoked, vpn)
+        case "notsill": return copy(.notSill, router)
+        case "gaveup": return "Stopped trying to reach Mac mini. Tap it to try again."
+        case "quit": return "Mac mini quit Sill. This \(device) reconnects when it’s back."
+        case "removed": return "Mac mini removed this \(device). To use it again, pair it again."
+        case "remoteoff": return "Mac mini turned off Remote Access."
+        case "timeoutip": return copy(.noAnswer, router)
+        default: return copy(.noAnswer, vpn)
+        }
     }
 
     // MARK: - Drawn images

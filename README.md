@@ -28,17 +28,20 @@ Without `--install` it only builds `.build/Sill.app`. It will not replace an
 Sill lives in the menu bar: no Dock icon, no window at launch. The menu shows
 whether it is visible on the network, each connected device with its frame
 rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
-"Direct"), and what is streaming; it holds the
+"Direct"; from away, "through Tailscale" or "over the internet"), and what is
+streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
-Connection, Launch at Login, Permissions, Show Log… and Settings… (⌘,).
+Connection, Remote Access… and Pair iPhone or iPad… (see Remote access below),
+Launch at Login, Permissions, Show Log… and Settings… (⌘,).
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
 has no room for the icon.
 
 Quality is the stream's bitrate per 60 fps (a 120 fps stream gets twice as
-much): Efficient 8 Mbps, Balanced 15 (the default, and the command-line
-host's), High 25, Pro 40, Ultra 80 and Extreme 150. Ultra and Extreme need the
+much): Low 4 Mbps (for a slow link away from home), Efficient 8, Balanced 15
+(the default, and the command-line host's), High 25, Pro 40, Ultra 80 and
+Extreme 150. Ultra and Extreme need the
 USB cable or very fast Wi-Fi; if the picture lags (the device's frame age in
 the menu climbs), step down. Any other value from 1 to 200 Mbps can be set by
 hand (quit Sill, `defaults write me.saffer.sill.mac bitrate -int 60000000`,
@@ -163,8 +166,9 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 1. Open `iOSClient/Sill.xcodeproj`. It already links the local
    `StreamProtocol` package (this folder), sets Swift 5 language mode for the
-   spike, and carries an `Info.plist` with `NSLocalNetworkUsageDescription` and
-   `NSBonjourServices = [_sill._tcp]`.
+   spike, and carries an `Info.plist` with `NSLocalNetworkUsageDescription`,
+   `NSBonjourServices = [_sill._tcp]`, the camera text for the pairing scanner
+   and the `sill` URL scheme (a pairing link always asks before it pairs).
 2. Target → Signing & Capabilities → pick your team. Change the bundle
    identifier if `me.saffer.sill` collides with something.
 3. Run on a real device on the same Wi-Fi (or with Direct Wireless Connection
@@ -179,6 +183,88 @@ changed from the device, and Disconnect at the bottom.
 
 The project is a plain Xcode project checked in by hand: four source files,
 an asset catalog, and the package reference. Nothing else.
+
+## Remote access (away from home)
+
+Sill reaches your Mac from anywhere through a VPN you already run, or through a
+port forward on your router. There is no Sill server: the iPhone or iPad dials
+the Mac itself. It is off until you turn it on, and only devices you paired can
+connect (TLS 1.3, each end pinned to the other's key).
+
+1. On the Mac: Sill › Settings › Remote Access, turn on Remote access. Sill
+   listens on TCP port 7455 (Change… picks another) and lists the addresses a
+   device will use: your Tailscale address and its MagicDNS name, another VPN,
+   this network's address.
+2. Pair each device once, at home or away: Pair iPhone or iPad… in the Sill
+   menu shows a QR code and a 12-digit code for five minutes. On the device,
+   tap Add a Mac… at the bottom of the connect screen and point it at the
+   code, or choose Enter Code Instead and type the address and the code the
+   window shows. With Tailscale, the address is the Mac's MagicDNS name or the
+   Tailscale IP address under it; otherwise it is this network's address, with
+   another VPN's address under it when the Mac runs one. A device already
+   connected at home can use Pair This iPad… at the end of its Settings panel
+   instead; the Mac shows its code by itself.
+3. Away from home the Mac is a "Remote" row about 3 s after the connect screen
+   opens (the local network gets the first 3 s); tap it. After a drop the device
+   reconnects by itself, first on the local network, then remotely. The
+   device's Settings panel says how it is connected ("Connected through
+   Tailscale · 48 ms"), and the Mac's menu shows the route of each device.
+
+The ways in:
+
+- **Tailscale** (the easy one): install it on the Mac and on the device, signed
+  in to the same tailnet. Nothing else to set up.
+- **WireGuard or another VPN into your home network** (on the router, say):
+  the device reaches the Mac's home address through the tunnel. The tunnel's
+  AllowedIPs on the device must include your home subnet (192.168.1.0/24, for
+  example), or nothing reaches it.
+- **A port forward** (Settings › Remote Access › Allow connections from the
+  internet, off by default): forward TCP 7455 on the router to the Mac's
+  address shown there, and reserve that address for the Mac. The pane shows
+  the router's internet address when the router says it, or explains when your
+  provider shares one address among many customers (CGNAT) or there are two
+  routers in a row (double NAT); then a port forward cannot work and a VPN can.
+  If your internet address changes, add a dynamic DNS name as the address name.
+  Turning the switch off disconnects devices that came in from the internet.
+
+If it doesn't connect:
+
+- "didn't answer": the Mac is asleep or off, or the VPN is off on the Mac.
+  While a device is connected remotely Sill keeps the Mac from going to sleep
+  by itself (the display may still sleep), but it cannot wake a sleeping Mac:
+  for a Mac that should stay reachable, prevent automatic sleeping in System
+  Settings › Energy (or Battery).
+- "Tailscale looks off on this iPad": turn it on on the device.
+- Tailscale's Shields Up on the Mac blocks every incoming connection, and a
+  tailnet ACL must let the device reach the Mac on port 7455.
+- Testing a port forward from inside your home network can fail on routers
+  without "hairpin" NAT: test over cellular.
+- "no longer accepts this iPad": the device was removed on the Mac (Settings ›
+  Remote Access › Paired Devices); pair it again.
+
+Quality follows you home: the Quality setting belongs to the Mac, and Sill.app
+saves it, so picking Low (4 Mbps, for a slow link) away from home leaves it at
+Low at home until you change it back. Away from home through a VPN or the
+internet, a device asks for 60 fps even if its screen shows 120, which halves
+what the Mac sends; the panel suggests Low or Standard resolution when the
+round trip stays over 250 ms.
+
+The command-line host: `swift run -c release SillHost --remote` opens the
+remote door for one run on any free port (`--remote=PORT` for a fixed one, but
+not Sill.app's 7455 while it has Remote Access on), with a new identity each
+run, and prints the pairing code and link in Terminal (again whenever a device
+asks); `--internet` also admits paired devices from outside this Mac's networks
+and VPNs; `--print-reachability` lists the addresses a device would get and
+exits. A device paired with the CLI must pair again after it restarts; Sill.app
+is the host to pair with for good.
+
+To start over on the Mac: quit Sill, then `for k in remoteAccess remotePort
+internetAccess remoteAddressName remoteDevicesSeen; do defaults delete
+me.saffer.sill.mac $k; done`. The Mac's identity and its paired devices are in
+Keychain Access › login: the key "Sill Remote Access" and the passwords of
+service `me.saffer.sill.remote`; deleting them makes this Mac new to every
+device, which must pair again. On the device, a paired Mac's row has Forget in
+its menu (touch and hold).
 
 ## Measuring latency
 
@@ -242,9 +328,12 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   or QUIC with FEC; measure before deciding.
 - The encoder is fixed to one size, so a resized window restarts the pipeline
   (a brief black frame on the device).
-- Single window at a time, no encryption. The device reconnects on a timer
-  when the Mac drops it.
-- Bonjour only. iCloud auto-pairing comes with milestone 5.
+- Single window at a time. On the home network the stream is not encrypted
+  (only this Mac's own networks may connect); away from home it runs over TLS
+  1.3 to paired devices only. The device reconnects on a timer when the Mac
+  drops it.
+- Bonjour at home, your VPN or a port forward away (Remote access above).
+  iCloud auto-pairing comes with milestone 5.
 
 ## Layout
 
@@ -254,7 +343,8 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
 - `Packaging/`: Sill.app's Info.plist and entitlements.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download) and `sillclient.py` (a wire-format test client).
+  zip people download), `sillclient.py` (a wire-format test client) and
+  `sillrelay.py` (a relay that slows or cuts the link, for tests).
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.
