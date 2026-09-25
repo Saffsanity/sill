@@ -13,7 +13,8 @@ import CoreMedia
 /// (`Scripts/encoder-check/run.sh mailbox mutants`; its scenarios and mutants: CLAUDE.md, "The 33
 /// fps plateau").
 struct EncoderMailbox<Frame> {
-    /// Frames VideoToolbox may hold at once.
+    /// Frames VideoToolbox may hold at once: one (HEVCEncoder), two on the hardware encoder under
+    /// the plateau experiment's switch (`SILL_TEST_ENCODER_IN_FLIGHT=2`).
     let limit: Int
     /// The frames let in and not yet back, by id, each with the time it went in: when it was let
     /// in, and again when `submit` hands it to VideoToolbox. A dead session never clears this.
@@ -30,12 +31,10 @@ struct EncoderMailbox<Frame> {
     /// The last id given out: 1 for the first frame let in, 2 for the next, and so on.
     private var lastID = 0
 
-    /// Two frames inside on the hardware encoder: a second frame goes in while the first is still
-    /// inside, so the time a frame spends around the encoder chip can overlap the next one's (see
-    /// HEVCEncoder). One on the software encoder: it is bound by the CPU, and a second frame there
-    /// would only wait a whole software encode inside.
-    init(software: Bool) {
-        limit = software ? 1 : 2
+    /// `limit` frames inside at once, one at least. With one, the next goes in when the last came
+    /// back; with more, a frame goes in while others are still inside (HEVCEncoder says when).
+    init(limit: Int) {
+        self.limit = max(1, limit)
     }
 
     enum Admission: Equatable {

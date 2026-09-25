@@ -13,24 +13,24 @@ import StreamProtocol
 ///   replaces an older waiting one.
 /// - `encodeQueue` (serial) hands frames to VideoToolbox one after another, in the order they were
 ///   let in, so timestamps only go forward and a requested keyframe goes with the next frame in.
-///   Up to two frames are inside VT at once on the hardware encoder, one on the software encoder
-///   (bound by the CPU, where a second frame would only wait a whole encode inside). A frame that
-///   finds every place taken waits in the mailbox until a frame comes back (`EncoderMailbox`,
-///   which keeps this bookkeeping and is checked on its own). VT hands outputs back in decode
-///   order, which without reordering is the order the frames went in.
-///   Why two (2026-09-25): at the Retina Desktop's size (3024×1964) the hardware encoder can fall
-///   into a slow state, often after a few seconds of fewer frames, at any bitrate, where each
-///   frame takes 29–30 ms from submit to output (15 ms on the encoder chip by the kernel's
-///   AppleAVE2 counters, against 9 ms in the fast state; the rest outside them). With one frame
-///   inside, the output rate was exactly one over that: 33 fps, with ~24 `enc.mailboxDrop` a
-///   second of 57 captured, in a third of the logged seconds of Noah's Retina Desktop streams at
-///   40 Mbps. With two, the next frame is already inside when one comes back, so the part of a
-///   frame's turnaround spent beside the chip can overlap the next frame's. That is a reading of
-///   the counters: if the encoder ran all 30 ms one frame at a time, two inside would still give
-///   33 fps and a frame would wait inside instead of in the mailbox. Measured so far only on an
-///   engine shared with another session, where two inside gained no frames and added a turnaround
-///   of latency (CLAUDE.md, "The 33 fps plateau"). While the encoder keeps up (~9 ms against
-///   16.7 ms between frames at 60 fps) a frame seldom finds another inside, and nothing changes.
+///   One frame is inside VT at a time: the next goes in when the last came back, and a frame that
+///   finds the place taken waits in the mailbox, where a newer one replaces it (`EncoderMailbox`,
+///   which keeps this bookkeeping and is checked on its own). Latency beats quality: a frame the
+///   encoder has no room for waits in the mailbox, never inside VT behind another. VT hands
+///   outputs back in decode order, which without reordering is the order the frames went in.
+///   Two inside is an experiment, off unless `SILL_TEST_ENCODER_IN_FLIGHT=2` (hardware sessions
+///   only; `InFlightTest`). At the Retina Desktop's size (3024×1964) the hardware encoder can fall
+///   into a slow state, often after a few seconds of fewer frames, at any bitrate, where a frame
+///   takes 29–30 ms from submit to output (15 ms on the encoder chip by the kernel's AppleAVE2
+///   counters, against 9 ms in the fast state): one frame inside gives one over that, 33 fps, with
+///   ~24 `enc.mailboxDrop` a second of 57 captured (a third of the logged seconds of Noah's Retina
+///   Desktop streams at 40 Mbps, 2026-09-25). A second frame inside could overlap the part of a
+///   turnaround spent beside the chip. But on an engine shared with another session it gained no
+///   frames and added a turnaround of latency (28 ms at the median), and on any engine a frame
+///   that finds the other inside waits a whole turnaround in VT instead of in the mailbox: in the
+///   slow state, and at 120 fps (8.3 ms between frames against a 9 ms encode) even in the fast
+///   one. So it stays off until a run on an engine nobody else uses shows the slow state lifted to
+///   ~55 fps, and would then be kept only while it adds frames (CLAUDE.md, "The 33 fps plateau").
 /// - A watchdog on its own queue declares the session dead when the frame inside VT longest has
 ///   been there `hangAfter` seconds without an output. The owner is told (`onHung`) and starts
 ///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping
@@ -55,8 +55,9 @@ final class HEVCEncoder {
     /// Increases with every encoder this process creates, so the owner can tell an encoder made
     /// before some moment from one made after it (`latestSerial` then).
     let serial: Int
-    /// How many frames this session lets inside VideoToolbox at once: two on the hardware encoder,
-    /// one on the software encoder (`EncoderMailbox`). EncoderProbe's test keeps as many inside.
+    /// How many frames this session lets inside VideoToolbox at once (`EncoderMailbox`): one, and
+    /// two on the hardware encoder under the plateau experiment's switch (`InFlightTest`).
+    /// EncoderProbe's test keeps as many inside as a stream would.
     let maxInFlight: Int
     private var session: VTCompressionSession?
 
@@ -107,7 +108,7 @@ final class HEVCEncoder {
         self.height = height
         self.software = software
         self.quiet = quiet
-        mailbox = EncoderMailbox(software: software)
+        mailbox = EncoderMailbox(limit: software ? 1 : InFlightTest.hardwareLimit)
         maxInFlight = mailbox.limit
         Self.serialLock.lock(); Self.lastSerial += 1; serial = Self.lastSerial; Self.serialLock.unlock()
         var s: VTCompressionSession?
@@ -136,6 +137,9 @@ final class HEVCEncoder {
             set(kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, kCFBooleanTrue)
         }
         VTCompressionSessionPrepareToEncodeFrames(session)
+        if maxInFlight > 1, !quiet, InFlightTest.announce() {
+            print("TEST: hardware sessions let up to \(maxInFlight) frames inside the encoder at once (SILL_TEST_ENCODER_IN_FLIGHT)")
+        }
 
         let t = DispatchSource.makeTimerSource(queue: watchdogQueue)
         t.schedule(deadline: .now() + 0.5, repeating: 0.5, leeway: .milliseconds(100))
@@ -233,7 +237,7 @@ final class HEVCEncoder {
     }
 
     /// encodeQueue: frames go into VideoToolbox one after another, in the order they were let in,
-    /// up to two inside at once on the hardware encoder (`EncoderMailbox`).
+    /// `maxInFlight` inside at once (`EncoderMailbox`).
     private func submit(_ pixelBuffer: CVPixelBuffer, pts requested: CMTime, id: Int) {
         guard let session else { return }
         lock.lock()
@@ -368,12 +372,12 @@ final class HEVCEncoder {
     enum EncoderError: Error { case create(OSStatus) }
 
     /// TEST ONLY. `SILL_TEST_ENCODER_HANG=N`: the first N hardware stream sessions of this process
-    /// each hold their 90th frame on `encodeQueue` for 3 s before handing it to VideoToolbox (the
-    /// frame let in beside it waits behind it on the queue, later ones in the mailbox), so the
-    /// watchdog fires 1.5 s after it went in, the owner falls back to the software encoder, and
-    /// the frame then goes in and comes back late, as in a busy engine (2026-09-24). N = 2 makes
-    /// the return to the hardware hang once more, for the re-check's backoff. Probes (quiet)
-    /// never take one. Read once; nothing else changes without the variable.
+    /// each hold their 90th frame on `encodeQueue` for 3 s before handing it to VideoToolbox (later
+    /// frames wait in the mailbox; with two inside, the one let in beside it waits behind it on
+    /// the queue), so the watchdog fires 1.5 s after it went in, the owner falls back to the
+    /// software encoder, and the frame then goes in and comes back late, as in a busy engine
+    /// (2026-09-24). N = 2 makes the return to the hardware hang once more, for the re-check's
+    /// backoff. Probes (quiet) never take one. Read once; nothing else changes without the variable.
     private enum TestHang {
         static let frame = 90
         static let hold: TimeInterval = 3
@@ -383,6 +387,24 @@ final class HEVCEncoder {
             lock.lock(); defer { lock.unlock() }
             guard left > 0 else { return false }
             left -= 1
+            return true
+        }
+    }
+
+    /// TEST ONLY. `SILL_TEST_ENCODER_IN_FLIGHT=2`: hardware sessions (streams, the launch probe and
+    /// the re-check's test alike) let up to two frames inside VideoToolbox at once instead of one:
+    /// the plateau experiment (the type's doc; CLAUDE.md, "The 33 fps plateau"). Read once; any
+    /// other value is one, and so is the software encoder always. The first such session that is
+    /// not a quiet probe's prints a "TEST:" line, once per process.
+    private enum InFlightTest {
+        static let hardwareLimit = ProcessInfo.processInfo.environment["SILL_TEST_ENCODER_IN_FLIGHT"] == "2" ? 2 : 1
+        private static let lock = NSLock()
+        private static var announced = false
+        /// True the first time it is asked.
+        static func announce() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !announced else { return false }
+            announced = true
             return true
         }
     }

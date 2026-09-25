@@ -119,10 +119,10 @@ final class StandIn {
     var fate: [Int: String] = [:]
     private var nextSerial = 0
 
-    init(clock: Clock, software: Bool, engine: Engine) {
+    init(clock: Clock, limit: Int, engine: Engine) {
         self.clock = clock
         self.engine = engine
-        box = Box(software: software)
+        box = Box(limit: limit)
     }
 
     func newFrame(index: Int, pts: CMTime, capturedAt: Double, reencode: Bool) -> Frame {
@@ -429,14 +429,16 @@ struct LCG {
 }
 
 let fps = 60.0
-let hardware = false, software = true
+/// HEVCEncoder's limits: one frame inside VideoToolbox (the default, both encoders), two on the
+/// hardware encoder under the plateau experiment's SILL_TEST_ENCODER_IN_FLIGHT=2.
+let oneInside = 1, twoInside = 2
 
 // MARK: - Scenarios
 
-func steady(_ name: String, software sw: Bool, engine: Engine, seconds: Double = 10) -> (StandIn, Summary) {
+func steady(_ name: String, limit: Int, engine: Engine, seconds: Double = 10) -> (StandIn, Summary) {
     scenarioName = name
     let clock = Clock()
-    let s = StandIn(clock: clock, software: sw, engine: engine)
+    let s = StandIn(clock: clock, limit: limit, engine: engine)
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: seconds))
     s.startWatchdog(until: seconds + 2)
     clock.run()
@@ -454,26 +456,26 @@ func steady(_ name: String, software sw: Bool, engine: Engine, seconds: Double =
 
 scenarioName = "limits"
 print("== EncoderMailbox against a stand-in VideoToolbox, 60 fps capture")
-expect(Box(software: false).limit == 2, "the hardware limit is \(Box(software: false).limit), not 2")
-expect(Box(software: true).limit == 1, "the software limit is \(Box(software: true).limit), not 1")
+expect(Box(limit: 1).limit == 1 && Box(limit: 2).limit == 2, "the limits are \(Box(limit: 1).limit) and \(Box(limit: 2).limit), not 1 and 2")
+expect(Box(limit: 0).limit == 1, "a limit of 0 gives \(Box(limit: 0).limit), not 1")
 
 // S1: the fast state (~9 ms a frame): nothing waits, on either limit.
 do {
-    let (s, m) = steady("fast state, 9 ms, hardware (two inside)", software: hardware, engine: .independent { _ in 0.009 })
+    let (s, m) = steady("fast state, 9 ms, two inside", limit: twoInside, engine: .independent { _ in 0.009 })
     expect(s.out == 600 && s.mailboxDrop == 0, "fast state: out \(s.out), mailboxDrop \(s.mailboxDrop)")
     expect(abs(m.latencyMax - 9) < 0.01, "fast state: latency max \(m.latencyMax) ms, not 9")
-    let (s1, _) = steady("fast state, 9 ms, software (one inside)", software: software, engine: .independent { _ in 0.009 })
+    let (s1, _) = steady("fast state, 9 ms, one inside", limit: oneInside, engine: .independent { _ in 0.009 })
     expect(s1.out == 600 && s1.mailboxDrop == 0, "fast state, one inside: out \(s1.out), mailboxDrop \(s1.mailboxDrop)")
 }
 
 // S2: the slow state, 30 ms a frame, each frame on its own (the time around the chip overlaps).
 do {
-    let (s, m) = steady("slow state, 30 ms, hardware (two inside)", software: hardware, engine: .independent { _ in 0.030 })
+    let (s, m) = steady("slow state, 30 ms, two inside", limit: twoInside, engine: .independent { _ in 0.030 })
     expect(m.rate >= 59.5 && m.rate <= 60.5, "slow state, two inside: \(m.rate) fps, not ~60")
     expect(s.out == 600 && s.mailboxDrop == 0, "slow state, two inside: out \(s.out), mailboxDrop \(s.mailboxDrop)")
     expect(s.maxVTHolds == 2, "slow state, two inside: VideoToolbox never held two (\(s.maxVTHolds))")
     expect(abs(m.latencyMedian - 30) < 0.01, "slow state, two inside: latency median \(m.latencyMedian), not 30")
-    let (s1, m1) = steady("slow state, 30 ms, software (one inside, as before)", software: software, engine: .independent { _ in 0.030 })
+    let (s1, m1) = steady("slow state, 30 ms, one inside", limit: oneInside, engine: .independent { _ in 0.030 })
     expect(m1.rate >= 32.5 && m1.rate <= 34.5, "slow state, one inside: \(m1.rate) fps, not ~33")
     expect(m1.drops >= 25 && m1.drops <= 28, "slow state, one inside: \(m1.drops) mailbox drops a second, not ~26")
     expect(s1.maxVTHolds == 1, "one inside: VideoToolbox held \(s1.maxVTHolds)")
@@ -483,7 +485,7 @@ do {
 
 // S3: 40 ms a frame: two inside carry 50 fps, and the rest are mailbox drops, counted exactly.
 do {
-    let (s, m) = steady("40 ms, hardware", software: hardware, engine: .independent { _ in 0.040 })
+    let (s, m) = steady("40 ms, two inside", limit: twoInside, engine: .independent { _ in 0.040 })
     expect(m.rate >= 49.5 && m.rate <= 50.5, "40 ms, two inside: \(m.rate) fps, not ~50")
     expect(m.drops >= 9.5 && m.drops <= 10.5, "40 ms, two inside: \(m.drops) drops a second, not ~10")
     expect(s.maxVTHolds == 2, "40 ms: VideoToolbox held \(s.maxVTHolds)")
@@ -494,12 +496,12 @@ do {
 // chip, two inside reach the capture rate. Not a property of the code: printed for the record, and
 // only checked to never do worse than one inside.
 do {
-    let (sB2, mB2) = steady("serial engine, all 30 ms one at a time, hardware", software: hardware, engine: .serial(pre: 0, chip: 0.030, post: 0))
-    let (_, mB1) = steady("serial engine, all 30 ms one at a time, software", software: software, engine: .serial(pre: 0, chip: 0.030, post: 0))
+    let (sB2, mB2) = steady("serial engine, all 30 ms one at a time, two inside", limit: twoInside, engine: .serial(pre: 0, chip: 0.030, post: 0))
+    let (_, mB1) = steady("serial engine, all 30 ms one at a time, one inside", limit: oneInside, engine: .serial(pre: 0, chip: 0.030, post: 0))
     expect(mB2.rate >= mB1.rate - 0.5, "serial engine: two inside \(mB2.rate) fps, below one inside \(mB1.rate)")
     _ = sB2
-    let (_, mA2) = steady("serial chip 15 ms, 7.5 ms before and after, hardware", software: hardware, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
-    let (_, mA1) = steady("serial chip 15 ms, 7.5 ms before and after, software", software: software, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
+    let (_, mA2) = steady("serial chip 15 ms, 7.5 ms before and after, two inside", limit: twoInside, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
+    let (_, mA1) = steady("serial chip 15 ms, 7.5 ms before and after, one inside", limit: oneInside, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
     expect(mA2.rate >= 59.5, "chip 15 ms with overlap: two inside \(mA2.rate) fps, not ~60")
     expect(mA1.rate <= 34.5, "chip 15 ms with overlap: one inside \(mA1.rate) fps, not ~33")
 }
@@ -511,7 +513,7 @@ do {
     let clock = Clock()
     var rng = LCG(state: 42)
     var delays: [Int: Double] = [:]
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { f in
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { f in
         if let d = delays[f.serial] { return d }
         let d = 0.004 + 0.041 * rng.next()
         delays[f.serial] = d
@@ -544,11 +546,11 @@ do {
 }
 
 // S6: one frame stuck for good while the other place keeps flowing (any order), and the same in
-// decode order (everything behind the stuck frame waits).
-for inOrder in [false, true] {
-    scenarioName = "stuck frame, \(inOrder ? "decode order" : "any order")"
+// decode order (everything behind the stuck frame waits); with one inside, everything waits.
+for (limit, inOrder) in [(twoInside, false), (twoInside, true), (oneInside, true)] {
+    scenarioName = "stuck frame, \(limit) inside, \(inOrder ? "decode order" : "any order")"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { $0.index == 100 ? nil : 0.009 })
+    let s = StandIn(clock: clock, limit: limit, engine: .independent { $0.index == 100 ? nil : 0.009 })
     s.inOrder = inOrder
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 6))
     s.startWatchdog(until: 8)
@@ -573,10 +575,10 @@ for inOrder in [false, true] {
 // S7: SILL_TEST_ENCODER_HANG: frame 90 waits 3 s on encodeQueue before its encode call, then goes
 // in and comes back. The watchdog must fire 1.5 s after it went in, the frame let in behind it
 // must never go in, and the late one must not be forwarded.
-for sw in [hardware, software] {
-    scenarioName = "TestHang, \(sw ? "software" : "hardware")"
+for limit in [twoInside, oneInside] {
+    scenarioName = "TestHang, \(limit) inside"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: sw, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, limit: limit, engine: .independent { _ in 0.009 })
     s.hold = { $0 == 90 ? 3 : 0 }
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 6))
     s.startWatchdog(until: 8)
@@ -594,7 +596,7 @@ for sw in [hardware, software] {
     }
     expect(s.late == 1, "late \(s.late): frame 90's output should come back late, once")
     expect(s.outputs.allSatisfy { $0.id < 90 }, "a frame after 90 was forwarded")
-    if !sw {
+    if limit == twoInside {
         expect(s.handOversAfterDeath == 1, "\(s.handOversAfterDeath) frames reached the hand-over after the watchdog (the one let in behind 90 should)")
     }
     let teardown = s.release()
@@ -604,11 +606,11 @@ for sw in [hardware, software] {
 // S8: slow but healthy: no false alarm. 1.2 s a frame each on its own; one engine at 0.7 s a
 // frame (a second frame inside waits up to 1.4 s); frames 2 s apart (nothing inside between).
 do {
-    let (_, _) = steady("1.2 s a frame, hardware", software: hardware, engine: .independent { _ in 1.2 }, seconds: 8)
-    let (_, _) = steady("one engine at 0.7 s a frame, hardware", software: hardware, engine: .serial(pre: 0, chip: 0.7, post: 0), seconds: 8)
+    let (_, _) = steady("1.2 s a frame, two inside", limit: twoInside, engine: .independent { _ in 1.2 }, seconds: 8)
+    let (_, _) = steady("one engine at 0.7 s a frame, two inside", limit: twoInside, engine: .serial(pre: 0, chip: 0.7, post: 0), seconds: 8)
     scenarioName = "sparse frames"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.009 })
     schedule(s, captures: stride(from: 0.0, to: 20, by: 2).map { $0 })
     s.startWatchdog(until: 22)
     clock.run()
@@ -620,7 +622,7 @@ do {
 do {
     scenarioName = "abandon"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { $0.index < 2 ? 5 : 0.009 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index < 2 ? 5 : 0.009 })
     s.clock.at(0) { s.capture(index: 0) }
     s.clock.at(0.01) { s.capture(index: 1) }
     s.clock.at(0.02) { s.capture(index: 2) }
@@ -633,11 +635,27 @@ do {
     expect(s.release() == .stalled(since: 0), "abandon: teardown not stalled since 0")
     scenarioName = "abandon, nothing inside"
     let c2 = Clock()
-    let s2 = StandIn(clock: c2, software: hardware, engine: .independent { _ in 0.009 })
+    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { _ in 0.009 })
     c2.at(0) { s2.capture(index: 0) }
     c2.run()
     expect(!s2.abandon(), "abandon with nothing inside returned true")
     expect(s2.release() == .idle, "abandon, nothing inside: teardown not idle")
+    // One inside (the default): the first frame inside, the newest of the others waiting.
+    scenarioName = "abandon, one inside"
+    let c3 = Clock()
+    let s3 = StandIn(clock: c3, limit: oneInside, engine: .independent { $0.index == 0 ? 5 : 0.009 })
+    c3.at(0) { s3.capture(index: 0) }
+    c3.at(0.01) { s3.capture(index: 1) }
+    c3.at(0.02) { s3.capture(index: 2) }
+    c3.run(until: 1.0)
+    expect(s3.vtHolds.count == 1 && s3.box.waiting != nil && s3.mailboxDrop == 1,
+           "abandon, one inside: \(s3.vtHolds.count) inside, waiting \(s3.box.waiting != nil), mailboxDrop \(s3.mailboxDrop)")
+    expect(s3.abandon(), "abandon with one inside returned false")
+    c3.at(1.1) { s3.capture(index: 3) }
+    c3.run()
+    expect(s3.late == 1 && s3.out == 0 && s3.deadDrop == 1, "abandon, one inside: late \(s3.late), out \(s3.out), deadDrop \(s3.deadDrop)")
+    expect(s3.release() == .stalled(since: 0), "abandon, one inside: teardown not stalled since 0")
+    expectAllSettled(s3)
 }
 
 // S10: keyframes and timestamps with two inside. Frames every 16.7 ms until 3.0 s, 30 ms each;
@@ -648,7 +666,7 @@ do {
 do {
     scenarioName = "keyframes"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { _ in 0.030 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.030 })
     let caps = captureTimes(fps: fps, from: 0, to: 3.0 + 1e-6)
     schedule(s, captures: caps)
     // Nothing is dropped or re-encoded before it, so capture 179 is let in as frame 180.
@@ -681,17 +699,25 @@ do {
 do {
     scenarioName = "teardown"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { _ in 0.030 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.030 })
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 2))
     clock.run(until: 1.0 + 1.0 / fps / 2)
     expect(s.vtHolds.count == 2, "teardown: \(s.vtHolds.count) inside at 1.008 s, expected 2")
     expect(s.release() == .drain, "teardown with two inside is not a drain")
     expect(s.vtHolds.isEmpty, "teardown: the drain left frames inside")
     let c2 = Clock()
-    let s2 = StandIn(clock: c2, software: hardware, engine: .independent { _ in 0.030 })
+    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { _ in 0.030 })
     schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 1))
     c2.run()
     expect(s2.release() == .idle, "teardown with nothing inside is not idle")
+    scenarioName = "teardown, one inside"
+    let c3 = Clock()
+    let s3 = StandIn(clock: c3, limit: oneInside, engine: .independent { _ in 0.030 })
+    schedule(s3, captures: captureTimes(fps: fps, from: 0, to: 2))
+    c3.run(until: 1.0 + 1.0 / fps / 2)
+    expect(s3.vtHolds.count == 1, "teardown, one inside: \(s3.vtHolds.count) inside at 1.008 s, expected 1")
+    expect(s3.release() == .drain, "teardown with one inside is not a drain")
+    expect(s3.vtHolds.isEmpty, "teardown, one inside: the drain left a frame inside")
 }
 
 // S12: an encode call that returns 1.3 s after VideoToolbox took its frame (whose output came back
@@ -701,7 +727,7 @@ do {
 do {
     scenarioName = "slow encode call"
     let clock = Clock()
-    let s = StandIn(clock: clock, software: hardware, engine: .independent { $0.index == 21 ? 0.8 : 0.009 })
+    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index == 21 ? 0.8 : 0.009 })
     s.callBlocks = { $0 == 21 ? 1.3 : 0 }   // capture 20 is let in as frame 21
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 4))
     s.startWatchdog(until: 6)
@@ -716,7 +742,7 @@ do {
     // 1.0 s, is inside with it), so the watchdog fires at the 2.5 s tick, not at 2.0.
     scenarioName = "encode call blocked for good"
     let c2 = Clock()
-    let s2 = StandIn(clock: c2, software: hardware, engine: .independent { $0.index == 28 ? 1.0 : 0.009 })
+    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { $0.index == 28 ? 1.0 : 0.009 })
     s2.callBlocks = { $0 == 30 ? 1_000 : 0 }   // capture 29 is let in as frame 30
     schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 4))
     s2.startWatchdog(until: 6)

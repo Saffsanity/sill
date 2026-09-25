@@ -10,8 +10,10 @@ src_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, 'Sources', '
 out = os.path.join(root, '.build', 'encoder-check', 'mutants')
 src = open(src_path).read()
 mutants = [
-    ("limit 1 (one frame inside on the hardware)",
-     "limit = software ? 1 : 2", "limit = software ? 1 : 1"),
+    ("the limit asked for ignored (always one)",
+     "self.limit = max(1, limit)", "self.limit = 1"),
+    ("no floor under the limit",
+     "self.limit = max(1, limit)", "self.limit = limit"),
     ("watchdog on the newest frame inside",
      "var oldest: CFTimeInterval? { inside.values.min() }", "var oldest: CFTimeInterval? { inside.values.max() }"),
     ("decrement on the pending path (the waiting frame goes in without a place)",

@@ -4,7 +4,10 @@
 #   mutants   the same check against one-line mutants of EncoderMailbox: each must fail it
 #   probe     EncoderProbe.throughput's loop (the real file) against a stand-in HEVCEncoder, in real
 #             time, and SILL_TEST_PROBE_HOLD=0.08 through it
-# usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe]      (no argument: all of them)
+#   encoder   the real HEVCEncoder.swift (with EncoderMailbox.swift and EncoderProbe.swift) against a
+#             stand-in VideoToolbox (encoder/FakeVT.swift), in real time: by default and again
+#             with SILL_TEST_ENCODER_IN_FLIGHT=2
+# usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe] [encoder]   (no argument: all)
 # Builds under .build/encoder-check/. Every binary is checked with otool before it runs: one that
 # links VideoToolbox is refused, so nothing here can open an encoder session, and these checks are
 # safe while Sill.app streams. The hardware runs are verify-hardware.sh's, under its own rules.
@@ -12,7 +15,7 @@ set -u
 ROOT=${0:A:h:h:h}
 OUT=$ROOT/.build/encoder-check
 mkdir -p $OUT
-steps=("$@"); (( ${#steps} )) || steps=(mailbox mutants probe)
+steps=("$@"); (( ${#steps} )) || steps=(mailbox mutants probe encoder)
 failed=0
 
 encoder_free() {   # BINARY: refuse it if it links VideoToolbox
@@ -41,6 +44,19 @@ probe)
   encoder_free $OUT/probe-check || { failed=1; continue }
   $OUT/probe-check || failed=1
   SILL_TEST_PROBE_HOLD=0.08 $OUT/probe-check hold || failed=1
+  ;;
+encoder)
+  echo "== encoder check"
+  # The real file, less the two imports FakeVT.swift stands in for; nothing else changes.
+  src=$OUT/encoder-src; rm -rf $src; mkdir -p $src
+  sed -e '/^import VideoToolbox$/d' -e '/^import StreamProtocol$/d' $ROOT/Sources/SillHost/HEVCEncoder.swift > $src/HEVCEncoder.swift
+  swiftc -O -module-name EncoderCheck $src/HEVCEncoder.swift $ROOT/Sources/SillHost/EncoderMailbox.swift \
+    $ROOT/Sources/SillHost/EncoderProbe.swift $ROOT/Scripts/encoder-check/encoder/FakeVT.swift \
+    $ROOT/Scripts/encoder-check/encoder/main.swift -o $OUT/encoder-check || { failed=1; continue }
+  encoder_free $OUT/encoder-check || { failed=1; continue }
+  if nm -u $OUT/encoder-check | grep -q '_VT'; then echo "REFUSED: encoder-check imports a VideoToolbox symbol"; failed=1; continue; fi
+  $OUT/encoder-check || failed=1
+  SILL_TEST_ENCODER_IN_FLIGHT=2 $OUT/encoder-check || failed=1
   ;;
 *) echo "unknown step $step"; failed=1 ;;
 esac
