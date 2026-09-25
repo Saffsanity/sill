@@ -18,6 +18,18 @@ enum RemoteDialPolicy {
     /// A pairing connection's kind 20 must follow its kind 19 within this.
     static let pairingReplyDeadline = 15.0
 
+    /// Whether a code the scanner read starts a pairing (StreamClient.scanned). The scanner reports
+    /// a code each time it finds it (a scanner shown again finds the one still in view) and each
+    /// time the person taps its highlight. Never while a pairing runs or has just succeeded
+    /// (`busy`): a second dial, once the first's kind 19 had spent the code, left the Mac listing
+    /// a device that saved nothing. After a failure the same code (`secret` is the last one
+    /// scanned) starts again only from a tap: found again by itself, it failed again and again
+    /// until the Mac's door kept this device out for five minutes. Another code starts at once.
+    static func scanStartsPairing(busy: Bool, failed: Bool, secret: Data, lastScanned: Data?, tapped: Bool) -> Bool {
+        if busy { return false }
+        return !(failed && !tapped && secret == lastScanned)
+    }
+
     /// One address to dial.
     struct Candidate: Hashable {
         /// A name, an IPv4 address or an IPv6 address without brackets.

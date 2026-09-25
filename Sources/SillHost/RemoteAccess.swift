@@ -151,22 +151,27 @@ package final class RemoteAccess {
     /// The three knobs from HostConfig: starts or stops the door, the watcher and the router
     /// query, and publishes. Turning Remote Access off closes an open pairing window and says
     /// goodbye to every remote session; turning the internet switch off, to those from the internet.
+    ///
+    /// The internet switch counts only while Remote Access is on: the pane hides it and the menu
+    /// says "Off" then, yet a pairing window (the Mac's own, or one a device at home asks for)
+    /// runs the door, which admitted internet sources, asked the router and put internet
+    /// addresses into the link. The saved setting stays as it is, for when Remote Access is back.
     package func apply(_ config: HostConfig) {
         guard identity != nil else { return }
         let wasOn = remoteAccess, wasInternet = internetAccess
         remoteAccess = config.remoteAccess
         remotePort = config.remotePort
-        internetAccess = config.internetAccess
+        internetAccess = config.remoteAccess && config.internetAccess
         if wasOn, !remoteAccess {
             if window.isOpen { window.close(.cancelled); windowClosed(.cancelled, reopen: false) }
             print("Remote access off.")
         }
         publishTrust()
         if wasOn, !remoteAccess {
+            // Every remote session, those from the internet included: one goodbye each.
             door?.closeSessions(Goodbye.remoteOff, matching: { _ in true },
                                 line: { name, endpoint in "Remote access off: disconnecting \(name) at \(endpoint)." })
-        }
-        if wasInternet, !internetAccess {
+        } else if wasInternet, !internetAccess {
             door?.closeSessions(Goodbye.internetOff, matching: { $0.origin == .internet },
                                 line: { name, endpoint in "Internet access off: disconnecting \(name) at \(endpoint)." })
         }
@@ -253,18 +258,28 @@ package final class RemoteAccess {
     }
 
     /// Removes a paired device: from the store, then the snapshot (its next handshake fails in the
-    /// verify block), then every session of it gets goodbye `removed`.
-    package func remove(fingerprint: String) {
-        guard let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) else { return }
-        let device = paired.remove(at: i)
+    /// verify block), then every session of it gets goodbye `removed`. Nil when done; otherwise why
+    /// not, and nothing changed: a removal the store did not keep (a locked login keychain, its
+    /// prompt cancelled) would trust the device again at the next launch while the pane said it
+    /// could no longer connect, so the device stays listed and connected until a save succeeds.
+    @discardableResult
+    package func remove(fingerprint: String) -> String? {
+        guard let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) else { return nil }
+        var rest = paired
+        let device = rest.remove(at: i)
+        do { try store?.savePaired(rest) } catch {
+            print("Remote access: \(device.displayName) is still paired: the paired devices could not be saved (\(error)).")
+            return "\(error)"
+        }
+        paired = rest
         if let fp = device.fingerprintData { lastSeen[RemoteIdentity.shortName(fp)] = nil }
-        save()
         publishTrust()
         publish()
         let fp = device.fingerprintData
         door?.closeSessions(Goodbye.removed, matching: { fp != nil && $0.fingerprint == fp }, done: { n in
             print("Removed \(device.displayName); closed \(n) connection\(n == 1 ? "" : "s").")
         })
+        return nil
     }
 
     /// Renames a paired device (the Mac's own label for it).
@@ -507,11 +522,15 @@ package final class RemoteAccess {
 
     // MARK: Kind 18
 
-    /// Who this Mac is and how to reach it, as of now (issuedAt 0: the comparison ignores it).
+    /// Who this Mac is and how to reach it, as of now (issuedAt 0: the comparison ignores it). No
+    /// addresses before the first look at this Mac's networks (0.5–2.5 s after Remote Access or a
+    /// pairing window starts the watcher): a list from nothing but the address name would replace
+    /// a device's full one. A device keeps what it has when the list is empty; the first look
+    /// broadcasts the real one.
     private func currentInfo() -> MacInfo? {
         guard let identity else { return nil }
         return MacInfo(macID: identity.macID, name: macName, issuedAt: 0, remoteAccess: remoteAccess,
-                       remotePort: doorPort ?? remotePort, internet: internetAccess, addresses: addresses())
+                       remotePort: doorPort ?? remotePort, internet: internetAccess, addresses: reach == nil ? [] : addresses())
     }
 
     /// Kind 18, signed, issued now: in every catalog right after kind 16.

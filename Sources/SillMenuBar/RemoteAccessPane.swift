@@ -32,7 +32,8 @@ struct RemoteAccessPane: View {
         var setPort: (Int) -> Void = { _ in }
         var setAddressName: (String) -> Void = { _ in }
         var pair: () -> Void = {}
-        var remove: (String) -> Void = { _ in }
+        /// Nil when the device was removed; otherwise why it is still paired.
+        var remove: (String) -> String? = { _ in nil }
         var rename: (String, String) -> Void = { _, _ in }
     }
 
@@ -51,6 +52,8 @@ struct RemoteAccessPane: View {
     @State private var portText = ""
     @State private var portSaved = false
     @State private var removedName: String?
+    /// A Remove the keychain did not keep: the device's name and why.
+    @State private var removeProblem: (name: String, reason: String)?
     @State private var nameText: String?
     @State private var nameProblem: String?
 
@@ -211,14 +214,26 @@ struct RemoteAccessPane: View {
             if let removedName {
                 Text("\(removedName) can no longer connect. To use it again, pair it again.")
             }
+            if let removeProblem {
+                // The system's messages end with a full stop of their own.
+                let reason = removeProblem.reason.hasSuffix(".") ? String(removeProblem.reason.dropLast()) : removeProblem.reason
+                Warning("\(removeProblem.name) is still paired: Sill couldn’t update the keychain (\(reason)). Try again.")
+            }
             if status.paired.isEmpty {
                 Text("No paired devices yet.").foregroundStyle(.secondary)
             }
             ForEach(status.paired) { device in
                 PairedDeviceRow(device: device, now: now,
                                 remove: {
-                                    removedName = device.name
-                                    actions.remove(device.id)
+                                    // Said only once the keychain kept it: otherwise the device
+                                    // would be trusted again at the next launch.
+                                    if let reason = actions.remove(device.id) {
+                                        removedName = nil
+                                        removeProblem = (device.name, reason)
+                                    } else {
+                                        removedName = device.name
+                                        removeProblem = nil
+                                    }
                                 },
                                 rename: { actions.rename(device.id, $0) })
             }

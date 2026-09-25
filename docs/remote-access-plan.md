@@ -2050,7 +2050,8 @@ and both verify blocks consult "paired store ∪ iCloud set" with `method: "iclo
 ## Results (implementation, 2026-09-24/25, branch `remote-access`)
 
 Steps 1–8 are done, one commit each, on `a9cc248` (origin/main when the work began; origin/main has
-since gained PRs #6–#8, which this branch does not contain). Step 9, the review, is next. Every open
+since gained PRs #6–#8, which this branch does not contain). Step 9, the review, is under way: the
+fixes of its first round are one commit ("Review fixes (step 9)" below). Every open
 question above took its default: the home door stays unpaired (1), the internet path ships behind
 its own switch (2), Pair This iPad… from home (3), Direct Wireless refused from afar (4),
 hand-built DER certificates (5), the Low preset (6), idle sleep held off while a device is
@@ -2069,7 +2070,8 @@ and the CLI's throwaway identity (14).
 | 5 iOS model | `3c1bd97` | H1, H3 (49 checks, 26/26 mutants; the discovery policy's 68), S3, S4 (reconnect at 3.1 s; liveness 6 s after a blackhole), S5 (every failure's words, live) |
 | 6 iOS UI | `5468bdc` | S1 (≈200 photos: every new connect case at the seven sizes, the re-shot cases, every settings case at the Duo sizes and at accessibility-extra-large, the overlay), S2 and S6 as XCUITests, S3's outside link live, S7 |
 | 7 Low and 60 fps | `fc39a45` | H1, H2, H14 (Balanced and Low), H22, the ledger check with Low, S8 |
-| 8 Docs | this commit | — |
+| 8 Docs | `47e4e7c` | — |
+| 9 Review fixes | the commit after `47e4e7c` | H1, H2, H3 (the step 5 checks at 60, 33/33 mutants), H22 (only the three spent-code pairing samples), the host's own gates and S2, S3, S6 again, below |
 
 **Measured.** Through `sillrelay.py --rate-mbps 2 --delay-ms 150` for 90 s, a paired TLS session
 kept every 5 s window full (≈300 frames), was never evicted and saw keyframes at the encoder's 4 s
@@ -2114,14 +2116,71 @@ callout. The CLI's output is still a9cc248's, byte for byte (masked and sorted),
   simulator), `-SillDeviceKeySE 1` (R0-a).
 - Commit trailers name the model that wrote them (Claude Opus 5.5), not the one the task named.
 
+**Review fixes (step 9).** Fourteen confirmed findings; each fix below, and where it departs from
+the plan.
+- A pick never streams one of Sill's own windows: `WindowCatalog.resolveWindow` (the fallback of a
+  pick with the virtual display on) and the staged window's pin skip this process's windows, as
+  the catalog did; a device guessing the ID just above the newest could stage the pairing window.
+  A Desktop stream on a host with remote access looks for Sill among every window when the
+  on-screen look missed it (the status item leaves that list while a full-screen app hides the
+  menu bar); excluding nothing let a pairing window opened later reach the devices.
+- The internet switch counts only while Remote Access is on (§1 made it the only gate): a pairing
+  window with Remote Access off admitted internet sources, asked the router and put internet
+  addresses into the link and kind 18 while the pane hid the switch. The saved setting stays for
+  when Remote Access is back; turning Remote Access off sends each session one goodbye.
+- Remove saves first: when the keychain write fails (a locked login keychain, its prompt
+  cancelled) nothing changes, one line is logged and the pane says the device is still paired;
+  the device was trusted again after a relaunch while the pane said it could no longer connect.
+- A spent code (used, expired, stopped, cancelled) no longer shows in the pairing window, only its
+  frame: a scanner read it at 20 % and every try was refused at the door.
+- Kind 18 lists no addresses before the Mac's first look at its networks, and a device keeps its
+  saved addresses when a verified kind 18 lists none or says Remote Access is off (§7.2 replaced
+  them whole): a device that connected at home while Remote Access was off had nothing to dial
+  once away.
+- A pairing over a home session (the overlay) ties that session to the Mac just paired only when
+  the session's verified kind 18 is signed by the same key, and then takes that kind 18's
+  addresses (the typed path saved only the address it dialed). Before, pairing another Mac's link
+  over the stream named the session after it: its end read as that Mac's, and the reconnect
+  dialed it.
+- The scanner never restarts a pairing by itself (`RemoteDialPolicy.scanStartsPairing`): nothing
+  while one runs or has just succeeded, and after a failure the same code only from a tap on it
+  (the caption says "Tap the code to try again."); another code starts at once. A card showing the
+  scanner again after a failure re-read the code and looped into the door's backoff, and a
+  re-read during an exchange spent the code for nothing. The silent retry after "busy" stays
+  cancelled after Cancel.
+- An outside link confirmed over the stream keeps the overlay up for its progress, its error or
+  "Paired with …" (Pair used to close it); Pair This iPad… starts from a clean state.
+- The overlay's typed path reads "Enter the Code from ‹Mac›" and moves to the top while the code
+  is typed, as the card does.
+- The connect screen's status line is announced to VoiceOver (§7.8), also the line a session
+  ended with, when the screen comes back.
+- Saved Macs are cleared at launch only when the Keychain says no device key exists under any tag
+  (errSecItemNotFound); a DEBUG `-SillDeviceKeySE 1` run, whose tag had no key, cleared real
+  pairings.
+- Not applied: the route line's wrap after "·" (unverified; it matches the readout's rule on
+  origin/main, where a wrap falls after the "·").
+- Gates on this build: the host's own (the internet source refused with Remote Access off and a
+  window open, internet=0 and no address name in kind 18 until Remote Access is on again; one
+  goodbye each for Remote Access off and for internet off; a Remove whose save fails changes
+  nothing, the device still paired after a relaunch, then a kept Remove works; kind 18 empty until
+  the first look, then 127.0.0.1 first); on the simulator, three new XCUITests against live
+  synthetic hosts (another Mac's link over a stream through a 1.5 s relay: "Pair with …", "Pairing
+  with …", "Paired with …", then the used link's error in the overlay until Cancel, and after the
+  first Mac quit nothing dialed the second; Pair This iPad… typed: the title, the content at the
+  top while typing, the record with the Mac's five kind 18 addresses and the typed one) and the
+  keys (a `-SillDeviceKeySE 1` launch keeps the saved Macs, an empty Keychain clears them). The
+  pre-fix build fails the link test (the overlay gone after Pair; the second Mac dialed by itself
+  after the first quit) and the keys test (the saved Mac cleared).
+
 **Not verified here, for Noah (R0–R13 as built).**
 - R0 probes: (a) `-SillDeviceKeySE 1` against `SillHost --synthetic --remote` over the LAN (does a
   Secure Enclave key sign TLS client authentication?); (b) with your OK, since it writes to your
   login keychain: `make-app.sh --install --open`, Settings › Remote Access on, then a rebuild and
   relaunch read the same identity without a prompt (`KeychainIdentityStore` never ran here: every
   test host used `SILL_TEST_REMOTE_DIR` or memory); (c) `natpmp-probe` from Terminal; (d) the
-  embedded scanner on the iPad (the simulator has none), including the camera prompt and a
-  non-Sill QR code.
+  embedded scanner on the iPad (the simulator has none), including the camera prompt, a
+  non-Sill QR code, and a failed pairing: the code still in view is held until tapped ("Tap the
+  code to try again."), and a spent code shows no QR on the Mac.
 - R1–R11 as written above: Tailscale setup and pairing timed; away on the hotspot; leaving home
   mid-stream; Wi‑Fi to cellular; Tailscale off at either end; sleep (15 minutes with nobody at the
   Mac); removing the iPad while it streams; a rebuild keeping port, Mac ID and pairing; Pair This
@@ -2129,7 +2188,8 @@ callout. The CLI's output is still a9cc248's, byte for byte (masked and sorted),
 - R12: VoiceOver and a hardware keyboard on the card, the scanner, the overlay and the pane's Copy
   buttons. Esc in particular: the iPadOS 27 simulator never delivers Escape to an app (a
   first-responder probe saw no key press at all), so only ⌘. was tested. Also that the pairing
-  window never shows in a Desktop stream.
+  window never shows in a Desktop stream (also with a full-screen app in front when it starts),
+  and that the connect screen's status lines are spoken.
 - R13: mixed builds (this iPad against PR #5's Sill.app: no Away from home group; PR #5's iPad
   against this host).
 - Also: the Local Network prompt on a fresh install before the first remote dial; the live menu

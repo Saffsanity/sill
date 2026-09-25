@@ -127,10 +127,14 @@ final class AppModel {
         remote?.cancelPairing()
     }
 
-    func removeDevice(_ id: String) {
+    /// Remove in the pane (and -SillUnpairAfter). Nil when done; otherwise why the device is still
+    /// paired (the keychain could not be written), and its "last connected" stays too.
+    @discardableResult
+    func removeDevice(_ id: String) -> String? {
         let prefix = coordinator?.status.snapshot.remote?.paired.first { $0.id == id }?.keyPrefix
-        remote?.remove(fingerprint: id)
+        if let problem = remote?.remove(fingerprint: id) { return problem }
         if let prefix { settings.forgetRemoteDevice(prefix) }
+        return nil
     }
 
     func renameDevice(_ id: String, to name: String) {

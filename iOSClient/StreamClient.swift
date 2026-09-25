@@ -115,6 +115,9 @@ final class StreamClient: ObservableObject {
     @Published var macInfo: MacInfo?
     /// This connection's Mac is a saved one: its kind 18 verified against the saved pin.
     @Published var macInfoSaved = false
+    /// This connection's latest kind 18 when its signature checked, with the key that signed it:
+    /// what tells a pairing made over this session (the overlay) whether it paired this very Mac.
+    var macInfoVerified: (info: MacInfo, fingerprint: Data)?
     /// When this connection's first kind 18 arrived (the panel hides Away from home without one).
     @Published var macInfoAt: Date?
     /// Pairing, as the Add a Mac card and the overlay show it.
@@ -345,6 +348,12 @@ final class StreamClient: ObservableObject {
     var pathMonitor: NWPathMonitor?
     /// After a pairing: no session within 10 s leaves the Mac as a saved row.
     var afterPairingWatch: DispatchWorkItem?
+    /// The secret of the code the scanner last started a pairing with: after that pairing failed,
+    /// the scanner's own re-readings of the same code are ignored (StreamClient.scanned).
+    var lastScannedSecret: Data?
+    /// Counts pairings started and cancelled: the silent retry after a "busy" answer runs only if
+    /// no other pairing started, and nobody cancelled, while it waited.
+    var pairingAttempt = 0
 
     /// Read on `queue` (receive loop, sends) and written on main (connect, disconnect, loss): a
     /// plain stored property would be a data race on a strong reference.
@@ -782,6 +791,7 @@ final class StreamClient: ObservableObject {
         route = nil
         macInfo = nil
         macInfoSaved = false
+        macInfoVerified = nil
         macInfoAt = nil
         linkStats = nil
         recentRttMedians = []

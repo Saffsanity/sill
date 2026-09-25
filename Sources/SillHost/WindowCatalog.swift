@@ -21,7 +21,7 @@ final class WindowCatalog {
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
-    /// is not listed (the CLI has no windows).
+    /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
@@ -131,12 +131,29 @@ final class WindowCatalog {
 
     /// `window(id:)`, else one look at every window the system knows (on-screen or not). The
     /// coordinator uses it for the staged window, whose SCWindow must be fresh after the move: the
-    /// probe refetched too before capturing on the virtual display.
+    /// probe refetched too before capturing on the virtual display. Never one of Sill's own
+    /// windows, as in the catalog: a device may name any window ID in a pick, and one just above
+    /// the newest it knows could be the pairing window with its code.
     func resolveWindow(id: UInt32) async -> SCWindow? {
         if let w = window(id: id) { return w }
         guard let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) else { return nil }
-        return all.windows.first { $0.windowID == id }
+        return all.windows.first { $0.windowID == id && !Self.isOwn($0) }
     }
+
+    /// `ownApplication`, else one look at every window (on screen or not) for this process. The
+    /// on-screen look can miss Sill while it shows nothing on screen: its status item's window
+    /// leaves the list while a full-screen app hides the menu bar, and a Desktop stream started
+    /// then would leave nothing out, so a pairing window opened later would reach the devices. Nil
+    /// when this process has no window at all (the CLI).
+    func resolveOwnApplication() async -> SCRunningApplication? {
+        if let own = ownApplication { return own }
+        guard let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) else { return nil }
+        return all.applications.first { $0.processID == Self.ownPID }
+            ?? all.windows.first { Self.isOwn($0) }?.owningApplication
+    }
+
+    /// One of this process's own windows (Settings, the log, the pairing window with its code).
+    static func isOwn(_ w: SCWindow) -> Bool { w.owningApplication?.processID == ownPID }
 
     /// `SCShareableContent`, but never for longer than `timeout`. Measured 2026-09-22: in a process
     /// without Screen Recording the call never returned once a virtual display existed (it returns
@@ -214,7 +231,7 @@ final class WindowCatalog {
         var pinned: SCWindow? = nil
         if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
            let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
-            pinned = all.windows.first { $0.windowID == id }
+            pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
             if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards

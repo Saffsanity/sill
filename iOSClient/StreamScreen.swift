@@ -156,7 +156,7 @@ struct StreamScreen: View {
         .animation(.spring(duration: 0.25, bounce: 0.2), value: windowMenu)
         .onChange(of: client.pendingLink) { _, link in
             // An outside link while streaming: the panel and the keyboard go first, as for Pair This iPad….
-            if link != nil { putAwayForOverlay() }
+            if link != nil { openLinkOverlay() }
         }
         .onChange(of: scenePhase) { _, phase in
             // A gesture cut short by a scene change never ends: put the transient UI away.
@@ -171,6 +171,8 @@ struct StreamScreen: View {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
+            // A link that came in before this connection did waits here now.
+            if client.pendingLink != nil { openLinkOverlay() }
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
@@ -221,9 +223,27 @@ struct StreamScreen: View {
     private var overlayShown: Bool { pairingOverlay || client.pendingLink != nil }
 
     /// Pair This iPad…: the panel and the keyboard are put away first, so no key reaches the Mac
-    /// while the code is typed, then the overlay covers the stream.
+    /// while the code is typed, then the overlay covers the stream. What an earlier pairing left
+    /// (a "Paired with…" whose fade never ran, an error) goes first: the overlay would show it,
+    /// and a stale "Paired" closed it after a second.
     private func openPairingOverlay() {
         putAwayForOverlay()
+        client.cancelPairing()
+        withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = true }
+    }
+
+    /// An outside link to confirm over the stream. The overlay is held open, not shown only while
+    /// the link waits: Pair clears the link, and the overlay went with it, before "Pairing with…",
+    /// any error or "Paired with…" could show. A pairing still running is left alone; one that
+    /// ended earlier leaves nothing behind.
+    private func openLinkOverlay() {
+        putAwayForOverlay()
+        if !pairingOverlay {
+            switch client.pairing {
+            case .working, .idle: break
+            case .failed, .paired: client.pairing = .idle
+            }
+        }
         withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = true }
     }
 

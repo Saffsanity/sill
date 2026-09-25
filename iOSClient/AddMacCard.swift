@@ -52,7 +52,8 @@ struct AddMacCard: View {
         Group {
             if layout.short && !typed {
                 HStack(alignment: .top, spacing: 16) {
-                    CodeScanner(mode: scannerMode, onLink: { client.pair(link: $0, overlay: false) })
+                    CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: false) },
+                                retryNeedsTap: client.scanRetryNeedsTap)
                         .frame(width: 260, height: 200)
                     VStack(alignment: .leading, spacing: 8) {
                         words
@@ -66,7 +67,10 @@ struct AddMacCard: View {
                     if typed {
                         fields
                     } else if !working {
-                        CodeScanner(mode: scannerMode, onLink: { client.pair(link: $0, overlay: false) })
+                        // Gone while a pairing runs, back after a failure: the new scanner finds the
+                        // code still in view, which StreamClient.scanned holds until it is tapped.
+                        CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: false) },
+                                    retryNeedsTap: client.scanRetryNeedsTap)
                             .frame(height: layout.short ? 200 : 230)
                     }
                     progress

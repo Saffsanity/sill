@@ -6,7 +6,8 @@ import StreamProtocol
 /// hold and which could cross the crease). Opening it asks the Mac to show its code (kind 21); the
 /// scanner reads it, or the code is typed (the address comes from this connection's kind 18). A
 /// pairing here never moves the session: the pairing connection closes and the home session goes
-/// on. Also where an outside sill://pair link is confirmed while connected.
+/// on. Also where an outside sill://pair link is confirmed while connected, and its pairing then
+/// runs to its end.
 struct PairingOverlay: View {
     @ObservedObject var client: StreamClient
     let scannerMode: CodeScanner.Mode
@@ -14,6 +15,8 @@ struct PairingOverlay: View {
     @State private var typed: Bool
     @State private var code = ""
     @State private var asked = false
+    /// An outside link confirmed here: the name of its Mac, whose pairing this overlay now shows.
+    @State private var linkName: String?
     @FocusState private var codeFocused: Bool
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -32,6 +35,10 @@ struct PairingOverlay: View {
         GeometryReader { geo in
             let layout = ConnectLayout(size: geo.size)
             let width = min(layout.short ? 640 : 420, geo.size.width - 32)
+            // The code field has the keyboard: the content goes to the top, so Pair stays above it
+            // (the stream screen ignores the keyboard's safe area, so nothing moves by itself), as
+            // on the connect screen. The half-folded Duo's is in the top half already.
+            let toTop = codeFocused && !layout.topHalf
             ZStack(alignment: .top) {
                 // No tap gesture here: one on this backdrop took the taps meant for the buttons in
                 // front of it (measured on the simulator). What is under the overlay is not
@@ -40,15 +47,23 @@ struct PairingOverlay: View {
                     .accessibilityHidden(true)
                 Group {
                     if let link = client.pendingLink {
-                        LinkConfirmation(link: link, pair: { client.confirmPendingLink() }, cancel: cancel)
+                        LinkConfirmation(link: link, pair: {
+                            // The overlay stays, now for this link's pairing (StreamScreen holds it open).
+                            linkName = link.name
+                            client.confirmPendingLink()
+                        }, cancel: cancel)
+                    } else if let linkName {
+                        linkProgress(linkName)
                     } else {
                         content(layout)
                     }
                 }
                 .frame(width: width, alignment: .leading)
                 .padding(.vertical, 16)
-                // The Duo half-folded: the top half only (the crease is at the middle); elsewhere centred.
-                .frame(maxWidth: .infinity, maxHeight: layout.topHalf ? geo.size.height / 2 : geo.size.height)
+                // The Duo half-folded: the top half only (the crease is at the middle); elsewhere
+                // centred, or at the top while the code is typed.
+                .frame(maxWidth: .infinity, maxHeight: layout.topHalf ? geo.size.height / 2 : geo.size.height,
+                       alignment: toTop ? .top : .center)
             }
         }
         .transition(.opacity)
@@ -83,7 +98,8 @@ struct PairingOverlay: View {
     @ViewBuilder private func content(_ layout: ConnectLayout) -> some View {
         if layout.short && !typed {
             HStack(alignment: .top, spacing: 16) {
-                CodeScanner(mode: scannerMode, onLink: { client.pair(link: $0, overlay: true) })
+                CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: true) },
+                            retryNeedsTap: client.scanRetryNeedsTap)
                     .frame(width: 260, height: 200)
                 VStack(alignment: .leading, spacing: 8) {
                     title
@@ -97,7 +113,8 @@ struct PairingOverlay: View {
                 if typed {
                     codeField
                 } else {
-                    CodeScanner(mode: scannerMode, onLink: { client.pair(link: $0, overlay: true) })
+                    CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: true) },
+                                retryNeedsTap: client.scanRetryNeedsTap)
                         .frame(maxWidth: 420, maxHeight: 300)
                         .frame(height: layout.topHalf ? 220 : 300)
                 }
@@ -107,9 +124,28 @@ struct PairingOverlay: View {
         }
     }
 
+    /// An outside link's pairing, once confirmed: its progress, its error or "Paired with…" (which
+    /// fades the overlay after a second), and Cancel. No scanner: the link may name another Mac
+    /// than the one this session streams.
+    private func linkProgress(_ name: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pair with \(name)")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($titleFocused)
+            status
+            cancelButton
+                .buttonStyle(.plain)
+        }
+        .onAppear { titleFocused = true }
+    }
+
     private var title: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Scan the Code on \(mac)")
+            // The typed path is all a device without the scanner gets: it says what to do there.
+            Text(typed ? "Enter the Code from \(mac)" : "Scan the Code on \(mac)")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
@@ -188,12 +224,16 @@ struct PairingOverlay: View {
                 .foregroundStyle(Palette.accent)
                 .frame(minHeight: 44)
             }
-            Button("Cancel", action: cancel)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Palette.accent)
-                .frame(minHeight: 44)
-                .keyboardShortcut(.cancelAction)
+            cancelButton
         }
         .buttonStyle(.plain)
+    }
+
+    private var cancelButton: some View {
+        Button("Cancel", action: cancel)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Palette.accent)
+            .frame(minHeight: 44)
+            .keyboardShortcut(.cancelAction)
     }
 }

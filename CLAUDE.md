@@ -12,8 +12,8 @@ Formerly winstream; the folder still carries the old name.
 its open questions and the results are in `docs/remote-access-plan.md`).** Bring
 your own VPN (Tailscale, WireGuard into the home network) or, behind a switch
 of its own, a port forward: a device paired once reaches the Mac from anywhere.
-Every open question took its default. Steps 1–8 are committed; step 9 (the
-review) is next.
+Every open question took its default. Steps 1–8 are committed, and so are the
+fixes of step 9's first review round (below); the rest of step 9 is next.
 - Two doors. The home door (today's plain TCP listener, Bonjour, unchanged for
   old iOS builds) now admits only this Mac's own networks, loopback and Direct
   Wireless (`OriginPolicy`), with caps (1 MiB messages, 4 kind-17 changes a
@@ -53,9 +53,25 @@ review) is next.
   live pairing (QR, typed, an outside link confirmed first), reconnects,
   every failure's words, an older host, and a slow link (60 fps through a VPN
   route; the callout at +300 ms).
+- Review fixes (step 9, the plan's "Review fixes (step 9)"): a pick never
+  streams Sill's own windows (the virtual display's lookup skips them; the
+  Desktop looks for Sill among every window when the on-screen look missed it);
+  the internet switch counts only while Remote Access is on; Remove changes
+  nothing when the keychain cannot be written, and the pane says so; a spent
+  code shows no QR; kind 18 lists no addresses before the Mac's first look,
+  and a device keeps its saved ones on an empty or Remote-Access-off kind 18;
+  an overlay pairing ties the session only to the same Mac (by its signed kind
+  18) and takes that kind 18's addresses; the scanner never restarts a pairing
+  by itself (after a failure, the same code only from a tap); a link confirmed
+  over the stream keeps the overlay for its outcome; the overlay's typed path
+  says "Enter the Code from ‹Mac›" and moves up while typing; the status line
+  is announced; saved Macs are cleared only when no device key exists at all.
+  Checked headless, on the simulator with three new XCUITests against live
+  hosts, and against the pre-fix build (which fails them).
 - **Untested, for Noah (R0–R13; the plan's Results say exactly what):** R0 the
   probes (the Secure Enclave key, the login keychain identity with your OK, the
-  router probe, the scanner on the iPad); R1 Tailscale setup and pairing,
+  router probe, the scanner on the iPad, with a failed pairing's code held
+  until tapped); R1 Tailscale setup and pairing,
   timed; R2 away on the hotspot; R3 leaving home mid-stream; R4 Wi‑Fi to
   cellular; R5 Tailscale off at either end; R6 sleep; R7 removing the iPad
   while it streams; R8 a rebuild keeps port, Mac ID and pairing; R9 Pair This

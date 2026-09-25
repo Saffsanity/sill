@@ -7,6 +7,8 @@ import StreamProtocol
 /// DataScannerViewController in the card's viewfinder, never a presentation. It reads QR codes; a
 /// sill://pair link goes to `onLink`, anything else shows "That’s not a Sill code." under the
 /// viewfinder for 2 s. The person chose to point the camera, so there is no confirmation step.
+/// A link arrives each time the scanner finds the code (again, when a scanner is shown anew with
+/// the code in view) and each time the person taps it; StreamClient.scanned decides what starts.
 ///
 /// Where the scanner cannot run (the simulator, a device without the Neural Engine it needs), the
 /// card goes straight to the typed path; with the camera refused it says so, with Open Settings.
@@ -22,7 +24,10 @@ struct CodeScanner: View {
     }
 
     let mode: Mode
-    let onLink: (PairLink) -> Void
+    /// A sill://pair link, and whether the person tapped the code rather than the scanner finding it.
+    let onLink: (PairLink, _ tapped: Bool) -> Void
+    /// A scan failed and the same code is held: the caption says a tap on it tries again.
+    var retryNeedsTap = false
     @State private var notSill = false
     @State private var notSillToken = 0
     /// The camera as this view knows it. DataScannerViewController never asks by itself (it only
@@ -66,7 +71,7 @@ struct CodeScanner: View {
                 } else if mode == .live {
                     // Not yet asked: the frame alone while the system's question is up.
                     if access == .authorized {
-                        ScannerRepresentable(onPayload: handle)
+                        ScannerRepresentable(onPayload: { handle($0, tapped: $1) })
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     Frame()
@@ -80,10 +85,10 @@ struct CodeScanner: View {
             .accessibilityElement(children: denied ? .contain : .ignore)
             .accessibilityLabel(denied ? "" : "Camera. Point it at the code on your Mac.")
             if !denied {
-                Text(notSill ? "That’s not a Sill code." : "Point at the code on your Mac")
+                Text(notSill ? "That’s not a Sill code." : retryNeedsTap ? "Tap the code to try again." : "Point at the code on your Mac")
                     .font(.system(size: 13))
                     .foregroundStyle(notSill ? Color.orange : Palette.muted)
-                    .accessibilityHidden(!notSill)
+                    .accessibilityHidden(!notSill && !retryNeedsTap)
             }
         }
         .task(id: notSillToken) {
@@ -99,9 +104,9 @@ struct CodeScanner: View {
         }
     }
 
-    private func handle(_ payload: String) {
+    private func handle(_ payload: String, tapped: Bool) {
         if case .success(let link) = PairLink.parse(payload) {
-            onLink(link)
+            onLink(link, tapped)
         } else if !notSill {
             notSill = true
             notSillToken += 1
@@ -134,7 +139,8 @@ struct CodeScanner: View {
 /// DataScannerViewController for QR codes, started once the view is on screen and stopped when it
 /// leaves.
 private struct ScannerRepresentable: UIViewControllerRepresentable {
-    let onPayload: (String) -> Void
+    /// A code's text, and whether it came from a tap on its highlight.
+    let onPayload: (String, Bool) -> Void
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])], qualityLevel: .balanced,
@@ -156,17 +162,17 @@ private struct ScannerRepresentable: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onPayload: onPayload) }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        var onPayload: (String) -> Void
-        init(onPayload: @escaping (String) -> Void) { self.onPayload = onPayload }
+        var onPayload: (String, Bool) -> Void
+        init(onPayload: @escaping (String, Bool) -> Void) { self.onPayload = onPayload }
 
         func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
             for item in addedItems {
-                if case .barcode(let code) = item, let text = code.payloadStringValue { onPayload(text) }
+                if case .barcode(let code) = item, let text = code.payloadStringValue { onPayload(text, false) }
             }
         }
 
         func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
-            if case .barcode(let code) = item, let text = code.payloadStringValue { onPayload(text) }
+            if case .barcode(let code) = item, let text = code.payloadStringValue { onPayload(text, true) }
         }
     }
 }

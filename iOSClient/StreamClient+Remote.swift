@@ -156,6 +156,7 @@ extension StreamClient {
 
     /// The card's Cancel while a pairing dial runs: it stops, nothing is saved.
     func cancelPairing() {
+        pairingAttempt += 1          // a "busy" retry still waiting stays cancelled
         pairingDial?.cancel()
         pairingDial = nil
         // Only a change publishes: Cancel's shortcut runs inside a view update, where a needless
@@ -164,7 +165,8 @@ extension StreamClient {
     }
 
     /// At launch: saved Macs without this device's key (a restore from a backup: the key is
-    /// ThisDeviceOnly) are useless, and cleared. DEBUG: `-SillForgetMacs 1` clears them and the key;
+    /// ThisDeviceOnly) are useless, and cleared, but only when the Keychain says the key is not
+    /// there (DeviceIdentity.knownMissing). DEBUG: `-SillForgetMacs 1` clears them and the key;
     /// `-SillPairURL`, `-SillPairCode` with `-SillPairAddress`, and `-SillDialSaved 1` start a
     /// pairing or a remote dial as the UI would, without the link's confirmation.
     func startRemote() {
@@ -176,7 +178,7 @@ extension StreamClient {
             print("remote: saved Macs and the device key forgotten")
         }
         #endif
-        if !savedMacs.isEmpty, DeviceIdentity.existing() == nil {
+        if !savedMacs.isEmpty, DeviceIdentity.knownMissing() {
             savedMacs = []
             persistSavedMacs()
         }
@@ -514,10 +516,12 @@ extension StreamClient {
         if macInfoAt == nil { macInfoAt = Date() }
         guard let (info, fingerprint) = signed.verified() else {
             macInfo = signed.unverifiedInfo()
+            macInfoVerified = nil
             macInfoSaved = false
             return
         }
         macInfo = info
+        macInfoVerified = (info, fingerprint)
         guard let i = savedMacs.firstIndex(where: { $0.macID == info.macID && $0.fingerprintData == fingerprint }) else {
             macInfoSaved = false
             return
@@ -597,13 +601,34 @@ extension StreamClient {
         }
     }
 
+    /// A code the scanner read, in the card or the overlay, found or tapped: a pairing starts only
+    /// when RemoteDialPolicy.scanStartsPairing says so (never over one that runs; after a failure,
+    /// the same code only from a tap).
+    func scanned(_ link: PairLink, tapped: Bool, overlay: Bool) {
+        var busy = false, failed = false
+        switch pairing {
+        case .working, .paired: busy = true
+        case .failed: failed = true
+        case .idle: break
+        }
+        guard RemoteDialPolicy.scanStartsPairing(busy: busy, failed: failed, secret: link.secret,
+                                                 lastScanned: lastScannedSecret, tapped: tapped) else { return }
+        pair(link: link, overlay: overlay, scanned: true)
+    }
+
+    /// After a failed scan, the scanner's caption says a tap on the code tries again.
+    var scanRetryNeedsTap: Bool {
+        if case .failed = pairing { return lastScannedSecret != nil }
+        return false
+    }
+
     /// The QR path: the link's addresses one at a time, pinned to its key.
-    func pair(link: PairLink, overlay: Bool) {
+    func pair(link: PairLink, overlay: Bool, scanned: Bool = false) {
         let addresses = link.addresses.map(RemoteDialPolicy.address(for:))
         let candidates = RemoteDialPolicy.order(addresses, remotePort: link.port, lastWorked: nil, localIPv4: Self.localIPv4Networks())
         startPairing(candidates: candidates, pin: link.fingerprint, key: { _ in PairingProof.qrKey(secret: link.secret) },
                      method: PairRequest.qr, macName: link.name, port: link.port, addresses: addresses, typed: nil,
-                     overlay: overlay, busyRetried: false)
+                     overlay: overlay, scannedSecret: scanned ? link.secret : nil, busyRetried: false)
     }
 
     /// The typed path: one address, any P-256 key, bound into the proof with K from the code.
@@ -613,13 +638,17 @@ extension StreamClient {
         let candidates = [RemoteDialPolicy.Candidate(host: a.host, port: port, kind: a.kind, via: a.via)]
         startPairing(candidates: candidates, pin: nil, key: { fp in PairingProof.codeKey(code: code, macFingerprint: fp) },
                      method: PairRequest.code, macName: nil, port: port, addresses: [], typed: a,
-                     overlay: overlay, busyRetried: false)
+                     overlay: overlay, scannedSecret: nil, busyRetried: false)
     }
 
-    // swiftlint-free by hand: the steps of one pairing, kept together.
+    // swiftlint-free by hand: the steps of one pairing, kept together. `scannedSecret`: the code's
+    // secret when the scanner started it (see `scanned`), nil for a typed code or a confirmed link.
     private func startPairing(candidates: [RemoteDialPolicy.Candidate], pin: Data?, key: @escaping (Data) -> SymmetricKey?,
                               method: String, macName: String?, port: Int, addresses: [MacAddress], typed: MacAddress?,
-                              overlay: Bool, busyRetried: Bool) {
+                              overlay: Bool, scannedSecret: Data?, busyRetried: Bool) {
+        lastScannedSecret = scannedSecret
+        pairingAttempt += 1
+        let attempt = pairingAttempt
         let identity: RemoteIdentity
         do { identity = try DeviceIdentity.loadOrCreate() } catch {
             pairing = .failed(.noKey("\(error)"))
@@ -635,8 +664,9 @@ extension StreamClient {
         pairingDial = connector
         let retry: (Double) -> Void = { [weak self] after in
             DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-                self?.startPairing(candidates: candidates, pin: pin, key: key, method: method, macName: macName, port: port,
-                                   addresses: addresses, typed: typed, overlay: overlay, busyRetried: true)
+                guard let self, self.pairingAttempt == attempt else { return }   // cancelled, or another pairing began
+                self.startPairing(candidates: candidates, pin: pin, key: key, method: method, macName: macName, port: port,
+                                  addresses: addresses, typed: typed, overlay: overlay, scannedSecret: scannedSecret, busyRetried: true)
             }
         }
         // On `queue`: the exchange runs there; its outcome hops to the main thread.
@@ -769,18 +799,28 @@ extension StreamClient {
                            typedAddresses: typed.map { SavedMacs.filtered([$0], allowLoopback: Self.keepsLoopback) },
                            infoIssuedAt: 0, bonjourName: nil, lastWorked: w.candidate.key, pairedAt: Date(), method: method,
                            lastConnectedAt: nil, lastRoute: nil)
-        if overlay, let s = session, !s.route.isRemote {
+        // Paired over a session at home (the overlay): that session's Mac is the one just paired
+        // only when its kind 18 is signed by the key just paired. Then the session is with a saved
+        // Mac, the record learns its Bonjour name, and it takes that kind 18's addresses: the typed
+        // path knew only the address it dialed, and the Mac sends no new kind 18 for a pairing.
+        // Another Mac's code or link, paired over this stream, is saved as the card saves it:
+        // naming this session after that Mac made its end read as that Mac's, and the reconnect
+        // went to that Mac.
+        var sameMac = false
+        if overlay, let s = session, !s.route.isRemote, let v = macInfoVerified, v.fingerprint == w.fingerprint, v.info.macID == macID {
+            sameMac = true
             mac.bonjourName = s.bonjourName
+            mac = SavedMacs.refreshed(mac, info: v.info, fingerprint: v.fingerprint, allowLoopback: Self.keepsLoopback) ?? mac
             session?.macID = macID
         }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
         persistSavedMacs()
         pairing = .paired(displayName(macID))
         #if DEBUG
-        print("remote: paired with \(name) (\(macID)), proof_M checked, pin saved")
+        print("remote: paired with \(name) (\(macID)), proof_M checked, pin saved\(overlay ? (sameMac ? "; this session's Mac" : "; not this session's Mac") : "")")
         #endif
         if overlay {
-            if macInfo?.macID == macID { macInfoSaved = true }
+            if sameMac { macInfoSaved = true }
             return
         }
         dialSaved(macID, why: .afterPairing)

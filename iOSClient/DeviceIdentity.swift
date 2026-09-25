@@ -49,7 +49,20 @@ enum DeviceIdentity {
         return id
     }
 
-    /// Forgets the key (`-SillForgetMacs 1`, or saved Macs found without it).
+    /// True only when the Keychain says, for every tag this build uses, that there is no key
+    /// (errSecItemNotFound): a restore from a backup, where the key did not travel. Any other
+    /// answer (the Keychain not readable yet, a DEBUG run with the Secure Enclave key under its
+    /// own tag, which found none and made the real pairings look keyless) is not proof, and
+    /// clearing the saved Macs on it would lose pairings the key still serves.
+    static func knownMissing() -> Bool {
+        var tags = [tag]
+        #if DEBUG
+        tags.append(secureEnclaveTag)
+        #endif
+        return tags.allSatisfy { status(of: $0) == errSecItemNotFound }
+    }
+
+    /// Forgets the key (`-SillForgetMacs 1`).
     static func forget() {
         lock.lock(); defer { lock.unlock() }
         cached = nil
@@ -62,19 +75,28 @@ enum DeviceIdentity {
         init(_ description: String) { self.description = description }
     }
 
-    private static func readKey() -> SecKey? {
-        let query: [String: Any] = [
+    private static func keyQuery(_ tag: Data) -> [String: Any] {
+        [
             kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: currentTag,
+            kSecAttrApplicationTag as String: tag,
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnRef as String: true,
         ]
+    }
+
+    private static func readKey() -> SecKey? {
+        var query = keyQuery(currentTag)
+        query[kSecReturnRef as String] = true
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let item,
               CFGetTypeID(item) == SecKeyGetTypeID() else { return nil }
         return (item as! SecKey)      // the type was just checked
+    }
+
+    /// The Keychain's answer for a key under `tag`, without reading it.
+    private static func status(of tag: Data) -> OSStatus {
+        SecItemCopyMatching(keyQuery(tag) as CFDictionary, nil)
     }
 
     private static func makeKey() throws -> SecKey {

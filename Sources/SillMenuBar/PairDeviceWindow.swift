@@ -124,6 +124,16 @@ struct PairDeviceView: View {
     }
 
     private var isWaiting: Bool { if case .waiting = phase { return true }; return false }
+    /// The code no longer works (used, expired, stopped, cancelled). A device's scanner would
+    /// still read it, dimmed, and the door turns every try away: five in a minute keep that
+    /// device's address out for five minutes, a new code included. The port in use only dims it:
+    /// the code works again once the door is back.
+    private var isSpent: Bool {
+        switch phase {
+        case .paired, .stopped, .expired, .closed: return true
+        case .waiting, .doorDown: return false
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -133,8 +143,8 @@ struct PairDeviceView: View {
             }
             Text("In Sill on your iPhone or iPad, tap Add a Mac…, then point it at this code.")
                 .fixedSize(horizontal: false, vertical: true)
-            QRCodeView(text: offer.url)
-                .opacity(isWaiting ? 1 : 0.2)
+            QRCodeView(text: offer.url, spent: isSpent)
+                .opacity(isWaiting || isSpent ? 1 : 0.2)
                 .frame(maxWidth: .infinity)
             lower
             if !remoteAccess {
@@ -260,6 +270,8 @@ struct PairDeviceView: View {
 /// was ignored when the previews rendered it), and a camera reads crisp edges best.
 struct QRCodeView: View {
     let text: String
+    /// The code no longer works: its place stays, empty, so nothing moves and no camera reads it.
+    var spent = false
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -267,12 +279,20 @@ struct QRCodeView: View {
             // A whole number of points, so centring never lands the bitmap on half a pixel (which
             // smooths every module's edge); the spare pixel is more white quiet zone.
             let side = (CGFloat(image.width) / displayScale).rounded(.up)
-            Image(decorative: image, scale: displayScale)
-                .frame(width: side, height: side, alignment: .topLeading)
-                .background(Color.white)
-                .accessibilityElement()
-                .accessibilityLabel("Pairing code image")
-                .accessibilityAddTraits(.isImage)
+            if spent {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.12))
+                    .overlay(Image(systemName: "qrcode").font(.system(size: 44, weight: .light)).foregroundStyle(.tertiary))
+                    .frame(width: side, height: side)
+                    .accessibilityHidden(true)
+            } else {
+                Image(decorative: image, scale: displayScale)
+                    .frame(width: side, height: side, alignment: .topLeading)
+                    .background(Color.white)
+                    .accessibilityElement()
+                    .accessibilityLabel("Pairing code image")
+                    .accessibilityAddTraits(.isImage)
+            }
         }
     }
 }

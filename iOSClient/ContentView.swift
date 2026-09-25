@@ -286,6 +286,18 @@ struct ConnectScreen: View {
             // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
             if case .paired = old, new == .idle, !client.connected { fold() }
         }
+        // VoiceOver hears each status line (§7.8): a remote dial and why it failed, a reconnect,
+        // "Stopped trying…", "… is saved", Forget, and the line a session ended with (why the Mac
+        // closed it), which is already set when this screen comes back. A changed Text alone is
+        // never spoken, and the rows keep the focus.
+        .onAppear { announce(client.status) }
+        .onChange(of: client.status) { _, line in announce(line) }
+    }
+
+    /// Not the idle "Looking for Macs…" lines, which change as the search does.
+    private func announce(_ line: String) {
+        guard !line.isEmpty, line != StreamClient.lookingOnNetwork, line != StreamClient.lookingNearby else { return }
+        AccessibilityNotification.Announcement(line).post()
     }
 
     private func column(_ layout: ConnectLayout) -> some View {

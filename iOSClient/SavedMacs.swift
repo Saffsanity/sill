@@ -96,14 +96,18 @@ enum SavedMacs {
 
     /// A verified kind 18 laid over `mac`: nil unless the signing key is the pin, the Mac ID is the
     /// saved one and it is newer than the last taken. Refreshes the name, the port and the Mac's
-    /// addresses; typed addresses and the one that last worked stay.
+    /// addresses; typed addresses and the one that last worked stay. An empty list, or one from a
+    /// Mac with Remote Access off, leaves the saved addresses alone: the Mac sends none while off
+    /// (and none before its first look at its networks), and a device that took that at home had
+    /// nothing to dial once away, after Remote Access came back on.
     static func refreshed(_ mac: SavedMac, info: MacInfo, fingerprint: Data, allowLoopback: Bool) -> SavedMac? {
         guard mac.fingerprintData == fingerprint, info.macID == mac.macID, info.issuedAt > mac.infoIssuedAt else { return nil }
         var next = mac
         let clean = SafeText.label(info.name)
         if !clean.isEmpty { next.name = clean }
         if (1...65535).contains(info.remotePort) { next.remotePort = info.remotePort }
-        next.addresses = filtered(info.addresses, allowLoopback: allowLoopback)
+        let addresses = filtered(info.addresses, allowLoopback: allowLoopback)
+        if info.remoteAccess, !addresses.isEmpty { next.addresses = addresses }
         next.infoIssuedAt = info.issuedAt
         return next
     }

@@ -865,8 +865,16 @@ package final class StreamCoordinator {
                 guard let d = catalog.display else { active = .none; broadcastList(); return }
                 // Sill's own windows (Settings, Log, the pairing window with its code) never go out
                 // in a Desktop stream. Fixed here at pipeline start: a running SCStream is never
-                // reconfigured. Without Sill in the catalog's last look (the CLI), as before.
-                if let own = catalog.ownApplication {
+                // reconfigured, so a host that can show a pairing code (remote access) looks for
+                // Sill among every window when the last on-screen look missed it; excluding nothing
+                // would let a pairing window opened later reach the devices. Without Sill anywhere
+                // (the CLI has no windows), as before.
+                var own = catalog.ownApplication
+                if own == nil, remote != nil {
+                    own = await catalog.resolveOwnApplication()
+                    guard !shuttingDown else { active = .none; broadcastList(); return }
+                }
+                if let own {
                     filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
                 } else {
                     filter = SCContentFilter(display: d, excludingWindows: [])
