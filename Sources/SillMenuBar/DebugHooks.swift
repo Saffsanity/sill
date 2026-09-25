@@ -236,6 +236,8 @@ enum DebugHooks {
         software.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 1512, height: 982, fps: 60,
                                                     mbps: 15, onVirtualDisplay: false, softwareEncoder: true)
         software.encodedFPS = 0
+        var stuck = software
+        stuck.hardwareEncoderStuck = true
         var fallback = streaming
         fallback.stream?.onVirtualDisplay = false
         fallback.lastStageFailure = "needs Accessibility"
@@ -258,6 +260,7 @@ enum DebugHooks {
             Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
             Sample(name: "software-encoder", snapshot: software),
+            Sample(name: "software-encoder-stuck", snapshot: stuck),
             Sample(name: "virtual-display-fallback", snapshot: fallback),
             Sample(name: "permissions-missing", snapshot: idle,
                    permissions: PermissionState(screenRecording: false, accessibility: false)),
