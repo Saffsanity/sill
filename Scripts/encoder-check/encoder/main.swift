@@ -218,5 +218,137 @@ do {
     withExtendedLifetime(enc) {}
 }
 
+/// Frames that went into VideoToolbox after newer content (a lower number after a higher one).
+func inversions(_ calls: [Call]) -> Int {
+    let seqs = calls.filter { !$0.refused }.map(\.seq)
+    return zip(seqs, seqs.dropFirst()).filter { $0.1 < $0.0 }.count
+}
+
+// E5: frames reach VideoToolbox in the order they were let in, whichever thread let each in.
+// Deschedules are stood in for by `Inject`: the thread sleeps right after its Nth NSLock unlock.
+do {
+    let capture = DispatchQueue(label: "sill.capture", qos: .userInteractive)
+    let network = DispatchQueue(label: "sill.net", qos: .userInteractive)
+    // (a) A still window: a keyframe request on the network queue re-encodes the last frame, and a
+    // repaint lands 1 ms later. The network thread sleeps 4 ms after its first or second unlock
+    // (the decision and the admission were two holds, and the re-encode was queued after the
+    // second: either gap let the repaint go in first, then the older picture after it).
+    for sleepOn in [1, 2] {
+        var inverted = 0, trials = 0
+        for t in 1...10 {
+            FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.009) })
+            let enc = makeEncoder()
+            let session = FakeVT.lastSession
+            let base = 100_000 + sleepOn * 10_000 + t * 100
+            for i in 1...5 {
+                autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base + i), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
+                Thread.sleep(forTimeInterval: 1.0 / 60)
+            }
+            Thread.sleep(forTimeInterval: 0.08)                    // still: the request re-encodes
+            let done = DispatchSemaphore(value: 0)
+            network.async {
+                Inject.arm(sleepOn: sleepOn, delay: 0.004)
+                enc.requestKeyframe()
+                Inject.disarm()
+                done.signal()
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+            autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base + 6), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
+            done.wait()
+            Thread.sleep(forTimeInterval: 0.06)
+            let calls = FakeVT.callsOf(session)
+            trials += 1
+            if inversions(calls) > 0 { inverted += 1 }
+            let pts = calls.map(\.pts)
+            expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "re-encode race: timestamps went backwards")
+            expect(calls.last?.seq == base + 6, "re-encode race: the last frame into VideoToolbox is \((calls.last?.seq ?? 0) - base), not the repaint (6)")
+            withExtendedLifetime(enc) {}
+        }
+        print("a re-encode and a repaint 1 ms apart, the network thread held 4 ms after unlock \(sleepOn): older picture into VideoToolbox last in \(inverted) of \(trials)")
+        expect(inverted == 0, "re-encode race (after unlock \(sleepOn)): older picture last in \(inverted) of \(trials)")
+    }
+    // (b) Two inside: frame A's output lets the waiting W in and its thread is held 8 ms; meanwhile
+    // K, inside beside A, is refused on encodeQueue, which lets the newer C in. W went in after C.
+    if two {
+        var inverted = 0, trials = 0
+        for t in 1...10 {
+            let base = 200_000 + t * 100
+            let a = base + 1, k = base + 2, w = base + 3, c = base + 4
+            FakeVT.reset(plan: { _, _, seq, _ in seq == k ? .refuse(after: 0.006) : .returnAfter(0.002) })
+            FakeVT.lock.run { FakeVT.injectOnOutputOf = [a: (sleepOn: 1, delay: 0.008)] }
+            let enc = makeEncoder()
+            let session = FakeVT.lastSession
+            let outs = Outputs()
+            enc.onEncoded = { _, key, _ in outs.add(key: key) }
+            // A first frame back, so two may go in.
+            autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
+            while outs.all.isEmpty { Thread.sleep(forTimeInterval: 0.001) }
+            for (seq, gap) in [(a, 0.0002), (k, 0.0003), (w, 0.0025), (c, 0.0)] {
+                autoreleasepool { capture.sync { enc.encode(makeFrame(seq: seq), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
+                if gap > 0 { Thread.sleep(forTimeInterval: gap) }
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+            let calls = FakeVT.callsOf(session)
+            trials += 1
+            if inversions(calls) > 0 { inverted += 1 }
+            expect(calls.contains { $0.seq == k && $0.refused }, "hand-over race: K was not refused (the scenario did not run)")
+            withExtendedLifetime(enc) {}
+        }
+        print("two inside, a waiting frame let in by an output whose thread is held 8 ms while a refusal lets a newer one in: older frame into VideoToolbox after newer in \(inverted) of \(trials)")
+        expect(inverted == 0, "hand-over race: older frame after newer in \(inverted) of \(trials)")
+    }
+    // (c) No stand-in deschedule: four encoders, each a still window where a keyframe request and a
+    // repaint are released together at a swept offset, for 2 s.
+    FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.009) })
+    let group = DispatchGroup()
+    let tally = Shared<(trials: Int, both: Int, inverted: Int)>((0, 0, 0))
+    let deadline = CACurrentMediaTime() + 2
+    for e in 0..<4 {
+        group.enter()
+        Thread.detachNewThread {
+            let enc = makeEncoder()
+            let session = FakeVT.lastSession
+            let cap = DispatchQueue(label: "sill.capture.\(e)", qos: .userInteractive)
+            let net = DispatchQueue(label: "sill.net.\(e)", qos: .userInitiated)
+            var seq = 300_000 + e * 10_000
+            autoreleasepool { cap.sync { enc.encode(makeFrame(seq: seq), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
+            var t = 0
+            while CACurrentMediaTime() < deadline {
+                Thread.sleep(forTimeInterval: 0.052)               // still for over 50 ms
+                let before = FakeVT.callsOf(session).count
+                seq += 1
+                let frame = makeFrame(seq: seq)
+                let go = UnsafeMutablePointer<Int>.allocate(capacity: 1); go.initialize(to: 0)
+                let spin = (t * 37) % 400
+                let pair = DispatchGroup()
+                pair.enter(); pair.enter()
+                net.async { while go.pointee == 0 { OSMemoryBarrier() }; enc.requestKeyframe(); pair.leave() }
+                cap.async {
+                    while go.pointee == 0 { OSMemoryBarrier() }
+                    var x = 0; for i in 0..<spin { x &+= i }; if x == -1 { print("") }
+                    enc.encode(frame, pts: CMClockGetTime(CMClockGetHostTimeClock())); pair.leave()
+                }
+                Thread.sleep(forTimeInterval: 0.0003)
+                go.pointee = 1; OSMemoryBarrier()
+                pair.wait()
+                Thread.sleep(forTimeInterval: 0.03)
+                go.deallocate()
+                let calls = Array(FakeVT.callsOf(session).dropFirst(before))
+                var v = tally.value
+                v.trials += 1
+                if calls.count == 2 { v.both += 1; if inversions(calls) > 0 { v.inverted += 1 } }
+                tally.value = v
+                t += 1
+            }
+            withExtendedLifetime(enc) {}
+            group.leave()
+        }
+    }
+    group.wait()
+    let v = tally.value
+    print("no stand-in deschedule, 4 encoders for 2 s: \(v.trials) requests beside a repaint, \(v.both) with both going in, older picture last in \(v.inverted)")
+    expect(v.inverted == 0, "natural race: older picture into VideoToolbox last in \(v.inverted) of \(v.both)")
+}
+
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

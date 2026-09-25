@@ -7,12 +7,13 @@ import StreamProtocol
 /// HEVC encoder tuned for low latency: real time, no B-frames, keyframes on demand.
 ///
 /// Threading, by hand and deliberately:
-/// - `encode()` is called on the capture queue (and `requestKeyframe()` on the network queue). It
-///   never touches VideoToolbox itself and never waits: the frame is let in, or waits in a one-slot
-///   mailbox, and it returns, so ScreenCaptureKit is never blocked by the encoder. A newer frame
-///   replaces an older waiting one.
+/// - `encode()` is called on the capture queue (and `requestKeyframe()` on the network queue or the
+///   main actor). It never touches VideoToolbox itself and never waits: the frame is let in, or
+///   waits in a one-slot mailbox, and it returns, so ScreenCaptureKit is never blocked by the
+///   encoder. A newer frame replaces an older waiting one.
 /// - `encodeQueue` (serial) hands frames to VideoToolbox one after another, in the order they were
-///   let in, so timestamps only go forward and a requested keyframe goes with the next frame in.
+///   let in (each is queued on it under the lock that let it in), so timestamps only go forward and
+///   a requested keyframe goes with the next frame in.
 ///   One frame is inside VT at a time: the next goes in when the last came back, and a frame that
 ///   finds the place taken waits in the mailbox, where a newer one replaces it (`EncoderMailbox`,
 ///   which keeps this bookkeeping and is checked on its own). Latency beats quality: a frame the
@@ -206,24 +207,39 @@ final class HEVCEncoder {
 
     /// Next frame becomes a keyframe (client connected, a delta was dropped, source switched).
     /// While frames are flowing the next captured frame simply carries the flag. Only when the
-    /// window is static (no frame in the last 50 ms) is the last frame re-encoded.
+    /// window is static (no frame in the last 50 ms) is the last frame re-encoded. The flag, that
+    /// decision and the re-encode's admission are one hold of the lock: a repaint that lands
+    /// meanwhile goes in after the re-encode, never before it (the older picture would then go
+    /// into VideoToolbox last and stay on the device until the next repaint, and `lastFrame` fall
+    /// back to it).
     func requestKeyframe() {
         lock.lock()
         mailbox.keyframeRequested = true
-        let recent = CACurrentMediaTime() - lastFrameAt < 0.05
-        let last = lastFrame
-        let lastPTS = mailbox.lastPTS
-        let pts = lastPTS.isValid ? CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000)) : CMClockGetTime(CMClockGetHostTimeClock())
+        let now = CACurrentMediaTime()
+        var admission: Admission?
+        if now - lastFrameAt >= 0.05, let last = lastFrame {
+            admission = admitLocked(last, pts: reencodePTS(), fromCapture: false, now: now)
+        }
         lock.unlock()
-        if !recent, let last { enqueue(last, pts: pts, fromCapture: false) }
+        if let admission { count(admission) }
     }
 
     /// Capture queue. Returns at once.
-    func encode(_ pixelBuffer: CVPixelBuffer, pts: CMTime) { enqueue(pixelBuffer, pts: pts, fromCapture: true) }
-
-    private func enqueue(_ pixelBuffer: CVPixelBuffer, pts: CMTime, fromCapture: Bool) {
+    func encode(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         lock.lock()
-        let now = CACurrentMediaTime()
+        let admission = admitLocked(pixelBuffer, pts: pts, fromCapture: true, now: CACurrentMediaTime())
+        lock.unlock()
+        count(admission)
+    }
+
+    private typealias Admission = EncoderMailbox<(CVPixelBuffer, CMTime)>.Admission
+
+    /// Under `lock`: a new frame goes in, waits in the mailbox, or is dropped. A frame let in is
+    /// queued on `encodeQueue` before the lock is released, so the queue's order is the order the
+    /// frames were let in, whichever thread let each in (the capture queue, the network queue, the
+    /// main actor, VideoToolbox's callback thread): `async` never waits, and the capture queue
+    /// still never waits on VideoToolbox.
+    private func admitLocked(_ pixelBuffer: CVPixelBuffer, pts: CMTime, fromCapture: Bool, now: CFTimeInterval) -> Admission {
         let admission = mailbox.admit((pixelBuffer, pts), now: now)
         if admission != .dropped {
             lastFrame = pixelBuffer
@@ -231,9 +247,21 @@ final class HEVCEncoder {
             // to the next requestKeyframe, or a retry after a dropped keyframe would do nothing.
             if fromCapture { lastFrameAt = now }
         }
-        lock.unlock()
+        if case .goesIn(let id) = admission { encodeQueue.async { [weak self] in self?.submit(pixelBuffer, pts: pts, id: id) } }
+        return admission
+    }
+
+    /// Under `lock`: a re-encode of the last frame is stamped just after the last timestamp handed
+    /// to VideoToolbox (`EncoderMailbox.handOver` still moves it past any frame let in before it).
+    private func reencodePTS() -> CMTime {
+        let lastPTS = mailbox.lastPTS
+        return lastPTS.isValid ? CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000)) : CMClockGetTime(CMClockGetHostTimeClock())
+    }
+
+    /// The counters for an admission, once the lock is released.
+    private func count(_ admission: Admission) {
         switch admission {
-        case .goesIn(let id): encodeQueue.async { [weak self] in self?.submit(pixelBuffer, pts: pts, id: id) }
+        case .goesIn: break
         case .waits(let replaced): if replaced { bump("enc.mailboxDrop") }   // newer frame wins
         case .dropped: bump("enc.deadDrop")
         }
@@ -302,13 +330,12 @@ final class HEVCEncoder {
     private func frameReturned(_ id: Int) -> Bool {
         lock.lock()
         let outcome = mailbox.returned(id, now: CACurrentMediaTime())
+        // Queued before the lock is released, like every frame let in (`admitLocked`).
+        if case .next(let (pb, pts), let next) = outcome { encodeQueue.async { [weak self] in self?.submit(pb, pts: pts, id: next) } }
         lock.unlock()
         switch outcome {
         case .late: return false
-        case .duplicate, .freed: return true
-        case .next(let (pb, pts), let next):
-            encodeQueue.async { [weak self] in self?.submit(pb, pts: pts, id: next) }
-            return true
+        case .duplicate, .freed, .next: return true
         }
     }
 

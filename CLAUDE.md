@@ -1179,6 +1179,25 @@ Review fixes, each shown by an encoder-free check (`Scripts/encoder-check/run.sh
   ahead: a stuck frame caught at 7.5 s; the handed set not kept); the encoder
   check's real-time stream against 0.9 s a frame on one engine stays quiet
   under the experiment (without the restart: fired at 2.6 s).
+- Frames reach VideoToolbox in the order they were let in: a frame let in is
+  queued on `encodeQueue` before the lock that let it in is released
+  (`admitLocked`, and `frameReturned` for the waiting frame; `async` never
+  waits), and `requestKeyframe` sets the flag, decides whether the window is
+  still and lets its re-encode in under one hold. Before, a thread descheduled
+  between its unlock and its dispatch let a later frame reach the queue first:
+  a stale re-encode went in after a repaint (the device kept the older picture
+  until the next repaint, and `lastFrame` fell back to it), and under the
+  experiment a waiting frame let in by one output could follow a newer one let
+  in by a refusal. The decision's own gap was there at 4fe37d4 and fires
+  without any stand-in deschedule (the reviewer's run: about one in five
+  coincidences of a request and a repaint). The encoder check holds a thread
+  4 ms after a chosen unlock (`Inject`, a swizzled `-[NSLock unlock]`): a
+  re-encode and a repaint 1 ms apart put the older picture into VideoToolbox
+  last in 10 of 10 trials before (after the first unlock at either limit,
+  after the second under the experiment), 0 now; the hand-over race under the
+  experiment 10 of 10 before, 0 now; and 4 encoders racing requests against
+  repaints for 2 s with no stand-in deschedule, 8 of 48 before under the
+  experiment, 0 now.
 
 The first round (two inside by default) was verified without the hardware
 encoder: clean builds at each commit (only the old CaptureProbe warning); the
