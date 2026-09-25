@@ -24,10 +24,12 @@ import StreamProtocol
 ///   AppleAVE2 counters, against 9 ms in the fast state; the rest outside them). With one frame
 ///   inside, the output rate was exactly one over that: 33 fps, with ~24 `enc.mailboxDrop` a
 ///   second of 57 captured, in a third of the logged seconds of Noah's Retina Desktop streams at
-///   40 Mbps. With two, the next frame is already inside when one comes back, so whatever part of
-///   a frame's turnaround runs beside the chip overlaps the next frame's. While the encoder keeps
-///   up (~9 ms against 16.7 ms between frames at 60 fps) a frame seldom finds another inside, and
-///   nothing changes. The cost: a frame may wait inside behind another instead of in the mailbox.
+///   40 Mbps. With two, the next frame is already inside when one comes back, so the part of a
+///   frame's turnaround spent beside the chip can overlap the next frame's. That is a reading of
+///   the counters: if the encoder ran all 30 ms one frame at a time, two inside would still give
+///   33 fps and a frame would wait inside instead of in the mailbox (CLAUDE.md, "The 33 fps
+///   plateau"). While the encoder keeps up (~9 ms against 16.7 ms between frames at 60 fps) a
+///   frame seldom finds another inside, and nothing changes.
 /// - A watchdog on its own queue declares the session dead when the frame inside VT longest has
 ///   been there `hangAfter` seconds without an output. The owner is told (`onHung`) and starts
 ///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping
