@@ -299,15 +299,28 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 - Read the host's stats line. `cap` counting with `enc.out` stuck at zero means
   the encoder, not the capture. `cap` at zero means the window is not
   repainting (covered on the Mac, or the app is idle).
-- The Mac's hardware video encoder can wedge system-wide: every new session
-  accepts a frame and never returns it, in any process. `swift run -c release
+- The Mac has one hardware video encoder, shared by every app. When it keeps
+  a frame for 1.5 s the log says "switching to the software encoder" and the
+  stream restarts at half resolution on the CPU, up to 60 fps (a launch probe
+  with no answer, "Hardware encoder probe: no answer", starts there). Almost
+  always the encoder is busy, not broken: the iOS Simulator's screen recorder
+  (`xcrun simctl io … recordVideo`) runs at a higher priority in the encoder
+  and held Sill's frames for 1.8 s and 8.6 s on 2026-09-24, and any other big
+  encode at the same time (a video export, a render, a second SillHost) costs
+  Sill frames too. The host then tests the hardware at the stream's size every
+  30 s while a device is connected (longer while it stays busy) and goes back
+  to it by itself once it keeps up ("Hardware encoder is back"): 45 fps in the
+  test, or for a frame too big for that even on a free engine (a Retina 6K
+  desktop), most of what the engine does alone at that size; "answers but
+  is busy" means another app still holds it, and "the stalled frame came back
+  after N s; the encoder was busy, not stuck" confirms it was busy. A
+  stuck encoder is rarer (2026-09-22: every new session in every process took
+  a frame and never returned it, for about three hours): `swift run -c release
   SillHost --encoder-selftest` settles it in five seconds without any
-  permission. The host also probes the hardware encoder at launch and prints
-  "Hardware encoder probe: no answer" when it is wedged, then streams with the
-  software encoder at half scale on the CPU; if it wedges mid-stream the log
-  says "switching to the software encoder" and the stream restarts by itself.
-  A reboot brings the hardware encoder back for sure; once it also recovered
-  by itself after about three hours.
+  permission, and a reboot fixes it. After 8 checks whose frames never came
+  back the host stops checking and says so, and the menu shows "Hardware
+  Encoder Stuck" until one of those frames does come back ("so it is not
+  stuck; checks resume").
 - `swift run -c release SillHost --synthetic` streams a moving test pattern as
   the Desktop source with no Screen Recording needed: if the device shows the
   bar sweeping, the encoder, fallback and network are fine and the problem is

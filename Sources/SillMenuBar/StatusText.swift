@@ -63,9 +63,14 @@ enum StatusText {
             attention.append(.init(title: "Allow Accessibility…", subtitle: "Devices can watch but not click or type.",
                                    action: .allowAccessibility))
         }
-        if s.softwareEncoder {
-            attention.append(.init(title: "Hardware Encoder Not Responding",
+        // Kept to one line no wider than the rest of the menu: a menu item's subtitle does not wrap.
+        if s.softwareEncoder, s.hardwareEncoderStuck {
+            attention.append(.init(title: "Hardware Encoder Stuck",
                                    subtitle: "Streaming with the software encoder, up to 60 fps. Restarting the Mac fixes this.",
+                                   action: .none))
+        } else if s.softwareEncoder {
+            attention.append(.init(title: "Hardware Encoder Busy",
+                                   subtitle: "Streaming with the software encoder, up to 60 fps, until it is free again.",
                                    action: .none))
         }
         let remotePortTaken = remotePortInUse(s.remote)
