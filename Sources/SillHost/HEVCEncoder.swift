@@ -40,8 +40,8 @@ final class HEVCEncoder {
 
     /// Called on VideoToolbox's callback thread with one access unit (length-prefixed NALs).
     var onEncoded: ((_ data: Data, _ isKeyframe: Bool, _ parameterSets: ParameterSets?) -> Void)?
-    /// The session stopped returning frames. Called once, on `encodeQueue`. The encoder is dead
-    /// afterwards: it drops every further frame.
+    /// The session stopped returning frames. Called once, on the watchdog's queue. The encoder is
+    /// dead afterwards: it drops every further frame.
     var onHung: (() -> Void)?
     /// For a session given up on (the watchdog, or `abandon`) with a frame still inside: called on a
     /// utility queue once VideoToolbox has let go of that frame, with the seconds since it went in.
@@ -58,26 +58,16 @@ final class HEVCEncoder {
     /// The serial of the newest encoder created so far.
     static var latestSerial: Int { serialLock.lock(); defer { serialLock.unlock() }; return lastSerial }
 
-    // Mailbox and in-flight state, guarded by `lock`.
+    // Guarded by `lock`.
     private let lock = NSLock()
-    private var pending: (CVPixelBuffer, CMTime)?
-    private var inFlight = false
-    private var submittedAt: CFTimeInterval = 0
-    private var dead = false
-    private var forceKeyframe = false
+    /// The frames inside VideoToolbox, the one waiting behind them, whether the session is dead,
+    /// and what the next frame to go in carries (its timestamp, a requested keyframe).
+    private var mailbox: EncoderMailbox<(CVPixelBuffer, CMTime)>
     /// Forced keyframes VideoToolbox dropped and we asked for again (bounded, see `submit`).
     private var forcedRetries = 0
-    /// Increments per frame handed to VideoToolbox, so a duplicate "returned" notice for the same
-    /// frame (an error status *and* a handler call) cannot free the slot twice.
-    private var submissionID = 0
-    /// The frame currently inside VideoToolbox, 0 when none. The first notice for it clears this,
-    /// so a second notice for the same frame cannot free the slot again.
-    private var outstandingID = 0
     /// Most recent captured frame. ScreenCaptureKit only delivers frames when the window repaints,
     /// so a client that connects while the window is static would otherwise never get a keyframe.
     private var lastFrame: CVPixelBuffer?
-    /// Presentation timestamps must never go backwards (frame reordering is off); see `submit`.
-    private var lastPTS: CMTime = .invalid
     private var lastFrameAt: CFTimeInterval = 0
     /// The watchdog gave up on this session (not `abandon`): its deinit says whether the frame came back.
     private var hungReported = false
@@ -95,6 +85,7 @@ final class HEVCEncoder {
         self.height = height
         self.software = software
         self.quiet = quiet
+        mailbox = EncoderMailbox(software: software)
         Self.serialLock.lock(); Self.lastSerial += 1; serial = Self.lastSerial; Self.serialLock.unlock()
         var s: VTCompressionSession?
         var spec: [CFString: Any] = [:]
@@ -132,7 +123,7 @@ final class HEVCEncoder {
 
     /// The watchdog gave up on this session. The owner checks this after installing an encoder,
     /// because a hang report that arrived mid-switch was ignored (see StreamCoordinator).
-    var isDead: Bool { lock.lock(); defer { lock.unlock() }; return dead }
+    var isDead: Bool { lock.lock(); defer { lock.unlock() }; return mailbox.dead }
 
     /// Give up on this session quietly: no watchdog report, no `enc.hung`. A probe calls this when
     /// its frame has not come back in time, since the owner already knows. True when that frame
@@ -140,7 +131,7 @@ final class HEVCEncoder {
     /// when it came back just now.
     @discardableResult
     func abandon() -> Bool {
-        lock.lock(); dead = true; pending = nil; lastFrame = nil; let inside = outstandingID != 0; lock.unlock()
+        lock.lock(); let inside = mailbox.giveUp(); lastFrame = nil; lock.unlock()
         watchdog?.cancel()
         return inside
     }
@@ -149,11 +140,10 @@ final class HEVCEncoder {
         watchdog?.cancel()
         guard let session else { return }
         lock.lock()
-        let outstanding = inFlight && !dead
-        // Given up on with a frame inside VideoToolbox (the watchdog, or a probe's `abandon`): a dead
-        // session never clears `outstandingID`, and `submittedAt` is when that frame went in.
-        let stalled = dead && outstandingID != 0
-        let stalledSince = submittedAt
+        // Drain a live session with a frame inside. One given up on with a frame inside VideoToolbox
+        // (the watchdog, or a probe's `abandon`) is stalled: a dead session never clears its
+        // frames, and `since` is when the one inside longest went in.
+        let teardown = mailbox.teardown
         let report = hungReported && !quiet
         lock.unlock()
         let described = "\(software ? "software" : "hardware") HEVC \(width)×\(height)"
@@ -172,10 +162,10 @@ final class HEVCEncoder {
         // completed). So its return is when a stalled frame came back: a busy encoder, not a stuck
         // one, which never lets go and leaves this thread blocked for good.
         DispatchQueue.global(qos: .utility).async {
-            if outstanding { VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid) }
+            if teardown == .drain { VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid) }
             VTCompressionSessionInvalidate(session)
-            guard stalled else { return }
-            let seconds = CACurrentMediaTime() - stalledSince
+            guard case .stalled(let since) = teardown else { return }
+            let seconds = CACurrentMediaTime() - since
             if report {
                 print("Encoder (\(described)): the stalled frame came back after \(String(format: "%.1f", seconds)) s; the encoder was busy, not stuck.")
             }
@@ -188,9 +178,10 @@ final class HEVCEncoder {
     /// window is static (no frame in the last 50 ms) is the last frame re-encoded.
     func requestKeyframe() {
         lock.lock()
-        forceKeyframe = true
+        mailbox.keyframeRequested = true
         let recent = CACurrentMediaTime() - lastFrameAt < 0.05
         let last = lastFrame
+        let lastPTS = mailbox.lastPTS
         let pts = lastPTS.isValid ? CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000)) : CMClockGetTime(CMClockGetHostTimeClock())
         lock.unlock()
         if !recent, let last { enqueue(last, pts: pts, fromCapture: false) }
@@ -201,42 +192,33 @@ final class HEVCEncoder {
 
     private func enqueue(_ pixelBuffer: CVPixelBuffer, pts: CMTime, fromCapture: Bool) {
         lock.lock()
-        guard !dead else { lock.unlock(); bump("enc.deadDrop"); return }
-        lastFrame = pixelBuffer
-        // A re-encode of the last frame is not a repaint: it must not make the window look live
-        // to the next requestKeyframe, or a retry after a dropped keyframe would do nothing.
-        if fromCapture { lastFrameAt = CACurrentMediaTime() }
-        if inFlight {
-            if pending != nil { bump("enc.mailboxDrop") }   // newer frame wins
-            pending = (pixelBuffer, pts)
-            lock.unlock()
-            return
+        let now = CACurrentMediaTime()
+        let admission = mailbox.admit((pixelBuffer, pts), now: now)
+        if admission != .dropped {
+            lastFrame = pixelBuffer
+            // A re-encode of the last frame is not a repaint: it must not make the window look live
+            // to the next requestKeyframe, or a retry after a dropped keyframe would do nothing.
+            if fromCapture { lastFrameAt = now }
         }
-        inFlight = true
-        submittedAt = CACurrentMediaTime()
         lock.unlock()
-        encodeQueue.async { [weak self] in self?.submit(pixelBuffer, pts: pts) }
+        switch admission {
+        case .goesIn(let id): encodeQueue.async { [weak self] in self?.submit(pixelBuffer, pts: pts, id: id) }
+        case .waits(let replaced): if replaced { bump("enc.mailboxDrop") }   // newer frame wins
+        case .dropped: bump("enc.deadDrop")
+        }
     }
 
-    /// encodeQueue. Exactly one frame inside VideoToolbox at a time.
-    private func submit(_ pixelBuffer: CVPixelBuffer, pts requested: CMTime) {
+    /// encodeQueue: frames go into VideoToolbox one after another, in the order they were let in.
+    private func submit(_ pixelBuffer: CVPixelBuffer, pts requested: CMTime, id: Int) {
         guard let session else { return }
         lock.lock()
-        guard !dead else { lock.unlock(); return }   // a frame queued just before the watchdog gave up
-        let forced = forceKeyframe
-        let props: CFDictionary? = forced ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
-        forceKeyframe = false
-        var pts = requested
-        if lastPTS.isValid, CMTimeCompare(pts, lastPTS) <= 0 {
-            pts = CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000))
-            bump("enc.ptsFixed")
-        }
-        lastPTS = pts
-        submittedAt = CACurrentMediaTime()
-        submissionID += 1
-        let id = submissionID
-        outstandingID = id
+        let handOver = mailbox.handOver(id, pts: requested, now: CACurrentMediaTime())
         lock.unlock()
+        guard let handOver else { return }   // a frame queued just before the watchdog gave up
+        if handOver.ptsFixed { bump("enc.ptsFixed") }
+        let forced = handOver.keyframe
+        let props: CFDictionary? = forced ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
+        let pts = handOver.pts
 
         if testHoldEachFrame > 0 { Thread.sleep(forTimeInterval: testHoldEachFrame) }
         if id == TestHang.frame, !quiet, !software, TestHang.take() {
@@ -280,32 +262,30 @@ final class HEVCEncoder {
         if again { requestKeyframe() }
     }
 
-    /// VT callback thread (or `submit` on a refusal): the slot is free; send the pending frame if
-    /// there is one. Returns false when the session is dead, so late output is not forwarded.
+    /// VT callback thread (or `submit` on a refusal): the frame's place is free; the waiting frame,
+    /// if there is one, takes it. Returns false when the session is dead, so late output is not
+    /// forwarded. A duplicate notice for a frame already back (an error status *and* a handler
+    /// call) frees nothing.
     @discardableResult
     private func frameReturned(_ id: Int) -> Bool {
         lock.lock()
-        guard !dead else { lock.unlock(); return false }
-        guard id == outstandingID else { lock.unlock(); return true }   // duplicate notice for a frame already handled
-        outstandingID = 0
-        if let (pb, pts) = pending {
-            pending = nil
-            submittedAt = CACurrentMediaTime()
-            lock.unlock()
-            encodeQueue.async { [weak self] in self?.submit(pb, pts: pts) }
-        } else {
-            inFlight = false
-            lock.unlock()
+        let outcome = mailbox.returned(id, now: CACurrentMediaTime())
+        lock.unlock()
+        switch outcome {
+        case .late: return false
+        case .duplicate, .freed: return true
+        case .next(let (pb, pts), let next):
+            encodeQueue.async { [weak self] in self?.submit(pb, pts: pts, id: next) }
+            return true
         }
-        return true
     }
 
     /// watchdogQueue, every 0.5 s. `encodeQueue` may be blocked inside VideoToolbox for good at this
     /// point; that thread is abandoned with the session.
     private func checkWatchdog() {
         lock.lock()
-        let hung = inFlight && !dead && CACurrentMediaTime() - submittedAt > Self.hangAfter
-        if hung { dead = true; hungReported = true; pending = nil; lastFrame = nil }   // lastFrame: 8+ MB at Retina size, no longer needed
+        let hung = mailbox.giveUpIfHung(now: CACurrentMediaTime(), after: Self.hangAfter)
+        if hung { hungReported = true; lastFrame = nil }   // lastFrame: 8+ MB at Retina size, no longer needed
         lock.unlock()
         guard hung else { return }
         watchdog?.cancel()
