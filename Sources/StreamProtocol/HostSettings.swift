@@ -88,8 +88,11 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     public var virtualDisplayAvailable: Bool
     /// Why the virtual display is unavailable or not working; nil when nothing is wrong.
     public var virtualDisplayNote: String?
-    /// The hardware encoder did not answer: streams run at up to 60 fps at Standard until the Mac
-    /// restarts. `settings` can then say 120 fps and Retina while `stream` says what runs.
+    /// The hardware encoder did not answer (busy or stuck): streams run on the software encoder at
+    /// up to 60 fps at Standard until the host finds it answering again (it checks every 30 s
+    /// while a device is connected, backing off to 300 s; hosts before 2026-09-25 kept it until
+    /// they restarted), and a new state then says false. `settings` can meanwhile say 120 fps and
+    /// Retina while `stream` says what runs.
     public var softwareEncoder: Bool
     /// Nil while nothing streams.
     public var stream: RunningStream?

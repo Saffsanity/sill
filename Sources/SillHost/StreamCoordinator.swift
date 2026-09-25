@@ -64,13 +64,45 @@ package final class StreamCoordinator {
     /// Why that check failed, if it did: the virtual display then stays off for the whole run.
     private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
-    /// Hardware HEVC normally. When a session stops returning frames (the Mac's hardware encoder
-    /// wedged system-wide on 2026-09-22 and stayed that way until a reboot), the source restarts
-    /// on the software encoder at half the capture scale, slow but alive. Back to hardware on the
-    /// next host launch.
+    /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
+    /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
+    /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware
+    /// answering again (`recheckLoop`, `hardwareIsBack`). The hardware has been stuck for hours
+    /// (2026-09-22) and busy for seconds (2026-09-24, when this used to last until the host
+    /// relaunched: 3 h at half resolution after a 1.8 s stall).
     private var useSoftwareEncoder = false
     private var softwareRestarts = 0
     private var lastSoftwareHangAt: CFAbsoluteTime = 0
+    /// The re-check while on the software encoder. It runs only while a device is connected, so an
+    /// idle host opens no hardware session; `recheckToken` keeps an ended task from clearing a newer one.
+    private var recheckTask: Task<Void, Never>?
+    private var recheckToken = 0
+    /// Seconds from one re-check to the next: 30 at first, doubled up to 300 by a check that got no
+    /// answer or by a hardware hang within 5 min of a return (the busy spell was still on), and
+    /// back to 30 when a return had lasted 10 min.
+    private var recheckInterval = StreamCoordinator.recheckFirstInterval
+    /// When the next re-check may run, and when the last one ran (or the fallback began).
+    private var recheckDue: CFAbsoluteTime = 0
+    private var lastRecheck: CFAbsoluteTime = 0
+    /// The re-check found `maxStuckProbes` probes still stuck and said so; cleared by a return.
+    private var recheckHeldBack = false
+    /// When the stream last went back to the hardware encoder (0: never), and the newest encoder
+    /// at that moment: a hang reported by an encoder no newer than that is stale and must not put
+    /// the host back on the software encoder.
+    private var lastReturnAt: CFAbsoluteTime = 0
+    private var returnSerial = 0
+    /// 30 s, and 300 s at most. TEST ONLY: `SILL_TEST_RECHECK_SECONDS=N` makes them N and 10 N, so
+    /// the backoff and the stuck-probe limit can be run through in a minute.
+    private static let recheckFirstInterval = TimeInterval(ProcessInfo.processInfo.environment["SILL_TEST_RECHECK_SECONDS"] ?? "") ?? 30
+    private static let recheckMaxInterval = recheckFirstInterval * 10
+    /// A hang this soon after a return doubles the interval; a return that lasted this long resets it.
+    private static let returnDidNotLast: TimeInterval = 300
+    private static let returnLasted: TimeInterval = 600
+    /// Probes whose frame never came back each hold a blocked thread (a stuck encoder never lets
+    /// go); with this many out, the re-check stops probing until one comes back. A busy encoder
+    /// hands them back within seconds, so only a stuck one reaches it (after 22–28 min of checks
+    /// with no answer).
+    private static let maxStuckProbes = 8
     /// The current encoder, readable off the main actor: the network queue asks it for a keyframe
     /// after dropping a delta. A lock instead of an actor hop keeps that request immediate.
     private let encoderBox = EncoderBox()
@@ -171,9 +203,12 @@ package final class StreamCoordinator {
         server.onClientCountChanged = { [weak self] count in
             Task { @MainActor in
                 guard let self else { return }
+                let wasEmpty = self.catalog.clientCount == 0
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                // On the software encoder, the hardware is checked only while someone watches.
+                if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
                 if count > 0 {
                     self.deselectWhenSettled = false
                 } else if self.switching {
@@ -288,15 +323,11 @@ package final class StreamCoordinator {
     package func start(preselect: String?, promptForPermissions: Bool = true) async {
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         // One small frame through the hardware encoder before anything streams. If the Mac's
-        // hardware encoder is wedged (it stays that way until a reboot) start on the software
-        // encoder now, instead of hanging the first stream for 1.5 s and restarting it.
+        // hardware encoder is stuck or busy, start on the software encoder now, instead of hanging
+        // the first stream for 1.5 s and restarting it; the re-check comes back to the hardware
+        // once it answers.
         let hardwareResponds = await Task.detached(priority: .userInitiated) { EncoderProbe.hardwareResponds() }.value
-        if !hardwareResponds {
-            useSoftwareEncoder = true
-            status.update { $0.softwareEncoder = true }
-            Stats.shared.bump("enc.fallback")
-            print("The Mac's hardware video encoder is not responding; streaming with the software encoder at half scale. A reboot brings it back.")
-        }
+        if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
         if virtualDisplay { enableVirtualDisplay() }
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
@@ -385,6 +416,13 @@ package final class StreamCoordinator {
     /// highest under the new limit, 60 at most on the software encoder), capture scale, bitrate,
     /// encoder speed, or, for a window, the virtual display. The Desktop never uses the display.
     /// Direct Wireless is deliberately absent: it is the listener's (`adopt` hands it over).
+    ///
+    /// A new bitrate needs a new encoder session. VideoToolbox accepts AverageBitRate on a live
+    /// session and reads it back, but the hardware HEVC encoder's rate control does not follow it
+    /// (measured 2026-09-25 on this M2 Pro, 1512×948 at 60 fps: raised from 8 to 40 Mbps the output
+    /// stayed at 9.6 Mbps for 5 s and across a keyframe, against 28 Mbps for a session made at 40;
+    /// lowered from 40 to 8 it dropped 41 of the next 60 frames). Only the software encoder and
+    /// low-latency rate control follow a live change.
     private func restartNeeded(for new: HostConfig) -> Bool {
         guard active != .none else { return false }
         let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
@@ -1128,17 +1166,16 @@ package final class StreamCoordinator {
         stage.release()
     }
 
-    /// An encoder's watchdog fired. A hardware hang is remembered whichever encoder reports it,
-    /// but only the encoder carrying the stream may restart it: a replaced encoder whose frame is
-    /// still stuck inside VideoToolbox times out later, and must not disturb its successor. First
-    /// hang: switch to the software encoder and restart the source. If even that dies repeatedly,
-    /// stop streaming rather than loop.
+    /// An encoder's watchdog fired. A hardware hang is remembered whichever encoder reports it, as
+    /// long as that encoder is newer than the last return to the hardware (an older one's report
+    /// is stale and must not undo the return), but only the encoder carrying the stream may
+    /// restart it: a replaced encoder whose frame is still stuck inside VideoToolbox times out
+    /// later, and must not disturb its successor. A hardware hang: switch to the software encoder
+    /// and restart the source; the re-check brings it back. If even the software encoder dies
+    /// repeatedly, stop streaming rather than loop.
     private func encoderHung(_ enc: HEVCEncoder, attempt: Int = 0) async {
-        if !enc.software, !useSoftwareEncoder {
-            useSoftwareEncoder = true
-            status.update { $0.softwareEncoder = true }
-            Stats.shared.bump("enc.fallback")
-            print("Hardware HEVC encoder is not returning frames; switching to the software encoder at half scale. A reboot brings the hardware encoder back.")
+        if !enc.software, !useSoftwareEncoder, enc.serial > returnSerial {
+            enterSoftwareFallback(afterHang: true)
         }
         guard enc === encoder, active != .none else { return }
         if switching {
@@ -1160,6 +1197,141 @@ package final class StreamCoordinator {
             }
         }
         await select(active)
+    }
+
+    // MARK: The software fallback and the way back
+
+    /// From here the software encoder carries every stream, at half the capture scale and up to 60
+    /// fps: a hardware session stopped returning frames (`afterHang`), or the launch probe got no
+    /// answer. Busy or stuck cannot be told apart yet (a busy engine's frame comes back seconds
+    /// later, and the encoder's deinit says so), so both start the re-check. A hang soon after a
+    /// return means the busy spell is still on: the next check waits longer.
+    private func enterSoftwareFallback(afterHang: Bool) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if lastReturnAt > 0 {
+            let lasted = now - lastReturnAt
+            if lasted < Self.returnDidNotLast {
+                recheckInterval = min(recheckInterval * 2, Self.recheckMaxInterval)
+            } else if lasted >= Self.returnLasted {
+                recheckInterval = Self.recheckFirstInterval
+            }
+        }
+        useSoftwareEncoder = true
+        status.update { $0.softwareEncoder = true }
+        Stats.shared.bump("enc.fallback")
+        lastRecheck = now
+        recheckDue = now + recheckInterval
+        let next = Int(recheckInterval)
+        if afterHang {
+            print("Hardware HEVC encoder is not returning frames (busy or stuck); switching to the software encoder at half scale until the hardware answers again (next check in \(next) s).")
+        } else {
+            print("The Mac's hardware video encoder is not answering; streaming with the software encoder at half scale until it does (checked every \(next) s while a device is connected).")
+        }
+        startRecheck()
+    }
+
+    /// A device connected (`firstArrived`: the first after none). On the software encoder a check
+    /// runs at once if the last one is 30 s old, so a stream that starts now can start on the
+    /// hardware, then the re-check goes on while devices stay.
+    private func devicesPresent(firstArrived: Bool) {
+        guard useSoftwareEncoder else { return }
+        if firstArrived {
+            recheckDue = min(recheckDue, max(CFAbsoluteTimeGetCurrent(), lastRecheck + Self.recheckFirstInterval))
+        }
+        startRecheck()
+    }
+
+    private func startRecheck() {
+        guard useSoftwareEncoder, !shuttingDown, recheckTask == nil, catalog.clientCount > 0 else { return }
+        recheckToken += 1
+        let token = recheckToken
+        recheckTask = Task { @MainActor [weak self] in
+            await self?.recheckLoop()
+            guard let self, self.recheckToken == token else { return }
+            self.recheckTask = nil
+            self.startRecheck()   // a fallback that came as this one ended; a no-op otherwise
+        }
+    }
+
+    /// The last device left: no hardware session is opened while nobody watches.
+    private func stopRecheck() {
+        recheckTask?.cancel()
+        recheckTask = nil
+    }
+
+    /// Main actor. Waits for `recheckDue`, probes the hardware with one small frame off the main
+    /// actor (1 s at most, no line, no counter), and on an answer goes back to it. A check with no
+    /// answer prints one line and doubles the wait. Ends when cancelled (no device), when the
+    /// hardware is back, or when the host shuts down.
+    private func recheckLoop() async {
+        while !Task.isCancelled, useSoftwareEncoder, !shuttingDown {
+            let wait = recheckDue - CFAbsoluteTimeGetCurrent()
+            if wait > 0 {
+                try? await Task.sleep(for: .seconds(wait))
+                continue      // look again: cancelled, back already, or the due time moved
+            }
+            let stuck = EncoderProbe.stuckProbes
+            if stuck >= Self.maxStuckProbes {
+                // Every further probe of a stuck encoder would block one more thread for good. The
+                // menu says so: a restart of the Mac, not waiting, fixes this one.
+                if !recheckHeldBack {
+                    recheckHeldBack = true
+                    print("Hardware encoder: \(stuck) checks never got their frame back, so it is stuck, not busy; no more checks until one comes back. Restarting the Mac fixes a stuck encoder.")
+                }
+                status.update { $0.hardwareEncoderStuck = true }
+                recheckDue = CFAbsoluteTimeGetCurrent() + Self.recheckMaxInterval
+                continue
+            }
+            status.update { $0.hardwareEncoderStuck = false }   // a probe came back: checking again
+            let (ok, ms) = await withCheckedContinuation { (c: CheckedContinuation<(ok: Bool, ms: Int), Never>) in
+                // The probe waits on a semaphore for up to 1 s: a GCD thread, not the main actor or
+                // a Swift concurrency thread.
+                DispatchQueue.global(qos: .utility).async { c.resume(returning: EncoderProbe.probe(timeout: 1, quiet: true)) }
+            }
+            let now = CFAbsoluteTimeGetCurrent()
+            lastRecheck = now
+            guard useSoftwareEncoder, !shuttingDown else { return }
+            if ok {
+                // Taken even if the last device left meanwhile: the next stream then starts on it.
+                // In a task of its own, which cancelling the re-check cannot reach: the restart's
+                // own waits (Task.sleep in the stage and here) must not end early.
+                let back = await Task { @MainActor in await self.hardwareIsBack(ms: ms) }.value
+                // Back: the loop ends here (a later hang starts a new re-check, see startRecheck).
+                if !back { recheckDue = CFAbsoluteTimeGetCurrent() + recheckInterval }   // a switch never settled; try later
+                continue
+            }
+            recheckInterval = min(recheckInterval * 2, Self.recheckMaxInterval)
+            recheckDue = now + recheckInterval
+            print("Hardware encoder still not answering after \(ms) ms; next check in \(Int(recheckInterval)) s.")
+        }
+    }
+
+    /// A re-check found the hardware answering: the next pipeline uses it, and a running stream
+    /// restarts on it now (one restart, like a settings change: Mac focus is left alone). Waits out
+    /// a switch in flight first, which may be building a software encoder; false when it never
+    /// settled, and the re-check tries again later.
+    private func hardwareIsBack(ms: Int) async -> Bool {
+        var waited = 0
+        while switching {
+            guard waited < 50 else { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+            waited += 1
+        }
+        guard useSoftwareEncoder, !shuttingDown else { return true }
+        useSoftwareEncoder = false
+        softwareRestarts = 0
+        lastReturnAt = CFAbsoluteTimeGetCurrent()
+        returnSerial = HEVCEncoder.latestSerial
+        recheckHeldBack = false
+        status.update { $0.softwareEncoder = false; $0.hardwareEncoderStuck = false }
+        Stats.shared.bump("enc.hardwareBack")
+        if active != .none {
+            print("Hardware encoder is back (answered in \(ms) ms); restarting the stream on it.")
+            await select(active)   // nothing awaited since `switching` read false: this select runs
+        } else {
+            print("Hardware encoder is back (answered in \(ms) ms); the next stream uses it.")
+        }
+        return true
     }
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
