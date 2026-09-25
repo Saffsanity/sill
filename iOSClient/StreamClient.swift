@@ -403,13 +403,22 @@ final class StreamClient: ObservableObject {
     /// A kind 22 on the current connection: why the Mac is about to close it, and what to do then
     /// (GoodbyePolicy). One that does not decode reads as reason "", a reason this build does not know.
     var goodbye: Goodbye?
-    /// The Mac's own words from the goodbye that ended the last session, when it was a notice (a
-    /// reason this build does not know): the connect screen's status line (GoodbyePolicy). Cleared
-    /// by the next session's tear-down, and a new dial replaces the status line it matches.
+    /// The Mac's own words from the goodbye that ended the last session, when it was a notice
+    /// ("update", or a reason this build does not know): the connect screen's status line
+    /// (GoodbyePolicy), and for "update" the App Store link under it, shown while the status line
+    /// still says it: the next status (a tap, a dial, Forget) takes the link away. Cleared by the
+    /// next session's tear-down.
     struct Notice: Equatable {
         let text: String
+        var storeLink = false
     }
     @Published var notice: Notice?
+    /// The Mac's version and protocol from this session's window lists (`WindowList.hostVersion`,
+    /// `protocol`): nil from SillHost and from Macs before 2026-09-25. Shown nowhere yet; kept so a
+    /// later device can tell a Mac from the first public build from what it needs (§14). Cleared
+    /// with the session.
+    @Published var hostVersion: String?
+    @Published var hostProtocol: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -792,6 +801,7 @@ final class StreamClient: ObservableObject {
             guard let self else { return }
             switch state {
             case .ready:
+                self.sendHello(on: c)   // first, before the pings (startMeasuring) and anything the session sends
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
                 let path = c.currentPath
                 DispatchQueue.main.async {
@@ -867,6 +877,32 @@ final class StreamClient: ObservableObject {
         let shown = status
         connect(to: fallback, name: name, macID: macID)   // cancels `c`, whose .cancelled finds it replaced
         status = shown
+    }
+
+    /// This device's hello (kind 23): its version, build, protocol and name, built once. DEBUG:
+    /// `-SillHelloVersion <v>` replaces the version, for a host's device floor under test.
+    private static let helloPayload: Data = {
+        var version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        #if DEBUG
+        if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
+        #endif
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+    }()
+
+    /// The hello, the first thing on every session connection (a tap's, a reconnect's, a wired dial
+    /// and its fallback, a move's network connection, a remote dial's winner), written straight to
+    /// `c` before anything else goes out on it: a Mac with a device floor judges the device by its
+    /// first message. Never on a pairing connection, whose one message is kind 19. Older Macs skip
+    /// it. Any thread.
+    private func sendHello(on c: NWConnection) {
+        let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Self.helloPayload)
+        c.send(content: message.serialized(), completion: .contentProcessed { _ in })
+        #if DEBUG
+        if let hello = Wire.decode(Hello.self, from: Self.helloPayload) {
+            print("hello: sent Sill \(hello.appVersion ?? "?") (\(hello.build ?? "?")), protocol \(hello.protocol ?? 0)")
+        }
+        #endif
     }
 
     /// Every connection to a Mac: TCP without Nagle, the interactive video class, and peer-to-peer
@@ -949,6 +985,9 @@ final class StreamClient: ObservableObject {
             guard let self else { return }
             switch state {
             case .ready:
+                // Its own hello first: nothing else goes out on it before the hand-over, and the
+                // fence (SessionLink) holds only what the session sends.
+                self.sendHello(on: c)
                 self.probeMove(c)
             case .waiting(let e):
                 guard let fallback else { break }
@@ -1305,6 +1344,9 @@ final class StreamClient: ObservableObject {
             guard let self else { return }
             self.unviableSince = viable ? nil : (self.unviableSince ?? CACurrentMediaTime())
         }
+        // The winner is `.ready` already: its hello goes out before anything the session sends,
+        // which only starts once it is `connection`.
+        sendHello(on: c)
         connection = c
         queue.async { [weak self] in
             self?.startMeasuring(c, remote: true)
@@ -1363,6 +1405,8 @@ final class StreamClient: ObservableObject {
         session = nil
         goodbye = nil
         notice = nil
+        hostVersion = nil
+        hostProtocol = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -1609,8 +1653,17 @@ final class StreamClient: ObservableObject {
                 // The host this session runs on, which a move to the network must reach again
                 // (`moveProbed`); its first list is what lets a move start.
                 self.sessionHost = list.launchID
+                if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
+                if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if !self.sessionListed {
                     self.sessionListed = true
+                    #if DEBUG
+                    switch (list.hostVersion, list.protocol) {
+                    case (nil, nil): print("host: no version (a Mac from before 2026-09-25)")
+                    case (nil, let p?): print("host: no version, protocol \(p)")
+                    case (let v?, let p): print("host: Sill \(v), protocol \(p.map(String.init) ?? "?")")
+                    }
+                    #endif
                     self.moveToNetworkIfListed()
                 }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }

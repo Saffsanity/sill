@@ -7,10 +7,11 @@ import StreamProtocol
 /// StreamProtocol, checked on its own with swiftc.
 ///
 /// The five reasons hosts have sent since remote access keep their words and their reconnects.
-/// Any other reason is a notice: a later host's own words (its `message`, cleaned), shown as the
-/// status line, and a reconnect only when the Mac asks for one (`"reconnect":true`). Before this
-/// rule a reason the device did not know showed "‹Mac› disconnected…" and reconnected at once, so a
-/// Mac that refused the device was dialled again and again.
+/// "update" (a Mac whose device floor is above this device's version, DeviceGate) and any other
+/// reason are notices: the host's own words (its `message`, cleaned), shown as the status line, and
+/// a reconnect only when the Mac asks for one (`"reconnect":true`); "update" also offers the App
+/// Store. Before this rule a reason the device did not know showed "‹Mac› disconnected…" and
+/// reconnected at once, so a Mac that refused the device was dialled again and again.
 enum GoodbyePolicy {
     struct Outcome: Equatable {
         /// The connect screen's status line.
@@ -19,6 +20,8 @@ enum GoodbyePolicy {
         var reconnect: Bool
         /// That reconnect may dial the saved Mac through the remote door (only a saved Mac).
         var remoteAllowed: Bool
+        /// "Update Sill in the App Store" under the status line ("update" only).
+        var storeLink = false
         /// The Mac's own words: a goodbye this build shows as the host wrote it. Looked at before a
         /// remote dial's failure rules (RemoteDialPolicy), which know only the older reasons.
         var isNotice: Bool
@@ -27,11 +30,12 @@ enum GoodbyePolicy {
     /// The longest message shown, in characters (SafeText.label).
     static let messageLimit = 300
 
-    /// The reasons this build knows by name; any other is a notice.
+    /// The reasons whose words and reconnects are this build's own; "update" and any other reason
+    /// are notices.
     static let knownReasons: Set<String> = [Goodbye.quit, Goodbye.removed, Goodbye.remoteOff, Goodbye.internetOff, Goodbye.busy]
 
-    /// A goodbye this build shows by the Mac's words: a reason it does not know (a kind 22 that did
-    /// not decode reads as reason "").
+    /// A goodbye this build shows by the Mac's words: "update", or a reason it does not know (a
+    /// kind 22 that did not decode reads as reason "").
     static func isNotice(_ goodbye: Goodbye) -> Bool {
         !knownReasons.contains(goodbye.reason)
     }
@@ -59,6 +63,12 @@ enum GoodbyePolicy {
                            reconnect: true, remoteAllowed: false, isNotice: false)
         case Goodbye.busy:
             return Outcome(text: "\(mac) is already serving 8 devices.", reconnect: true, remoteAllowed: saved, isNotice: false)
+        case Goodbye.update:
+            // The host always sends its message; these words are for one that does not.
+            var own = "Update Sill on this \(device) to keep using \(mac)."
+            if let floor = goodbye.minimumVersion.flatMap({ SillVersion($0) }) { own += " It needs version \(floor) or later." }
+            return Outcome(text: message(goodbye) ?? own, reconnect: goodbye.reconnect == true, remoteAllowed: saved,
+                           storeLink: true, isNotice: true)
         default:
             let reconnect = goodbye.reconnect == true
             let own = reconnect ? "\(mac) closed the connection. Sill will reconnect when it can."

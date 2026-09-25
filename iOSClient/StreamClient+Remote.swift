@@ -432,7 +432,7 @@ extension StreamClient {
     private func endWithNotice(_ goodbye: Goodbye, session s: Session?, saved: SavedMac?, name: String) {
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
         tearDown(status: outcome.text, restartSearch: connected)
-        notice = Notice(text: outcome.text)
+        notice = Notice(text: outcome.text, storeLink: outcome.storeLink)
         if s?.why == .afterPairing {
             afterPairingWatch?.cancel()
             afterPairingWatch = nil
