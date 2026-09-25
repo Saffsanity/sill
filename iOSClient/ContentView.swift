@@ -578,9 +578,10 @@ struct ConnectScreen: View {
 /// The connect screen's column inside the scroll view that sits above its footer. The column sits
 /// where it would without a footer: centred in `centreHeight` (the whole height, or the Duo's top
 /// half) or, while a field has the keyboard, at the top. A column that would come within `gap` of
-/// the footer rises to keep it, no higher than the top. The content is then exactly the scroll
-/// view's height, so nothing scrolls; a column that cannot keep the gap even at the top makes the
-/// content taller, 16 pt of room above it, and scrolls.
+/// the footer rises to keep it, but never closer than 16 pt to the top. The content is then exactly
+/// the scroll view's height, so nothing scrolls; a column that cannot keep both makes the content
+/// taller, with the same 16 pt above it, and scrolls. So at the switch the column neither moves nor
+/// jumps: it rises until it is 16 pt from the top, and from there it scrolls.
 ///
 /// The second subview is the footer again, hidden, which only gives the footer's height: the scroll
 /// view is `visibleHeight` less that, and its content never learns its container's height.
@@ -592,7 +593,7 @@ private struct ColumnOverFooter: Layout {
     let gap: CGFloat
     /// A field has the keyboard: the column at the top.
     let atTop: Bool
-    /// Above the column while it is at the top: with a field's keyboard up, or scrolling.
+    /// The least room above the column, however it sits: risen, at the top or scrolling.
     private let topRoom: CGFloat = 16
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -608,14 +609,12 @@ private struct ColumnOverFooter: Layout {
         guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
         let room = visibleHeight - footer.height
         let y: CGFloat
-        if !fits(column: column.height, room: room) {
-            y = topRoom
-        } else if atTop {
+        if !fits(column: column.height, room: room) || atTop {
             y = topRoom
         } else {
             let centred = centreHeight / 2 - column.height / 2
             let clear = room - gap - column.height
-            y = max(0, min(centred, clear))
+            y = max(topRoom, min(centred, clear))
         }
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + y), anchor: .topLeading,
                           proposal: ProposedViewSize(width: bounds.width, height: column.height))
@@ -623,9 +622,9 @@ private struct ColumnOverFooter: Layout {
                           proposal: ProposedViewSize(width: bounds.width, height: footer.height))
     }
 
-    /// Whether the column keeps the gap above the footer without scrolling.
+    /// Whether the column keeps the room above it and the gap below without scrolling.
     private func fits(column: CGFloat, room: CGFloat) -> Bool {
-        (atTop ? topRoom : 0) + column + gap <= room
+        topRoom + column + gap <= room
     }
 
     /// The column's and the footer's heights at this width, each as tall as it wants.

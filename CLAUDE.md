@@ -63,10 +63,17 @@ Apple's sources and every text to paste into App Store Connect;
   (tags, links, CSP, headings, the Remote Access markers and their cut gate);
   release.sh's refusals and its functions (33 checks, a fake keychain), never a
   real run; the placeholder commands on a scratch copy.
-- After the merge, three review findings fixed: every page's brand and Home
-  links were `./`, which opens nothing from the folder (WebKit from file://:
-  8 of the 28 header and footer links dead; with `index.html`, all 28 land on
-  their page, and each answers 200 from `python3 -m http.server`).
+- After the merge, review findings fixed: every page's brand and Home links
+  were `./`, which opens nothing from the folder (WebKit from file://: 8 of
+  the 28 header and footer links dead; with `index.html`, all 28 land on their
+  page, and each answers 200 from `python3 -m http.server`). A column that
+  rose to keep the gap could reach the very top, while one that scrolls has
+  16 pt above it, so at the switch it jumped: methods at 710 wide scrolled with
+  its title 19.5 pt down at 510 pt tall and, one point taller, rose flush (the
+  title 4 pt down). Now it rises no higher than 16 pt from the top, the same
+  as scrolling: photographed at every height from 500 to 540, the title stays
+  19.5 pt down up to 526 and then moves 1 pt a point (at the larger text, up
+  to 535); the 60 photos above are pixel for pixel the merge's.
 - **Untested, for Noah:** the decisions: the domain, the contact address, and
   whether 1.0 keeps Remote Access, which main has had since ba91136 (the
   audit advised a 1.0 without it before it merged; the metadata's switch lists
@@ -1337,8 +1344,9 @@ good.
   the column); the column stays where it would be without the footer
   (centred; in the top half on the Duo's 710×1000, the footer still along the
   bottom; at the top while a field has the keyboard), rises only to keep 24 pt
-  clear of the footer, and scrolls above it when even that does not fit (a
-  12 pt fade, then 12 pt clear, both inside that gap); one scroll view
+  clear of the footer, never closer than 16 pt to the top, and scrolls above
+  it, 16 pt from the top, when even that does not fit (a 12 pt fade, then
+  12 pt clear, both inside the gap); one scroll view
   whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
   footer), so a fit that changes never builds the card anew (its fields, the
   camera); + DEBUG harness), `SillLinks`
