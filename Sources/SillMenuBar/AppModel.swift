@@ -56,7 +56,10 @@ final class AppModel {
                 // The identity before the coordinator: its TXT tag goes into the first Bonjour
                 // registration. A keychain failure leaves remote access unavailable, not the app.
                 let remote = makeRemoteAccess()
-                let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote)
+                // The window lists carry this Sill's version, when it has one (the bare binary's
+                // "dev" does not parse): later devices can tell which Mac to update.
+                let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote,
+                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
                 // One path from the controls to the host, synchronous: the host's target equals

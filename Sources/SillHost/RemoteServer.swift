@@ -300,23 +300,27 @@ final class RemoteServer {
         p.deadline?.cancel()
         forgive(p.source)
         guard t.remoteAccess else {
-            StreamServer.sayGoodbye(Goodbye.remoteOff, on: c, queue: queue)
+            StreamServer.sayGoodbye(Goodbye(reason: Goodbye.remoteOff), on: c, queue: queue)
             return
         }
         guard server.remoteSessionCount < Self.maxSessions else {
             refusals.count("limit")
-            StreamServer.sayGoodbye(Goodbye.busy, on: c, queue: queue)
+            StreamServer.sayGoodbye(Goodbye(reason: Goodbye.busy), on: c, queue: queue)
             return
         }
         let origin = p.origin ?? .loopback
         let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { t.serviceNames[$0] }) ?? "by address"
-        server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: name))
-        print("Remote client connected: \(name) \(label) (\(c.endpoint))")
+        // The line once the device gate admits it: at once with the floor at "0", where it always
+        // came; a device the gate refuses hears the update goodbye instead and gets no line here.
+        let line = "Remote client connected: \(name) \(label) (\(c.endpoint))"
+        server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: name), admitted: { print(line) })
     }
 
     /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, judged on
     /// the main actor, answered with one kind 20, then closed once that is sent (or after 250 ms).
-    /// A device that goes away before its kind 19 is not refused, only closed.
+    /// A device that goes away before its kind 19 is not refused, only closed. Pairing is never
+    /// refused for the device's age (DeviceGate judges sessions only): a device too old for this
+    /// Mac's sessions can still pair, and hears the update notice when it connects.
     private func readPairRequest(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data?) {
         guard trust.snapshot.pairingOpen, let fp else {
             refuse(id, "unpaired")
@@ -437,7 +441,7 @@ final class RemoteServer {
             let list = server.sessions { $0.isRemote && matching($0) }
             for (c, route) in list {
                 if let line { print(line(route.pairedName ?? "a device", "\(c.endpoint)")) }
-                server.goodbye(reason, to: c)
+                server.goodbye(Goodbye(reason: reason), to: c)
             }
             done?(list.count)
         }

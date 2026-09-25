@@ -125,6 +125,9 @@ package final class StreamCoordinator {
     /// network checks that the new connection reaches this same running host, since the Bonjour
     /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
     private let launchID = UUID().uuidString
+    /// In every window list (`WindowList.hostVersion`, with `protocol`): Sill.app's version; nil
+    /// from the CLI, which has no bundle. For later devices, which can then say which Mac to update.
+    private let hostVersion: String?
     /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote. Nil: no
     /// identity, no TXT tag, no kind 18, no remote door, exactly the host as before.
     package let remote: RemoteAccess?
@@ -135,14 +138,18 @@ package final class StreamCoordinator {
 
     /// `config` is validated, and its virtual display forced off without the AppKit loop, which
     /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
-    package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil) throws {
+    /// `hostVersion`: Sill.app's version for the window lists, when it has one that parses.
+    package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil,
+                 hostVersion: String? = nil) throws {
         var config = config.validated()
         if !appKitLoop { config.virtualDisplay = false }
         self.config = config
         self.synthetic = synthetic
         self.appKitLoop = appKitLoop
+        self.hostVersion = hostVersion
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
+        server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
@@ -257,6 +264,20 @@ package final class StreamCoordinator {
                 self?.status.update {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
                     $0.devices[i].route = route
+                }
+            }
+        }
+        // A device's hello names it before its first stats (a second later): the card shows
+        // "iPad (iPad14,1)" from the first moment instead of an address. Its stats replace it, as
+        // they always did; a remote device keeps its paired name meanwhile.
+        server.onClientHello = { [weak self] connection, hello in
+            let id = ObjectIdentifier(connection)
+            let name = SafeText.label(hello.device ?? "")
+            guard !name.isEmpty else { return }
+            Task { @MainActor in
+                self?.status.update {
+                    guard let i = $0.devices.firstIndex(where: { $0.id == id }), $0.devices[i].name == nil else { return }
+                    $0.devices[i].name = name
                 }
             }
         }
@@ -1202,7 +1223,7 @@ package final class StreamCoordinator {
     /// end. The CLI without --virtual-display dies on a plain SIGINT with no goodbye, as before:
     /// its devices notice by liveness.
     package func shutdownForExit() {
-        server.goodbyeAll(Goodbye.quit, within: 0.1)
+        server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()
     }
@@ -1296,7 +1317,8 @@ package final class StreamCoordinator {
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID)))
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                                                      hostVersion: hostVersion, protocol: SillProtocol.current)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
