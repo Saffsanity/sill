@@ -202,8 +202,9 @@ package final class FileIdentityStore: IdentityStore {
         try Self.writePrivate(try encoder.encode(devices), to: directory.appendingPathComponent("paired.json"))
     }
 
-    /// Writes `data` with mode 0600 from its creation, replacing the file atomically.
-    static func writePrivate(_ data: Data, to url: URL) throws {
+    /// Writes `data` with mode 0600 from its creation, replacing the file atomically. Also the
+    /// app's -SillPairAfter hook, for the pairing link and code a test reads (never printed).
+    package static func writePrivate(_ data: Data, to url: URL) throws {
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(getpid()).tmp")
         try? FileManager.default.removeItem(at: tmp)
         guard FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {

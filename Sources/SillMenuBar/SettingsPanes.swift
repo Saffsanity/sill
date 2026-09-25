@@ -17,15 +17,17 @@ struct SettingsPane: View {
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
             case .permissions: PermissionsPane(model: model)
+            case .remoteAccess: LiveRemoteAccessPane(model: model, settings: model.settings)
             }
         }
         .formStyle(.grouped)
         .frame(width: 520)
         // Permissions and the login item change behind Sill's back, in System Settings. Re-read
         // them once a second, only while this tab is on screen, and when Sill becomes active; an
-        // idle Sill with Settings closed wakes for nothing.
+        // idle Sill with Settings closed wakes for nothing. The Remote Access pane follows the
+        // host's status, which is pushed, so it polls nothing.
         .task(id: model.visibleSettingsTab == tab) {
-            guard model.visibleSettingsTab == tab, tab != .streaming else { return }
+            guard model.visibleSettingsTab == tab, tab != .streaming, tab != .remoteAccess else { return }
             while !Task.isCancelled {
                 model.permissions.refresh()
                 model.loginItem.refresh()
@@ -40,7 +42,7 @@ struct SettingsPane: View {
 }
 
 /// Footer text the way System Settings sets it: small, secondary, from the leading edge.
-private struct Footnote: View {
+struct Footnote: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {

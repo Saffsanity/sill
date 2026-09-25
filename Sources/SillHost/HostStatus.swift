@@ -168,7 +168,8 @@ package struct PairedDeviceSummary: Equatable, Identifiable {
     package var pairedAt: Date
     /// "qr" or "code".
     package var method: String
-    /// When it last connected from away, and how ("through Tailscale"); nil when not this run.
+    /// When it last connected from away, and how ("through Tailscale"); nil when it never has (the
+    /// app keeps these across launches).
     package var lastSeen: Date?
     package var lastRoute: String?
 

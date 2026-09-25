@@ -35,6 +35,12 @@ package final class RemoteAccess {
         package let port: Int
         /// This window's offer shown again (a second request while it is open).
         package let again: Bool
+
+        /// Also for the app's previews, which draw the pairing window without a host.
+        package init(url: String, code: String, expiresAt: Date, requestedBy: String?, port: Int, again: Bool) {
+            self.url = url; self.code = code; self.expiresAt = expiresAt; self.requestedBy = requestedBy
+            self.port = port; self.again = again
+        }
     }
 
     package let identity: HostIdentity?
@@ -64,6 +70,9 @@ package final class RemoteAccess {
     private var listenerState = RemoteStatus.Listener.off
     private var pairingState = RemoteStatus.Pairing.closed
     private var lastBroadcast: MacInfo?
+    /// When each paired device last connected from away, and how ("through Tailscale"), by its key
+    /// prefix (`RemoteIdentity.shortName`): display only, for the pane's "last connected". The app
+    /// keeps it in its defaults (`restoreSeen`, `onSeen`); trust never rests on it.
     private var lastSeen: [String: (at: Date, route: String)] = [:]
     /// An offer waiting for the door's port and the first address list (at most `offerWait`).
     private var offerPending: (requestedBy: String?, again: Bool)?
@@ -79,6 +88,16 @@ package final class RemoteAccess {
     package var reopensPairing = false
     /// The core's "Pairing window open …" line (the CLI prints its own from `onPairingOffer`).
     package var logsPairingWindows = true
+    /// A paired device's remote session started (its key prefix, when, its route label): the app
+    /// saves it for the next launch's "last connected".
+    package var onSeen: ((_ keyPrefix: String, _ at: Date, _ route: String) -> Void)?
+
+    /// TEST ONLY: the file store's directory, where a test hook may leave the current pairing link
+    /// and code; nil for every other store.
+    package var testDirectory: URL? { store?.testDirectory }
+
+    /// The paired devices' key prefixes (what the app's "last connected" records are keyed by).
+    package var pairedPrefixes: [String] { paired.compactMap { $0.fingerprintData.map(RemoteIdentity.shortName) } }
 
     /// Loads (or creates) the identity and the trust list from `store`. A failure leaves the host
     /// without an identity: no TXT tag, no kind 18, no remote door; `identityProblem` says why.
@@ -238,6 +257,7 @@ package final class RemoteAccess {
     package func remove(fingerprint: String) {
         guard let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) else { return }
         let device = paired.remove(at: i)
+        if let fp = device.fingerprintData { lastSeen[RemoteIdentity.shortName(fp)] = nil }
         save()
         publishTrust()
         publish()
@@ -261,7 +281,15 @@ package final class RemoteAccess {
 
     /// A remote session of this paired device started: for the pane's "last connected".
     func sessionStarted(fingerprint: Data, route: String) {
-        lastSeen[Base64URL.encode(fingerprint)] = (Date(), route)
+        let prefix = RemoteIdentity.shortName(fingerprint), now = Date()
+        lastSeen[prefix] = (now, route)
+        publish()
+        onSeen?(prefix, now, route)
+    }
+
+    /// The app's saved "last connected" records, at launch. A newer one of this run wins.
+    package func restoreSeen(_ seen: [String: (at: Date, route: String)]) {
+        lastSeen.merge(seen) { mine, _ in mine }
         publish()
     }
 
@@ -457,8 +485,9 @@ package final class RemoteAccess {
     private func publish() {
         guard let status else { return }
         let summaries = paired.sorted { $0.pairedAt < $1.pairedAt }.map { d -> PairedDeviceSummary in
-            let seen = lastSeen[d.fingerprint]
-            return PairedDeviceSummary(id: d.fingerprint, keyPrefix: d.fingerprintData.map(RemoteIdentity.shortName) ?? "?",
+            let prefix = d.fingerprintData.map(RemoteIdentity.shortName) ?? "?"
+            let seen = lastSeen[prefix]
+            return PairedDeviceSummary(id: d.fingerprint, keyPrefix: prefix,
                                        name: d.displayName, model: d.model, pairedAt: Date(timeIntervalSince1970: d.pairedAt),
                                        method: d.method, lastSeen: seen?.at, lastRoute: seen?.route)
         }
