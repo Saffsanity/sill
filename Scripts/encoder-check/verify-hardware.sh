@@ -9,7 +9,7 @@
 # encodes its screen at priority 60), and the Retina Desktop's slow state needs the engine to
 # itself (CLAUDE.md, "The 33 fps plateau").
 #
-# usage: Scripts/encoder-check/verify-hardware.sh [parity] [stream] [harness] [probe]   (none: all four)
+# usage: Scripts/encoder-check/verify-hardware.sh [parity] [stream] [harness] [probe] [keyframe]   (none: all five)
 #   parity   SillHost --synthetic idle 35 s, base then new: new's stdout masked and sorted must
 #            equal base's
 #   stream   SillHost --synthetic + Scripts/sillclient.py picking the Desktop (3024×1898 @ 60 fps)
@@ -18,6 +18,10 @@
 #            frame every 0.3 s (to bring on the slow state), 20 s at 60 fps; per second enc.out,
 #            mailboxDrop, capture-to-output latency; HeartBeat per-frame times
 #   probe    EncoderProbe.throughput, new then two, 3 times at 3024×1904 and at 1512×948
+#   keyframe base then new, 6 sessions at 3024×1964: 12 frames at 60 fps, a keyframe asked for 5,
+#            20 or 40 ms after the last (a device joining just after a repaint), then still for
+#            0.5 s: base answers none (the next repaint would carry it), new every one, 60 ms
+#            and a turnaround after the last frame (HEVCEncoder.keyframeCheck)
 # The builds compared: base is ENCODER_CHECK_BASE (default 4fe37d4, encoder-recovery, one frame
 # inside), from git archive under .build/encoder-check/; new is this working tree as it ships (one
 # inside); two is this tree with SILL_TEST_ENCODER_IN_FLIGHT=2 (two inside on the hardware, the
@@ -33,7 +37,7 @@ BASE=${ENCODER_CHECK_BASE:-4fe37d4}
 CLIENT=$ROOT/Scripts/sillclient.py
 SILLLOG=${SILL_LOG_DIR:-$HOME/Library/Logs/Sill}/Sill.log
 mkdir -p $HW
-steps=("$@"); (( ${#steps} )) || steps=(parity stream harness probe)
+steps=("$@"); (( ${#steps} )) || steps=(parity stream harness probe keyframe)
 
 # The builds each step compares: the SillHost binary, the harness binary, the environment.
 typeset -A HOST HARNESS ENVV
@@ -45,6 +49,7 @@ VARIANTS[parity]="base new"
 VARIANTS[stream]=${ENCODER_CHECK_VARIANTS:-"new two"}
 VARIANTS[harness]=${ENCODER_CHECK_VARIANTS:-"new two"}
 VARIANTS[probe]=${ENCODER_CHECK_VARIANTS:-"new two"}
+VARIANTS[keyframe]=${ENCODER_CHECK_VARIANTS:-"base new"}
 
 echo "building (never touches the encoder): this tree, $BASE from git archive, the harness"
 {
@@ -167,6 +172,17 @@ probe)
       watch_pids $p || { echo "    probe-$name aborted"; break }
     done
     echo "probe $name (EncoderProbe.throughput):"; sed 's/^/    /' $HW/probe-$name.txt
+    sleep 2
+  done
+  ;;
+keyframe)
+  for name in ${=VARIANTS[keyframe]}; do
+    guard keyframe-$name || continue
+    env ${=ENVV[$name]} ${HARNESS[$name]} keyframe 3024 1964 40000000 6 > $HW/keyframe-$name.txt 2>&1 &
+    p=$!
+    watch_pids $p || { echo "    keyframe-$name aborted"; continue }
+    echo "keyframe $name (a keyframe asked for just after a burst's last frame, then still; 3024×1964, 40 Mbps):"
+    sed 's/^/    /' $HW/keyframe-$name.txt
     sleep 2
   done
   ;;

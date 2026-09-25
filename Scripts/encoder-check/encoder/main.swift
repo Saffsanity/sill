@@ -350,5 +350,76 @@ do {
     expect(v.inverted == 0, "natural race: older picture into VideoToolbox last in \(v.inverted) of \(v.both)")
 }
 
+// E6: a keyframe asked for within 50 ms of the last repaint of a window that then stays still (a
+// device joining, or one whose delta was dropped). No captured frame is coming to carry the flag,
+// so the request is looked at again 60 ms after that repaint (`keyframeCheck`, on the watchdog's
+// queue) and the last frame re-encoded; before, nothing went in until the window next repainted.
+// While repaints go on, the next one carries the flag and nothing is re-encoded, and a last
+// repaint still waiting in the mailbox at the second look carries it itself.
+do {
+    let capture = DispatchQueue(label: "sill.capture.e6", qos: .userInteractive)
+    let network = DispatchQueue(label: "sill.net.e6", qos: .userInteractive)
+    /// Twelve repaints at 60 fps numbered from `base`, a keyframe request from the network queue
+    /// `gap` after the last one's encode call, repaints at `repaintsAfter` seconds after it, then
+    /// `watch` seconds. The session's encode calls, the forced ones among those made at or after
+    /// the request, and when the last of the twelve went in.
+    func run(turnaround: Double, gap: Double, repaintsAfter: [Double] = [], watch: Double = 0.5, base: Int)
+        -> (calls: [Call], forced: [Call], lastAt: CFTimeInterval) {
+        FakeVT.reset(plan: { _, _, _, _ in .returnAfter(turnaround) })
+        let enc = makeEncoder()
+        let session = FakeVT.lastSession
+        var lastAt: CFTimeInterval = 0
+        let start = CACurrentMediaTime() + 0.005
+        for i in 0..<12 {
+            sleepUntil(start + Double(i) / 60)
+            autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base + i), pts: CMTime(value: CMTimeValue(i), timescale: 60)) } }
+            lastAt = CACurrentMediaTime()
+        }
+        sleepUntil(lastAt + gap)
+        var requestAt: CFTimeInterval = 0
+        network.sync { requestAt = CACurrentMediaTime(); enc.requestKeyframe() }
+        for (k, offset) in repaintsAfter.enumerated() {
+            sleepUntil(lastAt + offset)
+            autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base + 12 + k), pts: CMTime(value: CMTimeValue(12 + k), timescale: 60)) } }
+        }
+        Thread.sleep(forTimeInterval: watch)
+        let calls = FakeVT.callsOf(session)
+        withExtendedLifetime(enc) {}
+        return (calls, calls.filter { $0.forced && $0.at >= requestAt }, lastAt)
+    }
+    func ms(_ t: Double) -> String { String(format: "%.0f ms", t * 1000) }
+    var delays: [String] = []
+    for (k, gap) in [0.005, 0.020, 0.040].enumerated() {
+        let base = 400_000 + k * 100
+        let r = run(turnaround: 0.009, gap: gap, base: base)
+        let f = r.forced.first
+        delays.append(f.map { ms($0.at - r.lastAt) } ?? "none")
+        expect(r.forced.count == 1, "keyframe \(ms(gap)) after the last repaint, then still: \(r.forced.count) forced frames went in, not 1")
+        expect(f?.seq == base + 11, "keyframe \(ms(gap)) after the last repaint: the forced frame is \(f.map { "\($0.seq - base)" } ?? "none"), not the last picture (11)")
+        if let f { expect(f.at - r.lastAt < 0.3, "keyframe \(ms(gap)) after the last repaint: the forced frame went in \(ms(f.at - r.lastAt)) after it, not about 60 ms") }
+    }
+    print("a keyframe 5, 20 and 40 ms after the last repaint, then still: forced frame in \(delays.joined(separator: ", ")) after the repaint")
+    // 150 ms a frame: the last repaint still waits in the mailbox at the second look, 60 ms after it.
+    do {
+        let base = 400_500
+        let r = run(turnaround: 0.150, gap: 0.010, base: base)
+        let f = r.forced.first
+        print("a keyframe 10 ms after the last repaint, which waits in the mailbox behind a 150 ms frame: \(r.forced.count) forced, " +
+              (f.map { "picture \($0.seq - base) with its own timestamp: \(CMTimeCompare($0.pts, CMTime(value: 11, timescale: 60)) == 0 ? "yes" : "no"), in \(ms($0.at - r.lastAt)) after the repaint" } ?? "none"))
+        expect(r.forced.count == 1 && f?.seq == base + 11, "waiting in the mailbox: forced \(r.forced.map { $0.seq - base }), not the last picture (11) once")
+        expect(f.map { CMTimeCompare($0.pts, CMTime(value: 11, timescale: 60)) == 0 } == true,
+               "waiting in the mailbox: the forced frame went in with \(f.map { CMTimeGetSeconds($0.pts) } ?? -1) s, not the repaint's own 11/60 s (a re-encode replaced it)")
+    }
+    // Repaints go on after a request 5 ms after one: the next repaint carries it, nothing is re-encoded.
+    do {
+        let base = 400_600
+        let r = run(turnaround: 0.009, gap: 0.005, repaintsAfter: (1...12).map { Double($0) / 60 }, watch: 0.3, base: base)
+        let seqs = r.calls.map(\.seq)
+        print("a keyframe 5 ms after a repaint while repaints go on: \(r.forced.count) forced (picture \(r.forced.map { "\($0.seq - base)" }.joined(separator: ", "))), \(seqs.count - Set(seqs).count) re-encodes")
+        expect(r.forced.count == 1 && (r.forced.first?.seq ?? 0) > base + 11, "while repaints go on: forced \(r.forced.map { $0.seq - base }), not one later repaint")
+        expect(Set(seqs).count == seqs.count, "while repaints go on: a picture went in twice (a re-encode)")
+    }
+}
+
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

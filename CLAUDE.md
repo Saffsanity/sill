@@ -1198,6 +1198,49 @@ Review fixes, each shown by an encoder-free check (`Scripts/encoder-check/run.sh
   experiment 10 of 10 before, 0 now; and 4 encoders racing requests against
   repaints for 2 s with no stand-in deschedule, 8 of 48 before under the
   experiment, 0 now.
+- A keyframe asked for within 50 ms of the last repaint of a window that then
+  stays still is looked at again (main and 4fe37d4 have the same defect). Such
+  a request only set the flag, and with no repaint coming nothing carried it:
+  a device joining (`onClientConnected`) waited on black, and one whose delta
+  was dropped (`net.dropped`, then `onKeyframeNeeded`) on a stale picture,
+  until the window next repainted. Now `requestKeyframe` schedules
+  `keyframeCheck` on the watchdog's queue for 60 ms after that repaint
+  (`stillAfter`, 50 ms, plus 10): it re-encodes the last frame if the flag is
+  still set, the session is live, no frame is on its way to VideoToolbox to
+  carry the flag (`EncoderMailbox.frameOnItsWay`: waiting in the mailbox, or
+  let in and still on `encodeQueue`) and the window has not repainted since. A
+  request on a still window re-encodes at once, as before; nothing new prints
+  or counts, and the capture queue never waits. The mailbox check's S15 (both
+  limits, 9 and 28 ms a frame, a request 5, 20 or 45 ms after the last
+  repaint: one keyframe, in within 60 ms plus a turnaround of the repaint;
+  nothing re-encoded while frames flow, while the last repaint waits in the
+  mailbox or while it is queued behind a blocked encode call) and three
+  mutants of `frameOnItsWay`: 147,778 checks, 28 of 28 mutants caught. The
+  encoder check's E6, the real file in real time: a request 5, 20 or 40 ms
+  after the last repaint puts that picture in as a forced frame 64–70 ms after
+  the repaint (5ec3b63's `HEVCEncoder.swift`: none in 0.5 s; none with the
+  second look removed or run at once), a last repaint still waiting in the
+  mailbox at the second look goes in forced with its own timestamp (a
+  re-encode replaced it with the guard removed), and while repaints go on the
+  next one carries it and nothing is re-encoded. The reviewer's sweep (the
+  real file against a serial stand-in at 9 and 28 ms a frame; 12 repaints at
+  60 fps, then still; one inside and two): requests under 50 ms after the last
+  repaint unanswered in 0.6 s in 10/10 and 5/10 (two inside: 10/10, 6/10) at
+  5ec3b63, 0 now; a window still for 3 s got its keyframe only with the next
+  repaint, 2.97–3.01 s after the request, in 7 of 8 tries (in the eighth the
+  last repaint was still on its way), and now 30–82 ms after it in all 8; a
+  dropped last delta unanswered in 1.2 s in 8/8 and 4/8 (two inside: 8/8,
+  0/8), 0 now. Unchanged: a second request made after the forced frame went in
+  gets a keyframe of its own (at 5ec3b63 the next repaint carried it). On the
+  hardware, 19:52–19:54, after the iPad had left Sill.app (19:39; no device
+  connected, no other session on the engine),
+  `Scripts/encoder-check/verify-hardware.sh parity keyframe`: the CLI's idle
+  stdout against 4fe37d4, masked and sorted, identical (7 lines); `keyframe`,
+  new (6 sessions at 3024×1964 and 40 Mbps, 12 frames at 60 fps and a request
+  5, 20 or 40 ms after the last, then 0.5 s still): 4fe37d4 answered none of
+  the six, this tree all six, a keyframe out 70–73 ms after the last frame
+  (its harness mode against the stand-in VideoToolbox: 0 of 6 with 5ec3b63's
+  file, 6 of 6 now, 74–76 ms).
 
 The first round (two inside by default) was verified without the hardware
 encoder: clean builds at each commit (only the old CaptureProbe warning); the
@@ -1441,11 +1484,11 @@ good.
   every argument is checked before it connects, and a bad one exits 2).
   `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
   `run.sh` builds and runs those that never touch an encoder (the mailbox
-  check and its mutants, the probe check; it refuses any binary that links
-  VideoToolbox), and `verify-hardware.sh` the hardware runs against a base
-  commit built from `git archive` (parity, stream, harness, probe), each only
-  while `no-device.sh` finds no device connected to Sill.app; outputs go to
-  `.build/encoder-check/`.
+  check and its mutants, the probe and encoder checks; it refuses any binary
+  that links VideoToolbox), and `verify-hardware.sh` the hardware runs
+  against a base commit built from `git archive` (parity, stream, harness,
+  probe, keyframe), each only while `no-device.sh` finds no device connected
+  to Sill.app; outputs go to `.build/encoder-check/`.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a

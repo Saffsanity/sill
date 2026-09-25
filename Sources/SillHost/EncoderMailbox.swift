@@ -134,6 +134,11 @@ struct EncoderMailbox<Frame> {
         return .next(frame, id: letIn(now: now))
     }
 
+    /// A frame is on its way to VideoToolbox: let in and not handed over yet (on `encodeQueue`), or
+    /// waiting in the mailbox. The next hand-over then carries a requested keyframe, with no
+    /// re-encode needed (HEVCEncoder.keyframeCheck).
+    var frameOnItsWay: Bool { waiting != nil || inside.count > handed.count }
+
     /// When the oldest watchdog clock of the frames inside started.
     var oldest: CFTimeInterval? { inside.values.min() }
 

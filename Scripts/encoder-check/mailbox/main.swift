@@ -108,7 +108,7 @@ final class StandIn {
 
     // Stats keys and what the check watches.
     var out = 0, errors = 0, refused = 0, mailboxDrop = 0, deadDrop = 0, ptsFixed = 0, hung = 0
-    var late = 0, duplicates = 0, handOversAfterDeath = 0
+    var late = 0, duplicates = 0, handOversAfterDeath = 0, keyframeChecks = 0
     var hungAt: Double?
     var outputs: [(id: Int, frame: Frame, at: Double)] = []
     var handOvers: [(id: Int, frame: Frame, pts: CMTime, keyframe: Bool, at: Double)] = []   // encode calls
@@ -325,17 +325,31 @@ final class StandIn {
         invariants("watchdog")
     }
 
-    // HEVCEncoder.requestKeyframe
+    // HEVCEncoder.requestKeyframe (one hold of the lock: atomic here, as everything in virtual time)
     func requestKeyframe() {
         keyframeRequestTimes.append(clock.now)
         box.keyframeRequested = true
         let recent = clock.now - lastFrameAt < 0.05
-        let last = lastFrame
+        if !recent {
+            reencodeLast()
+        } else {
+            clock.at(lastFrameAt + 0.05 + 0.01) { [self] in keyframeCheck() }
+        }
+    }
+
+    // HEVCEncoder.keyframeCheck (on the watchdog's queue)
+    func keyframeCheck() {
+        guard !gone else { return }
+        keyframeChecks += 1
+        guard box.keyframeRequested, !box.dead, !box.frameOnItsWay, clock.now - lastFrameAt >= 0.05 else { return }
+        reencodeLast()
+    }
+
+    private func reencodeLast() {
+        guard let last = lastFrame else { return }
         let lastPTS = box.lastPTS
         let pts = lastPTS.isValid ? CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000)) : cm(clock.now)
-        if !recent, let last {
-            enqueue(newFrame(index: last.index, pts: pts, capturedAt: last.capturedAt, reencode: true), fromCapture: false)
-        }
+        enqueue(newFrame(index: last.index, pts: pts, capturedAt: last.capturedAt, reencode: true), fromCapture: false)
     }
 
     private func retryKeyframe() {
@@ -808,6 +822,79 @@ for (limit, t, fires) in [(twoInside, 0.8, false), (twoInside, 1.0, false), (two
     print(line(scenarioName, s, summary(s, from: 0, to: 8)))
     expect((s.hungAt != nil) == fires, "serial engine at \(t) s a frame, \(limit) inside: watchdog \(s.hungAt.map { "at \($0) s" } ?? "never"), expected \(fires ? "to fire" : "never")")
     if limit == twoInside, !fires { expect(s.maxVTHolds == 2, "serial engine at \(t) s: VideoToolbox never held two") }
+}
+
+// S15: a keyframe asked for within 50 ms of the last repaint of a window that then stays still
+// (a device joining, or one whose delta was dropped). No captured frame is coming to carry the
+// flag, so the request is looked at again 60 ms after that repaint and the last frame re-encoded.
+// While frames keep coming they carry it, and so does a frame on its way to VideoToolbox (waiting
+// in the mailbox, or queued behind an encode call that has not returned): no re-encode then.
+for (limit, turnaround) in [(oneInside, 0.009), (oneInside, 0.028), (twoInside, 0.009), (twoInside, 0.028)] {
+    for gap in [0.005, 0.020, 0.045] {
+        scenarioName = "keyframe \(Int(gap * 1000)) ms after the last repaint, \(limit) inside, \(Int(turnaround * 1000)) ms a frame"
+        let clock = Clock()
+        let s = StandIn(clock: clock, limit: limit, engine: .independent { _ in turnaround })
+        s.inOrder = true
+        let caps = captureTimes(fps: fps, from: 0, to: 0.5)
+        schedule(s, captures: caps)
+        let last = caps.last!
+        var requestAt = 0.0
+        clock.at(last + gap) { requestAt = clock.now; s.requestKeyframe() }
+        s.startWatchdog(until: 1.5)
+        clock.run(until: 1.5)
+        let keyed = s.handOverLog.filter { $0.keyframe && $0.at >= requestAt }
+        expect(keyed.count == 1, "\(keyed.count) keyframes handed over after the request, not 1")
+        if let k = keyed.first {
+            expect(k.at <= last + 0.06 + turnaround + 1e-9, "the keyframe went in at \(k.at), later than 60 ms after the last repaint (\(last)) and a turnaround")
+            expect(s.outputs.contains { $0.id == k.id }, "the keyframe (frame \(k.id)) never came out")
+        }
+        expectAllSettled(s)
+    }
+}
+do {
+    // While frames keep coming, the next capture carries the flag: no re-encode.
+    scenarioName = "keyframe while frames keep coming"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    schedule(s, captures: captureTimes(fps: fps, from: 0, to: 2))
+    for t in stride(from: 0.51, to: 1.9, by: 0.2) { clock.at(t) { s.requestKeyframe() } }
+    s.startWatchdog(until: 3)
+    clock.run()
+    expect(s.keyframeChecks == 7 && s.handOvers.filter(\.frame.reencode).isEmpty, "while frames keep coming: \(s.keyframeChecks) checks, \(s.handOvers.filter(\.frame.reencode).count) re-encodes")
+    expect(s.handOvers.filter(\.keyframe).count == 7, "while frames keep coming: \(s.handOvers.filter(\.keyframe).count) keyframes handed over for 7 requests")
+}
+do {
+    // The last repaint waits in the mailbox behind a slow frame (150 ms a frame, one inside) when
+    // the request is looked at again: it carries the flag when it goes in.
+    scenarioName = "keyframe while the last repaint waits in the mailbox"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.150 })
+    let caps = captureTimes(fps: fps, from: 0, to: 0.5)
+    schedule(s, captures: caps)
+    clock.at(caps.last! + 0.010) { s.requestKeyframe() }
+    s.startWatchdog(until: 1.5)
+    clock.run()
+    let last = s.handOvers.last
+    expect(s.handOvers.filter(\.frame.reencode).isEmpty, "waiting in the mailbox: \(s.handOvers.filter(\.frame.reencode).count) re-encodes, not 0")
+    expect(last?.frame.index == caps.count - 1 && last?.keyframe == true, "waiting in the mailbox: the last repaint went in \(last?.keyframe == true ? "as" : "not as") a keyframe")
+    expectAllSettled(s)
+}
+do {
+    // The last repaint is let in but queued behind an encode call that has not returned (its frame
+    // is already back) when the request is looked at again: it carries the flag when it goes in.
+    scenarioName = "keyframe while the last repaint is queued behind a blocked encode call"
+    let clock = Clock()
+    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    let caps = captureTimes(fps: fps, from: 0, to: 0.5)   // 30 captures; capture 28 goes in as frame 29
+    s.callBlocks = { $0 == 29 ? 0.3 : 0 }
+    schedule(s, captures: caps)
+    clock.at(caps.last! + 0.010) { s.requestKeyframe() }
+    s.startWatchdog(until: 1.5)
+    clock.run()
+    let last = s.handOvers.last
+    expect(s.handOvers.filter(\.frame.reencode).isEmpty, "queued: \(s.handOvers.filter(\.frame.reencode).count) re-encodes, not 0")
+    expect(last?.frame.index == caps.count - 1 && last?.keyframe == true, "queued: the last repaint went in \(last?.keyframe == true ? "as" : "not as") a keyframe")
+    expectAllSettled(s)
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")

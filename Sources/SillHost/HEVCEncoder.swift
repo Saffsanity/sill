@@ -102,6 +102,7 @@ final class HEVCEncoder {
     private let encodeQueue = DispatchQueue(label: "sill.encode", qos: .userInteractive)
     /// The watchdog must not share `encodeQueue`: when VideoToolbox hangs, it hangs *inside*
     /// `submit` on that queue, and a timer queued behind it would never fire (seen in the self-test).
+    /// A keyframe request's second look (`keyframeCheck`) runs here for the same reason.
     private let watchdogQueue = DispatchQueue(label: "sill.encode.watchdog", qos: .utility)
     private var watchdog: DispatchSourceTimer?
     static let hangAfter: CFTimeInterval = 1.5
@@ -205,19 +206,48 @@ final class HEVCEncoder {
         }
     }
 
+    /// A window with no repaint for this long is still: a keyframe asked for then re-encodes the
+    /// last frame, since no captured frame is coming to carry it.
+    static let stillAfter: CFTimeInterval = 0.05
+
     /// Next frame becomes a keyframe (client connected, a delta was dropped, source switched).
-    /// While frames are flowing the next captured frame simply carries the flag. Only when the
-    /// window is static (no frame in the last 50 ms) is the last frame re-encoded. The flag, that
-    /// decision and the re-encode's admission are one hold of the lock: a repaint that lands
-    /// meanwhile goes in after the re-encode, never before it (the older picture would then go
-    /// into VideoToolbox last and stay on the device until the next repaint, and `lastFrame` fall
-    /// back to it).
+    /// While frames are flowing the next captured frame simply carries the flag. When the window is
+    /// still (no repaint in the last `stillAfter`) the last frame is re-encoded at once. A request
+    /// that comes within `stillAfter` of a repaint is looked at again just after that much time has
+    /// passed since the repaint (`keyframeCheck`): the window may have stopped then, and nothing
+    /// would carry the flag until it repaints (a device joining, or one whose delta was dropped,
+    /// waited with a black or stale picture). The flag, the decision and the re-encode's admission
+    /// are one hold of the lock: a repaint that lands meanwhile goes in after the re-encode, never
+    /// before it (the older picture would then go into VideoToolbox last and stay on the device
+    /// until the next repaint, and `lastFrame` fall back to it).
     func requestKeyframe() {
         lock.lock()
         mailbox.keyframeRequested = true
         let now = CACurrentMediaTime()
         var admission: Admission?
-        if now - lastFrameAt >= 0.05, let last = lastFrame {
+        var lookAgainIn: CFTimeInterval?
+        if now - lastFrameAt >= Self.stillAfter {
+            if let last = lastFrame { admission = admitLocked(last, pts: reencodePTS(), fromCapture: false, now: now) }
+        } else {
+            lookAgainIn = lastFrameAt + Self.stillAfter + 0.01 - now
+        }
+        lock.unlock()
+        if let admission { count(admission) }
+        // The watchdog's queue: never blocked by VideoToolbox, and this takes the lock only briefly.
+        if let lookAgainIn { watchdogQueue.asyncAfter(deadline: .now() + lookAgainIn) { [weak self] in self?.keyframeCheck() } }
+    }
+
+    /// watchdogQueue, a little over `stillAfter` after the repaint a keyframe request came right
+    /// after: the last frame is re-encoded if the flag is still set, no frame is on its way to
+    /// VideoToolbox to carry it (on `encodeQueue`, or waiting in the mailbox), and the window has
+    /// not repainted since. A repaint since either carried the flag or came before a later request,
+    /// which then looks again itself.
+    private func keyframeCheck() {
+        lock.lock()
+        let now = CACurrentMediaTime()
+        var admission: Admission?
+        if mailbox.keyframeRequested, !mailbox.dead, !mailbox.frameOnItsWay, now - lastFrameAt >= Self.stillAfter,
+           let last = lastFrame {
             admission = admitLocked(last, pts: reencodePTS(), fromCapture: false, now: now)
         }
         lock.unlock()
