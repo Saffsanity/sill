@@ -210,7 +210,13 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
   seconds of few frames, at any bitrate) or another app encoding at the same
   time (a screen recording, the Simulator's recorder, or the Claude app's iOS
-  Simulator panel, beside which a Retina Desktop ran at 36 fps).
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The two
+  can read alike: a test-pattern Retina stream beside that panel alone read
+  about 32 fps with about 27 drops a second. The kernel's encoder log tells
+  them apart (`Scripts/encoder-check/hbparse.py` reads it; its header says
+  how to fetch it): it lists another session beside Sill's while an app
+  shares the encoder, and a time per frame (C/F) of about 10 ms, against
+  about 15 in the slow state.
 - Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
   it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).

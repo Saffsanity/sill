@@ -995,7 +995,9 @@ What the host does now:
   each shares the one engine, and the recorder outranks Sill. The Claude app's
   iOS Simulator panel counts too: `claude-ios-sim` encodes the simulator's
   screen at priority 60 (~62 fps at 2064×2752), and Noah's Retina Desktop fell
-  from 57 to 36 fps beside it (2026-09-25, 15:14).
+  from 57 to 33–36 fps beside it (33–34 for its first 40 s), and to 11–18 fps
+  while another agent's priority-80 recording of that simulator ran as well
+  (8–17 with a SillHost besides; 2026-09-25, 15:14–15:24).
 - Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
   60 (above every default session, still below the recorder's 80) and follows
   live bitrate changes, but it changes the bitstream and rate control (frames
@@ -1313,10 +1315,27 @@ fps through a copy of HEVCEncoder's glue (`Scripts/encoder-check/mailbox/`;
   cannot tell which, and Sill's frame age starts after the encoder. Read-only,
   at 15:14–15:24 on 2026-09-25: Noah's Sill.app (3024×1968, one frame inside,
   57 fps at 9.0 ms a frame alone) shared the engine with the Claude app's iOS
-  Simulator panel (priority 60, 2064×2752); both ran at ~36 fps while the
-  engine completed ~72 frames a second at 9.2–9.8 ms each by C/F (two thirds
-  of its time). The hardware runs below show that total was the engine's
-  whole capacity: C/F leaves out part of each frame's time on it.
+  Simulator panel (priority 60, 2064×2752), and for ~100 s with more. With the
+  panel alone, between and after the recordings below (15:15:54–15:23:31),
+  Sill ran at ~35.5 fps (35.3–35.7 on average in each stretch), both sessions
+  at ~36, while the engine completed ~72 frames a second at 9.2–9.8 ms each by
+  C/F (two thirds of its time). The hardware runs below show that total was
+  the engine's whole capacity: C/F leaves out part of each frame's time on it.
+  For the panel's first ~6 s Sill still held 51–59 fps (the engine ~88 frames
+  a second at ~7.5 ms each); after a nearly idle second (15:14:51: 25 frames
+  captured, 19 idle) it read 32–36 fps (33.7 on average) with 21–26 drops a
+  second for 40 s (15:14:52–15:15:31), the plateau's stats-line signature,
+  while the engine completed 64–68 frames a second at C/F ~10 ms (the slow
+  state alone reads ~15). Another agent was testing meanwhile, its "Sill
+  starve" simulator client connected to Sill.app (15:15:12–15:18:53): it
+  recorded that simulator four times with `simctl io recordVideo` (priority
+  80, 22–27 s each, ~100 s in all, 15:15:31–15:18:29), and Sill fell to 11–18
+  fps (38–48 drops a second) during each recording, and to 8–17 while a
+  `SillHost --synthetic` at 3024×1898 joined the last one for 22 s. Sharing
+  alone can read like the slow state in the stats line: the synthetic stream
+  below with one inside (15:43:39–15:44:09), beside the panel alone, read ~32
+  fps with ~27 drops a second at C/F 9.5–10.6; the HeartBeat tells them apart
+  (another session listed, C/F ~10 ms rather than ~15).
 On the hardware, 15:28–15:45 (no device connected; what is now
 `Scripts/encoder-check/verify-hardware.sh`, which checks the rule before each
 run and stops a run if a device connects). All session the Claude app's iOS Simulator
