@@ -8,6 +8,13 @@ in CLAUDE.md, DiscoveryPolicy.swift and StreamClient.swift). Line numbers are at
 marked "(PR #12)", which means 8e1e4e3. Nothing was built or started for this plan: no host, no
 app, no simulator, and never the Mac's video encoder.
 
+**Since then (the critique, 2026-09-25 evening).** origin/main has moved to cea195c: PR #11
+(encoder recovery) merged at b50e224, and PR #12 at cea195c after its merge with #13 (f863c74).
+The line numbers above stay; re-read each merged file before editing it. StreamServer.swift is
+unchanged at cea195c (md5 54a77389), so the diff still applies (`git apply --check`). The critique
+ran only the investigation's encoder-free harness, on the proposed file and on ba91136's; its runs
+are in the session's scratch folder `…/scratchpad/remote-bundle-plan/critic/runs/`.
+
 The evidence is the investigation of Noah's hotspot session of 2026-09-25 (Sill.log 13:55–14:56),
 its encoder-free harness and an independent verification of both (workflow wfwhu0q5v). The
 harness, the proposed diff (`remote-pacing.diff`, +76/−19) and every run are in that session's
@@ -31,7 +38,8 @@ StreamServer.swift is byte for byte cb0ec55's (md5 54a77389), the file the inves
 - **Item 3** is information on both screens, never a decision taken for the user. Automatic
   step-down is open question 2, off by default.
 - **Item 4** reuses the move from AWDL to the network (PR #6) as PR #12 generalises it (chained
-  fences, hold and adopt, `upWait`), so the branch for items 2–4 starts after PR #12 lands.
+  fences, hold and adopt, `upWait`), so the branch for items 2–4 starts from a main that has PR
+  #12: any main since cea195c.
 
 ---
 
@@ -91,7 +99,8 @@ net.waitKey 56" every 2 s, 1.4 fps. The proposed rule gives 60.1 fps with nothin
   broadcast (StreamCoordinator.swift:1363-1368). Each device now gets its own: its own quality
   (item 2) and its own link (item 3).
 - **Items 2 and 4 meet at the hand-over.** The home connection registers while the remote one
-  still streams, so the Mac restarts once, at the home quality, before the fence comes down.
+  still streams, so the Mac restarts once, at the home quality and the device's home rate (the
+  first viewport, which the move sends at `.ready`: §5.4, §7.3), before the fence comes down.
 - **Item 3's suggestion lands where item 2 says.** Its button is an ordinary kind 17 pick, so
   from away it changes the away quality only.
 
@@ -125,8 +134,8 @@ net.waitKey 56" every 2 s, 1.4 fps. The proposed rule gives 60.1 fps with nothin
    keys and shows it in Settings › Streaming.
 4. **Kind 16 per connection,** with two optional fields: `away` and `link`.
 5. **The link, per device:** fine, behind or stalled, judged by the host from what it withholds,
-   with what would fit. The device shows a callout with a button, and a line on the stream. The
-   Mac's card names it.
+   with what would fit. While it is behind the device shows a callout with a button, and a line on
+   the stream. The Mac's card names both.
 6. **The move home:** a remote session moves to the home door once the network has listed the
    same saved Mac for 2 s, through PR #12's fenced hand-over.
 
@@ -191,6 +200,24 @@ Ticks do not, since they bypass `send` (StreamServer.swift:147).
 
 All four were tuned on Low-sized frames (the verifier's caveat). Near-capacity cases (§3.7) are
 the keyframe's cost, not a bad constant: raising the hold cap to the keyframe's size did no better.
+
+**At the top presets.** An Extreme delta averages 312 KB (150 Mbps per 60 fps, twice that at 120
+fps: the same bytes a frame), more than the budget: one delta still waiting when the next frame
+comes drops it, and two behind a keyframe reach the hold cap. That happens only while the
+kernel's send buffer is full, which a link faster than the stream does not let it be. The critique
+ran it in the harness (2 MB keyframes, 312.5 KB deltas): at 120 fps through 600 Mbps with a 1 MB or
+a 256 KB queue and through 1,000 Mbps with 512 KB, and at 60 fps through 400 Mbps with 256 KB, the
+proposed file sent every frame (0 `net.dropped`, 0 `net.waitKey` after the first keyframe), where
+ba91136's dropped 3–11 frames a minute. H3 keeps the case (`ext120`), and P14 runs it on a device:
+the harness's host sends over loopback, and a real path's send buffer may stay smaller.
+
+**At the hold cap's edge.** A keyframe that takes about a second to be taken leaves about 512 KB of
+Low's deltas behind it, so a case there is bistable. bigkf8 (1.5 MB keyframes, 8 KB deltas, 8 Mbps,
+85 % of the link on average) ran at 60 fps with nothing dropped in five of six runs across fix-v3
+and the proposed file, a second or two behind; in the sixth (the proposed file, 2026-09-25) one
+drop 6 s in set off the 2 s loop for good: 29.6 fps, 27.8 drops a minute, about 3 s behind, where
+the base ran at 13.2–24.5 fps. Each forced keyframe is more than the link's spare capacity, so
+nothing brings it back out (§3.7, open question 12).
 
 #### 3.3 The host code (`Sources/SillHost/StreamServer.swift`)
 
@@ -300,9 +327,11 @@ None new, on either side.
 | Case | Measured (the verifier, the proposed file) | What helps |
 |---|---|---|
 | Near capacity: 1.5 MB keyframes, 40 KB deltas, 24 Mbps (~93 % load) | 43.8 fps, 20 drops a minute (base 15.1) | Each drop buys a whole keyframe, which pushes the link over. A lower quality: item 3 says so, item 2 starts away low |
-| 2 MB keyframes, 20 KB deltas, 16 Mbps | 29.4 fps, 21.7 drops a minute, ~1.2 s lag (base 1.5) | The same |
+| 2 MB keyframes, 20 KB deltas, 16 Mbps | 29.4 and 13.9 fps in the verifier's two runs, 22–30 drops a minute, ~1.2 s lag (base 1.5) | The same |
+| bigkf8: 1.5 MB keyframes, 8 KB deltas, 8 Mbps (~85 % load) | Bistable (§3.2): 60 fps, nothing dropped, 1–2 s behind in five runs of six; the 2 s loop at 29.6 fps and ~3 s behind in the sixth (base 13.2–24.5 fps) | The same |
+| A stream the link carries only through a standing queue in the kernel's send buffer (bigkf8's good runs: frame age p50 0.8–1.4 s, p95 1.6–1.9 s) | Every frame arrives, a second or two late | Nothing here: the rule sees only what Sill holds, not the socket's queue (a bound on it is not in this bundle), and the link judge (§6) sees nothing withheld. The device's frame age (the host's `client` lines) shows it |
 | Extreme · Retina on a 6–10 Mbps hotspot | Its deltas alone may exceed the link | Items 2 and 3 |
-| A 12 s dip from 8 to 0.5 Mbps | Lag back to 45 ms about 2 s later than the base (7 s against 5 s) | Nothing here. It delivers up to 512 KB of backlog behind a keyframe where the old rule dropped: a deliberate, bounded exception to "Latency beats quality. Drop frames before queuing them.", remote clients only |
+| A 12 s dip from 8 to 0.5 Mbps | Lag back to 45 ms about 3 s later than the base (7.1–8.2 s against 4.1–5.0 s, three runs each) | Nothing here. It delivers up to 512 KB of backlog behind a keyframe where the old rule dropped: a deliberate, bounded exception to "Latency beats quality. Drop frames before queuing them.", remote clients only |
 | The first seconds of a session on a slow link | The catalog drains ahead of the video; followers of the first keyframe can drop meanwhile | Later: icons after the first keyframe |
 | A stream bigger than the link on average (60 KB deltas on 8 Mbps) | 4.6 fps with ~3.5 s lag (fix-v3's run) | No pacing rule fixes it: a lower quality |
 
@@ -327,7 +356,9 @@ public struct AwayQuality: Codable, Hashable, Sendable {
     /// The Mac counts this connection as away: its Quality and Resolution picks set the away
     /// quality, and `settings.bitrate` and `settings.captureScale` show it.
     public var thisConnectionAway: Bool
-    /// The away quality runs now: every connected device is away.
+    /// Every connected device is away, so the away quality is the target: the host's `awayWanted`,
+    /// never its pipeline's `awayRunning` (a restart may still be taking it, as `settings` can be
+    /// ahead of `stream`). The state stays a function of the target and the snapshot (§5.4).
     public var awayRunning: Bool
 }
 
@@ -335,8 +366,9 @@ public struct AwayQuality: Codable, Hashable, Sendable {
 /// (docs/remote-bundle-plan.md §6). Only while it does not keep up.
 public struct LinkReport: Codable, Hashable, Sendable {
     /// "behind": the link cannot carry this quality (frames withheld in 3 of the last 5 seconds).
-    /// "stalled": nothing taken for 3 s while bytes waited. A string, never an enum: a device reads
-    /// any other value as keeping up.
+    /// "stalled": for 3 s nothing taken while bytes waited, and nothing heard from the device; the
+    /// Mac's card shows it, a device never does (it can only arrive once the path is back). A
+    /// string, never an enum: a device reads any other value as keeping up.
     public var state: String
     /// Frames withheld from this device in the second the state was judged (dropped, or skipped
     /// while it waited for a keyframe).
@@ -398,9 +430,9 @@ the away quality without knowing it.
 
 | Device | Host | Result |
 |---|---|---|
-| Older (PR #13, or #12 once merged), away | This host | Its Quality and Resolution show the away quality and set it. No "Away:" line. It ignores `link`, and keeps its rtt callout; the Mac's card still names the link |
+| Older (PR #13's, or main's up to cea195c), away | This host | Its Quality and Resolution show the away quality and set it. No "Away:" line. It ignores `link`, and keeps its rtt callout; the Mac's card still names the link. Its liveness still counts whole messages: a keyframe that takes more than 6 s to arrive still ends its session (§3.4), which this host's pacing makes rarer and cannot prevent |
 | Older, at home | This host | As today |
-| This device | Older host (PR #13's Sill.app) | No `away`, no `link`: the panel as today (one quality, the rtt callout). The move home works: that host sends a launch ID and a signed kind 18 |
+| This device | Older host (PR #13's Sill.app, or main's up to cea195c) | No `away`, no `link`: the panel as today (one quality, the rtt callout). The move home works: that host sends a launch ID and a signed kind 18 |
 | This device | CLI without `--remote` | `away` nil (no remote door); `link` works; nobody is ever away |
 | `sillclient.py` from ba91136 | This host, default path | Identical output: no `away` (no remote door) and no `link` while the link keeps up, so the JSON is byte for byte today's |
 | Any | Any | Items 1 and 4 change nothing on the wire |
@@ -484,8 +516,9 @@ setting must go" gains one line: an away variant goes in HostConfig's away knobs
   away pairs both, which is what the Mac's menu and Settings show.
 - **`ClientRoute.isAway`** (StreamServer.swift:1003-1019): `.remote` with origin `.vpn` or
   `.internet`.
-- **`routesChanged()`**, called in `onClientConnected` right after `routes[id] = route` and before
-  `sendCatalog`, and in `onClientDisconnected` (:160-194):
+- **`routesChanged(joined:)`**, called in `onClientConnected` right after `routes[id] = route` and
+  before `sendCatalog` (`joined: id`), and in `onClientDisconnected` right after
+  `routes[id] = nil`, before its rate check (`joined: nil`) (:160-194):
 
   ```swift
   if !routes.isEmpty {                                   // nobody connected: keep the flag
@@ -493,15 +526,29 @@ setting must go" gains one line: an away variant goes in HostConfig's away knobs
       if away != awayWanted {
           awayWanted = away
           print(away ? "Away from home: …" : "Home quality again: …")          // §5.9
-          Task { @MainActor in await self.applyPending() }
+          if let joined { flipAwaits(joined) }                   // its first viewport, or 1 s
+          else { Task { @MainActor in await self.applyPending() } }
       }
   }
   status.update { $0.away = awayWanted && !routes.isEmpty }   // publishes (status.onChange)
   ```
 
-- **`applyPending`** (:403-409) runs when `pendingConfig != nil || awayWanted != awayRunning`.
-  `restartNeeded(for:away:)` (:415-424) compares the effective pair of `new` under `away` with the
-  running one; the rate, the encoder speed and the virtual display as today.
+- **One restart for a device that joins or leaves.** A flip on a connect waits for that device's
+  first viewport, which carries its rate and which a device sends as soon as it is connected (a
+  move home at `.ready`, §7.3): `flipAwaits(id)` notes the connection and a 1 s deadline, and the
+  `.viewport` handler from that connection runs `applyPending` once `applyViewportToActiveWindow`
+  has (or leaves it to select's defer while switching). The rate and the quality then go in one
+  restart. Scheduled at once instead, the flip's Task and the viewport's raced: a 120 Hz home
+  device whose viewport landed after `select` took the rate cost a second restart, for the rate
+  alone. With no viewport by the deadline (a test client), `applyPending` runs then. A flip on a
+  disconnect goes at once; placed before the rate check (:191-192), it rides that check's restart
+  when a 120 Hz device left, as the commit takes both.
+- **`applyPending`** (:403-409) runs when `pendingConfig != nil || awayWanted != awayRunning`, and so
+  does **select's defer** (:757), which today comes back to `applyPending` only for
+  `pendingConfig`: a flip that lands mid-switch, after the commit, would otherwise wait for some
+  later restart (a device joining while a pick's capture starts would leave the other quality
+  running). `restartNeeded(for:away:)` (:415-424) compares the effective pair of `new` under `away`
+  with the running one; the rate, the encoder speed and the virtual display as today.
 - **`select`'s commit** (:776-790) adopts when either differs: `adopt(pendingConfig ?? config,
   away: awayWanted)`. It sets `awayRunning` and prints "Settings: …" only when `config` changed,
   as today. So an away flip prints its own line (§5.9), then "Streaming … at 1512×982, 60 fps,
@@ -520,9 +567,16 @@ setting must go" gains one line: an away variant goes in HostConfig's away knobs
 - **Kind 16 per connection.**
   - `settingsState(for id:, answering:)` replaces `settingsState(answering:)` (:1333-1342):
     `settings: target.streamSettings(away: routes[id]?.isAway ?? false)`, `away:` an
-    `AwayQuality` when `remote != nil` (else nil), `link: linkReports[id]` (§6.5).
+    `AwayQuality` when `remote != nil` (else nil), its `awayRunning` from `awayWanted`, and
+    `link: linkReports[id]` (§6.5). Never the pipeline's `awayRunning`: it changes in `adopt`,
+    which publishes only through a snapshot change (HostStatus.swift:204-208), and none comes when
+    nothing streams, so a state built from it could stick at the old value.
   - `publishSettings()` (:1363-1368) sends each connection its own state, only when it differs
-    from `lastPublished[id]`.
+    from `lastPublished[id]`, through a new `StreamServer.send(each:)` that sends every registered
+    connection its own message and skips the rest without a word, as `broadcast` does. Not
+    `send(_:to:)`: for a connection that has just left, it prints "send: no client for …", and a
+    publish can land between the server forgetting a client and `onClientDisconnected` reaching
+    the main actor (the CLI's stdout, H2).
   - `sendCatalog` (:1304-1323) records what it sent in `lastPublished[id]` and only then adds the
     connection to `connections`. Publishes reach only the connections there, so no state goes out
     ahead of a connection's window list and the catalog keeps its order (2, 16, 18). Today's
@@ -623,7 +677,13 @@ Each second, per connected device, the host closes a window of what it did for t
   its first keyframe since it connected or the stream changed do not count: that wait is the
   connect or a restart, not the link;
 - **bytes taken** by its connection (`.contentProcessed`);
-- **bytes waiting** at the second's end.
+- **bytes waiting** at the second's end;
+- **heard:** whether anything came from the device in the second (`lastHeardAt`; it pings every
+  0.25 s).
+
+`.contentProcessed` comes once a message has been taken whole: a 1.6 MB keyframe crossing 2 Mbps
+can show as up to 6 s of nothing taken, then all of it, though the link carried it throughout (the
+investigation's slowkfB). Both measures below allow for that.
 
 From those:
 
@@ -631,15 +691,25 @@ From those:
   frames. So a single drop at home (one frame, then the keyframe asked for at once) never counts,
   and neither does a still window (no frames).
 - **Behind** ("the link can't carry this quality"): 3 of the last 5 seconds were short.
-- **Stalled:** the connection took no byte for 3 seconds in a row while bytes waited.
-- **Fine again:** 5 seconds in a row that were not short, and not stalled. The hysteresis keeps
-  the state from flapping.
+- **Stalled:** for 3 seconds in a row the connection took nothing while bytes waited, and nothing
+  was heard from the device: the path is down both ways, as at the ends of the hotspot sessions.
+  Nothing taken alone is not enough: a slow link carrying one large message, or a still window
+  right after one, takes nothing for seconds while its device keeps pinging. A path down only
+  towards the device reads as behind (its frames are withheld), and the device's liveness ends it
+  (6 s without a byte): the host's drain backstop is checked only as a frame goes out, and none
+  does. A stall ends at the first second in which anything is taken or heard: behind then if 3 of
+  the last 5 seconds were short, else fine.
+- **Fine again** (from behind): 5 seconds in a row that were not short. The hysteresis keeps the
+  state from flapping.
 - **A stream restart** (a settings change, a rate change, a new source) clears the window: the
   state goes back to fine and is judged afresh. Picking a lower quality clears the callout at
   once, and it comes back after 3 s only if the new quality cannot be carried either.
-- **Carried:** the median of the bytes taken in the last 5 seconds that ended with at least 16 KB
-  waiting, needing 3 such seconds. In those seconds the link, not the stream, set the pace, and
-  the kernel's buffer was full, so what the connection took is what the link carried.
+- **Carried:** the bytes taken in the last 5 seconds that ended with at least 16 KB waiting,
+  divided by their number, needing 3 such seconds. In those seconds the link, not the stream, set
+  the pace, and the kernel's buffer was full, so what the connection took is what the link
+  carried. A mean, not a median: messages are taken whole, so a keyframe that crosses in 2 s
+  counts as a second of nothing and a second of all of it, and at Extreme on a hotspot (312 KB
+  deltas, about 750 KB a second carried) the median of such lumpy seconds can read half the link.
 - **Reported** to the coordinator when the state changes, and once more when the carried rate is
   first measured during a spell. Never every second: the device's own stats carry its fps.
 
@@ -666,7 +736,8 @@ kept 60 fps, and one at about 93 % did not (43.8 fps). The encoder's own 4 s key
 #### 6.3 `StreamServer.swift`
 
 - **`Client`** gains the second's counters (`sentThisSecond`, `withheldThisSecond`,
-  `takenThisSecond`) and `judge: LinkJudge`. `pendingBytes` is now kept for every client. Item 1's
+  `takenThisSecond`; `heard` comes from `lastHeardAt`, kept for every client already) and
+  `judge: LinkJudge`. `pendingBytes` is now kept for every client. Item 1's
   keyframe and floor bookkeeping stays remote only, and the home branch never reads
   `pendingBytes`.
 - **Counting:**
@@ -680,7 +751,9 @@ kept 60 fps, and one at about 93 % did not (43.8 fps). The encoder's own 4 s key
   `onClientLinkChanged: ((NWConnection, LinkJudge.Verdict) -> Void)?`. The remote silence
   eviction stays in the same tick, remote only, unchanged.
 - **`resetForNewStream`** (:760-768) also resets every judge. A judge that was not fine reports
-  fine.
+  fine, marked as a reset: the coordinator clears the report without a line (nothing was measured;
+  "keeping up again" at every restart would be untrue, and the pick that lowered the quality
+  restarts the stream).
 - **No Stats key, no print.** The lines are the coordinator's (§6.8).
 
 #### 6.4 `Sources/SillHost/LinkJudge.swift` (new; pure: Foundation only; checked with swiftc)
@@ -688,14 +761,14 @@ kept 60 fps, and one at about 93 % did not (43.8 fps). The encoder's own 4 s key
 ```swift
 struct LinkJudge {
     enum State: Equatable { case fine, behind, stalled }
-    struct Second: Equatable { var sent: Int; var withheld: Int; var taken: Int; var waiting: Int }
-    struct Verdict: Equatable { var state: State; var withheld: Int; var offered: Int; var carriedKbps: Int?; var waiting: Int }
+    struct Second: Equatable { var sent: Int; var withheld: Int; var taken: Int; var waiting: Int; var heard: Bool }
+    struct Verdict: Equatable { var state: State; var withheld: Int; var offered: Int; var carriedKbps: Int?; var waiting: Int; var reset: Bool }
     static let window = 5, shortToBehind = 3, cleanToFine = 5, stallSeconds = 3
     static let measureWaiting = 16 * 1024, headroom = 0.7
     static func isShort(_ s: Second) -> Bool            // withheld ≥ 3 and 10 × withheld ≥ sent + withheld
     private(set) var state = State.fine
     mutating func close(_ s: Second) -> Verdict?        // non-nil when reported (§6.1)
-    mutating func reset() -> Verdict?                    // fine, when it was not
+    mutating func reset() -> Verdict?                    // fine, when it was not; `reset` true
     var carriedKbps: Int? { get }
     static func suggestion(carriedKbps: Int?, bitrate: Int, fps: Int, captureScale: Double) -> (bitrate: Int, captureScale: Double?)?
 }
@@ -730,12 +803,16 @@ word, as today. `DebugHooks` gains card samples `link-behind` and `link-stalled`
 
 #### 6.7 The device
 
+**Stalled is the Mac's alone.** A report of it queues behind the backlog it describes, so it can
+only reach the device once the path is back, when it is no longer true, and the next report
+follows within a second. The device shows nothing for it (no callout, no line); its own liveness
+and frame age speak for a dead path.
+
 **The callout** (`HostSettingsPanel.middle`, :174-258, where the slow-link callout sits). While
-`client.settings.host?.link` says behind or stalled, one callout, first match wins:
+`client.settings.host?.link` says behind, one callout, first match wins:
 
 | Situation | Callout | Button |
 |---|---|---|
-| Stalled | "Nothing is getting through from ‹Mac› right now." | none |
 | Behind, away while a device at home is connected (`away.thisConnectionAway && !away.awayRunning`) | "The link can’t carry ‹Pro›, which ‹Mac› keeps while a device at home is connected." | none |
 | Behind, a suggestion | "The link can’t carry ‹Pro›. ‹Low · Standard› is recommended." | "Use ‹Low · Standard›" |
 | Behind, nothing lower | "The link to ‹Mac› is too slow for a steady picture, even at Low." | none |
@@ -746,7 +823,7 @@ word, as today. `DebugHooks` gains card samples `link-behind` and `link-stalled`
   suggestedBitrate, captureScale: suggestedCaptureScale))`. The ledger sends only what differs
   (rule 2), the Mac restarts once, and from away it changes the away quality only. At least 44 pt
   tall, like the panel's rows; spoken "Use Low, Standard".
-- **The old callout** (the rtt test, :183-187, `StreamClient.isSlowLink`) shows only while the
+- **The old callout** (the rtt test, :183-187, `client.slowLink`) shows only while the
   Mac sent no `away`: an older host. A host with a remote door judges the link itself, and a high
   round trip with nothing withheld is no reason to lower the quality.
 
@@ -754,7 +831,7 @@ word, as today. `DebugHooks` gains card samples `link-behind` and `link-stalled`
 - **Where:** a capsule at the top centre of the stream panel, 8 pt inside its top edge, at most the
   panel's width minus 32 pt. Footnote text on `Palette.bar` at 0.92 opacity; two lines at most at
   xxLarge text.
-- **When:** from the moment a report that is not fine arrives, while the Settings panel, the
+- **When:** from the moment a report of behind arrives, while the Settings panel, the
   drawer and the pairing overlay are closed. It goes 2 s after the report clears, so a quick
   flip back does not flicker.
 - **Words:** §8.
@@ -763,8 +840,8 @@ word, as today. `DebugHooks` gains card samples `link-behind` and `link-stalled`
   every change.
 - **Reduce Motion:** a fade either way.
 
-**The harness** gains `-SillSettingsCase linkbehind`, `linkmixed`, `linklow` and `linkstalled`,
-and `-SillLinkLine behind|stalled` for the stream screen with the line up.
+**The harness** gains `-SillSettingsCase linkbehind`, `linkmixed`, `linklow` and `linkstalled`
+(which must show nothing), and `-SillLinkLine behind` for the stream screen with the line up.
 
 #### 6.8 Log lines (exact; on reports only)
 
@@ -772,11 +849,12 @@ and `-SillLinkLine behind|stalled` for the stream screen with the line up.
 Link to iPad (iPad14,1): cannot carry Pro (withheld 52 of 58 frames in the last second; the link carried about 6.4 Mbps); suggesting Low · Standard.
 Link to iPad (iPad14,1): cannot carry Extreme (withheld 57 of 60 frames in the last second); suggesting Ultra.
 Link to iPad (iPad14,1): cannot carry Low (withheld 20 of 45 frames in the last second; the link carried about 2.1 Mbps); nothing lower to suggest.
-Link to iPad (iPad14,1): nothing has got through for 3 s (1.2 MB waiting).
+Link to iPad (iPad14,1): nothing has got through for 3 s, and nothing has come from it (1.2 MB waiting).
 Link to iPad (iPad14,1): keeping up again.
 ```
 
-A report that only adds the carried rate prints nothing. The device's DEBUG console prints
+A report that only adds the carried rate prints nothing, and neither does a reset at a restart
+(§6.3): "keeping up again" is a judged recovery only. The device's DEBUG console prints
 "link: behind (cannot carry Pro; suggesting Low · Standard)" and "link: keeping up".
 
 #### 6.9 Automatic step-down: not in this bundle
@@ -846,8 +924,11 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
 
   All are cleared in `tearDown`, `abandonMove` and at a new session.
 - **`moveHomeIfListed()`,** modelled on `moveToNetworkIfListed` (:886-901). It is called from
-  `discoveryChanged` (:558-563), at the remote session's first window list (`remoteSessionReady`,
-  StreamClient+Remote.swift:326-350) and after a move ends. It needs:
+  `discoveryChanged` (:558-563), at the session's first window list beside
+  `moveToNetworkIfListed()` and `followBestPath()`, once `sessionListed` and `sessionHost` are set
+  (not from `remoteSessionReady`, StreamClient+Remote.swift:326-350, which that handler calls
+  before setting them: its `sessionListed` guard would fail, and a Mac already listed would wait
+  for the next discovery change), and after a move ends. It needs:
   - `connected`, `session.route.isRemote`, `session.why != .connectRemotely`, `sessionListed`;
   - no move under way, and a connection;
   - `let id = session.macID`, and a row `macs.first { $0.route == .network && $0.macID == id }`.
@@ -865,10 +946,14 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
   SessionLink. Both are main-thread state (UIScreen, `lastViewport`), so the move captures the
   message when it starts, on the main thread, and the `.ready` handler on `sill.net` only sends it.
   - A viewport cannot reorder input, and the Mac keeps a rate per connection.
-  - A ProMotion device's 120 fps then usually reaches the Mac before its quality restart takes the
-    rate (§7.4).
-  - The same viewport goes out again through the link after the fence, as PR #12's `finishMove`
-    does; the Mac finds it unchanged.
+  - It is the new connection's first viewport, which the Mac's flip waits for (§5.4), so a
+    ProMotion device's 120 fps and the home quality go in one restart (§7.4).
+  - `finishMove`'s re-send (PR #12's `if let v = lastViewport { sendViewport(v) }`) sends this
+    captured viewport for `.fromRemote`, not `lastViewport`, which still carries the away
+    session's 60 fps cap: re-sent after the fence, it would take the new connection's rate from
+    120 to 60, and StreamScreen's re-send on `remoteRoute` back to 120, two more restarts. Sent
+    through `sendViewport`, the captured one becomes `lastViewport`, and the Mac finds it
+    unchanged.
 - **The probe** (`probeMove`/`moveProbed`, PR #12) reads on to kind 18 for `.fromRemote`. The
   catalog's order is 2, 16, 18, so this costs a millisecond. The session is handed over only when
   all three hold:
@@ -878,8 +963,11 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
   - its `issuedAt` ≥ `remoteInfoIssuedAt`.
 
   The Mac signs kind 18 afresh for every catalog (RemoteAccess.swift:537-542). A signature at
-  least as new as the one this session received proves the home door's host holds the Mac's key
-  now. A replayed TXT tag and a replayed kind 18 are not enough to take the session over (§10).
+  least as new as the one this session received was made by the Mac since this session began, so
+  a TXT tag and a kind 18 captured earlier and replayed are not enough to take the session over
+  (§10). It does not prove the home door is the Mac: anyone who can reach the Mac's home door
+  (anyone on its network) can fetch a fresh kind 18 and the launch ID there and relay them, the
+  plaintext home door's exposure until M5, as for every reconnect over it today.
 
   A mismatch: "remote: move home refused: …" and `refusedHomeListing = savedSightings.since[id]`.
 - **`finishMove(c, kind: .fromRemote, kept:)`** (PR #12):
@@ -898,9 +986,19 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
   `moveHomeIfListed()`.
 - **The remote connection dying while the move home is under way** (the hotspot dropped as the
   home Wi‑Fi joined): the move carries the session, as PR #12's `rescue` lets a move to Wi‑Fi
-  under way carry a dead cable session. `sessionDead`, what the device sends is held
-  (`holdSends`), and the hand-over is an `adopt` without a fence, since nothing sent on a dead
-  connection comes back. No connect screen; the session ends only if the move does not complete.
+  under way carry a dead cable session. `rescue` today returns false for any remote session
+  (pathPlan never moves one), so a `.fromRemote` move under way is checked first: `sessionDead`,
+  what the device sends is held from that moment (`holdSends(c)`: unlike a move to Wi‑Fi, this
+  move held nothing when it started), and the hand-over is an `adopt` without a fence, since
+  nothing sent on a dead connection comes back. No connect screen; the session ends only if the
+  move does not complete.
+  - **Settings picks are not held.** While that hold stands, `changeSettings` sends nothing (the
+    control stays on the Mac's value). A pick then is made against the away state the panel
+    shows; held, it would go out on the home connection, and the Mac, which counts that one at
+    home, would set the home quality and Sill.app would save it. The fenced hand-over needs no
+    such rule: `finishMove` resets the ledger in the same main-thread turn as `handOver`, so a pick
+    before it goes out on the remote connection (the fence has the Mac read it there, as away),
+    and one after it waits for the home connection's state.
 - **`receiveMacInfo`** (StreamClient+Remote.swift:521-545) records `remoteInfoIssuedAt` for a
   verified kind 18 on a remote session.
 - **`StreamScreen`** also re-sends the viewport on a change of `client.remoteRoute`, so a session
@@ -910,10 +1008,8 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
 
 1. "Client connected: fe80::…%en0.51447" and its catalog, while the remote session streams on.
 2. The new connection registers, so `routesChanged` finds a device at home: "Home quality again:
-   …", and one restart at the home quality.
-   - The home viewport is already in, or lands during the restart's capture stop, before
-     `select` takes the rate.
-   - A viewport later than that costs a second restart, for the rate only. S4 records which.
+   …". The flip waits for that connection's first viewport, the home one the move sent at
+   `.ready` (§5.4): one restart, at the home quality and the device's home rate.
 3. The fence's pong on the remote connection, then the device's held messages on the home one.
 4. "Client left: 100.x.y.z:port" half a second later. Nothing else changes: a home device is
    still connected.
@@ -967,7 +1063,6 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 | Callouts and the button | §6.7 |
 | Stream screen line, behind with a suggestion | "The link can’t keep up with ‹Pro›. Lower it in Settings." |
 | Stream screen line, any other behind | "The link to ‹Mac› can’t keep up." |
-| Stream screen line, stalled | "Nothing is getting through from ‹Mac›." |
 | VoiceOver, once per spell | The line's text |
 
 ---
@@ -984,8 +1079,8 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 | Device read piece | at most 256 KB |
 | Device liveness | no byte for max(6 s, 4 × the worst rtt of the last second that measured one), now true per byte; remote paths also not viable for more than 3 s (unchanged) |
 | A short second | ≥ 3 frames withheld and ≥ a tenth of that second's frames |
-| Behind / fine again / stalled | 3 of the last 5 seconds short / 5 seconds in a row not short / 3 seconds with bytes waiting and none taken |
-| Carried rate | median of the bytes taken in the last 5 seconds that ended with ≥ 16 KB waiting; needs 3 |
+| Behind / fine again / stalled | 3 of the last 5 seconds short / 5 seconds in a row not short / 3 seconds with bytes waiting, none taken and nothing heard from the device |
+| Carried rate | the bytes taken in the last 5 seconds that ended with ≥ 16 KB waiting, over their number (a mean); needs 3 |
 | Suggestion headroom | 70 % of the carried rate, at the stream's fps |
 | Stream screen line | shown on arrival; goes 2 s after the report clears |
 | Move home: listed | 2 s without a break (`moveAfter`) |
@@ -1014,10 +1109,17 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 | Link: the connect burst, a restart | Frames before the first keyframe do not count; a restart clears the judge |
 | Link: home Wi‑Fi far from the router at Extreme | Behind at home too; the button lowers the home quality (saved), as a menu click would |
 | Link: two away devices, one on a poor link | Its callout; the button lowers the shared away quality for both (one stream). The panel already says "Applies to every device streaming from ‹Mac›" |
-| Link: stalled | The card says so at once. The device's line only if the report gets through, and its liveness decides the session |
-| Link: a report queued behind the backlog it describes | Behind: it waits behind at most what §3 lets queue (a keyframe and up to 512 KB after it). Stalled: it arrives when the path recovers, and the next report follows |
+| Link: stalled | The card says so. The device shows nothing (§6.7), and its liveness decides the session |
+| Link: a report queued behind the backlog it describes | Behind: it waits behind at most what §3 lets queue (a keyframe and up to 512 KB after it). Stalled: it arrives when the path recovers, the device ignores it, and the next report follows within a second |
+| Link: a slow link carrying one large message, or a still window right after one | Not stalled: its device keeps pinging (§6.1). The carried rate counts the message in the second it was taken whole, over the seconds it took |
+| Link: the path down only towards the device | Behind, not stalled: its pings still come. The device's liveness ends the session (6 s without a byte); the host's drain backstop is checked only as a frame goes out, and none does |
+| Link: one drop on a remote device beside a home device | It waits for a keyframe up to 4 s (the spacing beside a home device), which can read as 3 short seconds: behind for about 8 s though the link recovered at once. Accepted: its picture did stop |
+| Link: a stream carried whole but late (bigkf8's good runs, §3.7) | Fine: nothing is withheld. The device's frame age shows the lag |
 | Move home: another Mac of the same name on the network | Rows match by Mac ID (the tag), never by name |
-| Move home: an impostor replays the Mac's TXT tag | Its connection must show this launch's ID and a kind 18 signed by the pinned key at least as new as this session's, which it cannot make. A live relay between the two networks remains possible: the home door is plaintext until M5, as it is for every reconnect over it today |
+| Move home: an impostor replays the Mac's TXT tag | Its connection must show this launch's ID and a kind 18 signed by the pinned key at least as new as this session's, which only the Mac makes: a capture from before this session is refused. Anyone who can reach the Mac's home door can fetch both there and relay them: the home door is plaintext until M5, as it is for every reconnect over it today |
+| Move home at the edge of the home Wi‑Fi | A home connection that dies soon after a move home reconnects remotely (the network no longer lists the Mac) and moves home again once it is listed 2 s: each round costs the Mac two restarts (home, then away). Not damped: the back-off counts moves that did not complete within one session, and each round is a new session. P10 notes how often it happens |
+| A home device joins while only away devices stream | One restart, at its first viewport: its rate and the home quality together (§5.4); 1 s after it connected when no viewport comes (a test client) |
+| A pick on the panel while the move home carries a dead remote session | Not sent (§7.3): it would set the home quality from an away panel |
 | Move home: Connect Remotely | Never moves |
 | Move home: the Mac seen only over AWDL | Never moves (Direct rows do not count) |
 | Move home: the home connection admitted, then the move fails | Two restarts (home, then away again); the next try waits 10 s |
@@ -1037,11 +1139,17 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
   `SILL_TEST_REMOTE_DIR`; `defaults delete SillMenuBar` afterwards.
 - **The encoder-free harness** (`Scripts/pacing/`) for every pacing and link-judging gate.
 - **Synthetic hosts run with `SILL_TEST_SOFTWARE_ENCODER=1`.** If the pointer plan has not landed
-  the hook, step 1 adds it exactly as pointer-visibility-plan.md §4.10 defines it: a synthetic
-  host only; it skips `EncoderProbe` and starts on the software encoder, with the line "Test
-  encoder: software only (SILL_TEST_SOFTWARE_ENCODER); the hardware encoder is never probed.".
-  On the software encoder a synthetic host runs at points (CLAUDE.md), so Retina ↔ Standard shows
-  in the logs as bitrate only.
+  the hook, step 1 adds it as pointer-visibility-plan.md §4.10 defines it: a synthetic host only;
+  it skips `EncoderProbe` and starts on the software encoder, with the line "Test encoder:
+  software only (SILL_TEST_SOFTWARE_ENCODER); the hardware encoder is never probed.". **It also
+  stops PR #11's re-check,** which §4.10 predates: since b50e224 a host on the software encoder
+  tests the hardware every 30 s while a device is connected (`startRecheck`, a short
+  `EncoderProbe.throughput` at the stream's size) and goes back to it once it keeps up, so the
+  hook as §4.10 words it would reach the hardware encoder half a minute into H7–H13 and S2–S5,
+  and could move the test stream onto it. `startRecheck` returns at once under the hook; H0
+  checks it. On the software encoder a synthetic host runs at points and at most 60 fps
+  (CLAUDE.md), so Retina ↔ Standard shows in the logs as bitrate only, and no viewport's rate
+  restarts it.
 - **H2's parity runs use the hardware encoder,** as every earlier parity run did. Run them only
   while `~/Library/Logs/Sill/Sill.log`, read-only, has no `client ` line in the last minute;
   otherwise wait and say so in the results.
@@ -1059,7 +1167,12 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
   - `main.swift`: the fake-encoder driver. Keyframes and deltas of chosen sizes, a keyframe on
     request and every `--gop` seconds, the catalog (`--icons`), thumbnails every 6 s, the remote
     door on RemoteTLS's server parameters accepting any key, or `--plain` for the home door. With
-    item 3 it prints each link verdict as "Link: behind (withheld 52 of 58; carried 7.9 Mbps)".
+    item 3 it prints each link verdict as "Link: behind (withheld 52 of 58; carried 7.9 Mbps;
+    suggesting Low)", the suggestion from `LinkJudge.suggestion` for `--bitrate B` (default Pro)
+    at the run's fps, and `--still-at T:D` sends no frame for D seconds from T (a still window).
+    Those lines compile only under `#if LINK_JUDGE`, which `build.sh` defines for HarnessNew
+    alone: one main.swift serves both packages, and the base's StreamServer has no
+    `onClientLinkChanged`.
   - `build.sh BASE`: assembles two throwaway SwiftPM packages under `$T`: HarnessBase from
     `git show BASE:` of StreamServer.swift and its neighbours (ClientLink, HostLog,
     InterfaceSnapshot, OriginPolicy, RefusalSummary, Stats, and LinkJudge once it exists), and
@@ -1067,7 +1180,8 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
     the repository, so nothing drifts.
   - `device.py` (the device's reader, pings, stats and liveness; `--liveness-bytes` for the per-byte
     rule), `bottleneck.py` (a rate, a delay and a finite bottleneck queue; `--rate-at T:R`, where a
-    rate of 0 is a blackhole), `run.py`, `summarize.py` and `matrix.sh`.
+    rate of 0 stops the downlink only, and `--blackhole-at T`, both ways from T, as sillrelay.py's
+    `--blackhole-after`), `run.py`, `summarize.py` and `matrix.sh`.
   - The device's key and certificate are made on first use with `/usr/bin/openssl` under `$T`,
     never committed.
 - **`Scripts/sillclient.py`:** `describe` prints `away=` and `link=` when present; `--expect` learns
@@ -1078,19 +1192,19 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 
 | # | Check | Pass when |
 |---|---|---|
-| H0 | **Preflight** (no commit). Record the base; `git archive` it to `$SP/base` and build it. `Scripts/pacing/build.sh <base>`. H2's baselines. The ledger check's count (90 with 5,000 runs) and the policy checks' counts, PR #12's included. Once the software-encoder hook exists (step 1, or the pointer plan): the synthetic host's keyframe size and rate on it (`sillclient.py PORT 10 desktop`, its LINK line), from which S2 and H12 set their relay rates | Files and numbers recorded |
+| H0 | **Preflight** (no commit). Record the base; `git archive` it to `$SP/base` and build it. `Scripts/pacing/build.sh <base>`. H2's baselines. The ledger check's count (90 with 5,000 runs) and the policy checks' counts, PR #12's included. Once the software-encoder hook exists (step 1, or the pointer plan): the synthetic host's keyframe size and rate on it (`sillclient.py PORT 10 desktop`, its LINK line), from which S2 and H12 set their relay rates; and that the hook keeps the hardware encoder out: `startRecheck` returns under it (read the code), and a synthetic host with it and `sillclient.py PORT 75 desktop` stays on the software encoder throughout | Files and numbers recorded; no return to the hardware encoder |
 | H1 | **Builds.** `swift build -c release`; iOS Debug and Release for the simulator | Only the known warnings (CaptureProbe; the old `StreamClient` capture warning) |
 | H2 | **The CLI byte for byte.** Base and new `SillHost --synthetic`: idle 35 s, and with `sillclient.py PORT 5 desktop`; both again with `--direct-wireless`; digits masked, sorted. After steps 1, 5 and 6 | Identical, the client's kind 16 lines and "settings messages" count included |
-| H3 | **The pacing matrix,** base and new, each case's arguments as run by the investigation (host `--` relay `--` device): real24 `--kf 1500000 --delta 30000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect`; kf25m32 (2.5 MB, 20 KB, 32 Mbps); fastbig (1.5 MB, 150 KB, 100 Mbps, 20 ms, a 1 MB queue); bigkf8 (1.5 MB, 8 KB, 8 Mbps); low (150 KB, 8 KB, 8 Mbps); switch (sizes change at 30 s to Low's); dip (8 → 0.5 Mbps from 20 s to 32 s, a 1 MB queue, 60 s); over8 (60 KB deltas on 8 Mbps); slowkfB (1.6 MB on 2 Mbps with `--liveness-bytes`); home (`DOOR=Home`, `--plain`). real24, kf25m32 and bigkf8 three times each | real24 ≥ 55 fps, 0 `net.dropped`, about 15 keyframes a minute, 3 of 3 (verified: 60.1 fps against the base's 39.5); kf25m32 ≥ 55 fps (60.1 against 1.4); fastbig 60 fps and 0 drops (base 1.7 a minute); bigkf8 ≥ 55 fps and 0 drops; slowkfB ≥ 55 fps after its first keyframe. These last two were measured on fix-v3 only, never on the proposed file, so they are first proven here. low, switch and home equal the base within noise. dip: no loss, no eviction, the lag back to 45 ms within 8 s of the dip's end (record it). over8 ≥ the base (record it) |
+| H3 | **The pacing matrix,** base and new, each case's arguments as run by the investigation (host `--` relay `--` device): real24 `--kf 1500000 --delta 30000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect`; kf25m32 (2.5 MB, 20 KB, 32 Mbps); fastbig (1.5 MB, 150 KB, 100 Mbps, 20 ms, a 1 MB queue); bigkf8 (1.5 MB, 8 KB, 8 Mbps); low (150 KB, 8 KB, 8 Mbps); switch (sizes change at 30 s to Low's); dip (8 → 0.5 Mbps from 20 s to 32 s, a 1 MB queue, 60 s); over8 (60 KB deltas on 8 Mbps); slowkfB (1.6 MB on 2 Mbps with `--liveness-bytes`); home (`DOOR=Home`, `--plain`); ext120 (`--kf 2000000 --delta 312500 --fps 120 -- --rate-mbps 600 --delay-ms 6 --queue-bytes 262144`, 25 s). real24, kf25m32 and bigkf8 three times each | real24 ≥ 55 fps, 0 `net.dropped`, about 15 keyframes a minute, 3 of 3 (on the proposed file 60.1, 59.9 and 59.9 fps, against the base's 39.5); kf25m32 ≥ 55 fps (60.1 and 60.0 against 1.4); fastbig 60 fps and 0 drops (base 1.7 a minute); ext120 120 fps, 0 `net.dropped` and 0 `net.waitKey` after the first keyframe (measured: 120.0 fps, the base 8.6 drops a minute); slowkfB ≥ 55 fps after its first keyframe and no liveness loss (measured on the proposed file: 60.1 fps from 12 s, 0 drops). bigkf8 is bistable (§3.2), so it is recorded, not gated beyond each run ≥ the base's fps (on the proposed file two of three at 60 fps with 0 drops, the third in the 2 s loop at 29.6 fps). low, switch and home equal the base within noise. dip: no loss, no eviction, the lag back to 45 ms within 10 s of the dip's end (7.1–8.2 s measured; record it). over8 ≥ the base (record it) |
 | H4 | **The remote door's slow-link gates again** (remote plan H14, H15): `sillrelay.py --rate-mbps 2 --delay-ms 150` for 90 s on a paired session; `--blackhole-after 5` | No eviction; frames in every 5 s window; keyframes at the encoder's cadence; "Client silent for … dropping" at about 13 s after a blackhole |
 | H5 | **MessageReader** (swiftc, against a local NWListener): 2,000 random messages of 0 B to 3 MB written in random chunks of 1 B to 300 KB with random pauses; a 3 MB frame at 1 Mbps; EOF half-way through a payload; a header announcing 40 MB; `stillReads` turning false mid-stream | Every message delivered byte for byte and in order; `onBytes` at least once per 256 KB and at most 0.3 s apart during the slow frame; EOF gives `.closed` with nothing delivered; `.tooBig` with nothing read after the header; no receive after `stillReads` is false. At least 5 mutants caught: the stamp only at the message's end, `minimumIncompleteLength` = remaining, no piece cap, EOF mid-message ignored, no cap check |
 | H6 | **The wire** (swiftc): `AwayQuality` and `LinkReport` JSON round trips; `{}` fails to decode them, and a state without them decodes; the base's StreamProtocol decodes the new kind 16 and the new decodes the base's | All pass |
 | H7 | **Away.** `SILL_TEST_ORIGIN=vpn SILL_TEST_REMOTE_DIR=$T/h SillHost --synthetic --remote`; `sillclient.py --tls --pair-code=… --identity=$T/a`, then a session with `--set=bitrate=15000000@4` | "Away from home: …" once; "Streaming … 4 Mbps"; kind 16: `thisConnectionAway` 1, `awayRunning` 1, bitrate 4000000, scale 1, `homeBitrate` 15000000; at 4 s "Settings from sillclient: away bitrate 4 → 15 Mbps per 60 fps" and one restart at 15 Mbps; `homeBitrate` still 15000000 |
-| H8 | **Mixed.** H7's host; a home client at 5 s from the Mac's own `fe80::…%en0` (`--host=`, admitted as this network), leaving at 12 s | "Home quality again: …" and one restart at 5 s (the home quality); the remote client's kind 16 `awayRunning` 0 while the home client stays; at 12 s "Away from home: …" and one restart; exactly one "Streaming" line per flip |
+| H8 | **Mixed.** H7's host; a home client at 5 s from the Mac's own `fe80::…%en0` (`--host=`, admitted as this network) with `--fps=60` (its viewport right after its select), leaving at 12 s; again without `--fps` | "Home quality again: …" at 5 s and one restart, after the home client's viewport, or 1 s after it connected without one (§5.4); the remote client's kind 16 `awayRunning` 0 while the home client stays; at 12 s "Away from home: …" and one restart; exactly one "Streaming" line per flip |
 | H9 | **The app.** Bare `SillMenuBar --synthetic -remoteAccess 1` (a launch-argument override, never saved) with `SILL_TEST_ORIGIN=vpn`, `SILL_TEST_REMOTE_DIR=$T/app` and `-SillPairAfter 1`; `sillclient.py --tls --pair-url=` from `$T/app/pairing.url`, then a session that changes the bitrate; relaunch; `-SillSetAfter '3 awayBitrate=8000000,awayCaptureScale=2'` | `defaults read SillMenuBar awayBitrate` 15000000 and `bitrate` absent; after the relaunch the away session starts at 15 Mbps; the SetAfter gives one "Settings: away bitrate 15 → 8 Mbps per 60 fps, away points → Retina" and one restart; then `defaults delete SillMenuBar` |
-| H10 | **LinkJudge** (swiftc, at least 30 checks): behind at exactly 3 short of 5 (2 stays fine); fine after 5 clean in a row (4 stays behind); still seconds count as clean; stalled after 3 seconds with bytes waiting and none taken (2 not); stalled → behind → fine; reset reports fine; `isShort` at 2 of 60 (no), 3 of 60 (no: 5 %), 6 of 60 (yes), 3 of 20 (yes); the carried median needs 3 measured seconds; the suggestion: the highest preset ≤ 70 % at 60 and at 120 fps, Low when none fits, one step down without a measure, Standard added only with Low from Retina, the same bitrate at Standard from Low · Retina and from a hand-set 2 Mbps at Retina, nil at Low · Standard, never above the running bitrate | All pass; at least 8 mutants caught (2 of 5, 4 clean, still seconds as short, `>` for `≥`, 0.8 for 0.7, fps ignored, Standard never suggested, the first-keyframe wait counted) |
-| H11 | **The link in the harness** (encoder-free, the new build): real24, over8, dip, a blackhole at 20 s (`--rate-at 20:0`), home | real24 never behind; over8 behind within 5 s of the stream start, carried within 20 % of 8 Mbps and a Low suggestion; dip behind within 5 s of its start and fine within 10 s of its end; blackhole stalled within 4 s; home never behind |
-| H12 | **The link end to end.** H7's host through `sillrelay.py --rate-mbps R` (R half the synthetic stream's rate, from H0); `--set` of the suggestion 20 s in | Within 6 s a kind 16 with `link.state` "behind" and a suggestion, and "Link to sillclient: cannot carry …"; after the `--set`, one restart and a kind 16 without `link` |
+| H10 | **LinkJudge** (swiftc, at least 34 checks): behind at exactly 3 short of 5 (2 stays fine); fine after 5 clean in a row (4 stays behind); still seconds count as clean; stalled after 3 seconds with bytes waiting, none taken and nothing heard (2 not; 3 with the device heard not: a keyframe crossing a slow link); a stall ends at the first second with bytes taken or the device heard, to behind when 3 of the last 5 were short, else fine; stalled → behind → fine; reset reports fine, marked as a reset; `isShort` at 2 of 60 (no), 3 of 60 (no: 5 %), 6 of 60 (yes), 3 of 20 (yes); the carried rate needs 3 measured seconds and is their mean (0, 0 and 2.25 MB read 6 Mbps, where a median would read 0); the suggestion: the highest preset ≤ 70 % at 60 and at 120 fps, Low when none fits, one step down without a measure, Standard added only with Low from Retina, the same bitrate at Standard from Low · Retina and from a hand-set 2 Mbps at Retina, nil at Low · Standard, never above the running bitrate | All pass; at least 10 mutants caught (2 of 5, 4 clean, still seconds as short, `>` for `≥`, 0.8 for 0.7, fps ignored, Standard never suggested, the first-keyframe wait counted, stalled without the silence, the median for the mean) |
+| H11 | **The link in the harness** (encoder-free, the new build): real24, over8 (`--bitrate 40000000`), dip, slowkfB, still (slowkfB's sizes and `--liveness-bytes`, with `--still-at 31:10`: the frames stop while its second keyframe is still crossing), a blackhole both ways at 20 s (`--blackhole-at 20`), the downlink alone at 0 from 20 s (`--rate-at 20:0`), home | real24 never behind; over8 behind within 5 s of the stream start, carried within 20 % of 8 Mbps and a Low suggestion; dip behind within 5 s of its start and fine within 10 s of its end; slowkfB and still never stalled or behind after the first keyframe; the blackhole stalled within 4 s; the downlink alone behind within 5 s and never stalled; home never behind |
+| H12 | **The link end to end.** H7's host through `sillrelay.py --rate-mbps R` (R half the synthetic stream's rate, from H0), the away quality first raised to Balanced (`--set=bitrate=15000000@2`: at Low · Standard there is nothing lower to suggest); `--set` of the suggestion 20 s in | Within 6 s of the first `--set`'s restart a kind 16 with `link.state` "behind" and a suggestion below Balanced, and "Link to sillclient: cannot carry Balanced …"; after the second `--set`, one restart and a kind 16 without `link`, with no "keeping up again" line (a reset). The synthetic pattern's size does not follow the quality (under 1 Mbps whatever the target, CLAUDE.md), so behind can come back 3 s or more later: expected, recorded |
 | H13 | **Per-connection states.** H8's two clients, and the one-client runs of H2 | Each gets its own pair; with one client, the kind 16 lines and count equal the base's |
 | H14 | **The ledger check and the policy checks,** unchanged and PR #12's | As at H0 |
 | H15 | **`moveHome`** (swiftc, with the policy check): 1.9 s no, 2.0 s yes; a blink restarts the count; retries at 10, 20, 40, 60, 60 s after 1–5 failures; a refused listing never; a new listing afresh | All pass; at least 5 mutants caught (no refusal, `upWait(0)`, a blink ignored, `>` for `≥`, failures ignored) |
@@ -1101,10 +1215,10 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 
 | # | Check |
 |---|---|
-| S1 | **The photo matrix.** `-SillSettingsCase away`, `awaymixed`, `awayhome`, `linkbehind`, `linkmixed`, `linklow` and `linkstalled`, and `-SillLinkLine behind` and `stalled`, at 1000x710, 710x1000, 500x710 and 710x500, and at `content_size accessibility-extra-large` (reset afterwards). Check: the header's lines never truncate; the callout's button is at least 44 pt; the line never covers the bar and nothing crosses y = 500 at 710x1000. Send Noah the sheet |
-| S2 | **The reader, live.** The simulator by address (`-SillConnect`) through `sillrelay.py --rate-mbps R`, R such that the first keyframe takes at least 8 s (H0). The base build's console shows "connection silent for 6 s: lost" within 30 s; the new build's never in 60 s, its HUD counts frames, and the host evicts nobody |
-| S3 | **The callout, live.** Pair by the typed path through a relay (`-SillPairCode … -SillPairAddress 127.0.0.1:RELAY`, the remote plan's S8) to H7's host (away); the relay at H12's rate. The callout appears within about 6 s; a headless tap on its button gives "Settings from … away bitrate …" on the host and one restart; the callout and the line go; the console shows the announcement once |
-| S4 | **The move home, live.** Pair with H7's host (`SILL_TEST_ORIGIN=vpn`: the remote session is away), then `-SillDialSaved 1 -SillMoveHomeTest to:[fe80::…%en0]:HOMEPORT -SillScreenFPS 120`. The host logs "Client connected: fe80::…", "Home quality again: …", then "Client left: 127.0.0.1:…"; one "Streaming" line for the flip (record whether the rate needed a second); the panel's route line gone and the readout ending in "Wi‑Fi"; "remote: the session moved home". Variants: `refused` (tries at about 2, 12, 32 and 72 s; the session stays remote); `other:PORT` (refused once, not again while listed) |
+| S1 | **The photo matrix.** `-SillSettingsCase away`, `awaymixed`, `awayhome`, `linkbehind`, `linkmixed`, `linklow` and `linkstalled` (no callout may show), and `-SillLinkLine behind`, at 1000x710, 710x1000, 500x710 and 710x500, and at `content_size accessibility-extra-large` (reset afterwards). Check: the header's lines never truncate; the callout's button is at least 44 pt; the line never covers the bar and nothing crosses y = 500 at 710x1000. Send Noah the sheet |
+| S2 | **The reader, live.** A remote session through `sillrelay.py --rate-mbps R`, R such that the first keyframe takes at least 8 s (H0): pair by the typed path through the relay as S3 does. Not `-SillConnect`: it reaches the home door, whose drain rule (4 s, after an 8 s grace) evicts a device whose keyframe takes 8 s, whichever reader it runs. The base build's console shows "connection silent for 6 s: lost" within 30 s; the new build's never in 60 s, its HUD counts frames, and the host evicts nobody |
+| S3 | **The callout, live.** Pair by the typed path through a relay (`-SillPairCode … -SillPairAddress 127.0.0.1:RELAY`, the remote plan's S8) to H7's host (away); the relay at H12's rate. The away quality first raised to Balanced from the panel (at Low · Standard there is no button). The callout appears within about 6 s; a headless tap on its button gives "Settings from … away bitrate …" on the host and one restart; the callout goes at once and the line 2 s later, and both may come back 3 s or more after (H12: the synthetic pattern's size does not follow the quality); the console shows the announcement once a spell |
+| S4 | **The move home, live.** Pair with H7's host (`SILL_TEST_ORIGIN=vpn`: the remote session is away), then `-SillDialSaved 1 -SillRemoteRoute vpn -SillMoveHomeTest to:[fe80::…%en0]:HOMEPORT -SillScreenFPS 120` (the remote session asks for 60 fps as one through Tailscale does, the home connection for 120). The host logs "Client connected: fe80::…", "Home quality again: …", then "Client left: 127.0.0.1:…"; one "Streaming" line for the flip, right after the home connection's viewport (on the software encoder the stream stays at 60 fps, so the rate's share of that restart shows only on a hardware host with a 120 Hz device); the panel's route line gone and the readout ending in "Wi‑Fi"; "remote: the session moved home". Variants: `refused` (tries at about 2, 12, 32 and 72 s; the session stays remote); `other:PORT` (refused once, not again while listed) |
 | S5 | **Connect Remotely stays remote.** `-SillDialSaved remotely -SillMoveHomeTest to:…`: no move in 30 s |
 | S6 | **Accessibility.** The header lines spoken as §8 says; the callout and its button; one announcement per spell (DEBUG print) |
 
@@ -1118,14 +1232,15 @@ for P6.
 | P3 | **Home unchanged.** Two minutes on home Wi‑Fi at Extreme: `net.dropped` a minute and frame age as before |
 | P4 | **Away starts low.** At home set Pro · Retina, then leave for the hotspot. The remote session starts at Low · Standard: "Away from home: …" in Sill.log, the panel's "Away: Low · Standard". `defaults read me.saffer.sill.mac bitrate` still 40000000 |
 | P5 | **The away choice.** Pick Balanced away: one restart at 15 Mbps; `awayBitrate` 15000000; the home bitrate unchanged; the next away session starts at Balanced |
-| P6 | **Mixed.** The iPhone at home on Wi‑Fi and the iPad away. The home quality runs; the iPad's header says "Home quality: Pro · Retina (a device at home is connected)". Disconnect the iPhone: the away quality, one restart |
+| P6 | **Mixed.** The iPad streaming away, then the iPhone connects at home on Wi‑Fi: one restart (a 120 Hz iPhone's rate and the home quality together). The home quality runs; the iPad's header says "Home quality: Pro · Retina (a device at home is connected)". Disconnect the iPhone: the away quality, one restart |
 | P7 | **The Mac.** Settings › Streaming shows both sections. Changing the away pickers while the iPad is away restarts once. The menu's Quality subtitle says "Away from home now: …" |
 | P8 | **The link.** Away at Extreme. Within about 5 s: the callout with its button, the stream's line, one VoiceOver announcement, and the Mac's card "iPad: … the link can’t carry Extreme". Tap the button: one restart; the callout and the line go; the card's row is normal within about 5 s |
 | P9 | **A dip.** Cover the iPhone, or walk away from it, for 15 s. The line appears, then goes about 5 s after the link recovers; no reconnect |
-| P10 | **Coming home.** Streaming away through Tailscale, join the home Wi‑Fi. Within about 5 s of the network listing the Mac: "Client connected: fe80::…%en0", "Home quality again", "Client left: 100.x". The route line gives way to "Wi‑Fi"; one restart; drag and type through it (no button stays down, no letters swap); the Mac's card shows the iPad once, "Wi‑Fi" |
+| P10 | **Coming home.** Streaming away through Tailscale, join the home Wi‑Fi. Within about 5 s of the network listing the Mac: "Client connected: fe80::…%en0", "Home quality again", "Client left: 100.x". The route line gives way to "Wi‑Fi"; one restart; drag and type through it (no button stays down, no letters swap); the Mac's card shows the iPad once, "Wi‑Fi". At the edge of the home Wi‑Fi, note how often it goes back and forth (§10) |
 | P11 | **Coming home by cable.** An away session; at home, plug the cable in. The move goes to the cable ("Wired"; the Mac logs `%en14` or `%anri0`) |
 | P12 | **Connect Remotely at home** stays remote |
 | P13 | **Mixed builds.** PR #13's iPad against this Sill.app, away: starts at Low · Standard; its Quality shows Low; no header line. This iPad against PR #13's Sill.app: no header line, no link callout, the move home works |
+| P14 | **Extreme through the remote door on a fast path.** Connect Remotely at home through Tailscale's LAN path (rtt under 15 ms), Extreme · Retina picked away, two minutes on a busy window: no `net.dropped` in Sill.log's `[1s]` lines, the `client iPad` lines at its 60 fps. With a 120 Hz device on a remote session by address, the same at 120 fps (§3.2: the harness's host sends over loopback, and a real path's send buffer may stay smaller) |
 
 ---
 
@@ -1140,14 +1255,14 @@ depends on nothing open and can merge first.
 1. **"Host: remote pacing counts bytes, not messages: a keyframe no longer starves its followers"**
    (StreamServer.swift, `Scripts/pacing/`, and the `SILL_TEST_SOFTWARE_ENCODER` hook if the
    pointer plan has not landed it). About 90 lines of host code and the harness (~700 lines,
-   moved). Gates: H1, H2, H3, H4, and H0's keyframe measurement.
+   moved). Gates: H1, H2, H3, H4, and H0's keyframe measurement and its check of the hook.
 2. **"iOS: the reader takes a message in pieces; liveness counts every byte"** (MessageReader.swift
    new, StreamClient.swift, pbxproj). About 150 lines. Gates: H1, H5, S2.
 3. **"docs: remote pacing":** CLAUDE.md (the step, Layout, `Scripts/pacing/`), and
    remote-access-plan.md §4.9(6)'s line (§3.3). Stop here if Noah takes PR A alone.
 
-**PR B, "Away from home"** (items 2–4). Branch from origin/main **after PR #12 has merged** (and
-after PR A, or with PR A's commits first). Cherry-pick this plan's commit.
+**PR B, "Away from home"** (items 2–4). Branch from origin/main, which has PR #12 since cea195c,
+after PR A or with PR A's commits first. Cherry-pick this plan's commit.
 
 4. **"Protocol: the away quality and the link report in kind 16"** (HostSettings.swift). About 90
    lines. Gates: H1, H6.
@@ -1168,7 +1283,7 @@ after PR A, or with PR A's commits first). Cherry-pick this plan's commit.
 10. **"docs: away from home":**
     - this plan's Results;
     - CLAUDE.md: the step; Layout (MessageReader, LinkJudge, `Scripts/pacing/`); Build and run (the
-      harness, the new `sillclient.py` keys, the DEBUG arguments); Untested, for Noah: P1–P13;
+      harness, the new `sillclient.py` keys, the DEBUG arguments); Untested, for Noah: P1–P14;
     - README: the away quality, the link callout, coming home.
 11. **Review and hand-over.**
     - Three lenses: pacing and link judging on `sill.net` (bytes, completions, the sweep); the away
@@ -1176,16 +1291,18 @@ after PR A, or with PR A's commits first). Cherry-pick this plan's commit.
       (fences, the kind 18 check, backoff).
     - A "Review fixes" commit if needed.
     - Then H3, H7, H8, H11, H12, S3 and S4 again on the final build.
-    - Hand P1–P13 to Noah. **Stop there.**
+    - Hand P1–P14 to Noah. **Stop there.**
 
 **Rebases.**
-- **PR #12 (follow-best-path)** must land before PR B: step 9 builds on its `MoveKind`,
-  `startMove`/`probeMove`/`finishMove`, `SessionLink` (fences, hold, adopt, `Released.close`),
-  `closeSoon` and `upWait`. If PR A lands first, #12's merge carries MessageReader (it touches
-  neither `readPayload` nor the reader).
-- **PR #11 (encoder-recovery)** touches StreamCoordinator, HostStatus, HostSettings.swift (a doc
-  comment), SettingsPanes, StatusText, DebugHooks, `sillclient.py` and HostSettingsPanel: a small
-  rebase for PR B whichever lands first.
+- **PR #12 (follow-best-path)** has landed (cea195c, after its merge with #13 at f863c74): step 9
+  builds on its `MoveKind`, `startMove`/`probeMove`/`finishMove`, `SessionLink` (fences, hold,
+  adopt, `Released.close`), `closeSoon`, `rescue` and `upWait` as merged; re-read them (the
+  merge changed `rescue` and the reader). MessageReader replaces the merged `readHeader`/
+  `readPayload`; the move's probe keeps its own.
+- **PR #11 (encoder-recovery)** has landed (b50e224): StreamCoordinator, HostStatus,
+  HostSettings.swift (a doc comment), SettingsPanes, StatusText, DebugHooks, `sillclient.py` and
+  HostSettingsPanel moved under this plan's line numbers. Its hardware re-check is why the
+  software-encoder hook must stop it (§11).
 - **update-notice** touches StreamServer, StreamCoordinator, SessionLink and StreamClient, and takes
   kind 23 for its hello, which the pointer plan holds for the menu bar. Not this plan's to settle;
   this plan takes no kind.
@@ -1239,9 +1356,19 @@ after PR A, or with PR A's commits first). Cherry-pick this plan's commit.
 9. **The stream's line.** Default: **non-interactive**, so it never takes a touch meant for the
    Mac. The alternative opens Settings on a tap.
 10. **The move home checks kind 18** (the pinned key, as new as the session's). Default: **yes.**
-    It costs a millisecond and stops a replayed tag. The home door stays plaintext until M5.
+    It costs a millisecond and stops a tag and a kind 18 captured before this session. A device
+    on the home network can still fetch fresh ones from the Mac's home door and relay them: the
+    home door stays plaintext until M5.
 11. **Ship PR A (pacing) on its own first.** Default: **yes.** It is independent of PR #12, and it
     removes the livelock for every build of the device.
 12. **The 512 KB hold cap** keeps up to about a second of Low's deltas behind a keyframe instead of
     dropping them: an exception to "Latency beats quality", remote clients only. Default: **keep
-    it,** as the investigation measured. The alternative cap at 256 KB was not measured.
+    it,** as the investigation measured. The alternative cap at 256 KB was not measured. A case at
+    its edge is bistable (bigkf8, §3.2: five runs of six at 60 fps a second or two behind, one in
+    the 2 s loop at ~30 fps and ~3 s behind); a larger cap would keep such a case out of the loop
+    at the price of more lag behind every keyframe, a smaller one drops sooner. Neither measured.
+13. **The link as the device counts it** (an optional `ClientStats` field: the bytes MessageReader
+    read in each second). Default: **no:** the host's view (§6.1), where stalled needs the device
+    silent too. The device's count would be exact where `.contentProcessed` sees only whole
+    messages, and would tell a path down only towards the device from a slow one; it is a wire
+    field (optional, compatible both ways) and more device code.
