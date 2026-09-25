@@ -38,7 +38,13 @@ public enum StreamMessageKind: UInt8 {
     case pairResult = 20     // host → device: JSON PairResult — the answer to 19; the host then closes the connection
     case pairingWanted = 21  // device → host, empty payload: "show your pairing code" (Pair This iPad…). Home door only,
                              // from this Mac's own networks, at most once per 30 s per connection; ignored elsewhere
-    case goodbye = 22        // host → device: JSON Goodbye — why the host is about to close this session
+    case goodbye = 22        // host → device: JSON Goodbye — why the host is about to close this session, and
+                             // what the device should do then (a message to show, whether to reconnect)
+    // Compatibility (Compatibility.swift). Older hosts map it to `.unknown` and skip it.
+    case hello = 23          // device → host: JSON Hello — who the device is (its version, build, protocol and
+                             // name). The first message of every session connection, before anything else, so a
+                             // host can judge the device before it sends anything (DeviceGate). Never on a
+                             // pairing connection
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
