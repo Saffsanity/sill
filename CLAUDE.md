@@ -8,6 +8,67 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Remote access (2026-09-24/25, branch `remote-access` from `a9cc248`; the plan,
+its open questions and the results are in `docs/remote-access-plan.md`).** Bring
+your own VPN (Tailscale, WireGuard into the home network) or, behind a switch
+of its own, a port forward: a device paired once reaches the Mac from anywhere.
+Every open question took its default. Steps 1–8 are committed; step 9 (the
+review) is next.
+- Two doors. The home door (today's plain TCP listener, Bonjour, unchanged for
+  old iOS builds) now admits only this Mac's own networks, loopback and Direct
+  Wireless (`OriginPolicy`), with caps (1 MiB messages, 4 kind-17 changes a
+  second, a clean device name). The remote door (`RemoteServer`, port 7455) is
+  TLS 1.3 only, both ends self-signed P-256 keys pinned by SPKI SHA-256, ALPN
+  `sill/1` for a paired key, `sill-pair/1` only while a pairing window is
+  open; pre-auth caps (8 pending, 2 per source, backoff after 5 of its own
+  refusals), 8 sessions, remote clients evicted after 8 s of silence, forced
+  keyframes at least 2 s apart. Kinds 18 (the signed MacInfo: Mac ID, name,
+  addresses), 19/20 (one pairing request and its answer), 21 (Pair This iPad…,
+  home door only) and 22 (goodbye) are skipped by older readers; the TXT record
+  carries a recognition tag (`r`) only paired devices can read.
+- Pairing: the Mac's window shows a QR code (`sill://pair?…`, pinned to the
+  Mac's key) and a 12-digit code (Damm check digit; PBKDF2 600k), 5 minutes,
+  single use, five wrong tries. Sill.app: Settings › Remote Access (a fifth
+  tab: the switch, the addresses, the port, paired devices, the internet
+  switch with the router's answer, the address name, sleep), the menu's Remote
+  Access… and Pair iPhone or iPad…, identity in the login keychain
+  (`KeychainIdentityStore`; label "Sill Remote Access", service
+  `me.saffer.sill.remote`), idle sleep held off while a device is connected
+  remotely. The CLI's `--remote` uses a throwaway identity per run.
+- iOS: `DeviceIdentity` (a Keychain key, this device only), `SavedMacs`,
+  `RemoteDialPolicy` + `RemoteConnector` (the dial order, happy-eyeballs 1 s
+  apart, every failure's words), Remote rows after the network's 3 s, the
+  reconnect order after a loss, liveness on every route; the connect screen's
+  "Add a Mac…" card (the VisionKit scanner or the typed address and code),
+  `sill://pair` links only ever confirmed, Pair This iPad… as an overlay over
+  the stream, the panel's route line ("Connected through Tailscale · 48 ms"),
+  its Away from home group and the slow-link callout; the Low preset (4 Mbps,
+  first on both sides) and 60 fps away from home.
+- Verified without Noah's devices: the plan's H1–H24 headless (the CLI's
+  output byte for byte, the pure checks with mutants, the doors' refusals and
+  caps, no plaintext on the wire, no code or secret in any log, a 2 Mbps
+  +150 ms relay with no eviction and the base's keyframe rate), the app's
+  persistence and previews, and on the simulator S1–S8: about 200 photos at
+  the Duo sizes, phones and larger text, taps and accessibility as XCUITests,
+  live pairing (QR, typed, an outside link confirmed first), reconnects,
+  every failure's words, an older host, and a slow link (60 fps through a VPN
+  route; the callout at +300 ms).
+- **Untested, for Noah (R0–R13; the plan's Results say exactly what):** R0 the
+  probes (the Secure Enclave key, the login keychain identity with your OK, the
+  router probe, the scanner on the iPad); R1 Tailscale setup and pairing,
+  timed; R2 away on the hotspot; R3 leaving home mid-stream; R4 Wi‑Fi to
+  cellular; R5 Tailscale off at either end; R6 sleep; R7 removing the iPad
+  while it streams; R8 a rebuild keeps port, Mac ID and pairing; R9 Pair This
+  iPad… at home; R10 the port forward; R11 Direct Wireless at the café; R12
+  VoiceOver and a hardware keyboard (Esc never reaches an app in the iPadOS 27
+  simulator; only ⌘. was tested); R13 mixed builds.
+- Known: origin/main gained PRs #6–#8 after this branch began (a rebase will
+  meet the quality presets of #8); the simulator iPad Pro 13" is shared with
+  other work, so a test that installs the app there can replace someone
+  else's build (the iPad Pro 11" was used for S8); an unsigned simulator build
+  cannot use the keychain on a fresh simulator (-34018): build it ad hoc
+  signed (`CODE_SIGN_IDENTITY=-`).
+
 **Direct Wireless Connection (2026-09-24, branch `direct-wireless` from
 `ipad-host-settings` at 35a1238; the plan and its measurements are in
 `docs/direct-wireless-plan.md`).** Noah's decision: AWDL off by default on both
@@ -685,7 +746,13 @@ good.
   `HostSettings.swift` — the host settings a device sees and changes (kinds 16
   and 17): `StreamSettings`, `RunningStream`, `HostSettingsState`,
   `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
-  `QualityPreset`.
+  `QualityPreset` (Low, Efficient, Balanced, High, Maximum). Remote access:
+  `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
+  `SignedMacInfo`, `PairRequest`, `PairResult`, `Goodbye`), `RemoteTLS.swift`
+  (the one TLS 1.3 builder for both doors' ends and the tests),
+  `RemoteIdentity.swift` (SPKI fingerprints, the Mac ID, the hand-built
+  certificate, keys), `Pairing.swift` (`PairingCode`, `PairingProof`,
+  `RecognitionTag`, `PairLink`), `AddressParser.swift`, `SafeText.swift`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -718,7 +785,14 @@ good.
   sources + atexit, installed only with the flag in the CLI, always in the app;
   `releaseForQuit` for the app's Quit), `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
-  heartbeat when idle).
+  heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
+  (who may use which door; pure), `RefusalSummary` (one refusal line a minute),
+  `HostIdentity` (the `IdentityStore` protocol, `MemoryIdentityStore`, the TEST
+  ONLY `FileIdentityStore`, `PairedDevice`, the lock-protected trust snapshot
+  the door reads on the network queue), `KeychainIdentityStore` (Sill.app's),
+  `PairingWindow` (pure), `RemoteServer` (the remote door), `Reachability`,
+  `AddressList` (pure) and `RouterAddress` (read-only NAT-PMP/PCP),
+  `RemoteAccess` (main actor; ties them together, signs kind 18).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -728,14 +802,22 @@ good.
   (+ `MenuBuilder`), `StatusText` (all status copy), `StatusCard`,
   `StatusGlyph`, `SettingsWindow` + `SettingsPanes`, `Permissions`,
   `LoginItem`, `LogWindow`, `MainMenu` (key equivalents), `DebugHooks`,
-  `AppLog` (its print shadow).
+  `AppLog` (its print shadow), `RemoteAccessPane` (Settings › Remote Access),
+  `PairDeviceWindow` (the QR code and the typed code).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
   `--expect=K=V[,…]` against the last kind 16, which it prints one per line;
-  every argument is checked before it connects, and a bad one exits 2).
+  `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
+  `--stop-read@T`, `--pairing-wanted@T`; the remote door with `--tls
+  --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
+  `--expect-tls-fail`, printing kinds 18, 20 and 22; every argument is checked
+  before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
+  shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
+  [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
+  through).
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
@@ -753,8 +835,13 @@ good.
   hint and Search Nearby, + DEBUG harness),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
-  with swiftc), `HostSettingsPanel` (the Settings panel). New files need their
-  four pbxproj entries by hand. Swift 5 language mode.
+  with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
+  from home, the slow-link callout). Remote access: `DeviceIdentity`,
+  `SavedMacs` (pure), `RemoteDialPolicy` (pure), `RemoteConnector`,
+  `StreamClient+Remote` (pairing, remote dials, the reconnect order, links),
+  `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
+  `PairingOverlay` (Pair This iPad…). New files need their four pbxproj
+  entries by hand. Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 
 ## Build and run
@@ -768,6 +855,9 @@ swift run -c release SillHost --encoder-selftest   # is the hardware encoder ali
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
+swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
+swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
+swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
@@ -810,6 +900,23 @@ registration with AWDL adds 2, a peer-to-peer browse 1); `log` is a zsh
 builtin, hence `/usr/bin/log`, and `process == "kernel"` keeps the log tool's
 own line out. Enable and disable lines ("Enabling AWDL due to Mdns") show only
 when nothing else holds AWDL. Keep AWDL-on tests under 20 s and on test types.
+Remote access, headless: TEST ONLY variables, honoured only by a host that
+does not advertise: `SILL_TEST_REMOTE_DIR=<dir>` (the identity and trust list
+in a 0700 directory instead of memory or the keychain; the bare app's
+`-SillPairAfter <s>` leaves `pairing.url` and `pairing.code` there, 0600, never
+printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
+`SILL_TEST_ORIGIN=vpn|internet` (loopback counts as that origin) and
+`SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every headless host).
+The bare app takes `-remoteAccess 1 -remotePort P`, `-SillSetAfter '3
+remotePort=P2'`, `-SillPairAfter <s>` and `-SillUnpairAfter <s>`; its
+`-SillRenderPreviews` adds the Remote Access pane's states and the pairing
+window's. A session through a shaped link: `python3 Scripts/sillrelay.py
+--listen 0 --to 127.0.0.1:P --delay-ms 150 --rate-mbps 2`, then
+`sillclient.py RELAYPORT 90 desktop --tls --identity=$T/a --stats` after
+`--pair-url=URL` once. Never let a test binary take a connection from another
+machine: the Application Firewall prompts. Reset the app's remote settings with
+`for k in remoteAccess remotePort internetAccess remoteAddressName
+remoteDevicesSeen; do defaults delete me.saffer.sill.mac $k; done`.
 Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
 (outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
@@ -818,7 +925,20 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect` (the mock Mac's settings; it answers a pick after 0.35 s),
 `-SillConnectCase looking|hint|nearby|denied` (the connect screen in a discovery state;
-the mock never browses), `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
+the mock never browses) and remote access's `remote|addmac|addcode|addcodeerror|
+pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
+vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
+remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
+remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
+scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay), and in
+the normal app `-SillPairURL '<sill://pair…>'` (pair at launch, no
+confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
+`-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
+`'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
+that route), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`
+(a Secure Enclave device key, R0-a); `xcrun simctl openurl <udid>
+'sill://pair…'` shows the link's confirmation after the system's "Open in
+Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the

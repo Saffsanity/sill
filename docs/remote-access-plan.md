@@ -2044,3 +2044,95 @@ and both verify blocks consult "paired store ∪ iCloud set" with `method: "iclo
     remote host.
 15. **Fast-forward the local `main` ref to origin/main?** Default: **leave it to Noah.** Nothing in
     this plan compares against local `main`.
+
+---
+
+## Results (implementation, 2026-09-24/25, branch `remote-access`)
+
+Steps 1–8 are done, one commit each, on `a9cc248` (origin/main when the work began; origin/main has
+since gained PRs #6–#8, which this branch does not contain). Step 9, the review, is next. Every open
+question above took its default: the home door stays unpaired (1), the internet path ships behind
+its own switch (2), Pair This iPad… from home (3), Direct Wireless refused from afar (4),
+hand-built DER certificates (5), the Low preset (6), idle sleep held off while a device is
+connected remotely (7), Sill's windows left out of the Desktop stream (8), 12 digits with a Damm
+check digit and PBKDF2 at 600,000 rounds (9), pairing never turns Remote Access on (10), port 7455
+changed only on the Mac (11), a software device key until R0-a says otherwise (12; DEBUG
+`-SillDeviceKeySE 1` tries the Secure Enclave), `sill://pair` registered but always confirmed (13)
+and the CLI's throwaway identity (14).
+
+| Step | Commit | Gates run and passed |
+|---|---|---|
+| 1 Protocol | `4de3efb` | H1, H3 (188 checks, 20/20 mutants, the plan's vectors, a live loopback mTLS handshake per rule), H21 |
+| 2 Home door | `5112041` | H1, H2, H3 (OriginPolicy 66, 10/10 mutants), H4, H5, H24 |
+| 3 Remote door | `be66c33`, review fixes `b481c71` | H1, H2, H3 (AddressList and PairingWindow 41, 15/15 mutants), H6–H15, H17, H18, H20 (remote 5.79 % CPU vs home 6.08 %), H23, the goodbyes, and the review's own gates |
+| 4 Sill.app | `4c562de` | H1, H16 (listening 26.6 s after the port was freed; a rebind under a streaming session), H19 (neither the code nor the secret in any log), H22 |
+| 5 iOS model | `3c1bd97` | H1, H3 (49 checks, 26/26 mutants; the discovery policy's 68), S3, S4 (reconnect at 3.1 s; liveness 6 s after a blackhole), S5 (every failure's words, live) |
+| 6 iOS UI | `5468bdc` | S1 (≈200 photos: every new connect case at the seven sizes, the re-shot cases, every settings case at the Duo sizes and at accessibility-extra-large, the overlay), S2 and S6 as XCUITests, S3's outside link live, S7 |
+| 7 Low and 60 fps | `fc39a45` | H1, H2, H14 (Balanced and Low), H22, the ledger check with Low, S8 |
+| 8 Docs | this commit | — |
+
+**Measured.** Through `sillrelay.py --rate-mbps 2 --delay-ms 150` for 90 s, a paired TLS session
+kept every 5 s window full (≈300 frames), was never evicted and saw keyframes at the encoder's 4 s
+cadence (15.3 a minute at Balanced; 16.0 at Low, the extra one being the restart for the change);
+the pong round trip was 153 ms at the median and 157–158 ms at p95; an unshaped home client on the
+same build equalled a9cc248's (5,398 frames, 23 keyframes, nothing dropped). On the simulator
+through `--delay-ms 150 --rate-mbps 5`, typed pairing finished 1.7 s after launch; with
+`-SillScreenFPS 120` the device asked for 60 fps through a VPN route and 120 by address; through
+`--delay-ms 300` the panel read "Connected through Tailscale · 303 ms" with the slow-link
+callout. The CLI's output is still a9cc248's, byte for byte (masked and sorted), after step 7.
+
+**Where the code and this plan differ (the code wins).**
+- TLS: the server's verify block also sees the negotiated ALPN, so an unpaired key is refused
+  inside TLS even while a pairing window is open, and a pairing dial with no window is refused
+  the same way (the device reads it as "isn't pairing right now"). The verify block reads the
+  peer's leaf from the handshake metadata, never SecTrust (§3.3 named
+  `SecTrustCopyCertificateChain`, which let an AIA URL stall the network queue).
+- The remote door judges a connection's origin before it starts, and again at `.ready` and at
+  kind 19; its backoff counts only its own refusals, and a paired key clears its source's count
+  (§4.7 counted every end before admission). A keyframe forced for a slow remote client waits
+  for the encoder's 4 s interval while a home client is connected.
+- The CLI notices an expired pairing window at the next attempt ("expired"), then opens a fresh
+  one. A plain client whose bytes parse as a TLS record gets a 7-byte TLS alert, never a Sill byte.
+  The certificate's CN is 16 random hex characters (about 312 bytes, not 287).
+- Sill.app keeps its key, recognition key and trust list in the legacy login keychain: the
+  data-protection keychain needs a provisioning profile, which a Developer ID app does not have.
+- The device: on an iPad the code field uses the numbers-and-punctuation keyboard, because the
+  floating number pad swallowed the next tap (Pair took two). The scanner asks for the camera
+  itself when a live viewfinder first shows (DataScannerViewController never asks). Esc is a
+  priority key command (`EscapeKey`), since a focused text field can claim the key before
+  SwiftUI's `.cancelAction` sees it. The connect column is placed by its leading edge and the
+  side-by-side card grows to the trailing side (at most 620 pt, 24 pt from the edge), so the title
+  never moves sideways; with a field's keyboard up the column goes to the top on every layout, not
+  only the outer display, so Pair stays above the keyboard; the card's two links stack on a
+  667 pt phone on its side. The Away from home group appears when kind 18 does (no timer: an
+  older Mac never sends one). The frame-rate footnote's away sentence shows only when the 60 fps
+  request halves what the screen could show. The overlay's Cancel also stops a pairing still
+  dialing and drops a waiting link.
+- `defaults delete` takes one key at a time, so the README's reset is a loop over the keys.
+- DEBUG arguments beyond §7.12: `-SillSettingsEnd 1` (the panel scrolled to its end, for photos),
+  `-SillRemoteRoute vpn|internet` and `-SillScreenFPS 120` (S8 on a loopback host and a 60 Hz
+  simulator), `-SillDeviceKeySE 1` (R0-a).
+- Commit trailers name the model that wrote them (Claude Opus 5.5), not the one the task named.
+
+**Not verified here, for Noah (R0–R13 as built).**
+- R0 probes: (a) `-SillDeviceKeySE 1` against `SillHost --synthetic --remote` over the LAN (does a
+  Secure Enclave key sign TLS client authentication?); (b) with your OK, since it writes to your
+  login keychain: `make-app.sh --install --open`, Settings › Remote Access on, then a rebuild and
+  relaunch read the same identity without a prompt (`KeychainIdentityStore` never ran here: every
+  test host used `SILL_TEST_REMOTE_DIR` or memory); (c) `natpmp-probe` from Terminal; (d) the
+  embedded scanner on the iPad (the simulator has none), including the camera prompt and a
+  non-Sill QR code.
+- R1–R11 as written above: Tailscale setup and pairing timed; away on the hotspot; leaving home
+  mid-stream; Wi‑Fi to cellular; Tailscale off at either end; sleep (15 minutes with nobody at the
+  Mac); removing the iPad while it streams; a rebuild keeping port, Mac ID and pairing; Pair This
+  iPad… from the panel; the port forward; Direct Wireless at the café.
+- R12: VoiceOver and a hardware keyboard on the card, the scanner, the overlay and the pane's Copy
+  buttons. Esc in particular: the iPadOS 27 simulator never delivers Escape to an app (a
+  first-responder probe saw no key press at all), so only ⌘. was tested. Also that the pairing
+  window never shows in a Desktop stream.
+- R13: mixed builds (this iPad against PR #5's Sill.app: no Away from home group; PR #5's iPad
+  against this host).
+- Also: the Local Network prompt on a fresh install before the first remote dial; the live menu
+  and Settings in the macOS 26 look (only offscreen renders were checked); one unexplained failure
+  in four runs of the outside-link UI test (the first after a rebuild: the pairing dial was refused
+  and no log was captured; three reruns passed).
