@@ -1296,7 +1296,9 @@ package final class StreamCoordinator {
                 // In a task of its own, which cancelling the re-check cannot reach: the restart's
                 // own waits (Task.sleep in the stage and here) must not end early.
                 let back = await Task { @MainActor in await self.hardwareIsBack(ms: ms) }.value
-                // Back: the loop ends here (a later hang starts a new re-check, see startRecheck).
+                // Back: the loop ends, unless the restart's new session already hung and set the
+                // flag and the next check again (then it goes on). A later hang starts a new
+                // re-check (startRecheck).
                 if !back { recheckDue = CFAbsoluteTimeGetCurrent() + recheckInterval }   // a switch never settled; try later
                 continue
             }
