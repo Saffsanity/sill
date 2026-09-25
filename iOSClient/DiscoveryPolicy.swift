@@ -3,8 +3,9 @@ import Foundation
 /// When the device also looks for Macs over peer-to-peer Wi-Fi (AWDL), how a nearby result is told
 /// from a network one, the word each row shows for how its Mac is reachable and the one the
 /// Settings panel shows for the session's own connection, which interface a "Wired" row is dialled
-/// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network, and,
-/// for the Macs this device paired with, when they show as Remote rows and when a lost one is
+/// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network,
+/// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
+/// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
 /// dialed away from home.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
@@ -132,6 +133,15 @@ enum DiscoveryPolicy {
             case .direct: return "Direct"
             }
         }
+
+        /// The order a session prefers its paths in (`pathPlan`): the cable over Wi-Fi over Direct.
+        var rank: Int {
+            switch self {
+            case .wired: return 2
+            case .wifi: return 1
+            case .direct: return 0
+            }
+        }
     }
 
     /// A row's method, from the interfaces its own browser saw its Mac on (Noah, 2026-09-24). A
@@ -174,11 +184,22 @@ enum DiscoveryPolicy {
         return interfaces.first { $0.type == .wiredEthernet && !isPeerToPeer($0.name) }?.name
     }
 
+    /// The interface a network row's Mac is dialled on when a session over the cable loses it
+    /// (`pathPlan`'s move to Wi-Fi): the first Wi-Fi interface its browser saw it on that is not
+    /// peer-to-peer (awdl0 and llw0 report .wifi too), nil for none and for a Direct row. Pinned
+    /// there, as a Wired row's dial is pinned to the cable, rather than dialled as listed while
+    /// what the system knows of the Mac may still include the cable that just went.
+    static func wifiInterface(direct: Bool, interfaces: [Interface]) -> String? {
+        guard !direct else { return nil }
+        return interfaces.first { $0.type == .wifi && !isPeerToPeer($0.name) }?.name
+    }
+
     /// How the session's own connection reaches the Mac: the word the Settings panel's readout
     /// ends in (Noah, 2026-09-24), where a row's `method` says where the browser saw the Mac. A
     /// session can run over another link than its row's word (a Wired row's dial is pinned to the
     /// cable, `dialInterface`, but the unconstrained dial it can give way to may take Wi-Fi, and a
-    /// session made before the cable came stays on Wi-Fi), so this reads the connection's path:
+    /// session made before the cable came is on Wi-Fi until it moves, `pathPlan`), so this reads
+    /// the connection's path:
     /// the interface the Mac's address is scoped to when it is a link-local one, which is all the
     /// USB cable and AWDL carry (over the cable this device sees the Mac's address on en2, and the
     /// Mac logs the device's on en14 or anri0; over AWDL the Mac logs "fe80::…%awdl0"), else the
@@ -302,6 +323,228 @@ enum DiscoveryPolicy {
     /// two hosts.
     static func sameHost(_ session: String?, _ network: String?) -> Bool {
         session == network
+    }
+
+    // MARK: Following the best path
+
+    // An established connection keeps the interface it was made on for life: TCP does not move.
+    // Noah's tests on 2026-09-25: a session made over Wi-Fi stayed there after he plugged the cable
+    // in, until he disconnected and connected again, and one over the cable, unplugged, hung a
+    // while, fell to the connect screen and came back over Wi-Fi. A live session now follows the
+    // best path its Mac is reachable on, the cable over Wi-Fi over Direct (`Method.rank`), with the
+    // make-before-break hand-over of the move from AWDL (StreamClient.followBestPath): up to the
+    // cable once the network browser has listed the Mac on it for `cableSettle`, down to Wi-Fi at
+    // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works
+    // (a connection the Mac closed while the cable stays listed is made again over the cable),
+    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (only
+    // the remote reconnect moves one, and not home: remote access's merge left that for later), and
+    // at most one move per `pathHysteresis` each way; a cable listing that reaches another Mac is not
+    // tried again, and one whose moves do not complete is tried less and less often (`upWait`).
+
+    /// A wired interface must stay listed this long before a session over Wi-Fi moves to it: a
+    /// cable comes up in steps (iPadOS brings up anpi0 and en2, and the Mac's records follow on
+    /// each). A move off the cable starts the wait again, for a browser that still lists a cable
+    /// whose path is gone.
+    static let cableSettle = 2.0
+    /// At most one move per this long each way, up to the cable and down to Wi-Fi, counted from the
+    /// start of the last move that way: a loose cable cannot make the session flap.
+    static let pathHysteresis = 5.0
+    /// How long the network browser's last listing of the Mac on Wi-Fi still counts once it is gone:
+    /// a Mac's result can drop and come back while the cable's interfaces leave.
+    static let wifiFresh = 5.0
+    /// Over the cable, once the network browser no longer lists the Mac on a wired interface, a
+    /// connection that has brought back no pong for this long has lost its path, whatever iOS says
+    /// of it: a ping goes every 0.25 s, and over the cable its pong is back in 1–2 ms.
+    static let pongSilence = 1.0
+    /// The longest wait between two moves up to one listing of the cable (`upWait`).
+    static let upBackoffCap = 60.0
+
+    /// How long after the last move up the next may start, when the last `failures` moves up to this
+    /// listing of the cable in a row did not complete (the wired dial not ready within `wiredWait`,
+    /// waiting or failing, or no window list within 5 s): `pathHysteresis`, doubled for each, up to
+    /// `upBackoffCap` (5, 10, 20, 40, then 60 s). A cable the browser lists but that does not carry
+    /// the Mac is then not dialled every 5 s for as long as it stays in; a move up that completes,
+    /// or a new listing (the cable out and in again), starts again at `pathHysteresis`.
+    static func upWait(failures: Int) -> Double {
+        min(pathHysteresis * Double(1 << min(max(failures, 0), 4)), upBackoffCap)
+    }
+
+    /// What the network browser has shown of each Mac's paths, by Bonjour name.
+    struct PathSightings: Equatable {
+        /// Listed on a wired interface now: the first one (`dialInterface`), and since when one has
+        /// been listed without a break.
+        var wired: [String: String] = [:]
+        var wiredSince: [String: Double] = [:]
+        /// Listed on Wi-Fi now: the first Wi-Fi interface (`wifiInterface`).
+        var wifi: [String: String] = [:]
+        /// Not on Wi-Fi now: the interface it was last listed on and the moment it went, kept for
+        /// `wifiFresh`.
+        var wifiLeft: [String: WifiLeft] = [:]
+
+        struct WifiLeft: Equatable {
+            var interface: String
+            var at: Double
+        }
+    }
+
+    /// The sightings after the network browser's list changed (or was looked at again) at `now`:
+    /// each name with the interfaces its result lists, the first result of a name counting, as in
+    /// `rows`.
+    static func pathSightings(_ previous: PathSightings, network: [(name: String, interfaces: [Interface])], now: Double) -> PathSightings {
+        var next = PathSightings()
+        var seen = Set<String>()
+        for entry in network where seen.insert(entry.name).inserted {
+            if let wired = dialInterface(direct: false, interfaces: entry.interfaces) {
+                next.wired[entry.name] = wired
+                next.wiredSince[entry.name] = previous.wiredSince[entry.name] ?? now
+            }
+            if let wifi = wifiInterface(direct: false, interfaces: entry.interfaces) {
+                next.wifi[entry.name] = wifi
+            }
+        }
+        for (name, wifi) in previous.wifi where next.wifi[name] == nil {
+            next.wifiLeft[name] = PathSightings.WifiLeft(interface: wifi, at: now)
+        }
+        for (name, left) in previous.wifiLeft where next.wifi[name] == nil && next.wifiLeft[name] == nil && now - left.at < wifiFresh {
+            next.wifiLeft[name] = left
+        }
+        return next
+    }
+
+    /// The Wi-Fi interface a session that lost the cable dials its Mac on: the one the network
+    /// browser lists it on now, else the one it listed it on within `wifiFresh`; nil for neither.
+    static func freshWifi(_ s: PathSightings, name: String, now: Double) -> String? {
+        if let wifi = s.wifi[name] { return wifi }
+        if let left = s.wifiLeft[name], now - left.at < wifiFresh { return left.interface }
+        return nil
+    }
+
+    /// The session as `pathPlan` reads it.
+    struct PathInput: Equatable {
+        /// ProcessInfo.systemUptime.
+        var now: Double
+        /// The path the session runs on: its word (`sessionRoute`), and Direct while it is connected
+        /// over AWDL; nil when its path does not say, and then it never moves.
+        var route: Method?
+        /// The session's connection failed or closed.
+        var dead = false
+        /// iOS says the connection's path is gone: not viable, back to waiting, or a path update
+        /// that is not satisfied and names the Mac's address (`describesFlow`'s kind).
+        var pathReported = false
+        /// A path update that is not satisfied but names the service instead of an address: it
+        /// describes the service's resolution (`describesFlow`), so it counts only beside the
+        /// network browser's word that the cable is gone.
+        var pathHinted = false
+        /// When the connection last brought back a pong, or became the session's.
+        var lastPong: Double
+        /// The session's Mac as the network browser lists it (`PathSightings`): the first wired
+        /// interface and since when one has been listed (nil while none is), and the Wi-Fi interface
+        /// listed now or within `wifiFresh` (`freshWifi`).
+        var wired: String?
+        var wiredSince: Double?
+        var wifi: String?
+        /// When this session's last move up (to the cable; one from AWDL counts, and so does a
+        /// reconnect over the cable) and down (to Wi-Fi) started.
+        var lastUp: Double?
+        var lastDown: Double?
+        /// The listing of the cable (its `wiredSince`) a move up found to reach another Mac, or
+        /// another launch of Sill: not tried again while it lasts, as `moveToNetwork`'s
+        /// `refusedListing`. A new listing (the cable out and in again) is tried afresh.
+        var refusedCable: Double? = nil
+        /// Moves up to the listing of the cable now listed that did not complete, in a row (`upWait`).
+        var upFailures = 0
+        /// The session runs through the remote door (a saved Mac dialed away from home): it never
+        /// moves here, whatever its path and the browser say, as a Direct session does not; it
+        /// moves only by the remote reconnect's rules (StreamClient+Remote), and never home to the
+        /// network (docs/remote-access-plan.md).
+        var remote = false
+    }
+
+    /// Why a session stays on its path, for the DEBUG console's "kept: …".
+    enum Keep: Equatable {
+        case routeUnknown, direct, remote, cable, cableUnlisted, wifi, cableSettling, upTooSoon, cableFailing, cableRefused, noWifi, downTooSoon, lost
+
+        var text: String {
+            switch self {
+            case .routeUnknown: return "the session's path is not known"
+            case .direct: return "over Direct, the session moves only to the network"
+            case .remote: return "a remote session moves only by the remote reconnect"
+            case .cable: return "on the cable"
+            case .cableUnlisted: return "on the cable, which the network no longer lists; its pongs say it works"
+            case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"
+            case .cableSettling: return "the cable appeared; waiting for it to settle"
+            case .upTooSoon: return "the cable is up, but the last move to it was under 5 s ago"
+            case .cableFailing: return "the cable is up, but the last move to it did not complete; the next waits longer"
+            case .cableRefused: return "the cable reaches another Mac, or another launch of Sill; not tried again until it is plugged in again"
+            case .noWifi: return "the cable went away, and the Mac is not on Wi\u{2011}Fi"
+            case .downTooSoon: return "the cable went away, but the last move to Wi\u{2011}Fi was under 5 s ago"
+            case .lost: return "Wi\u{2011}Fi's path is gone, and there is no cable"
+            }
+        }
+    }
+
+    enum PathPlan: Equatable {
+        /// Keep the session where it is, and look again at `recheckAt` (nil: when something changes).
+        case stay(Keep, recheckAt: Double?)
+        /// Dial the Mac on `interface` beside the session and hand the session over: up to the
+        /// cable with the fence, down to Wi-Fi without one (nothing on the old path comes back).
+        case moveTo(Method, interface: String)
+        /// The connection is dead, and it ran over the cable: dial the Mac now, not after the
+        /// reconnect's retry timer. Over the cable again on `interface` (`.wired`: the browser still
+        /// lists it and nothing said its path went, so the Mac closed the connection, the row as
+        /// listed as the fallback, as a tap on a Wired row), or on Wi-Fi on `interface` (`.wifi`).
+        case reconnectNow(Method, interface: String)
+    }
+
+    /// Whether the session connection's path is gone: it is dead, iOS says so (`pathReported`), or,
+    /// over the cable, the network browser no longer lists the Mac on a wired interface and either
+    /// iOS hints it (`pathHinted`) or no pong has come back for `pongSilence`. A browser that stops
+    /// listing a working cable for a moment never takes the session off it: its pongs keep coming.
+    static func pathGone(_ i: PathInput) -> Bool {
+        if i.dead || i.pathReported { return true }
+        guard i.route == .wired, i.wired == nil else { return false }
+        return i.pathHinted || i.now - i.lastPong >= pongSilence
+    }
+
+    /// What a live session does about its path now (Noah, 2026-09-25): move up to the cable, down to
+    /// Wi-Fi, reconnect at once, or stay. Up, from Wi-Fi only, once the cable has been listed for
+    /// `cableSettle` (counted again from a move off it) and not within `upWait` of the last move up
+    /// (`pathHysteresis`, longer after moves up that did not complete), never to a listing found to
+    /// reach another Mac (`refusedCable`); the connection's own state does not matter, as the cable
+    /// is better either way, unless it is dead. Down, from the cable only, and only once its path is
+    /// gone (`pathGone`), to the Wi-Fi the Mac is listed on now or was within `wifiFresh`, not within
+    /// `pathHysteresis` of the last move down. A dead connection over the cable is made again at
+    /// once instead: over the cable when the browser still lists it and iOS said nothing of the
+    /// path (the Mac closed it: it evicts a device that stops reading, one suspended in the
+    /// background, say; over Wi-Fi the session would be back on the cable 2 s later), else over
+    /// Wi-Fi. Nothing ever moves a session to Direct or off it (the reconnect and `moveToNetwork`
+    /// do), from Wi-Fi to Wi-Fi, or off a cable that works, and nothing here moves a remote session
+    /// (`remote`), whatever its path says.
+    static func pathPlan(_ i: PathInput) -> PathPlan {
+        if i.remote { return .stay(.remote, recheckAt: nil) }
+        guard let route = i.route else { return .stay(.routeUnknown, recheckAt: nil) }
+        if route == .direct { return .stay(.direct, recheckAt: nil) }
+        if !i.dead, Method.wired.rank > route.rank, let wired = i.wired, let since = i.wiredSince {
+            if since == i.refusedCable { return .stay(.cableRefused, recheckAt: nil) }
+            let settled = max(since, i.lastDown ?? since) + cableSettle
+            let due = max(settled, (i.lastUp ?? -.infinity) + upWait(failures: i.upFailures))
+            if i.now >= due { return .moveTo(.wired, interface: wired) }
+            return .stay(due > settled ? (i.upFailures > 0 ? .cableFailing : .upTooSoon) : .cableSettling, recheckAt: due)
+        }
+        let gone = pathGone(i)
+        if route == .wifi { return .stay(gone ? .lost : .wifi, recheckAt: nil) }
+        guard gone else {
+            // Over the cable, which the browser no longer lists: its pongs decide, at the silence mark.
+            if i.wired == nil { return .stay(.cableUnlisted, recheckAt: i.lastPong + pongSilence) }
+            return .stay(.cable, recheckAt: nil)
+        }
+        if i.dead, !i.pathReported, let wired = i.wired { return .reconnectNow(.wired, interface: wired) }
+        guard let wifi = i.wifi else { return .stay(.noWifi, recheckAt: nil) }
+        if i.dead { return .reconnectNow(.wifi, interface: wifi) }
+        if let last = i.lastDown, i.now < last + pathHysteresis {
+            return .stay(.downTooSoon, recheckAt: last + pathHysteresis)
+        }
+        return .moveTo(.wifi, interface: wifi)
     }
 
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an

@@ -41,6 +41,182 @@ plainly.
   gear paragraph of The iOS app. A change the public README describes (pairing
   at home, say) also updates README.md's How it works and Good to know.
 
+**Follow-best-path merged with main after remote access (2026-09-25, branch
+`follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12;
+not a rebase).** A session at home follows the best path as the next entry
+says; remote access works as its entries say. Where the two meet:
+- A remote session (a saved Mac dialed through the remote door,
+  `Session.route` `.remote`) is no candidate for the moves:
+  `DiscoveryPolicy.PathInput.remote` (StreamClient sets it from the session's
+  route) makes `pathPlan` keep it where it is whatever its path and the
+  browser say, as it keeps a Direct session ("path: kept: a remote session
+  moves only by the remote reconnect", `Keep.remote`). Its route word stays
+  nil (#13), its end is never carried on by a move (`rescue` asks the plan),
+  and it still never moves home to the network (a later step).
+- The end of a session: `endSession` hands over to #13's `sessionEnded` (the
+  words, `reconnect` by Mac ID or Bonjour name, the remote dial), which
+  replaced `reconnectTo`. `connectionLost` first lets a move carry the session
+  on (`rescue`: the stream screen stays), except after a goodbye (kind 22,
+  "quit" at home: the session ends at once with its words, not after a dial
+  to a Mac that is going) and when this device closed the connection itself
+  (`end`: a message no Sill sends). #13's `reconnectIfListed` never runs
+  beside a move (`moveUnderWay`: a move, or a session one carries on, which
+  stays `connected` until the move takes over or ends it). #13's liveness (no
+  byte for 6 s) now ends a stranded cable connection too; the rescue then
+  decides as for any other end. A connection already closed sends no pings
+  (the fix-up after the merge): while a move carried its session on, it was
+  still the session's, and its liveness reported it lost four times a second
+  until the move ended (log lines, and `connectionLost` calls that did nothing).
+- Dials: one row dial, #13's `dial(_:macID:)`, which carries prefer-cable's
+  wired dial and its fallback; the moves keep theirs (`startMove` with
+  `wiredDial`, or this branch's `wifiDial`), both for network rows only now
+  that a row has a route (a Remote row is not Direct either) and an optional
+  endpoint. `FoundMac.wifi` joined #13's initializer; `adopt` (a remote dial's
+  winner) forgets the path state as `connect` does; `-SillPathTest`'s
+  addresses go through #13's address parser first, then the split at the last
+  colon.
+- `SessionLink` is this branch's (hold, adopt, unhold, the chained fences):
+  main had not changed it since 76366e8. `DiscoveryPolicy` is the union, plus
+  the remote rule.
+- Verified without devices: iOS Debug and Release for the simulator and Debug
+  for the iPad (build only, not installed), only the old `StreamClient`
+  capture warning; `swift build -c release`, and clean, only the CaptureProbe
+  warning (Sources, Package.swift and Scripts are main's byte for byte). Pure
+  checks against the merged files:
+  this branch's policy check 277 of 277 and its 61 mutants; main's 187 of 187,
+  its 25 mutants (D1's text made unique: `wifiInterface` has the same guard)
+  and the 20 older ones; the remote rule's 9 checks on top of the 277 (286:
+  a 12,288-case grid, a model) and 9 mutants of it, 70 of 70 with the 61;
+  remote access's rules check 64 of 64 and 35 of 35; the fence check's 12
+  modes and 16 of 16 mutants. On a simulator of its own against the merged
+  `SillHost --synthetic`, one host at a time (21 hosts, the longest 49 s):
+  this branch's 18 scenarios as before the merge (refused-cable's other
+  launch now a Python stand-in, so one real host suffices); remote access's
+  pairing by link, a remote session by address that the plan keeps where it
+  is (its "path: kept: a remote session…", no route word, no move) and, its
+  host gone and back, the ordinary end and an automatic remote redial, no
+  rescue; and close-slow (the connection closed over the cable, the cable's
+  dial never answering, the row as listed never sending a list: the session
+  ends 7.5 s later with #13's words), 66 of 66 checks. close-slow on the merge
+  commit's own build printed "connection silent for 6 s: lost" seven times,
+  0.25 s apart, until the move ended; with the fix-up, never. The first run
+  stopped after four scenarios when Noah's iPad connected to Sill.app: that
+  host had passed the check before it started and ran 24 s beside his stream,
+  so the runner (`scratchpad/integrate-12/sim/simmerge.py`) now also kills its
+  host the moment Sill.log shows a device connecting.
+- **Untested, for Noah:** the entries below on the merged build, and: a remote
+  session at home with the cable plugged in stays remote (the console's "path:
+  kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
+  while the iPad streams over the cable gives "‹Mac› quit Sill." at once, with
+  no dial over the cable first, and it reconnects when Sill is back.
+
+**The session follows the best path (2026-09-25, branch `follow-best-path` from
+main at 76366e8, after PRs #9 and #10).** Noah's tests: plugging the cable in
+left a Wi-Fi session on Wi-Fi until he reconnected (a TCP connection keeps its
+interface), and pulling it hung the session a while, then the connect screen,
+then Wi-Fi. A live session now follows the best path its Mac is reachable on,
+the cable over Wi-Fi over Direct (`DiscoveryPolicy.pathPlan`, pure;
+`StreamClient.followBestPath`), by the move from AWDL's make-before-break
+hand-over (the new connection's first window list must carry the same
+`launchID`). Up: once the network browser has listed the session's Mac on a
+wired interface for 2 s (`cableSettle`, counted again after a move off it),
+the Mac is dialled on it beside the Wi-Fi session (the wired dial; not ready in
+2.5 s, or waiting or failing, and the session stays on Wi-Fi) and handed over
+with the fence, and the readout says Wired. Down: when the cable's path is
+gone (iOS says so: the connection not viable, back to waiting, or a path
+update that is not satisfied and names the Mac's address; or the browser has
+dropped the cable and either an unsatisfied update names only the service or
+no pong has come back for 1 s, `pongSilence`), the Mac is dialled at once on
+the Wi-Fi interface it is listed on, or was within 5 s (`wifiFresh`; the row as
+listed after 2.5 s), what the device sends waits meanwhile
+(`SessionLink.hold`) and goes out first on the new connection with no fence
+(`adopt`), and the old connection is force-cancelled so nothing of it lands
+late; a path that comes back calls the move off (`unhold`). A connection
+already dead over the cable is made again at once (`reconnectNow`): over the
+cable when the browser still lists it and iOS said nothing of its path (the
+Mac closed it), as a tap on its Wired row dials it (the row as listed after
+2.5 s), else over Wi-Fi the same way; the stream screen stays, no retry timer,
+and if the Mac stopped the stream meanwhile (zero devices) the new
+connection's first list picks the source again (the Desktop for a window that
+went). Never Wi-Fi to Wi-Fi, never off a working cable (a browser blink alone
+never moves it: its pongs keep coming), never off a Direct session but to the
+network, at most one move per 5 s each way (`pathHysteresis`; up, 10, 20, 40,
+then 60 s after moves to the cable that did not complete, `upWait`, and never
+again to a listing of the cable that reached another Mac or launch until it is
+listed afresh); with no Wi-Fi to go to, the ordinary end and reconnect.
+DEBUG console: "path: the cable appeared: moving the session to anpi0", "path:
+the cable went away: moving to Wi-Fi on en0", "path: the cable went away with
+the connection: reconnecting over Wi-Fi on en0 now", "path: kept: …", and what
+iOS said ("path: the session's connection is not viable…", "path: iOS says the
+session's path is unsatisfied…"); `-SillPathTest` drives it in the simulator
+(ContentView's contract). Verified: the policy check at 253 (187 plus 66: the
+plan at every boundary, a 20,480-case grid, a model of plugs, pulls, blinks,
+silence and a loose cable), 48 of 48 mutants caught (25 plus 23); the fence
+check's eight modes (new: hold, holdclosed, unhold, adoptfence), six mutants of
+the new SessionLink code caught; in the simulator against `SillHost
+--synthetic`, dialling this Mac's own `fe80::…%en0` ("Wi-Fi") and
+`fe80::…%en14` (the USB cable to the iPad, "Wired"): the cable listed at 3 s,
+moved about 2 s later with the fence down in 1–2 ms; the path reported gone,
+on Wi-Fi 10–20 ms later without a fence; the connection cut, carried on over
+Wi-Fi in 10–20 ms with no connect screen and the Desktop picked again; the
+cable dropped with pongs silent, moved at the 1 s mark, with pongs flowing,
+kept; a loose cable moved up at 3.7, 8.9, 13.9 s and down at 4.6, 9.6, 14.6 s;
+no Wi-Fi, the ordinary end; the move from AWDL and PR #10's wired-dial
+fallbacks unchanged. **Untested, for Noah:** the real plug and pull on the
+iPad while streaming. Plugged in: a few seconds later "path: the cable
+appeared", the readout's Wired, and the host's "Client connected: …%anri0" (or
+`%en14`) then "Client left" for the Wi-Fi one. Pulled: within about a second
+the readout's Wi-Fi with no connect screen and the host's "Client connected"
+over Wi-Fi (`%en0`, or the iPad's Wi-Fi IPv4 address; the cable's connection
+leaves by itself, at the latest by eviction 4 s on); and which signal iOS gave
+first (the console's "path:" lines), since a pull's own signals have never
+been seen on a device. And on the cable, another app for over 4 s (the Mac
+evicts the suspended iPad), then back to Sill: "path: the connection went
+away, the cable did not", the host's "Client connected" over the cable again,
+and no hop to Wi-Fi.
+
+Review fixes (2026-09-25). A connection over the cable that dies while the
+browser still lists the cable and iOS said nothing of its path was closed by
+the Mac (it evicts a device that stops reading, an iPad suspended in the
+background for 4 s): it is made again over the cable, where before it went to
+Wi-Fi and came back to the cable 2 s later. A move to the cable could land
+while the move from AWDL's fence was still up (that move can take 7.5 s, and
+the next move up counts from its start), and its hand-over replaced the first
+fence: what the first fence held was lost (a release sent then left the
+button down), its AWDL connection was never closed, and `hold` was refused
+while a fence stood. `SessionLink` now keeps a list of fences and a hold apart
+from them: what waits goes out only once no fence and no hold stands, a hold
+taken during a fence outlasts it (a cable pulled right after a move landed on
+it), and each old connection is handed back for closing only once what waited
+has gone out, its viewport first (`Released.close`), so the Mac never counts
+only devices without one. A move up keeps its fence even when iOS has said
+the old connection's path is gone (a report can pass; the 3 s timeout covers
+a dead path), and a connection ready again after waiting clears `waiting` and
+starts no second read loop. A listing of the cable that reached another Mac
+or launch is not tried again while it lasts (`refusedCable`), and moves up
+that do not complete wait 10, 20, 40, then 60 s (`upWait`), where before they
+went every 5 s for as long as the cable stayed in. `-SillPathTest` gained
+`close` (the connection closed, the row as it is) and `direct` (the session
+counts as one over AWDL). Verified: the policy check at 277 (the 253, whose
+grid now also spans refused listings and failed moves up, plus 24: the
+reconnect over the cable, the refused listing, `upWait`, models of an
+eviction on the cable and of moves up failing each way), 61 of 61 mutants
+caught (48 plus 13); the fence check's twelve modes (new: twofences,
+twomoves, holdfence, holdadopt; the `SessionLink` before the fixes fails
+three: 27 inputs lost with 41 inversions, and two holds refused), 16 of 16
+mutants of the new code caught; iOS Debug for the simulator and the iPad
+(build only) and Release for the simulator, only the old `StreamClient`
+warning; in a simulator of its own (another agent's UI tests had the shared
+one) against `SillHost --synthetic`: the connection closed over the cable,
+reconnected over the cable in 10 ms with no Wi-Fi hop; the cable's dial never
+answering, on Wi-Fi 2.5 s later, then moves up 5, 15 and 35 s after, each
+given up; a cable that connects but sends no list, and one refused at once,
+the same back-off; a cable that reaches another launch, one try, and one more
+once listed afresh; behind delay proxies (2 s and 3.5 s each way), the move to
+the cable landing 1.5 s before the move from "AWDL"'s fence was down, the two
+fences down by their timeouts, then everything that waited out on the cable
+and both old connections closed; the earlier scenarios unchanged.
+
 **The hardware encoder: busy, not stuck (2026-09-24; fixed 2026-09-25, branch
 `encoder-recovery` from main at 76366e8, with main at ba91136 merged in: the
 bullet before the last).** Sill.app's watchdog fired twice on 2026-09-24 and
@@ -690,10 +866,11 @@ its Wi-Fi channel up to ~97 ms every 524 ms (see the trackpad-stutter section).
   `.ready` logged as ignored with the word kept (that session ran over Wi-Fi,
   `%en0` on the host: with Wi-Fi healthy the race took en0 in all three
   unscoped tries, and the night's cable session came right after an eviction
-  on Wi-Fi). A session over
-  the cable ends when it is pulled and comes back over Wi-Fi, "Wi-Fi" on both
-  ends; plugged back in, an established Wi-Fi session stays on Wi-Fi (TCP does
-  not move) until the next connection. On
+  on Wi-Fi). Until branch
+  `follow-best-path` a session over the cable ended when it was pulled and came
+  back over Wi-Fi, "Wi-Fi" on both ends, and plugged back in, an established
+  Wi-Fi session stayed on Wi-Fi (TCP does not move) until the next connection;
+  now it follows the cable (the step above). On
   the device, also compare each word with the host's "Client connected:
   fe80::…%anri0" line (`%anri0` or `%enN`: the cable; `%en0`: this Mac's
   Wi-Fi). Verified on the simulator: the policy check at 138, eight mutants
@@ -1501,15 +1678,19 @@ good.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
   `FoundMac` rows; connection, parsing, reconnect, the move of a session over
-  AWDL to the network, ping, generic `send`), `SessionLink` (the session's
-  connection and the one door out to the Mac; the move's fenced hand-over;
-  Foundation and Network only, checked with swiftc),
+  AWDL to the network, a live session following the best path
+  (`followBestPath`: to the cable, to Wi-Fi, made again over either), ping,
+  generic `send`), `SessionLink` (the session's connection and the one door out
+  to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
+  off a lost path: `handOver`, `hold`, `adopt`, `unhold`; Foundation and
+  Network only, checked with swiftc),
   `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
   the session's route word for the Settings panel,
   when a reconnect may take a Direct row, when a session over AWDL moves to
-  the network, the memory of Macs with Direct Wireless on, the Remote rows and
-  when a lost saved Mac is dialed away from home; pure, checked with swiftc),
-  `StreamScreen`
+  the network, when a live session at home moves to the cable or to Wi-Fi or is
+  made again (`pathPlan`, `upWait`; never a remote one), the memory of Macs with
+  Direct Wireless on, the Remote rows and when a lost saved Mac is dialed away
+  from home; pure, checked with swiftc), `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
   layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
@@ -1656,7 +1837,11 @@ address, or its port 1, or HOST:PORT, is listed as the Mac's network row, so the
 move to the network runs against a synthetic host; `to:` this Mac's
 `fe80::…%en0` address from `127.0.0.1` shows the panel's route word change at
 the hand-over; the console's "discovery: …" and "session: …" lines,
-`xcrun simctl launch --console-pty`, say what happened). A fake screen wider than the
+`xcrun simctl launch --console-pty`, say what happened), `-SillPathTest
+'<spec>'` (with `-SillConnect`: the session's Mac listed as a network row whose
+cable and Wi-Fi come and go on cue, so the session follows the best path for
+real; the spec is ContentView's contract, the console's "path: …" lines say
+what happened). A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot.
 
