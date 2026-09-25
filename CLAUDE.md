@@ -1001,7 +1001,7 @@ display off by default in both the CLI and the app.
   or the user closes it. Allow… shows each system alert once
   (`askedScreenRecording`/`askedAccessibility` in the defaults), then opens
   System Settings, so recovering from a `tccutil reset` also deletes those two
-  keys (README, Permissions).
+  keys (docs/DEVELOPMENT.md, Permissions).
 - Build facts. SwiftPM's default build system links without SDKROOT, so its
   executables record the deployment target as their SDK (`xcrun vtool
   -show-build`: sdk 14.0), and macOS 26+ draws such an app in the pre-26 look.
@@ -1495,6 +1495,13 @@ good.
   `PairingOverlay` (Pair This iPad…). New files need their four pbxproj
   entries by hand. Swift 5 language mode.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
+- `docs/DEVELOPMENT.md` — building, running and testing from source; the
+  README's developer material until 2026-09-25, so a plan's "README" means a
+  section there: the toolchain, make-app.sh, Sill.app's menu and Quality, the
+  CLI's flags, the iOS project, Permissions (the TCC reset), settings from a
+  device, Direct Wireless, remote access (setup, troubleshooting, reset), the
+  test tools in brief (Build and run below has them all), measuring latency,
+  troubleshooting (slow, frozen, the encoder), releasing, known limitations.
 
 ## Build and run
 
