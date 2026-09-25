@@ -115,9 +115,11 @@ struct HostSettingsPanel: View {
                         // From afar, how, with the round trip (it needs no clock agreement between
                         // the two devices, unlike frame age); the readout above then ends in the
                         // bitrate. Wraps like the readout (larger text on the outer display cut it
-                        // off), after a "·" as the readout does.
+                        // off), after a "·" as the readout does, and never inside the route: its
+                        // spaces are no-break ones, as on the Mac's card (at xxLarge on the outer
+                        // display it read "Connected through" / "Tailscale · 48 ms").
                         if let r = remoteRoute {
-                            Text("Connected \(r.phrase)\u{00A0}· \(Self.rttText(client.linkStats))")
+                            Text("Connected \(r.phrase.replacingOccurrences(of: " ", with: "\u{00A0}"))\u{00A0}· \(Self.rttText(client.linkStats))")
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
