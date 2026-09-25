@@ -105,8 +105,11 @@ zips it again so the download carries the ticket, checks a copy unpacked from
 that zip with `stapler validate` and `spctl`, and prints the zip's path and
 SHA-256. It needs `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'`
 and `SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
-store-credentials sill-notary`), and refuses to start without them.
-`--dry-run` needs only the identity and stops before anything goes to Apple.
+store-credentials sill-notary`), and refuses to start without them. Give
+both on the release command itself, never in your shell profile: `make-app.sh`
+signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
+included. `--dry-run` needs only the identity and stops before anything goes
+to Apple.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.

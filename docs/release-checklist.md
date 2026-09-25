@@ -38,8 +38,10 @@ Only the Account Holder can make one.
       password, kept outside the repo. Apple limits how many you can make. Sill's designated
       requirement names the team, not the certificate, so a later certificate from the same team
       keeps everyone's Screen Recording and Accessibility permissions.
-- Your own Mac asks for both permissions once more after the first Developer ID build: its
-  designated requirement differs from the Apple Development builds'.
+- Your own Mac keeps its permissions as long as its builds stay Apple Development, so keep
+  `SILL_SIGN_IDENTITY` out of your shell profile (§2). A Developer ID build has a different
+  designated requirement: opening one on this Mac asks for both permissions again. Try each
+  release on another Mac or user account instead (part 2).
 
 ### 2. Notary credentials
 
@@ -53,14 +55,21 @@ Stored in your keychain under one profile name. Either:
       Passwords, then `xcrun notarytool store-credentials sill-notary --apple-id <your Apple ID> --team-id 9B2KKVM937`
       and paste the password when asked.
 
-Then, in your shell profile:
+Give both to the release command, never to your shell profile. `make-app.sh` signs every build
+with `SILL_SIGN_IDENTITY` when it is set, `--install` included, so an exported Developer ID
+identity would re-sign your everyday Sill.app, and macOS would ask for Screen Recording and
+Accessibility again.
 
 ```
-export SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'
-export SILL_NOTARY_PROFILE=sill-notary
+SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh --dry-run
 ```
 
-- [ ] Rehearse: `Scripts/release.sh --dry-run` checks the setup, builds, signs and zips, and stops
+To type them once, put the two lines `export SILL_SIGN_IDENTITY=…` and
+`export SILL_NOTARY_PROFILE=sill-notary` in a file of their own, such as `~/.sill-release`, and
+run `(. ~/.sill-release && Scripts/release.sh --dry-run)`. The parentheses keep them out of your
+shell.
+
+- [ ] Rehearse with that command: `--dry-run` checks the setup, builds, signs and zips, and stops
       before anything goes to Apple. When something is missing it says what, and builds nothing.
 
 ### 3. The website
@@ -137,9 +146,10 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       build number is the commit count, which make-app.sh stamps in. The iOS app's are
       MARKETING_VERSION and CURRENT_PROJECT_VERSION in `iOSClient/Sill.xcodeproj` (target Sill ›
       General). Commit.
-- [ ] `Scripts/release.sh`. It builds, notarizes, staples and zips, checks a copy unpacked from
-      the zip the way Gatekeeper will, and prints the zip's path, its SHA-256 and where Apple's
-      notary log is. It warns when the log lists issues: read them.
+- [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
+      zips, checks a copy unpacked from the zip the way Gatekeeper will, and prints the zip's
+      path, its SHA-256 and where Apple's notary log is. It warns when the log lists issues: read
+      them.
 - [ ] Try the zip as someone new to Sill would: on another Mac or a new macOS user account,
       download it from where it will live (so it gets the quarantine flag), unzip it, open it,
       allow the permissions and stream to a device. For 1.0 this is the reviewer's path: film it
