@@ -74,9 +74,13 @@ Before it goes public:
 - [ ] Remote Access: the pages describe it (PR #13). For a release without it, delete each block
       from `<!-- Remote Access` to `<!-- /Remote Access -->`; `grep -n "Remote Access" site/*.html`
       finds them.
-- [ ] The home page says Sill is open source. Make the repository public with a LICENSE first
-      (Apache-2.0 or MPL-2.0, docs/BRIEF.md), then turn the commented GitHub links in
-      `index.html` and `support.html` into real ones. Or take that line out until then.
+- [ ] Open source: the site doesn't say it while Saffsanity/sill is private. Once the repository is
+      public with a LICENSE (Apache-2.0 or MPL-2.0, docs/BRIEF.md), follow the comments in
+      `index.html` and `support.html`: put "open source" back on the home page and turn the
+      commented GitHub links into real ones. Sill for Mac already says "free and open source"
+      (`NSHumanReadableCopyright` in `Packaging/Info.plist`, and the footnote in Settings,
+      `SettingsPanes.swift`). If the repository is still private at the first Developer ID
+      release, decide whether those wait too.
 - [ ] `download.html` needs a real build first (part 2).
 
 Hosting: GitHub Pages. On GitHub Free it serves only public repositories, and from a branch it
