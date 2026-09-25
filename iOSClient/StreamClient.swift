@@ -213,7 +213,8 @@ final class StreamClient: ObservableObject {
     /// Main thread only.
     var localPointer: CGPoint? { didSet { onLocalPointerChange?(localPointer) } }
     var onLocalPointerChange: ((CGPoint?) -> Void)?
-    /// The last Viewport sent, so the local-cursor flag can be re-sent without re-measuring. Main thread.
+    /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
+    /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite. Not
@@ -800,11 +801,17 @@ final class StreamClient: ObservableObject {
         goodbye = nil
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
+        // The hello first, written to `c` before it becomes the session's connection below: from
+        // then on the session can send through the link before `.ready` (a coast's end as the
+        // stream screen goes, the pointer's viewport 200 ms after a tear-down), and a send made
+        // before `.ready` goes out once it is ready, in the order made. Sent at `.ready`, the hello
+        // came after such a message, and a Mac with a device floor refuses a device whose first
+        // message is not its hello.
+        sendHello(on: c)
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
-                self.sendHello(on: c)   // first, before the pings (startMeasuring) and anything the session sends
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
                 let path = c.currentPath
                 DispatchQueue.main.async {
@@ -893,11 +900,13 @@ final class StreamClient: ObservableObject {
         return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
     }()
 
-    /// The hello, the first thing on every session connection (a tap's, a reconnect's, a wired dial
-    /// and its fallback, a move's network connection, a remote dial's winner), written straight to
-    /// `c` before anything else goes out on it: a Mac with a device floor judges the device by its
-    /// first message. Never on a pairing connection, whose one message is kind 19. Older Macs skip
-    /// it. Any thread.
+    /// The hello, the first thing on every session connection, written straight to `c` before
+    /// anything else can go out on it: a Mac with a device floor judges the device by its first
+    /// message. A tap's, a reconnect's, a wired dial's and its fallback's as the connection is
+    /// made, before it becomes the session's (`connect(to:)`: a send made before `.ready` waits
+    /// for it, in order); a move's network connection at `.ready` (nothing else goes out on it
+    /// before the hand-over); a remote dial's winner before it becomes the session's (`adopt`).
+    /// Never on a pairing connection, whose one message is kind 19. Older Macs skip it. Any thread.
     private func sendHello(on c: NWConnection) {
         let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Self.helloPayload)
         c.send(content: message.serialized(), completion: .contentProcessed { _ in })
@@ -1419,6 +1428,9 @@ final class StreamClient: ObservableObject {
         recentRttMedians = []
         slowLink = false
         localPointer = nil
+        // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
+        // session's viewport may reach the next connection, which may already be dialling.
+        forgetViewport()
         cursorShape = nil
         connected = false
         connectedDirectly = false
