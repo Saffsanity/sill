@@ -83,8 +83,13 @@ package struct HostStatusSnapshot: Equatable {
     /// Frames the encoder put out in the last stats second (the stats line's `enc.out`).
     package var encodedFPS = 0
     /// The hardware encoder did not answer (launch probe or a hang): the software encoder carries
-    /// every stream until the host restarts.
+    /// every stream until a re-check finds the hardware keeping up with the stream (every 30 s
+    /// while a device is connected, backing off to 300 s), which clears it.
     package var softwareEncoder = false
+    /// With `softwareEncoder`: so many checks have not got their frame back that the encoder is
+    /// stuck, not busy, and the re-check has stopped probing it (a restart of the Mac fixes that).
+    /// Cleared as soon as one of those frames comes back.
+    package var hardwareEncoderStuck = false
     /// The virtual display setting as the host runs it.
     package var virtualDisplayOn = false
     /// Why the virtual display is off for this run: the private API is missing, or the system took
