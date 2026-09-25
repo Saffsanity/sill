@@ -11,15 +11,15 @@ Noah hasn't confirmed these yet. Each lives in the places listed, and one comman
 
 | What | Now | Where |
 |---|---|---|
-| The site's domain | sill.saffer.me | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `docs/app-store-metadata.md`, this file |
-| The support address | `SUPPORT_EMAIL_PLACEHOLDER` | `site/privacy.html`, `site/support.html`, `docs/app-store-metadata.md` |
-| The current Mac build | `SILL_VERSION_PLACEHOLDER`, `SILL_ZIP_URL_PLACEHOLDER`, `SILL_ZIP_SHA256_PLACEHOLDER` | `site/download.html` (set by hand on every release, part 2) |
+| The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `docs/app-store-metadata.md`, this file |
+| The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `docs/app-store-metadata.md` |
+| The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names | `site/download.html` (never edited per release, part 2) |
 
 With the real values in place of `<domain>` and `<address>`:
 
 ```
 grep -rl 'sill\.saffer\.me' site iOSClient docs | xargs sed -i '' 's#sill\.saffer\.me#<domain>#g'
-grep -rl SUPPORT_EMAIL_PLACEHOLDER site docs/app-store-metadata.md | xargs sed -i '' 's#SUPPORT_EMAIL_PLACEHOLDER#<address>#g'
+grep -rl support@getsill.app site docs/app-store-metadata.md | xargs sed -i '' 's#support@getsill.app#<address>#g'
 ```
 
 ## Part 1: once
@@ -78,7 +78,7 @@ Preview it with `python3 -m http.server 8000 --directory site` and http://localh
 
 Before it goes public:
 
-- [ ] Replace `SUPPORT_EMAIL_PLACEHOLDER` (above) with an address someone reads. Apple wants real
+- [ ] Replace `support@getsill.app` (above) with an address someone reads. Apple wants real
       contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
@@ -90,14 +90,13 @@ Before it goes public:
       (`NSHumanReadableCopyright` in `Packaging/Info.plist`, and the footnote in Settings,
       `SettingsPanes.swift`). If the repository is still private at the first Developer ID
       release, decide whether those wait too.
-- [ ] `download.html` needs a real build first (part 2).
+- [x] `download.html` links the newest GitHub Release; nothing per release (part 2).
 
 Hosting: GitHub Pages. On GitHub Free it serves only public repositories, and from a branch it
 serves the root or `/docs`, never `/site`. So:
 
-- [ ] While Saffsanity/sill is private: create a public repository, Saffsanity/sill-site, copy
-      the folder into it (the commands below), then sill-site › Settings › Pages › Deploy from a
-      branch › main, / (root).
+- [x] Done 2026-09-25: the public repository Saffsanity/sill-site holds a copy of `site/`, with
+      Pages on (main, / root) and the custom domain set. Republish whenever `site/` changes:
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
@@ -107,13 +106,19 @@ rsync -a --delete --exclude .git site/ ../sill-site/                    # whenev
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
-- [ ] Domain: first verify saffer.me for your account (github.com › Settings › Pages › Add a
-      domain). It gives a TXT record to add at saffer.me's DNS host, and then nobody else can
-      claim sill.saffer.me. Then add the record `sill  CNAME  saffsanity.github.io.` there.
-      `site/CNAME` already names sill.saffer.me. `dig +short sill.saffer.me` shows the CNAME once
-      it has spread.
+- [x] Domain, done 2026-09-25: getsill.app at Cloudflare, with A records to GitHub Pages
+      (185.199.108.153, .109, .110, .111), the matching AAAA records (2606:50c0:8000::153 to
+      8003::153), and Email Routing forwarding support@ to Noah's mailbox. The records are proxied
+      through Cloudflare, which serves the certificate, so GitHub's "Enforce HTTPS" stays off.
+- [ ] Cloudflare: SSL/TLS mode "Full" and "Always Use HTTPS" on, so the hop to GitHub is encrypted
+      and plain links redirect (.app is HTTPS-only in browsers anyway). Add `www CNAME
+      saffsanity.github.io` if www should work. Optional: verify the domain for the GitHub account
+      (github.com › Settings › Pages › Add a domain, a TXT record) so nobody else can claim it.
+- [ ] Cloudflare rewrites visible email addresses unless they sit inside `<!--email_off-->`
+      comments, which the pages now use; alternatively turn off Scrape Shield › Email Address
+      Obfuscation.
 - [ ] In the repository's Settings › Pages, tick Enforce HTTPS once GitHub has the certificate.
-- [ ] In a private window: https://sill.saffer.me/, `/download`, `/privacy` and `/support` all
+- [ ] In a private window: https://getsill.app/, `/download`, `/privacy` and `/support` all
       load. GitHub Pages serves `privacy.html` at `/privacy`, the form the app and App Store
       Connect use.
 
@@ -126,10 +131,10 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       Act).
 - [ ] Pricing and Availability (metadata §3): free; not available on Apple silicon Macs or
       Apple Vision Pro.
-- [ ] App Privacy (metadata §4): Privacy Policy URL `https://sill.saffer.me/privacy`, and "No,
+- [ ] App Privacy (metadata §4): Privacy Policy URL `https://getsill.app/privacy`, and "No,
       we do not collect data from this app", published as Data Not Collected. The privacy policy
       and the app's privacy manifest say the same.
-- [ ] Version 1.0 (metadata §5 and §9): Support URL `https://sill.saffer.me/support`, the
+- [ ] Version 1.0 (metadata §5 and §9): Support URL `https://getsill.app/support`, the
       description, keywords and screenshots.
 - [ ] For a build without Remote Access, paste the local-only keywords, What's New
       and review notes, leave out the description's "Away from home" bullet, and film no shot 11
@@ -154,14 +159,14 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       download it from where it will live (so it gets the quarantine flag), unzip it, open it,
       allow the permissions and stream to a device. For 1.0 this is the reviewer's path: film it
       for the review video (metadata §8).
-- [ ] Upload the zip. A GitHub Release keeps binaries out of git:
-      `gh release create v<version> .build/Sill-<version>.zip --repo Saffsanity/<repo> --title "Sill <version>"`
-      gives `https://github.com/Saffsanity/<repo>/releases/download/v<version>/Sill-<version>.zip`.
-      Or put the zip in the site's repository next to download.html; each version then adds a
-      few MB to it.
-- [ ] In `site/download.html`, set the version, the link and the SHA-256 that release.sh printed.
-      Publish the site. In a private window, download it from https://sill.saffer.me/download
-      and compare its `shasum -a 256`.
+- [ ] Publish: `Scripts/release.sh --publish` (with the same two variables) creates the GitHub Release
+      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`. The site's
+      Download button links `releases/latest/download/Sill.zip`, which GitHub redirects to the newest
+      release, so download.html is never edited. The repository must be public for anonymous
+      downloads; until it is, set `SILL_RELEASE_REPO=Saffsanity/sill-site` and point the button there.
+- [ ] The first release only: the published copy of download.html says the build is being prepared;
+      republish `site/` (the rsync below) so the button shows. Then, in a private window, download
+      it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
 - [ ] iOS: in Xcode pick Any iOS Device, then Product › Archive. In the Organizer: Validate App,
       then Distribute App › App Store Connect › Upload. Generate Privacy Report there should list
       the privacy manifest's API categories.

@@ -6,6 +6,9 @@
 #     Scripts/release.sh             build, zip, notarize, staple, zip again, verify
 #   Scripts/release.sh --dry-run     the same checks, build and first zip, then stops before
 #                                    notarytool and prints what a real run would do next
+#   Scripts/release.sh --publish     everything, then a GitHub Release (tag v<version>) with the
+#                                    assets Sill.zip and Sill.zip.sha256, which the site's download
+#                                    page links under those fixed names (needs gh, signed in)
 #
 # SILL_SIGN_IDENTITY names a Developer ID Application identity in your keychain: its name, part of
 # it, or its SHA-1 hash, as for make-app.sh. SILL_NOTARY_PROFILE is the profile name you gave
@@ -26,7 +29,7 @@ set -euo pipefail
 
 usage() {
     cat <<'USAGE'
-usage: Scripts/release.sh [--dry-run]
+usage: Scripts/release.sh [--dry-run | --publish]
 
   SILL_SIGN_IDENTITY='Developer ID Application: … (TEAMID)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh
       builds Sill.app with make-app.sh --release, zips it, has Apple notarize it, staples the
@@ -34,6 +37,9 @@ usage: Scripts/release.sh [--dry-run]
       path and SHA-256 for site/download.html.
   --dry-run
       the same checks, build and first zip; stops before notarytool and prints the rest.
+  --publish
+      after the checks, creates the GitHub Release v<version> in $SILL_RELEASE_REPO
+      (default Saffsanity/sill) with Sill.zip and Sill.zip.sha256, the names the site links.
 
 The one-time setup (certificate, notary credentials) is in docs/release-checklist.md.
 USAGE
@@ -122,10 +128,11 @@ unpacked=""   # the zip's copy being checked; removed on exit
 cleanup() { if [ -n "$unpacked" ]; then rm -rf "$unpacked"; fi; }
 
 main() {
-    local dry_run=0 arg
+    local dry_run=0 publish=0 arg
     for arg in "$@"; do
         case "$arg" in
             --dry-run) dry_run=1 ;;
+            --publish) publish=1 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; exit 2 ;;
         esac
@@ -226,10 +233,36 @@ DRY
     echo
     echo "Sill $version ($build) is notarized, stapled and zipped:"
     shasum -a 256 "$zip"
-    echo "Next (docs/release-checklist.md): upload $zip, then set these in site/download.html:"
-    echo "  version  $version"
-    echo "  link     where you uploaded Sill-$version.zip"
-    echo "  SHA-256  $sha"
+    if [ "$publish" = 1 ]; then
+        publish_release "$zip" "$version" "$build" "$sha"
+    else
+        echo "Next (docs/release-checklist.md): Scripts/release.sh --publish creates the GitHub Release"
+        echo "v$version with Sill.zip and Sill.zip.sha256, which https://getsill.app/download links."
+        echo "  SHA-256  $sha"
+    fi
+}
+
+# The GitHub Release the site's download page links: tag v<version>, assets named exactly Sill.zip and
+# Sill.zip.sha256 so /releases/latest/download/<name> keeps working release after release.
+publish_release() {
+    local zip="$1" version="$2" build="$3" sha="$4"
+    local repo="${SILL_RELEASE_REPO:-Saffsanity/sill}" dir asset
+    command -v gh >/dev/null || fail "gh is not installed (brew install gh), or not on PATH"
+    gh auth status >/dev/null 2>&1 || fail "gh is not signed in: run gh auth login"
+    if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
+        fail "release v$version already exists in $repo; bump the version in Packaging/Info.plist first"
+    fi
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/sill-publish.XXXXXX")"
+    asset="$dir/Sill.zip"
+    cp "$zip" "$asset"
+    (cd "$dir" && shasum -a 256 Sill.zip > Sill.zip.sha256)
+    say "Creating the GitHub Release v$version in $repo"
+    gh release create "v$version" "$asset" "$dir/Sill.zip.sha256" --repo "$repo" \
+        --title "Sill $version" \
+        --notes "Sill for Mac $version ($build), notarized. SHA-256 of Sill.zip: $sha. Download at https://getsill.app/download"
+    rm -rf "$dir"
+    echo "Published: https://github.com/$repo/releases/tag/v$version"
+    echo "The site's Download button already points at the newest release."
 }
 
 # Sourced (to test its functions), the script only defines them.

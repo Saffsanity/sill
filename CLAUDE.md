@@ -24,9 +24,9 @@ Apple's sources and every text to paste into App Store Connect;
   screen's footer (Layout, `ContentView`), for guidelines 1.5, 2.1 and
   5.1.1(i); the website in `site/` and `Scripts/release.sh` (Layout); the two
   docs, with the Remote Access switch (the cuts for a 1.0 without it).
-- Assumed, none confirmed by Noah: the site at `https://sill.saffer.me`
+- Confirmed by Noah on 2026-09-25 (the site is live): the site at `https://getsill.app`
   (`site/CNAME`, `SillLinks.swift`, both docs; nothing is served there yet),
-  the contact address `SUPPORT_EMAIL_PLACEHOLDER` (the privacy and support
+  the contact address `support@getsill.app` (the privacy and support
   pages and the metadata; never ship it), and the Mac download at `/download`
   (`site/download.html`, whose version, link and SHA-256 are placeholders that
   release.sh's output fills in). The checklist's Placeholders table has the one
@@ -1611,7 +1611,7 @@ good.
   whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
   footer), so a fit that changes never builds the card anew (its fields, the
   camera); + DEBUG harness), `SillLinks`
-  (the site's addresses, written once; sill.saffer.me is not confirmed yet),
+  (the site's addresses, written once; getsill.app is live since 2026-09-25),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away

@@ -15,18 +15,18 @@ literally, and the command under the table changes every copy in this file.
 
 | What | Value | Status |
 |---|---|---|
-| Site | `https://sill.saffer.me` | Assumed. Noah owns saffer.me; nothing is served there yet. |
-| Support URL | `https://sill.saffer.me/support` | Assumed. The page is `site/support.html`; it must show a real contact before submitting. The same link as `SillLinks.support` in the app (guideline 1.5). |
-| Privacy Policy URL | `https://sill.saffer.me/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
-| Mac download | `https://sill.saffer.me/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
-| Contact address | `SUPPORT_EMAIL_PLACEHOLDER` | Placeholder. Never ship it. |
+| Site | `https://getsill.app` | Assumed. Noah owns saffer.me; nothing is served there yet. |
+| Support URL | `https://getsill.app/support` | Assumed. The page is `site/support.html`; it must show a real contact before submitting. The same link as `SillLinks.support` in the app (guideline 1.5). |
+| Privacy Policy URL | `https://getsill.app/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
+| Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
+| Contact address | `support@getsill.app` | Placeholder. Never ship it. |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
 | Remote Access in 1.0 | Undecided: main has it since ba91136 (PR #13) | Noah decides, before anything is pasted, whether 1.0 keeps it or ships without it (the audit's advice, given before it merged). |
 
 To change the domain or fill in the contact address in this file:
 
 ```sh
-sed -i '' -e 's#sill\.saffer\.me#NEW.DOMAIN#g' -e 's#SUPPORT_EMAIL_PLACEHOLDER#THE.REAL.ADDRESS#g' docs/app-store-metadata.md
+sed -i '' -e 's#sill\.saffer\.me#NEW.DOMAIN#g' -e 's#support@getsill.app#THE.REAL.ADDRESS#g' docs/app-store-metadata.md
 ```
 
 The app's own copy of the site and of the download, support and privacy links
@@ -186,7 +186,7 @@ one who skips the EU, and Apple can't decide it for you.
 
 ## 4. App Privacy
 
-- Privacy Policy URL: `https://sill.saffer.me/privacy`
+- Privacy Policy URL: `https://getsill.app/privacy`
 - User Privacy Choices URL: leave empty.
 - Get Started › "No, we do not collect data from this app" › Save › Publish.
   The product page then says **Data Not Collected**.
@@ -232,7 +232,7 @@ Free, with no account and no servers. Use any window on your Mac, or the whole d
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil. Your apps keep running on your Mac. Sill shows them and sends back what you do.
 
-Sill needs the free Sill for Mac on the Mac you want to use. Get it at sill.saffer.me. It runs on a Mac with Apple silicon and macOS 14 or later.
+Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.app. It runs on a Mac with Apple silicon and macOS 14 or later.
 
 Get started
 • Open Sill for Mac and allow Screen Recording and Accessibility.
@@ -264,7 +264,7 @@ Private
 Good to know
 • Sill shows one window, or the whole desktop, at a time.
 • Sill doesn’t play sound from your Mac.
-• Sill for Mac comes from sill.saffer.me, not the Mac App Store.
+• Sill for Mac comes from getsill.app, not the Mac App Store.
 ```
 
 Local-only build: delete the bullet that starts "Away from home".
@@ -304,8 +304,8 @@ company's name.
 
 | Field | Value |
 |---|---|
-| Support URL | `https://sill.saffer.me/support` |
-| Marketing URL (optional) | `https://sill.saffer.me` |
+| Support URL | `https://getsill.app/support` |
+| Marketing URL (optional) | `https://getsill.app` |
 | Version | 1.0 |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for 1.0. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
@@ -369,7 +369,7 @@ both.
 | Field | Value |
 |---|---|
 | Sign-in required | Unchecked. There is no account. |
-| Contact | Noah Saffer, a phone number starting with + and the country code, and an email you read (`SUPPORT_EMAIL_PLACEHOLDER` or your own; App Review only) |
+| Contact | Noah Saffer, a phone number starting with + and the country code, and an email you read (`support@getsill.app` or your own; App Review only) |
 | Notes | The block below |
 | Attachment | The demo video (section 8) |
 
@@ -386,7 +386,7 @@ There is no account, no sign-in, no in-app purchase, no ads and no server. The a
 WHAT YOU NEED
 - A Mac with Apple silicon and macOS 14 or later.
 - An iPhone or iPad on the same Wi-Fi network as the Mac.
-- Sill for Mac, free: https://sill.saffer.me/download (Developer ID, notarized).
+- Sill for Mac, free: https://getsill.app/download (Developer ID, notarized).
 
 SET UP THE MAC (about 2 minutes)
 1. Download Sill for Mac from the link above, move Sill to Applications and open it (click Open if macOS asks). It lives in the menu bar, with no Dock icon, and opens its Settings on Permissions.
