@@ -1019,8 +1019,10 @@ good.
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
   Wired, Wi-Fi or Direct, the hint and Search Nearby, and a footer along the
-  bottom, "Needs the free Sill app on your Mac." with links to the download
-  and the privacy policy, which open in Safari; the column stays centred where
+  bottom, "Needs the free Sill app on your Mac." with links to the download,
+  support and the privacy policy, which open in Safari (one line while they
+  fit, else the download link over the other two, never wider than the
+  screen); the column stays centred where
   it was and rises only to keep clear of the footer, and scrolls above it when
   even that does not fit; + DEBUG harness), `SillLinks` (the site's
   addresses, written once; sill.saffer.me is not confirmed yet),

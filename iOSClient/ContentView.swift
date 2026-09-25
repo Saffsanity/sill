@@ -233,9 +233,9 @@ struct LayoutHarness: View {
 /// Before a Mac is picked: the Macs the browsers found, as drawer-style rows that end in how each is
 /// reachable ("Wired", "Wi-Fi", or "Direct" for one reached over peer-to-peer Wi-Fi; nothing when
 /// the device cannot tell), and, when none turns up on the network, why, with Search Nearby. Along
-/// the bottom, a footer says Sill needs its free Mac app, where to get it, and links the privacy
-/// policy (App Review guidelines 2.1 and 5.1.1(i)). None of it shows while connected: the stream
-/// screen takes this one's place (`ContentView`).
+/// the bottom, a footer says Sill needs its free Mac app and where to get it, and links support
+/// and the privacy policy (App Review guidelines 1.5, 2.1 and 5.1.1(i)). None of it shows while
+/// connected: the stream screen takes this one's place (`ContentView`).
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
 
@@ -348,40 +348,60 @@ struct ConnectScreen: View {
     }
 
     /// For someone who found Sill here first, and for App Review: what else it needs, where to get
-    /// it, and the privacy policy. Muted and 13 pt like the status line, but it follows the text
-    /// size, up to the Settings panel's cap (the column keeps its fixed sizes); it wraps, never
-    /// truncates. Each link opens in Safari (a Link hands its URL to the environment's openURL),
-    /// and VoiceOver reads it as a link. The addresses are SillLinks'.
+    /// it, where to get help, and the privacy policy. Muted and 13 pt like the status line, but it
+    /// follows the text size, up to the Settings panel's cap (the column keeps its fixed sizes); it
+    /// wraps, never truncates. Each link opens in Safari (a Link hands its URL to the environment's
+    /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Needs the free Sill app on your Mac.")
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            // Side by side while they fit on one line, else one under the other, far enough apart
-            // that their tap areas meet without overlapping. Upward the areas reach a little into
-            // the line above, which is plain text.
+            // All three on one line while they fit, else the download link over the other two,
+            // the lines far enough apart that their tap areas meet without overlapping. Upward the
+            // areas reach a little into the line above, which is plain text.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 0) {
-                    footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
-                    Text(" · ")
-                        .foregroundStyle(Palette.muted)
-                        .accessibilityHidden(true)
-                    footerLink("Privacy Policy", to: SillLinks.privacy)
+                    downloadLink
+                    linkSeparator
+                    supportAndPrivacy
                 }
                 VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
-                    footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
-                    footerLink("Privacy Policy", to: SillLinks.privacy)
+                    downloadLink
+                    supportAndPrivacy
                 }
             }
         }
         .font(.footnote)
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .padding(.horizontal, 10)
-        // Under the column's own edge, so the two line up.
-        .frame(width: 380, alignment: .leading)
+        // Under the column's own edge, so the two line up. On a screen narrower than the column (a
+        // window in Slide Over) it takes the screen's width instead, so the links go to a second
+        // line rather than past the edge.
+        .frame(maxWidth: 380, alignment: .leading)
         .frame(maxWidth: .infinity)
         // Room for the last link's tap area, which then stays on the screen.
         .padding(.bottom, Self.linkReach)
+    }
+
+    private var downloadLink: some View {
+        footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
+    }
+
+    /// Support, then the privacy policy, on one line.
+    private var supportAndPrivacy: some View {
+        HStack(spacing: 0) {
+            footerLink("Support", to: SillLinks.support)
+            linkSeparator
+            footerLink("Privacy Policy", to: SillLinks.privacy)
+        }
+    }
+
+    /// The dot between two links on a line. VoiceOver skips it.
+    private var linkSeparator: some View {
+        Text(" · ")
+            .foregroundStyle(Palette.muted)
+            .accessibilityHidden(true)
     }
 
     private func footerLink(_ title: LocalizedStringKey, to url: URL) -> some View {

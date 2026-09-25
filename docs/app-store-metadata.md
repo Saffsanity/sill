@@ -16,7 +16,7 @@ literally, and the command under the table changes every copy in this file.
 | What | Value | Status |
 |---|---|---|
 | Site | `https://sill.saffer.me` | Assumed. Noah owns saffer.me; nothing is served there yet. |
-| Support URL | `https://sill.saffer.me/support` | Assumed. The page is `site/support.html`; it must show a real contact before submitting. |
+| Support URL | `https://sill.saffer.me/support` | Assumed. The page is `site/support.html`; it must show a real contact before submitting. The same link as `SillLinks.support` in the app (guideline 1.5). |
 | Privacy Policy URL | `https://sill.saffer.me/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
 | Mac download | `https://sill.saffer.me/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `SUPPORT_EMAIL_PLACEHOLDER` | Placeholder. Never ship it. |
@@ -29,8 +29,8 @@ To change the domain or fill in the contact address in this file:
 sed -i '' -e 's#sill\.saffer\.me#NEW.DOMAIN#g' -e 's#SUPPORT_EMAIL_PLACEHOLDER#THE.REAL.ADDRESS#g' docs/app-store-metadata.md
 ```
 
-The app's own copy of the site, the download and the privacy links is
-`iOSClient/SillLinks.swift`.
+The app's own copy of the site and of the download, support and privacy links
+is `iOSClient/SillLinks.swift`.
 
 **Remote Access switch.** The blocks below describe a 1.0 that includes Remote
 Access (PR #13). Guideline 2.3.1(a) forbids describing what the build lacks, so
