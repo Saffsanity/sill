@@ -9,8 +9,9 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Follow-best-path merged with main after remote access (2026-09-25, branch
-`follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12;
-not a rebase).** A session at home follows the best path as the next entry
+`follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12,
+then main at b50e224, PR #11, merged at f863c74; neither a rebase; PR #12 is
+main's cea195c).** A session at home follows the best path as the next entry
 says; remote access works as its entries say. Where the two meet:
 - A remote session (a saved Mac dialed through the remote door,
   `Session.route` `.remote`) is no candidate for the moves:
@@ -48,8 +49,8 @@ says; remote access works as its entries say. Where the two meet:
 - Verified without devices: iOS Debug and Release for the simulator and Debug
   for the iPad (build only, not installed), only the old `StreamClient`
   capture warning; `swift build -c release`, and clean, only the CaptureProbe
-  warning (Sources, Package.swift and Scripts are main's byte for byte). Pure
-  checks against the merged files:
+  warning (Sources, Package.swift and Scripts were ba91136's byte for byte).
+  Pure checks against the merged files:
   this branch's policy check 277 of 277 and its 61 mutants; main's 187 of 187,
   its 25 mutants (D1's text made unique: `wifiInterface` has the same guard)
   and the 20 older ones; the remote rule's 9 checks on top of the 277 (286:
@@ -71,6 +72,19 @@ says; remote access works as its entries say. Where the two meet:
   host had passed the check before it started and ran 24 s beside his stream,
   so the runner (`scratchpad/integrate-12/sim/simmerge.py`) now also kills its
   host the moment Sill.log shows a device connecting.
+- Then main at b50e224 (PR #11, encoder recovery) merged at f863c74. Only
+  CLAUDE.md conflicted: both Current-step entries kept, the best-path ones
+  first; README merged by itself. Sources, Package.swift, Scripts and
+  `HostSettingsPanel.swift` (its software-encoder callout) are b50e224's byte
+  for byte, every other iOS file ed6b378's. Verified on f863c74's tree (the
+  review's runs): iOS Debug for the simulator, only the old `StreamClient`
+  capture warning; 70 harness photos at 1000x710 equal to b50e224's but for
+  two spinners (connect-pairing, settings-pending: 176 and 178 px); the policy
+  check 286 of 286 and 70 of 70 mutants, main's 187 of 187 and 25 of 25, the
+  20 older mutants; remote access's rules check 64 of 64 and 35 of 35; the
+  fence check's modes and 19 of 19 mutants. Not run on it: Release and device
+  builds, and the simulator scenarios against its `SillHost --synthetic`,
+  which now has b50e224's encoder recovery (the 21 hosts above ran ba91136's).
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
@@ -406,9 +420,9 @@ the moment it connected.
   was streaming from Sill.app the whole time.
 - **Untested, for Noah:** a build of this branch in /Applications
   (`Scripts/make-app.sh --install --open` from this branch, which now carries
-  remote access too, or from main once PR #11 is in; only a new build comes
-  back by itself). Then, with the iPad streaming the Desktop, `xcrun
-  simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
+  remote access too, or from main, which has it since b50e224; only a new
+  build comes back by itself). Then, with the iPad streaming the Desktop,
+  `xcrun simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
   simulator: the frame rate drops, and within a minute or so "switching to the
   software encoder" and "the stalled frame came back" (the menu: "Hardware
   Encoder Busy"); while it records, "answers but is busy" at each check, 30,
