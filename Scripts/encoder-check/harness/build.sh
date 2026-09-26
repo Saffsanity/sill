@@ -3,7 +3,8 @@
 # running the result does, so run it only through verify-hardware.sh):
 #   .build/encoder-check/harness-base   the base commit's HEVCEncoder (ENCODER_CHECK_BASE, default
 #                                       4fe37d4, encoder-recovery: one frame inside), from git archive
-#   .build/encoder-check/harness-new    this working tree's HEVCEncoder and EncoderMailbox
+#   .build/encoder-check/harness-new    this working tree's HEVCEncoder, EncoderMailbox and
+#                                       EncoderSlowState
 # Each copy of HEVCEncoder.swift loses its `import StreamProtocol` line (StreamProtocol's sources are
 # compiled into the same module) and gains one line at the top of `handle(_:)` that records the
 # output's timestamp for the latency figure.
@@ -25,7 +26,8 @@ build() {   # NAME TREE
       $tree/Sources/SillHost/HEVCEncoder.swift > $d/HEVCEncoder.swift
   grep -q 'harnessOutputPTS = ' $d/HEVCEncoder.swift || { echo "patch failed for $name"; exit 1 }
   local extra=()
-  [[ -f $tree/Sources/SillHost/EncoderMailbox.swift ]] && extra=($tree/Sources/SillHost/EncoderMailbox.swift)
+  [[ -f $tree/Sources/SillHost/EncoderMailbox.swift ]] && extra+=($tree/Sources/SillHost/EncoderMailbox.swift)
+  [[ -f $tree/Sources/SillHost/EncoderSlowState.swift ]] && extra+=($tree/Sources/SillHost/EncoderSlowState.swift)
   swiftc -O -package-name sill -module-name Harness -o $OUT/harness-$name \
     $ROOT/Scripts/encoder-check/harness/main.swift $d/HEVCEncoder.swift $tree/Sources/SillHost/EncoderProbe.swift \
     $tree/Sources/SillHost/Stats.swift $tree/Sources/StreamProtocol/*.swift $extra

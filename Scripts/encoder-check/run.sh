@@ -50,6 +50,7 @@ encoder)
   src=$OUT/encoder-src; rm -rf $src; mkdir -p $src
   sed -e '/^import VideoToolbox$/d' -e '/^import StreamProtocol$/d' $ROOT/Sources/SillHost/HEVCEncoder.swift > $src/HEVCEncoder.swift
   swiftc -O -module-name EncoderCheck $src/HEVCEncoder.swift $ROOT/Sources/SillHost/EncoderMailbox.swift \
+    $ROOT/Sources/SillHost/EncoderSlowState.swift \
     $ROOT/Sources/SillHost/EncoderProbe.swift $ROOT/Scripts/encoder-check/encoder/FakeVT.swift \
     $ROOT/Scripts/encoder-check/encoder/main.swift -o $OUT/encoder-check || { failed=1; continue }
   encoder_free $OUT/encoder-check || { failed=1; continue }
