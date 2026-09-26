@@ -62,8 +62,11 @@ These texts are only true once these are:
   stapled, and opens on a Mac that never had it.
 - The build carries `PrivacyInfo.xcprivacy` and the export compliance key
   (section 6).
-- `MARKETING_VERSION` is 1.0 in both configurations of the Sill target
-  (it is 0.1 today), so the build attaches to the 1.0 version record.
+- The version record's Version is the build's: the first App Store version
+  is 0.5 (Noah, 2026-09-26; `MARKETING_VERSION` in both configurations of
+  the Sill target since PR #19). App Store Connect names a new app's first
+  version 1.0, and only a build whose version matches can be added to it, so
+  set the record's Version to 0.5 (section 5).
 - Every claim in the description has been seen working on a device. Still
   open: the USB cable on an iPhone (verified on the iPad mini only; if it
   fails, write "a USB cable (iPad)"), Apple Pencil hover, and 120 frames per
@@ -221,7 +224,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. Version 1.0
+## 5. The first version (0.5)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -308,7 +311,7 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 1.0 |
+| Version | 0.5 (App Store Connect proposes 1.0 for a new app; the build says 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for 1.0. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
