@@ -132,8 +132,8 @@ enum MockCatalog {
     private static func seed(_ client: StreamClient, settings c: SettingsCase) {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
         // How this session reaches the Mac: read from the connection, whatever the Mac runs.
-        // Away from home the route line under the readout says how instead (the remote cases), and
-        // the readout ends in the bitrate.
+        // Away from home the route line under the readout says how instead (`remote`,
+        // `remoteinternet`, `remoteslow`), and the readout ends in the bitrate.
         switch c {
         case .directlink: client.route = .direct
         case .wired: client.route = .wired

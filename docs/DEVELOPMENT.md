@@ -333,6 +333,17 @@ None of these needs a device. `CLAUDE.md`, Build and run, has the complete
 list, with the test-only environment variables and the recipes for headless
 tests of Direct Wireless Connection and remote access.
 
+### The pure checks
+
+`Tests/checks/run-all.sh` compiles the files that decide things (discovery and
+the session's path, the settings ledger, the wire format, pairing, who may use
+which door) on their own with a check each, and runs them: about two minutes,
+no device, permission or encoder. `--mutants` also checks that each check fails
+when its file is changed in one place (most of an hour).
+`Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
+on every pull request and push to `main`, with `swift build -c release` and the
+iOS app's build for the simulator.
+
 ### The test client and the relay
 
 `Scripts/sillclient.py PORT [seconds] [desktop|none|window:ID] [flags…]` speaks
@@ -487,6 +498,11 @@ to Apple; it builds any commit, and only warns that HEAD lacks the tag.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
+The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
+`v<version>`: it checks and builds, and with the repository variable
+`SILL_SIGN_IN_CI` set to `true` it also signs, notarizes and publishes with
+`release.sh --publish` (docs/release-checklist.md, "Releasing from GitHub
+Actions").
 
 ## Known limitations
 
@@ -513,6 +529,8 @@ permissions are granted once more.
   `sillrelay.py` (a relay that slows or cuts the link, for tests) and
   `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
   check's tests).
+- `Tests/checks/`: the pure checks (above). `.github/`: the CI and release
+  workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.

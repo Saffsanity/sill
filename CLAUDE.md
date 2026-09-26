@@ -186,6 +186,125 @@ set the compatibility floor for good (the section before Conventions).
   the privacy policy's Update check section (site/privacy.html) on the
   published site, once Saffsanity/sill-site is republished.
 
+**GitHub Actions (2026-09-25, branch `github-actions` from main at 1f3072a).**
+Noah: the download link still fails; a new release should be checked by
+GitHub, and does that cost money. The link fails twice over: there is no
+release (`release.sh --publish` has never run; `gh release list` is empty), and
+Saffsanity/sill is private, so its release files are a 404 to anyone not signed
+in with access (docs/release-checklist.md, "Releasing from GitHub Actions",
+has both ways out: go public, or publish in sill-site). Added:
+- `.github/workflows/ci.yml` (Layout): pull requests and pushes to main that
+  touch more than documents, the site or design files, and by hand; one job on
+  `xcode-27`, 30 minutes, cancelling an older run of the same event and ref.
+  Runner: the newest image GitHub offers and the only one with Xcode 27 (macOS
+  27.0 26A428 with Xcode 27.0 27A266a as the default, 27.1 installed as
+  `Xcode_27.1_beta.app` and a 27.2 beta; a public preview, issue 14404);
+  `macos-latest` is macOS 26 with Xcode 26.6 at most, `macos-15` Xcode 16.4
+  and 26.3, never tried with this code. `.github/actions/select-xcode` takes
+  the newest Xcode 27 whose folder is not a beta (27.0 there, the same build
+  as this Mac) and prints `xcodebuild -version`. The `.build` cache is keyed
+  on that toolchain and Package.swift (there is no Package.resolved),
+  `.build/checks` left out. The iOS build is arm64 only and not `-quiet`:
+  Xcode 27's -quiet heads a compile that only warned with "error: the
+  following command failed with exit code 0". The CLI runs only where it exits
+  before the host starts: `--internet` alone (exit 2) and
+  `--print-reachability`. Mutants only by hand, a job per check. Actions
+  pinned by commit (checkout v7.0.1, cache v6.1.0, upload-artifact v7.0.1, the
+  newest on 2026-09-25).
+- `.github/workflows/release.yml`: a pushed tag `v*` or by hand with a tag
+  (`SILL_RELEASE_TAG`); checkout with the whole history (make-app.sh's build
+  number is the commit count). Repository variable `SILL_SIGN_IN_CI` not
+  `true`: verify (the tag, the checks, `make-app.sh` signed ad hoc, the icon
+  there, `Sill-<version>-adhoc.zip` as an artifact for 14 days). `true`:
+  the checks, a check that the five secrets are set, the .p12 into
+  `$RUNNER_TEMP/sill-release.keychain-db` (random password, masked; first in
+  the search list and the default keychain, where notarytool keeps profiles),
+  `notarytool store-credentials sill-notary --keychain` (validates the key),
+  `release.sh --publish` with `GH_TOKEN` (the run's token, `contents: write`,
+  or `SILL_RELEASE_TOKEN` for `SILL_RELEASE_REPO`), the notary log as an
+  artifact, and an always() step that deletes the keychain and key files.
+- `Scripts/release.sh`: `SILL_RELEASE_TAG` in the preflight (the tag must be
+  `v<CFBundleShortVersionString>` and, when it is here, name HEAD);
+  `--check-tag` checks only that. It refuses a build without Assets.car and
+  AppIcon.icns (make-app.sh only warns when Quick Look or actool fail). Publish
+  asks `gh api repos/<repo>` instead of `gh auth status`, which asks GET /user,
+  and Actions' token can't answer that.
+- `Tests/checks/` (Layout): the pure checks from this session's scratch
+  folders, the newest of each, the ones run against the sources main now has,
+  unchanged but for paths (the compile line in six `main.swift` headers; the
+  policy, fence and clientlink mutants scripts read the repository and write
+  to `.build/checks/<name>/`): policy 286 (integrate-12's merged check, 70
+  mutants), fence 14 modes (review-moves-b's, 19), ledger 90 (ledger-union,
+  no mutants), clientlink 89 (14), remote-rules 64 (rf2, 35), origin 66 (10),
+  protocol 188 plus crosscheck.py's 8 (20), addresses 41 (step 3, 15),
+  pairing-address 80 (pairing-address/fixes, 35). Not here: EncoderMailbox's
+  (only on encoder-two-in-flight, which carries it as Scripts/encoder-check),
+  and update-notice's one-line change to protocol's kind 23 case.
+- Verified here, nothing pushed and no Actions run: `Tests/checks/run-all.sh`
+  passes (all nine, 132 s); every mutant caught (`run-all.sh --mutants`, about
+  44 minutes here: policy 70, fence 19, remote-rules 35, pairing-address 35,
+  protocol 20, addresses 15, clientlink 14, origin 10); `swift build -c
+  release` (28 s, only the CaptureProbe warning); the iOS command (only the
+  StreamClient warning; both simulator slices); the CLI step under `bash -eo
+  pipefail`; the three YAML files parse (PyYAML) and pass a structural check
+  (every action pinned by hash, no expression inside a run script);
+  release.sh's `--check-tag` on a match, a mismatch, unset, a tag on another
+  commit and an annotated tag (a scratch clone), and a dry run with a wrong
+  tag stopping before it builds; the Xcode rule on two fake image layouts; `gh
+  api repos/Saffsanity/sill` answers.
+- Review fixes (one pass: triggers and permissions, secrets, the Xcode step,
+  the cache, injected failures, costs, docs):
+  - The Xcode step would have failed every job: the image's `bash` is 3.2 (its
+    README), which ends a `$(` at a `case` pattern's `)`, so the loop listing
+    the Xcodes stopped short and `sudo xcode-select --switch` was handed the
+    rest of the script as a path (reproduced with `/bin/bash`; zsh parses it).
+    The loop is a function now. The step takes `version` (27 in both
+    workflows: the newest 27.x that is not a beta, compared as text, as awk
+    finds 27.10 equal to 27.1) and `fallback` (CI: a warning and the newest
+    Xcode there; release.yml: `false`, the job fails); the old message said
+    the default stayed selected and exited 1. 13 fake layouts under
+    `/bin/bash` with stubbed sudo, xcodebuild and swift; every `run:` block
+    parses with `/bin/bash -n`.
+  - The cache's `!.build/checks` excluded nothing: actions/cache 6.1.0 globs
+    with implicitDescendants off and tars each listed path whole (its
+    dist/save/index.js), so `.build` took `.build/checks`; now `.build/*` with
+    the exclusion. `.build` is 196 MB here, 135 of it the SDK's precompiled
+    modules, module cache and stat caches.
+  - `run-all.sh` skipped a check whose `run.sh` had lost its exec bit (seven
+    of nine skipped: "All passed.", exit 0) and died on an unbound array with
+    none: now every folder with a `run.sh` is a check, a non-executable one
+    fails, none at all is an error.
+  - Failures injected in a scratch copy: a behaviour mutant for each of the
+    nine (the ledger's made by hand), a compile error for each build style
+    (swiftc in run.sh; build.sh without `set -e`; with `|| true`), a failing
+    cross-check, two broken checks under `bash -eo pipefail` (exit 2), a
+    no-op mutant (`--mutants` fails on 14 of 15): every one fails as it
+    should.
+  - CI's concurrency group has the event, so a push to main no longer cancels
+    a mutants run started by hand, nor the other way round.
+  - The iOS step builds arm64 only (`ARCHS=arm64`; the generic simulator
+    destination also compiled every file for x86_64): 61 compiles, 43 s of CPU
+    here, `** BUILD SUCCEEDED **`, only the StreamClient warning.
+  - `release.sh --publish` asks gh in its preflight whether it reaches the
+    repository and whether the release exists, before building; both used to
+    surface only after notarization (a stub gh: exists, missing, no access,
+    no gh; `--dry-run` and `--check-tag` make no gh call).
+  - The checklist's costs, against the fetched pages: they print no multiplier
+    table any more (the prices' ratio is still ten), a budget stops usage
+    only with "Stop usage when budget limit is reached" where offered, 15 to
+    20 CI runs a month fit in Free's included minutes, the mutants take about
+    an hour and a half (some 900 included minutes).
+- **Untested, for Noah:** every run on GitHub (the first will be this
+  branch's pull request: a draft counts too). The keychain and notary steps
+  never ran (they change the keychain search list and the default keychain,
+  which is not for this Mac), nor make-app.sh's Quick Look icon, spctl or
+  notarytool on a runner. The steps: decide public or sill-site; set the secrets
+  (`gh secret set`, the checklist); push a tag with the variable unset and
+  try the artifact; then set `SILL_SIGN_IN_CI` and push the next tag. Costs:
+  free once public; private, about 10 minutes a CI run against roughly 200
+  included macOS minutes a month on GitHub Free (a macOS minute counts ten),
+  then $0.062 a minute with a payment method on file, and nothing without one.
+
 **Public README (2026-09-25, branch `public-readme` from main at b50e224,
 draft PR #15).** For the repository going public at launch: `README.md` is the
 public front page, everything the old README said is in `docs/DEVELOPMENT.md`
@@ -310,8 +429,9 @@ Apple's sources and every text to paste into App Store Connect;
   not yet seen on a device: the cable on an iPhone, Pencil hover, 120 fps.
 
 **Follow-best-path merged with main after remote access (2026-09-25, branch
-`follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12;
-not a rebase).** A session at home follows the best path as the next entry
+`follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12,
+then main at b50e224, PR #11, merged at f863c74; neither a rebase; PR #12 is
+main's cea195c).** A session at home follows the best path as the next entry
 says; remote access works as its entries say. Where the two meet:
 - A remote session (a saved Mac dialed through the remote door,
   `Session.route` `.remote`) is no candidate for the moves:
@@ -325,8 +445,9 @@ says; remote access works as its entries say. Where the two meet:
   words, `reconnect` by Mac ID or Bonjour name, the remote dial), which
   replaced `reconnectTo`. `connectionLost` first lets a move carry the session
   on (`rescue`: the stream screen stays), except after a goodbye (kind 22,
-  "quit" at home: the session ends at once with its words, not after a dial
-  to a Mac that is going) and when this device closed the connection itself
+  "quit" at home: the session ends at once with its words, not after a
+  rescue's dial to a Mac that is going; the reconnect waits too, see the
+  review fixes below) and when this device closed the connection itself
   (`end`: a message no Sill sends). #13's `reconnectIfListed` never runs
   beside a move (`moveUnderWay`: a move, or a session one carries on, which
   stays `connected` until the move takes over or ends it). #13's liveness (no
@@ -349,8 +470,8 @@ says; remote access works as its entries say. Where the two meet:
 - Verified without devices: iOS Debug and Release for the simulator and Debug
   for the iPad (build only, not installed), only the old `StreamClient`
   capture warning; `swift build -c release`, and clean, only the CaptureProbe
-  warning (Sources, Package.swift and Scripts are main's byte for byte). Pure
-  checks against the merged files:
+  warning (Sources, Package.swift and Scripts were ba91136's byte for byte).
+  Pure checks against the merged files:
   this branch's policy check 277 of 277 and its 61 mutants; main's 187 of 187,
   its 25 mutants (D1's text made unique: `wifiInterface` has the same guard)
   and the 20 older ones; the remote rule's 9 checks on top of the 277 (286:
@@ -372,11 +493,79 @@ says; remote access works as its entries say. Where the two meet:
   host had passed the check before it started and ran 24 s beside his stream,
   so the runner (`scratchpad/integrate-12/sim/simmerge.py`) now also kills its
   host the moment Sill.log shows a device connecting.
+- Then main at b50e224 (PR #11, encoder recovery) merged at f863c74. Only
+  CLAUDE.md conflicted: both Current-step entries kept, the best-path ones
+  first; README merged by itself. Sources, Package.swift, Scripts and
+  `HostSettingsPanel.swift` (its software-encoder callout) are b50e224's byte
+  for byte, every other iOS file ed6b378's. Verified on f863c74's tree (the
+  review's runs): iOS Debug for the simulator, only the old `StreamClient`
+  capture warning; 70 harness photos at 1000x710 equal to b50e224's but for
+  two spinners (connect-pairing, settings-pending: 176 and 178 px); the policy
+  check 286 of 286 and 70 of 70 mutants, main's 187 of 187 and 25 of 25, the
+  20 older mutants; remote access's rules check 64 of 64 and 35 of 35; the
+  fence check's modes and 19 of 19 mutants. Not run on it: Release and device
+  builds, and the simulator scenarios against its `SillHost --synthetic`,
+  which now has b50e224's encoder recovery (the 21 hosts above ran ba91136's).
+- Review fixes after the merges. After goodbye "quit" the reconnect no longer
+  dials the Mac's row at once. The row outlives the goodbye by about a second
+  (a receiver keeps a record 1 s past its goodbye, RFC 6762 §10.1; a stand-in
+  for Sill.app's Quit, browsed on this Mac: gone 1.05–1.22 s after the
+  connection ended, 11 of 11), and `sessionEnded` ran `reconnectIfListed` in
+  the same main-queue turn, which took it (over the cable for a Wired row):
+  "Reconnecting to ‹Mac›…" replaced "‹Mac› quit Sill." before it was drawn,
+  and the dial waited on a Mac that was going (#13 alone did the same at
+  home). Now a row listed since before the goodbye is left alone for 3 s
+  (`DiscoveryPolicy.quitWait`; `reconnectRow`'s `quitAt` and `networkSince`,
+  from `Reconnect.afterQuit` and `sightings`): the words stay; the row listed
+  again (Sill is back) is taken at once by the usual rules (a Direct row after
+  its own 6 s), and one still listed at 3 s (Sill relaunched within that
+  second, a lost goodbye packet) is taken then. Any other end is as before.
+  Verified: the policy check 310 of 310 (the merge's 286, and 24 for the
+  rule: its cases, a grid of 17,820 against the old rule, a model of the
+  glue) and the rule's 10 mutants; iOS Debug for the simulator, only the old
+  `StreamClient` capture warning. No simulator scenario can show it: the
+  synthetic hosts do not advertise, so no row lingers after their goodbye,
+  and a session by address has no Bonjour name to reconnect by. DEBUG:
+  `-SillMoveTest to:HOST:PORT` split HOST:PORT at its last colon itself, so
+  `to:[::1]:P` listed the name "[::1]", which never connected (each try given
+  up after 5 s); it now reads it as `-SillConnect` does (`address(_:)`: the
+  address parser, then the split), and Build and run below names `other:PORT`
+  and `-SillWiredTest` too. Verified on a simulator of its own against
+  `SillHost --synthetic` built from the same tree (b50e224's host code), one
+  host at a time (9 hosts, the longest 18 s;
+  `scratchpad/integrate-12/apply-fixes/sim/simapply.py`): `to:[::1]:P`,
+  `to:::1:P` and `to:fe80::…%en0:P` from 127.0.0.1 each list the address and
+  move (the host sees the second connection; the scoped one reads its route
+  again at the hand-over), and, as before, `-SillMoveTest 1`, a move's wired
+  test, a plain session, close-slow (#13's words) and remote access's host
+  gone and back (the session's end and the remote redial, which the quit fix
+  runs through): 32 of 32 checks. The runner's app is signed to run locally:
+  unsigned, the simulator gives it no keychain, and pairing stops at the
+  device key (-34018) before it prints anything. Comments and docs: the
+  harness contract in `ContentView` names `-SillSettingsEnd 1`,
+  `-SillDeviceKeySE 1` and `-Sill.directWirelessMacs`, says the pairing
+  arguments run under `-SillLive 1` too, and which remote settings cases are
+  away from home (no route word) and which at home (Wi-Fi); `-SillWiredTest`'s
+  comment says network rows (a Remote row is not Direct either);
+  `address(argument:)` no longer repeats `address(_:)`'s paragraph. Left as
+  it is here: README's "four source files", which main's PR #15 replaced
+  (docs/DEVELOPMENT.md there says "its source files"). Verified on the last
+  tree, comments only since the simulator run: iOS Debug and Release for the
+  simulator and Debug for a device (generic, unsigned), only the old
+  `StreamClient` capture warning; `swift build -c release`, only the
+  CaptureProbe warning; on the same DiscoveryPolicy, SessionLink,
+  RemoteDialPolicy, SavedMacs and StreamProtocol: the policy check 310 of 310
+  and 80 of 80 mutants, main's 187 of 187 and 25 of 25, the 20 older mutants,
+  remote access's rules check 64 of 64 and 35 of 35, the fence check's 14
+  modes and 19 of 19 mutants. The branch still merges into main (1f3072a,
+  after PRs #14 and #15) without a conflict.
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
-  while the iPad streams over the cable gives "‹Mac› quit Sill." at once, with
-  no dial over the cable first, and it reconnects when Sill is back.
+  while the iPad streams over the cable gives "‹Mac› quit Sill." at once and
+  keeps it, with no "dialing ‹Mac› on anpi0 (wired)" on the console before
+  the row is listed again or 3 s have passed, and reopening Sill reconnects
+  over the cable.
 
 **The session follows the best path (2026-09-25, branch `follow-best-path` from
 main at 76366e8, after PRs #9 and #10).** Noah's tests: plugging the cable in
@@ -707,9 +896,9 @@ the moment it connected.
   was streaming from Sill.app the whole time.
 - **Untested, for Noah:** a build of this branch in /Applications
   (`Scripts/make-app.sh --install --open` from this branch, which now carries
-  remote access too, or from main once PR #11 is in; only a new build comes
-  back by itself). Then, with the iPad streaming the Desktop, `xcrun
-  simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
+  remote access too, or from main, which has it since b50e224; only a new
+  build comes back by itself). Then, with the iPad streaming the Desktop,
+  `xcrun simctl io booted recordVideo /tmp/x.mov` on a booted iPad Pro 13"
   simulator: the frame rate drops, and within a minute or so "switching to the
   software encoder" and "the stalled frame came back" (the menu: "Hardware
   Encoder Busy"); while it records, "answers but is busy" at each check, 30,
@@ -1948,15 +2137,20 @@ good.
   `site/download.html`. It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
-  update check's), and `--dry-run` stops before notarytool (the profile and
+  update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
+  not `v<CFBundleShortVersionString>` or naming another commit (`--check-tag`
+  checks only that), and `--dry-run` stops before notarytool (the profile and
   the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
-  `make-app.sh --release` builds an untagged commit). `--publish` makes the
-  GitHub Release in `SILL_RELEASE_REPO` (default Saffsanity/sill, the only
-  repository the update check reads) and refuses to start unless origin's
-  tag v‹version› names HEAD (gh would make a missing tag from the default
-  branch's tip); in Saffsanity/sill it passes gh `--verify-tag`, anywhere else
-  it warns that no Sill.app will offer the release. Sourced, it only defines
-  its functions.
+  `make-app.sh --release` builds an untagged commit); it refuses a build
+  without Assets.car and AppIcon.icns. `--publish` makes the GitHub Release in
+  `SILL_RELEASE_REPO` (default Saffsanity/sill, the only repository the update
+  check reads), asks `gh api repos/<repo>` whether it can reach the repository
+  (`gh auth status` asks GET /user, which the Actions token can't answer), and
+  refuses to start unless origin's tag v‹version› names HEAD (gh would make a
+  missing tag from the default branch's tip; not asked in the release
+  workflow, whose checkout is that tag and keeps no credentials); in
+  Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
+  Sill.app will offer the release. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
@@ -2061,6 +2255,37 @@ good.
   `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
   line joins it once there is a Ko-fi handle). Tip links live there, in the
   README's Tips and on the site, never in the iOS app.
+- `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27
+  with Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`:
+  pull requests and pushes to main that touch more than documents, the site or
+  the design files, and by hand; `swift build -c release`,
+  `Tests/checks/run-all.sh`, the iOS app for the generic simulator (Debug,
+  arm64, `CODE_SIGNING_ALLOWED=NO`), and the CLI's paths that exit before the
+  host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
+  with "mutants", each check's mutants in a job of its own. `release.yml`: a
+  pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
+  `make-app.sh` signed ad hoc, zipped as an artifact) unless the repository
+  variable `SILL_SIGN_IN_CI` is `true`, then the Developer ID .p12 into a
+  temporary keychain, the notary key stored as a profile in it, `release.sh
+  --publish`, and the keychain deleted in an always() step. Secrets,
+  variables, rotation and costs: docs/release-checklist.md, "Releasing from
+  GitHub Actions". `.github/actions/select-xcode` — selects the newest Xcode
+  of the `version` asked for (27) whose folder is not a beta and prints
+  `xcodebuild -version`; without one, CI warns and takes the newest Xcode
+  there and a release (`fallback: false`) fails (CI only: it runs `sudo
+  xcode-select`). The runner's `bash` is 3.2: try `run:` steps with
+  `/bin/bash`. Actions are pinned by commit hash.
+- `Tests/checks/` — the pure checks, a folder each: `main.swift`, `run.sh`
+  (compiles the app's files it names with swiftc into `.build/checks/<name>/`
+  and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
+  caught), and `build.sh` where a check compiles a module (StreamProtocol's
+  sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
+  `fence`, `ledger`, `origin`, `pairing-address`, `policy`, `protocol`,
+  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  with the number that failed (a folder whose `run.sh` is not executable
+  fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
+  compiles and the checks that belong to open branches. A change to a checked
+  file updates its check (and a mutant's pattern) in the same commit.
 
 ## Build and run
 
@@ -2077,6 +2302,7 @@ swift run -c release SillHost --remote      # the remote door for this run on an
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
+Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
@@ -2167,7 +2393,8 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
 after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
-Wired, `noroute` none and the remote cases none, where the route line says how),
+Wired, `noroute` none, and `remote`, `remoteinternet` and `remoteslow` none,
+where the route line says how),
 `-SillConnectCase looking|hint|nearby|methods|denied|update|notice` (the connect screen in a discovery
 state; `methods` has a row ending in each word, none, and long names; `update` a
 Mac's refusal with "Update Sill in the App Store" when `-SillAppStoreURL
@@ -2178,8 +2405,8 @@ vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|remove
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay), and in
-the normal app `-SillPairURL '<sill://pair…>'` (pair at launch, no
-confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
+the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
+at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
 `-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
 `'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
 that route), `-SillHelloVersion <v>` (the version the hello gives, against a
@@ -2190,13 +2417,20 @@ Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the
-off-Bonjour synthetic hosts from the simulator), `-SillMoveTest 1|refused|to:HOST:PORT`
-(with `-SillConnect`: that session counts as direct and a second later the same
-address, or its port 1, or HOST:PORT, is listed as the Mac's network row, so the
-move to the network runs against a synthetic host; `to:` this Mac's
-`fe80::…%en0` address from `127.0.0.1` shows the panel's route word change at
-the hand-over; the console's "discovery: …" and "session: …" lines,
-`xcrun simctl launch --console-pty`, say what happened), `-SillPathTest
+off-Bonjour synthetic hosts from the simulator), `-SillMoveTest
+1|refused|other:PORT|to:HOST:PORT` (with `-SillConnect`: that session counts as
+direct and a second later the same address, or its port 1, or its port PORT, or
+HOST:PORT, is listed as the Mac's network row, so the move to the network runs
+against a synthetic host; `other:` with a second synthetic host on PORT is
+another launch, refused at its first window list and not tried again, and with
+`-SillConnect` through a delay proxy to the first host's own PORT the fence
+waits out the proxy's round trip; `to:` reads HOST:PORT as `-SillConnect` does,
+`[::1]:P` too, and this Mac's `fe80::…%en0` address from `127.0.0.1` shows the
+panel's route word change at the hand-over; the console's "discovery: …" and
+"session: …" lines, `xcrun simctl launch --console-pty`, say what happened),
+`-SillWiredTest HOST:PORT` (a wired dial's fallback under test:
+`-SillConnect`'s dial, a network row's and a move's go to HOST:PORT first,
+`192.0.2.1:9` giving way after 2.5 s and `127.0.0.1:1` at once), `-SillPathTest
 '<spec>'` (with `-SillConnect`: the session's Mac listed as a network row whose
 cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say

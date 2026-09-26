@@ -414,7 +414,8 @@ extension StreamClient {
         }
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
         tearDown(status: outcome.text)
-        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed) : nil
+        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
+                                                      afterQuit: goodbye?.reason == Goodbye.quit) : nil
         updateDiscovery()
         if outcome.reconnect {
             scheduleReconnectRetry()
@@ -446,13 +447,17 @@ extension StreamClient {
         if outcome.reconnect { scheduleReconnectRetry() }
     }
 
-    /// The automatic reconnect after a session with this Mac ended on its own (§7.4).
-    private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool) -> Reconnect {
+    /// The automatic reconnect after a session with this Mac ended on its own (§7.4). `afterQuit`:
+    /// the session ended with goodbye `quit`, so the Mac's row that is going is left alone for
+    /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice.
+    private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
+                               afterQuit: Bool = false) -> Reconnect {
         let bonjour = s?.bonjourName ?? saved?.bonjourName
         return Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
                          lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
                          remoteAllowed: remoteAllowed,
-                         rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false)
+                         rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
+                         afterQuit: afterQuit)
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
@@ -467,7 +472,11 @@ extension StreamClient {
     /// ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one.
     /// Never while a move is under way (`moveUnderWay`): a session at home whose connection went is
     /// carried on by one (StreamClient.rescue) and stays connected until it takes over, or until it
-    /// fails and the session's end brings the reconnect here.
+    /// fails and the session's end brings the reconnect here. After goodbye `quit`, a row listed
+    /// since before the loss is the registration that is going (it outlives the goodbye by about a
+    /// second): it is left alone for DiscoveryPolicy.quitWait, and the words "‹Mac› quit Sill…"
+    /// stay meanwhile; the row listed again (Sill is back), or still listed after that, is taken as
+    /// above.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
@@ -485,9 +494,10 @@ extension StreamClient {
         // The network's sightings are by the name it lists: the Direct row's, else the name last
         // used with the Mac.
         let listedName = direct?.name ?? r.bonjourName
-        let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] },
-                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] }, now: now)
+        let choice = DiscoveryPolicy.reconnectRow(network: network, networkSince: network.flatMap { sightings.since[$0.name] },
+                                                  direct: direct, directSince: direct.flatMap { directSince[$0.name] },
+                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] },
+                                                  quitAt: r.afterQuit ? r.lostAt : nil, now: now)
         if let mac = choice.take, mac.endpoint != nil {
             if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
             cancelRemoteDial()

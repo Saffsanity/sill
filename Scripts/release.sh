@@ -10,6 +10,13 @@
 #                                    assets Sill.zip and Sill.zip.sha256, which the site's download
 #                                    page links under those fixed names (needs gh, signed in, and
 #                                    the tag pushed: origin's v<version> must name HEAD)
+#   SILL_RELEASE_TAG=v0.3.0 Scripts/release.sh --check-tag
+#                                    only checks the tag against Packaging/Info.plist, then exits
+#
+# SILL_RELEASE_TAG, when set, is the tag this release is for: it must be v<CFBundleShortVersionString>
+# of Packaging/Info.plist (the release this run creates), and when the tag is here, the commit being
+# built. The release workflow (.github/workflows/release.yml) sets it to the tag that started it and
+# runs --publish on a GitHub runner; docs/release-checklist.md, "Releasing from GitHub Actions".
 #
 # SILL_SIGN_IDENTITY names a Developer ID Application identity in your keychain: its name, part of
 # it, or its SHA-1 hash, as for make-app.sh. SILL_NOTARY_PROFILE is the profile name you gave
@@ -37,12 +44,14 @@
 # - --publish checks origin's tag before it builds: `gh release create` makes a tag the release's
 #   repository lacks from its default branch's tip, so the release (and its source archives) would
 #   name another commit than the one built, and pushing the real tag later would be refused. In
-#   Saffsanity/sill it also passes --verify-tag, so gh itself refuses a tag that isn't there.
+#   Saffsanity/sill it also passes --verify-tag, so gh itself refuses a tag that isn't there. In
+#   the release workflow the commit checked out is origin's tag, so there the local tag is checked
+#   (SILL_RELEASE_TAG) and origin is not asked: its checkout keeps no credentials.
 set -euo pipefail
 
 usage() {
     cat <<'USAGE'
-usage: Scripts/release.sh [--dry-run | --publish]
+usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
 
   SILL_SIGN_IDENTITY='Developer ID Application: … (TEAMID)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh
       builds Sill.app with make-app.sh --release, zips it, has Apple notarize it, staples the
@@ -53,9 +62,15 @@ usage: Scripts/release.sh [--dry-run | --publish]
   --publish
       after the checks, creates the GitHub Release v<version> in $SILL_RELEASE_REPO
       (default Saffsanity/sill) with Sill.zip and Sill.zip.sha256, the names the site links.
-      Refused, before building, unless origin has the tag v<version> and it names HEAD
-      (git push origin v<version>). Every Sill.app's update check reads only Saffsanity/sill's
-      releases: one published anywhere else can be downloaded, but no Sill.app offers it.
+      Before building, it checks that gh reaches that repository and the release isn't there yet,
+      and refuses unless origin has the tag v<version> and it names HEAD (git push origin
+      v<version>). Every Sill.app's update check reads only Saffsanity/sill's releases: one
+      published anywhere else can be downloaded, but no Sill.app offers it.
+  --check-tag
+      only checks that $SILL_RELEASE_TAG is v<version> of Packaging/Info.plist (and, when the tag
+      is here, that it names the commit checked out), then exits.
+
+  With SILL_RELEASE_TAG set, every run makes the same check before it builds anything.
 
 The one-time setup (certificate, notary credentials) is in docs/release-checklist.md.
 USAGE
@@ -78,6 +93,48 @@ identities_matching() {
         signing_identities | awk -F'\t' -v h="$wanted" 'toupper($1) == toupper(h)'
     else
         signing_identities | awk -F'\t' -v n="$wanted" 'index($2, n) > 0'
+    fi
+}
+
+# With SILL_RELEASE_TAG set: whether it is the tag of the release this run creates. Prints one
+# problem per line, and nothing when all is well (or when SILL_RELEASE_TAG is not set).
+tag_problems() {
+    local tag="${SILL_RELEASE_TAG:-}" version tagged head
+    if [ -z "$tag" ]; then return 0; fi
+    version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || version=""
+    if [ -z "$version" ]; then
+        echo "Packaging/Info.plist has no CFBundleShortVersionString, so the release has no version to match the tag $tag."
+    elif [ "$tag" != "v$version" ]; then
+        echo "The tag is $tag, but Packaging/Info.plist says version $version, so the release would be v$version. Tag v$version instead, or set CFBundleShortVersionString to ${tag#v} and tag that commit."
+    fi
+    if tagged="$(git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>/dev/null)"; then
+        head="$(git rev-parse HEAD)"
+        if [ "$tagged" != "$head" ]; then
+            echo "The tag $tag names commit ${tagged:0:12}, but the commit checked out is ${head:0:12}. Check out $tag, or move the tag."
+        fi
+    fi
+}
+
+# With --publish: what would otherwise stop the run only at its end, after the build and Apple's
+# notarization (in the release workflow, up to its whole hour): gh can't reach the repository, or
+# the release already exists. Prints one problem per line, and nothing when all is well.
+# publish_release asks again before it creates the release.
+publish_problems() {
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" version
+    if ! command -v gh >/dev/null; then
+        echo "gh is not installed (brew install gh), or not on PATH."
+        return 0
+    fi
+    # Whether gh can reach the repository, not who it is signed in as: `gh auth status` asks that
+    # (GET /user), which the release workflow's GITHUB_TOKEN can't answer although it may create
+    # this repository's releases.
+    if ! gh api "repos/$repo" --silent >/dev/null 2>&1; then
+        echo "gh can't reach $repo: run gh auth login (in the release workflow: GH_TOKEN, or the SILL_RELEASE_TOKEN secret for another repository)."
+        return 0
+    fi
+    version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || return 0
+    if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
+        echo "The release v$version already exists in $repo. Bump CFBundleShortVersionString in Packaging/Info.plist, or delete that release (and its tag) first."
     fi
 }
 
@@ -106,7 +163,8 @@ preflight_problems() {
         tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
         echo "HEAD is not tagged v$version (it is tagged '${tags:-nothing}'). A release is built only from the commit tagged v + Packaging/Info.plist's CFBundleShortVersionString, which every Sill.app's update check compares with the version it runs: commit the version, then git tag v$version and git push origin v$version."
     fi
-    if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)"; then
+    if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && ! in_release_workflow \
+        && version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)"; then
         remote_tag_problem "$version"
     fi
     if [ "$dry_run" = 0 ]; then
@@ -118,6 +176,8 @@ preflight_problems() {
                 || echo "xcrun can't find $tool. Select Xcode as the developer directory: sudo xcode-select -s /Applications/Xcode.app"
         done
     fi
+    tag_problems
+    if [ "$publish" = 1 ]; then publish_problems; fi
 }
 
 # Whether HEAD carries the tag a release needs: v + Packaging/Info.plist's CFBundleShortVersionString.
@@ -129,9 +189,20 @@ head_is_release_tag() {
     git tag --points-at HEAD 2>/dev/null | grep -Fx "v$version" >/dev/null
 }
 
+# Whether this run is the release workflow's (.github/workflows/release.yml): on a GitHub runner,
+# with SILL_RELEASE_TAG set to the tag that started it. Its checkout is origin's tag itself
+# (refs/tags/$SILL_RELEASE_TAG, with every tag fetched), so origin's tag names HEAD exactly when the
+# local one does, which tag_problems and head_is_release_tag check; git ls-remote would need the
+# credentials that checkout does not keep (persist-credentials: false) while the repository is
+# private.
+in_release_workflow() {
+    [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${SILL_RELEASE_TAG:-}" ]
+}
+
 # Why --publish can't use origin's tag v$1, or nothing: origin must have it, naming HEAD. gh makes
 # a tag the release's repository lacks from the default branch's tip, so a tag left unpushed would
-# publish a release, and source archives, of another commit than the one built.
+# publish a release, and source archives, of another commit than the one built. Not asked in the
+# release workflow (in_release_workflow).
 remote_tag_problem() {
     local version="$1" lines remote head
     if ! lines="$(git ls-remote --tags origin "refs/tags/v$version" "refs/tags/v$version^{}" 2>/dev/null)"; then
@@ -202,16 +273,32 @@ unpacked=""   # the zip's copy being checked; removed on exit
 cleanup() { if [ -n "$unpacked" ]; then rm -rf "$unpacked"; fi; }
 
 main() {
-    local dry_run=0 publish=0 arg
+    local dry_run=0 publish=0 check_tag=0 arg
     for arg in "$@"; do
         case "$arg" in
             --dry-run) dry_run=1 ;;
             --publish) publish=1 ;;
+            --check-tag) check_tag=1 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; exit 2 ;;
         esac
     done
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+    if [ "$check_tag" = 1 ]; then
+        local tag_problem
+        if [ -z "${SILL_RELEASE_TAG:-}" ]; then
+            echo "error: --check-tag checks SILL_RELEASE_TAG, which is not set (SILL_RELEASE_TAG=v0.3.0 Scripts/release.sh --check-tag)" >&2
+            exit 2
+        fi
+        tag_problem="$(tag_problems)"
+        if [ -n "$tag_problem" ]; then
+            printf '%s\n' "$tag_problem" | sed 's/^/error: /' >&2
+            exit 1
+        fi
+        echo "$SILL_RELEASE_TAG matches Packaging/Info.plist."
+        exit 0
+    fi
 
     local problems
     problems="$(preflight_problems "$dry_run" "$publish")"
@@ -250,6 +337,10 @@ main() {
     build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
     zip=".build/Sill-$version.zip"
     check_signature "$app"
+    # make-app.sh only warns when Quick Look or actool can't make the icon (a build machine without
+    # them, such as a CI runner, would still build); a release must not ship the generic icon.
+    [ -f "$app/Contents/Resources/Assets.car" ] && [ -f "$app/Contents/Resources/AppIcon.icns" ] \
+        || fail "$app has no icon (Assets.car and AppIcon.icns): make-app.sh's warning above says why"
     say "Sill $version ($build) for $(lipo -archs "$app/Contents/MacOS/Sill"). The site says Apple silicon: change that if this ever lists x86_64."
 
     say "Zipping $app into $zip"
@@ -331,12 +422,10 @@ DRY
 # Sill.zip.sha256 so /releases/latest/download/<name> keeps working release after release.
 publish_release() {
     local zip="$1" version="$2" build="$3" sha="$4"
-    local repo="${SILL_RELEASE_REPO:-$feed_repo}" dir asset verify=""
-    command -v gh >/dev/null || fail "gh is not installed (brew install gh), or not on PATH"
-    gh auth status >/dev/null 2>&1 || fail "gh is not signed in: run gh auth login"
-    if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
-        fail "release v$version already exists in $repo; bump the version in Packaging/Info.plist first"
-    fi
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" dir asset problem verify=""
+    # Asked before the build too (publish_problems); again here, in case that changed meanwhile.
+    problem="$(publish_problems)"
+    if [ -n "$problem" ]; then fail "$problem (The notarized zip is $zip.)"; fi
     # The release's tag is the pushed one (the preflight checked origin's): in the feed's repository
     # gh must find it there too, and never make it from the default branch. Another repository never
     # holds the source's tags, so there gh makes one, which nothing reads.
