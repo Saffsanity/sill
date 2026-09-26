@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var settingsWindow: SettingsWindowController?
     private var logWindow: LogWindowController?
+    private var pairingWindow: PairDeviceWindowController?
     private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -35,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onPresentation = { [weak item] p in item?.show(p) }
         model.showSettings = { [weak self] tab in self?.showSettings(tab: tab) }
         model.showLog = { [weak self] in self?.showLog() }
+        // An offer can come from a device's request (kind 21), on a main-actor hop: showing a
+        // window there is fine, it runs no modal loop.
+        model.showPairing = { [weak self] offer in self?.showPairing(offer) }
         // Always, not only with the virtual display on: Settings can turn it on at any time, and a
         // kill must then still put the streamed window back.
         HostShutdown.install { [model] in model.coordinator }
@@ -101,5 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = logWindow ?? LogWindowController(settings: model.settings)
         logWindow = controller
         controller.show()
+    }
+
+    /// The one pairing window: made once, shown with each offer (the same code while it is open).
+    func showPairing(_ offer: RemoteAccess.PairingOffer) {
+        let controller = pairingWindow ?? PairDeviceWindowController(model: model)
+        pairingWindow = controller
+        controller.show(offer)
     }
 }
