@@ -29,7 +29,7 @@ enum AddressList {
         var interface: String
         var ipv4: [String]
         var ipv6: [IPv6Entry]
-        /// Its DNS SupplementalMatchDomains ("tailc94091.ts.net."), for the MagicDNS name.
+        /// Its DNS SupplementalMatchDomains ("tail1234.ts.net."), for the MagicDNS name.
         var matchDomains: [String] = []
     }
 

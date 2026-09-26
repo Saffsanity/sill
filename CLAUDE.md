@@ -89,6 +89,39 @@ the record field by field. Nothing was uploaded and no record was created.
   devices, any run on GitHub (unsigned first, then with the key), signing
   through an API key, and the Organizer's privacy report PDF.
 
+**Before going public (2026-09-26, branch `public-sweep` from main at 150f781,
+with main at a550e27 merged in, PR #24).** Noah's four steps for the first Mac
+release end with making Saffsanity/sill public, which publishes its whole
+history, so a sweep read the tree, every branch's history, the v0.3.0 release
+and the repository's settings first. The branch fixes what the tree can:
+docs/menu-bar-app-plan.md without the Apple Account's address (in the Apple
+Development identity's name) or the name in that certificate's O field; made-up
+Tailscale values in place of this Mac's in DebugHooks' long-name preview
+(compiled into Sill.app: a person's Mac on the real tailnet), three comments,
+the addresses, pairing-address and origin checks and the remote access plan; the
+README and the site say the Mac download is out and the iPhone and iPad app is
+on its way to the App Store (the site's steps sent visitors to a listing that
+does not exist); the license is Apache-2.0 unless Noah says otherwise (final
+once the repository is public); .gitignore leaves out signing keys, profiles,
+keychains and design/reel/, and the checklist's `gh secret set` commands read
+the keys from outside the repository; release docs after v0.3.0 and with
+immutable releases (a deleted immutable release's tag can never be used again);
+SECURITY.md and issue forms; the ledger check's fix, which main's PR #22 also
+made (the merge keeps main's lines). Verified: a clean `swift build -c release`,
+whose SillMenuBar holds none of the old values; `Tests/checks/run-all.sh`, all
+15; the three changed checks' output equal to main's once the replaced values
+are masked; the four address checks' mutants, 74 of 74; the preview name 291.5
+pt wide with its port against 291.6.
+- **For Noah, before the repository goes public:** what history, the other
+  branches, the tag v0.3.0 and the 0.3.0 binary still carry (the sweep's report
+  lists it): accept it, or publish a fresh repository; whether Apache-2.0 stays;
+  immutable releases and the Actions allow-list (both possible while private).
+  Right after: secret scanning and push protection, private vulnerability
+  reporting, rulesets for main and the v* tags, the site republished, then the
+  edits the comments hold back (the README's CI badge, index.html's "Free and
+  open source", support.html's issues link, the checklist's private-repository
+  lines). The sweep's report has the commands.
+
 **Update check and device notice (2026-09-25, branch `update-notice` from
 `remote-access` at cb0ec55, PR #13, with main merged in at 1f3072a and again
 at 32d532b, not rebased; the plan, its open questions with the defaults taken,
@@ -428,11 +461,11 @@ plainly.
 - **For Noah:** Sponsorships turned on in the repository's settings (General,
   Features), or GitHub shows no Sponsor button (github.com/sponsors/Saffsanity
   is live since 2026-09-25); a Ko-fi handle, if wanted, goes in two places, a
-  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; Apache-2.0 or
-  MPL-2.0, still open in docs/BRIEF.md (for MPL-2.0, replace LICENSE and the
-  README's License section); the App Store badge and the sentence under the
-  README's links, as the listing and the first notarized Sill for Mac come
-  out.
+  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; the license,
+  Apache-2.0 unless Noah says otherwise (docs/BRIEF.md; for MPL-2.0, replace
+  LICENSE and the README's License section before the repository is public);
+  the App Store badge and the sentence under the README's links, as the
+  listing and the first notarized Sill for Mac come out.
 - Merging: main gained follow-best-path (PR #12, cea195c) after this branch
   began, so PR #15 conflicts in README.md and CLAUDE.md: take this branch's
   README.md (DEVELOPMENT.md's step 3 of The iOS app already has PR #12's
@@ -1539,7 +1572,7 @@ fixes of step 9's first review round (below); the rest of step 9 is next.
 - Pairing: the Mac's window shows a QR code (`sill://pair?…`, pinned to the
   Mac's key) and a 12-digit code (Damm check digit; PBKDF2 600k), 5 minutes,
   single use, five wrong tries, and the address to type with the code:
-  Tailscale's MagicDNS name and its IPv4 under it ("or 100.65.142.55"), else a
+  Tailscale's MagicDNS name and its IPv4 under it ("or 100.101.102.103"), else a
   Tailscale IP (100.64/10, else fd7a:115c:a1e0::/48), else this network's
   address with any other VPN's IP under it ("or 10.8.0.6"). Another VPN never
   takes this network's place, since NordVPN's or WARP's address answers from
@@ -1599,15 +1632,15 @@ fixes of step 9's first review round (below); the rest of step 9 is next.
   VoiceOver and a hardware keyboard (Esc never reaches an app in the iPadOS 27
   simulator; only ⌘. was tested); R13 mixed builds. Also the pairing window's
   Address row, live (only its offscreen previews were seen): with this build's
-  Sill.app, Pair iPhone or iPad… reads noahs-macbook-pro.tailc94091.ts.net
-  with "or 100.65.142.55" muted under it (what `SillHost --print-reachability`
+  Sill.app, Pair iPhone or iPad… reads this Mac's MagicDNS name with "or" and
+  its Tailscale IPv4 muted under it (what `SillHost --print-reachability`
   lists); with the window open, Tailscale off on the Mac gives 10.128.0.34
   alone and a window 18 pt shorter, and back on the name and the "or" line
-  return (100.65.142.55 alone for a few seconds, until MagicDNS answers, is
+  return (the IPv4 alone for a few seconds, until MagicDNS answers, is
   expected; note it if it stays); each line selects without "or" and pastes
   (Universal Clipboard) or types into Enter Code Instead (a code works once:
-  New Code, or reopen the window, for a second try); VoiceOver reads "or
-  100.65.142.55" as one element. And a decision: beside a VPN that is not
+  New Code, or reopen the window, for a second try); VoiceOver reads the "or"
+  line as one element. And a decision: beside a VPN that is not
   Tailscale (NordVPN, WARP, a work VPN, your own WireGuard) the window shows
   this network's address with that VPN's IP under it; the other order, or
   this network's address alone, is one line in `PairingWindowAddress.choose`.
@@ -2695,8 +2728,8 @@ good.
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
   `--all-headers`; `GET /__control?key=value` changes them while it runs).
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
-  `index.html`, `download.html` (the current release's version, link and
-  SHA-256, set by hand from release.sh's output), `privacy.html` (the policy
+  `index.html`, `download.html` (links the newest GitHub Release's `Sill.zip`
+  and `Sill.zip.sha256`; never edited per release), `privacy.html` (the policy
   App Store Connect and the app link to), `support.html`, `style.css` (system
   fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
   scripts and nothing loaded from elsewhere: every page's
@@ -2779,7 +2812,11 @@ good.
   contributing, the license. `LICENSE` — the Apache License 2.0.
   `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
   line joins it once there is a Ko-fi handle). Tip links live there, in the
-  README's Tips and on the site, never in the iOS app.
+  README's Tips and on the site, never in the iOS app. `SECURITY.md` — how to
+  report a vulnerability (support@getsill.app, never a public issue) and what
+  is in scope. `.github/ISSUE_TEMPLATE/` — issue forms: a bug report, an idea,
+  a question, no blank issue. `.gitignore` also leaves out signing keys,
+  profiles, keychains and design/reel/.
 - `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27
   with Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`:
   pull requests and pushes to main that touch more than documents, the site or
@@ -3040,5 +3077,6 @@ device keeps working with Macs from the first public build on, or each says why
 - iCloud auto-pairing (same Apple Account, Mac just appears) for milestone 5.
   Bonjour only for the spike.
 - Native feel is the bar: Flighty-level polish, iOS conventions, Duo layouts.
-- License: Apache-2.0 or MPL-2.0 (paid plan is gone, so no GPL/CLA needed).
+- License: Apache-2.0, LICENSE since PR #15 (MPL-2.0 only if Noah switches
+  before the repository is public; paid plan is gone, so no GPL/CLA needed).
 - v1 out of scope: hole punching, multi-window, layout customization, audio.

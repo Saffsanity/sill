@@ -90,7 +90,7 @@ Before it goes public:
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
 - [ ] Open source: the site doesn't say it while Saffsanity/sill is private. Once the repository is
-      public with a LICENSE (Apache-2.0 or MPL-2.0, docs/BRIEF.md), follow the comments in
+      public with its LICENSE (Apache-2.0, since PR #15), follow the comments in
       `index.html` and `support.html`: put "open source" back on the home page and turn the
       commented GitHub links into real ones. Sill for Mac already says "free and open source"
       (`NSHumanReadableCopyright` in `Packaging/Info.plist`, and the footnote in Settings,
@@ -201,13 +201,16 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       don't also run `--publish` here (whichever comes second stops at "already exists"); without
       it the run only verifies (macOS minutes either way).
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
-      republish `site/` (part 1 §3's rsync) so the button shows. Then, in a private window, download
-      it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
+      right after Saffsanity/sill goes public, republish `site/` (the rsync below) so the button
+      shows (before that, the button and every GitHub link on the pages answer 404 to visitors).
+      Then, in a private window, download it from https://getsill.app/download and compare its
+      `shasum -a 256` with `Sill.zip.sha256`.
 - [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without
       `--bump`, once `MARKETING_VERSION` says it); TestFlight §4 below. Or in Xcode: Any iOS
-      Device, Product › Archive, then the Organizer's Distribute App › App Store Connect. The
-      privacy report: `Scripts/release-ios.sh --privacy-report`, and the Organizer's Generate
-      Privacy Report for the PDF; both should list the privacy manifest's API categories.
+      Device, Product › Archive, then the Organizer's Validate App and Distribute App › App Store
+      Connect › Upload. The privacy report: `Scripts/release-ios.sh --privacy-report`, and the
+      Organizer's Generate Privacy Report for the PDF; both should list the privacy manifest's API
+      categories.
 - [ ] TestFlight: internal testers get the build without review. An external group sends the
       first build through Beta App Review with the same notes and video: a cheap rehearsal
       (TestFlight §5 to §7 below).
@@ -455,9 +458,9 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 
 ### Why the download link doesn't work yet
 
-- There is no release. The site's button links `releases/latest/download/Sill.zip`, which GitHub
-  redirects to the newest release's file of that name, and `Scripts/release.sh --publish` has
-  never run, so there is nothing to redirect to.
+- There was no release until v0.3.0, published on 2026-09-26. The site's button links
+  `releases/latest/download/Sill.zip`, which GitHub redirects to the newest release's file of that
+  name.
 - The repository is private, and GitHub serves a private repository's release files only to people
   signed in with access to it. Everyone else gets a 404 even once a release exists. Either make
   Saffsanity/sill public (the plan at launch), or publish in the public Saffsanity/sill-site: the
@@ -487,13 +490,22 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
   republish `site/`.
 - A failed run can be re-run from its page. A version that is already released is refused
   before anything is built or sent to Apple (`release.sh --publish` asks GitHub first, as it asks
-  whether its token reaches the repository): bump the version, or delete that release and its
-  tag first.
+  whether its token reaches the repository): bump the version. Deleting that release and its tag
+  frees the version only for a release that isn't immutable: GitHub never lets an immutable
+  release's tag be used again, even after the release is deleted.
 
 ### Secrets and variables
 
 Settings › Secrets and variables › Actions, or `gh` from the repository's folder. Nothing here
 ever goes in the repository, a commit message or a shell profile.
+
+Until the repository is public, sign on this Mac instead (`Scripts/release.sh --publish`, with
+`SILL_SIGN_IN_CI` unset). Repository secrets reach any workflow on any branch or tag pushed here
+(never a fork's pull request), and an environment, which can keep them to release runs alone,
+needs a public repository on GitHub Free. Once it is public, before `SILL_SIGN_IN_CI` goes on: an
+environment `release` that only tags `v*` may deploy to, with Noah as its required reviewer,
+holds the five secrets (`gh secret set NAME --env release`), and release.yml's publish job names
+it (`environment: release`).
 
 | Name | Kind | What it holds |
 |---|---|---|
@@ -511,16 +523,18 @@ also allows. The keychain, its password, the profile name `sill-notary` and the 
 repository's own release are made by each run and gone at its end.
 
 ```
-base64 -i DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12
+base64 -i <backup folder>/DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12
 gh secret set SILL_DEVELOPER_ID_P12_PASSWORD        # asks for the value; nothing lands in the shell history
 gh secret set SILL_NOTARY_KEY_ID
 gh secret set SILL_NOTARY_ISSUER_ID
-base64 -i AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8
+base64 -i <backup folder>/AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8
 gh variable set SILL_SIGN_IN_CI --body true         # after a verify-only run has passed
 ```
 
-Keep the exported .p12 and .p8 where part 1 keeps its backups, outside the repository, and not in
-Downloads.
+`<backup folder>` is where part 1 keeps the exported .p12 and .p8: outside the repository (these
+commands run in it, so a bare file name would be read from there) and not in Downloads.
+`.gitignore` leaves out `*.p12`, `*.p8` and `AuthKey_*` in case one lands in the repository
+anyway.
 
 ### Rotating them
 

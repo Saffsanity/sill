@@ -22,13 +22,12 @@ server in between.
 -->
 
 <!-- App Store: once the iPhone and iPad app is listed, put Apple's "Download on
-     the App Store" badge here, linked to the listing. Edit the sentence below
-     as the App Store listing and the first notarized build of Sill for Mac come
-     out, and delete it once both have. -->
+     the App Store" badge here, linked to the listing, and delete the sentence
+     below. -->
 
-The first public build of Sill for Mac is being prepared, and the iPhone and
-iPad app is not on the App Store yet. Until then, you can build both from
-source.
+Sill for Mac is a free, notarized download from
+[getsill.app](https://getsill.app/download). The iPhone and iPad app is not on
+the App Store yet; until it is, you can build it from source (below).
 
 ## Requirements
 
@@ -122,7 +121,8 @@ latency before picture quality. Open an issue before starting anything large.
 Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about two minutes and with no device.
 Contributions are accepted under the project's license. Please report a
-security problem by email to support@getsill.app, not in a public issue.
+security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
+public issue.
 
 ## License
 

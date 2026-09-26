@@ -4,3 +4,17 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 .DS_Store
+
+# Signing and notary keys, certificates exported with their keys, provisioning profiles and
+# keychains: never in the repository (docs/release-checklist.md keeps them outside it).
+*.p12
+*.p8
+AuthKey_*
+*.pem
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+
+# The sizzle reel's renders (design/reel, over a gigabyte): kept out of git.
+design/reel/
