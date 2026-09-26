@@ -1,0 +1,222 @@
+# Releases of Sill for Mac. Started by pushing a tag v<version>, the version in Packaging/Info.plist
+# (`git tag v0.3.0 && git push origin v0.3.0` on the commit to release), or by hand with such a tag
+# (Actions › Release › Run workflow). What it does depends on the repository variable
+# SILL_SIGN_IN_CI (Settings › Secrets and variables › Actions › Variables):
+#
+# - Not set, or anything but true: verify only. It checks the tag against Packaging/Info.plist,
+#   runs the pure checks, builds Sill.app with Scripts/make-app.sh (signed ad hoc: the runner has
+#   no identity) and keeps it, zipped, as this run's artifact for 14 days. It uses no secret and
+#   creates no release.
+# - true: sign and publish. The same checks, then the Developer ID certificate goes into a
+#   temporary keychain, the notary credentials into a profile in it, and Scripts/release.sh
+#   --publish builds Sill.app, has Apple notarize it, staples the ticket, checks a copy the way
+#   Gatekeeper will, and creates the GitHub Release v<version> with Sill.zip and Sill.zip.sha256,
+#   the files the site's Download button links. The keychain is deleted at the end, whatever
+#   happened.
+#
+# docs/release-checklist.md, "Releasing from GitHub Actions", lists every secret and variable, how
+# to make and rotate them, and what a run costs (free in a public repository; in a private one,
+# macOS minutes against the account's included minutes, then $0.062 a minute on 2026-09-25).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release, such as v0.3.0 (it must exist, and match Packaging/Info.plist)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Every run step under bash -eo pipefail (GitHub leaves pipefail off unless the shell is named).
+defaults:
+  run:
+    shell: bash
+
+# One run per tag at a time; a second one waits rather than cancel the first mid-notarization.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # The tag this run releases: the one pushed, or the one given by hand. Scripts/release.sh checks
+  # it against Packaging/Info.plist and the commit checked out.
+  SILL_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    name: Verify (no signing, no release)
+    if: vars.SILL_SIGN_IN_CI != 'true'
+    # As in ci.yml: the image with Xcode 27 (macOS 27, public preview).
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.SILL_RELEASE_TAG }}
+          fetch-depth: 0 # make-app.sh's build number is the commit count
+          persist-credentials: false
+
+      - name: Select the newest Xcode
+        uses: ./.github/actions/select-xcode
+
+      - name: Check the tag against Packaging/Info.plist
+        run: Scripts/release.sh --check-tag
+
+      - name: Pure checks (Tests/checks/run-all.sh)
+        run: Tests/checks/run-all.sh
+
+      - name: Build Sill.app (Scripts/make-app.sh, signed ad hoc)
+        run: Scripts/make-app.sh
+
+      - name: Check Sill.app and zip it
+        id: zip
+        run: |
+          app=.build/Sill.app
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
+          codesign --verify --strict "$app"
+          for file in Assets.car AppIcon.icns; do
+            if [ ! -f "$app/Contents/Resources/$file" ]; then
+              echo "::error::Sill.app has no $file: make-app.sh could not make the icon (its warning above says why), and a signed release refuses to ship without one."
+              exit 1
+            fi
+          done
+          zip=".build/Sill-$version-adhoc.zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          {
+            echo "Sill $version ($build) for $(lipo -archs "$app/Contents/MacOS/Sill"): the checks passed and Sill.app built."
+            echo
+            echo "The artifact $(basename "$zip") is signed ad hoc, not with Developer ID, and not notarized: for trying out, not for anyone else to download. SHA-256 $(shasum -a 256 "$zip" | awk '{ print $1 }')."
+            echo "Nothing was published: the repository variable SILL_SIGN_IN_CI is not true."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the zip as this run's artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.zip.outputs.zip }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Sign, notarize and publish
+    if: vars.SILL_SIGN_IN_CI == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: write # the GitHub Release, with this repository's own token
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.SILL_RELEASE_TAG }}
+          fetch-depth: 0 # make-app.sh's build number is the commit count
+          persist-credentials: false
+
+      - name: Select the newest Xcode
+        uses: ./.github/actions/select-xcode
+
+      - name: Check the tag against Packaging/Info.plist
+        run: Scripts/release.sh --check-tag
+
+      - name: Pure checks (Tests/checks/run-all.sh)
+        run: Tests/checks/run-all.sh
+
+      - name: Check that every secret is set
+        env:
+          SILL_DEVELOPER_ID_P12: ${{ secrets.SILL_DEVELOPER_ID_P12 }}
+          SILL_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.SILL_DEVELOPER_ID_P12_PASSWORD }}
+          SILL_NOTARY_KEY_ID: ${{ secrets.SILL_NOTARY_KEY_ID }}
+          SILL_NOTARY_ISSUER_ID: ${{ secrets.SILL_NOTARY_ISSUER_ID }}
+          SILL_NOTARY_KEY_P8: ${{ secrets.SILL_NOTARY_KEY_P8 }}
+        run: |
+          missing=""
+          for name in SILL_DEVELOPER_ID_P12 SILL_DEVELOPER_ID_P12_PASSWORD SILL_NOTARY_KEY_ID SILL_NOTARY_ISSUER_ID SILL_NOTARY_KEY_P8; do
+            if [ -z "$(printenv "$name")" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::These repository secrets are not set:$missing. docs/release-checklist.md, Releasing from GitHub Actions."
+            exit 1
+          fi
+
+      - name: Put the Developer ID certificate in a temporary keychain
+        env:
+          SILL_DEVELOPER_ID_P12: ${{ secrets.SILL_DEVELOPER_ID_P12 }}
+          SILL_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.SILL_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/sill-release.keychain-db"
+          p12="$RUNNER_TEMP/sill-developer-id.p12"
+          password="$(openssl rand -base64 32)"
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$SILL_DEVELOPER_ID_P12" | base64 --decode > "$p12"
+          security import "$p12" -k "$keychain" -f pkcs12 -P "$SILL_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          # codesign and release.sh look through the user's keychain list; notarytool keeps its
+          # profile in the default keychain. The image already has Apple's Developer ID
+          # intermediate certificate in the System keychain.
+          { echo "\"$keychain\""; security list-keychains -d user; } | xargs security list-keychains -d user -s
+          security default-keychain -d user -s "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/"Developer ID Application: / && !found { print $2; found = 1 }')"
+          if [ -z "$identity" ]; then
+            echo "::error::SILL_DEVELOPER_ID_P12 holds no valid Developer ID Application identity (a certificate with its private key)."
+            exit 1
+          fi
+          echo "Signing with: $(security find-identity -v -p codesigning "$keychain" | grep "$identity" | sed 's/^[^"]*//')"
+          echo "SILL_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Store the notary credentials in that keychain
+        env:
+          SILL_NOTARY_KEY_ID: ${{ secrets.SILL_NOTARY_KEY_ID }}
+          SILL_NOTARY_ISSUER_ID: ${{ secrets.SILL_NOTARY_ISSUER_ID }}
+          SILL_NOTARY_KEY_P8: ${{ secrets.SILL_NOTARY_KEY_P8 }}
+        run: |
+          keychain="$RUNNER_TEMP/sill-release.keychain-db"
+          key="$RUNNER_TEMP/sill-notary-key.p8"
+          printf '%s' "$SILL_NOTARY_KEY_P8" | base64 --decode > "$key"
+          # Validates the key with Apple before saving it, so a wrong key fails here.
+          xcrun notarytool store-credentials sill-notary --key "$key" --key-id "$SILL_NOTARY_KEY_ID" \
+            --issuer "$SILL_NOTARY_ISSUER_ID" --keychain "$keychain"
+          rm -f "$key"
+          echo "SILL_NOTARY_PROFILE=sill-notary" >> "$GITHUB_ENV"
+
+      - name: Build, notarize and publish (Scripts/release.sh --publish)
+        env:
+          # This repository's releases with its own token. For another repository's (the public
+          # sill-site, while this one is private): the variable SILL_RELEASE_REPO and a token for
+          # it in the secret SILL_RELEASE_TOKEN.
+          SILL_RELEASE_REPO: ${{ vars.SILL_RELEASE_REPO || github.repository }}
+          GH_TOKEN: ${{ secrets.SILL_RELEASE_TOKEN || github.token }}
+        run: Scripts/release.sh --publish
+
+      - name: Keep Apple's notary log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notary-${{ env.SILL_RELEASE_TAG }}
+          path: |
+            .build/Sill-*-notary.plist
+            .build/Sill-*-notary-log.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Delete the keychain and the key files
+        if: always()
+        run: |
+          keychain="$RUNNER_TEMP/sill-release.keychain-db"
+          rm -f "$RUNNER_TEMP/sill-developer-id.p12" "$RUNNER_TEMP/sill-notary-key.p8"
+          if [ -f "$keychain" ]; then
+            security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db" || true
+            security delete-keychain "$keychain"
+          fi
+          echo "Keychains left: $(security list-keychains -d user | tr -d ' "' | tr '\n' ' ')"

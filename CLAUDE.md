@@ -8,6 +8,82 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**GitHub Actions (2026-09-25, branch `github-actions` from main at 1f3072a).**
+Noah: the download link still fails; a new release should be checked by
+GitHub, and does that cost money. The link fails twice over: there is no
+release (`release.sh --publish` has never run; `gh release list` is empty), and
+Saffsanity/sill is private, so its release files are a 404 to anyone not signed
+in with access (docs/release-checklist.md, "Releasing from GitHub Actions",
+has both ways out: go public, or publish in sill-site). Added:
+- `.github/workflows/ci.yml` (Layout): pull requests and pushes to main that
+  touch more than documents, the site or design files, and by hand; one job
+  on `xcode-27`, 30 minutes, cancelling an older run of the same ref. Runner:
+  the newest image GitHub offers and the only one with Xcode 27 (macOS 27.0
+  26A428 with Xcode 27.0 27A266a as the default, 27.1 installed as
+  `Xcode_27.1_beta.app` and a 27.2 beta; a public preview, issue 14404);
+  `macos-latest` is macOS 26 with Xcode 26.6 at most, `macos-15` Xcode 16.4 and
+  26.3, never tried with this code. `.github/actions/select-xcode` takes the
+  newest Xcode whose folder is not a beta (27.0 there, the same build as this
+  Mac) and prints `xcodebuild -version`. The `.build` cache is keyed on that
+  toolchain and Package.swift (there is no Package.resolved), `.build/checks`
+  left out. The iOS build is not `-quiet`: Xcode 27's -quiet heads a compile
+  that only warned with "error: the following command failed with exit code
+  0". The CLI runs only where it exits before the host starts: `--internet`
+  alone (exit 2) and `--print-reachability`. Mutants only by hand, a job per
+  check. Actions pinned by commit (checkout v7.0.1, cache v6.1.0,
+  upload-artifact v7.0.1, the newest on 2026-09-25).
+- `.github/workflows/release.yml`: a pushed tag `v*` or by hand with a tag
+  (`SILL_RELEASE_TAG`); checkout with the whole history (make-app.sh's build
+  number is the commit count). Repository variable `SILL_SIGN_IN_CI` not
+  `true`: verify (the tag, the checks, `make-app.sh` signed ad hoc, the icon
+  there, `Sill-<version>-adhoc.zip` as an artifact for 14 days). `true`:
+  the checks, a check that the five secrets are set, the .p12 into
+  `$RUNNER_TEMP/sill-release.keychain-db` (random password, masked; first in
+  the search list and the default keychain, where notarytool keeps profiles),
+  `notarytool store-credentials sill-notary --keychain` (validates the key),
+  `release.sh --publish` with `GH_TOKEN` (the run's token, `contents: write`,
+  or `SILL_RELEASE_TOKEN` for `SILL_RELEASE_REPO`), the notary log as an
+  artifact, and an always() step that deletes the keychain and key files.
+- `Scripts/release.sh`: `SILL_RELEASE_TAG` in the preflight (the tag must be
+  `v<CFBundleShortVersionString>` and, when it is here, name HEAD);
+  `--check-tag` checks only that. It refuses a build without Assets.car and
+  AppIcon.icns (make-app.sh only warns when Quick Look or actool fail). Publish
+  asks `gh api repos/<repo>` instead of `gh auth status`, which asks GET /user,
+  and Actions' token can't answer that.
+- `Tests/checks/` (Layout): the pure checks from this session's scratch
+  folders, the newest of each, the ones run against the sources main now has,
+  unchanged but for paths (the compile line in six `main.swift` headers; the
+  policy, fence and clientlink mutants scripts read the repository and write
+  to `.build/checks/<name>/`): policy 286 (integrate-12's merged check, 70
+  mutants), fence 14 modes (review-moves-b's, 19), ledger 90 (ledger-union,
+  no mutants), clientlink 89 (14), remote-rules 64 (rf2, 35), origin 66 (10),
+  protocol 188 plus crosscheck.py's 8 (20), addresses 41 (step 3, 15),
+  pairing-address 80 (pairing-address/fixes, 35). Not here: EncoderMailbox's
+  (only on encoder-two-in-flight, which carries it as Scripts/encoder-check),
+  and update-notice's one-line change to protocol's kind 23 case.
+- Verified here, nothing pushed and no Actions run: `Tests/checks/run-all.sh`
+  passes (all nine, 132 s); every mutant caught (`run-all.sh --mutants`, about
+  44 minutes here: policy 70, fence 19, remote-rules 35, pairing-address 35,
+  protocol 20, addresses 15, clientlink 14, origin 10); `swift build -c
+  release` (28 s, only the CaptureProbe warning); the iOS command (only the
+  StreamClient warning; both simulator slices); the CLI step under `bash -eo
+  pipefail`; the three YAML files parse (PyYAML) and pass a structural check
+  (every action pinned by hash, no expression inside a run script);
+  release.sh's `--check-tag` on a match, a mismatch, unset, a tag on another
+  commit and an annotated tag (a scratch clone), and a dry run with a wrong
+  tag stopping before it builds; the Xcode rule on two fake image layouts; `gh
+  api repos/Saffsanity/sill` answers.
+- **Untested, for Noah:** every run on GitHub (the first will be this
+  branch's pull request: a draft counts too). The keychain and notary steps
+  never ran (they change the keychain search list and the default keychain,
+  which is not for this Mac), nor make-app.sh's Quick Look icon, spctl or
+  notarytool on a runner. The steps: decide public or sill-site; set the secrets
+  (`gh secret set`, the checklist); push a tag with the variable unset and
+  try the artifact; then set `SILL_SIGN_IN_CI` and push the next tag. Costs:
+  free once public; private, about 10 minutes a CI run against roughly 200
+  included macOS minutes a month on GitHub Free (a macOS minute counts ten),
+  then $0.062 a minute with a payment method on file, and nothing without one.
+
 **Public README (2026-09-25, branch `public-readme` from main at b50e224,
 draft PR #15).** For the repository going public at launch: `README.md` is the
 public front page, everything the old README said is in `docs/DEVELOPMENT.md`
@@ -1758,8 +1834,13 @@ good.
   Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
   `site/download.html`. It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
-  keychain) or the profile, and `--dry-run` stops before notarytool (the
-  profile only warned about); sourced, it only defines its functions.
+  keychain) or the profile, or with `SILL_RELEASE_TAG` (the release workflow
+  sets it) not `v<CFBundleShortVersionString>` or naming another commit
+  (`--check-tag` checks only that), and `--dry-run` stops before notarytool (the
+  profile only warned about); it refuses a build without Assets.car and
+  AppIcon.icns, and `--publish` asks `gh api repos/<repo>` whether it can reach
+  the repository (`gh auth status` asks GET /user, which the Actions token
+  can't answer); sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
@@ -1855,6 +1936,33 @@ good.
   `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
   line joins it once there is a Ko-fi handle). Tip links live there, in the
   README's Tips and on the site, never in the iOS app.
+- `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27 with
+  Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`: pull
+  requests and pushes to main that touch more than documents, the site or the
+  design files, and by hand; `swift build -c release`, `Tests/checks/run-all.sh`,
+  the iOS app for the generic simulator (Debug, `CODE_SIGNING_ALLOWED=NO`), and
+  the CLI's paths that exit before the host starts (`--internet` alone, exit 2;
+  `--print-reachability`); by hand with "mutants", each check's mutants in a job
+  of its own. `release.yml`: a pushed tag `v*`, or by hand with one; verify only
+  (the tag, the checks, `make-app.sh` signed ad hoc, zipped as an artifact)
+  unless the repository variable `SILL_SIGN_IN_CI` is `true`, then the Developer
+  ID .p12 into a temporary keychain, the notary key stored as a profile in it,
+  `release.sh --publish`, and the keychain deleted in an always() step. Secrets,
+  variables, rotation and costs: docs/release-checklist.md, "Releasing from
+  GitHub Actions". `.github/actions/select-xcode` — selects the newest Xcode
+  whose folder is not a beta and prints `xcodebuild -version` (CI only: it runs
+  `sudo xcode-select`). Actions are pinned by commit hash.
+- `Tests/checks/` — the pure checks, a folder each: `main.swift`, `run.sh`
+  (compiles the app's files it names with swiftc into `.build/checks/<name>/` and
+  runs; `--mutants` runs `mutants.py`, passing only when every mutant is
+  caught), and `build.sh` where a check compiles a module (StreamProtocol's
+  sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
+  `fence`, `ledger`, `origin`, `pairing-address`, `policy`, `protocol`,
+  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits with
+  the number that failed; `common.sh` is sourced by each `run.sh`; `README.md`
+  lists what each compiles and the checks that belong to open branches. A
+  change to a checked file updates its check (and a mutant's pattern) in the
+  same commit.
 
 ## Build and run
 
@@ -1871,6 +1979,7 @@ swift run -c release SillHost --remote      # the remote door for this run on an
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
+Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
