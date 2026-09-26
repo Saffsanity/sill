@@ -527,8 +527,14 @@ The branch first let two frames into the hardware encoder at once, on the
 reading that part of the 29 ms might overlap, then only under a test switch
 after review (its commits 63a365b–e68408f have the design, the review and runs
 on an engine shared with the Claude app's iOS Simulator panel, where two inside
-gained nothing: 35.7 against 35.6 fps, capture to output 36 → 64 ms). The
-deciding run had the engine alone:
+gained nothing: 35.7 against 35.6 fps, capture to output 36 → 64 ms). Sharing
+alone reads like the slow state in the stats line: in those runs a synthetic
+Retina stream with one inside, beside the panel alone (15:43:39–15:44:09),
+read ~32 fps with ~27 drops a second, and Noah's Retina Desktop beside it
+33–36 fps (the operational rule in "The hardware encoder: busy, not stuck").
+The HeartBeat tells them apart: it lists the panel's session beside Sill's,
+and its C/F, the engine's figure, read 9.5–10.6 ms there against 14.0 for the
+slow state alone. The deciding run had the engine alone:
 
 Measured alone (2026-09-25, 20:16–21:04; no device connected, and each kept
 run's HeartBeat lists only its own session): the CLI host built from e68408f
@@ -2441,7 +2447,7 @@ SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
-SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost --synthetic   # keeps each hardware session (no new session for the slow state; 1 forces it)
+SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
 Needs Xcode as the active developer directory with its license accepted; with

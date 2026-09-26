@@ -411,13 +411,16 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
   seconds of few frames, at any bitrate) or another app encoding at the same
   time (a screen recording, the Simulator's recorder, or the Claude app's iOS
-  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The two
-  can read alike: a test-pattern Retina stream beside that panel alone read
-  about 32 fps with about 27 drops a second. The kernel's encoder log tells
-  them apart (`Scripts/encoder-check/hbparse.py` reads it; its header says
-  how to fetch it): it lists another session beside Sill's while an app
-  shares the encoder, and a time per frame (C/F) of about 10 ms, against
-  about 15 in the slow state. The host gives a stream in the slow state a new
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The stats
+  line can read alike for both: a test-pattern Retina stream beside that panel
+  alone read about 32 fps with about 27 drops a second. The kernel's encoder
+  log tells them apart (`Scripts/encoder-check/hbparse.py` reads it; its
+  header says how to fetch it): while another app shares the encoder, it lists
+  that app's session beside Sill's, and hbparse.py marks those windows
+  "(shared)"; in the slow state Sill's session is alone. Its C/F column is the
+  engine's figure, not Sill's time per frame, and moves with how many frames
+  the engine completes in all: about 14 ms in the slow state alone, about 10
+  beside the Simulator panel. The host gives a stream in the slow state a new
   encoder session about 2 s into the motion, which runs at the full rate
   again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
   ms each …; a new session takes 9 ms …"); if a new session is no faster
