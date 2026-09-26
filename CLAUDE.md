@@ -1930,7 +1930,12 @@ good.
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
   update check's), and `--dry-run` stops before notarytool (the profile and
   the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
-  `make-app.sh --release` builds an untagged commit); sourced, it only defines
+  `make-app.sh --release` builds an untagged commit). `--publish` makes the
+  GitHub Release in `SILL_RELEASE_REPO` (default Saffsanity/sill, the only
+  repository the update check reads) and refuses to start unless origin's
+  tag v‹version› names HEAD (gh would make a missing tag from the default
+  branch's tip); in Saffsanity/sill it passes gh `--verify-tag`, anywhere else
+  it warns that no Sill.app will offer the release. Sourced, it only defines
   its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,

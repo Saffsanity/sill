@@ -461,14 +461,20 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
 CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
-tag v0.4.0`), and its GitHub release is published (not a draft, not a
-prerelease) with the notarized zip attached; every Sill.app's update check
-compares that tag with the version it runs. `Scripts/release.sh` makes the
-download. It runs `make-app.sh --release` (which refuses a HEAD without that
-tag, and any signature but Developer ID), zips the app, sends it to Apple's
-notary service and waits, staples the ticket, zips it again so the download
-carries the ticket, checks a copy unpacked from that zip with `stapler
-validate` and `spctl`, and prints the zip's path and SHA-256. It needs
+tag v0.4.0`, `git push origin v0.4.0`), and its GitHub release in
+Saffsanity/sill is published (not a draft, not a prerelease) with the
+notarized zip attached; every Sill.app's update check reads that repository's
+releases alone and compares the tag with the version it runs.
+`Scripts/release.sh` makes the download. It runs `make-app.sh --release`
+(which refuses a HEAD without that tag, and any signature but Developer ID),
+zips the app, sends it to Apple's notary service and waits, staples the
+ticket, zips it again so the download carries the ticket, checks a copy
+unpacked from that zip with `stapler validate` and `spctl`, and prints the
+zip's path and SHA-256. With `--publish` it then makes the GitHub Release,
+and refuses to start unless origin has the tag and it names HEAD (gh would
+otherwise make the tag from the default branch); a `SILL_RELEASE_REPO` other
+than Saffsanity/sill gets a warning, since no Sill.app offers a release
+published there. It needs
 `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'` and
 `SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
 store-credentials sill-notary`), and refuses to start without them. Give

@@ -8,12 +8,18 @@
 #                                    notarytool and prints what a real run would do next
 #   Scripts/release.sh --publish     everything, then a GitHub Release (tag v<version>) with the
 #                                    assets Sill.zip and Sill.zip.sha256, which the site's download
-#                                    page links under those fixed names (needs gh, signed in)
+#                                    page links under those fixed names (needs gh, signed in, and
+#                                    the tag pushed: origin's v<version> must name HEAD)
 #
 # SILL_SIGN_IDENTITY names a Developer ID Application identity in your keychain: its name, part of
 # it, or its SHA-1 hash, as for make-app.sh. SILL_NOTARY_PROFILE is the profile name you gave
 # `xcrun notarytool store-credentials` (a dry run only warns when it is missing).
 # docs/release-checklist.md says how to get both, and what to do with the zip.
+#
+# --publish makes the release in SILL_RELEASE_REPO, by default Saffsanity/sill: the one repository
+# whose releases every Sill.app's update check reads (Sources/SillMenuBar/UpdatePolicy.swift,
+# `feed`). A release anywhere else can be downloaded, but no Sill.app offers it, and the script
+# warns before it builds and again as it publishes.
 #
 # Why each step:
 # - make-app.sh --release signs with the hardened runtime and a secure timestamp and without
@@ -28,6 +34,10 @@
 # - The zip is made again after stapling: the first one, the one sent to Apple, has no ticket.
 # - Last, a copy unpacked from the final zip must pass `stapler validate` and `spctl` as
 #   "Notarized Developer ID": that zip is exactly what people download.
+# - --publish checks origin's tag before it builds: `gh release create` makes a tag the release's
+#   repository lacks from its default branch's tip, so the release (and its source archives) would
+#   name another commit than the one built, and pushing the real tag later would be refused. In
+#   Saffsanity/sill it also passes --verify-tag, so gh itself refuses a tag that isn't there.
 set -euo pipefail
 
 usage() {
@@ -43,6 +53,9 @@ usage: Scripts/release.sh [--dry-run | --publish]
   --publish
       after the checks, creates the GitHub Release v<version> in $SILL_RELEASE_REPO
       (default Saffsanity/sill) with Sill.zip and Sill.zip.sha256, the names the site links.
+      Refused, before building, unless origin has the tag v<version> and it names HEAD
+      (git push origin v<version>). Every Sill.app's update check reads only Saffsanity/sill's
+      releases: one published anywhere else can be downloaded, but no Sill.app offers it.
 
 The one-time setup (certificate, notary credentials) is in docs/release-checklist.md.
 USAGE
@@ -69,9 +82,10 @@ identities_matching() {
 }
 
 # Everything a run needs before it builds, checked at once so that one run names every gap.
-# Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run.
+# Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run, $2 is 1 for
+# --publish.
 preflight_problems() {
-    local dry_run="$1" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
+    local dry_run="$1" publish="${2:-0}" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
     local matches count others tool version tags
     if [ -z "$identity" ]; then
         echo "SILL_SIGN_IDENTITY is not set. Set it to your Developer ID Application identity, as in SILL_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)'."
@@ -92,6 +106,9 @@ preflight_problems() {
         tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
         echo "HEAD is not tagged v$version (it is tagged '${tags:-nothing}'). A release is built only from the commit tagged v + Packaging/Info.plist's CFBundleShortVersionString, which every Sill.app's update check compares with the version it runs: commit the version, then git tag v$version and git push origin v$version."
     fi
+    if [ "$dry_run" = 0 ] && [ "$publish" = 1 ] && version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)"; then
+        remote_tag_problem "$version"
+    fi
     if [ "$dry_run" = 0 ]; then
         if [ -z "$profile" ]; then
             echo "SILL_NOTARY_PROFILE is not set. Store your notary credentials once with 'xcrun notarytool store-credentials sill-notary', then set SILL_NOTARY_PROFILE=sill-notary."
@@ -107,8 +124,49 @@ preflight_problems() {
 head_is_release_tag() {
     local version
     version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || return 1
-    # grep reads all of it (no -q): an early exit could fail the pipeline under pipefail.
-    git tag --points-at HEAD 2>/dev/null | grep -x "v$version" >/dev/null
+    # grep reads all of it (no -q): an early exit could fail the pipeline under pipefail. -F: the
+    # dots are dots.
+    git tag --points-at HEAD 2>/dev/null | grep -Fx "v$version" >/dev/null
+}
+
+# Why --publish can't use origin's tag v$1, or nothing: origin must have it, naming HEAD. gh makes
+# a tag the release's repository lacks from the default branch's tip, so a tag left unpushed would
+# publish a release, and source archives, of another commit than the one built.
+remote_tag_problem() {
+    local version="$1" lines remote head
+    if ! lines="$(git ls-remote --tags origin "refs/tags/v$version" "refs/tags/v$version^{}" 2>/dev/null)"; then
+        echo "Couldn't read origin's tags (git ls-remote origin failed). --publish needs the tag v$version on origin, naming HEAD: git push origin v$version."
+        return 0
+    fi
+    # An annotated tag's commit is its peeled line (^{}); a lightweight tag's is its own.
+    remote="$(awk -v t="refs/tags/v$version" '$2 == (t "^{}") { peeled = $1 } $2 == t { plain = $1 } END { print (peeled != "" ? peeled : plain) }' <<<"$lines")"
+    head="$(git rev-parse HEAD 2>/dev/null)" || head=""
+    if [ -z "$remote" ]; then
+        echo "origin has no tag v$version. --publish makes the GitHub Release of the pushed tag, and gh would otherwise create the tag from the default branch's tip, not from this commit: git push origin v$version."
+    elif [ "$remote" != "$head" ]; then
+        echo "origin's tag v$version names ${remote:0:12}, not HEAD (${head:0:12}), so the release would name another commit than the one built. Publish from the commit origin's tag names, or correct the tag on origin first."
+    fi
+}
+
+# The one repository whose releases every Sill.app's update check reads
+# (Sources/SillMenuBar/UpdatePolicy.swift, `feed`).
+feed_repo=Saffsanity/sill
+
+# Whether $1, a repository as gh takes it ([HOST/]OWNER/REPO, or its URL), is `feed_repo`.
+is_feed_repo() {
+    local r want
+    r="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    want="$(printf '%s' "$feed_repo" | tr '[:upper:]' '[:lower:]')"
+    r="${r#https://}"; r="${r#http://}"; r="${r%/}"; r="${r%.git}"
+    [ "$r" = "$want" ] || [ "$r" = "github.com/$want" ]
+}
+
+# A release anywhere but `feed_repo` can be downloaded, but no Sill.app offers it. Said before a
+# --publish run builds, and again as it publishes.
+feed_warning() {
+    if ! is_feed_repo "$1"; then
+        echo "warning: the release goes to $1, not $feed_repo. It can be downloaded there, but no Sill.app will offer it: every Sill.app's update check reads only $feed_repo's releases (docs/release-checklist.md, part 2, Publish)." >&2
+    fi
 }
 
 # What notarization requires of the signature, read back from the built app. make-app.sh has
@@ -156,7 +214,7 @@ main() {
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
     local problems
-    problems="$(preflight_problems "$dry_run")"
+    problems="$(preflight_problems "$dry_run" "$publish")"
     if [ -n "$problems" ]; then
         {
             echo "error: Scripts/release.sh can't start:"
@@ -164,6 +222,9 @@ main() {
             echo "The one-time setup is in docs/release-checklist.md. Nothing was built."
         } >&2
         exit 2
+    fi
+    if [ "$publish" = 1 ]; then
+        feed_warning "${SILL_RELEASE_REPO:-$feed_repo}"
     fi
     if [ "$dry_run" = 1 ] && [ -z "${SILL_NOTARY_PROFILE:-}" ]; then
         echo "warning: SILL_NOTARY_PROFILE is not set; a real run needs it (docs/release-checklist.md)." >&2
@@ -261,6 +322,7 @@ DRY
     else
         echo "Next (docs/release-checklist.md): Scripts/release.sh --publish creates the GitHub Release"
         echo "v$version with Sill.zip and Sill.zip.sha256, which https://getsill.app/download links."
+        echo "It refuses to start until origin has the tag: git push origin v$version."
         echo "  SHA-256  $sha"
     fi
 }
@@ -269,23 +331,34 @@ DRY
 # Sill.zip.sha256 so /releases/latest/download/<name> keeps working release after release.
 publish_release() {
     local zip="$1" version="$2" build="$3" sha="$4"
-    local repo="${SILL_RELEASE_REPO:-Saffsanity/sill}" dir asset
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" dir asset verify=""
     command -v gh >/dev/null || fail "gh is not installed (brew install gh), or not on PATH"
     gh auth status >/dev/null 2>&1 || fail "gh is not signed in: run gh auth login"
     if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
         fail "release v$version already exists in $repo; bump the version in Packaging/Info.plist first"
     fi
+    # The release's tag is the pushed one (the preflight checked origin's): in the feed's repository
+    # gh must find it there too, and never make it from the default branch. Another repository never
+    # holds the source's tags, so there gh makes one, which nothing reads.
+    if is_feed_repo "$repo"; then verify=1; else feed_warning "$repo"; fi
     dir="$(mktemp -d "${TMPDIR:-/tmp}/sill-publish.XXXXXX")"
     asset="$dir/Sill.zip"
     cp "$zip" "$asset"
     (cd "$dir" && shasum -a 256 Sill.zip > Sill.zip.sha256)
     say "Creating the GitHub Release v$version in $repo"
-    gh release create "v$version" "$asset" "$dir/Sill.zip.sha256" --repo "$repo" \
+    if ! gh release create "v$version" "$asset" "$dir/Sill.zip.sha256" --repo "$repo" ${verify:+--verify-tag} \
         --title "Sill $version" \
-        --notes "Sill for Mac $version ($build), notarized. SHA-256 of Sill.zip: $sha. Download at https://getsill.app/download"
+        --notes "Sill for Mac $version ($build), notarized. SHA-256 of Sill.zip: $sha. Download at https://getsill.app/download"; then
+        rm -rf "$dir"
+        fail "gh release create failed for v$version in $repo (its message is above). If it left a draft release there, delete it before trying again."
+    fi
     rm -rf "$dir"
     echo "Published: https://github.com/$repo/releases/tag/v$version"
-    echo "The site's Download button already points at the newest release."
+    if [ -n "$verify" ]; then
+        echo "The site's Download button already points at the newest release."
+    else
+        echo "The site's Download button links $feed_repo's newest release: point site/download.html's three links at $repo while releases go there."
+    fi
 }
 
 # Sourced (to test its functions), the script only defines them.

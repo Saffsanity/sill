@@ -160,9 +160,12 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       General). Commit.
 - [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag v0.4.0` and
       `git push origin v0.4.0` for 0.4.0. `make-app.sh --release` builds only the commit carrying
-      it, `release.sh --publish` makes the GitHub Release for it, and every Sill.app's update check
-      compares the newest published release's tag (not a draft, not a prerelease) with the version
-      it runs: within a day of the release, every older Sill.app offers it.
+      it, and `release.sh --publish` refuses to start until origin's tag names that commit, then
+      makes the GitHub Release for it. Every Sill.app's update check reads the releases of
+      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag (not
+      a draft, not a prerelease) with the version it runs: once Saffsanity/sill is public, within a
+      day of a release there, every older Sill.app offers it. While the repository is private,
+      GitHub answers the check with a 404 and no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, and prints the zip's
       path, its SHA-256 and where Apple's notary log is. It warns when the log lists issues: read
@@ -172,10 +175,16 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       allow the permissions and stream to a device. For 1.0 this is the reviewer's path: film it
       for the review video (metadata §8).
 - [ ] Publish: `Scripts/release.sh --publish` (with the same two variables) creates the GitHub Release
-      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`. The site's
-      Download button links `releases/latest/download/Sill.zip`, which GitHub redirects to the newest
-      release, so download.html is never edited. The repository must be public for anonymous
-      downloads; until it is, set `SILL_RELEASE_REPO=Saffsanity/sill-site` and point the button there.
+      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`; before it
+      builds, it checks that origin has the tag and that it names HEAD. The site's Download button
+      links `releases/latest/download/Sill.zip`, which GitHub redirects to the newest release, so
+      download.html is never edited. The repository must be public for anonymous downloads and for
+      the update check. Until it is, `SILL_RELEASE_REPO=Saffsanity/sill-site` publishes there
+      instead (point download.html's three GitHub links there too), and release.sh warns: a release
+      in sill-site can be downloaded, but no Sill.app will offer it, so the download page's "it
+      tells you when a new version is out" does not hold for it. Once sill is public: unset
+      `SILL_RELEASE_REPO` (in `~/.sill-release` too), point the links back at Saffsanity/sill, and
+      publish the newest release there, so that every older Sill.app offers it.
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
       republish `site/` (the rsync below) so the button shows. Then, in a private window, download
       it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.

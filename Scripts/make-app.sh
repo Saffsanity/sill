@@ -46,7 +46,7 @@ fi
 if [ "$release" = 1 ]; then
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
     tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
-    if ! git tag --points-at HEAD 2>/dev/null | grep -x "v$version" >/dev/null; then
+    if ! git tag --points-at HEAD 2>/dev/null | grep -Fx "v$version" >/dev/null; then   # -F: dots are dots
         if [ "${SILL_RELEASE_DRY_RUN:-}" = 1 ]; then
             echo "warning: HEAD is not tagged v$version (it is tagged '${tags:-nothing}'); a dry run builds it anyway, a release only a commit tagged v$version." >&2
         else
