@@ -1,0 +1,39 @@
+# Used by .github/workflows/ci.yml and release.yml after the checkout. CI only: never run this on
+# your own Mac (it runs `sudo xcode-select`).
+name: Select the newest Xcode
+description: >-
+  Selects the newest Xcode on the runner that is not a beta, prints `xcodebuild -version` and
+  `swift --version`, and outputs a key naming that toolchain.
+outputs:
+  toolchain:
+    description: Xcode's build and the Swift compiler's version, such as 27A266a-6.4.0.34.1
+    value: ${{ steps.select.outputs.toolchain }}
+runs:
+  using: composite
+  steps:
+    - id: select
+      shell: bash
+      run: |
+        # Every Xcode on a GitHub macOS image is a folder /Applications/Xcode_<version>.app (a beta's
+        # name says beta), and symlinks such as Xcode.app and Xcode_27.0.app point at them. Take
+        # the real folders that are not betas, and of those the newest by its own version.
+        newest="$(
+          for app in /Applications/Xcode_*.app; do
+            if [ -L "$app" ]; then continue; fi
+            case "$app" in *[Bb]eta*|*_RC*|*Release_Candidate*) continue ;; esac
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
+            if [ -n "$version" ]; then printf '%s\t%s\n' "$version" "$app"; fi
+          done | sort -V | tail -n 1 | cut -f 2
+        )"
+        if [ -z "$newest" ]; then
+          echo "::error::No Xcode on this runner that is not a beta; the image's default stays selected."
+          exit 1
+        fi
+        echo "Available: $(ls -d /Applications/Xcode_*.app | xargs -n 1 basename | tr '\n' ' ')"
+        echo "Selecting $newest"
+        sudo xcode-select --switch "$newest"
+        xcodebuild -version
+        swift --version
+        build="$(xcodebuild -version | awk '/Build version/ { print $3 }')"
+        swift_version="$(swift --version 2>&1 | sed -n 's/.*(swiftlang-\([^ )]*\).*/\1/p')"
+        echo "toolchain=$build-$swift_version" >> "$GITHUB_OUTPUT"
