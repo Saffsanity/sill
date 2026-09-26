@@ -18,6 +18,9 @@ import Security
 /// - The recognition key: a generic password, service `me.saffer.sill.remote`, account
 ///   `recognition-key`, 32 bytes.
 /// - The trust list: a generic password, same service, account `paired-devices`, JSON.
+/// - Require pairing: a generic password, same service, account `require-pairing`, "0" or "1"
+///   (docs/home-pairing-plan.md §4.8). A missing item reads as on, so deleting it only turns
+///   pairing on; another app reading or writing it gets the keychain's prompt.
 ///
 /// Only an item that does not exist yet is created. Any other failure to read one throws: a new
 /// key would be a new Mac ID (every device's pin broken), and an empty list saved over an
@@ -29,6 +32,7 @@ package final class KeychainIdentityStore: IdentityStore {
     static let service = "me.saffer.sill.remote"
     static let recognitionAccount = "recognition-key"
     static let pairedAccount = "paired-devices"
+    static let requirePairingAccount = "require-pairing"
 
     package init() {}
 
@@ -89,6 +93,15 @@ package final class KeychainIdentityStore: IdentityStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try write(try encoder.encode(devices), account: Self.pairedAccount, label: "\(Self.label) (paired devices)")
+    }
+
+    package func loadRequirePairing() throws -> Bool {
+        guard let data = try read(Self.requirePairingAccount) else { return true }
+        return RequirePairingValue.decode(data)
+    }
+
+    package func saveRequirePairing(_ on: Bool) throws {
+        try write(RequirePairingValue.encode(on), account: Self.requirePairingAccount, label: "\(Self.label) (require pairing)")
     }
 
     // MARK: Generic passwords

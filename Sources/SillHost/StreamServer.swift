@@ -16,13 +16,18 @@ import StreamProtocol
 /// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
 /// client on en0 stands in for a device on awdl0, which no test can reach.
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
-/// gate can refuse a test client. All are honoured only on a host that does not advertise, so a
-/// stray variable can never touch a real host.
+/// gate can refuse a test client. All are honoured only on a test host (DoorPolicy.isTestHost: one
+/// that does not advertise and is not Sill.app's own executable), so a stray variable can never
+/// touch a real host.
 ///
 /// The home door (this listener) admits only loopback, link-local (AWDL included) and this Mac's
-/// own networks (OriginPolicy), checked at `.ready` before anything is registered or sent: a
-/// refused connection is cancelled with zero bytes from Sill and only counted, one summary line a
-/// minute at most. Every client message is capped at `StreamMessage.maxClientPayload`.
+/// own networks (OriginPolicy): a refused connection is cancelled with zero bytes from Sill and
+/// only counted, one summary line a minute at most. Every client message is capped at
+/// `StreamMessage.maxClientPayload`. It speaks one of three ways (`HomeDoorMode`,
+/// docs/home-pairing-plan.md §4.5): plain TCP as it always has (the CLI without --pairing), its
+/// origin checked at `.ready`; TLS 1.3 with both keys pinned, admitted by `Door(.home)` exactly as
+/// the remote door admits (Sill.app, SillHost --pairing), with `p` in its TXT record; or not at all
+/// (the identity could not be loaded: fail closed).
 ///
 /// The remote door (RemoteServer, on this queue) hands its admitted sessions here (`serve`), so
 /// both doors share the framing, the catalog and the stream; remote clients get their own
@@ -42,8 +47,8 @@ final class StreamServer {
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
-        /// Which door and from where: `.home(origin)` decided at `.ready`, or the remote door's.
-        var route = ClientRoute.home(.loopback)
+        /// Which door and from where: `.home(origin, peer:)` decided at `.ready`, or the remote door's.
+        var route = ClientRoute.home(.loopback, peer: nil)
         /// The device's own name from its last ClientStats, cleaned (SafeText), for its stats line
         /// and the line that says why it was disconnected; nil until its first report.
         var device: String?
@@ -60,13 +65,18 @@ final class StreamServer {
         /// Remote clients: a frame was dropped for it and a keyframe should be asked for, when
         /// `remoteKeyframeDue` (at most every 2 s across all remote clients, later beside a home one).
         var keyframeWanted = false
-        /// When a message was last handed to it (remote clients skip a tick right after one).
+        /// When a message was last handed to it (TLS clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
+        /// Its connection is TLS: every remote session, and every home session at a TLS home door.
+        var encrypted = false
+        /// A TLS home session over the USB cable to an iPhone or iPad (CableLink, read at
+        /// registration): no radio to keep awake, so no ticks.
+        var onCable = false
         init(_ c: NWConnection) { connection = c }
     }
 
     /// The network queue: both doors, their connections, the verify blocks and the timers.
-    let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
+    let queue: DispatchQueue
     private var clients: [ObjectIdentifier: Client] = [:]
     private var lastParameterSets: Data?
     /// A client was admitted (home door at `.ready`, remote door once paired and checked), with
@@ -141,9 +151,12 @@ final class StreamServer {
         let now = Date().timeIntervalSince1970
         let data = StreamMessage(kind: .tick, timestamp: now, isKeyframe: false, payload: Data()).serialized()
         for client in clients.values where client.connection.state == .ready {
-            // A remote client that was sent something within the interval needs no tick: its link
-            // is busy anyway, and over TLS every record costs the host CPU (H20).
-            if client.route.isRemote, now - client.lastSentAt < Self.tickInterval { continue }
+            // Over TLS every record costs CPU (the remote plan's H20): skip a tick right after
+            // anything else went out. The link is busy anyway, so the device's radio stays awake
+            // exactly as before. The plain door keeps every tick.
+            if client.encrypted, now - client.lastSentAt < Self.tickInterval { continue }
+            // The USB cable has no radio to keep awake.
+            if client.encrypted, client.onCable { continue }
             client.connection.send(content: data, completion: .contentProcessed { _ in })   // not counted as inflight
         }
         Stats.shared.bump("net.tick")
@@ -171,6 +184,28 @@ final class StreamServer {
     // From `start()` on, the listener's whole life is the network queue's: its creation, start,
     // handlers and replacement, and `readyPort`, which the main actor reads through `portLock`.
 
+    /// How the home door speaks (docs/home-pairing-plan.md §4.5).
+    enum HomeDoorMode {
+        /// Plain TCP, byte for byte as before: the CLI without --pairing.
+        case plain
+        /// TLS 1.3, both keys pinned, admission by `Door(.home)`: Sill.app, SillHost --pairing.
+        case tls(HomeTLS)
+        /// No listener at all (the identity could not be loaded: fail closed); why, for the log.
+        case closed(String)
+    }
+    /// What a TLS home door needs: the Mac's identity and the trust list's snapshot, both the
+    /// remote door's (one identity, one trust list).
+    struct HomeTLS {
+        let identity: HostIdentity
+        let trust: TrustBox
+    }
+    let homeMode: HomeDoorMode
+    /// The TLS home door's admission; nil for a plain or closed one. RemoteAccess wires its outputs.
+    let homeDoor: Door?
+    /// The home door speaks TLS: its TXT record carries `p`, and kind 21 comes only from an
+    /// unpaired session.
+    var homeTLS: Bool { homeDoor != nil }
+
     private var listener: NWListener                 // replaced whole, never reconfigured
     /// The Mac's name and `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
     /// synthetic hosts, which devices must never find).
@@ -188,7 +223,8 @@ final class StreamServer {
     }
     /// A test registration is announced once in the log and never reaches `onServiceRegistered`.
     private let serviceIsTest: Bool
-    /// A host that does not advertise (the synthetic ones): the only kind the TEST ONLY hooks touch.
+    /// A test host (DoorPolicy.isTestHost: it does not advertise and is not Sill.app's own
+    /// executable): the only kind the TEST ONLY hooks touch.
     private let testHost: Bool
     private var peerToPeer = false                   // what `listener` was built with
     private var wantedPeerToPeer = false             // the newest request
@@ -207,25 +243,35 @@ final class StreamServer {
     private static let cancelTimeout: TimeInterval = 1.0
 
     /// `advertise: false` keeps the host off Bonjour (the synthetic test mode), unless a test asks
-    /// for its test registration (SILL_TEST_SERVICE_TYPE, above).
-    init(serviceType: String = "_sill._tcp", advertise: Bool = true) throws {
+    /// for its test registration (SILL_TEST_SERVICE_TYPE, above). `home`: how the home door speaks.
+    /// `testHooks`: false for Sill.app's own executable, which honours no TEST ONLY hook that bears
+    /// on who gets in (docs/home-pairing-plan.md §4.3).
+    init(serviceType: String = "_sill._tcp", advertise: Bool = true, home: HomeDoorMode = .plain, testHooks: Bool = true) throws {
+        let queue = DispatchQueue(label: "sill.net", qos: .userInteractive)
+        self.queue = queue
+        let test = DoorPolicy.isTestHost(advertises: advertise, bundled: !testHooks)
         // The synthetic test host does not advertise: a device would otherwise find it, connect,
         // and show the test pattern (Noah saw "a white moving wall", 2026-09-23). Test clients
         // connect to it by port.
         if advertise {
             serviceNameAndType = (Host.current().localizedName ?? "Mac", serviceType)
             serviceIsTest = false
-        } else if let type = Self.testServiceType {
+        } else if test, let type = Self.testServiceType {
             serviceNameAndType = ("Sill test \(getpid())", type)
             serviceIsTest = true
         } else {
             serviceNameAndType = nil
             serviceIsTest = false
         }
-        testHost = !advertise
-        listener = try Self.makeListener(peerToPeer: false, port: nil)
+        testHost = test
+        homeMode = home
+        var door: Door?
+        if case .tls(let t) = home { door = Door(.home, queue: queue, identity: t.identity, trust: t.trust, testHost: test) }
+        homeDoor = door
+        listener = try Self.makeListener(peerToPeer: false, port: nil, tls: door?.tlsOptions())
         listener.service = makeService()
         wire(listener)
+        door?.server = self
     }
 
     /// TEST ONLY: SILL_TEST_SERVICE_TYPE (see the type's doc comment). Read once. Only a
@@ -334,8 +380,10 @@ final class StreamServer {
     }
 
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
-    /// given (a replacement keeps the port that test clients and resolved devices know).
-    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?) throws -> NWListener {
+    /// given (a replacement keeps the port that test clients and resolved devices know), speaking
+    /// TLS when `tls` is given (a TLS home door: the Door's options with its verify block), plain
+    /// TCP otherwise, exactly as before.
+    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?, tls: NWProtocolTLS.Options?) throws -> NWListener {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         // A client that vanishes without closing (app killed, Wi-Fi gone) would otherwise stay
@@ -344,11 +392,23 @@ final class StreamServer {
         tcp.keepaliveIdle = 5
         tcp.keepaliveInterval = 2
         tcp.keepaliveCount = 3
-        let params = NWParameters(tls: nil, tcp: tcp)
-        params.serviceClass = .interactiveVideo   // WMM video class on Wi-Fi: shorter queues, higher priority
-        params.includePeerToPeer = peerToPeer     // Direct Wireless Connection only (see the MARK above)
+        let params: NWParameters
+        if let tls {
+            // The remote door's TLS over the home door's own TCP (no connectionDropTime: home
+            // clients keep their 4 s drain rule), the same service class and peer-to-peer flag.
+            params = RemoteTLS.parameters(tls: tls, tcp: tcp, peerToPeer: peerToPeer)
+        } else {
+            params = NWParameters(tls: nil, tcp: tcp)
+            params.serviceClass = .interactiveVideo   // WMM video class on Wi-Fi: shorter queues, higher priority
+            params.includePeerToPeer = peerToPeer     // Direct Wireless Connection only (see the MARK above)
+        }
         if let port { return try NWListener(using: params, on: port) }
         return try NWListener(using: params)
+    }
+
+    /// The same, in this door's mode: a replacement speaks as the listener it replaces.
+    private func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?) throws -> NWListener {
+        try Self.makeListener(peerToPeer: peerToPeer, port: port, tls: homeDoor?.tlsOptions())
     }
 
     /// The listener's handlers. Each first checks that `l` is still the listener, so the callbacks
@@ -443,7 +503,7 @@ final class StreamServer {
         }
         let l: NWListener
         do {
-            l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: port)
+            l = try makeListener(peerToPeer: wantedPeerToPeer, port: port)
         } catch {
             replacementFailed(error as? NWError ?? .posix(.EINVAL), swap: n)
             return
@@ -485,6 +545,8 @@ final class StreamServer {
     /// session: the remote door never listens on peer-to-peer Wi-Fi (RemoteTLS), and who reaches it
     /// is Remote Access's to say, not Direct Wireless's.
     private func disconnectPeerToPeerClients() {
+        // An ask or a proof in flight over peer-to-peer Wi-Fi goes too (a TLS home door).
+        homeDoor?.cancelPending { runsPeerToPeer($0) }
         for client in clients.values where !client.route.isRemote && runsPeerToPeer(client.connection) {
             let endpoint = "\(client.connection.endpoint)"
             let who = client.device.map { "\($0) at \(endpoint)" } ?? endpoint
@@ -559,12 +621,19 @@ final class StreamServer {
     }
 
     /// Starts listening and advertising. Thread-safe: from here on the listener lives on `queue`.
+    /// A closed home door (no identity) never listens: one line, and the CLI exits as it does when
+    /// its listener fails; the app keeps running and says why.
     func start() {
         queue.async { [self] in
+            if case .closed(let why) = homeMode {
+                print("Home door unavailable: \(why).")
+                if onListenerFailed == nil { exit(1) }   // the CLI, as when its listener fails
+                return
+            }
             // Set before start (the setting at launch): build the listener with it, nothing to replace.
             if wantedPeerToPeer != peerToPeer {
                 do {
-                    let l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: nil)
+                    let l = try makeListener(peerToPeer: wantedPeerToPeer, port: nil)
                     l.service = makeService()
                     wire(l)
                     listener = l
@@ -580,15 +649,29 @@ final class StreamServer {
         }
     }
 
+    /// Require pairing changed: the TXT record's `p` again. Setting the running listener's service
+    /// with the same name and type updates the record in place (H0's P1: no removal, no "(2)", and
+    /// no registration callback, so the status keeps its name). During a Direct Wireless
+    /// replacement it does nothing: the replacement's advertising step reads the current value.
+    /// Thread-safe.
+    func updateService() {
+        queue.async { [self] in
+            guard started, swap == .idle, serviceNameAndType != nil, txtRecord != nil else { return }
+            listener.service = makeService()
+        }
+    }
+
     /// The port the listener got, once it is ready: how test clients reach the synthetic host.
     var port: UInt16? {
         portLock.lock(); defer { portLock.unlock() }
         return readyPort
     }
 
-    /// The home door. A connection is registered only once it is ready and its origin is one the
-    /// home door admits: until then it gets nothing, counts for nothing, and prints nothing.
+    /// The home door. A TLS door hands the connection to its Door, which registers it through
+    /// `serve` once admitted. A plain one registers it only once it is ready and its origin is one
+    /// the home door admits: until then it gets nothing, counts for nothing, and prints nothing.
     private func accept(_ connection: NWConnection) {
+        if let homeDoor { homeDoor.accept(connection); return }
         let client = Client(connection)
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
@@ -603,7 +686,7 @@ final class StreamServer {
                     self.homeRefusals.count(origin == .vpn ? "vpn" : "internet")
                     return
                 }
-                client.route = .home(origin)
+                client.route = .home(origin, peer: nil)
                 client.link = self.link(connection, path: connection.currentPath)
                 self.register(client)
                 print("Client connected: \(connection.endpoint)")
@@ -642,12 +725,15 @@ final class StreamServer {
         updateRemoteSweep()
     }
 
-    /// The remote door's admitted session, already `.ready` and pinned: registered like a home
-    /// client, with its own route, and no link (its card names the route, "through Tailscale").
-    /// On `queue`.
+    /// A session a TLS door admitted, already `.ready` and pinned: registered like a plain home
+    /// client, with its route. A remote session has no link (its card names the route, "through
+    /// Tailscale"); a home one's link is read at registration and then follows the path, as the
+    /// plain door's does. On `queue`.
     func serve(_ connection: NWConnection, route: ClientRoute) {
         let client = Client(connection)
         client.route = route
+        client.encrypted = true
+        client.onCable = route.cableDevice != nil
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
@@ -660,17 +746,37 @@ final class StreamServer {
             default: break
             }
         }
+        if !route.isRemote {
+            client.link = link(connection, path: connection.currentPath)
+            connection.pathUpdateHandler = { [weak self] path in
+                guard let self, self.clients[id] === client else { return }
+                let link = self.link(connection, path: path)
+                guard link != client.link else { return }
+                client.link = link
+                self.onClientRouteChanged?(connection, link)
+            }
+        }
         register(client)
         receiveLoop(client)
-        onClientConnected?(connection, route, nil)
+        onClientConnected?(connection, route, client.link)
     }
 
     /// Admitted remote sessions: how many. On `queue`.
     var remoteSessionCount: Int { clients.values.filter { $0.route.isRemote }.count }
 
-    /// The admitted clients whose route matches, with their routes. On `queue`.
-    func sessions(where match: (ClientRoute) -> Bool) -> [(connection: NWConnection, route: ClientRoute)] {
-        clients.values.filter { match($0.route) }.map { ($0.connection, $0.route) }
+    /// Every admitted session, of either door, whose route matches gets goodbye `reason` and is
+    /// closed; `line` names one (its paired name, else the device's own, and its endpoint) for the
+    /// log, and `done` gets how many there were. Thread-safe.
+    func closeSessions(_ reason: String, matching: @escaping @Sendable (ClientRoute) -> Bool,
+                       line: (@Sendable (String, String) -> String)? = nil, done: (@Sendable (Int) -> Void)? = nil) {
+        queue.async { [self] in
+            let list = clients.values.filter { matching($0.route) }
+            for client in list {
+                if let line { print(line(client.route.pairedName ?? client.device ?? "a device", "\(client.connection.endpoint)")) }
+                goodbye(reason, to: client.connection)
+            }
+            done?(list.count)
+        }
     }
 
     // MARK: Goodbye (kind 22)
@@ -997,23 +1103,53 @@ final class StreamServer {
     }
 }
 
-/// Which door admitted a client and from where. The home door's origin is decided at `.ready`; a
-/// remote session carries the paired device's fingerprint and name and the route's label
-/// ("through Tailscale", "over the internet", "by address").
+/// Which door admitted a client and from where. The home door's origin is decided at `.ready`,
+/// with the peer's key when the door speaks TLS; a remote session carries the paired device's
+/// fingerprint and name and the route's label ("through Tailscale", "over the internet", "by
+/// address").
 enum ClientRoute: Equatable {
-    case home(OriginPolicy.Origin)
+    /// A TLS home session's key: its fingerprint, its paired name (nil for an unpaired key while
+    /// Require pairing is off), and the iPhone or iPad it runs over by the USB cable
+    /// (CableLink.deviceID, never the serial; nil off the cable).
+    struct Peer: Equatable {
+        var fingerprint: Data
+        var name: String?
+        var cableDevice: String?
+    }
+    /// `peer` nil: the plain door, which sees no key.
+    case home(OriginPolicy.Origin, peer: Peer?)
     case remote(origin: OriginPolicy.Origin, label: String, fingerprint: Data, name: String)
 
     var isRemote: Bool { if case .remote = self { return true }; return false }
     var origin: OriginPolicy.Origin {
         switch self {
-        case .home(let o): return o
+        case .home(let o, _): return o
         case .remote(let o, _, _, _): return o
         }
     }
     /// The label a remote route shows on the Mac's card; nil at home.
     var label: String? { if case .remote(_, let l, _, _) = self { return l }; return nil }
-    var fingerprint: Data? { if case .remote(_, _, let f, _) = self { return f }; return nil }
-    /// The paired name of a remote device; nil at home.
-    var pairedName: String? { if case .remote(_, _, _, let n) = self { return n }; return nil }
+    /// The peer's key, at either door; nil on the plain home door.
+    var fingerprint: Data? {
+        switch self {
+        case .home(_, let peer): return peer?.fingerprint
+        case .remote(_, _, let f, _): return f
+        }
+    }
+    /// The paired name, at either door; nil on the plain home door and for an unpaired key.
+    var pairedName: String? {
+        switch self {
+        case .home(_, let peer): return peer?.name
+        case .remote(_, _, _, let n): return n
+        }
+    }
+    /// A home session over the USB cable: the device's CableLink.deviceID.
+    var cableDevice: String? { if case .home(_, let peer) = self { return peer?.cableDevice }; return nil }
+    /// The session is TLS: every remote one, and every home one with a peer.
+    var encrypted: Bool {
+        switch self {
+        case .home(_, let peer): return peer != nil
+        case .remote: return true
+        }
+    }
 }

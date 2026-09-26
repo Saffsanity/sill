@@ -13,7 +13,7 @@ import StreamProtocol
 enum DoorPolicy {
     enum Door: Equatable, Sendable { case home, remote }
 
-    /// A remote door's sessions at once; the ninth gets goodbye `busy` (RemoteServer.maxSessions).
+    /// A remote door's sessions at once; the ninth gets goodbye `busy`.
     static let maxRemoteSessions = 8
 
     /// What admission knows about one connection: its key, and the Mac's switches as the

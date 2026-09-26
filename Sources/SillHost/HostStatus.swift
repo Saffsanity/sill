@@ -112,9 +112,30 @@ package struct HostStatusSnapshot: Equatable {
     package init() {}
 }
 
-/// The remote door as the Mac's pane and menu show it. Never a pairing code or secret: those reach
-/// the app and the CLI only through `RemoteAccess.onPairingOffer`.
+/// Both doors' pairing and the remote door as the Mac's panes and menu show them. Never a pairing
+/// code or secret: those reach the app and the CLI only through `RemoteAccess.onPairingOffer`.
 package struct RemoteStatus: Equatable {
+    /// The home door (docs/home-pairing-plan.md §4.10): plain (the CLI without --pairing), TLS with
+    /// pairing required or open to any device, or unavailable, with why (no identity: the keychain
+    /// failed, so there is no home listener at all).
+    package enum HomeDoor: Equatable {
+        case plain, pairingRequired, open
+        case unavailable(String)
+    }
+    /// A device asked to pair and no window shows its code by itself (the Mac locked, or the ask
+    /// limits), or a device-opened window is up: the menu's "‹device› Wants to Pair", for 5 minutes
+    /// after the ask. Never for an ask from this Mac itself.
+    package struct PairingRequest: Equatable {
+        /// The device's own name, cleaned: "iPad (iPad14,1)".
+        package var name: String
+        package var at: Date
+        /// "showing" (a window it opened is up), "locked" or "limit" (quiet, or too many windows).
+        package var reason: String
+        package init(name: String, at: Date, reason: String) { self.name = name; self.at = at; self.reason = reason }
+        /// How long the menu shows it.
+        package static let shownFor: TimeInterval = 300
+    }
+
     package enum Listener: Equatable {
         case off
         case listening(Int)
@@ -134,7 +155,8 @@ package struct RemoteStatus: Equatable {
     }
     package enum Pairing: Equatable {
         case closed
-        case open(requestedBy: String?, expiresAt: Date, triesLeft: Int, lastWrongFrom: String?)
+        /// `byDevice`: a device opened it by asking (shown in front without the keyboard).
+        case open(requestedBy: String?, expiresAt: Date, triesLeft: Int, lastWrongFrom: String?, byDevice: Bool)
         /// The last window paired this device (its name).
         case paired(String)
         /// Five wrong codes.
@@ -158,13 +180,20 @@ package struct RemoteStatus: Equatable {
     package var paired: [PairedDeviceSummary]
     /// "The keychain couldn’t be used: …" when the identity could not be loaded.
     package var identityProblem: String?
+    package var homeDoor: HomeDoor
+    package var pairingRequest: PairingRequest?
+    /// The last connection the home door refused as not TLS (an older Sill), for the menu's
+    /// "An iPhone or iPad Needs Sill Updated" (10 minutes from it).
+    package var olderDeviceAt: Date?
 
     package init(remoteAccess: Bool = false, internetAccess: Bool = false, listener: Listener = .off, addresses: [MacAddress] = [],
                  vpnDown: [String] = [], lanAddress: String? = nil, router: Router = .off, addressName: String = "",
-                 pairing: Pairing = .closed, paired: [PairedDeviceSummary] = [], identityProblem: String? = nil) {
+                 pairing: Pairing = .closed, paired: [PairedDeviceSummary] = [], identityProblem: String? = nil,
+                 homeDoor: HomeDoor = .plain, pairingRequest: PairingRequest? = nil, olderDeviceAt: Date? = nil) {
         self.remoteAccess = remoteAccess; self.internetAccess = internetAccess; self.listener = listener
         self.addresses = addresses; self.vpnDown = vpnDown; self.lanAddress = lanAddress; self.router = router
         self.addressName = addressName; self.pairing = pairing; self.paired = paired; self.identityProblem = identityProblem
+        self.homeDoor = homeDoor; self.pairingRequest = pairingRequest; self.olderDeviceAt = olderDeviceAt
     }
 }
 
@@ -177,10 +206,11 @@ package struct PairedDeviceSummary: Equatable, Identifiable {
     package var name: String
     package var model: String?
     package var pairedAt: Date
-    /// "qr" or "code".
+    /// "qr", "code" or "cable".
     package var method: String
-    /// When it last connected from away, and how ("through Tailscale"); nil when it never has (the
-    /// app keeps these across launches).
+    /// When it last connected, and how: from away ("through Tailscale") or at home ("over the USB
+    /// cable", "over Wi‑Fi", "directly"…); nil when it never has (the app keeps these across
+    /// launches).
     package var lastSeen: Date?
     package var lastRoute: String?
 

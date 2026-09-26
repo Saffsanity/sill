@@ -20,6 +20,15 @@ struct PairingWindow {
         case none
     }
 
+    /// Who put a window up by asking (docs/home-pairing-plan.md §4.7): the asking key and its
+    /// address, for AskLimits' quiet rule, and where it asked from, for the window's copy.
+    struct DeviceAsk: Equatable {
+        let fingerprint: Data
+        let source: String
+        /// "on this network", "nearby" (peer-to-peer Wi-Fi) or "on this Mac".
+        var from: String = "on this network"
+    }
+
     struct Open {
         /// The QR path's key (16 bytes).
         let secret: Data
@@ -33,6 +42,14 @@ struct PairingWindow {
         var lastAttemptBySource: [String: Double] = [:]
         let requestedBy: String?
         var lastWrongFrom: String?
+        /// A device opened it by asking (an ask at the home door, or kind 21 from an unpaired
+        /// session); nil when the Mac's user opened it.
+        var byDevice: DeviceAsk?
+        /// The remote door runs for it and takes its proofs: a window the Mac's user opened (or the
+        /// CLI's with --remote), and every window on a plain home door, which takes no proof at
+        /// all. Never one a device opened at a TLS home door, until the Mac's user opens a window
+        /// over it (`makeRemote`); a device's ask never takes it away.
+        var forRemote = true
     }
 
     enum State {
@@ -66,8 +83,19 @@ struct PairingWindow {
     var closeReason: CloseReason? { if case .closed(let r) = state { return r }; return nil }
 
     /// Opens a fresh window (a new secret and code), replacing any other.
-    mutating func open(secret: Data, code: String, now: Double, lifetime: Double = Self.lifetime, requestedBy: String?) {
-        state = .open(Open(secret: secret, code: code, expiresAt: now + lifetime, requestedBy: requestedBy))
+    mutating func open(secret: Data, code: String, now: Double, lifetime: Double = Self.lifetime, requestedBy: String?,
+                       byDevice: DeviceAsk? = nil, forRemote: Bool = true) {
+        state = .open(Open(secret: secret, code: code, expiresAt: now + lifetime, requestedBy: requestedBy,
+                           byDevice: byDevice, forRemote: forRemote))
+    }
+
+    /// The Mac's user opened a window while this one is up: the same code becomes the remote
+    /// door's too. Whether it changed anything.
+    mutating func makeRemote() -> Bool {
+        guard case .open(var w) = state, !w.forRemote else { return false }
+        w.forRemote = true
+        state = .open(w)
+        return true
     }
 
     /// K for `code`, once derived; ignored when the window has moved on to another code.

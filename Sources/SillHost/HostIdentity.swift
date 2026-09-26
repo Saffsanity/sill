@@ -72,9 +72,13 @@ package final class HostIdentity: @unchecked Sendable {
         SignedMacInfo.signing(info, with: remote.privateKey)
     }
 
-    /// A fresh TXT record for one Bonjour registration: `r` = a new tag.
-    package func txtRecord() -> NWTXTRecord? {
-        RecognitionTag.make(recognitionKey: recognitionKey).map { NWTXTRecord([RecognitionTag.txtKey: $0]) }
+    /// A fresh TXT record for one Bonjour registration: `r` = a new tag, and `p` (HomeDoorTXT) when
+    /// the home door speaks TLS: "1" pairing required, "0" open. A plain door carries no `p`.
+    package func txtRecord(homeDoor p: String? = nil) -> NWTXTRecord? {
+        guard let tag = RecognitionTag.make(recognitionKey: recognitionKey) else { return nil }
+        var entries = [RecognitionTag.txtKey: tag]
+        if let p { entries[HomeDoorTXT.key] = p }
+        return NWTXTRecord(entries)
     }
 }
 
@@ -96,6 +100,12 @@ package protocol IdentityStore: AnyObject {
     /// next save would replace it.
     func loadPaired() throws -> [PairedDevice]
     func savePaired(_ devices: [PairedDevice]) throws
+    /// Require pairing (docs/home-pairing-plan.md §4.8), kept beside the trust list and never in
+    /// UserDefaults: true when it was never saved, so a missing item only ever turns pairing on. A
+    /// read that fails throws (the caller then counts it as on). Its own item, not a field of the
+    /// trust list: an older Sill reading a changed list would call it damaged and lose its identity.
+    func loadRequirePairing() throws -> Bool
+    func saveRequirePairing(_ on: Bool) throws
     /// TEST ONLY: a directory where a test hook may leave the current pairing link and code (the
     /// file store's own, 0700); nil for every other store.
     var testDirectory: URL? { get }
@@ -134,6 +144,10 @@ package final class MemoryIdentityStore: IdentityStore {
     package func loadPaired() throws -> [PairedDevice] { paired }
     package func savePaired(_ devices: [PairedDevice]) throws { paired = devices }
 
+    private var requirePairing = true
+    package func loadRequirePairing() throws -> Bool { requirePairing }
+    package func saveRequirePairing(_ on: Bool) throws { requirePairing = on }
+
     static func randomBytes(_ n: Int) throws -> Data {
         var b = [UInt8](repeating: 0, count: n)
         guard SecRandomCopyBytes(kSecRandomDefault, n, &b) == errSecSuccess else { throw IdentityStoreError("the random source failed") }
@@ -144,9 +158,10 @@ package final class MemoryIdentityStore: IdentityStore {
 /// TEST ONLY (SILL_TEST_REMOTE_DIR=<dir>, honoured only by a host that does not advertise): the
 /// identity and trust list in a directory of mode 0700, each file 0600, so a test can pair, restart
 /// the host and find the same Mac ID and pairings, without the login keychain.
-/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`, and
-/// `.lock`, which one host holds for as long as it uses the directory: two hosts sharing it would
-/// each save their own list over the other's.
+/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`,
+/// `require-pairing` ("0" off; anything else, or no file, on), and `.lock`, which one host holds
+/// for as long as it uses the directory: two hosts sharing it would each save their own list over
+/// the other's.
 package final class FileIdentityStore: IdentityStore {
     package let directory: URL
     /// The open `.lock`, flock'ed exclusively; closing it (or the process ending) lets it go.
@@ -220,6 +235,15 @@ package final class FileIdentityStore: IdentityStore {
         try Self.writePrivate(try encoder.encode(devices), to: directory.appendingPathComponent("paired.json"))
     }
 
+    package func loadRequirePairing() throws -> Bool {
+        guard let data = try Self.read(directory.appendingPathComponent("require-pairing")) else { return true }
+        return RequirePairingValue.decode(data)
+    }
+
+    package func saveRequirePairing(_ on: Bool) throws {
+        try Self.writePrivate(RequirePairingValue.encode(on), to: directory.appendingPathComponent("require-pairing"))
+    }
+
     /// Writes `data` with mode 0600 from its creation, replacing the file atomically. Also the
     /// app's -SillPairAfter hook, for the pairing link and code a test reads (never printed).
     package static func writePrivate(_ data: Data, to url: URL) throws {
@@ -232,14 +256,27 @@ package final class FileIdentityStore: IdentityStore {
     }
 }
 
-/// What the remote door's verify block and admission read on the network queue: immutable,
-/// replaced whole under a lock on every change. Nothing that reads it ever waits on the main actor.
+/// Require pairing's stored bytes, in every store: "0" off, "1" on; anything else reads as on, the
+/// safe side.
+enum RequirePairingValue {
+    static func encode(_ on: Bool) -> Data { Data((on ? "1" : "0").utf8) }
+    static func decode(_ data: Data) -> Bool { data != Data("0".utf8) }
+}
+
+/// What both doors' verify blocks and admission read on the network queue: immutable, replaced
+/// whole under a lock on every change. Nothing that reads it ever waits on the main actor.
 struct TrustSnapshot: Sendable {
     /// Paired fingerprints → display names ("iPad (iPad14,1)").
     var paired: [Data: String] = [:]
+    /// A pairing window is open: the home door takes its proofs.
     var pairingOpen = false
+    /// One the remote door takes proofs for (opened by the Mac's user, or the CLI's --remote),
+    /// never one a device opened by asking (docs/home-pairing-plan.md §4.6).
+    var remotePairingOpen = false
     var remoteAccess = false
     var internetAccess = false
+    /// The home door admits only paired keys (on a TLS home door; the plain one has no pairing).
+    var requirePairing = true
     /// Interface → network service name ("utun4" → "Tailscale"), for a session's route label.
     var serviceNames: [String: String] = [:]
 }

@@ -92,7 +92,10 @@ final class HostSettings {
                             directWireless: defaults.bool(forKey: Key.directWireless),
                             remoteAccess: defaults.bool(forKey: Key.remoteAccess),
                             remotePort: defaults.integer(forKey: Key.remotePort),
-                            internetAccess: defaults.bool(forKey: Key.internetAccess)).validated()
+                            internetAccess: defaults.bool(forKey: Key.internetAccess),
+                            // Never a default or a launch argument: it lives with the trust list
+                            // (the identity store), and this build's home door is still plain.
+                            requirePairing: HostConfig.standard.requirePairing).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)

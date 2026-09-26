@@ -110,7 +110,7 @@ struct PairDeviceView: View {
 
     var phase: Phase {
         switch status.pairing {
-        case .open(_, _, let triesLeft, let wrongFrom):
+        case .open(_, _, let triesLeft, let wrongFrom, _):
             switch status.listener {
             case .portInUse(let p): return .doorDown("Can’t pair while port \(p) is in use.")
             case .failed: return .doorDown("Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds.")

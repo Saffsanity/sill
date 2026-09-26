@@ -35,7 +35,9 @@ import Foundation
 // A Mac-only listener knob (remote access, its port, internet access) goes in the host's
 // HostConfig, the app's HostSettings, DebugHooks, the Remote Access pane and the menu, and never in
 // StreamSettings, HostSettingsChange or DeviceSettings.accepted: only the Mac's own user widens
-// who can reach the Mac.
+// who can reach the Mac. Require pairing (docs/home-pairing-plan.md §4.1, §6.5) is one too, and
+// stricter still: it lives in the identity store beside the trust list, never in the app's
+// HostSettings (UserDefaults) or a launch argument, since any process of this user can write those.
 
 /// The settings a device sees and changes, as the Mac's menu and Settings show them: five for the
 /// stream, and one (Direct Wireless) for how devices reach the Mac. Plain values, never enums: an

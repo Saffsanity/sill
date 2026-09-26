@@ -592,7 +592,10 @@ enum CableLink {
   (`IOObjectConformsTo`) and read `idVendor`, `USB Product Name` (else `kUSBProductString`),
   `USB Serial Number` and `sessionID`. Under a millisecond an interface; read again when the
   interface list changes, and afresh for the arrival interface of every ask (a device swapped for
-  another between two reads keeps the interface's name; the tick rule may use the cache). Nothing
+  another between two reads keeps the interface's name; the tick rule may use the cache). As built
+  (step 2): no cache at all. Every reader reads its one interface afresh (an ask, a session's
+  registration; --print-cable reads them all), so `InterfaceSnapshot.readCable` returns plain
+  values and Door makes the `CableLink.Ancestry`. Nothing
   written, no permission needed (the probe ran from Terminal as a plain process, and again from
   the review's shell).
 - **SessionLock** (main actor): unlocked when `CGSessionCopyCurrentDictionary()` has
@@ -687,7 +690,7 @@ enum CableLink {
    if client.encrypted, client.onCable { continue }
    ```
    `encrypted` is every TLS client (both doors; was: remote only); `onCable` is set at
-   registration from `CableLink.device` (the cache may serve). The plain door keeps today's ticks
+   registration from `CableLink.device` (read afresh, step 2). The plain door keeps today's ticks
    byte for byte.
 7. **`disconnectPeerToPeerClients`** (:487) also cancels the home door's pending connections on
    peer-to-peer Wi‑Fi (an ask or a proof in flight over awdl0). Its line and the rest are unchanged.
@@ -1800,3 +1803,202 @@ canonical form in runs with random hash seeds; `{"reason":"quit"}` is `{"reason"
 **What step 1 changed in this plan:** §3.1 (the examples' key order), §3.2 (the record reader),
 §4.2 (the sketch: `Trust.hasKey`, `AtReady.pairing`, `pairing(_:method:)`, the ask's two cable
 arguments and the helpers) and §7.3 (`p` read from the record).
+
+### Step 2: the host
+
+`$SP` here is `scratchpad/home-pairing/2`: the gates (`gates.py`, `h2.py`, `h9.py`, `harness.py`, and
+`remote-gates/` with PR #13's scripts), their logs (`logs/`, `h2/`) and the checks (`checks/`,
+`checks-full/`, `regression/`). Every host but H2's and H9's (and H15's home half) ran with
+`SILL_TEST_SOFTWARE_ENCODER=1`; H2, H9 and H15's home half ran on the hardware encoder only while
+Noah's Sill.log said idle and no other session's host ran, re-checked every 2 s. One host of this
+step at a time, each started after any other session's host had ended (another session's parity
+batch ran beside this work and aborts a run when a host starts beside it).
+
+**What landed.**
+- `Door` (Door.swift): RemoteServer's admission, moved and shared: `Door(.remote)` owned by
+  RemoteServer, `Door(.home)` by StreamServer, both driven by DoorPolicy (the origin before start,
+  the verify block, `.ready`, the one kind 19, handshake refusals). The home door's summary line;
+  -9836 counts "from an older Sill" and marks `olderDeviceAt`, never toward the backoff. A home
+  attempt carries its address with its scope, whether it comes from this Mac itself (getifaddrs
+  read afresh), and its cable device (CableLink over the arrival interface's IOKit ancestry, read
+  afresh). RemoteServer keeps the listener's life (the port, the 30 s retry) and its lines.
+- StreamServer: `HomeDoorMode` `.plain` (as before), `.tls` (the Door's TLS options over the home
+  door's own TCP; a Direct Wireless replacement rebuilds the same mode), `.closed` (no listener, one
+  line; the CLI exits 1 as when its listener fails). `serve` registers a TLS home session with its
+  link, which then follows the path; `ClientRoute.home(origin, peer:)`; the tick rule (a TLS client
+  skips a tick within 30 ms of a send, and one on the cable gets none); `updateService()` for `p`;
+  Direct Wireless off also cancels the home door's pending connections on peer-to-peer Wi-Fi;
+  `closeSessions` over both doors (Remove, Require pairing).
+- InterfaceSnapshot: `readCable` (read-only IOKit), `cableCandidates`, `ownAddresses`. SessionLock
+  (CGSession; `watchNotifications()` for the app; SILL_TEST_LOCKED). CableReport (`--print-cable`).
+  TestHooks: one "… ignored" line for each door or pairing variable set on a host that does not
+  honour them (the test-host rule now also gates SILL_TEST_SERVICE_TYPE).
+- RemoteAccess: the ask (the rule, its line at most once a minute per address, the menu's request,
+  5 minutes, a "showing" one ending with its window); pairing by itself over the cable (saved first,
+  the line, `onCablePaired`; a key already on the list gets the ok with nothing else); windows a
+  device opened (the home door's alone: no remote door, no address in the link, offered at once;
+  AskLimits when one closes unused; the Mac's user opening a window over one makes it the remote
+  door's too, offered again with addresses); kind 21 at a TLS door through the ask rule's steps 1
+  and 3–6; Require pairing (`p` in place, goodbye `pairingRequired` to the unpaired sessions); Remove
+  on both doors; "last connected" at home; the cable's device learned once from a session; the
+  status's `homeDoor`, `pairingRequest`, `olderDeviceAt` and `Pairing.open(byDevice:)`;
+  `storedRequirePairing()` and `saveRequirePairing(_:)` for step 3.
+- HostConfig `requirePairing` (on in `standard`; absent from the wire and DeviceSettings);
+  IdentityStore's `loadRequirePairing()` and `saveRequirePairing(_:)` (the keychain's
+  `require-pairing` item, memory, the test directory's `require-pairing` file); TrustSnapshot's
+  `requirePairing` and `remotePairingOpen`; the coordinator's `homePairing` and `testHooks` (their
+  defaults keep Sill.app's call as it was); `SILL_TEST_SOFTWARE_ENCODER` (the pointer plan's §4.10
+  hook and lines; it also keeps the re-check off, so the hardware is never touched).
+- The CLI: `--pairing` and `--print-cable`. `sillclient.py`: `--pair-ask[=cable]`, `--then-code=FILE`,
+  `--pair-hold=S`, `--expect-pair=R`.
+- Sill.app: only what the core's new values need to compile (its HostSettings passes
+  `requirePairing`, the pairing window's `.open` pattern and samples). Its home door stays plain
+  until step 3.
+
+**H1.** `swift build -c release` from an empty scratch path: only the CaptureProbe warning. iOS Debug
+and Release for the simulator and Debug for a generic device (build only, unsigned; the iPad was not
+touched): only the `StreamClient` capture warning. No iOS file changed, and StreamProtocol by one
+comment.
+
+**H2** (`h2.py`). Idle 35 s and with the base's `sillclient.py PORT 5 desktop`, plain, with
+`--direct-wireless` and with `--remote`: identical to step 0's base logs, masked and sorted, without
+the `[1s]` lines, and in full but for client-dw's last partial second (a `net.tick` count, as step 0
+found). `--pairing` adds exactly "Home door: TLS, pairing required (N paired)." and "Pairing
+required for this run (TLS on the home door). Pair with N N N or sill://pair?<link>".
+`--print-cable` exits 0.
+
+**H4.** Its two lines; `dns-sd -L` reads `r` and `p=1` on every interface; one listener for its
+PID; no code in any core line.
+
+**H5.** (a) A plain Sill message: `15 03 01 00 02 02 46` 1.5 ms after it, then EOF, no Sill byte;
+the base's `sillclient.py` reads EOF at once, 0 frames; "1 from an older Sill (not TLS)". (b)
+`curl http://127.0.0.1:PORT/`: 000 in 1.7 ms, "1 unpaired". (c) Five plain tries from 127.0.0.1,
+each the alert, then the ask, the code and a session from the same address, admitted at once with
+the real 300 s backoff. (d) An unpaired key on `sill/1`: TLS up, then certificate_unknown on the
+first read, no Sill message, "1 unpaired". (e) ALPN `h2`: the handshake fails, "1 unpaired". (f)
+`SILL_TEST_ORIGIN=vpn`: closed with no byte in 0.9 ms, "1 through a VPN". One summary line each.
+`--print-cable` names en14 and anri0 as the cable to the iPad (plug-in 4854277126715).
+
+**H6** (the CLI's part). The ask → `shown`; the code → ok with a proof_M that checks; the core's
+ask line and the CLI's "Pairing: H6 iPad (sillclient) asked; code …"; "Paired … from 127.0.0.1,
+with the code."; the same by the link (`--pair-url`, pinned to `k`); then `sill/1` with the first
+identity: pinned, catalog `2 16 18 4×119 5 16 2 14`, 330 frames in 6 s; the codes and QR secrets
+only in main.swift's offer lines.
+
+**H7** (the stand-in: `SILL_TEST_CABLE_INTERFACE=en0`, `SILL_TEST_ASK_FROM_THIS_MAC=1`, the client on
+this Mac's `fe80::…%en0`). `--pair-ask=cable` → ok, `method` "cable", no proof, the Mac ID and a
+32-byte recognition key; "Paired Cable iPad (sillclient) (key …) over the USB cable
+(fe80::…%en0)."; `paired.json` method "cable" and `cableDevice` = deviceID("TEST"), no serial;
+then a pinned session that got no tick. Without `cable` → `shown`; a second key claiming it →
+`shown`; the first key again → ok, with no second line; a 127.0.0.1 client claiming it → `shown`;
+the line "Cable pairing: … not paired by itself (it didn’t find the cable on its side); the code is
+already showing."; `SILL_TEST_LOCKED=1` → `locked` and its line, nothing saved; without the stand-in
+the same `fe80::…%en0` client → `shown`, nothing saved.
+
+**H7b** (the iPad on the cable). `--pair-ask=cable` from this Mac's own `fe80::…%en14` and from
+169.254.177.140 (en14): `shown` both, nothing saved; the host's line names `%en14` and is a plain
+"Pairing: … asked to pair" line (rule 2: this Mac's own address), never "Cable pairing".
+
+**H9** (`h9.py`, two rounds, 45 s at 60 fps, CPU over 40 s after a 4 s settle). Plain 3.59 % (3.60,
+3.57); TLS with §8's tick rule 3.26 % (3.40, 3.12): −0.32 points; median frame age 0.20 against
+0.17 ms. TLS without the rule (a scratch build with its two lines out) 3.45 % (3.52, 3.37): +0.19
+over the rule, as P3 estimated. Ticks received: 1,500 plain, none over TLS with the rule (a 60 fps
+stream always sent something within 30 ms).
+
+**H12.** `--pairing --direct-wireless` with `SILL_TEST_PEER_TO_PEER_INTERFACE=en0`: a paired TLS
+session from `fe80::…%en0` turned it off (kind 17): "Direct wireless off: disconnecting Direct iPad
+at fe80::…%en0.N, which was connected over peer-to-peer Wi-Fi; …" and EOF; a pending pairing
+connection (`--pair-hold=8`) closed 3.96 s into its hold (the replacement's settle); the same port.
+With `SILL_TEST_SERVICE_TYPE`, after the Sill.log check (AWDL on for 3.4 s): `p=1` after the
+replacement.
+
+**H14.** PR #13's scripts from `remote-access-build`, unchanged but for the helpers' paths:
+`h6_h13.py` (the remote plan's H6–H10 and H13), `h11_h15.py` (H11, H12, H15), `h17_h23.py H17`
+(after the Sill.log check), `goodbyes.py` (busy, quit) and `h16_h19.py` (H16 and H19 on the bare
+app, its SillMenuBar domain deleted after): all pass. On the software encoder three frame counts
+were lowered (H7 more than 30 frames in 6 s, H8 and H9 more than 20; it gave 330, 230 and 225 here),
+and H6's comparison leaves out the two encoder lines, the base's "Hardware encoder probe: …" and
+the hook's "Test encoder: …". H15's home half needs the hardware encoder (the software encoder's
+~7 kB/s never fills the loopback buffers within 60 s) and ran on it under the rule: "Client not
+draining for 4 s" 26.0 s in (the base: 27.7–30.5 s). With a window the Mac's user opened (the CLI's
+`--remote` window) an ask at the remote door is answered `closed`, the next wrong code still leaves
+4 tries, and no ask line is printed.
+
+**H16.** `requirePairing` in no wire type, not in DeviceSettings, not a UserDefaults key (the app
+passes the standard value to HostConfig's init). Every door and pairing `SILL_TEST_` read is behind
+the test-host rule. No print of a code, secret, link or serial added under Sources/SillHost; no
+`assumeIsolated` added (HostShutdown's is the base's) and no `updateConfiguration`. The plain
+`accept`: one line that hands a TLS door's connection to its Door, and `.home(origin, peer: nil)`.
+
+**H17.** Step 0's checks unchanged (the discovery policy 286, the ledger 90, the fence 14 of 14
+modes, remote-rules 64, AddressList and PairingWindow 41, the pairing window's address rule 80,
+OriginPolicy 66, ClientLink 89, the protocol 188). Step 1's checks unchanged (DoorPolicy 104,
+CableLink 40, AskLimits 27, the records 20, the device 61, the protocol's new values 39) with
+136 of 136 mutants caught, and the wire probe's 50 lines byte for byte (`$SP/checks-full`). The swap's fallbacks on a TLS host: `SILL_TEST_SWAP_FAIL=port` → another port, the
+session on the old listener streams on, and the new listener speaks TLS (a pinned session, the alert
+for a plain message); `=all` → "Listener failed", exit 1.
+
+**Beyond step 2's gates.** A scratch-only build of the CLI (`$SP/harness/tree`, never committed)
+reads SILLH_* variables: Require pairing's starting value and a flip after S seconds, no window at
+start, the app's window rules (a window's own line, its expiry), the Mac's user opening a window,
+the Mac user's windows running the remote door, the remote port, Remove, the notice hook, the
+status, and SILLH_UNLOCKED, since this Mac was locked by then (an ask there was answered `locked`,
+which is the rule). The same build, with SILLH_UNLOCKED alone, also reran H5, H6, H7, H12 and the
+swap's fallbacks on the final code: all pass. Run ahead of step 3's bare-app gates:
+- HA (H10's core): off at start, "Home door: TLS, pairing not required.", `p=0`; an unpaired key's
+  session admitted and streaming; the flip at 10 s: goodbye `pairingRequired` 0.08 s after it and
+  EOF, one "Require pairing: disconnecting Stranger at 127.0.0.1:N, which isn’t paired." line and
+  one "Settings: require pairing off → on", `p=1`, the same port, no "(2)"; a paired session
+  streams throughout.
+- HB (H8's core, `SILL_TEST_PAIRING_TTL=1`, `SILL_TEST_ASK_QUIET=12`): an ask opens a window (one
+  listener, a link with no address, "Pairing window open for 1 s (asked by K1 (sillclient) on this
+  Mac)."); after it expired the same key and address get `openOnMac`; another key from ::1 a
+  window, a third from `fe80::…%en0`, then a fourth from the LAN address `openOnMac` with "not
+  shown (3 windows in 12 s)"; the status's request "K4 (sillclient)/limit".
+- HC: a device-opened window, then the Mac's user's: the same code, the remote door's listener
+  appears, the offer again with addresses, and its link pairs at the remote door.
+- HD: kind 21 from an unpaired session opens a device-opened window (home only, "showing" in the
+  status); without `SILL_TEST_ASK_FROM_THIS_MAC` the same kind 21 from this Mac opens nothing, lights
+  no menu, and its line says "not shown (it asked from this Mac)".
+- HE: with Remote Access on and only a device-opened window, the remote door refuses a pairing
+  connection in its handshake; the same link pairs at the home door.
+- HF: `onCablePaired` once per pairing (not for the same key asking again); a key paired by code
+  gets `cableDevice` the first time its session runs over the (stand-in) cable, then another key's
+  cable ask gets the window with "another key of this iPad is paired"; its "last connected" reads
+  "over the USB cable".
+- HG: a plain Sill message sets the status's `olderDeviceAt`; an HTTP request does not.
+- HH (H11's core, `--pairing --remote`): Remove sends goodbye `removed` to the key's home session
+  and its remote one, "Removed Both (sillclient); closed 2 connections.", and its next `sill/1` is
+  refused in the handshake.
+- The CLI with `--pairing` and a damaged `paired.json` in `SILL_TEST_REMOTE_DIR`: "Home door
+  unavailable: Sill couldn’t use its key in the test directory … (… is damaged).", no listener,
+  exit 1.
+- Pure checks (`$SP/checks`): SessionLock's rule 15 checks, 6 of 6 mutants; Require pairing's bytes
+  and its memory and file stores 19. The bare app's 80 previews, rendered from one fixed path by
+  1f3072a's binary and by this one: identical byte for byte.
+
+**Deviations from the plan's sketches.**
+- No cable cache in InterfaceSnapshot (§4.3, §4.5 (6) now say so): each reader reads its one
+  interface afresh. `readCable` returns plain values, so InterfaceSnapshot still compiles on its own
+  with OriginPolicy (step 0's origin check); Door makes the `CableLink.Ancestry`.
+- One key per iPhone or iPad over the cable, by a hash of its USB serial number, as the amended plan
+  says (not per plug-in).
+- `Door.PairAttempt` carries `display` (the address with its scope at home, the old `source` at the
+  remote door, whose lines are unchanged) and no endpoint.
+- A "Cable pairing" line whose ask both lacks the claim and comes from a device with another key on
+  the list names the Mac's own reason ("another key of this iPad is paired").
+- The ask's line is at most one a minute per source address (§4.6): step 3's H8 reads kind 20 for
+  asks that repeat an address within a minute, or uses a fresh address per ask.
+- Turning Remote Access off closes only a window the remote door runs for; a device-opened window
+  at home stays up. On a plain home door every window is the remote door's, so nothing changed there.
+- A home-only window's link names the configured remote port, else 7455: the link needs a port, and
+  its device dials the door it asked on.
+- A closed home door's line names where the key lives ("in the keychain" for the app, the store's
+  own words otherwise), and the CLI exits 1 after it, as when its listener fails; the status says
+  `homeDoor == .unavailable` and the network state is left to step 3's presentation.
+- The core prints the "… ignored" line for each door or pairing variable a host does not honour
+  (TestHooks); step 3 adds SILL_TEST_REMOTE_DIR's and the `-Sill…After` hooks' in the app.
+- The coordinator's `homePairing` and `testHooks` have defaults (false, true) so Sill.app's call is
+  unchanged until step 3 passes them; `SessionLock.watchNotifications()` is there for step 3 to call.
+
+**What step 2 changed in this plan:** §4.3 and §4.5 (6) (no cable cache).

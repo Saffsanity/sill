@@ -448,7 +448,7 @@ extension DebugHooks {
             RemoteStatus(remoteAccess: true, listener: .listening(port), addresses: addresses ?? tailscaleAddresses,
                          lanAddress: "192.168.1.20", pairing: pairing)
         }
-        let open = RemoteStatus.Pairing.open(requestedBy: nil, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil)
+        let open = RemoteStatus.Pairing.open(requestedBy: nil, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil, byDevice: false)
         let wifi = [MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi")]
         let otherVPN = [MacAddress(host: "10.8.0.6", kind: MacAddress.vpn, via: "WireGuard")] + wifi
         let longName = "christinas-macbook-pro.tailc94091.ts.net"
@@ -457,9 +457,9 @@ extension DebugHooks {
         return [
             PairingSample(name: "waiting", offer: offer(), status: status(open)),
             PairingSample(name: "requested", offer: offer("iPad (iPad14,1)"),
-                          status: status(.open(requestedBy: "iPad (iPad14,1)", expiresAt: expires, triesLeft: 5, lastWrongFrom: nil))),
+                          status: status(.open(requestedBy: "iPad (iPad14,1)", expiresAt: expires, triesLeft: 5, lastWrongFrom: nil, byDevice: false))),
             PairingSample(name: "wrong", offer: offer(),
-                          status: status(.open(requestedBy: nil, expiresAt: expires, triesLeft: 4, lastWrongFrom: "203.0.113.9"))),
+                          status: status(.open(requestedBy: nil, expiresAt: expires, triesLeft: 4, lastWrongFrom: "203.0.113.9", byDevice: false))),
             PairingSample(name: "paired", offer: offer(), status: status(.paired("iPad (iPad14,1)"))),
             PairingSample(name: "stopped", offer: offer(), status: status(.stopped)),
             PairingSample(name: "expired", offer: offer(), status: status(.expired)),
