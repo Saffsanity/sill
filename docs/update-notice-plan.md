@@ -1152,7 +1152,9 @@ Commit messages end with the session's attribution lines.
 - **Pairing on the home door (M5; the audit's finding 3; open question 14).** The host that brings
   it raises the floor to the first device version that pairs there, and `SillProtocol.current` to
   2. Devices from the first public build on then read the notice instead of looping, as long as
-  that host still reads their plaintext hello (open question 14).
+  that host still reads their plaintext hello (open question 14). Superseded (Noah, 2026-09-25):
+  home pairing ships before 1.0, so the first public build already pairs at home over TLS, and its
+  hello goes first inside TLS; only pre-1.0 builds meet the TLS door unable to read a notice.
 - **The Mac's version on the device** (the Settings panel's footer), for support.
 - **"Skip This Version"**, release notes in Settings, and Sparkle, if BRIEF.md ever allows it (§6.1).
 
@@ -1190,7 +1192,8 @@ Commit messages end with the session's attribution lines.
     Default: **accept**: only development and TestFlight builds are that old; the host slows them
     and sums them up in its log.
 14. **Home pairing before or after 1.0?** (Review, 2026-09-25; no default: Noah's call before either
-    branch merges.) The compatibility floor (CLAUDE.md) keeps the plain-TCP `_sill._tcp` home door,
+    branch merges.) **Answered (Noah, 2026-09-25): before 1.0.** The floor is the TLS home door with
+    pairing (CLAUDE.md, Compatibility floor), and the hello goes first inside TLS. The compatibility floor (CLAUDE.md) keeps the plain-TCP `_sill._tcp` home door,
     and §14 assumes pairing comes after the first public build; docs/home-pairing-plan.md (branch
     `home-pairing`) makes Sill.app's home door TLS-only for 1.0 and rejects a plain listener or a
     sniffer for older builds. A device from this build at a TLS-only door gets a failed handshake and
@@ -1486,7 +1489,7 @@ Sill.app had no device from 19:47 to the end), and the runs that stream were gua
   use asks the person for permission. The link's address is SillLinks'; the photos show it.
 - **The plan's V1–V7** are Noah's (CLAUDE.md, Untested).
 
-### For the app-store-readiness branch (not merged into this base)
+### For the app-store-readiness branch (merged since: see "Merged with main" below)
 
 - **site/privacy.html**, the plan's §6.10 line as written, with one addition after "(for example
   “Sill/1.0”)": "and a fixed “en” as its language".
@@ -1497,3 +1500,77 @@ Sill.app had no device from 19:47 to the end), and the runs that stream were gua
   iOSClient/SillLinks.swift with https://apps.apple.com/app/id‹Apple ID›.
 - **SillLinks.swift** exists on both branches: merging them is an add/add conflict to resolve by
   keeping both enums' members in one file (and one set of pbxproj entries).
+
+### Merged with main (2026-09-25)
+
+Main at 1f3072a (PRs #11 encoder recovery, #12 follow-best-path, #14 App Store readiness, #15 the
+public README) merged into this branch in 104a9bd, not rebased, with two fix-ups after it.
+
+**Where they met, and how:**
+- **The hello on every connection, #12's included.** `StreamClient` makes connections in two places
+  and adopts one more: `connect(to:)` (a tap, a reconnect, a wired dial and its fallback,
+  `-SillConnect`), `startMove` (the move from AWDL, and #12's to the cable, to Wi-Fi and a rescue's
+  reconnect, with each one's fallback), and `adopt` (a remote winner). `connect(to:)` and `adopt`
+  already wrote the hello before anything else. `startMove` sent it at `.ready`, where main's side
+  now guards a connection that is ready again after waiting; its hello moved to where the
+  connection is made, as `connect(to:)` has it, so no path can put anything ahead of it. Nothing of
+  the session goes out on a move's connection before the hand-over either way: SessionLink's fences
+  and #12's hold release what waited onto it only at `finishMove`.
+- **Main's `rescue`** read `goodbyeReason`, which this branch replaced with the whole `Goodbye`: it
+  reads `goodbye`, so a session the Mac said goodbye on (any reason, a notice included) ends with
+  that goodbye's words instead of being carried on.
+- **`SillLinks.swift`**, added on both sides: one enum with main's site, download, support, privacy
+  and siteName and this branch's `appStoreText` and `appStore`; the project file keeps main's entries
+  (A201/F201) and drops this branch's (A01F/F01F).
+- **README.md** is main's public front page; this branch's Updates paragraph, tag rule and hello
+  paragraph went to docs/DEVELOPMENT.md (Sill.app, Releasing, The iOS app), sillfeed.py to its
+  Layout.
+- **docs/pointer-visibility-plan.md** held kinds 23–25 for the Mac menu bar sketch: 23 is the hello,
+  so the sketch has 24, 25 and 27, and the pointer keeps 26.
+- **Fix-up 184d902, the release.** Main's `release.sh` runs `make-app.sh --release`, which this
+  branch made refuse an untagged HEAD, so the checklist's rehearsal (`release.sh --dry-run`, on any
+  commit) was refused. A dry run now passes `SILL_RELEASE_DRY_RUN=1` and is only warned; a real run
+  names the missing tag in its preflight, before building. The checklist gains the tag and its push
+  (part 2) and the App Store address (Placeholders, part 1 §4).
+- **Fix-up 05d9d3a, the site.** §6.10's line, as the Results adjusted it, is the privacy policy's
+  "Update check" section, in the page's voice ("the developer") and with "Mac" never possessive, as
+  PR #14's pages keep it; the short version and the device-to-Mac list name the check and the
+  version the device sends; the download page says Sill tells you about a new version.
+
+**Verified on the merge** (scratch: `…/scratchpad/integrate-update/`):
+- Builds from a `git archive` of 104a9bd: `swift build -c release`, only the CaptureProbe warning;
+  iOS Debug and Release for the simulator and Debug for a device (`CODE_SIGNING_ALLOWED=NO`), each
+  from fresh derived data, only the `StreamClient` capture warning; `make-app.sh` without
+  `--install`: 0.3.0 (157), Apple Development, sdk 27.0.
+- This branch's pure checks against the merged sources: the protocol 74 (13 of 13 mutants),
+  DeviceGate 58 (14 of 14), GoodbyePolicy 42 (16 of 16), UpdatePolicy 124 (18 of 18).
+- Main's: the discovery policy 286 with 70 of 70 mutants, and main's own 187 with the 20 older
+  mutants; the fence in its 12 modes with 16 of 16; the remote rules (rf2) 64 with 35 of 35; the
+  ledger 90 with 5,000 random runs and 3 of 3; the remote protocol 188 ("kind 23 is hello, 24
+  unknown").
+- The hello first: the review's check against the merged SessionLink (5 of 5 in each case, its
+  mutant caught), and a new one for #12's moves (`checks/movehello`): a hold and adopt, and a
+  fenced hand-over released by its timeout, each with the hello written as the move's connection is
+  made and at `.ready` (both first, 5 of 5, the three held inputs right after it), and a move
+  connection with no hello caught 5 of 5; the source: two `NWConnection`s made (connect, startMove),
+  three hellos (those and adopt), none in a `.ready` case.
+- The checker alone against sillfeed.py: 42, and the stale-result check's 11; the bare app
+  (`SillMenuBarIU`, deleted after) H8 runs 1 and 2: the found line, the live menu's item, the pane,
+  one request with §6.2's headers, then the item at launch with no request.
+- Previews from the bundle (a copy with its own bundle ID, both at one path) against origin/main's:
+  77 files identical; `pane-general-{light,dark}` (the update section), menu.txt (the
+  `update-available` sample) and the 20 `pane-updates-*` differ, as they should.
+- The CLI's stdout against origin/main's build (`SillHost --synthetic`, idle 35 s and with a
+  Desktop pick, origin/main's sillclient.py for both), masked and sorted: identical (6 and 10
+  lines), the `[1s]` keys the same.
+- The gate on the merged CLI: H5, H6 a–d, g, h, the remote door (f) and the slowdown with its count
+  line (e) as in the Results; origin/main's sillclient.py refused at floor 0.1 and served at 0;
+  origin/main's host serving a hello'd client with nothing new printed.
+- A simulator of this stage's own ("iPad integrate-update", deleted after), the Debug build:
+  floor 99, the notice as the status line, "not reconnecting", one Refused line and no second
+  connection in 60 s; floor 0.1, admitted with one Client hello line, streaming; floor 0.1 with
+  `-SillMoveTest 1`, the move's own connection admitted with its hello, "the session moved to the
+  network", the direct one left; the `update` and `notice` cases at 1000x710, 500x710, 710x500 and
+  710x1000 with main's footer below: nothing overlaps.
+- Every host run checked Noah's Sill.log first (idle, nothing streamed in the last minute) and
+  every 10 s while it ran, one host at a time, each under 90 s.

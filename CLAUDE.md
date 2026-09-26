@@ -9,8 +9,9 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Update check and device notice (2026-09-25, branch `update-notice` from
-`remote-access` at cb0ec55, PR #13; the plan, its open questions with the
-defaults taken, and the results are in `docs/update-notice-plan.md`).** Noah's
+`remote-access` at cb0ec55, PR #13, with main at 1f3072a merged in, not
+rebased; the plan, its open questions with the defaults taken, and the
+results are in `docs/update-notice-plan.md`).** Noah's
 request: an update check in Sill.app with Apple frameworks only (GitHub's
 releases feed, not Sparkle), and a host-to-device notice so a later Mac can tell
 an old device to update instead of failing silently. The first public builds
@@ -116,6 +117,41 @@ set the compatibility floor for good (the section before Conventions).
   H4–H6, H7 (42), UpdatePolicy (124) and H8's seven runs pass; the CLI's stdout,
   masked and sorted, equals cb0ec55's; previews equal the build before's; iOS
   Debug, Release and device builds with only the old warning.
+- Merged with main (merge 104a9bd of main at 1f3072a: PRs #11 encoder recovery,
+  #12 follow-best-path, #14 App Store readiness, #15 the public README). Where
+  they meet: every connection the device opens says hello first, #12's moves
+  included: `startMove` (from AWDL, to the cable, to Wi-Fi, a rescue's
+  reconnect, each fallback) writes it as the connection is made, as
+  `connect(to:)` does, and a remote winner says it in `adopt`; main's `rescue`
+  reads `goodbye`. `SillLinks` is one enum (the site's addresses and the App
+  Store one), once in the project file. The public README stays main's; this
+  branch's Updates, tag and hello paragraphs are in docs/DEVELOPMENT.md. The
+  pointer plan's Mac menu bar kinds move to 24, 25 and 27 (23 is the hello).
+  Fix-ups: `release.sh --dry-run` builds an untagged commit again
+  (`SILL_RELEASE_DRY_RUN=1`) while a real run names the missing tag in its
+  preflight, and the checklist gains the tag and the App Store address
+  (184d902); the privacy policy's Update check section, and the download page
+  (05d9d3a). Verified on the merge: clean builds (only the CaptureProbe and
+  `StreamClient` capture warnings; `make-app.sh` without `--install`); this
+  branch's pure checks against the merged sources (the protocol 74, DeviceGate
+  58, GoodbyePolicy 42, UpdatePolicy 124, their 61 mutants caught) and main's
+  (the discovery policy 286 with 70 of 70 mutants, main's own 187 with the 20
+  older ones, the fence in its 12 modes with 16 of 16, the remote rules 64
+  with 35 of 35, the ledger 90 with 5,000 random runs and 3 of 3, the remote
+  protocol 188); the hello first on the merged SessionLink (the review's check,
+  and a new one for #12's hold and fenced hand-overs: the move's connection
+  says hello first, one without it is caught; the source: two connections
+  made, three hellos sent); the checker alone against sillfeed.py (42, and the
+  stale-result check); the bare app's H8 runs 1 and 2; previews from the bundle
+  against origin/main's: only General, menu.txt's `update-available` sample and
+  the 20 new update states differ; the CLI's stdout against origin/main's,
+  idle 35 s and with a Desktop pick, masked and sorted: identical; the gate on
+  the merged CLI (H5, H6 a–h with the remote door, the slowdown and its count
+  line) and origin/main's host skipping the hello; a simulator of its own
+  (deleted after): at floor 99 the notice, no reconnect, no second connection
+  in 60 s; at floor 0.1 admitted and streaming, and with `-SillMoveTest 1` the
+  move's own connection admitted with its hello and the session moved to it;
+  the update and notice cases at four sizes above main's footer.
 - **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
   this Sill.app yourself; within a minute "Update check failed: GitHub has no
   release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t
@@ -126,7 +162,9 @@ set the compatibility floor for good (the section before Conventions).
   reconnect in 2 minutes), V4 mixed builds (PR #13's iPad build against this
   Sill.app and this iPad build against PR #13's: as before), V5 VoiceOver on the
   Mac, V6 the first two notarized builds (permissions kept across the update;
-  `--release` refuses an untagged HEAD), V7 the privacy line on the site.
+  `--release` refuses an untagged HEAD, `release.sh --dry-run` only warns), V7
+  the privacy policy's Update check section (site/privacy.html) on the
+  published site, once Saffsanity/sill-site is republished.
 
 **Public README (2026-09-25, branch `public-readme` from main at b50e224,
 draft PR #15).** For the repository going public at launch: `README.md` is the
@@ -2149,10 +2187,12 @@ at one), and a device can stay on an old version (automatic updates off, an iOS 
 dropped). So every later host keeps serving devices from the first public build on, and every later
 device keeps working with Macs from the first public build on, or each says why
 (docs/update-notice-plan.md):
-- Kept as they are: the plain-TCP `_sill._tcp` home door; the 14-byte header; kinds 0–23 and their
-  payloads (HEVC with ParameterSets; the JSON of Switcher, Input, Viewport, HostSettings, Remote
-  and Compatibility); the ping echo; a kind 16 within 2 s of the first window list; kind 22's
-  `reason`, `message` and `reconnect`.
+- Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
+  (docs/home-pairing-plan.md, branch `home-pairing`, in progress; it ships before 1.0, Noah
+  2026-09-25), not today's plain-TCP `_sill._tcp` door, which only development builds and the CLI
+  keep; the 14-byte header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of
+  Switcher, Input, Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16
+  within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`.
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
@@ -2170,15 +2210,13 @@ device keeps working with Macs from the first public build on, or each says why
   does for a Mac without kind 16.
 - `SillProtocol.current` (1) rises only with a change an older peer cannot skip, and the floor
   rises with it.
-- **Open, for Noah** (review, 2026-09-25; the plan's open question 14): the first bullet keeps the
-  plain-TCP home door, while docs/home-pairing-plan.md (branch `home-pairing`) makes Sill.app's
-  home door TLS-only for 1.0 and rejects a plain listener or a sniffer beside it. A device from
-  this build dials plain TCP and says hello in plaintext: at a TLS-only door it gets a failed
-  handshake and EOF, never kind 22 "update", and redials. Settle the order before either branch
-  merges. Home pairing in 1.0: the first bullet then reads "the home door as 1.0 ships it (TLS)", and
-  the hello goes first inside TLS, through `serve`'s gate. After 1.0: the home door keeps a
-  plaintext path that reads the hello and answers kind 22 "update" (a first byte of 0x16 is a TLS
-  handshake record; a device never sends kind 22).
+- Decided (Noah, 2026-09-25; the plan's open question 14): home pairing ships before 1.0, so the
+  floor is the TLS home door with pairing, and no 1.0 device speaks plain TCP to Sill.app. The
+  hello goes first inside TLS at both doors, through `serve`'s gate: whichever of this branch and
+  `home-pairing` lands second puts the gate in home-pairing's `Door`, one place for both doors.
+  Builds from before home pairing, this one included, dial plain TCP and say hello in plaintext:
+  at the TLS door they get a failed handshake and EOF, never kind 22 "update", and redial. Only
+  development and TestFlight builds are that old, so no plaintext path or sniffer answers them.
 
 ## Conventions
 
