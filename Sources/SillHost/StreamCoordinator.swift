@@ -45,6 +45,19 @@ package final class StreamCoordinator {
     let syntheticCapture = SyntheticCapture()
     let injector = InputInjector()
     let sizer = WindowSizer()
+    /// The Mac's pointer (PointerWatch): who moves it, and where it is in the streamed source, for
+    /// the devices that are not moving it (kind 26, sent by StreamServer). Its geometry follows the
+    /// source (`pointerGeometry`); InputInjector and VirtualStage note Sill's own motion there.
+    let pointer: PointerWatch
+    /// The test pattern's size in points (a synthetic host's Desktop), and the space the TEST ONLY
+    /// scripted pointer moves in.
+    static let testPatternRect = CGRect(x: 0, y: 0, width: 1512, height: 949)
+    /// TEST ONLY (SILL_TEST_SOFTWARE_ENCODER=1, a synthetic host): every stream runs on the software
+    /// encoder, the launch probe never runs and the re-check never starts, so no test touches the
+    /// Mac's one hardware encoder while Noah streams (PointerTestHooks).
+    private let softwareOnly: Bool
+    /// The TEST ONLY hooks' lines (PointerTestHooks), printed as `start` begins; empty without them.
+    private let testHookLines: [String]
     /// A picked window streams from its own HiDPI display (see VirtualStage): the CLI's
     /// `--virtual-display`, or the app's setting. Every branch this adds is behind this flag;
     /// without it the coordinator behaves as before. It changes only inside `select` (`adopt`).
@@ -133,6 +146,7 @@ package final class StreamCoordinator {
             if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
+            pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -192,6 +206,12 @@ package final class StreamCoordinator {
         self.synthetic = synthetic
         self.appKitLoop = appKitLoop
         self.hostVersion = hostVersion
+        let env = ProcessInfo.processInfo.environment
+        let path = PointerTestHooks.pointerPath(synthetic: synthetic, environment: env)
+        let software = PointerTestHooks.softwareEncoder(synthetic: synthetic, environment: env)
+        pointer = PointerWatch(synthetic: synthetic, path: path.path)
+        softwareOnly = software.on
+        testHookLines = [path.line, software.line].compactMap { $0 }
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
@@ -199,6 +219,13 @@ package final class StreamCoordinator {
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
         stage = VirtualStage(sizer: sizer, catalog: catalog)
+        // Sill's own motion is Sill's: the server counts each device's input, the injector notes
+        // each post just before it (and a synthetic host posts nothing: the test pattern is not the
+        // screen, docs/pointer-visibility-plan.md Q10), the stage its warp home.
+        server.pointerWatch = pointer
+        injector.watch = pointer
+        injector.dryRun = synthetic
+        stage.onWarp = { [pointer] in pointer.sillMoved() }
         // The identity's TXT tag must be in the first registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName)
         catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
@@ -385,13 +412,20 @@ package final class StreamCoordinator {
     /// call raises the system's Screen Recording alert. That should follow a click in Settings or
     /// a device connecting, not a login.
     package func start(preselect: String?, promptForPermissions: Bool = true) async {
+        for line in testHookLines { print(line) }
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
-        // One small frame through the hardware encoder before anything streams. If the Mac's
-        // hardware encoder is stuck or busy, start on the software encoder now, instead of hanging
-        // the first stream for 1.5 s and restarting it; the re-check comes back to the hardware
-        // once it answers.
-        let hardwareResponds = await Task.detached(priority: .userInitiated) { EncoderProbe.hardwareResponds() }.value
-        if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
+        if softwareOnly {
+            // TEST ONLY: the software encoder from the start, and never a hardware session.
+            useSoftwareEncoder = true
+            status.update { $0.softwareEncoder = true }
+        } else {
+            // One small frame through the hardware encoder before anything streams. If the Mac's
+            // hardware encoder is stuck or busy, start on the software encoder now, instead of
+            // hanging the first stream for 1.5 s and restarting it; the re-check comes back to the
+            // hardware once it answers.
+            let hardwareResponds = await Task.detached(priority: .userInitiated) { EncoderProbe.hardwareResponds() }.value
+            if !hardwareResponds { enterSoftwareFallback(afterHang: false) }
+        }
         if virtualDisplay { enableVirtualDisplay() }
         catalog.start()
         // The only startup line Direct Wireless adds, and only when it is on: the default path
@@ -604,7 +638,9 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload),
                   let rect = currentSourceRect() else { return }
-            raiseIfInteracting(event)
+            // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
+            // activates and raises nothing either.
+            if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect)
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
@@ -675,6 +711,9 @@ package final class StreamCoordinator {
         case .none:
             return nil
         case .desktop:
+            // The test pattern with the TEST ONLY scripted pointer: its own space, where a test
+            // client's input moves that pointer (a synthetic host posts nothing).
+            if synthetic, pointer.hasTestPointer { return Self.testPatternRect }
             return catalog.display?.frame
         case .window(let id):
             // On the virtual display the video is the captured crop, not the whole window: an app
@@ -702,6 +741,29 @@ package final class StreamCoordinator {
     // Pencil says it is (no round trip), and `cursorShapes` streams the Mac's current cursor image
     // so that pointer takes the right shape. Toggling `showsCursor` on a running SCStream with
     // `updateConfiguration` wedged the capture on macOS 27, so it is fixed at start.
+    //
+    // While the Mac (its own mouse or trackpad), or another device, moves the pointer, the devices
+    // draw it from where the host says it is (kind 26: `pointer`, StreamServer), in the same shape.
+
+    /// What the Mac's pointer is judged against (docs/pointer-visibility-plan.md §4.7): the streamed
+    /// source's rectangle in global points, the injector's own (`currentSourceRect`). The Desktop:
+    /// its display. A window on the virtual display: the crop, or the full-screen band. A window in
+    /// regular mode: its live bounds, which the watch re-reads, and it must be on screen. A
+    /// synthetic host has one only for the test pattern under the TEST ONLY scripted pointer, so it
+    /// never reads the real pointer (a real window picked there included).
+    private func pointerGeometry() -> PointerWatch.Geometry? {
+        switch active {
+        case .none:
+            return nil
+        case .desktop:
+            if synthetic { return pointer.hasTestPointer ? .rect(Self.testPatternRect) : nil }
+            return catalog.display.map { .rect($0.frame) }
+        case .window(let id):
+            guard !synthetic else { return nil }
+            if virtualDisplay, stage.isStaged, let onScreen = stage.captureRectOnScreen { return .rect(onScreen) }
+            return currentSourceRect().map { .window(id, $0) }
+        }
+    }
 
     // MARK: Fitting the window to the client
 
@@ -1359,7 +1421,7 @@ package final class StreamCoordinator {
     }
 
     private func startRecheck() {
-        guard useSoftwareEncoder, !shuttingDown, recheckTask == nil, catalog.clientCount > 0 else { return }
+        guard useSoftwareEncoder, !softwareOnly, !shuttingDown, recheckTask == nil, catalog.clientCount > 0 else { return }
         recheckToken += 1
         let token = recheckToken
         recheckTask = Task { @MainActor [weak self] in
@@ -1518,6 +1580,8 @@ package final class StreamCoordinator {
     }
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
+        // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
+        defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick

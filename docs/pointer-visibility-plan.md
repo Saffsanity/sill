@@ -1,5 +1,21 @@
 # The Mac's pointer on the device — the plan
 
+## Status and hand-off (2026-09-26 05:20)
+
+Stopped by Noah at 99 % of the week's usage during the host build. Branch `pointer-visibility`
+(worktree `/Users/noah/Downloads/winstream-pointer`, from main at 8b0d418) holds 51006b8, the
+protocol and host (kind 26, the Mac's pointer, and who moves it), and the commit after this one:
+the rest of the host as the interrupted agent left it while it was running the pure checks against
+the branch. Unverified, unreviewed; no iOS file has changed. Next agent: (1) build and run
+`Tests/checks/run-all.sh`, fix, commit the host properly; (2) the iOS half (the plan's device
+sections: the real pointer shown while the Mac moves it, the client pointer only for the portrait
+trackpad); (3) merge main (bd46192 or later), review, PR with Noah's device tests. Noah's
+authorization: "When the Mac is controlling the mouse pointer, it should show the real mouse
+pointer… When Sill is controlling the Mac, continue to hide the real pointer and only render the
+client side one in portrait mode when the trackpad is used" (2026-09-25) and "Work on 5-12 as well
+please" (2026-09-26).
+
+
 2026-09-25. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of `/Users/noah/Downloads/winstream-remote` (branch `remote-access` at 78d76e0,
 which contains cb0ec55); line numbers are at 78d76e0. No host or app was started, no event was
