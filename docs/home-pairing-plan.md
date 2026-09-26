@@ -380,9 +380,13 @@ extension Goodbye { public static let pairingRequired = "pairingRequired" }
   value reads as `"1"`, the safe side.
 - Built at every registration (init, `start()`, a Direct Wireless replacement's settle) and when
   Require pairing changes: the listener's `service` is set again on the network queue, or, during
-  a Direct Wireless replacement, left to its settle step, which reads the current value. H0's
-  probe P1 checks that NWListener updates the record in place (no "(2)", nothing orphaned on
-  awdl0).
+  a Direct Wireless replacement, left to its settle step, which reads the current value.
+  NWListener updates the record in place (H0's P1, Results): with the same name and type and a new
+  TXT record, no browser sees a removal or a "(2)", the listener's
+  `serviceRegistrationUpdateHandler` reports nothing (so the status keeps its name), and the new
+  record is on lo0, en0, the cable's en14 and anri0 and, with `includePeerToPeer`, awdl0 0.02 to
+  1.0 s later, whether `r` is fresh or the same; cancelling the listener removed every copy, awdl0's
+  included, within 1.1 s.
 
 ```swift
 public enum HomeDoorTXT {
@@ -421,9 +425,13 @@ cancelled with no Sill byte, counted for the minute's summary.
 **Measured in the remote plan and still true here** (loopback, 2026-09-24): mutual TLS 1.3 ready in
 12–20 ms, suite 0x1302; a key the server refuses leaves the client `.ready`, then its first read
 fails with -9825 about 2 ms later; a client whose pin does not match goes `.waiting(-9808)`
-without sending its certificate; a plain client makes the server fail with -9858 within about
-3 ms, and gets EOF once the server cancels; TLS costs 0.9 ms of CPU per MB at each end, plain TCP
-0.4.
+without sending its certificate. Corrected by H0 (Results, P4 and P3): a plain Sill client,
+whatever its first message (kinds 6 to 23 were tried), makes the server fail with -9836 within
+2 ms of its first bytes, and gets a 7-byte TLS alert (`15 03 01 00 02 02 46`: fatal,
+protocol_version) and then EOF; -9858 (no alert) is what an HTTP request gets, -9863 a TLS 1.3
+client without a certificate, and -9836 a TLS 1.2 client too. TLS costs the sender about
+0.67 ms of CPU per MB paced at 60 fps against 0.44 plain, the receiver 0.72 against 0.40 (§8);
+the remote plan's 0.9 against 0.4 had both ends in one process.
 
 #### 3.4 Compatibility
 
@@ -433,7 +441,7 @@ without sending its certificate; a plain client makes the server fail with -9858
 
 | Device | Host | Result |
 |---|---|---|
-| main | this Sill.app (either setting) | The device dials plain. The door fails the handshake as the first bytes arrive (a viewport or a ping, within 0.25 s of the connect) and closes; the device reads EOF. Because main sets `connected` at TCP `.ready`, it shows the stream screen for a moment, then "Mac mini disconnected…", and retries every 2 s. These refusals do not count toward the door's 300 s backoff (§4.4): that backoff is checked before any key is seen, so an update installed after a few of them would otherwise be refused for up to 5 minutes. The Mac counts it as "from an older Sill (not TLS)" and its menu says "An iPhone or iPad Needs Sill Updated" (§6.4). **Install the device build first.** |
+| main | this Sill.app (either setting) | The device dials plain. The door fails the handshake (-9836) within 2 ms of the first bytes (the viewport at once, or the first ping at 0.25 s) and closes; the device reads a 7-byte TLS alert and EOF (H0's P4), which its header read takes for the Mac gone. Because main sets `connected` at TCP `.ready`, it shows the stream screen for a moment, then "Mac mini disconnected…", and retries every 2 s. These refusals do not count toward the door's 300 s backoff (§4.4): that backoff is checked before any key is seen, so an update installed after a few of them would otherwise be refused for up to 5 minutes. The Mac counts it as "from an older Sill (not TLS)" and its menu says "An iPhone or iPad Needs Sill Updated" (§6.4). **Install the device build first.** |
 | main | SillHost without `--pairing` | As today (plain) |
 | this, DEBUG | main's Sill.app (plain door, TXT `r`, no `p`) | Plain, as today: saved Macs recognised by the tag, no pairing at home, remote access as PR #13. Until the device has seen that Mac with `p` (§7.3) |
 | this, Release | main's Sill.app | The row says "Update Sill"; a tap says why; nothing is dialed |
@@ -624,8 +632,14 @@ enum CableLink {
 - **The home door's summary** (the plain door's line stays byte for byte for the CLI):
   "Home door refused N connections in the last minute: a unpaired, b through a VPN, c from the
   internet, d from an older Sill (not TLS), e over the limit." A home handshake that fails with
-  -9858 or -9836 (not TLS, or not TLS 1.3) counts as "from an older Sill" and sets
-  `olderDeviceAt` (§4.10). It counts in the summary, not toward its source's backoff: the
+  -9836 counts as "from an older Sill" and sets `olderDeviceAt` (§4.10): every plain Sill message
+  gets it, whatever its kind (H0's P4), because the TLS record header's version bytes are the Sill
+  header's first timestamp bytes, 0x41 0xD0 to 0xDF for any time from 2004 to 2038, never a TLS
+  version. A TLS 1.2 client gets -9836 as well (no Sill build is one; a scanner that tries TLS 1.2
+  lights the menu's item for its 10 minutes). -9858 (an HTTP request, which the TLS stack tells
+  apart) and the remote door's other refusals (`doorRefusals`: -9808, -9863, -9810) count as
+  "unpaired", toward the backoff, as they do at the remote door. An older Sill's -9836 counts in
+  the summary, not toward its source's backoff: the
   backoff is checked when a connection is accepted, before any key is seen (RemoteServer.swift:214),
   so an iPad that retried plainly every 2 s (5 refusals in 10 s) and was then updated would have
   its new build refused at once for up to 300 s; a plain connection costs the Mac nothing past its
@@ -652,7 +666,8 @@ enum CableLink {
    fingerprint: Data; name: String? }` (name nil for an unpaired key while Require pairing is off;
    no peer on the plain door). `fingerprint` and `pairedName` answer for both doors.
 5. **The TXT record:** the coordinator's `txtRecord` returns `r` and `p`. New `updateService()`
-   sets `listener.service` again on the queue for a `p` change; during a replacement it does
+   sets `listener.service` again on the queue for a `p` change (the same name and type: an update
+   in place, H0's P1, which fires no `onServiceRegistered`); during a replacement it does
    nothing, since `settled` (:466) reads the current value.
 6. **Ticks** (:138–150):
    ```swift
@@ -1195,7 +1210,11 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
   here.
 - `-SillServiceType _silltest._tcp`: the browsers look for that type instead of `_sill._tcp`, so a
   test host registered with `SILL_TEST_SERVICE_TYPE` shows as a real row with its TXT record, and
-  no real Mac is listed.
+  no real Mac is listed. The simulator enforces NSBonjourServices (H0's P5: a browse for a type
+  the Info.plist does not declare fails with -65555 NoAuth, on every launch but the first after an
+  install), so the Debug configuration's Info.plist declares `_silltest._tcp` beside `_sill._tcp`
+  (a per-configuration plist or a Debug-only build step), and Release's declares `_sill._tcp`
+  alone: H1 prints `NSBonjourServices` from both products.
 - `-SillCableTest 1`: this device's path counts as the cable for §7.5's check. The simulator has
   no cable of its own: its interfaces and addresses are this Mac's, so without the argument its
   check never passes, even over en14 while a device is plugged into the Mac. With the host's
@@ -1212,25 +1231,33 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
   gets 5 s. PR #12's move down (the cable pulled) holds what the device sends until the Wi‑Fi
   connection's first window list (`probeMove`, then `finishMove`), so its hold grows by the
   handshake, some 15–30 ms on Wi‑Fi.
-- **The bytes:** TLS 0.9 ms of CPU per MB at each end against 0.4 for plain TCP (the remote plan
-  §3.3), so +0.5 ms per MB. At Balanced (15 Mbps, 1.9 MB/s): +1 ms a second, 0.1 % of a core. At
-  Extreme over the cable (150 Mbps at 60 fps, 18.75 MB/s): +9 ms a second, about 0.9 %; at 120 fps
-  about 1.9 %. The iPad pays the same per byte. A frame's last TLS record decrypts in
-  microseconds, so frame age does not move.
+- **The bytes** (H0's P3, Results: NWConnection on loopback with the home door's options, each end
+  its own process): paced at 60 fps with 320 KB frames, the Mac pays 0.67 ms of CPU per MB over
+  TLS against 0.44 plain, the device 0.72 against 0.40. So Extreme over the cable (150 Mbps at
+  60 fps) costs the Mac +0.44 percentage points of a core (1.29 % against 0.85 %) and the device
+  +0.61; at 120 fps +1.1 and +1.3; at Balanced (15 Mbps) the difference is below the runs' noise.
+  This section first said +0.5 ms per MB and 0.9 % at Extreme, from the remote plan's figure with
+  both ends in one process. A frame's last TLS record decrypts in microseconds, so frame age does
+  not move.
 - **The tick** exists for the device's Wi‑Fi power save: a downlink quiet for a moment lets the
   radio doze, and the next packet waits up to 300 ms (CLAUDE.md, trackpad stutter (1)). Over TLS
-  each 14-byte tick is a record: the remote door measured +1.46 percentage points of host CPU with
-  a tick every 30 ms, and 5.79 % (TLS, a tick skipped right after anything else went out) against
-  6.08 % (the plain home door with every tick), 60 s at 60 fps (PR #13, step 3, H20). So:
+  each 14-byte tick is a record of its own. The remote door measured +1.46 percentage points of
+  host CPU with a tick every 30 ms, and 5.79 % (TLS, a tick skipped right after anything else went
+  out) against 6.08 % (the plain home door with every tick), 60 s at 60 fps (PR #13, step 3, H20).
+  H0's P3 finds the record itself cheap: alone, a tick costs the Mac 90 µs over TLS against 75 µs
+  plain (the device 68 against 53), 0.05 % of a core more at 33 a second; beside a 60 fps Balanced
+  stream every tick together costs about 0.19 percentage points over TLS and 0.17 plain, and
+  skipping them brings TLS to 0.76 % against plain's 0.69 % with every tick. So the rule below
+  saves about 0.2 points, not 1.5, and H9 measures the whole host. The rules stay:
   - every TLS client, home or remote, skips a tick when something went out within the last 30 ms
     (the remote rule, StreamServer.swift:146): the downlink is exactly as busy as before, and the
     radio stays awake;
   - a device on the USB cable gets no tick at all: there is no radio to keep awake;
   - over Wi‑Fi and Direct the tick stays;
   - the plain door (the CLI's default) keeps every tick, byte for byte.
-- **Measured before it counts:** H0's probe P3 (per MB, per record), H9 (host CPU, frame age), P11
-  (the `rtt m/M` maxima on a still window over Wi‑Fi as before; on the cable without ticks; Extreme
-  at 120 fps over the cable as before).
+- **Measured before it counts:** H0's probe P3 (per MB, per record: done, Results), H9 (host CPU,
+  frame age), P11 (the `rtt m/M` maxima on a still window over Wi‑Fi as before; on the cable
+  without ticks; Extreme at 120 fps over the cable as before).
 
 ---
 
@@ -1338,7 +1365,7 @@ stand-ins.
 | H2 | **The CLI byte for byte:** H0's runs on the new build, masked and sorted | Identical. `--pairing` adds exactly its two lines (§5, §4.11), plus two per ask (the core's ask line and the CLI's code line); `--print-cable` exits 0 |
 | H3 | **Pure checks**, each with mutants caught: `DoorPolicy` (every row of §4.2: both doors, each origin, each ALPN, Require pairing on and off, paired or not, a window or not, the ask rule's six steps in order: step 2 only with the Mac's rule, `cable: true` and no other key of the device, step 4 for loopback and every one of this Mac's own addresses, and the TEST ONLY skip only on a test host, §4.3); `CableLink` (fixtures: this Mac's en14 and anri0 → a cable; anpi0 and en4 (device mode), en1 (Thunderbolt), en0 (Wi‑Fi), bridge0 → not; a Realtek USB Ethernet adapter (0x0BDA) → not; Apple's USB Ethernet Adapter (0x05AC, "Apple USB Ethernet Adapter") → not; an iPhone (0x05AC, "iPhone") → a cable; another Mac in device mode → not; no product name, no NCM interface → not; a routed source on a cable interface → not; a source that is one of this Mac's own addresses on en14, fe80 or 169.254 (the Simulator's, 2026-09-24) → not; any IPv4 source → not; no serial → not; `deviceID` stable, 22 characters, never the serial); `AskLimits` (one window; 10 minutes of quiet by key and by address; 3 in 10 minutes; expiry and a stop count as unused; the test override); `HomeDoorTXT` (build, parse, an unknown value → required); the device's `rowWord`, `homeDial` and `onCable` (every row of §7.3 and §7.4, DEBUG and Release, `homeTLS`, revoked; fe80 scoped to en2 or anpi0 carrying only link-local addresses → the cable; the same interface with a DHCP or SLAAC address (a USB Ethernet adapter) → not, and its row "Not paired"; the Mac's address one of this device's own → not; IPv4 link-local, Wi‑Fi, AWDL, loopback → not); `SavedMacs` and `PairedDevice` (the new fields; records without them decode) | All pass |
 | H4 | **The home door up:** `SILL_TEST_SERVICE_TYPE=_silltest._tcp SillHost --synthetic --pairing` | Its two lines; `dns-sd -t 3 -L "Sill test <pid>" _silltest._tcp local` shows `r` and `p=1`; one listener for its PID (`lsof -p`), no remote door; without `--pairing`, H2 holds |
-| H5 | **Refusals at the home door:** the base's `sillclient.py` (plain); `--tls` with an unpaired key on `sill/1`; `--tls` with another ALPN; `SILL_TEST_ORIGIN=vpn`. And `SillHost --print-cable` (read-only) with the iPad plugged in, if it is | Plain: closed within 100 ms with no Sill byte, counted "from an older Sill"; five plain tries from one address in 10 s, then a paired `--tls` session from it: admitted at once (no backoff, §4.4); unpaired: ready, then a read error (-9825), no Sill byte; another ALPN: the handshake fails; vpn: closed before TLS; one summary line. `--print-cable` names en14 and anri0 as the iPad's cable |
+| H5 | **Refusals at the home door:** the base's `sillclient.py` (plain); `--tls` with an unpaired key on `sill/1`; `--tls` with another ALPN; `SILL_TEST_ORIGIN=vpn`. And `SillHost --print-cable` (read-only) with the iPad plugged in, if it is | Plain: closed within 100 ms, the 7-byte TLS alert and EOF, no Sill byte (H0's P4), counted "from an older Sill"; an HTTP request (`curl http://127.0.0.1:PORT/`): counted "unpaired", no menu item; five plain tries from one address in 10 s, then a paired `--tls` session from it: admitted at once (no backoff, §4.4); unpaired: ready, then a read error (-9825), no Sill byte; another ALPN: the handshake fails; vpn: closed before TLS; one summary line. `--print-cable` names en14 and anri0 as the iPad's cable |
 | H6 | **Pairing at home:** `--pair-ask --then-code=…` with the printed code; again with `--pair-url`; then `sill/1` with the same identity | `shown`, and the CLI's ask line; ok with a valid proof_M, over the home door; the session's catalog 2, 16, 18, 4…, 5, 14 and frames. On the bare app with Remote Access off, `-remotePort 0` and `SILL_TEST_ASK_FROM_THIS_MAC=1`, a device-opened window adds no listener to its PID, its `pairing.url` has no `a`, and `pairing.code` is written within 0.5 s of the ask, while `-SillPairAfter`'s window adds the remote door; without the variable the same ask gets `openOnMac` (it comes from this Mac) and no `pairingRequest` in the status. With a device-opened window up, `-SillPairAfter` makes it the remote door's: the remote door's listener appears for the PID, `pairing.url` is written again with the same secret and an `a`, and `--pair-url` over the remote door pairs |
 | H7 | **The cable, by its stand-in:** `SILL_TEST_CABLE_INTERFACE=en0` and `SILL_TEST_ASK_FROM_THIS_MAC=1`, the client on the Mac's own `fe80::…%en0` | `--pair-ask=cable` → ok, `method "cable"`, the line, the notice hook, `cableDevice` in `paired.json`; `--pair-ask` without `cable` → `shown`; a second key → `shown` (the same device, serial TEST); the first key again → ok; on the bare app, the first removed (`-SillUnpairAfter`), then the second → ok; `SILL_TEST_LOCKED=1` → `locked`; a 127.0.0.1 client → `shown` (not link-local); without `SILL_TEST_CABLE_INTERFACE`, the same `fe80::…%en0` client → `shown` (this Mac's own address) |
 | H7b | **The real rule against this Mac's own addresses**, only while an iPhone or iPad is on the cable (`SillHost --print-cable` says so; skipped and recorded otherwise): `SILL_TEST_SERVICE_TYPE=_silltest._tcp SillHost --synthetic --pairing`, no TEST ONLY variable; `--pair-ask=cable` from this Mac's own `fe80::…%en14` (or `%anri0`) and from its 169.254 address on en14 | `shown` both (the CLI's window is open), never ok, nothing in `paired.json`: what the Simulator and any app on the Mac get. The connections stay inside this Mac; nothing crosses the cable |
@@ -1548,3 +1575,138 @@ Commit messages end with the session's attribution lines.
     `-SillPairAfter`): any app could otherwise turn pairing off, or pair itself, through a Sill.app
     it starts. Tests use the bare binary and the CLI, as they already do; the encoder's test
     variables still work on Sill.app. Default: **yes.**
+
+---
+
+## Results (implementation, 2026-09-25, branch `home-pairing`)
+
+`$SP` below is `scratchpad/home-pairing/0` in the implementing session's scratchpad; every script,
+log and photo named here is there.
+
+### Step 0: the merge and H0
+
+**The merge.** origin/main `1f3072a` (PRs #11, #12, #14 and #15) merged into this branch with no
+conflict: the branch had only this plan. The base is therefore `1f3072a` (the plan allowed
+`cea195c` or later): its host sources equal `b50e224`'s, and its iOS sources are `cea195c`'s plus
+PR #14's connect-screen footer
+(`SillLinks.swift`, the privacy manifest, `ITSAppUsesNonExemptEncryption`). `swift build -c
+release` passes with only the old CaptureProbe warning, and the iOS Debug build for the simulator
+with only the old `StreamClient` capture warning.
+
+**Baselines** (the base is `git archive 1f3072a` in `$SP/base`, built there):
+- The CLI (`$SP/baseline/baseline.py`; raw, timestamped and masked-and-sorted logs in
+  `$SP/baseline/logs`): `SillHost --synthetic` idle 35 s and with `sillclient.py PORT 5 desktop`,
+  each plain, with `--direct-wireless` and with `--remote` (any port). Noah's Sill.log was read
+  before every host and every 2 s while it ran: idle throughout. This branch's merged build gives
+  the same output, masked and sorted: idle identical; with the client identical but for the last
+  `[1s]` line, which has a `net.tick` count or not by whether a tick fell in the last partial
+  second, so H2 compares without the `[Ns]` lines too. `--remote` prints a fresh code and link per
+  run: the `.masked` files replace the link with `<link>` and mask digits.
+- Previews: the bare binary copied to a fixed path, `$SP/previews/bin/SillMenuBar`, because the
+  General pane shows where it runs from; and the bundle as a copy of make-app.sh's
+  `.build/Sill.app` with `CFBundleIdentifier` `me.saffer.sill.h0previews` and `CFBundleVersion`
+  `H0`, signed ad hoc, at `$SP/previews/Sill-h0.app`, so no run reads `me.saffer.sill.mac` and
+  the General pane's build number never differs. 80 files each (`bare-base`, `bundle-base`, with
+  their `shasum` lists); the merged build's bare 80, rendered from the same path, equal the
+  base's byte for byte. H15 renders its "after" from the same two paths.
+- The pure checks (`$SP/checks/run.sh WT OUT`: the newest harness of each, as the
+  `github-actions` session collected them for `Tests/checks/`, unchanged), against the merged
+  tree: the discovery policy 286, the ledger 90, the fence 14 of 14 modes, remote-rules 64,
+  AddressList and PairingWindow 41, OriginPolicy 66, ClientLink 89; also the pairing window's
+  address rule 80 and the protocol 188 plus its 8 cross-checks. All pass.
+
+**P1, the TXT record** (`$SP/probe`: one swiftc tool over StreamProtocol's own RemoteTLS,
+RemoteIdentity and StreamMessage; `$SP/p1`). A TLS 1.3 NWListener with RemoteTLS's server options
+over the home door's TCP options, registered as `_silltest._tcp` "Sill probe ‹pid›" with TXT `r`
+and `p=1`; 3 s after ready its `service` is set again with `p=0` and a fresh `r`, 4 s later with
+`p=1` and the same `r`; cancelled at 11 s.
+- The update is in place. `dns-sd -B` saw one Add per interface at the start and one Rmv per
+  interface after the cancel (1.1 s later), nothing in between, and never a "(2)". The listener's
+  `serviceRegistrationUpdateHandler` reported the first registration and nothing for either
+  update.
+- `dns-sd -i ‹if› -L` on lo0, en0, en14 and anri0 saw each new record 1.00 s after the set; fresh
+  one-shot lookups on each interface read whichever record was current, and after the cancel
+  found nothing.
+- With `includePeerToPeer` (after the Sill.log check; AWDL on for 19.3 s by the kernel's own
+  lines, its tail included): the registration also on awdl0 (index 16); the updates reached awdl0
+  0.02 s and 1.0 s after the sets; the cancel removed the awdl0 copy with the others, and a fresh
+  `dns-sd -t 3 -includeAWDL -B` found nothing. The kernel counted ValidSvc 0 → 1 (the browse) → 3
+  (the registration) → 1 → 0, with "Enabling AWDL due to Mdns" and "Disabling AWDL due to no
+  services and no active sockets"; nothing left behind.
+
+**P2, the cable** (the plan's `cable-probe.swift`, `probe2.swift` and `timing.swift`, unchanged,
+read-only; `$SP/p2`). The iPad was still on the cable, the same plug-in as the review's (sessionID
+4854277126715): en14 `IOEthernetInterface ← AppleUSBNCM11Data ← AppleUSBNCM11Control ←
+IOUSBHostInterface (class 2/13) ← IOUSBHostDevice "iPad"` (0x05AC, 0x12AB, the serial present,
+24 characters), anri0 the same through `AppleUSBHostNCMRestrictedEthernetInterface`; the iPad's
+interfaces PTP@0, Apple USB Multiplexor@1, NCM Control@2 and Data@3, NCM Control@4 and Data@5;
+its neighbours `fe80::18fe:abff:febb:459f%anri0` and `fe80::18c2:af60:ec0d:47ea%en14`; this Mac's
+anpi0–2 and en4–en6 under `AppleT8112USBXDCI`, en1–en3 under Thunderbolt, en0 under PCIe: no USB
+host device. One interface's ancestry read takes 0.165 ms (median of 50; at most 0.60 ms). The
+session is unlocked (`kCGSSessionOnConsoleKey` 1, no lock key). NWPathMonitor's default path
+listed only en0 and utun6, the default route's, never the cable. Not run: the half of P2 with
+nothing plugged in (unplugging the iPad is Noah's).
+
+**P3, what TLS costs** (`$SP/probe` in `serve` and `dial` modes, each end its own process, CPU from
+`getrusage` between `.ready` and the last byte; `$SP/p3`, `summary.txt`). Loopback, the home door's
+TCP options and service class on the Mac's side, the device's on the other, RemoteTLS's options on
+both; the receiver reads a 14-byte header, then its payload, as the device does. MB = 10⁶ bytes;
+medians of 3 (bulk) or 2 (paced).
+
+| Run | Mac TLS | Mac plain | Device TLS | Device plain |
+|---|---|---|---|---|
+| 200 MiB Mac → device, unpaced, 32 KiB messages (ms per MB) | 0.73 | 0.44 | 1.33 | 1.06 |
+| the same, 320 kB messages | 0.39 | 0.25 | 0.45 | 0.24 |
+| 200 MiB device → Mac, 32 KiB (the Mac receives) | 1.38 | 1.03 | 0.73 | 0.33 |
+| the same, 320 kB | 0.47 | 0.22 | 0.40 | 0.21 |
+| Extreme: 320 kB at 60 fps for 20 s (ms per MB; % of a core) | 0.67; 1.29 % | 0.44; 0.85 % | 0.72; 1.39 % | 0.40; 0.78 % |
+| Extreme at 120 fps for 10 s (% of a core) | 2.59 % | 1.49 % | 2.73 % | 1.40 % |
+| Balanced: 32 KiB at 60 fps for 20 s (% of a core) | 0.47 % | 0.53 % | 0.48 % | 0.53 % |
+| 2,000 ticks (14 bytes) every 30 ms, nothing else (µs per tick) | 90 | 75 | 68 | 53 |
+| Balanced at 60 fps and a tick every 30 ms, 30 s (% of a core) | 0.95 % | 0.69 % | 0.95 % | 0.69 % |
+| the same, a tick skipped within 30 ms of a send (all were) | 0.76 % | 0.52 % | 0.81 % | 0.53 % |
+
+At Balanced the two runs of each kind disagreed by more than TLS's share, so there it is below
+the noise. The plan's §8 said +0.9 % at Extreme and 1.9 % at 120 fps from the remote plan's figure;
+measured: +0.44 and +1.1 points on the Mac, +0.61 and +1.33 on the device. A tick record costs
+15 µs more over TLS at each end; the remote door's +1.46 points for ticks (H20) is not their own
+cost. §8 now says so; its rules are unchanged, and H9 still measures the whole host.
+
+**P4, an older build at a TLS door** (`$SP/p4`: `p4.py` and `p4b.py` against the probe's TLS
+listener with the home door's options, which fails and cancels a connection as RemoteServer does;
+main's `sillclient.py` from `1f3072a`, and a raw client that sends what main's device sends).
+
+| Client (plain unless named) | The door | The client |
+|---|---|---|
+| main's `sillclient.py PORT 5 desktop` (kind 6 first), also with `--stats --fps=60` | `.failed(-9836)` 0.4–0.7 ms after the accept, cancelled | 7 bytes, `15 03 01 00 02 02 46` (a TLS alert: fatal, protocol_version), then EOF; it prints "EOF from host at 0.00s", 0 frames, exit 0 |
+| main's device: its viewport (kind 9) at once | -9836 | the same 7 bytes 0.7 ms after its send, EOF 0.3 ms later |
+| main's device before its viewport: its first ping (kind 10) at 0.25 s | nothing until the ping, then -9836 | the same, 0.1 ms after the ping, then EOF |
+| kinds 8, 12, 15, 17, 19, 21 or 23 (the update-notice hello) first | -9836 within 2 ms of the accept | the same 7 bytes and EOF, within 5 ms of its send (one at 11 ms) |
+| sends nothing | waits; `-9816` only when the client closes (3 s here) | nothing; the Door's 10 s admission deadline bounds it |
+| an HTTP request | -9858 | nothing, EOF |
+| TLS 1.2 only | -9836 | the protocol_version alert |
+| TLS 1.3 without a client certificate | -9863 | the handshake ends, then the certificate_required alert |
+
+Main's device reads the 7 bytes and EOF as its 14-byte header read ending short with
+`isComplete`, which is `connectionLost`: the Mac gone, the 2 s retry. §3.3, §3.4 and H5 now say
+so, and §4.4 counts only -9836 as "from an older Sill" (-9858 is never a Sill build).
+
+**P5, the simulator and NSBonjourServices** (`$SP/p5`). The `-SillServiceType` argument does not
+exist before step 4, so a scratch copy of this branch's iOS app browsed `_silltest._tcp` in place of
+`_sill._tcp`, its Info.plist unchanged (only `_sill._tcp`), on a simulator of its own ("iPad
+home-pairing H0", `8E83D7DE-94BD-4608-BEAB-8E8C66D28EC0`, iOS 27.0, shut down after), while the
+probe registered "Sill probe ‹pid›". The first launch after each of two installs listed it
+("Sill probe 15413 … Wired, seen on anri0, lo0, en0, en14": the simulator browses through this
+Mac, so the iPad on the cable makes it "Wired"); both later launches got "Browse failed: -65555:
+NoAuth" and no row (`connect.png` and `connect4.png` with the row, `connect2.png` and
+`connect3.png` without). The simulator enforces it, so §7.9 now puts `_silltest._tcp` in the Debug
+configuration's NSBonjourServices only.
+
+**P6.** `net.inet.ip.check_interface` 1 and `net.inet6.ip6.check_interface` 1 (macOS 27.0,
+26A428), as on 2026-09-25 afternoon; the cable rule does not lean on them.
+
+**What H0 changed in this plan:** §3.2 and §4.5 (5) (the update is in place and fires no
+registration callback), §3.3 (what a plain client and other clients get; the cost), §3.4 (the
+first row), §4.4 (only -9836 is an older Sill; -9858 counts as unpaired), §7.9 (the Debug-only
+NSBonjourServices entry), §8 (the measured cost of the bytes and the tick) and H5 (the alert, and
+an HTTP request).
