@@ -152,6 +152,25 @@ set the compatibility floor for good (the section before Conventions).
   in 60 s; at floor 0.1 admitted and streaming, and with `-SillMoveTest 1` the
   move's own connection admitted with its hello and the session moved to it;
   the update and notice cases at four sizes above main's footer.
+- Review fixes after the merge (2026-09-25; the plan's "Review fixes after the
+  merge"): `release.sh --publish` refuses, before building, unless origin's tag
+  v‹version› names HEAD (gh would make a missing tag from the default branch's
+  tip), passes gh `--verify-tag` in Saffsanity/sill, and warns when
+  `SILL_RELEASE_REPO` is elsewhere, since every update check reads only
+  Saffsanity/sill (the checklist's sill-site fallback publishes a download no
+  Sill.app offers); the tag match is `grep -Fx`. A goodbye on a move's
+  connection before its window list ends a session whose own connection has
+  gone with the Mac's words (a rescue refused by a newer Mac: the notice, no
+  reconnect), and a live session's move up no longer retries the listing that
+  refused it. The privacy policy says the device tells the Mac its version
+  "when it connects" (no VPN outside the Remote Access markers), and its short
+  version names the fixed "en" and the IP address. §13 of the plan is the floor
+  as written here; getsill.app and support@getsill.app read as confirmed in
+  SillLinks, the checklist and the metadata. Verified: the builds; release.sh
+  and make-app.sh against scratch repositories (60 checks, 13 of 13 mutants;
+  d4abceb's fail 40) and `publish_release` against a fake GitHub API; the
+  simulator against Python stand-ins, before and after; the site's cut gate;
+  every pure check with its mutants, H7 (42) and the stale-result check (11).
 - **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
   this Sill.app yourself; within a minute "Update check failed: GitHub has no
   release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t
@@ -162,7 +181,8 @@ set the compatibility floor for good (the section before Conventions).
   reconnect in 2 minutes), V4 mixed builds (PR #13's iPad build against this
   Sill.app and this iPad build against PR #13's: as before), V5 VoiceOver on the
   Mac, V6 the first two notarized builds (permissions kept across the update;
-  `--release` refuses an untagged HEAD, `release.sh --dry-run` only warns), V7
+  `--release` refuses an untagged HEAD, `release.sh --dry-run` only warns,
+  `--publish` refuses until the tag is pushed), V7
   the privacy policy's Update check section (site/privacy.html) on the
   published site, once Saffsanity/sill-site is republished.
 

@@ -1591,3 +1591,93 @@ public README) merged into this branch in 104a9bd, not rebased, with two fix-ups
   710x1000 with main's footer below: nothing overlaps.
 - Every host run checked Noah's Sill.log first (idle, nothing streamed in the last minute) and
   every 10 s while it ran, one host at a time, each under 90 s.
+
+### Review fixes after the merge (2026-09-25)
+
+A review of the merge at d4abceb (seven findings, each confirmed by a second pass) found two gaps in
+the release script and its checklist, a goodbye the device dropped on a move's connection, a
+privacy sentence the Remote Access cut missed, and docs the merge left stale. Fixed in 77d52c7
+(release), 274f5b0 (iOS), fb24cdd (site), aa017e7 and 7bf947f (docs), then these notes. Not pushed.
+
+- **The release's tag, and the one feed** (77d52c7). `gh release create --repo` makes a tag the
+  repository lacks from its default branch's tip, so a forgotten `git push origin v‹version›`
+  published a release, and its source archives, of main's tip rather than the notarized commit,
+  and pushing the real tag later was refused. `release.sh --publish` now reads origin's tag before
+  it builds (`git ls-remote`, an annotated tag's peeled line) and refuses unless it names HEAD; in
+  Saffsanity/sill gh also gets `--verify-tag`, and a failed `gh release create` ends the run with
+  its own error. Every Sill.app reads Saffsanity/sill's releases alone (`UpdatePolicy.feed`), so
+  the checklist's fallback to Saffsanity/sill-site while sill is private publishes a download that
+  no Sill.app offers. The fallback stays (Noah's call); release.sh warns before it builds and as it
+  publishes, its last line says to point download.html's links there, and the checklist says what
+  to do once sill is public (unset `SILL_RELEASE_REPO`, point the links back, publish the newest
+  release in sill). The tag match in release.sh and make-app.sh is `grep -Fx`.
+- **A goodbye on a move's connection** (274f5b0). `probeMove` kept a kind 22 that came before the
+  window list but never acted on it, so a session whose own connection had gone (a rescue's
+  reconnect over the cable, or a move to Wi-Fi carrying it) that a relaunched Mac with a higher
+  floor refused ended as "…disconnected. It will reconnect…", and a Bonjour session dialled that
+  Mac again before its notice showed. `moveSaidGoodbye` now reaches main before the `.cancelled`
+  that the Mac's FIN brings: such a session ends through `sessionEnded` with the Mac's words (the
+  notice and no reconnect for "update", the quit words for "quit"). A session still running stays
+  where it is, as before, and a move up no longer retries the listing that refused it while that
+  lasts: the move from AWDL sets `refusedListing`, the move to the cable `refusedCable`, as
+  `moveProbed` does for another Mac.
+- **The privacy policy** (fb24cdd). "It does tell your Mac which version of Sill it runs, over your
+  own network or VPN" sat outside the Remote Access markers, so the checklist's cut for a release
+  without Remote Access left a VPN on the page (its grep printed privacy.html:72), and with Remote
+  Access it left out the cable, Direct Wireless and a forwarded port: it now says "when it
+  connects". The short version names what the Update check section does: the version, a fixed
+  "en", and the IP address GitHub sees. DEVELOPMENT.md's Updates paragraph and §6.10 follow.
+- **The floor's docs** (aa017e7). §13 quoted the floor as first written, with the plain-TCP home
+  door kept: it is now CLAUDE.md's section line for line. Open question 14 is in the past tense,
+  with one thing left for the merge with `home-pairing`: whether 1.0's TLS home door is
+  `SillProtocol` 1 with ALPN `sill/1`. §14's home-pairing bullet leads with its superseded note,
+  and the floor says which devices receive a notice at the TLS home door (home pairing's and
+  later). The pointer plan's §3.1 says kinds 0–23 are untouched, and its step 1 names the note on
+  23 (the hello) and 24, 25 and 27 (the menu bar's).
+- **The site's addresses** (7bf947f). The merge kept main's SillLinks comment ("not final…, on
+  Noah's saffer.me"); the site is getsill.app, live since 2026-09-25. It kept the other leftovers
+  of main's rename too: the checklist's intro and its domain command (it searched for
+  sill.saffer.me), the metadata's "Assumed" and "Placeholder. Never ship it.", and CLAUDE.md's
+  "nothing is served there yet". Only the App Store address still waits; the change commands
+  search for getsill.app, reach README.md, DEVELOPMENT.md and release.sh, and change the address
+  first.
+
+**Verified** (scratch: `…/scratchpad/integrate-update/apply-review/`):
+- Builds of 7bf947f (a clone): `swift build -c release`, only the CaptureProbe warning; iOS Debug
+  and Release for the simulator and Debug for a device, each from fresh derived data, only the
+  `StreamClient` capture warning; `make-app.sh` without `--install`: 0.3.0 (165), Apple
+  Development, sdk 27.0. Sources/, Package.swift and Packaging/ are d4abceb's byte for byte, so the
+  CLI's stdout is the merge's (identical to origin/main's, masked and sorted), and no fix needed a
+  host run.
+- release.sh and make-app.sh against scratch repositories with a local bare origin, a stub where
+  the build would start: 60 checks (origin's tag missing, only local, lightweight and annotated at
+  HEAD, at another commit, `v1x2x3`, origin unreachable or absent; the preflight with and without
+  `--publish` and in a dry run; the whole script refusing before it builds, going on once the tag
+  is pushed, warning for sill-site before the build; make-app refusing `v1x2x3` before it
+  builds), 13 of 13 mutants caught; d4abceb's scripts fail 40 of the 60 (its make-app.sh built on
+  `v1x2x3`, its `--publish` went on with origin's tag elsewhere). The app-store stage's 33
+  function checks pass in a tagged clone. `publish_release` against a fake GitHub API (every
+  CONNECT refused): in the feed's repository without the tag, gh aborts on `--verify-tag`, no
+  release is made and the run ends with its error; with the tag, the release, its two assets,
+  published; in another repository, the warning, no `--verify-tag`, and the download.html line.
+- The simulator (a Debug build on this stage's own "iPad apply-review", deleted after) against two
+  Python stand-ins, no SillHost and no encoder, d4abceb's build and then this one: a rescue's
+  reconnect over the cable refused with "update" now ends with the Mac's words and "not
+  reconnecting" (before: "…disconnected. It will reconnect when the Mac is back."), and with
+  "quit" in "…quit Sill. This iPad reconnects when it’s back."; a refusal on an ordinary
+  connection as before; a live session's move from AWDL refused: one dial in 32 s (before: three,
+  every 10 s), the session kept; its move to the cable refused: one (before: two), then "the cable
+  reaches another Mac, or another launch of Sill; not tried again until it is plugged in again".
+  The six again on 7bf947f's clone build, the sixth a refusal that ends in a reset instead of a
+  FIN: the same notice, the move's read ending it before any fallback could dial.
+- The site: the checklist's cut, then its grep, prints nothing (d4abceb's printed privacy.html:72);
+  the static checks as before. The checklist's two change commands on a scratch copy leave
+  getsill.app only in CLAUDE.md. §13's block, its "> " removed, equals CLAUDE.md's floor.
+- The pure checks against the final tree: the protocol 74 (13 of 13 mutants), DeviceGate 58 (14 of
+  14), GoodbyePolicy 42 (16 of 16), UpdatePolicy 124 (18 of 18); the discovery policy 286 (70 of
+  70), main's own 187 with its 20 older mutants (20 of 20), the fence in its 12 modes (16 of 16),
+  the remote rules 64 (35 of 35), the ledger 90 with 5,000 random runs, the remote protocol 188; the
+  hello first, the review's check and #12's moves (the source: two connections made, three hellos
+  sent). The checker alone against sillfeed.py: H7's 42 and the stale-result check's 11.
+- **Not verified here:** a real Mac refusing a device mid-session (no build raises the floor), and a
+  real `gh release create` (no test contacts GitHub).
