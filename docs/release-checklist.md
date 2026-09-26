@@ -194,8 +194,10 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       don't also run `--publish` here (whichever comes second stops at "already exists"); without
       it the run only verifies (macOS minutes either way).
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
-      republish `site/` (the rsync below) so the button shows. Then, in a private window, download
-      it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
+      right after Saffsanity/sill goes public, republish `site/` (the rsync below) so the button
+      shows (before that, the button and every GitHub link on the pages answer 404 to visitors).
+      Then, in a private window, download it from https://getsill.app/download and compare its
+      `shasum -a 256` with `Sill.zip.sha256`.
 - [ ] iOS: in Xcode pick Any iOS Device, then Product › Archive. In the Organizer: Validate App,
       then Distribute App › App Store Connect › Upload. Generate Privacy Report there should list
       the privacy manifest's API categories.
@@ -217,9 +219,9 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 
 ### Why the download link doesn't work yet
 
-- There is no release. The site's button links `releases/latest/download/Sill.zip`, which GitHub
-  redirects to the newest release's file of that name, and `Scripts/release.sh --publish` has
-  never run, so there is nothing to redirect to.
+- There was no release until v0.3.0, published on 2026-09-26. The site's button links
+  `releases/latest/download/Sill.zip`, which GitHub redirects to the newest release's file of that
+  name.
 - The repository is private, and GitHub serves a private repository's release files only to people
   signed in with access to it. Everyone else gets a 404 even once a release exists. Either make
   Saffsanity/sill public (the plan at launch), or publish in the public Saffsanity/sill-site: the
@@ -249,8 +251,9 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
   republish `site/`.
 - A failed run can be re-run from its page. A version that is already released is refused
   before anything is built or sent to Apple (`release.sh --publish` asks GitHub first, as it asks
-  whether its token reaches the repository): bump the version, or delete that release and its
-  tag first.
+  whether its token reaches the repository): bump the version. Deleting that release and its tag
+  frees the version only for a release that isn't immutable: GitHub never lets an immutable
+  release's tag be used again, even after the release is deleted.
 
 ### Secrets and variables
 
