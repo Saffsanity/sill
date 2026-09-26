@@ -16,13 +16,23 @@ import StreamProtocol
 /// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
 /// client on en0 stands in for a device on awdl0, which no test can reach.
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
-/// gate can refuse a test client. All are honoured only on a host that does not advertise, so a
-/// stray variable can never touch a real host.
+/// gate can refuse a test client. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
+/// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
+/// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
+/// tests). All are honoured only on a host that does not advertise, so a stray variable can never
+/// touch a real host.
 ///
 /// The home door (this listener) admits only loopback, link-local (AWDL included) and this Mac's
 /// own networks (OriginPolicy), checked at `.ready` before anything is registered or sent: a
 /// refused connection is cancelled with zero bytes from Sill and only counted, one summary line a
 /// minute at most. Every client message is capped at `StreamMessage.maxClientPayload`.
+///
+/// The device gate (DeviceGate): with the floor above "0", a ready connection on either door is
+/// held unregistered until its first message, which must be a hello the floor admits; any other
+/// device gets kind 22 "update" and is closed, never registered. What changed while it was held is
+/// judged again as it is admitted: Direct Wireless turned off (home), and the remote door's trust,
+/// Remote Access, internet access and session limit (`serve`'s recheck). With the floor at "0"
+/// (every build that ships so far) nothing waits, and a device's hello is only logged.
 ///
 /// The remote door (RemoteServer, on this queue) hands its admitted sessions here (`serve`), so
 /// both doors share the framing, the catalog and the stream; remote clients get their own
@@ -62,6 +72,13 @@ final class StreamServer {
         var keyframeWanted = false
         /// When a message was last handed to it (remote clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
+        /// The device gate is reading its first message (floor above "0"): not registered yet.
+        var judging = false
+        /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless
+        /// on), so it may run over AWDL; the gate checks again as it admits one.
+        var acceptedPeerToPeer = false
+        /// A hello (kind 23) came on this connection: only the first counts.
+        var helloSeen = false
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -98,6 +115,18 @@ final class StreamServer {
     /// Every ClientStats report, about once a second per device (the log prints every other one).
     /// Called on the network queue.
     var onClientStats: ((NWConnection, ClientStats) -> Void)?
+    /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
+    /// network queue.
+    var onClientHello: ((NWConnection, Hello) -> Void)?
+
+    /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
+    /// nothing waits for a hello. TEST ONLY: SILL_TEST_MIN_DEVICE_VERSION on a host that does not
+    /// advertise.
+    let deviceFloor: SillVersion
+    /// The Mac's name, for the update goodbye's message. Set by the coordinator before `start()`.
+    var macName = "Mac"
+    /// TEST ONLY: SILL_TEST_GOODBYE's payload, sent by a refusal instead of the update goodbye.
+    private let testGoodbye: Data?
 
     // MARK: Link keepalive
     //
@@ -223,6 +252,7 @@ final class StreamServer {
             serviceIsTest = false
         }
         testHost = !advertise
+        (deviceFloor, testGoodbye) = Self.gateSettings(testHost: testHost)
         listener = try Self.makeListener(peerToPeer: false, port: nil)
         listener.service = makeService()
         wire(listener)
@@ -239,6 +269,24 @@ final class StreamServer {
         if !valid { print("SILL_TEST_SERVICE_TYPE=\(type) ignored: a test type is _name._tcp, and never _sill._tcp.") }
         return valid ? type : nil
     }()
+
+    /// The device floor, and a test goodbye: DeviceGate's constant, except on a test host where
+    /// SILL_TEST_MIN_DEVICE_VERSION replaces it and SILL_TEST_GOODBYE (a JSON Goodbye, sent as
+    /// written) replaces the refusal's payload. A value that does not parse is ignored with one line.
+    /// Neither is read on a host that advertises.
+    private static func gateSettings(testHost: Bool) -> (SillVersion, Data?) {
+        guard testHost else { return (DeviceGate.floor, nil) }
+        let env = ProcessInfo.processInfo.environment
+        var floor = DeviceGate.floor
+        if let raw = env["SILL_TEST_MIN_DEVICE_VERSION"], !raw.isEmpty {
+            if let v = SillVersion(raw) { floor = v } else { print("SILL_TEST_MIN_DEVICE_VERSION=\(raw) ignored: not a version.") }
+        }
+        var goodbye: Data?
+        if let raw = env["SILL_TEST_GOODBYE"], !raw.isEmpty {
+            if Wire.decode(Goodbye.self, from: Data(raw.utf8)) != nil { goodbye = Data(raw.utf8) } else { print("SILL_TEST_GOODBYE ignored: not a Goodbye.") }
+        }
+        return (floor, goodbye)
+    }
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
@@ -394,7 +442,8 @@ final class StreamServer {
         }
         // A connection no longer depends on the listener that accepted it, so it is served
         // whichever listener it came from.
-        l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        let acceptsPeerToPeer = l.parameters.includePeerToPeer
+        l.newConnectionHandler = { [weak self] c in self?.accept(c, peerToPeer: acceptsPeerToPeer) }
     }
 
     /// Direct Wireless Connection, from the coordinator. Before `start()` the listener is built with
@@ -483,14 +532,22 @@ final class StreamServer {
     /// a minute later, as it did when no socket held it); one that shares none cannot, which is
     /// what off means. Clients on any other interface are untouched, and so is every remote
     /// session: the remote door never listens on peer-to-peer Wi-Fi (RemoteTLS), and who reaches it
-    /// is Remote Access's to say, not Direct Wireless's.
+    /// is Remote Access's to say, not Direct Wireless's. A home connection the device gate still
+    /// reads (the floor above "0") is not a client yet: the gate judges it the same way as it
+    /// admits it (`accept`).
     private func disconnectPeerToPeerClients() {
         for client in clients.values where !client.route.isRemote && runsPeerToPeer(client.connection) {
-            let endpoint = "\(client.connection.endpoint)"
-            let who = client.device.map { "\($0) at \(endpoint)" } ?? endpoint
-            print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
-            client.connection.cancel()   // its state handler prints "Client left" and forgets it
+            disconnectOverPeerToPeer(client.connection, device: client.device)
         }
+    }
+
+    /// One line, then the close: a client's state handler then prints "Client left" and forgets
+    /// it; a connection the gate held was never registered and prints nothing more. On `queue`.
+    private func disconnectOverPeerToPeer(_ c: NWConnection, device: String?) {
+        let endpoint = "\(c.endpoint)"
+        let who = device.map { "\($0) at \(endpoint)" } ?? endpoint
+        print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
+        c.cancel()
     }
 
     /// Whether a client reaches this Mac over peer-to-peer Wi-Fi (ClientLink), with the TEST ONLY
@@ -588,14 +645,17 @@ final class StreamServer {
 
     /// The home door. A connection is registered only once it is ready and its origin is one the
     /// home door admits: until then it gets nothing, counts for nothing, and prints nothing.
-    private func accept(_ connection: NWConnection) {
+    /// `peerToPeer`: the accepting listener included peer-to-peer Wi-Fi.
+    private func accept(_ connection: NWConnection, peerToPeer: Bool) {
         let client = Client(connection)
+        client.acceptedPeerToPeer = peerToPeer
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
-                guard self.clients[id] == nil else { return }   // once: a second .ready changes nothing
+                // Once: a second .ready changes nothing, also while the gate reads the first message.
+                guard self.clients[id] == nil, !client.judging else { return }
                 let origin = self.origin(of: connection)
                 guard OriginPolicy.homeAdmits(origin) else {
                     // Through a tunnel or from the internet: never registered, zero bytes sent.
@@ -604,11 +664,31 @@ final class StreamServer {
                     return
                 }
                 client.route = .home(origin)
-                client.link = self.link(connection, path: connection.currentPath)
-                self.register(client)
-                print("Client connected: \(connection.endpoint)")
-                self.receiveLoop(client)
-                self.onClientConnected?(connection, client.route, client.link)
+                let admit = { (hello: Hello?) in
+                    client.link = self.link(connection, path: connection.currentPath)
+                    self.register(client)
+                    print("Client connected: \(connection.endpoint)")
+                    self.receiveLoop(client)
+                    self.onClientConnected?(connection, client.route, client.link)
+                    if let hello { self.took(hello, from: client) }
+                }
+                // The floor at "0": registered at once, as always. Above it: by the first message.
+                if self.deviceFloor == .zero {
+                    admit(nil)
+                } else {
+                    client.judging = true
+                    self.gate(connection) { hello in
+                        // Direct Wireless turned off while the gate read the hello (up to 2 s): the
+                        // replacement, once advertised, disconnected the clients on peer-to-peer
+                        // Wi-Fi without this one, so it goes now, as it would have gone then.
+                        if client.acceptedPeerToPeer, self.swap == .idle, !self.peerToPeer, self.runsPeerToPeer(connection) {
+                            let name = SafeText.label(hello.device ?? "")
+                            self.disconnectOverPeerToPeer(connection, device: name.isEmpty ? nil : name)
+                            return
+                        }
+                        admit(hello)
+                    }
+                }
             case .failed:
                 // Cancelled at once: a failed connection that is only forgotten keeps its socket.
                 connection.cancel()
@@ -643,9 +723,14 @@ final class StreamServer {
     }
 
     /// The remote door's admitted session, already `.ready` and pinned: registered like a home
-    /// client, with its own route, and no link (its card names the route, "through Tailscale").
-    /// On `queue`.
-    func serve(_ connection: NWConnection, route: ClientRoute) {
+    /// client, with its own route, and no link (its card names the route, "through Tailscale"), then
+    /// `admitted` (the door's "Remote client connected" line). With the device floor above "0" the
+    /// gate judges it first, as at home: a refused device never gets `admitted`. The gate reads for
+    /// up to 2 s, and meanwhile the session is no client, so `RemoteServer.closeSessions` and the
+    /// session count miss it: `recheck` judges it again as the gate admits it, and a goodbye it
+    /// returns is sent instead (`closeWithGoodbye`), never registered, never `admitted`. On `queue`.
+    func serve(_ connection: NWConnection, route: ClientRoute, recheck: @escaping () -> Goodbye? = { nil },
+               admitted: @escaping () -> Void = {}) {
         let client = Client(connection)
         client.route = route
         let id = ObjectIdentifier(connection)
@@ -660,9 +745,25 @@ final class StreamServer {
             default: break
             }
         }
-        register(client)
-        receiveLoop(client)
-        onClientConnected?(connection, route, nil)
+        let admit = { (hello: Hello?) in
+            self.register(client)
+            self.receiveLoop(client)
+            self.onClientConnected?(connection, route, nil)
+            admitted()
+            if let hello { self.took(hello, from: client) }
+        }
+        if deviceFloor == .zero {
+            admit(nil)
+        } else {
+            client.judging = true
+            gate(connection) { [queue] hello in
+                if let goodbye = recheck() {
+                    Self.closeWithGoodbye(goodbye, on: connection, queue: queue)
+                    return
+                }
+                admit(hello)
+            }
+        }
     }
 
     /// Admitted remote sessions: how many. On `queue`.
@@ -676,28 +777,30 @@ final class StreamServer {
     // MARK: Goodbye (kind 22)
 
     /// Tells one admitted client why it is about to be closed, then closes it once the message is
-    /// handed to the network or `within` has passed, whichever comes first. On `queue`.
-    func goodbye(_ reason: String, to connection: NWConnection, within: TimeInterval = 0.25) {
-        Self.sayGoodbye(reason, on: connection, queue: queue, within: within)
+    /// handed to the network or `within` has passed, whichever comes first: a registered client,
+    /// whose connection the stream and the catalog share. A connection that was never registered
+    /// closes with `closeWithGoodbye`. On `queue`.
+    func goodbye(_ goodbye: Goodbye, to connection: NWConnection, within: TimeInterval = 0.25) {
+        Self.sayGoodbye(payload: Wire.encode(goodbye), on: connection, queue: queue, within: within)
     }
 
-    /// The same for any ready connection, registered or not (the remote door's refusals). On `queue`.
-    static func sayGoodbye(_ reason: String, on connection: NWConnection, queue: DispatchQueue, within: TimeInterval = 0.25) {
+    /// A kind 22 with this payload, then the close. On `queue`.
+    private static func sayGoodbye(payload: Data, on connection: NWConnection, queue: DispatchQueue, within: TimeInterval) {
         let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                                 payload: Wire.encode(Goodbye(reason: reason))).serialized()
+                                 payload: payload).serialized()
         connection.send(content: data, completion: .contentProcessed { _ in connection.cancel() })
         queue.asyncAfter(deadline: .now() + within) { connection.cancel() }
     }
 
-    /// Every admitted client, home and remote, gets `reason` (the app's Quit and the signal path:
+    /// Every admitted client, home and remote, gets `goodbye` (the app's Quit and the signal path:
     /// "quit"); returns once each message was handed to the network or after `within`. Call from
     /// any thread but the network queue.
-    func goodbyeAll(_ reason: String, within: TimeInterval) {
+    func goodbyeAll(_ goodbye: Goodbye, within: TimeInterval) {
         let group = DispatchGroup()
         group.enter()
         queue.async { [self] in
             let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                                     payload: Wire.encode(Goodbye(reason: reason))).serialized()
+                                     payload: Wire.encode(goodbye)).serialized()
             for client in clients.values where client.connection.state == .ready {
                 group.enter()
                 client.connection.send(content: data, completion: .contentProcessed { _ in group.leave() })
@@ -705,6 +808,151 @@ final class StreamServer {
             group.leave()
         }
         _ = group.wait(timeout: .now() + within)
+    }
+
+    // MARK: The device gate (DeviceGate), with the floor above "0"
+    //
+    // A ready connection is held unregistered (no broadcast, tick, catalog, device row, "Client
+    // connected" line or count) while its first message is read: a hello the floor admits is
+    // served (`admit`); anything else is refused with the update goodbye and closed, never
+    // registered, so neither "Client connected" nor "Client left" is printed for it.
+
+    /// Each source's refusals within the last `DeviceGate.loopWindow` (the loop slowdown), and the
+    /// sources whose Refused line was printed within the last minute, with how many more came since.
+    /// On `queue`.
+    private var gateRefusals: [String: [CFAbsoluteTime]] = [:]
+    private var gateLog: [String: Int] = [:]
+
+    /// Reads `c`'s first message, within `DeviceGate.firstMessageDeadline` of now (`.ready`): a
+    /// hello the floor admits calls `admit` with it; a lower version, a hello that does not decode,
+    /// any other kind first, the end of the connection or nothing in time is refused. On `queue`.
+    private func gate(_ c: NWConnection, admit: @escaping (Hello) -> Void) {
+        var decided = false          // on `queue`, like every closure here
+        let refuse = { [weak self] (hello: Hello?) in
+            guard let self, !decided else { return }
+            decided = true
+            self.refuse(c, hello: hello)
+        }
+        let deadline = DispatchWorkItem { refuse(nil) }
+        queue.asyncAfter(deadline: .now() + DeviceGate.firstMessageDeadline, execute: deadline)
+        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
+            guard let self, !decided else { return }
+            // An older device's viewport, pick or ping, a header no Sill sends, or the end: refused
+            // at once, its payload unread.
+            guard let data, let header = StreamMessage.parseHeader(data), header.kind == .hello,
+                  header.payloadLength <= StreamMessage.maxClientPayload else {
+                deadline.cancel()
+                refuse(nil)
+                return
+            }
+            let judge = { (payload: Data) in
+                guard !decided else { return }
+                deadline.cancel()
+                let hello = Wire.decode(Hello.self, from: payload)
+                if let hello, DeviceGate.admits(hello, floor: self.deviceFloor) {
+                    decided = true
+                    admit(hello)
+                } else {
+                    refuse(hello)
+                }
+            }
+            if header.payloadLength == 0 { judge(Data()); return }
+            c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, _, _ in
+                guard let data, data.count == header.payloadLength else {
+                    deadline.cancel()
+                    refuse(nil)
+                    return
+                }
+                judge(data)
+            }
+        }
+    }
+
+    /// A device the gate did not admit: the update goodbye (or SILL_TEST_GOODBYE's payload), then
+    /// the close (`closeWithGoodbye`); one Refused line per source a minute, the rest counted. A
+    /// source refused `DeviceGate.loopRefusals` times within the window hears it
+    /// `DeviceGate.loopDelay` later. On `queue`.
+    private func refuse(_ c: NWConnection, hello: Hello?) {
+        let source: String
+        if case .hostPort(let host, _) = c.endpoint { source = Self.addressText(host).text } else { source = "\(c.endpoint)" }
+        let now = CFAbsoluteTimeGetCurrent()
+        if gateRefusals.count > 256 { gateRefusals = gateRefusals.filter { $0.value.contains { now - $0 < DeviceGate.loopWindow } } }
+        var times = (gateRefusals[source] ?? []).filter { now - $0 < DeviceGate.loopWindow }
+        let slowed = DeviceGate.slows(refusedInWindow: times.count)
+        times.append(now)
+        gateRefusals[source] = times
+        logRefusal(DeviceGate.refusedLine(hello, endpoint: "\(c.endpoint)", floor: deviceFloor), source: source)
+        let payload = testGoodbye ?? Wire.encode(DeviceGate.refusal(hello, floor: deviceFloor, macName: macName))
+        let queue = queue
+        if slowed {
+            queue.asyncAfter(deadline: .now() + DeviceGate.loopDelay) { Self.closeWithGoodbye(payload, on: c, queue: queue) }
+        } else {
+            Self.closeWithGoodbye(payload, on: c, queue: queue)
+        }
+    }
+
+    /// The goodbye and close of a connection that was never registered, so nothing else sends to
+    /// it: the gate's refusals, a session the gate held and `serve`'s recheck refused, and the
+    /// remote door's refusals at admission (Remote Access off, the session limit). The message,
+    /// then this side's end (FIN; over TLS its close_notify first), then whatever the device still
+    /// sends read and dropped until it closes too (at most `DeviceGate.closeWait`), then the
+    /// connection cancelled. Cancelling at once, with what the device sent still unread, makes TCP
+    /// answer with a reset, which can reach the device before it has read the goodbye (sillclient,
+    /// sending on after its hello, got the goodbye and then ECONNRESET), and a device from
+    /// 2026-09-25 on sends its hello as soon as its connection is ready; a device that loses the
+    /// goodbye reads the reset instead and redials. On `queue`.
+    static func closeWithGoodbye(_ goodbye: Goodbye, on c: NWConnection, queue: DispatchQueue) {
+        closeWithGoodbye(Wire.encode(goodbye), on: c, queue: queue)
+    }
+
+    /// The same with this kind 22 payload (the gate's refusal, or SILL_TEST_GOODBYE's). On `queue`.
+    private static func closeWithGoodbye(_ payload: Data, on c: NWConnection, queue: DispatchQueue) {
+        let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                 payload: payload).serialized()
+        c.send(content: data, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in })
+        func drain() {
+            c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, isComplete, error in
+                if isComplete || error != nil { c.cancel(); return }
+                drain()
+            }
+        }
+        drain()
+        queue.asyncAfter(deadline: .now() + DeviceGate.closeWait) { c.cancel() }
+    }
+
+    /// The first refusal of a source in a minute prints its line; the rest of that minute's are
+    /// counted and printed in one line when it is up, and so on while they keep coming. On `queue`.
+    private func logRefusal(_ line: String, source: String) {
+        if let n = gateLog[source] {
+            gateLog[source] = n + 1
+            return
+        }
+        print(line)
+        gateLog[source] = 0
+        armRefusalLog(source)
+    }
+
+    private func armRefusalLog(_ source: String) {
+        queue.asyncAfter(deadline: .now() + RefusalSummary.interval) { [weak self] in
+            guard let self, let n = self.gateLog[source] else { return }
+            guard n > 0 else { self.gateLog[source] = nil; return }
+            print(DeviceGate.countLine(n, source: source, floor: self.deviceFloor))
+            self.gateLog[source] = 0
+            self.armRefusalLog(source)
+        }
+    }
+
+    /// A device's hello, the first of its connection (after the gate, or in the receive loop): its
+    /// name for the log until its stats name it, one line, and the callback. It never refuses: with
+    /// the floor at "0" every device is served, and above it the gate has judged it already. On
+    /// `queue`.
+    private func took(_ hello: Hello, from client: Client) {
+        client.helloSeen = true
+        let c = client.connection
+        let name = SafeText.label(hello.device ?? "")
+        if client.device == nil, !name.isEmpty { client.device = name }
+        print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
+        onClientHello?(c, hello)
     }
 
     // MARK: Remote clients: silence and a slow uplink
@@ -830,6 +1078,13 @@ final class StreamServer {
                             client.worstRttSincePrint = -1
                         }
                         self.onClientStats?(c, stats)
+                    }
+                } else if header.kind == .hello {
+                    // The device's hello: the first of this connection counts, a second is skipped
+                    // without a line. Never a refusal here (see `took`).
+                    if !client.helloSeen {
+                        client.helloSeen = true
+                        if let hello = Wire.decode(Hello.self, from: payload) { self.took(hello, from: client) }
                     }
                 } else if header.kind == .pairingWanted && client.route.isRemote {
                     // "Show your pairing code" comes only from a device near the Mac: ignored here.

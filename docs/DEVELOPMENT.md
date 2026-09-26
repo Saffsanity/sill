@@ -85,6 +85,25 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+Updates: once a day (and when you click Check Now in Settings › General),
+Sill asks GitHub (api.github.com) whether a newer Sill has been released, and
+when one has, the menu offers "Sill 0.4 Is Available…" and Settings › General
+says so; either opens the release's page on GitHub, where you download it.
+Sill never downloads or installs anything by itself, and a failed check is one
+line in the log and in Settings, never an alert. The request carries the Mac's
+IP address (like any visit to a website), Sill's version in its User-Agent
+("Sill/0.3.0"), a fixed `Accept-Language: en` (URLSession would otherwise send
+the Mac's languages) and, after a first answer, GitHub's own ETag back
+(If-None-Match); nothing else about the Mac or you: no identifier, no cookie,
+nothing about your devices. "Check for updates automatically" turns the daily
+check off (what an earlier check found stays in the menu); the check needs a
+published GitHub release, so while the repository has none it logs "GitHub has
+no release of Sill (HTTP 404)" once a day. It keeps `updateLastCheck`,
+`updateETag`, `updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`;
+to make the next launch check again after 30 s: `for k in updateLastCheck
+updateETag updateLatestTag updateLatestURL; do defaults delete
+me.saffer.sill.mac $k; done` (`defaults delete` takes one key at a time).
+
 ### The command-line host
 
 ```
@@ -159,6 +178,14 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
+
+Every connection starts with the device's hello (its Sill version, build and
+name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
+on the device answers with a notice instead of a stream: the connect screen
+shows the Mac's words ("Update Sill on your iPad to keep using Mac mini. It
+needs version 1.2 or later."), with "Update Sill in the App Store" under them
+once the app has its App Store address, and the device does not reconnect by
+itself. Today's Macs refuse no device.
 
 The project is a plain Xcode project checked in by hand: its source files, an
 asset catalog, and the package reference. Nothing else. A new source file
@@ -310,7 +337,8 @@ tests of Direct Wireless Connection and remote access.
 
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
-which door) on their own with a check each, and runs them: about two minutes,
+which door, the device floor, how a session ends, the update check) on their
+own with a check each, and runs them: about two minutes,
 no device, permission or encoder. `--mutants` also checks that each check fails
 when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
@@ -445,18 +473,29 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## Releasing
 
-Distribution (M6): `Scripts/release.sh` makes the download. It runs
-`make-app.sh --release` (which refuses any signature but Developer ID), zips
-the app, sends it to Apple's notary service and waits, staples the ticket,
-zips it again so the download carries the ticket, checks a copy unpacked from
-that zip with `stapler validate` and `spctl`, and prints the zip's path and
-SHA-256. It needs `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'`
-and `SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
+Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
+CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
+tag v0.4.0`, `git push origin v0.4.0`), and its GitHub release in
+Saffsanity/sill is published (not a draft, not a prerelease) with the
+notarized zip attached; every Sill.app's update check reads that repository's
+releases alone and compares the tag with the version it runs.
+`Scripts/release.sh` makes the download. It runs `make-app.sh --release`
+(which refuses a HEAD without that tag, and any signature but Developer ID),
+zips the app, sends it to Apple's notary service and waits, staples the
+ticket, zips it again so the download carries the ticket, checks a copy
+unpacked from that zip with `stapler validate` and `spctl`, and prints the
+zip's path and SHA-256. With `--publish` it then makes the GitHub Release,
+and refuses to start unless origin has the tag and it names HEAD (gh would
+otherwise make the tag from the default branch); a `SILL_RELEASE_REPO` other
+than Saffsanity/sill gets a warning, since no Sill.app offers a release
+published there. It needs
+`SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'` and
+`SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
 store-credentials sill-notary`), and refuses to start without them. Give
 both on the release command itself, never in your shell profile: `make-app.sh`
 signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
 included. `--dry-run` needs only the identity and stops before anything goes
-to Apple.
+to Apple; it builds any commit, and only warns that HEAD lacks the tag.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
@@ -464,7 +503,10 @@ The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
 `v<version>`: it checks and builds, and with the repository variable
 `SILL_SIGN_IN_CI` set to `true` it also signs, notarizes and publishes with
 `release.sh --publish` (docs/release-checklist.md, "Releasing from GitHub
-Actions").
+Actions"). Its checkout is that tag, so there `--publish` checks the local
+tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
+`--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
+on, let that run publish instead.
 
 ## Known limitations
 
@@ -487,8 +529,10 @@ Actions").
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
 - `Packaging/`: Sill.app's Info.plist and entitlements.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `sillclient.py` (a wire-format test client) and
-  `sillrelay.py` (a relay that slows or cuts the link, for tests).
+  zip people download), `sillclient.py` (a wire-format test client),
+  `sillrelay.py` (a relay that slows or cuts the link, for tests) and
+  `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
+  check's tests).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI and release
   workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy

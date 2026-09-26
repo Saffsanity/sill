@@ -15,9 +15,9 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              remoteAccess, remotePort, internetAccess,
-///                                              remoteAddressName=host[:port]). Saved like any
-///                                              change: run it on the bare binary, whose defaults
-///                                              domain is "SillMenuBar", not on Sill.app.
+///                                              remoteAddressName=host[:port], updateCheck). Saved
+///                                              like any change: run it on the bare binary, whose
+///                                              defaults domain is "SillMenuBar", not on Sill.app.
 ///     -SillPairAfter <s>                       open a pairing window (Pair iPhone or iPad…) s
 ///                                              seconds after launch. With --synthetic and
 ///                                              SILL_TEST_REMOTE_DIR the link and the code are
@@ -25,8 +25,23 @@ import StreamProtocol
 ///                                              (0600), never printed (the log copies stdout)
 ///     -SillUnpairAfter <s>                     remove every paired device s seconds after launch
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
+///     -SillUpdateFeed <url>                    the update check asks this feed instead of GitHub:
+///                                              a feed on this Mac only (http or https to
+///                                              127.0.0.1, ::1 or localhost; anything else is
+///                                              ignored with one line). With it any http or https
+///                                              release page counts, and test pattern mode checks
+///     -SillUpdateNow 1                         one check right after the host starts, as Check Now
+///     -SillUpdateVersion <v>                   the version the check compares (the bare binary has
+///                                              none, so it never checks without this)
+///     -SillUpdateInterval <s>                  the check's 24 hours become s seconds (the hour's
+///                                              retry s/24, at least 1 s; the launch delay at most
+///                                              s; no jitter)
+///     -SillPrintMenuAfter <s>                  print the status menu as it would open (as menu.txt
+///                                              draws it, "menu: " before each line) and Settings ›
+///                                              General's update line, s seconds after launch
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Remote Access pane in
-///                                              each of its states), the pairing window's states,
+///                                              each of its states, General's update section in
+///                                              each of its), the pairing window's states,
 ///                                              status cards, glyphs and menu.txt to <dir>, then
 ///                                              exit (no Screen Recording needed: views render
 ///                                              offscreen; no identity is loaded)
@@ -48,6 +63,34 @@ enum DebugHooks {
         return library.appendingPathComponent("Logs/Sill/Sill.log")
     }
 
+    /// The update check's configuration: GitHub and the plan's schedule, with the running version
+    /// from the bundle, unless the test arguments above say otherwise. Read once, when the model is
+    /// made; nothing here makes a request.
+    static func updateConfiguration(testPattern: Bool) -> UpdateChecker.Configuration {
+        let defaults = UserDefaults.standard
+        var c = UpdateChecker.Configuration()
+        c.testPattern = testPattern
+        c.running = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let v = defaults.string(forKey: "SillUpdateVersion"), !v.isEmpty { c.running = v }
+        if let raw = defaults.string(forKey: "SillUpdateFeed"), !raw.isEmpty {
+            if let url = URL(string: raw), UpdatePolicy.isLocalFeed(url) {
+                c.feed = url
+                c.testFeed = true
+            } else {
+                print("SillUpdateFeed ignored: only a feed on this Mac (127.0.0.1, ::1 or localhost) is allowed.")
+            }
+        }
+        c.checkAtStart = defaults.bool(forKey: "SillUpdateNow")
+        let interval = defaults.double(forKey: "SillUpdateInterval")
+        if interval > 0 {
+            c.period = interval
+            c.retry = max(1, interval / 24)
+            c.launchDelay = min(UpdatePolicy.launchDelay, interval)
+            c.jitter = 0
+        }
+        return c
+    }
+
     /// -SillSetAfter and -SillQuitAfter, counted from now (launch).
     static func schedule(model: AppModel) {
         let defaults = UserDefaults.standard
@@ -63,10 +106,12 @@ enum DebugHooks {
                     MainActor.assumeIsolated {
                         var config = model.settings.config
                         var addressName: String?
-                        for change in changes { apply(change, to: &config, addressName: &addressName) }
+                        var updateCheck: Bool?
+                        for change in changes { apply(change, to: &config, addressName: &addressName, updateCheck: &updateCheck) }
                         print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
                         model.settings.config = config    // one assignment: several keys, one apply
                         if let addressName { model.settings.remoteAddressName = addressName }
+                        if let updateCheck { model.settings.updateCheck = updateCheck }
                     }
                 }
                 RunLoop.main.add(timer, forMode: .common)
@@ -93,6 +138,20 @@ enum DebugHooks {
             }
             RunLoop.main.add(timer, forMode: .common)
         }
+        let printAfter = defaults.double(forKey: "SillPrintMenuAfter")
+        if printAfter > 0 {
+            let timer = Timer(timeInterval: printAfter, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    model.permissions.refresh()
+                    model.loginItem.refresh()
+                    print("SillPrintMenuAfter \(printAfter) s:")
+                    let text = MenuBuilder.dump(MenuBuilder.entries(for: model), card: model.presentation)
+                    for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty { print("menu: \(line)") }
+                    print("Settings › General's update line: \(model.updates.pane.line)")
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+        }
         let quitAfter = defaults.double(forKey: "SillQuitAfter")
         if quitAfter > 0 {
             let timer = Timer(timeInterval: quitAfter, repeats: false) { _ in
@@ -105,7 +164,7 @@ enum DebugHooks {
         }
     }
 
-    private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?) {
+    private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, updateCheck: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -121,6 +180,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "remoteAddressName": addressName = value
+        case "updateCheck": updateCheck = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -135,11 +195,22 @@ enum DebugHooks {
         let appearances: [(String, NSAppearance.Name)] = [("light", .aqua), ("dark", .darkAqua)]
 
         // The Remote Access pane is drawn in each of its states below instead of live (the model
-        // has no host here, so it would only ever show "off").
+        // has no host here, so it would only ever show "off"). General's update section is fixed at
+        // "Not checked yet.", whatever an earlier run stored; its states are drawn alone below.
+        let neverChecked = updatePaneSamples()[0].pane
         for tab in SettingsTab.allCases where tab != .remoteAccess {
             for (name, appearance) in appearances {
-                render(SettingsPane(tab: tab, model: model).background(Color(nsColor: .windowBackgroundColor)),
+                render(SettingsPane(tab: tab, model: model, previewUpdates: neverChecked).background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("pane-\(tab.rawValue)-\(name).png"))
+            }
+        }
+        for sample in updatePaneSamples() {
+            let section = Form { UpdatesSection(pane: sample.pane, automatic: .constant(sample.automatic)) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-updates-\(sample.name)-\(name).png"))
             }
         }
         for sample in remotePaneSamples() {
@@ -178,6 +249,14 @@ enum DebugHooks {
             config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmark matches the sample
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
+            menuText += MenuBuilder.dump(entries, card: p) + "\n"
+        }
+        // A newer release found (0.4 against 0.3): the idle menu with its item; the glyph stays.
+        if let idle = samples().first(where: { $0.name == "idle" }) {
+            let p = StatusText.present(snapshot: idle.snapshot, permissions: idle.permissions, startupError: nil, hasCoordinator: true)
+            let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: idle.permissions,
+                                              update: (offer: previewOffer, running: SillVersion("0.3.0")!))
+            menuText += "=== update-available (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
         }
         try? menuText.write(to: out.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
@@ -351,6 +430,45 @@ enum DebugHooks {
             Sample(name: "waiting", snapshot: waiting),
             Sample(name: "failed", snapshot: failed),
             Sample(name: "startup-error", snapshot: HostStatusSnapshot(), startupError: "POSIXErrorCode(rawValue: 22): Invalid argument"),
+        ]
+    }
+}
+
+// MARK: Update check previews
+
+extension DebugHooks {
+    /// Sill 0.4, found by a check, against a running 0.3.
+    static let previewOffer = UpdatePolicy.Offer(version: SillVersion("0.4.0")!, tag: "v0.4.0",
+                                                 url: URL(string: "https://github.com/Saffsanity/sill/releases/tag/v0.4.0")!)
+
+    struct UpdatePaneSample {
+        var name: String
+        var pane: UpdatePolicy.Pane
+        var automatic = true
+    }
+
+    /// pane-updates-{never,last,checking,uptodate,available,norelease,limited,offline,noversion,
+    /// testpattern}: the section in each state, at the previews' clock (`previewNow`).
+    static func updatePaneSamples() -> [UpdatePaneSample] {
+        func pane(checking: Bool = false, result: UpdatePolicy.Outcome? = nil, offer: UpdatePolicy.Offer? = nil,
+                  lastCheck: Date? = nil, hasVersion: Bool = true, testPatternOnly: Bool = false) -> UpdatePolicy.Pane {
+            UpdatePolicy.pane(checking: checking, result: result, resultID: result == nil ? 0 : 1, offer: offer, lastCheck: lastCheck,
+                              hasVersion: hasVersion, testPatternOnly: testPatternOnly,
+                              time: UpdateChecker.time, date: UpdateChecker.date)
+        }
+        let lastCheck = previewNow.addingTimeInterval(-3 * 3600)
+        return [
+            UpdatePaneSample(name: "never", pane: pane()),
+            UpdatePaneSample(name: "last", pane: pane(lastCheck: lastCheck)),
+            UpdatePaneSample(name: "checking", pane: pane(checking: true, lastCheck: lastCheck)),
+            UpdatePaneSample(name: "uptodate", pane: pane(result: .upToDate(tag: "v0.3.0"), lastCheck: previewNow)),
+            UpdatePaneSample(name: "available", pane: pane(offer: previewOffer, lastCheck: lastCheck)),
+            UpdatePaneSample(name: "norelease", pane: pane(result: .noRelease, lastCheck: previewNow)),
+            UpdatePaneSample(name: "limited", pane: pane(result: .limited(status: 403, reset: previewNow.addingTimeInterval(42 * 60)), lastCheck: previewNow)),
+            UpdatePaneSample(name: "offline", pane: pane(result: .noConnection(code: -1009, description: "The Internet connection appears to be offline."),
+                                                         lastCheck: lastCheck), automatic: false),
+            UpdatePaneSample(name: "noversion", pane: pane(hasVersion: false)),
+            UpdatePaneSample(name: "testpattern", pane: pane(testPatternOnly: true)),
         ]
     }
 }

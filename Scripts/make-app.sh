@@ -5,7 +5,9 @@
 #   Scripts/make-app.sh --install          …then replace /Applications/Sill.app (a running copy quits first)
 #   Scripts/make-app.sh --install --open   …and launch it: Noah's one command after any change
 #   SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release
-#                                          (M6; refused unless the signature is Developer ID)
+#                                          (M6; refused unless HEAD carries the tag v‹version› and
+#                                          the signature is Developer ID; Scripts/release.sh --dry-run
+#                                          sets SILL_RELEASE_DRY_RUN=1, which only warns about the tag)
 #   SILL_INSTALL_DIR=~/Applications Scripts/make-app.sh --install   (another install folder)
 #
 # Why a script: SwiftPM builds executables, not app bundles, and everything the host needs from
@@ -35,6 +37,23 @@ done
 if [ "$release" = 1 ] && [ -z "${SILL_SIGN_IDENTITY:-}" ]; then
     echo "error: --release needs SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'" >&2
     exit 2
+fi
+# A release is built only from the commit its tag names: the tag is "v" + Packaging/Info.plist's
+# CFBundleShortVersionString (v0.4.0 for 0.4.0), and every Sill.app's update check compares the
+# latest release's tag on GitHub with the version it runs (Sources/SillMenuBar/UpdatePolicy.swift).
+# A rehearsal (release.sh --dry-run, which sets SILL_RELEASE_DRY_RUN=1) builds any commit and only
+# warns: its zip is never notarized, so it is never published.
+if [ "$release" = 1 ]; then
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Packaging/Info.plist)"
+    tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
+    if ! git tag --points-at HEAD 2>/dev/null | grep -Fx "v$version" >/dev/null; then   # -F: dots are dots
+        if [ "${SILL_RELEASE_DRY_RUN:-}" = 1 ]; then
+            echo "warning: HEAD is not tagged v$version (it is tagged '${tags:-nothing}'); a dry run builds it anyway, a release only a commit tagged v$version." >&2
+        else
+            echo "error: --release builds only a commit tagged v$version (HEAD is tagged '${tags:-nothing}'): the update check compares the release's tag with this version." >&2
+            exit 2
+        fi
+    fi
 fi
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/Info.plist)"

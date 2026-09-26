@@ -259,7 +259,10 @@ final class RemoteServer {
     /// switch as it is now: at `.preparing` (behind the check before start), again at `.ready` and
     /// at a pairing's kind 19, so a switch turned off during the handshake refuses a connection not
     /// yet admitted. Admitted ones are `closeSessions`' (RemoteAccess changes the snapshot before it
-    /// queues that), so none slips between the two. False when refused, or no longer pending.
+    /// queues that), so none slips between the two; one the device gate holds (the floor above
+    /// "0") is neither pending nor a client yet, and `stillAdmits` judges it again as the gate
+    /// admits it, from the same snapshot: admitted before the change, it is a client when
+    /// `closeSessions` runs; after it, it is refused. False when refused, or no longer pending.
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id] else { return false }
         if p.origin == nil {
@@ -288,7 +291,9 @@ final class RemoteServer {
         }
     }
 
-    /// `sill/1`: a paired key (checked again), Remote Access on, fewer than 8 sessions.
+    /// `sill/1`: a paired key (checked again), Remote Access on, fewer than 8 sessions. A refusal
+    /// here closes with a FIN and a drain (`closeWithGoodbye`): the device has sent its hello by
+    /// now, and a cancel with it unread answered with a reset that could beat the goodbye.
     private func admitSession(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data?) {
         let t = trust.snapshot
         guard let fp, let name = t.paired[fp] else {
@@ -300,23 +305,55 @@ final class RemoteServer {
         p.deadline?.cancel()
         forgive(p.source)
         guard t.remoteAccess else {
-            StreamServer.sayGoodbye(Goodbye.remoteOff, on: c, queue: queue)
+            StreamServer.closeWithGoodbye(Goodbye(reason: Goodbye.remoteOff), on: c, queue: queue)
             return
         }
         guard server.remoteSessionCount < Self.maxSessions else {
             refusals.count("limit")
-            StreamServer.sayGoodbye(Goodbye.busy, on: c, queue: queue)
+            StreamServer.closeWithGoodbye(Goodbye(reason: Goodbye.busy), on: c, queue: queue)
             return
         }
         let origin = p.origin ?? .loopback
         let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { t.serviceNames[$0] }) ?? "by address"
-        server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: name))
-        print("Remote client connected: \(name) \(label) (\(c.endpoint))")
+        // The line once the device gate admits it: at once with the floor at "0", where it always
+        // came; a device the gate refuses hears the update goodbye instead and gets no line here.
+        let line = "Remote client connected: \(name) \(label) (\(c.endpoint))"
+        let endpoint = "\(c.endpoint)"
+        server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: name),
+                     recheck: { [self] in stillAdmits(fp, name: name, origin: origin, endpoint: endpoint) },
+                     admitted: { print(line) })
+    }
+
+    /// A session the device gate held (the floor above "0", up to 2 s) is judged again as it is
+    /// admitted, from the trust snapshot as it is then: removed, Remote Access or internet access
+    /// turned off, or the limit reached meanwhile. The goodbye to send instead, with the line
+    /// `closeSessions` prints for the same change, or nil to admit it. On `queue`.
+    private func stillAdmits(_ fp: Data, name: String, origin: OriginPolicy.Origin, endpoint: String) -> Goodbye? {
+        let t = trust.snapshot
+        if t.paired[fp] == nil {
+            print("Removed \(name): disconnecting it at \(endpoint).")
+            return Goodbye(reason: Goodbye.removed)
+        }
+        if !t.remoteAccess {
+            print("Remote access off: disconnecting \(name) at \(endpoint).")
+            return Goodbye(reason: Goodbye.remoteOff)
+        }
+        if !OriginPolicy.remoteAdmits(origin, internetAccess: t.internetAccess) {
+            print("Internet access off: disconnecting \(name) at \(endpoint).")
+            return Goodbye(reason: Goodbye.internetOff)
+        }
+        if server.remoteSessionCount >= Self.maxSessions {
+            refusals.count("limit")
+            return Goodbye(reason: Goodbye.busy)
+        }
+        return nil
     }
 
     /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, judged on
     /// the main actor, answered with one kind 20, then closed once that is sent (or after 250 ms).
-    /// A device that goes away before its kind 19 is not refused, only closed.
+    /// A device that goes away before its kind 19 is not refused, only closed. Pairing is never
+    /// refused for the device's age (DeviceGate judges sessions only): a device too old for this
+    /// Mac's sessions can still pair, and hears the update notice when it connects.
     private func readPairRequest(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data?) {
         guard trust.snapshot.pairingOpen, let fp else {
             refuse(id, "unpaired")
@@ -437,7 +474,7 @@ final class RemoteServer {
             let list = server.sessions { $0.isRemote && matching($0) }
             for (c, route) in list {
                 if let line { print(line(route.pairedName ?? "a device", "\(c.endpoint)")) }
-                server.goodbye(reason, to: c)
+                server.goodbye(Goodbye(reason: reason), to: c)
             }
             done?(list.count)
         }

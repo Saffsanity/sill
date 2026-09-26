@@ -9,11 +9,14 @@ import StreamProtocol
 struct SettingsPane: View {
     let tab: SettingsTab
     let model: AppModel
+    /// The previews (DebugHooks): General's update section in this state instead of the live one,
+    /// so a render does not depend on what an earlier run stored.
+    var previewUpdates: UpdatePolicy.Pane?
 
     var body: some View {
         Group {
             switch tab {
-            case .general: GeneralPane(model: model, settings: model.settings)
+            case .general: GeneralPane(model: model, settings: model.settings, previewUpdates: previewUpdates)
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
             case .permissions: PermissionsPane(model: model)
@@ -59,6 +62,7 @@ struct Footnote: View {
 private struct GeneralPane: View {
     let model: AppModel
     @Bindable var settings: HostSettings
+    var previewUpdates: UpdatePolicy.Pane?
 
     private static let runsFromApplications = Bundle.main.bundlePath.hasPrefix("/Applications/")
 
@@ -116,6 +120,13 @@ private struct GeneralPane: View {
             } footer: {
                 Footnote("Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find and connect to this Mac.")
             }
+            if let preview = previewUpdates {
+                UpdatesSection(pane: preview, automatic: .constant(true))
+            } else {
+                UpdatesSection(pane: model.updates.pane, automatic: $settings.updateCheck,
+                               actions: UpdatesSection.Actions(checkNow: { model.updates.checkNow() },
+                                                               openRelease: { NSWorkspace.shared.open($0) }))
+            }
             Section {
                 HStack {
                     Button("Show Log…") { model.showLog?() }
@@ -142,6 +153,47 @@ private struct GeneralPane: View {
         case .failed: return "Not visible (the listener failed)"
         case .waiting: return "Not yet (waiting for the network)"
         case .starting, .registering: return "Registering…"
+        }
+    }
+}
+
+// MARK: Updates
+
+/// Settings › General's update check: the automatic switch, the line (what the last check found, or
+/// why Sill cannot check), Open Release Page… while a newer release is offered, and Check Now. Plain
+/// values in, so the previews draw every state. Errors show here and in the log, never in an alert.
+struct UpdatesSection: View {
+    struct Actions {
+        var checkNow: () -> Void = {}
+        var openRelease: (URL) -> Void = { _ in }
+    }
+
+    let pane: UpdatePolicy.Pane
+    @Binding var automatic: Bool
+    var actions = Actions()
+
+    var body: some View {
+        Section {
+            Toggle("Check for updates automatically", isOn: $automatic)
+            LabeledContent {
+                HStack(spacing: 8) {
+                    if let url = pane.releasePage {
+                        Button("Open Release Page…") { actions.openRelease(url) }
+                    }
+                    Button("Check Now") { actions.checkNow() }
+                        .disabled(!pane.canCheck)
+                }
+            } label: {
+                Text(pane.line)
+                    .foregroundStyle(pane.failed ? Color.orange : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // VoiceOver hears Check Now's result, which arrives after the click.
+            .onChange(of: pane.resultID) { _, _ in
+                AccessibilityNotification.Announcement(pane.line).post()
+            }
+        } footer: {
+            Footnote(UpdatePolicy.footnote)
         }
     }
 }

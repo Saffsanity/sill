@@ -45,6 +45,15 @@ extension StreamClient {
 
     private static let localCursorDebounce: TimeInterval = 0.2
 
+    /// The session ended (`tearDown`): its last viewport and a pointer re-send still waiting go with
+    /// it, so neither reaches the next connection, whose stream screen sends a viewport of its own
+    /// once connected. The pointer flag stays, for that viewport to carry. Main thread.
+    func forgetViewport() {
+        localCursorState.pending?.cancel()
+        localCursorState.pending = nil
+        lastViewport = nil
+    }
+
     /// The rate the host should stream at for this device: the panel's ceiling (120 on ProMotion
     /// iPads and iPhones, 60 on the iPad mini and other 60 Hz panels), or 60 while Low Power Mode
     /// is on, which caps the panel at 60 anyway, or while `remote` (away from home through a VPN or

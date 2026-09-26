@@ -9,8 +9,8 @@
 #
 # Cost: GitHub-hosted runners are free for a public repository. For a private one, macOS minutes
 # count against the account's included minutes and are then billed per minute ($0.062 on
-# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about an hour and a half
-# of macOS time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
+# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about two hours of macOS
+# time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
 name: CI
 
 # A change that touches only documents, the website or design files starts no run. (Should this
@@ -119,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, clientlink, fence, origin, pairing-address, policy, protocol, remote-rules]
+        check: [addresses, clientlink, compatibility, device-gate, fence, goodbye, origin, pairing-address, policy, protocol, remote-rules, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

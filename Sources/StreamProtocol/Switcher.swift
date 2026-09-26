@@ -41,9 +41,18 @@ public struct WindowList: Codable {
     /// device moving its session from AWDL to the network must not land on another Mac. Optional:
     /// nil from a host older than 2026-09-24, and an older device ignores the key.
     public var launchID: String?
+    /// The host's version: Sill.app's CFBundleShortVersionString ("0.4.0"); nil from SillHost (no
+    /// bundle) and from hosts before 2026-09-25. For later devices: which Mac to update, and to what
+    /// (docs/update-notice-plan.md §14).
+    public var hostVersion: String?
+    /// The host's SillProtocol.current; nil from hosts before 2026-09-25, which speak 1. The JSON key
+    /// is "protocol".
+    public var `protocol`: Int?
 
-    public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil) {
+    public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
+                hostVersion: String? = nil, protocol: Int? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
+        self.hostVersion = hostVersion; self.protocol = `protocol`
     }
 }
 

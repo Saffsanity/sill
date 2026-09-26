@@ -11,6 +11,9 @@ final class AppModel {
     let settings: HostSettings
     let permissions: PermissionsModel
     let loginItem = LoginItemModel()
+    /// The update check (GitHub's releases feed): the menu's "Sill 0.4 Is Available…" and Settings ›
+    /// General's section. Started once the host has started, or could not.
+    let updates: UpdateChecker
     /// `--synthetic`: the Desktop streams a test pattern and the host stays off Bonjour, exactly
     /// as with the CLI's flag. No onboarding in this mode.
     let synthetic = CommandLine.arguments.contains("--synthetic")
@@ -39,6 +42,13 @@ final class AppModel {
         let settings = HostSettings()
         self.settings = settings
         permissions = PermissionsModel(settings: settings)
+        let updates = UpdateChecker(configuration: DebugHooks.updateConfiguration(testPattern: CommandLine.arguments.contains("--synthetic")),
+                                    automatic: settings.updateCheck)
+        self.updates = updates
+        // The switch reaches the checker from launch on: Settings… is in the menu before the host
+        // is up (up to a second or more), and -SillSetAfter counts from launch. Before `start()`
+        // the checker only records it.
+        settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(settings.updateCheck) }
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
@@ -56,7 +66,10 @@ final class AppModel {
                 // The identity before the coordinator: its TXT tag goes into the first Bonjour
                 // registration. A keychain failure leaves remote access unavailable, not the app.
                 let remote = makeRemoteAccess()
-                let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote)
+                // The window lists carry this Sill's version, when it has one (the bare binary's
+                // "dev" does not parse): later devices can tell which Mac to update.
+                let c = try StreamCoordinator(config: settings.config, synthetic: synthetic, appKitLoop: true, remote: remote,
+                                              hostVersion: SillVersion(Self.version) != nil ? Self.version : nil)
                 c.keepRunningOnListenerFailure()
                 coordinator = c
                 // One path from the controls to the host, synchronous: the host's target equals
@@ -83,7 +96,19 @@ final class AppModel {
                 startupError = "\(error)"
                 print("Sill couldn’t start: \(error)")
             }
+            // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
+            startUpdates()
         }
+    }
+
+    // MARK: Updates
+
+    /// The update check's schedule and the Mac waking (its switch is wired from `init`).
+    private func startUpdates() {
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updates.systemDidWake() }
+        }
+        updates.start()
     }
 
     // MARK: Remote access
