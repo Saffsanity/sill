@@ -8,6 +8,87 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
+150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
+Connect record, screenshots, the 0.5 archive and upload, the placeholder and
+the site). This branch makes those minutes of work: the upload tooling and
+the record field by field. Nothing was uploaded and no record was created.
+- `Scripts/release-ios.sh` (Layout): archive (Release, generic/platform=iOS,
+  automatic signing, `-allowProvisioningUpdates`), export with
+  `Packaging/ExportOptions-appstore.plist` (app-store-connect, team
+  9B2KKVM937, automatic, destination export, `manageAppVersionAndBuildNumber`
+  NO), the .ipa unpacked and checked, and with `--upload` a second export
+  whose destination is upload. `--bump` (a clean tree; `CURRENT_PROJECT_VERSION`
+  + 1 in both configurations, committed alone), `--api-key`/`--api-issuer`
+  (`--api-key-id`; an App Store Connect key instead of Xcode's account,
+  refused inside the repository, only its path given to xcodebuild),
+  `--sign-at-export` (the archive unsigned, the export signs), `--unsigned`
+  (CI without the key), `--print-version`, `--privacy-report` (xcodebuild
+  has no command for the report: the manifests, the required-reason APIs the
+  binary imports or calls, and the Organizer's way to the PDF). Refuses any
+  Xcode but 27; one line per step, xcodebuild's output in `.build/ios/*.log`.
+- Signing, as the rehearsal found it (2026-09-26): the first export made a
+  cloud-managed Apple Distribution certificate (a POST for
+  DISTRIBUTION_MANAGED; "Apple Distribution: NOAH WILLIAM SAFFER
+  (9B2KKVM937)", until 2027-09-26; no private key in the keychain) and the
+  profile "iOS Team Store Provisioning Profile: me.saffer.sill" (until
+  2027-09-26); the App ID is Xcode's "XC me saffer sill". An archive made
+  with `CODE_SIGNING_ALLOWED=NO` exports the same way with the same
+  entitlements, so CI needs no certificate or profile, only an App Store
+  Connect key with the Admin role (cloud signing refuses others). Uploading
+  takes Account Holder, Admin, App Manager or Developer, but every export
+  signs, so the notary key (Developer) can't run the script.
+- `.github/workflows/testflight.yml` (Layout): by hand only. Without the key
+  `--unsigned` and that .ipa as the artifact; with the secrets
+  `SILL_TESTFLIGHT_KEY_ID`, `SILL_TESTFLIGHT_ISSUER_ID` and
+  `SILL_TESTFLIGHT_KEY_P8`, `--sign-at-export` and the signed .ipa; with the
+  variable `SILL_TESTFLIGHT_IN_CI` true too, `--upload`.
+- docs/release-checklist.md, "TestFlight": the record field by field (§1),
+  the App Store address (§2), the site (§3: sill-site holds main's `site/`
+  but for download.html, kept at "being prepared" on purpose, so TestFlight
+  needs no republish; a later one leaves out download.html, `.nojekyll` and
+  `.github`), the build (§4),
+  internal testers (§5), Test Information with a beta description (§6),
+  external testers and Beta App Review (§7), the screenshot session (§8,
+  metadata §9) and TestFlight from GitHub Actions. docs/app-store-metadata.md:
+  the version record says 0.5 (App Store Connect proposes 1.0).
+- Verified: the rehearsal on this Mac, archive and export in 49 s (the plan's
+  numbers are in the checklist's §4), Sill.ipa 2.0 MB, App Store profile,
+  `beta-reports-active` true, get-task-allow false, 0.5 (1),
+  `ITSAppUsesNonExemptEncryption` false, the Local Network and camera
+  strings, `PrivacyInfo.xcprivacy`, no keychain or Apple Account prompt (no
+  SecurityAgent line in the unified log); the unsigned archive's export with
+  the same signature and entitlements; the script offline against a
+  stand-in xcodebuild playing the rehearsal's archive and .ipa (123 checks,
+  27 of 27 mutants caught; in the session's scratchpad, `testflight/tests`);
+  the workflow's YAML (every action pinned, no expression in a run script,
+  bash 3.2 parses each run block) and its shell steps with fake inputs.
+- Review fixes (2026-09-26): `--upload` refuses uncommitted changes as
+  `--bump` does (a build that stays here only warns), and both count new
+  files in iOSClient and Sources/StreamProtocol, which reach the build
+  unlisted (the local StreamProtocol package, the asset catalog); an
+  `appStoreText` that is neither the placeholder nor an App Store address
+  stops the build; `--api-key` refuses a file that isn't a .p8 key, and a
+  relative `--api-key` or `--privacy-report` path is the caller's, not the
+  repository's; an expired Xcode sign-in, and a failure after `--bump` (its
+  commit, then run again without it), are named. Roles, from Apple's pages:
+  uploading takes Developer or above and signing through a key Admin (the
+  docs had App Manager, and a notary key that could do neither). The
+  workflow's key step names a secret that isn't base64 (it ended at
+  base64's own complaint). The checklist's republish (§3, and part 1 §3's)
+  deleted sill-site's own `.nojekyll` and `.github/FUNDING.yml` (tried with
+  this Mac's openrsync on a copy), part 2's first release pointed at the
+  rsync below, which leaves out download.html, and §3 said the published
+  pages lacked the email_off comments (Cloudflare strips them; sill-site
+  has them). Verified: the offline checks, 150 (123 and 27 new), and 39 of
+  39 mutants (27 and 12 new); the key step under bash 3.2 with a good, a
+  raw, a garbled and an empty secret; the export options against Xcode
+  27.0's `xcodebuild -help`.
+- **Untested, for Noah:** the record, the upload (`Scripts/release-ios.sh
+  --upload` after the checklist's TestFlight §1 and §2), TestFlight on the
+  devices, any run on GitHub (unsigned first, then with the key), signing
+  through an API key, and the Organizer's privacy report PDF.
+
 **Before going public (2026-09-26, branch `public-sweep` from main at 150f781,
 with main at a550e27 merged in, PR #24).** Noah's four steps for the first Mac
 release end with making Saffsanity/sill public, which publishes its whole
@@ -2580,8 +2661,22 @@ good.
   and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
   GitHub's releases feed and times the checks; compiles on its own with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
-  (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
-  installs the bundle; `Scripts/release.sh` (M6) makes the download from it:
+  (get-task-allow only), and `ExportOptions-appstore.plist`, how the iOS
+  app's archive is exported for App Store Connect. `Scripts/release-ios.sh`
+  makes the iOS app's build: the Release archive (automatic signing on team
+  9B2KKVM937, or none with `--sign-at-export` and `--unsigned`), the export
+  (destination export; `--upload` adds a second one whose destination is
+  upload), the .ipa checked (version and build, the export compliance key,
+  the Local Network, Bonjour and camera entries, the privacy manifest, an
+  Apple Distribution signature, an App Store profile, no get-task-allow, the
+  required-reason APIs against the manifest), `--bump`, `--api-key`,
+  `--print-version` and `--privacy-report`; it refuses any Xcode but 27,
+  with `--bump` or `--upload` a working tree with changes (new files in
+  iOSClient and Sources/StreamProtocol count), and an App Store address in
+  `SillLinks.swift` that isn't one, and sourced it only defines its
+  functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
+  builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
+  (M6) makes the download from it:
   `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
   service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
   the ticket stapled, the zip made again with the ticket inside, and a copy
@@ -2736,12 +2831,18 @@ good.
   temporary keychain, the notary key stored as a profile in it, `release.sh
   --publish`, and the keychain deleted in an always() step. Secrets,
   variables, rotation and costs: docs/release-checklist.md, "Releasing from
-  GitHub Actions". `.github/actions/select-xcode` — selects the newest Xcode
-  of the `version` asked for (27) whose folder is not a beta and prints
-  `xcodebuild -version`; without one, CI warns and takes the newest Xcode
-  there and a release (`fallback: false`) fails (CI only: it runs `sudo
-  xcode-select`). The runner's `bash` is 3.2: try `run:` steps with
-  `/bin/bash`. Actions are pinned by commit hash.
+  GitHub Actions". `testflight.yml`: by hand only; `release-ios.sh
+  --unsigned` without an App Store Connect key, `--sign-at-export` with one
+  (the secrets `SILL_TESTFLIGHT_KEY_ID`, `SILL_TESTFLIGHT_ISSUER_ID`,
+  `SILL_TESTFLIGHT_KEY_P8`, an Admin key: cloud signing, no certificate or
+  profile stored), and `--upload` too when the variable `SILL_TESTFLIGHT_IN_CI`
+  is `true`; the .ipa is the artifact for 14 days (docs/release-checklist.md,
+  "TestFlight from GitHub Actions"). `.github/actions/select-xcode` —
+  selects the newest Xcode of the `version` asked for (27) whose folder is
+  not a beta and prints `xcodebuild -version`; without one, CI warns and
+  takes the newest Xcode there and a release (`fallback: false`) fails (CI
+  only: it runs `sudo xcode-select`). The runner's `bash` is 3.2: try `run:`
+  steps with `/bin/bash`. Actions are pinned by commit hash.
 - `Tests/checks/` — the pure checks, a folder each: `main.swift`, `run.sh`
   (compiles the app's files it names with swiftc into `.build/checks/<name>/`
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
@@ -2779,6 +2880,8 @@ Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
+Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
+Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (docs/release-checklist.md, TestFlight; --privacy-report, --print-version)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
