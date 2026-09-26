@@ -14,6 +14,7 @@ Noah hasn't confirmed these yet. Each lives in the places listed, and one comman
 | The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `docs/app-store-metadata.md`, this file |
 | The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `docs/app-store-metadata.md` |
 | The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names | `site/download.html` (never edited per release, part 2) |
+| The App Store address | `APP_STORE_URL_PLACEHOLDER`: until it is replaced, a Mac's update notice on the device shows no "Update Sill in the App Store" link (its words still say what to do) | `iOSClient/SillLinks.swift` (`appStoreText`; part 1 §4 says when) |
 
 With the real values in place of `<domain>` and `<address>`:
 
@@ -71,6 +72,8 @@ shell.
 
 - [ ] Rehearse with that command: `--dry-run` checks the setup, builds, signs and zips, and stops
       before anything goes to Apple. When something is missing it says what, and builds nothing.
+      It builds any commit and only warns that HEAD lacks the release's tag (part 2), which a real
+      run refuses to build without.
 
 ### 3. The website
 
@@ -144,6 +147,10 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       (`ITSAppUsesNonExemptEncryption`), so the uploaded build must not show Missing Compliance.
 - [ ] App Review Information (metadata §7 and §8): contact, notes, the video.
 - [ ] Version Release: Manually release this version, so an approval waits for the Mac download.
+- [ ] Once the record exists, before the first upload: in `iOSClient/SillLinks.swift`, replace
+      `APP_STORE_URL_PLACEHOLDER` with `https://apps.apple.com/app/id<Apple ID>` (App Information
+      shows the Apple ID). A Mac that needs a newer Sill on the device then shows "Update Sill in
+      the App Store" under its notice.
 
 ## Part 2: every release
 
@@ -151,6 +158,11 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       build number is the commit count, which make-app.sh stamps in. The iOS app's are
       MARKETING_VERSION and CURRENT_PROJECT_VERSION in `iOSClient/Sill.xcodeproj` (target Sill ›
       General). Commit.
+- [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag v0.4.0` and
+      `git push origin v0.4.0` for 0.4.0. `make-app.sh --release` builds only the commit carrying
+      it, `release.sh --publish` makes the GitHub Release for it, and every Sill.app's update check
+      compares the newest published release's tag (not a draft, not a prerelease) with the version
+      it runs: within a day of the release, every older Sill.app offers it.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, and prints the zip's
       path, its SHA-256 and where Apple's notary log is. It warns when the log lists issues: read

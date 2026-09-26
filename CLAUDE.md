@@ -1889,8 +1889,11 @@ good.
   Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
   `site/download.html`. It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
-  keychain) or the profile, and `--dry-run` stops before notarytool (the
-  profile only warned about); sourced, it only defines its functions.
+  keychain) or the profile, or on a HEAD without the tag v‹version› (the
+  update check's), and `--dry-run` stops before notarytool (the profile and
+  the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
+  `make-app.sh --release` builds an untagged commit); sourced, it only defines
+  its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,

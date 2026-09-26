@@ -17,7 +17,10 @@
 #
 # Why each step:
 # - make-app.sh --release signs with the hardened runtime and a secure timestamp and without
-#   get-task-allow, which notarization requires, and refuses any signature but Developer ID.
+#   get-task-allow, which notarization requires, and refuses any signature but Developer ID, and
+#   any HEAD but the commit tagged v<version> (Packaging/Info.plist's CFBundleShortVersionString),
+#   the tag every Sill.app's update check compares with the version it runs. A dry run only
+#   warns about the tag: it rehearses on any commit, and its zip is never notarized.
 # - ditto -c -k --keepParent is the zip Apple's notarization docs use; it keeps the bundle intact.
 # - Notarization is Apple's automated malware scan, not App Review. Apple also publishes the
 #   ticket online, but stapling puts it inside the app, so Gatekeeper finds it on a Mac that is
@@ -69,7 +72,7 @@ identities_matching() {
 # Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run.
 preflight_problems() {
     local dry_run="$1" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
-    local matches count others tool
+    local matches count others tool version tags
     if [ -z "$identity" ]; then
         echo "SILL_SIGN_IDENTITY is not set. Set it to your Developer ID Application identity, as in SILL_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)'."
     else
@@ -84,6 +87,11 @@ preflight_problems() {
             echo "SILL_SIGN_IDENTITY ('$identity') matches $count identities, and codesign refuses an ambiguous name. Use the SHA-1 hash of one of them: $(printf '%s\n' "$matches" | awk -F'\t' '{ printf "%s%s (%s)", sep, $1, $2; sep = ", " }')."
         fi
     fi
+    if [ "$dry_run" = 0 ] && ! head_is_release_tag; then
+        version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || version="<version>"
+        tags="$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)"
+        echo "HEAD is not tagged v$version (it is tagged '${tags:-nothing}'). A release is built only from the commit tagged v + Packaging/Info.plist's CFBundleShortVersionString, which every Sill.app's update check compares with the version it runs: commit the version, then git tag v$version and git push origin v$version."
+    fi
     if [ "$dry_run" = 0 ]; then
         if [ -z "$profile" ]; then
             echo "SILL_NOTARY_PROFILE is not set. Store your notary credentials once with 'xcrun notarytool store-credentials sill-notary', then set SILL_NOTARY_PROFILE=sill-notary."
@@ -93,6 +101,14 @@ preflight_problems() {
                 || echo "xcrun can't find $tool. Select Xcode as the developer directory: sudo xcode-select -s /Applications/Xcode.app"
         done
     fi
+}
+
+# Whether HEAD carries the tag a release needs: v + Packaging/Info.plist's CFBundleShortVersionString.
+head_is_release_tag() {
+    local version
+    version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || return 1
+    # grep reads all of it (no -q): an early exit could fail the pipeline under pipefail.
+    git tag --points-at HEAD 2>/dev/null | grep -x "v$version" >/dev/null
 }
 
 # What notarization requires of the signature, read back from the built app. make-app.sh has
@@ -152,12 +168,19 @@ main() {
     if [ "$dry_run" = 1 ] && [ -z "${SILL_NOTARY_PROFILE:-}" ]; then
         echo "warning: SILL_NOTARY_PROFILE is not set; a real run needs it (docs/release-checklist.md)." >&2
     fi
+    if [ "$dry_run" = 1 ] && ! head_is_release_tag; then
+        echo "warning: HEAD is not tagged v$(plist_value CFBundleShortVersionString Packaging/Info.plist || echo '<version>'); a real run needs that tag (docs/release-checklist.md, part 2)." >&2
+    fi
     if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
         echo "warning: the working tree has uncommitted changes. Release from a commit: the build number is the commit count, so a build of that commit without these changes has the same number." >&2
     fi
 
     say "Building and signing Sill.app (Scripts/make-app.sh --release)"
-    Scripts/make-app.sh --release
+    if [ "$dry_run" = 1 ]; then
+        SILL_RELEASE_DRY_RUN=1 Scripts/make-app.sh --release
+    else
+        Scripts/make-app.sh --release
+    fi
 
     local app=.build/Sill.app version build zip
     # Read as make-app.sh's last line reads it: the version from Packaging/Info.plist, and the

@@ -475,7 +475,7 @@ store-credentials sill-notary`), and refuses to start without them. Give
 both on the release command itself, never in your shell profile: `make-app.sh`
 signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
 included. `--dry-run` needs only the identity and stops before anything goes
-to Apple.
+to Apple; it builds any commit, and only warns that HEAD lacks the tag.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
