@@ -72,6 +72,15 @@ final class StreamServer {
         var keyframeWanted = false
         /// When a message was last handed to it (remote clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
+        /// Remote clients: bytes handed to the connection that it has not taken yet
+        /// (`.contentProcessed`), every message `inflight` counts; and the last keyframe among
+        /// them, while it is still being taken (its sequence number and size).
+        var pendingBytes = 0
+        var keyframeInFlight: (seq: Int, bytes: Int)?
+        var keyframeSeq = 0
+        /// Remote clients: the smallest backlog since the last keyframe was taken, which starts at
+        /// what that keyframe left behind it (the frames that queued while it was taken).
+        var backlogFloor = 0
         /// The device gate is reading its first message (floor above "0"): not registered yet.
         var judging = false
         /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless
@@ -1148,30 +1157,43 @@ final class StreamServer {
         }
     }
 
-    /// Remote clients' frames (home clients keep the rule above byte for byte). Never queue anything
-    /// behind a full queue: with more than 2 messages in flight the frame is dropped, delta or
-    /// keyframe, and the client waits for a keyframe. A keyframe is sent to a waiting client only
-    /// when its queue has room, or when it has had none since it was admitted or the stream changed.
-    /// Keyframes are asked for at most every `remoteKeyframeSpacing` for all remote clients
-    /// together (later beside a home client: `remoteKeyframeDue`), so a slow link cannot turn the
-    /// stream into a keyframe storm. Returns whether to ask for one now. On `queue`. No new Stats
-    /// key: skipped frames count as net.waitKey, dropped ones as net.dropped, sent ones as net.sent.
+    /// Remote clients' frames (home clients keep the rule above byte for byte). What is queued is
+    /// counted in bytes the connection has not taken yet (`pendingBytes`), never in messages
+    /// (docs/remote-bundle-plan.md §3):
+    /// - Behind a keyframe the connection is still taking, frames go out up to `remoteHoldCap`:
+    ///   every delta references that keyframe, so dropping them for its sake wasted it and looped
+    ///   (drop, a keyframe 2 s later, the next delta dropped behind it: 2026-09-25, 0–3 fps and
+    ///   rtt up to 12 s at 150 Mbps on a phone's hotspot).
+    /// - Otherwise a frame is dropped when the backlog exceeds `remoteBacklogBudget`, or what the
+    ///   last keyframe left behind it (`backlogFloor`, following the backlog down) plus
+    ///   `remoteBacklogSlack`: a backlog that shrinks is a link catching up, one that grows is a
+    ///   stream the link cannot carry.
+    /// - A client that lost a frame asks for a keyframe only once the connection has taken
+    ///   everything but control messages (`remoteIdleBytes`), so the keyframe leads the queue
+    ///   instead of queueing behind the backlog that caused the drop; at most every
+    ///   `remoteKeyframeSpacing` for all remote clients together (later beside a home client:
+    ///   `remoteKeyframeDue`).
+    /// - The keyframe it waits for goes out when the backlog fits the budget, or at once when it
+    ///   has had none since it was admitted or the stream changed (the first keyframe).
+    /// Returns whether to ask for one now. On `queue`. No new Stats key: skipped frames count as
+    /// net.waitKey, dropped ones as net.dropped, sent ones as net.sent.
     private func paceRemote(_ client: Client, message: StreamMessage, data: Data) -> Bool {
         var ask = false
+        client.backlogFloor = min(client.backlogFloor, client.pendingBytes)
         if client.needsKeyframe {
             guard message.isKeyframe else {
                 Stats.shared.bump("net.waitKey")
                 let now = Date().timeIntervalSince1970
-                if client.keyframeWanted, client.inflight <= 2, remoteKeyframeDue(now) {
+                if client.keyframeWanted, client.pendingBytes <= Self.remoteIdleBytes, remoteKeyframeDue(now) {
                     lastRemoteKeyframeRequest = now
                     client.keyframeWanted = false
                     ask = true
                 }
                 return ask
             }
-            guard client.awaitingFirstKeyframe || client.inflight <= 2, let ps = lastParameterSets else {
-                // Its queue is still full: this keyframe is lost to it too. Ask again later (within
-                // the spacing) rather than wait for the encoder's own periodic one.
+            guard client.awaitingFirstKeyframe || client.pendingBytes <= Self.remoteBacklogBudget, let ps = lastParameterSets else {
+                // Its queue is still full: this keyframe is lost to it too. Ask again once it has
+                // drained (within the spacing) rather than wait for the encoder's own periodic one.
                 Stats.shared.bump("net.waitKey")
                 client.keyframeWanted = true
                 return false
@@ -1179,16 +1201,38 @@ final class StreamServer {
             send(ps, to: client)
             client.needsKeyframe = false
             client.awaitingFirstKeyframe = false
-        } else if client.inflight > 2 {
-            Stats.shared.bump("net.dropped")
-            client.needsKeyframe = true
-            client.keyframeWanted = true
-            return false
+        } else {
+            let tooMuch: Bool
+            if let key = client.keyframeInFlight {
+                tooMuch = client.pendingBytes - key.bytes > Self.remoteHoldCap
+            } else {
+                tooMuch = client.pendingBytes > max(Self.remoteBacklogBudget, client.backlogFloor + Self.remoteBacklogSlack)
+            }
+            if tooMuch {
+                Stats.shared.bump("net.dropped")
+                client.needsKeyframe = true
+                client.keyframeWanted = true
+                return false
+            }
         }
         Stats.shared.bump("net.sent")
-        send(data, to: client, isFrame: true)
+        send(data, to: client, isFrame: true, isKeyframe: message.isKeyframe)
         return false
     }
+
+    /// A remote client's backlog that never drops a frame: about a quarter second at 8 Mbps, 30
+    /// frames of the Low preset.
+    static let remoteBacklogBudget = 256 * 1024
+    /// Growth over what a keyframe left behind that still counts as noise (a thumbnail pass is 11
+    /// small JPEGs).
+    static let remoteBacklogSlack = 128 * 1024
+    /// How much may queue behind a keyframe the connection is still taking: about a second of the
+    /// Low preset's deltas (60 × ~8 KB), what piles up while a large keyframe is taken on a hotspot;
+    /// past it the stream is more than the link carries.
+    static let remoteHoldCap = 512 * 1024
+    /// A queue this short holds nothing but control messages (pongs, a settings reply): a
+    /// keyframe asked for now leads it.
+    static let remoteIdleBytes = 16 * 1024
 
     /// When a keyframe was last asked for on behalf of a remote client.
     private var lastRemoteKeyframeRequest: TimeInterval = 0
@@ -1220,7 +1264,7 @@ final class StreamServer {
     /// No eviction while the connect burst (catalog + first keyframe) is still draining.
     private static let graceAfterConnect: TimeInterval = 8.0
 
-    private func send(_ data: Data, to client: Client, isFrame: Bool = false) {
+    private func send(_ data: Data, to client: Client, isFrame: Bool = false, isKeyframe: Bool = false) {
         let now = Date().timeIntervalSince1970
         let remote = client.route.isRemote
         if isFrame, let oldest = client.oldestUnackedFrameAt,
@@ -1232,6 +1276,15 @@ final class StreamServer {
         }
         client.inflight += 1
         client.lastSentAt = now
+        var keyframeSeq: Int?
+        if remote {
+            client.pendingBytes += data.count
+            if isKeyframe {
+                client.keyframeSeq += 1
+                keyframeSeq = client.keyframeSeq
+                client.keyframeInFlight = (client.keyframeSeq, data.count)
+            }
+        }
         if isFrame {
             client.inflightFrames += 1
             if client.oldestUnackedFrameAt == nil { client.oldestUnackedFrameAt = now }
@@ -1239,6 +1292,13 @@ final class StreamServer {
         client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
             guard let client else { return }
             client.inflight -= 1
+            if remote {
+                client.pendingBytes -= data.count
+                if let seq = keyframeSeq, client.keyframeInFlight?.seq == seq {
+                    client.keyframeInFlight = nil
+                    client.backlogFloor = client.pendingBytes      // what it left behind it
+                }
+            }
             if isFrame {
                 client.inflightFrames -= 1
                 if client.inflightFrames <= 0 {
