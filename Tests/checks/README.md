@@ -1,12 +1,13 @@
 # Pure checks
 
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
-takes, the settings ledger, the wire format, pairing, who may use which door) are plain Swift files
-that compile on their own. Each folder here compiles one or a few of those files, exactly as they
-are in `Sources/` and `iOSClient/`, together with its own `main.swift`, and runs the result. Nothing
-here needs a device, Screen Recording, Accessibility, the video encoder or any network but
-loopback, so the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull
-requests and pushes to `main`.
+takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
+video encoder and when a stream gets a new encoder session) are plain Swift files that compile on
+their own. Each folder here compiles one or a few of those files, exactly as they are in `Sources/`
+and `iOSClient/`, together with its own `main.swift`, and runs the result. Nothing here needs a
+device, Screen Recording, Accessibility, the video encoder or any network but loopback, so the
+checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and pushes
+to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about two minutes on an M-series Mac
@@ -25,6 +26,8 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 |---|---|---|---|---|
 | `addresses` | `Sources/SillHost/AddressList.swift`, `PairingWindow.swift` and `OriginPolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | the addresses the Mac offers for remote access, from its services and tunnels; the pairing window's proofs, tries and back-off | 41 | 15 |
 | `clientlink` | `Sources/SillHost/ClientLink.swift` (`-package-name sill`) | which route a device came by, from its endpoint's scope and path, and the menu card's word for it | 89 | 14 |
+| `encoder-mailbox` | `Sources/SillHost/EncoderMailbox.swift` | HEVCEncoder's frames on their way into VideoToolbox (one inside, the one-slot mailbox, the watchdog's clock, timestamps, keyframe requests, `abandon`, the teardown) through a copy of HEVCEncoder's glue around a stand-in for VideoToolbox, in virtual time; a binary that links VideoToolbox is refused | 38,256 | 27 |
+| `encoder-slowstate` | `Sources/SillHost/EncoderSlowState.swift` | when a hardware stream's session has settled in the encoder's slow state and gets a new one, and how the new one is judged: the rule at its edges, and streams in virtual time against a scripted engine; a binary that links VideoToolbox is refused | 1,207 | 29 |
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order | 14 modes | 19 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
@@ -33,7 +36,8 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `protocol` | `Sources/StreamProtocol/*.swift`, then `crosscheck.py` | the address parser, SafeText, pairing codes and proofs, tags, the Mac ID, the certificate, kind 18's signature, framing, and TLS 1.3 with pinned keys on loopback; the cross-check repeats the certificate and signature with Python and `/usr/bin/openssl` | 188 + 8 | 20 |
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
 
-The counts are those of main at 1f3072a, where every check passes and every mutant is caught.
+The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
+two encoder checks' are those of the encoder-two-in-flight branch that brought them.
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -50,7 +54,12 @@ name them: H2, H3, H13 and so on) and moved here unchanged except for paths: the
 `main.swift`'s header comment, and the `policy`, `fence` and `clientlink` mutants scripts, which
 named absolute paths and wrote beside themselves; they now read the repository and write to
 `.build/checks/<name>/`. The others take the repository's root as their argument, as `run.sh` passes
-it. `ledger`'s old mutants were whole copies of an older ledger, so it has none.
+it. `ledger`'s old mutants were whole copies of an older ledger, so it has none. `encoder-mailbox`
+and `encoder-slowstate` came with encoder-two-in-flight, which had them as
+`Scripts/encoder-check/mailbox` and `slowstate`; its two real-time encoder checks (`probe`, the
+re-check's loop against a stand-in encoder, and `encoder`, the real HEVCEncoder against a stand-in
+VideoToolbox) stay in `Scripts/encoder-check/run.sh`, which runs these two as well: their timing
+bounds are tight for a shared runner.
 
 ## Adding a check
 
@@ -65,11 +74,6 @@ a permission, a device or the network, and never anything that links VideoToolbo
 
 ## Checks that belong to open branches
 
-- `encoder-two-in-flight`: EncoderMailbox (`Sources/SillHost/EncoderMailbox.swift`, only on that
-  branch) and the encoder checks built on it. The branch carries them as `Scripts/encoder-check/`
-  (`mailbox` with its mutants, `probe`, `encoder`; `Scripts/encoder-check/run.sh`), which refuse to
-  run any binary that links VideoToolbox. When it merges, move them here (or call that script from
-  `ci.yml`).
 - `update-notice`: it adds kind 23 (the device's hello), so `protocol/main.swift`'s case "kind 23 is
   unknown (skipped)" becomes "kind 23 is hello (update-notice), 24 unknown (skipped)" in that merge.
 - `home-pairing` and `remote-bundle` are plans so far, without checks.

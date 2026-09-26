@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # Each mutant changes Sources/SillHost/EncoderSlowState.swift in one place (in a copy under
-# .build/encoder-check/mutants-slowstate/, never the file itself); the slow-state check (main.swift
-# here) must fail on every one. Encoder-free: the check links no VideoToolbox.
-# usage: Scripts/encoder-check/slowstate/mutants.py [path to EncoderSlowState.swift]
+# .build/checks/encoder-slowstate/, never the file itself); the slow-state check (main.swift here)
+# must fail on every one. Encoder-free: a mutant binary that links VideoToolbox is refused, not run.
+# usage: Tests/checks/encoder-slowstate/mutants.py [path to EncoderSlowState.swift]
+#        (or Tests/checks/encoder-slowstate/run.sh --mutants)
 import subprocess, sys, os
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.abspath(os.path.join(here, '..', '..', '..'))
 src_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, 'Sources', 'SillHost', 'EncoderSlowState.swift')
-out = os.path.join(root, '.build', 'encoder-check', 'mutants-slowstate')
+out = os.path.join(root, '.build', 'checks', 'encoder-slowstate')
 src = open(src_path).read()
 mutants = [
     ("input counted in the window's last second only",
@@ -90,6 +91,8 @@ for i, (name, old, new) in enumerate(mutants, 1):
                        capture_output=True, text=True)
     if b.returncode != 0:
         print(f"M{i:02} NOBUILD  {name}: {b.stderr.strip().splitlines()[0] if b.stderr.strip() else '?'}"); ok = False; continue
+    if "VideoToolbox" in subprocess.run(["otool", "-L", os.path.join(d, "check")], capture_output=True, text=True).stdout:
+        print(f"M{i:02} REFUSED  {name}: the binary links VideoToolbox"); ok = False; continue
     r = subprocess.run([os.path.join(d, "check")], capture_output=True, text=True, timeout=120)
     fails = [l for l in r.stdout.splitlines() if "FAIL" in l]
     if r.returncode != 0:

@@ -10,9 +10,9 @@ import CoreMedia
 // A new session for the slow state (EncoderSlowState) makes no call on the mailbox of its own; it
 // is the slow-state check's and the encoder check's (E7). Nothing here links VideoToolbox.
 //
-//   Scripts/encoder-check/run.sh mailbox mutants      (from the repository's root)
-// or by hand:
-//   swiftc -O Sources/SillHost/EncoderMailbox.swift Scripts/encoder-check/mailbox/main.swift -o .build/mailbox-check && .build/mailbox-check
+//   Tests/checks/encoder-mailbox/run.sh [--mutants]
+// or by hand, from the repository's root:
+//   swiftc -O Sources/SillHost/EncoderMailbox.swift Tests/checks/encoder-mailbox/main.swift -o .build/mailbox-check && .build/mailbox-check
 
 // MARK: - Harness
 

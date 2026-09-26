@@ -7,7 +7,9 @@ import Foundation
 // new session made `makeDelay` after it is asked for and taken at the next hand-over) against an
 // engine whose turnaround is scripted per session. Nothing here links VideoToolbox.
 //
-//   Scripts/encoder-check/run.sh slowstate mutants-slowstate
+//   Tests/checks/encoder-slowstate/run.sh [--mutants]
+// or by hand, from the repository's root:
+//   swiftc -O Sources/SillHost/EncoderSlowState.swift Tests/checks/encoder-slowstate/main.swift -o .build/slowstate-check && .build/slowstate-check
 
 var checks = 0, failures = 0
 var scenarioName = ""

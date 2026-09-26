@@ -1,6 +1,7 @@
 #!/bin/zsh
 # The encoder checks that never touch an encoder, from any directory:
 #   mailbox   EncoderMailbox (the real file) against a stand-in for VideoToolbox in virtual time
+#             (Tests/checks/encoder-mailbox, which CI runs)
 #   mutants   the same check against one-line mutants of EncoderMailbox: each must fail it
 #   probe     EncoderProbe.throughput's loop (the real file) against a stand-in HEVCEncoder, in real
 #             time, and SILL_TEST_PROBE_HOLD=0.08 through it
@@ -9,12 +10,15 @@
 #             time: with a new session for the slow state on (all of it), then off (E7 alone)
 #   slowstate EncoderSlowState (the real file): when a stream's session is replaced for the slow
 #             state, by hand at its edges and in streams in virtual time
+#             (Tests/checks/encoder-slowstate, which CI runs)
 #   mutants-slowstate   the same check against one-line mutants of EncoderSlowState: each must fail
 # usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe] [encoder] [slowstate]
 #        [mutants-slowstate]   (no argument: all)
-# Builds under .build/encoder-check/. Every binary is checked with otool before it runs: one that
-# links VideoToolbox is refused, so nothing here can open an encoder session, and these checks are
-# safe while Sill.app streams. The hardware runs are verify-hardware.sh's, under its own rules.
+# The probe and encoder checks run in real time with tight timing bounds, so they stay here, out of
+# CI. They build under .build/encoder-check/, the other two under .build/checks/. Every binary is
+# checked with otool before it runs: one that links VideoToolbox is refused, so nothing here can
+# open an encoder session, and these checks are safe while Sill.app streams. The hardware runs are
+# verify-hardware.sh's, under its own rules.
 set -u
 ROOT=${0:A:h:h:h}
 OUT=$ROOT/.build/encoder-check
@@ -32,14 +36,11 @@ for step in $steps; do
 case $step in
 mailbox)
   echo "== mailbox check"
-  swiftc -O $ROOT/Sources/SillHost/EncoderMailbox.swift $ROOT/Scripts/encoder-check/mailbox/main.swift -o $OUT/mailbox-check || { failed=1; continue }
-  encoder_free $OUT/mailbox-check || { failed=1; continue }
-  $OUT/mailbox-check || failed=1
+  $ROOT/Tests/checks/encoder-mailbox/run.sh || failed=1
   ;;
 mutants)
   echo "== mutants of EncoderMailbox"
-  python3 $ROOT/Scripts/encoder-check/mailbox/mutants.py || failed=1
-  for b in $OUT/mutants/*/check(N); do encoder_free $b || failed=1; done
+  $ROOT/Tests/checks/encoder-mailbox/run.sh --mutants || failed=1
   ;;
 probe)
   echo "== probe check"
@@ -65,14 +66,11 @@ encoder)
   ;;
 slowstate)
   echo "== slow-state check"
-  swiftc -O $ROOT/Sources/SillHost/EncoderSlowState.swift $ROOT/Scripts/encoder-check/slowstate/main.swift -o $OUT/slowstate-check || { failed=1; continue }
-  encoder_free $OUT/slowstate-check || { failed=1; continue }
-  $OUT/slowstate-check || failed=1
+  $ROOT/Tests/checks/encoder-slowstate/run.sh || failed=1
   ;;
 mutants-slowstate)
   echo "== mutants of EncoderSlowState"
-  python3 $ROOT/Scripts/encoder-check/slowstate/mutants.py || failed=1
-  for b in $OUT/mutants-slowstate/*/check(N); do encoder_free $b || failed=1; done
+  $ROOT/Tests/checks/encoder-slowstate/run.sh --mutants || failed=1
   ;;
 *) echo "unknown step $step"; failed=1 ;;
 esac

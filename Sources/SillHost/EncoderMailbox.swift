@@ -13,7 +13,7 @@ import CoreMedia
 ///
 /// Foundation and CoreMedia only, so it is checked on its own with swiftc against a stand-in for
 /// VideoToolbox that returns frames after programmable delays, in virtual time
-/// (`Scripts/encoder-check/run.sh mailbox mutants`).
+/// (`Tests/checks/encoder-mailbox`, which CI runs).
 struct EncoderMailbox<Frame> {
     /// The frame let in and not yet back.
     struct Inside: Equatable {

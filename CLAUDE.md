@@ -59,9 +59,12 @@ has both ways out: go public, or publish in sill-site). Added:
   mutants), fence 14 modes (review-moves-b's, 19), ledger 90 (ledger-union,
   no mutants), clientlink 89 (14), remote-rules 64 (rf2, 35), origin 66 (10),
   protocol 188 plus crosscheck.py's 8 (20), addresses 41 (step 3, 15),
-  pairing-address 80 (pairing-address/fixes, 35). Not here: EncoderMailbox's
-  (only on encoder-two-in-flight, which carries it as Scripts/encoder-check),
-  and update-notice's one-line change to protocol's kind 23 case.
+  pairing-address 80 (pairing-address/fixes, 35). Not here then:
+  EncoderMailbox's (only on encoder-two-in-flight, which carried it as
+  Scripts/encoder-check; since that branch merged main at 32d532b,
+  `encoder-mailbox` and `encoder-slowstate` are here and in CI: "A new
+  session for the slow state"), and update-notice's one-line change to
+  protocol's kind 23 case.
 - Verified here, nothing pushed and no Actions run: `Tests/checks/run-all.sh`
   passes (all nine, 132 s); every mutant caught (`run-all.sh --mutants`, about
   44 minutes here: policy 70, fence 19, remote-rules 35, pairing-address 35,
@@ -2224,10 +2227,10 @@ good.
   one-slot mailbox behind it and a hang watchdog; hardware or software; says
   whether a stalled frame came back; gives a stream whose session settled in
   the slow state a new one), `EncoderSlowState` (when that is, and whether the
-  new session ran faster; pure, checked with swiftc), `EncoderMailbox` (its bookkeeping: the
-  frame inside with its
-  watchdog clock, the mailbox, the watchdog's test, timestamps and keyframe
-  requests; pure, checked with swiftc), `EncoderProbe` (one small frame
+  new session ran faster; pure, `Tests/checks/encoder-slowstate`),
+  `EncoderMailbox` (its bookkeeping: the frame inside with its watchdog
+  clock, the mailbox, the watchdog's test, timestamps and keyframe requests;
+  pure, `Tests/checks/encoder-mailbox`), `EncoderProbe` (one small frame
   through a hardware session at launch; for the re-check a short quiet run at
   the stream's size, one frame at a time like a stream, the rate it keeps and
   the rate a return needs), `EncoderSelfTest`
@@ -2304,13 +2307,14 @@ good.
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through).
   `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
-  `run.sh` builds and runs those that never touch an encoder (the mailbox
-  check and its mutants, the probe and encoder checks, the slow-state check
-  and its mutants; it refuses any binary that links VideoToolbox), and
-  `verify-hardware.sh` the hardware runs
-  against a base commit built from `git archive` (parity, stream, harness,
-  probe, keyframe), each only while `no-device.sh` finds no device connected
-  to Sill.app; outputs go to `.build/encoder-check/`.
+  `run.sh` builds and runs those that never touch an encoder (the probe and
+  encoder checks, which run in real time with tight bounds and so stay out of
+  CI, and through `Tests/checks/encoder-mailbox` and `encoder-slowstate` the
+  mailbox and slow-state checks and their mutants; it refuses any binary that
+  links VideoToolbox), and `verify-hardware.sh` the hardware runs against a
+  base commit built from `git archive` (parity, stream, harness, probe,
+  keyframe), each only while `no-device.sh` finds no device connected to
+  Sill.app; outputs go to `.build/encoder-check/`.
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
   `index.html`, `download.html` (the current release's version, link and
   SHA-256, set by hand from release.sh's output), `privacy.html` (the policy
@@ -2418,8 +2422,10 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `fence`, `ledger`, `origin`, `pairing-address`, `policy`, `protocol`,
-  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  `encoder-mailbox`, `encoder-slowstate`, `fence`, `ledger`, `origin`,
+  `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
+  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
+  [-v] [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked

@@ -310,8 +310,9 @@ tests of Direct Wireless Connection and remote access.
 
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
-which door) on their own with a check each, and runs them: about two minutes,
-no device, permission or encoder. `--mutants` also checks that each check fails
+which door, how frames go into the video encoder and when a stream gets a new
+encoder session) on their own with a check each, and runs them: about two
+minutes, no device, permission or encoder. `--mutants` also checks that each check fails
 when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the

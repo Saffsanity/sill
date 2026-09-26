@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # Each mutant changes Sources/SillHost/EncoderMailbox.swift in one place (in a copy under
-# .build/encoder-check/mutants/, never the file itself); the mailbox check (main.swift here) must
-# fail on every one. Encoder-free: the check links no VideoToolbox.
-# usage: Scripts/encoder-check/mailbox/mutants.py [path to EncoderMailbox.swift]
+# .build/checks/encoder-mailbox/, never the file itself); the mailbox check (main.swift here) must
+# fail on every one. Encoder-free: a mutant binary that links VideoToolbox is refused, not run.
+# usage: Tests/checks/encoder-mailbox/mutants.py [path to EncoderMailbox.swift]
+#        (or Tests/checks/encoder-mailbox/run.sh --mutants)
 import subprocess, sys, os
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.abspath(os.path.join(here, '..', '..', '..'))
 src_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, 'Sources', 'SillHost', 'EncoderMailbox.swift')
-out = os.path.join(root, '.build', 'encoder-check', 'mutants')
+out = os.path.join(root, '.build', 'checks', 'encoder-mailbox')
 src = open(src_path).read()
 mutants = [
     ("every frame let in (no mailbox: a second frame inside)",
@@ -77,6 +78,8 @@ for i, (name, old, new) in enumerate(mutants, 1):
                        capture_output=True, text=True)
     if c.returncode != 0:
         print(f"M{i:02d} {name}: does not compile: {c.stderr.strip().splitlines()[0] if c.stderr else ''}"); continue
+    if 'VideoToolbox' in subprocess.run(['otool', '-L', os.path.join(d, 'check')], capture_output=True, text=True).stdout:
+        print(f"M{i:02d} {name}: REFUSED: the binary links VideoToolbox"); continue
     try:
         r = subprocess.run([os.path.join(d, 'check')], capture_output=True, text=True, timeout=120)
         stdout = r.stdout; code = r.returncode
