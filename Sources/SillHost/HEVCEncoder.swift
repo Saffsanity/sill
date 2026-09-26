@@ -13,14 +13,29 @@ import StreamProtocol
 /// - `encodeQueue` (serial) hands frames to VideoToolbox one at a time: the next frame goes in when
 ///   the previous one's output handler has run. At most one frame is ever inside VT.
 /// - A watchdog on its own queue declares the session dead when a frame has been inside VT for
-///   `hangAfter` seconds without an output. 2026-09-22 the Mac's hardware encoder wedged system-wide
-///   (a fresh session in a fresh process never returned a single frame); with the old direct call
-///   that froze the capture queue, then `stopCapture`, then every later source switch. Now the
-///   owner is told (`onHung`) and can start over on the software encoder.
+///   `hangAfter` seconds without an output. The owner is told (`onHung`) and starts over on the
+///   software encoder, and leaves it again once a re-check finds the hardware keeping up with the
+///   stream (StreamCoordinator, EncoderProbe). It has fired for two different reasons:
+///   - Stuck. 2026-09-22 the Mac's hardware encoder wedged system-wide for about three hours: a
+///     fresh session in a fresh process never returned a single frame. With the old direct call
+///     that froze the capture queue, then `stopCapture`, then every later source switch.
+///   - Busy. 2026-09-24, twice: the iOS Simulator's screen recorder runs its hardware session at
+///     the encoder firmware's priority 80, a real-time session like this one at 0, and the one
+///     encoder engine served the recorder while this session's frame waited 1.8 s and 8.6 s. Both
+///     frames came back, and fresh sessions answered at once. The kernel's AppleAVE2 log showed it
+///     (CLAUDE.md, "Frozen stream").
+///   A session given up on reports on its way out whether its stalled frame ever came back
+///   (`deinit`): a busy encoder hands it back, a stuck one never does.
 final class HEVCEncoder {
     let width: Int
     let height: Int
     let software: Bool
+    /// A probe's session: no counters and no lines, so a re-check while streaming leaves the
+    /// stats line (whose `enc.out` is the menu's encoded fps) and the log as they were.
+    let quiet: Bool
+    /// Increases with every encoder this process creates, so the owner can tell an encoder made
+    /// before some moment from one made after it (`latestSerial` then).
+    let serial: Int
     private var session: VTCompressionSession?
 
     /// Called on VideoToolbox's callback thread with one access unit (length-prefixed NALs).
@@ -28,6 +43,20 @@ final class HEVCEncoder {
     /// The session stopped returning frames. Called once, on `encodeQueue`. The encoder is dead
     /// afterwards: it drops every further frame.
     var onHung: (() -> Void)?
+    /// For a session given up on (the watchdog, or `abandon`) with a frame still inside: called on a
+    /// utility queue once VideoToolbox has let go of that frame, with the seconds since it went in.
+    /// Never called while the frame stays inside, which is what a stuck encoder does. Set it before
+    /// the encoder is released.
+    var onStalledFrameBack: ((TimeInterval) -> Void)?
+    /// TEST ONLY (EncoderProbe's SILL_TEST_PROBE_HOLD): every frame waits this long on
+    /// `encodeQueue` before it goes in, as in a starved encoder (tens of ms), a busy one (seconds)
+    /// or a stuck one (for good).
+    var testHoldEachFrame: TimeInterval = 0
+
+    private static let serialLock = NSLock()
+    private static var lastSerial = 0
+    /// The serial of the newest encoder created so far.
+    static var latestSerial: Int { serialLock.lock(); defer { serialLock.unlock() }; return lastSerial }
 
     // Mailbox and in-flight state, guarded by `lock`.
     private let lock = NSLock()
@@ -50,6 +79,8 @@ final class HEVCEncoder {
     /// Presentation timestamps must never go backwards (frame reordering is off); see `submit`.
     private var lastPTS: CMTime = .invalid
     private var lastFrameAt: CFTimeInterval = 0
+    /// The watchdog gave up on this session (not `abandon`): its deinit says whether the frame came back.
+    private var hungReported = false
 
     private let encodeQueue = DispatchQueue(label: "sill.encode", qos: .userInteractive)
     /// The watchdog must not share `encodeQueue`: when VideoToolbox hangs, it hangs *inside*
@@ -58,10 +89,13 @@ final class HEVCEncoder {
     private var watchdog: DispatchSourceTimer?
     static let hangAfter: CFTimeInterval = 1.5
 
-    init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool, software: Bool = false) throws {
+    init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool, software: Bool = false,
+         quiet: Bool = false) throws {
         self.width = width
         self.height = height
         self.software = software
+        self.quiet = quiet
+        Self.serialLock.lock(); Self.lastSerial += 1; serial = Self.lastSerial; Self.serialLock.unlock()
         var s: VTCompressionSession?
         var spec: [CFString: Any] = [:]
         if software { spec[kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder] = false }
@@ -100,27 +134,52 @@ final class HEVCEncoder {
     /// because a hang report that arrived mid-switch was ignored (see StreamCoordinator).
     var isDead: Bool { lock.lock(); defer { lock.unlock() }; return dead }
 
-    /// Give up on this session quietly: no watchdog report, no `enc.hung`. The launch probe calls
-    /// this when its frame never comes back, since the owner already knows.
-    func abandon() {
-        lock.lock(); dead = true; pending = nil; lastFrame = nil; lock.unlock()
+    /// Give up on this session quietly: no watchdog report, no `enc.hung`. A probe calls this when
+    /// its frame has not come back in time, since the owner already knows. True when that frame
+    /// is still inside VideoToolbox (then `onStalledFrameBack` tells when it comes out); false
+    /// when it came back just now.
+    @discardableResult
+    func abandon() -> Bool {
+        lock.lock(); dead = true; pending = nil; lastFrame = nil; let inside = outstandingID != 0; lock.unlock()
         watchdog?.cancel()
+        return inside
     }
 
     deinit {
         watchdog?.cancel()
         guard let session else { return }
-        lock.lock(); let outstanding = inFlight && !dead; lock.unlock()
+        lock.lock()
+        let outstanding = inFlight && !dead
+        // Given up on with a frame inside VideoToolbox (the watchdog, or a probe's `abandon`): a dead
+        // session never clears `outstandingID`, and `submittedAt` is when that frame went in.
+        let stalled = dead && outstandingID != 0
+        let stalledSince = submittedAt
+        let report = hungReported && !quiet
+        lock.unlock()
+        let described = "\(software ? "software" : "hardware") HEVC \(width)×\(height)"
+        let back = onStalledFrameBack
         // Never tear a live session down with a frame still inside the hardware encoder. The system
         // log for 2026-09-22 shows every wedge began with a session whose first frame never came
         // back after the session was invalidated under it (the encoder service then logs "Frame
         // POC 0 timed out" every 4 s for good, and two such orphans stalled the hardware for every
         // later session until a reboot). Draining first costs a few ms on a healthy session. A dead
-        // session is not drained: that call would never return. Invalidating a wedged session can
-        // itself block, so none of this runs on the caller's thread.
+        // session is not drained: that call would never return if the encoder is stuck. Invalidating
+        // it can itself block, so none of this runs on the caller's thread.
+        //
+        // The invalidate waits for a frame still inside (measured 2026-09-25: 17 ms for a 3024×1898
+        // frame in flight, whose output handler ran just before it returned; 2026-09-24 the encoder
+        // service's own invalidate waited 0.17 s and 7.06 s for the stalled frames, which then
+        // completed). So its return is when a stalled frame came back: a busy encoder, not a stuck
+        // one, which never lets go and leaves this thread blocked for good.
         DispatchQueue.global(qos: .utility).async {
             if outstanding { VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid) }
             VTCompressionSessionInvalidate(session)
+            guard stalled else { return }
+            let seconds = CACurrentMediaTime() - stalledSince
+            if report {
+                print("Encoder (\(described)): the stalled frame came back after \(String(format: "%.1f", seconds)) s; the encoder was busy, not stuck.")
+            }
+            back?(seconds)
         }
     }
 
@@ -142,13 +201,13 @@ final class HEVCEncoder {
 
     private func enqueue(_ pixelBuffer: CVPixelBuffer, pts: CMTime, fromCapture: Bool) {
         lock.lock()
-        guard !dead else { lock.unlock(); Stats.shared.bump("enc.deadDrop"); return }
+        guard !dead else { lock.unlock(); bump("enc.deadDrop"); return }
         lastFrame = pixelBuffer
         // A re-encode of the last frame is not a repaint: it must not make the window look live
         // to the next requestKeyframe, or a retry after a dropped keyframe would do nothing.
         if fromCapture { lastFrameAt = CACurrentMediaTime() }
         if inFlight {
-            if pending != nil { Stats.shared.bump("enc.mailboxDrop") }   // newer frame wins
+            if pending != nil { bump("enc.mailboxDrop") }   // newer frame wins
             pending = (pixelBuffer, pts)
             lock.unlock()
             return
@@ -170,7 +229,7 @@ final class HEVCEncoder {
         var pts = requested
         if lastPTS.isValid, CMTimeCompare(pts, lastPTS) <= 0 {
             pts = CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000))
-            Stats.shared.bump("enc.ptsFixed")
+            bump("enc.ptsFixed")
         }
         lastPTS = pts
         submittedAt = CACurrentMediaTime()
@@ -179,6 +238,13 @@ final class HEVCEncoder {
         outstandingID = id
         lock.unlock()
 
+        if testHoldEachFrame > 0 { Thread.sleep(forTimeInterval: testHoldEachFrame) }
+        if id == TestHang.frame, !quiet, !software, TestHang.take() {
+            // TEST ONLY (SILL_TEST_ENCODER_HANG): this frame waits here, then goes in late and comes
+            // back, as frames did in a busy engine on 2026-09-24. The watchdog fires meanwhile.
+            print("TEST: holding frame \(id) of the hardware HEVC \(width)×\(height) session for \(Int(TestHang.hold)) s before it goes in (SILL_TEST_ENCODER_HANG)")
+            Thread.sleep(forTimeInterval: TestHang.hold)
+        }
         let status = VTCompressionSessionEncodeFrame(session, imageBuffer: pixelBuffer, presentationTimeStamp: pts,
                                                      duration: .invalid, frameProperties: props, infoFlagsOut: nil) { [weak self] status, _, sampleBuffer in
             guard let self else { return }
@@ -186,20 +252,20 @@ final class HEVCEncoder {
             // moved on to a new session (new size, new parameter sets): never forward it.
             guard self.frameReturned(id) else { return }
             guard status == noErr, let sampleBuffer else {
-                Stats.shared.bump("enc.error")
+                self.bump("enc.error")
                 // VideoToolbox dropped the frame (real-time mode over its data-rate cap). A forced
                 // keyframe must not go with it: on a static window nothing would ask again and a
                 // client waiting for a keyframe would wait for good.
                 if forced { self.retryKeyframe() }
                 return
             }
-            Stats.shared.bump("enc.out")
+            self.bump("enc.out")
             self.handle(sampleBuffer)
         }
         if status != noErr {
             // Refused outright; the handler may never run. Free the slot ourselves, or the watchdog
             // would call a transient error a hang and drop the stream to the software encoder.
-            Stats.shared.bump("enc.refused")
+            bump("enc.refused")
             if forced { retryKeyframe() }
             frameReturned(id)
         }
@@ -239,13 +305,20 @@ final class HEVCEncoder {
     private func checkWatchdog() {
         lock.lock()
         let hung = inFlight && !dead && CACurrentMediaTime() - submittedAt > Self.hangAfter
-        if hung { dead = true; pending = nil; lastFrame = nil }   // lastFrame: 8+ MB at Retina size, no longer needed
+        if hung { dead = true; hungReported = true; pending = nil; lastFrame = nil }   // lastFrame: 8+ MB at Retina size, no longer needed
         lock.unlock()
         guard hung else { return }
         watchdog?.cancel()
-        Stats.shared.bump("enc.hung")
-        print("Encoder (\(software ? "software" : "hardware") HEVC \(width)×\(height)) returned nothing for \(Int(Self.hangAfter * 1000)) ms: giving up on this session")
+        bump("enc.hung")
+        if !quiet {
+            print("Encoder (\(software ? "software" : "hardware") HEVC \(width)×\(height)) returned nothing for \(Int(Self.hangAfter * 1000)) ms: giving up on this session")
+        }
         onHung?()
+    }
+
+    /// Every counter this encoder keeps goes through here: a quiet one (a probe) keeps none.
+    private func bump(_ key: String) {
+        if !quiet { Stats.shared.bump(key) }
     }
 
     private func handle(_ sb: CMSampleBuffer) {
@@ -288,4 +361,23 @@ final class HEVCEncoder {
     }
 
     enum EncoderError: Error { case create(OSStatus) }
+
+    /// TEST ONLY. `SILL_TEST_ENCODER_HANG=N`: the first N hardware stream sessions of this process
+    /// each hold their 90th frame on `encodeQueue` for 3 s before handing it to VideoToolbox, so
+    /// the watchdog fires at 1.5 s, the owner falls back to the software encoder, and the frame
+    /// then goes in and comes back late, as in a busy engine (2026-09-24). N = 2 makes the return
+    /// to the hardware hang once more, for the re-check's backoff. Probes (quiet, one frame) never
+    /// take one. Read once; nothing else changes without the variable.
+    private enum TestHang {
+        static let frame = 90
+        static let hold: TimeInterval = 3
+        private static let lock = NSLock()
+        private static var left = Int(ProcessInfo.processInfo.environment["SILL_TEST_ENCODER_HANG"] ?? "") ?? 0
+        static func take() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard left > 0 else { return false }
+            left -= 1
+            return true
+        }
+    }
 }

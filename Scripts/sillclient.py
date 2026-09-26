@@ -46,7 +46,9 @@ kinds it received first (the catalog). Pairing prints PAIR ok or PAIR FAIL with 
 At exit a LINK line gives the pong round trip (p50/p95/max over every pong), the keyframes' arrival
 times, the frames received in each 5 s window, and the frames' age (host timestamp to arrival; the
 same clock when both run on one Mac).
-Every kind 16 (host settings) is printed on one line with its arrival time; dw= is Direct Wireless
+Once a second it prints the frames, their payload in kB (the encoder's output), ticks, cursor
+shapes and the last ping's round trip. Every kind 16 (host settings) is printed on one line with
+its arrival time; dw= is Direct Wireless
 (1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
@@ -355,7 +357,7 @@ def describe(d):
             f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else ""))
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
-per = {}; tot = {}; frames = 0; keys = 0; kb = 0; rtt = None; first_frame = None; ps_seen = []
+per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
 token = 1; last_state = None; settings_msgs = 0
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
 def bump(k, n=1):
@@ -412,7 +414,7 @@ while time.time() - t0 < dur:
         name = KIND.get(kind, str(kind)); bump(name); served = True
         if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13): first_kinds.append(kind)
         if kind == 1:
-            frames += 1; kb += ln / 1024
+            frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
             w = int((time.time() - t0) // 5); window_frames[w] = window_frames.get(w, 0) + 1
             if key: keys += 1; key_times.append(round(time.time() - t0, 2))
@@ -445,9 +447,10 @@ while time.time() - t0 < dur:
             print(f"  settings at {time.time()-t0:.3f}s answering={d.get('answering')} {describe(d)}")
     if now - last >= 1:
         f = per.get("frame", 0)
-        print(f"t={now-t0:4.1f}s frames={f:3d} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
-              f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} ticks={per.get('tick',0):3d}")
-        per = {}; last = now
+        # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
+        print(f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
+              f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d}")
+        per = {}; kb_sec = 0; last = now
 print(f"TOTAL {frames} frames ({keys} key) {kb:.0f} kB in {dur:.0f}s = {frames/dur:.1f} fps; kinds={tot}")
 print(f"settings messages: {settings_msgs}")
 def runs(ks):

@@ -230,9 +230,11 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Lower latency when the Mac is busy, at a softer picture.")
             }
-            if model.coordinator?.status.snapshot.softwareEncoder == true {
+            if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
-                    Label("The hardware encoder isn’t responding, so streams are limited to 60 fps at Standard resolution until the Mac restarts.",
+                    Label(snapshot.hardwareEncoderStuck
+                          ? "The hardware encoder is stuck, so streams use the software encoder: up to 60 fps at Standard resolution. Restarting the Mac fixes this."
+                          : "The hardware encoder is busy or not answering, so streams use the software encoder: up to 60 fps at Standard resolution. Sill switches back by itself once it keeps up again.",
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }

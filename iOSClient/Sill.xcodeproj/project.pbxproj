@@ -12,6 +12,7 @@
 		A1000001000000000000A003 /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F003 /* StreamClient.swift */; };
 		A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F004 /* HEVCDisplayView.swift */; };
 		A1000001000000000000A005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F005 /* Assets.xcassets */; };
+		A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F101 /* PrivacyInfo.xcprivacy */; };
 		A1000001000000000000A007 /* StreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F008 /* StreamScreen.swift */; };
 		A1000001000000000000A008 /* InputOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F009 /* InputOverlay.swift */; };
 		A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00A /* PortraitStreamScreen.swift */; };
@@ -24,11 +25,11 @@
 		A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F013 /* HostSettingsPanel.swift */; };
 		A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
 		A1000001000000000000A015 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
+		A1000001000000000000A201 /* SillLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F201 /* SillLinks.swift */; };
 		A1000001000000000000A01D /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01D /* DeviceIdentity.swift */; };
 		A1000001000000000000A016 /* SavedMacs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F016 /* SavedMacs.swift */; };
 		A1000001000000000000A017 /* RemoteDialPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F017 /* RemoteDialPolicy.swift */; };
 		A1000001000000000000A01E /* GoodbyePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01E /* GoodbyePolicy.swift */; };
-		A1000001000000000000A01F /* SillLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01F /* SillLinks.swift */; };
 		A1000001000000000000A018 /* RemoteConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F018 /* RemoteConnector.swift */; };
 		A1000001000000000000A019 /* StreamClient+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F019 /* StreamClient+Remote.swift */; };
 		A1000001000000000000A01A /* CodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01A /* CodeScanner.swift */; };
@@ -42,6 +43,7 @@
 		A1000001000000000000F003 /* StreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamClient.swift; sourceTree = "<group>"; };
 		A1000001000000000000F004 /* HEVCDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEVCDisplayView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1000001000000000000F101 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A1000001000000000000F006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000001000000000000F007 /* Sill.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sill.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000001000000000000F008 /* StreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScreen.swift; sourceTree = "<group>"; };
@@ -55,11 +57,11 @@
 		A1000001000000000000F013 /* HostSettingsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsPanel.swift; sourceTree = "<group>"; };
 		A1000001000000000000F014 /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F015 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
+		A1000001000000000000F201 /* SillLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillLinks.swift; sourceTree = "<group>"; };
 		A1000001000000000000F01D /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		A1000001000000000000F016 /* SavedMacs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedMacs.swift; sourceTree = "<group>"; };
 		A1000001000000000000F017 /* RemoteDialPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDialPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F01E /* GoodbyePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoodbyePolicy.swift; sourceTree = "<group>"; };
-		A1000001000000000000F01F /* SillLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillLinks.swift; sourceTree = "<group>"; };
 		A1000001000000000000F018 /* RemoteConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnector.swift; sourceTree = "<group>"; };
 		A1000001000000000000F019 /* StreamClient+Remote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Remote.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F01A /* CodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeScanner.swift; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 			children = (
 				A1000001000000000000F001 /* SillApp.swift */,
 				A1000001000000000000F002 /* ContentView.swift */,
+				A1000001000000000000F201 /* SillLinks.swift */,
 				A1000001000000000000F011 /* StreamClient+Viewport.swift */,
 				A1000001000000000000F010 /* DiagnosticsHUD.swift */,
 				A1000001000000000000F008 /* StreamScreen.swift */,
@@ -104,10 +107,10 @@
 				A1000001000000000000F018 /* RemoteConnector.swift */,
 				A1000001000000000000F017 /* RemoteDialPolicy.swift */,
 				A1000001000000000000F01E /* GoodbyePolicy.swift */,
-				A1000001000000000000F01F /* SillLinks.swift */,
 				A1000001000000000000F016 /* SavedMacs.swift */,
 				A1000001000000000000F01D /* DeviceIdentity.swift */,
 				A1000001000000000000F005 /* Assets.xcassets */,
+				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
 				A1000001000000000000F006 /* Info.plist */,
 				A1000001000000000000C002 /* Frameworks */,
 				A1000001000000000000C003 /* Products */,
@@ -194,6 +197,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000001000000000000A005 /* Assets.xcassets in Resources */,
+				A1000001000000000000A101 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -206,6 +210,7 @@
 			files = (
 				A1000001000000000000A001 /* SillApp.swift in Sources */,
 				A1000001000000000000A002 /* ContentView.swift in Sources */,
+				A1000001000000000000A201 /* SillLinks.swift in Sources */,
 				A1000001000000000000A011 /* StreamClient+Viewport.swift in Sources */,
 				A1000001000000000000A010 /* DiagnosticsHUD.swift in Sources */,
 				A1000001000000000000A007 /* StreamScreen.swift in Sources */,
@@ -226,7 +231,6 @@
 				A1000001000000000000A018 /* RemoteConnector.swift in Sources */,
 				A1000001000000000000A017 /* RemoteDialPolicy.swift in Sources */,
 				A1000001000000000000A01E /* GoodbyePolicy.swift in Sources */,
-				A1000001000000000000A01F /* SillLinks.swift in Sources */,
 				A1000001000000000000A016 /* SavedMacs.swift in Sources */,
 				A1000001000000000000A01D /* DeviceIdentity.swift in Sources */,
 			);
