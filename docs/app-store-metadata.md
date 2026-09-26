@@ -88,7 +88,7 @@ Apps › + › New App:
 | Field | Value |
 |---|---|
 | Platforms | iOS |
-| Name | `Sill – Window Streaming` ("Sill" was taken in App Store Connect on 2026-09-26; section 2) |
+| Name | `Sill – Mac Streaming` (Noah’s pick on 2026-09-26; "Sill" was taken in App Store Connect; section 2) |
 | Primary Language | English (U.S.) |
 | Bundle ID | `me.saffer.sill` (Xcode's automatic signing on team 9B2KKVM937 should have registered it; if the menu lacks it, add it under Certificates, Identifiers & Profiles. It can't change after the first upload.) |
 | SKU | `sill-ios` (never shown; can't change) |
@@ -109,8 +109,11 @@ refuses it, use this (2 to 30 characters, no Apple product name in the name
 itself):
 
 ```text
-Sill – Window Streaming
+Sill – Mac Streaming
 ```
+
+(Noah chose "Sill – Mac Streaming" on 2026-09-26; "Sill – Window Streaming" was the
+fallback this file first proposed.)
 
 The dash is an en dash (U+2013). The Home Screen label stays "Sill" whatever
 the store name is (`CFBundleDisplayName`). Keep other apps' names, Sidecar
