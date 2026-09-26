@@ -133,6 +133,7 @@ package final class StreamCoordinator {
             if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
+            menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -180,6 +181,21 @@ package final class StreamCoordinator {
     private var routes: [ObjectIdentifier: ClientRoute] = [:]
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
+    /// MenuMirror). Reads and presses nothing for a device that never asked.
+    let menus: MenuMirror
+    /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
+    /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
+    /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
+    /// prints about it, only when the variable is set.
+    private let testMenuPID: pid_t?
+    private let testMenuLine: String?
+    /// The Desktop's frontmost app is looked at again 0.3 s after a device's click or key, at most
+    /// once per 0.5 s (a click on another app's window activates it 50–200 ms later).
+    private var menuFrontCheckAt: CFAbsoluteTime = 0
+    private var menuFrontCheckPending = false
+    /// Under the AppKit loop, while a device subscribes: app activations on the Mac.
+    private var frontmostObserver: NSObjectProtocol?
 
     /// `config` is validated, and its virtual display forced off without the AppKit loop, which
     /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
@@ -195,6 +211,10 @@ package final class StreamCoordinator {
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
+        menus = MenuMirror(server: server)
+        let hook = Self.testMenuHook(synthetic: synthetic)
+        testMenuPID = hook.pid
+        testMenuLine = hook.line
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
@@ -208,6 +228,10 @@ package final class StreamCoordinator {
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
+        menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
+        menus.currentTarget = { [weak self] in self?.menuTarget() }
+        menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
+        catalog.onPolled = { [weak self] in self?.menusPolled() }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -240,6 +264,7 @@ package final class StreamCoordinator {
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 self.routes[ObjectIdentifier(connection)] = nil
                 self.lastPairingWanted[ObjectIdentifier(connection)] = nil
+                self.menus.clientLeft(connection)
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
@@ -400,6 +425,7 @@ package final class StreamCoordinator {
         if config.directWireless {
             print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
         }
+        if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
         server.start()
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
@@ -607,6 +633,7 @@ package final class StreamCoordinator {
                   let rect = currentSourceRect() else { return }
             raiseIfInteracting(event)
             deliver(event, in: rect)
+            desktopInputMayActivate(event)
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
             viewport = v
@@ -661,6 +688,14 @@ package final class StreamCoordinator {
             // Exactly one answer, to this device alone: the settings as they now stand, so a
             // refused or ignored field goes back to the Mac's value on the device.
             server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
+        case .fetchMenu:
+            // The Mac's menus (MenuMirror): no `await` here either; the mirror schedules its reads
+            // and answers this device alone. JSON that does not decode has no token to answer.
+            guard let r = Wire.decode(FetchMenu.self, from: message.payload) else { return }
+            menus.fetch(r, from: connection, who: deviceName(connection))
+        case .pressMenuItem:
+            guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
+            menus.press(r, from: connection, who: deviceName(connection))
         default:
             break
         }
@@ -1256,6 +1291,145 @@ package final class StreamCoordinator {
         let app = w.owningApplication?.applicationName ?? "?"
         let title = w.title ?? ""
         return title.isEmpty ? app : "\(app) — \(title)"
+    }
+
+    // MARK: The Mac's menus (MenuMirror; docs/menu-bar-plan.md §4.5)
+    //
+    // Which app's menus a device is shown: the streamed window's, or on the Desktop the frontmost
+    // app's (never Sill's own: a device's "Quit Sill" would end the host). The mirror hears of a
+    // change only while a device subscribes; with none, `menuTargetChanged` is one comparison.
+
+    /// The app behind the current source, for the menus: nil for nothing streaming and for Sill.
+    private func menuTarget() -> MenuMirror.Target? {
+        switch active {
+        case .none:
+            return nil
+        case .window(let id):
+            if virtualDisplay, let p = stage.placement, p.windowID == id {
+                return p.pid == WindowCatalog.ownPID ? nil : Self.menuTarget(pid: p.pid, window: id)
+            }
+            guard let app = catalog.window(id: id)?.owningApplication, app.processID != WindowCatalog.ownPID else { return nil }
+            return Self.menuTarget(pid: app.processID, window: id)
+        case .desktop:
+            return desktopMenuTarget()
+        }
+    }
+
+    /// The Desktop's: the frontmost app (AppKit's under its loop, else the owner of the topmost
+    /// window; see `activePID`). A synthetic host has none, but for the TEST ONLY hook's process.
+    private func desktopMenuTarget() -> MenuMirror.Target? {
+        if synthetic {
+            guard let pid = testMenuPID, MenuReader.alive(pid) else { return nil }
+            return Self.menuTarget(pid: pid)
+        }
+        guard let pid = Self.activePID(trustAppKit: appKitLoop), pid != WindowCatalog.ownPID else { return nil }
+        return Self.menuTarget(pid: pid)
+    }
+
+    /// One name for an app whichever source names it (the window list's and AppKit's can differ).
+    private static func menuTarget(pid: pid_t, window: CGWindowID? = nil) -> MenuMirror.Target {
+        let app = NSRunningApplication(processIdentifier: pid)
+        return MenuMirror.Target(pid: pid, app: app?.localizedName ?? "pid \(pid)", bundleID: app?.bundleIdentifier, window: window)
+    }
+
+    /// The source, or the Desktop's frontmost app, may have changed.
+    private func menuTargetChanged() {
+        guard menus.hasSubscribers else { return }
+        menus.setTarget(menuTarget())
+    }
+
+    /// Every catalog poll (2 s) while a device is connected.
+    private func menusPolled() {
+        guard menus.hasSubscribers else { return }
+        if active == .desktop { menuTargetChanged() }
+        menus.catalogPolled()
+    }
+
+    /// A device's click or key on the Desktop can bring another app forward (50–200 ms later): its
+    /// menus are looked at again 0.3 s after, at most once per 0.5 s.
+    private func desktopInputMayActivate(_ event: InputEvent) {
+        guard active == .desktop, menus.hasSubscribers, !menuFrontCheckPending else { return }
+        switch event {
+        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }
+        case .key(_, let down, _): guard down else { return }
+        default: return
+        }
+        menuFrontCheckPending = true
+        let wait = max(0.3, menuFrontCheckAt + 0.5 - CFAbsoluteTimeGetCurrent())
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(wait))
+            self.menuFrontCheckPending = false
+            self.menuFrontCheckAt = CFAbsoluteTimeGetCurrent()
+            if self.active == .desktop { self.menuTargetChanged() }
+        }
+    }
+
+    /// Under the AppKit loop (Sill.app, the CLI's --virtual-display), while a device subscribes:
+    /// the Desktop's menus follow an app activated on the Mac at once, not at the next poll.
+    private func watchFrontmostApp(_ on: Bool) {
+        guard appKitLoop else { return }
+        if on, frontmostObserver == nil {
+            frontmostObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.active == .desktop else { return }
+                    self.menuTargetChanged()
+                }
+            }
+        } else if !on, let observer = frontmostObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            frontmostObserver = nil
+        }
+    }
+
+    /// Before a menu of a window source is read or one of its items pressed: its app active and the
+    /// window key, as a click from the device makes them (`raiseIfInteracting`: Accessibility only,
+    /// one activation attempt per 2 s, never Launch Services). An inactive app's states differ (its
+    /// Copy, Close and Minimize read disabled: the probe), and a press must act on the streamed
+    /// window, not another of the app's. No raise: a menu needs the app active, not the window
+    /// uncovered. True when the app is frontmost as this returns. The Desktop's app is frontmost
+    /// already, and a synthetic host's hook is never activated: true at once for both and for
+    /// nothing. During a switch (`active` still names the old source) nothing is activated.
+    private func focusForMenus() async -> Bool {
+        guard case .window(let id) = active else { return true }
+        let staged = virtualDisplay && stage.isStaged
+        guard let pid = staged ? stage.placement?.pid : catalog.window(id: id)?.owningApplication?.processID else { return false }
+        let frontmost = Self.activePID(trustAppKit: appKitLoop) == pid
+        if switching { return frontmost }
+        var answered = true
+        if !frontmost {
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - lastActivationAt > 2 else { return false }
+            lastActivationAt = now
+            answered = activate(pid: pid)
+        }
+        // An app that let the activation run into its timeout gets no more AX calls from here.
+        guard answered else { return false }
+        if staged, let element = stage.placement?.element {
+            WindowSizer.makeKey(element)
+        } else if let w = catalog.window(id: id), let element = sizer.element(for: w) {
+            WindowSizer.makeKey(element)
+        }
+        if frontmost { return true }
+        let deadline = CFAbsoluteTimeGetCurrent() + Self.activationTimeout
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            if Self.activePID(trustAppKit: appKitLoop) == pid { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return Self.activePID(trustAppKit: appKitLoop) == pid
+    }
+
+    /// TEST ONLY: `SILL_TEST_MENU_PID`, honoured only by a --synthetic host (which does not
+    /// advertise), with the one line `start` prints about it. Nothing, and no line, without it.
+    private static func testMenuHook(synthetic: Bool) -> (pid: pid_t?, line: String?) {
+        guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_MENU_PID"] else { return (nil, nil) }
+        let shown = SafeText.label(raw, limit: 32)
+        guard synthetic else { return (nil, "SILL_TEST_MENU_PID=\(shown) ignored: only a --synthetic host takes it.") }
+        guard let pid = pid_t(raw), pid > 0, MenuReader.alive(pid) else {
+            return (nil, "SILL_TEST_MENU_PID=\(shown) ignored: not a running process.")
+        }
+        let name = NSRunningApplication(processIdentifier: pid)?.localizedName.map { SafeText.label($0) } ?? "no app name"
+        return (pid, "Test menus: the test pattern's menus are pid \(pid)'s (\(name)); read and pressed without activating it.")
     }
 
     // MARK: Virtual display lifecycle

@@ -5,7 +5,7 @@
 # `import StreamProtocol` stripped; FILE=OVERRIDE (a basename, then a path) compiles OVERRIDE in
 # FILE's place (the mutants').
 WT=$1; OUT=$2; shift 2; T=$(mktemp -d)
-HOST_FILES=()
+HOST_FILES=(MenuFormat.swift MenuPolicy.swift)
 cp "$WT"/Sources/StreamProtocol/*.swift "$T"/
 for f in ${HOST_FILES[@]+"${HOST_FILES[@]}"}; do
     src="$WT/Sources/SillHost/$f"
