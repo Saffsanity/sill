@@ -106,8 +106,9 @@ final class HEVCEncoder {
     private var watchdog: DispatchSourceTimer?
     static let hangAfter: CFTimeInterval = 1.5
     /// A hardware stream session that settles in the slow state is replaced (`EncoderSlowState`).
-    /// False keeps each session for the stream's life.
-    static let replacesSlowSessions = false
+    /// Measured alone on the engine (CLAUDE.md, "The 33 fps plateau"): the resumed motion ran at
+    /// 57 fps against 34 without it. False keeps each session for the stream's life.
+    static let replacesSlowSessions = true
     /// `replacesSlowSessions`, unless TEST ONLY `SILL_TEST_ENCODER_RECYCLE=1` or `0` says otherwise for
     /// this process (an A/B from one binary), which it says once, when the first hardware stream
     /// session is made.
