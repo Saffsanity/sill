@@ -13,22 +13,44 @@ import Foundation
 /// long as it lasted (90 s of 90): 34 fps out of 57 captured, one frame inside at a time.
 ///
 /// The rule: a session that has run fast (a frame back in under `slowTurnaround`) and now, over the
-/// last `window` seconds, gets at least `minInputFPS` frames from the capture in each second while
-/// the median turnaround of what came back is at least `slowTurnaround`, is replaced
-/// (`Event.replace`), at most once per `minSpacing`. The new session is timed on its frames after
-/// its first (a keyframe) and `Event.judged` reports it; one no faster (then the engine is slow, not
-/// the session) ends the replacing for this stream (`gaveUp`). A session that never ran fast (a
+/// last `window` seconds, gets at least `minInputFPS` frames a second from the capture in each half
+/// of the window while the median turnaround of what came back is at least `slowTurnaround` and at
+/// least `slowFactor` times the fastest frame the session has returned, is replaced
+/// (`Event.replace`), at most once per `minSpacing`. The factor keeps a session that is merely at
+/// the engine's capacity near `slowTurnaround` (6880×2880 at 60 fps: 25.5 ms at the median, 24.65
+/// at best) from being replaced for nothing, while the slow state is 1.8 times the paced fast
+/// state (29 ms against 16) and 3.2 times a fresh session's 9. A session that never ran fast (a
 /// frame size the engine is simply slow at) is never replaced.
+///
+/// The new session is timed on its frames after its first (a keyframe) while the motion that set
+/// off the swap lasts (`inMotion`): the first frame handed over without it ends the timing, since
+/// sparse frames make a session slow within about a second (seen in new sessions too: 29 ms a
+/// frame 0.55 s after the picture stopped, and 15 ms once motion came back), so they say nothing
+/// of how it keeps up with a stream. The verdict (`Event.judged`) comes at `judgeFrames` timed
+/// frames, when the timing ends, or at the first frame back `judgeWithin` after the swap: the
+/// median of those frames if there are at least `minJudged`, else none (the picture went still).
+/// One no faster (its median at least `noFasterFraction` of the replaced session's: then the
+/// engine is slow, as beside another app, not the session) ends the replacing for this stream
+/// (`gaveUp`).
 struct EncoderSlowState {
     static let window: CFTimeInterval = 2
+    /// Frames a second from the capture: in each half of `window` for a replace, and in the second
+    /// before a new session's frame went in for that frame to be timed.
     static let minInputFPS = 45
     static let slowTurnaround: CFTimeInterval = 0.025
+    /// A median this many times the session's fastest frame or more is slow (and `slowTurnaround`).
+    static let slowFactor = 1.5
+    /// A new session whose median is at least this fraction of the replaced session's is no faster.
+    static let noFasterFraction = 0.8
+    /// A frame is timed only if the capture before its hand-over came within this of the one
+    /// before it (and `minInputFPS` came in the second before).
+    static let motionGap: CFTimeInterval = 0.1
     /// The fewest frames back in the window for its median to count.
     static let minReturns = 10
     /// At most one new session in this long (one that could not be made counts too).
     static let minSpacing: CFTimeInterval = 10
     /// A new session is judged on this many frames after its first, or on those back within
-    /// `judgeWithin` of the swap if there are at least `minJudged`.
+    /// `judgeWithin` of the swap (or before the motion ended) if there are at least `minJudged`.
     static let judgeFrames = 30
     static let judgeWithin: CFTimeInterval = 2
     static let minJudged = 5
@@ -45,8 +67,8 @@ struct EncoderSlowState {
     /// How a new session's first frames went.
     struct Report: Equatable {
         let slow: Slow
-        /// The median turnaround of the new session's frames after its first; nil when fewer than
-        /// `minJudged` came back within `judgeWithin` of the swap (the picture went still).
+        /// The median turnaround of the new session's frames timed in motion after its first; nil
+        /// when fewer than `minJudged` were (the picture went still).
         let turnaround: CFTimeInterval?
         /// How many frames that median is of.
         let judged: Int
@@ -57,7 +79,7 @@ struct EncoderSlowState {
         let firstTurnaround: CFTimeInterval
         let gap: CFTimeInterval
         /// No faster: the stream keeps this session and gets no other.
-        var noFaster: Bool { turnaround.map { $0 >= EncoderSlowState.slowTurnaround } ?? false }
+        var noFaster: Bool { turnaround.map { $0 >= EncoderSlowState.noFasterFraction * slow.turnaround } ?? false }
     }
 
     enum Event: Equatable {
@@ -73,7 +95,10 @@ struct EncoderSlowState {
         /// When the old session's last frame came back.
         let lastOldReturn: CFTimeInterval
         var first: (bytes: Int, turnaround: CFTimeInterval, at: CFTimeInterval)?
+        /// The frames after the first timed while the motion lasted.
         var turnarounds: [CFTimeInterval] = []
+        /// A frame after the first went in without motion: no later frame is timed.
+        var motionEnded = false
     }
 
     private enum Phase {
@@ -89,8 +114,9 @@ struct EncoderSlowState {
     private var watchingSince: CFTimeInterval
     /// When a new session last took over, or could not be made; -infinity for never.
     private var lastAttempt = -CFTimeInterval.infinity
-    /// A frame of the current session came back in under `slowTurnaround`.
-    private var ranFast = false
+    /// The fastest frame the current session has returned; +infinity before its first. It has run
+    /// fast once this is under `slowTurnaround`.
+    private var fastest = CFTimeInterval.infinity
     /// A new session was no faster: the stream keeps the one it has.
     private(set) var gaveUp = false
     /// Capture times, and the frames back (when, and their turnaround), within the last `window`.
@@ -111,7 +137,7 @@ struct EncoderSlowState {
         lastReturnAt = now
         returns.append((now, turnaround))
         dropOld(now)
-        if turnaround < Self.slowTurnaround { ranFast = true }
+        fastest = min(fastest, turnaround)
         switch phase {
         case .making:
             return nil
@@ -121,8 +147,10 @@ struct EncoderSlowState {
                 phase = .judging(j)
                 return nil
             }
-            j.turnarounds.append(turnaround)
-            guard j.turnarounds.count >= Self.judgeFrames || now - j.swapAt >= Self.judgeWithin else {
+            if !j.motionEnded {
+                if inMotion(handedOverAt: now - turnaround) { j.turnarounds.append(turnaround) } else { j.motionEnded = true }
+            }
+            guard j.turnarounds.count >= Self.judgeFrames || j.motionEnded || now - j.swapAt >= Self.judgeWithin else {
                 phase = .judging(j)
                 return nil
             }
@@ -135,14 +163,14 @@ struct EncoderSlowState {
             watchingSince = now
             return .judged(report)
         case .watching:
-            guard !gaveUp, ranFast, turnaround >= Self.slowTurnaround,
+            guard !gaveUp, fastest < Self.slowTurnaround, turnaround >= Self.slowTurnaround,
                   now - watchingSince >= Self.window, now - lastAttempt >= Self.minSpacing else { return nil }
-            // Every capture left is within the window: in its second half, or its first.
-            let recent = captures.filter { $0 > now - Self.window / 2 }.count
-            guard recent >= Self.minInputFPS, captures.count - recent >= Self.minInputFPS,
+            let half = Self.window / 2, need = Double(Self.minInputFPS) * half
+            guard Double(inputs(after: now - half, through: now)) >= need,
+                  Double(inputs(after: now - Self.window, through: now - half)) >= need,
                   returns.count >= Self.minReturns else { return nil }
             let median = Self.median(returns.map(\.turnaround))
-            guard median >= Self.slowTurnaround else { return nil }
+            guard median >= max(Self.slowTurnaround, Self.slowFactor * fastest) else { return nil }
             let slow = Slow(turnaround: median, inputFPS: Double(captures.count) / Self.window,
                             outputFPS: Double(returns.count) / Self.window)
             phase = .making(slow)
@@ -155,7 +183,7 @@ struct EncoderSlowState {
         guard case .making(let slow) = phase else { return }
         phase = .judging(Judging(slow: slow, swapAt: now, lastOldReturn: lastReturnAt))
         lastAttempt = now
-        ranFast = false
+        fastest = .infinity
     }
 
     /// The new session could not be made: the stream goes on with the one it has, and the next try
@@ -164,6 +192,19 @@ struct EncoderSlowState {
         guard case .making = phase else { return }
         phase = .watching
         lastAttempt = now
+    }
+
+    /// Whether a frame handed over at `h` went in during motion: the capture before it came within
+    /// `motionGap` of the one before that, and at least `minInputFPS` came in the second before it.
+    /// Captures are kept for `window`, so a frame back more than a second after it went in never is.
+    private func inMotion(handedOverAt h: CFTimeInterval) -> Bool {
+        guard let k = captures.lastIndex(where: { $0 <= h }), k > 0, captures[k] - captures[k - 1] < Self.motionGap else { return false }
+        return inputs(after: h - 1, through: h) >= Self.minInputFPS
+    }
+
+    /// Captures in (a, b].
+    private func inputs(after a: CFTimeInterval, through b: CFTimeInterval) -> Int {
+        captures.reduce(0) { $0 + ($1 > a && $1 <= b ? 1 : 0) }
     }
 
     private mutating func dropOld(_ now: CFTimeInterval) {

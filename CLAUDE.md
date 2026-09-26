@@ -679,15 +679,21 @@ whose session has settled in it gets a new session in place, on by default
 (`HEVCEncoder.replacesSlowSessions`):
 - The rule (`EncoderSlowState`, pure, Foundation only): a session that has run
   fast (a frame back in under 25 ms; turnaround is hand-over to output, by the
-  mailbox's own clock) and now, over the last 2 s, gets at least 45 frames
-  from the capture in each second while the median turnaround of what came
-  back is at least 25 ms, is replaced, at most once per 10 s (a new session
-  that could not be made counts too). The new session is timed on its 30
-  frames after its first (a keyframe), or on those back within 2 s if at least
-  5; one no faster (then the engine is slow, as beside another app) ends the
-  replacing for that stream. A session that never ran fast (a size the engine
-  is simply slow at) is never replaced; probes and the software encoder never
-  are.
+  mailbox's own clock) and now, over the last 2 s, gets at least 45 frames a
+  second from the capture in each half of that window while the median
+  turnaround of what came back is at least 25 ms and at least 1.5 times the
+  fastest frame the session has returned, is replaced, at most once per 10 s
+  (a new session that could not be made counts too). The new session is timed
+  on its frames after its first (a keyframe) while the motion that set off the
+  swap lasts: a frame counts only if the capture before its hand-over came
+  within 0.1 s of the one before that and 45 came in the second before it, and
+  the first frame without motion ends the timing. The verdict comes at 30
+  timed frames, when the timing ends, or at the first frame back 2 s after the
+  swap: their median if at least 5, else none (the picture went still). One no
+  faster (its median at least 0.8 of the replaced session's: then the engine
+  is slow, as beside another app) ends the replacing for that stream. A
+  session that never ran fast (a size the engine is simply slow at) is never
+  replaced; probes and the software encoder never are.
 - The swap (`HEVCEncoder`): the new session is made with the stream's settings
   on a queue of its own while the old one goes on (the kernel opened it 39–42
   ms before it took over); `submit` hands it the next frame with a forced

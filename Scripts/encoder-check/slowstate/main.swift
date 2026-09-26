@@ -22,14 +22,14 @@ func report(_ e: W.Event?) -> W.Report? { if case .judged(let r) = e { return r 
 // MARK: - Part one: the edges, by hand
 
 /// A watch started at `started` (by default exactly `window` before `at`, so nothing is decided before
-/// `at`) that has run fast (a frame back in 9 ms then), with the given captures in each of the two
-/// seconds before `at` and `returns` frames back in them at `turnaround`; then one more frame back at
-/// `at` with `last`: what that one says.
+/// `at`) that has run fast (a frame back in `fast`, 9 ms, then), with the given captures in each of
+/// the two seconds before `at` and `returns` frames back in them at `turnaround`; then one more frame
+/// back at `at` with `last`: what that one says.
 func probe(started: Double? = nil, perSecondEarlier: Int = 57, perSecondRecent: Int = 57, returns: Int = 60,
-           turnaround: Double = 0.029, last: Double = 0.029, at: Double = 10, ranFast: Bool = true) -> W.Event? {
+           turnaround: Double = 0.029, last: Double = 0.029, at: Double = 10, ranFast: Bool = true, fast: Double = 0.009) -> W.Event? {
     let started = started ?? at - W.window
     var w = W(now: started)
-    if ranFast { _ = w.returned(turnaround: 0.009, bytes: 1, at: started) }
+    if ranFast { _ = w.returned(turnaround: fast, bytes: 1, at: started) }
     var ev: [(Double, Int)] = []   // (time, 0 capture / 1 return)
     for i in 0..<perSecondEarlier { ev.append((at - 2 + 0.001 + Double(i) * (0.998 / Double(max(perSecondEarlier, 1))), 0)) }
     for i in 0..<perSecondRecent { ev.append((at - 1 + 0.001 + Double(i) * (0.998 / Double(max(perSecondRecent, 1))), 0)) }
@@ -54,6 +54,10 @@ expect(!isReplace(probe(turnaround: 0.0249, last: 0.0249)), "a median of 24.9 ms
 expect(!isReplace(probe(turnaround: 0.029, last: 0.020)), "the frame just back under 25 ms: a replace (the decision waits for a slow one)")
 expect(!isReplace(probe(turnaround: 0.016, last: 0.029)), "one slow frame among fast ones (16 ms): a replace (the median decides)")
 expect(!isReplace(probe(ranFast: false)), "a session that never ran fast: a replace")
+expect(isReplace(probe(fast: 0.016)), "fast only at the paced rate (16 ms), now 29 ms: no replace (a factor of 2 misses the slow state)")
+expect(!isReplace(probe(turnaround: 0.0299, last: 0.0299, fast: 0.020)), "20 ms at best, a median of 29.9 ms (under 1.5 times): a replace")
+expect(isReplace(probe(turnaround: 0.0301, last: 0.0301, fast: 0.020)), "20 ms at best, a median of 30.1 ms (over 1.5 times): no replace")
+expect(!isReplace(probe(turnaround: 0.0255, last: 0.0255, fast: 0.0245)), "at the engine's capacity (24.5 ms at best, 25.5 at the median): a replace")
 expect(!isReplace(probe(started: 8.01)), "under 2 s of evidence since the stream began: a replace")
 expect(isReplace(probe(started: 8.0)), "2 s of evidence since the stream began: no replace")
 do {
@@ -88,17 +92,23 @@ do {
     // session's last frame back.
     var w = W(now: 0)
     _ = w.returned(turnaround: 0.009, bytes: 1, at: 0)
-    for i in 0..<(57 * 3) { w.captured(at: Double(i) / 57) }
+    let caps = (0..<(57 * 5)).map { Double($0) / 57 }   // motion throughout (5 s)
+    var c = 0
+    func capturesTo(_ t: Double) { while c < caps.count, caps[c] <= t { w.captured(at: caps[c]); c += 1 } }
     var t = 0.0, replaced = false
-    while !replaced { t += 0.029; replaced = isReplace(w.returned(turnaround: 0.029, bytes: 500, at: t)) }
+    while !replaced { t += 0.029; capturesTo(t); replaced = isReplace(w.returned(turnaround: 0.029, bytes: 500, at: t)) }
     let lastOld = t
+    capturesTo(t + 0.029)
     let s = w.returned(turnaround: 0.029, bytes: 500, at: t + 0.029)   // the old session's last frame, while making
     expect(s == nil, "an event while the new session is made")
     w.swapped(at: t + 0.030)
+    capturesTo(t + 0.070)
     expect(w.returned(turnaround: 0.040, bytes: 250_000, at: t + 0.070) == nil, "the new session's first frame judged it")
     var judged: W.Report?
     for k in 1...30 {
-        let e = w.returned(turnaround: 0.009, bytes: 30_000, at: t + 0.070 + Double(k) * 0.0175)
+        let at = t + 0.070 + Double(k) * 0.0175
+        capturesTo(at)
+        let e = w.returned(turnaround: 0.009, bytes: 30_000, at: at)
         if let r = report(e) { judged = r; expect(k == 30, "judged after \(k) frames, not 30") }
     }
     if let r = judged {
@@ -114,14 +124,20 @@ do {
     for (n, expectTurnaround) in [(4, true), (3, false)] {
         var w = W(now: 0)
         _ = w.returned(turnaround: 0.009, bytes: 1, at: 0)
-        for i in 0..<(57 * 3) { w.captured(at: Double(i) / 57) }
+        let caps = (0..<(57 * 5)).map { Double($0) / 57 }   // motion throughout (5 s)
+        var c = 0
+        func capturesTo(_ t: Double) { while c < caps.count, caps[c] <= t { w.captured(at: caps[c]); c += 1 } }
         var t = 0.0
-        while !isReplace(w.returned(turnaround: 0.029, bytes: 1, at: t + 0.029)) { t += 0.029 }
+        while true { capturesTo(t + 0.029); if isReplace(w.returned(turnaround: 0.029, bytes: 1, at: t + 0.029)) { break }; t += 0.029 }
         w.swapped(at: t + 0.05)
-        _ = w.returned(turnaround: 0.03, bytes: 9, at: t + 0.08)
+        capturesTo(t + 0.08); _ = w.returned(turnaround: 0.03, bytes: 9, at: t + 0.08)
         var r: W.Report?
-        for k in 0..<n { if let x = report(w.returned(turnaround: 0.030, bytes: 1, at: t + 0.1 + Double(k) * 0.01)) { r = x } }
+        for k in 0..<n {
+            let at = t + 0.1 + Double(k) * 0.01
+            capturesTo(at); if let x = report(w.returned(turnaround: 0.030, bytes: 1, at: at)) { r = x }
+        }
         expect(r == nil, "judged before \(W.judgeWithin) s on \(n) frames")
+        capturesTo(t + 0.05 + W.judgeWithin)
         r = report(w.returned(turnaround: 0.030, bytes: 1, at: t + 0.05 + W.judgeWithin))
         expect(r != nil, "not judged at \(W.judgeWithin) s")
         if let r {
@@ -129,6 +145,51 @@ do {
             expect(r.noFaster == expectTurnaround && w.gaveUp == expectTurnaround, "\(n + 1) frames at 30 ms by \(W.judgeWithin) s: noFaster \(r.noFaster), gaveUp \(w.gaveUp)")
         }
     }
+}
+/// A watch driven by hand to a replace: motion at 57 captures a second from 1 ms, every frame back in
+/// 29 ms after a first at 9 ms. The watch, when the replace came, and the next capture's time.
+func slowUntilReplace() -> (W, Double, Double) {
+    var w = W(now: 0)
+    _ = w.returned(turnaround: 0.009, bytes: 1, at: 0)
+    var t = 0.0, cap = 0.001
+    while true {
+        while cap <= t + 0.029 { w.captured(at: cap); cap += 1.0 / 57 }
+        t += 0.029
+        if isReplace(w.returned(turnaround: 0.029, bytes: 1, at: t)) { return (w, t, cap) }
+    }
+}
+do {
+    // The timing ends at the first frame after the keyframe that went in without motion, and the
+    // verdict comes with it. (a) Five frames timed in motion at 9 ms, then a repaint 0.12 s after
+    // the last one, though the second before it still held 50 captures: judged 9 ms on five, then.
+    var (w, _, cap) = slowUntilReplace()
+    w.captured(at: cap); w.swapped(at: cap)
+    _ = w.returned(turnaround: 0.009, bytes: 250_000, at: cap + 0.009)
+    var e: W.Event?
+    for k in 1...5 {
+        let c = cap + Double(k) / 57
+        w.captured(at: c)
+        e = w.returned(turnaround: 0.009, bytes: 1, at: c + 0.009)
+        expect(e == nil, "an event at the \(k)th frame in motion after the keyframe")
+    }
+    let m = cap + 5.0 / 57 + 0.12
+    w.captured(at: m)
+    e = w.returned(turnaround: 0.029, bytes: 1, at: m + 0.029)
+    let ra = report(e)
+    expect(ra != nil && ra?.judged == 5 && ra.map { abs(($0.turnaround ?? 0) - 0.009) < 1e-9 } == true && !w.gaveUp,
+           "a repaint 0.12 s after the last in motion: \(ra.map { "judged \($0.turnaround ?? -1) on \($0.judged)" } ?? "no verdict then"), not 9 ms on 5 at once")
+}
+do {
+    // (b) Motion stopped at the replace; the new session took over with a repaint 0.5 s later, and
+    // the next came 50 ms after that one: close to it, but the second before held under 45
+    // captures. Nothing timed: the picture went still, at once, and no giving up.
+    var (w, r, _) = slowUntilReplace()
+    w.captured(at: r + 0.5); w.swapped(at: r + 0.5)
+    _ = w.returned(turnaround: 0.03, bytes: 250_000, at: r + 0.53)
+    w.captured(at: r + 0.55)
+    let rb = report(w.returned(turnaround: 0.009, bytes: 1, at: r + 0.559))
+    expect(rb != nil && rb?.judged == 0 && rb?.turnaround == nil && !w.gaveUp,
+           "a pair of repaints 50 ms apart after the motion stopped: \(rb.map { "judged \($0.turnaround ?? -1) on \($0.judged)" } ?? "no verdict then"), not went still at once")
 }
 do {
     // A new session that could not be made: nothing to judge, and the next try 10 s on.
@@ -217,6 +278,18 @@ struct Stream {
 func motion(_ a: Double, _ b: Double, fps: Double = 57) -> [Double] { stride(from: a, to: b, by: 1 / fps).map { $0 } }
 func quiet(_ a: Double, _ b: Double) -> [Double] { stride(from: a + 0.5, to: b, by: 1.0).map { $0 } }
 
+/// Feeds `caps` to `s` up to its first replace: when that came, and the last capture fed.
+func feedUntilReplace(_ s: inout Stream, _ caps: [Double]) -> (replaced: Double, last: Double)? {
+    for c in caps {
+        s.capture(at: c)
+        if let r = s.replaces.first { return (r, c) }
+    }
+    return nil
+}
+/// When the motion stopped, for an engine scripted before it is known.
+final class Stop { var at = Double.infinity }
+final class Counter { var n = 0 }
+
 /// The solo measurement's engine: a session is 9 ms a frame until it has been fed sparse frames for
 /// 1.4 s (no two captures within 0.2 s), then 29 ms for good; `newSlow`: every new session 29 ms.
 func soloEngine(quietFrom: Double, quietTo: Double, newSlow: Bool = false) -> (Int, Double, Double) -> Double {
@@ -238,6 +311,10 @@ do {
     if let (_, r) = s.reports.first {
         expect(abs((r.turnaround ?? 0) - 0.009) < 1e-9 && !r.noFaster, "the new session judged at \(r.turnaround ?? -1)")
         expect(abs(r.slow.turnaround - 0.029) < 1e-9, "the slow session's median \(r.slow.turnaround), not 29 ms")
+        // Its 2 s reach 0.2 s back into the still spell: 51.5 and 31 (the hardware's line read "31 fps
+        // out of 51 captured").
+        expect(abs(r.slow.inputFPS - 51.5) < 1 && abs(r.slow.outputFPS - 31) < 1,
+               "the slow session's window: \(r.slow.inputFPS) fps in, \(r.slow.outputFPS) out, not 51.5 and 31")
         expect(r.gap < 0.03, "a gap of \(r.gap) s across the swap")
     }
     let before = s.outRate(15, 15.8), after = s.outRate(17, 49)
@@ -283,6 +360,15 @@ do {
     var s = Stream(turnaround: { _, _, _ in 0.030 })
     s.run(motion(0, 30), until: 30.5)
     expect(s.replaces.isEmpty, "\(s.replaces.count) replaces for a session that never ran fast")
+}
+
+scenarioName = "never under 25 ms"
+do {
+    // A frame size the engine is simply slow at: 26 ms at best, then 40 ms after a quiet spell (over
+    // 1.5 times its best): never replaced, since it never ran fast.
+    var s = Stream(turnaround: { _, _, now in now >= 5.4 ? 0.040 : 0.026 })
+    s.run(motion(0, 4) + quiet(4, 14) + motion(14, 40), until: 40.5)
+    expect(s.replaces.isEmpty, "\(s.replaces.count) replaces for a session never under 25 ms")
 }
 
 scenarioName = "fast throughout"
@@ -343,8 +429,8 @@ do {
 
 scenarioName = "still right after the swap"
 do {
-    // The picture stops as the new session is asked for, so it takes over with the next repaint and
-    // gets two more before `judgeWithin`: no verdict on its speed, and no giving up. The new session,
+    // The picture stops as the new session is asked for, so it takes over with the next repaint, and
+    // the one after ends the timing: no verdict on its speed, and no giving up. The new session,
     // which never runs fast, is slow when motion comes back 20 s later: no second replace, however
     // long the motion lasts.
     var s = Stream(turnaround: { session, _, now in session == 1 ? (now >= 5.4 ? 0.029 : 0.009) : 0.029 })
@@ -358,6 +444,118 @@ do {
     expect(s.reports.count == 1 && s.reports.first?.1.turnaround == nil && !s.watch.gaveUp,
            "went still after the swap: \(s.reports.map { String(describing: $0.1.turnaround) }), gave up \(s.watch.gaveUp)")
     expect(s.replaces.count == 1, "\(s.replaces.count) replaces: a session that never ran fast was replaced")
+}
+
+scenarioName = "at the engine's capacity"
+do {
+    // 6880×2880 at 60 fps on the hardware: 24.65 ms at best, 25.5 at the median. Frames spread evenly
+    // over 24–27 ms, and a flat 25.6 ms after one frame at 24.9: never replaced (under 1.5 times the
+    // session's best), where any frame under 25 ms and a median of 25 or more replaced both 2 s in.
+    let c = Counter()
+    var s = Stream(turnaround: { _, _, _ in c.n += 1; return 0.024 + 0.0005 * Double(c.n % 7) })
+    s.run(motion(0, 30), until: 30.5)
+    expect(s.replaces.isEmpty, "\(s.replaces.count) replaces for frames of 24–27 ms")
+    let d = Counter()
+    var t = Stream(turnaround: { _, _, _ in d.n += 1; return d.n == 2 ? 0.0249 : 0.0256 })
+    t.run(motion(0, 30), until: 30.5)
+    expect(t.replaces.isEmpty, "\(t.replaces.count) replaces for a flat 25.6 ms after one frame at 24.9")
+}
+
+scenarioName = "fast only at the paced rate"
+do {
+    // A session whose best frames came paced (16 ms at 57 fps: a stream that began on a still screen,
+    // or a new session whose picture stopped at the swap, 17.1 ms at best on the hardware), then 29
+    // ms: replaced, as one 9 ms at best is. Twice its best would be 32 ms, over the slow state.
+    var s = Stream(turnaround: { session, _, now in session == 1 ? (now >= 5.4 ? 0.029 : 0.016) : 0.009 })
+    s.run(motion(0, 4) + quiet(4, 14) + motion(14, 40), until: 40.5)
+    expect(s.replaces.count == 1, "\(s.replaces.count) replaces for a session 16 ms at best, then 29")
+    if let r = s.replaces.first { expect(r > 15.7 && r < 16.2, "replaced \(r - 14) s into the motion, not about 2 s") }
+    expect(s.reports.first.map { $0.1.turnaround != nil && !$0.1.noFaster } == true, "the new session judged \(s.reports.map { $0.1.turnaround ?? -1 })")
+}
+
+scenarioName = "no faster, against the session replaced"
+do {
+    // Slow at 34 ms, a new session at 25.5 (a quarter faster): not no faster, and kept going; slow at
+    // 29, a new one at 24 (under a fifth faster): no faster, and the stream keeps it. A fixed 25 ms
+    // says the opposite of both.
+    for (old, new, noFaster) in [(0.034, 0.0255, false), (0.029, 0.024, true)] {
+        var s = Stream(turnaround: { session, _, now in session == 1 ? (now >= 5.4 ? old : 0.009) : new })
+        s.run(motion(0, 4) + quiet(4, 14) + motion(14, 40), until: 40.5)
+        let tag = "slow at \(old * 1000) ms, a new session at \(new * 1000)"
+        expect(s.replaces.count == 1 && s.reports.count == 1, "\(tag): \(s.replaces.count) replaces, \(s.reports.count) verdicts")
+        if let (_, r) = s.reports.first {
+            expect(r.noFaster == noFaster && s.watch.gaveUp == noFaster, "\(tag): no faster \(r.noFaster), gave up \(s.watch.gaveUp)")
+        }
+    }
+}
+
+scenarioName = "the picture stops at the swap"
+do {
+    // On the hardware (3024×1964, motion stopping at the swap, then 4 repaints a second) the new
+    // session's frames took 17.1 ms, then 29–30 from 0.56 s on, and judged on those it was "no
+    // faster": the stream kept it for good, at 34 fps in the next motion. Here motion stops from just
+    // before the new session takes over to 0.25 s after, then 2, 3, 4 or 6 repaints a second for 6 s,
+    // then motion for 12 s; the new session runs 9 ms a frame for its first 0.3 s and until 0.4 s of
+    // the repaints, 29 ms after. Only its frames in motion are timed: never no faster, the verdict
+    // with the first frame without motion, and a second replace once motion is back and 10 s have
+    // passed since the first swap.
+    var cells = 0, stillCells = 0, timedCells = 0
+    for rate in [2.0, 3.0, 4.0, 6.0] {
+        for d in [0.0, 0.03, 0.06, 0.1, 0.15, 0.25] {
+            let stop = Stop()
+            var s = Stream(turnaround: { session, since, now in
+                switch session {
+                case 1: return now >= 5.4 ? 0.029 : 0.009
+                case 2: return since < 0.3 || now < stop.at + 0.4 ? 0.009 : 0.029
+                default: return 0.009
+                }
+            })
+            guard let (r, last) = feedUntilReplace(&s, motion(0, 4) + quiet(4, 14) + motion(14, 20)) else { expect(false, "no replace"); continue }
+            stop.at = r + d
+            let sparse = Array(stride(from: stop.at + 1 / rate, to: stop.at + 6, by: 1 / rate))
+            s.run(motion(last + 1 / 57, stop.at) + sparse + motion(stop.at + 6, stop.at + 18), until: stop.at + 18.5)
+            cells += 1
+            let tag = "\(Int(rate)) a second, motion stopped \(Int(d * 1000)) ms after the replace"
+            expect(s.swaps.count == 2 && s.reports.count == 2, "\(tag): \(s.swaps.count) swaps, \(s.reports.count) verdicts")
+            if let (at, r0) = s.reports.first, let sw = s.swaps.first {
+                if r0.turnaround == nil { stillCells += 1 } else { timedCells += 1 }
+                expect(!r0.noFaster, "\(tag): judged \(r0.turnaround.map { "\(($0 * 1000).rounded()) ms" } ?? "went still") on \(r0.judged): no faster")
+                expect(at <= max(stop.at, sw) + 1 / rate + 0.05, "\(tag): the verdict \(at - stop.at) s after the motion stopped, not with the first repaint without it")
+            }
+            expect(!s.watch.gaveUp, "\(tag): gave up")
+            if s.swaps.count == 2 { expect(s.swaps[1] - s.swaps[0] >= 10 && s.swaps[1] >= stop.at + 6, "\(tag): the second swap \(s.swaps[1] - s.swaps[0]) s after the first") }
+            if s.reports.count == 2 { expect(s.reports[1].1.turnaround.map { abs($0 - 0.009) < 1e-9 } == true, "\(tag): the third session judged \(String(describing: s.reports[1].1.turnaround))") }
+        }
+    }
+    print("the picture stops at the swap: \(cells) cases, the new session timed in motion in \(timedCells), went still in \(stillCells); never no faster, replaced again in the next motion")
+}
+
+scenarioName = "a pause right after the swap"
+do {
+    // Motion stops at the replace, 4 repaints a second for 1 s, then motion again: the new session,
+    // 9 ms a frame until 0.4 s into the pause and 29 ms from then on, is slow when motion comes back,
+    // within 2 s of taking over. Not judged on those frames (the motion that set off the swap had
+    // ended with the first repaint): no giving up, and replaced again 10 s after it took over.
+    let stop = Stop()
+    var s = Stream(turnaround: { session, since, now in
+        switch session {
+        case 1: return now >= 5.4 ? 0.029 : 0.009
+        case 2: return since < 0.3 || now < stop.at + 0.4 ? 0.009 : 0.029
+        default: return 0.009
+        }
+    })
+    if let (r, _) = feedUntilReplace(&s, motion(0, 4) + quiet(4, 14) + motion(14, 20)) {
+        stop.at = r
+        s.run(Array(stride(from: r + 0.25, to: r + 1, by: 0.25)) + motion(r + 1, r + 20), until: r + 20.5)
+        expect(s.swaps.count == 2 && s.reports.count == 2, "\(s.swaps.count) swaps, \(s.reports.count) verdicts")
+        expect(s.reports.first.map { !$0.1.noFaster } == true && !s.watch.gaveUp,
+               "judged \(s.reports.first.map { String(describing: $0.1.turnaround) } ?? "never"), gave up \(s.watch.gaveUp)")
+        let back = s.outRate(r + 12.5, r + 20)
+        print(String(format: "a pause right after the swap: first verdict %@, second swap %.1f s after the first, %.1f fps at the end",
+                     s.reports.first.map { $0.1.turnaround.map { String(format: "%.0f ms", $0 * 1000) } ?? "went still" } ?? "none",
+                     s.swaps.count == 2 ? s.swaps[1] - s.swaps[0] : -1, back))
+        expect(back > 56, "\(back) fps at the end, not about 57")
+    } else { expect(false, "no replace") }
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
