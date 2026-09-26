@@ -178,16 +178,13 @@ struct PairingOverlay: View {
         }
     }
 
-    /// The typed path here needs only the code: the address is this connection's Mac's own
-    /// (StreamClient.overlayAddress).
+    /// The typed path here needs only the code: over a session at home that speaks TLS it goes to
+    /// the session's own row, pinned to the key the session saw (docs/home-pairing-plan.md §7.5);
+    /// over any other, to the address from this connection's kind 18 (StreamClient.pairOverlayTyped).
     private func pairTyped() {
         guard !working else { return }
         codeFocused = false
-        guard let address = client.overlayAddress() else {
-            client.pairing = .failed(.notPairing(mac))
-            return
-        }
-        client.pairTyped(code: code, address: address, overlay: true)
+        client.pairOverlayTyped(code: code, mac: mac)
     }
 
     @ViewBuilder private var status: some View {

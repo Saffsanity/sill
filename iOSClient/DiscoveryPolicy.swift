@@ -7,7 +7,9 @@ import Foundation
 /// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
 /// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
 /// dialed away from home; at home, what a row of a Mac whose door speaks TLS says and what a tap
-/// on it does, and whether a connection runs over the USB cable as this device sees it.
+/// on it does, whether a connection runs over the USB cable as this device sees it, the key each
+/// connection of a session at home is pinned to and what its end means, what the Mac's answer to
+/// an ask means, where a pairing link goes, and the words for all of it.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -600,10 +602,10 @@ enum DiscoveryPolicy {
     /// A home door as its Bonjour TXT record's `p` says (HomeDoorTXT.Door, spelled here so that this
     /// file needs Foundation only; StreamClient maps it case for case): no `p` is a plain door,
     /// "0" a TLS door open to any device, anything else a TLS door for paired devices only.
-    enum HomeDoor: Equatable { case plain, pairingRequired, open }
+    enum HomeDoor: Hashable { case plain, pairingRequired, open }
 
     /// What a network or Direct row of a Mac at home ends in, and what VoiceOver says for it (§7.3).
-    enum RowWord: Equatable {
+    enum RowWord: Hashable {
         /// How the Mac is reachable (`method`), as before: a saved Mac on a TLS door, an unsaved one
         /// on an open door, a plain door in a DEBUG build. Nil when its interfaces do not say.
         case method(Method?)
@@ -780,5 +782,186 @@ enum DiscoveryPolicy {
         var v6 = in6_addr()
         withUnsafeMutableBytes(of: &v6) { $0.copyBytes(from: unscoped(a)) }
         return inet_ntop(AF_INET6, &v6, &buffer, socklen_t(buffer.count)).map { String(cString: $0) } ?? "?"
+    }
+
+    // MARK: Sessions and pairing at home over TLS (docs/home-pairing-plan.md §7.2, §7.5–7.7)
+
+    /// What a session at home trusts, which decides how every connection it opens is dialed (§7.2):
+    /// its first, and each move's (from AWDL, up to the cable, down to Wi-Fi, a reconnect over the
+    /// cable), so no hop of the session ever lands on another key.
+    enum HomeTrust: Equatable {
+        /// A plain door (`homeDial`'s `.plain`: a DEBUG build, a Mac never seen with `p`): no TLS.
+        case plain
+        /// A saved Mac: every connection `sill/1`, pinned to its key.
+        case saved(pin: Data)
+        /// An unsaved Mac on an open door (`p=0`): the session's first connection takes any key,
+        /// and every later one pins the key that one saw (`seen`).
+        case open(seen: Data?)
+
+        /// The session speaks TLS: connected at its first window list, not at `.ready`, since with
+        /// TLS 1.3 a connection is ready before the Mac has judged this device's key.
+        var tls: Bool { self != .plain }
+    }
+
+    /// What a new connection of a session checks the Mac's key against (`pin`).
+    enum Pin: Equatable {
+        /// Plain TCP: no key at all.
+        case plainTCP
+        /// Any P-256 key.
+        case anyKey
+        /// This key only.
+        case key(Data)
+    }
+
+    /// The pin of the session's next connection.
+    static func pin(_ trust: HomeTrust) -> Pin {
+        switch trust {
+        case .plain: return .plainTCP
+        case .saved(let pin): return .key(pin)
+        case .open(let seen?): return .key(seen)
+        case .open(nil): return .anyKey
+        }
+    }
+
+    /// The session a tap or an automatic reconnect starts (§7.4): the trust `homeDial`'s answer
+    /// gives it; nil when that answer dials no session (the ask, a Mac too old for this build, a
+    /// reconnect that waits for a tap) or a saved Mac's pin cannot be read.
+    static func sessionTrust(_ dial: HomeDial, savedPin: Data?) -> HomeTrust? {
+        switch dial {
+        case .pinned: return savedPin.map { .saved(pin: $0) }
+        case .anyKey: return .open(seen: nil)
+        case .plain: return .plain
+        case .ask, .updateSill, .waitForTap: return nil
+        }
+    }
+
+    /// The trust once the session's first connection is ready: an open session keeps the key that
+    /// connection saw for the rest of the session. Any other trust, and an open session that has
+    /// seen a key already, is unchanged.
+    static func trust(_ trust: HomeTrust, readyWith fingerprint: Data?) -> HomeTrust {
+        if case .open(nil) = trust, let fingerprint { return .open(seen: fingerprint) }
+        return trust
+    }
+
+    /// How a session at home ended (§7.6), from its trust, the goodbye the Mac sent (Goodbye's
+    /// `reason`: "removed", "pairingRequired"…) and the TLS status its end carried.
+    enum HomeEnd: Equatable {
+        /// The Mac removed this device: goodbye `removed`, or a saved Mac's key refused right after
+        /// `.ready` (-9825, -9829). The saved Mac is revoked, nothing reconnects, and a tap asks.
+        case removed
+        /// Require pairing turned on while this unpaired device was connected: goodbye
+        /// `pairingRequired`, or an open session's key refused (its TXT record was stale). Nothing
+        /// reconnects; the row reads Not paired once the Mac's new record arrives.
+        case pairingRequired
+        /// Another key answered as the saved Mac (-9808: this device's pin refused it): the other
+        /// rows its tag names are dialed, pinned, before any words; never a plain retry.
+        case wrongKey
+        /// Anything else: the words and the reconnect as before.
+        case other
+    }
+
+    /// The Mac refused this device's key (-9825), or its certificate (-9829).
+    static let keyRefused: Set<Int32> = [-9825, -9829]
+    /// This device's pin refused the Mac's key.
+    static let pinRefused: Int32 = -9808
+
+    static func homeEnd(trust: HomeTrust?, goodbye: String?, tls: Int32?) -> HomeEnd {
+        guard let trust, trust.tls else { return .other }   // a remote session, or a plain door (no keys)
+        if goodbye == "removed" { return .removed }
+        if goodbye == "pairingRequired" { return .pairingRequired }
+        guard goodbye == nil, let tls else { return .other }
+        switch trust {
+        case .saved:
+            if keyRefused.contains(tls) { return .removed }
+            return tls == pinRefused ? .wrongKey : .other
+        case .open:
+            return keyRefused.contains(tls) ? .pairingRequired : .other
+        case .plain:
+            return .other
+        }
+    }
+
+    /// After a pinned dial of a saved Mac failed its pin (-9808): the next row to dial, pinned,
+    /// among the rows its TXT tag names (`rows`: each row's id and the saved Mac its tag named), in
+    /// the connect screen's order, leaving out those tried; nil once none is left (§7.6). A stranger
+    /// replaying the Mac's tag makes a row that looks like it, so the words that tell the user to
+    /// forget the Mac wait until every such row has failed.
+    static func nextPinnedRow(macID: String, tried: [String], rows: [(id: String, macID: String?)]) -> String? {
+        rows.first { $0.macID == macID && !tried.contains($0.id) }?.id
+    }
+
+    /// What the device makes of the Mac's answer to its ask (kind 20, §7.5).
+    enum AskAnswer: Equatable {
+        /// Paired by itself over the USB cable: an ok without a proof, `method` "cable", to an ask
+        /// that said `cable: true`, naming the key this connection saw (its Mac ID), with a 32-byte
+        /// recognition key. Nothing else ever pairs without a proof.
+        case pairedOverCable
+        /// The Mac shows its code now: the home card, to scan it or type it.
+        case shown
+        /// The Mac showed no code by itself: choose Pair iPhone or iPad… on the Mac.
+        case openOnMac
+        /// The Mac is locked.
+        case locked
+        /// Busy: one silent retry, after this many seconds.
+        case busy(Double)
+        /// Any other refusal, or a reason this build does not know: as `openOnMac`.
+        case refused
+        /// An ok this device does not take (no cable claimed, a proof it cannot check, another Mac
+        /// ID, no recognition key): nothing is saved ("Pairing didn't finish…").
+        case invalid
+    }
+
+    static func askAnswer(ok: Bool, method: String?, hasProof: Bool, reason: String?, retryAfter: Double?,
+                          askedCable: Bool, macIDMatches: Bool, recognitionKeyBytes: Int?) -> AskAnswer {
+        if ok {
+            guard method == "cable", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }
+            return .pairedOverCable
+        }
+        switch reason {
+        case "shown"?: return .shown
+        case "openOnMac"?: return .openOnMac
+        case "locked"?: return .locked
+        case "busy"?: return .busy(min(max(retryAfter ?? 1, 0.2), 10))
+        default: return .refused
+        }
+    }
+
+    /// Where a pairing link goes at home (§7.5): nil for the connection the ask reached, when the
+    /// link's key is the one that connection saw (`askedKey`); else every home row with `p`, in the
+    /// connect screen's order, each to be dialed pinned to the link's key, one at a time (the Mac
+    /// whose code it is answers; a look-alike that answered the ask cannot), leaving out the asked
+    /// row, whose key is known to be another. None answering, the link's own addresses follow (the
+    /// caller's). `rows`: each row's id and door.
+    static func linkRows(linkKey: Data, askedKey: Data?, askedRow: String?, rows: [(id: String, door: HomeDoor)]) -> [String]? {
+        if let askedKey, askedKey == linkKey { return nil }
+        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\.id)
+    }
+
+    /// The connect screen's words for pairing and sessions at home (§7.7). `mac` is what the row
+    /// calls the Mac; `device` this device's kind ("iPad").
+    enum HomeCopy {
+        static func pairing(mac: String, cable: Bool) -> String {
+            cable ? "Pairing with \(mac) over the cable\u{2026}" : "Pairing with \(mac)\u{2026}"
+        }
+        static func pairedOverCable(mac: String) -> String { "Paired with \(mac) over the cable." }
+        static func showing(mac: String, device: String) -> String { "\(mac) is showing a code. Point this \(device) at it." }
+        static func openOnMac(mac: String) -> String {
+            "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+        }
+        static func locked(mac: String) -> String { "Unlock \(mac), then tap it again." }
+        static func removed(mac: String, device: String) -> String { "\(mac) removed this \(device). Tap it to pair again." }
+        static func pairingRequired(mac: String, device: String) -> String {
+            "\(mac) now asks devices to pair. Tap it to pair this \(device)."
+        }
+        /// The home card's errors, under its field or in its place.
+        static func stopped(mac: String) -> String {
+            "\(mac) stopped pairing after too many wrong codes. Tap \(mac) for a new code."
+        }
+        static func usedOrExpired(mac: String) -> String { "That code was used or has expired. Tap \(mac) for a new one." }
+        static func proofFailed(mac: String) -> String {
+            "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again."
+        }
+        /// Nothing answered the ask or a proof at the row (it went, or Sill quit meanwhile).
+        static func noAnswer(mac: String) -> String { "\(mac) didn\u{2019}t answer. Check that Sill is open on it, then tap it again." }
     }
 }

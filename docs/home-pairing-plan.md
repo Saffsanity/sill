@@ -1038,7 +1038,8 @@ New attention items (first group, orange):
 | `iOSClient/DiscoveryPolicy.swift` | `homeDial`, `rowWord`, `onCable` (pure) |
 | `iOSClient/SavedMacs.swift` | `homeTLS`, `revoked` (optional: older records decode) |
 | `iOSClient/StreamClient.swift` | one TLS builder for every home dial; `p` from each result; the session gate at the first window list; revoked |
-| `iOSClient/StreamClient+Remote.swift` | the ask; pairing through the row; the cable's ok; the goodbyes at home |
+| `iOSClient/StreamClient+Remote.swift` | the ask; pairing through the row; the cable's ok; the goodbyes at home. As built (step 4): these live in a new `iOSClient/StreamClient+Home.swift` (`DeviceTLS`, `HomeDialer`, `HomeAsk`, the ask, the proofs at the home door, the session gate, how a home session ends); +Remote routes its scanner, outside links and ends to it |
+| `iOSClient/Info-Debug.plist` (new, step 4) | the Debug configuration's Info.plist: Info.plist plus `_silltest._tcp` (§7.9) |
 | `iOSClient/AddMacCard.swift` | a home mode: the scanner, or the code alone |
 | `iOSClient/ContentView.swift` | row words and hints; the card for a row; the harness contract |
 | `iOSClient/HostSettingsPanel.swift` | Away from home: "Paired"; Pair This ‹iPad›… only in an unpaired session |
@@ -1192,7 +1193,7 @@ New attention items (first group, orange):
 |---|---|
 | Row words | "Not paired", "Wired", "Update Sill" (§7.3) |
 | Status | "Pairing with Mac mini…" · "Pairing with Mac mini over the cable…" · "Paired with Mac mini over the cable." · "Mac mini runs an older Sill. Update Sill on the Mac to connect." · "Mac mini removed this ‹iPad›. Tap it to pair again." · "Mac mini now asks devices to pair. Tap it to pair this ‹iPad›." |
-| After an ask | `openOnMac`: "Mac mini didn’t show a code. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then tap Mac mini again." · `locked`: "Unlock Mac mini, then tap it again." |
+| After an ask | `openOnMac`: "Mac mini didn’t show a code. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then tap Mac mini again." · `locked`: "Unlock Mac mini, then tap it again." · `shown` (as built, step 4, while the card is up): "Mac mini is showing a code. Point this ‹iPad› at it." · nothing answered the ask or a proof (step 4): "Mac mini didn’t answer. Check that Sill is open on it, then tap it again." |
 
 **The home card**
 
@@ -1240,6 +1241,13 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
   check never passes, even over en14 while a device is plugged into the Mac. With the host's
   `SILL_TEST_CABLE_INTERFACE=en0` (which also lets this Mac's own address through, §4.3) and
   `-SillConnect` to the Mac's own `fe80::…%en0`, the whole cable path runs in the simulator.
+- Added in step 4, because the gates drive no UI (no XCUITest; the Simulator tool's taps would ask
+  for a device permission a headless session cannot give): `-SillTapRow <name prefix>` taps the
+  first network or Direct row so named, once, as soon as it is listed; `-SillHomeCode <digits>` and
+  `-SillHomeLink <sill://pair…>` type the code into, or scan the link with, the home card once the
+  Mac answers the ask `shown`; `-SillOverlayCode <digits>` runs Pair This ‹iPad›… (kind 21, then
+  the code typed) once, on a session at home over TLS. The move and path tests' rows count as the
+  one saved Mac under `-SillHomeDoor` (they carry no TXT tag).
 
 ---
 
@@ -2175,3 +2183,156 @@ Noah's devices (P1–P16).
 
 **What step 3 changed in this plan:** §6.3 (the notice's own window), §6.6 (the bundle ignores
 `-SillQuitAfter` too; `-SillMenuAfter`) and H15.
+
+### Step 4: the iOS model
+
+`$SP` here is `scratchpad/home-pairing/4`: the checks (`checks/`: step 1's harness with the device and
+records checks grown and a new `home` check; step 0's policy, rf2 remote-rules and fence harnesses with
+step 4's sections and their mutant drivers pointed at this tree), the simulator gates (`sgates.py`,
+`simlib.py`), the stand-in Mac (`standin/`), their consoles and host logs (`t-s2` … `t-s6`,
+`sgates-final.out`) and the builds' logs. Every host ran with `SILL_TEST_SOFTWARE_ENCODER=1` but the
+base's (S6, which has no such hook), which ran on the hardware encoder only while Noah's Sill.log said
+idle; one host at a time, each under 90 s, stopped by its PID. The simulator is this plan's own ("iPad
+home-pairing H0"); the app browsed only `_silltest._tcp`; photos with `simctl io screenshot` only, and no
+tap, UI test, recording or panel.
+
+**What landed.**
+- One TLS builder, `DeviceTLS` (the new StreamClient+Home.swift): every connection to a Mac takes its
+  client options (RemoteTLS, this device's certificate, the pin or any P-256 key): a tap's session, its
+  wired dial and the fallback, the automatic reconnect, the move from AWDL, PR #12's moves up and down
+  and its reconnect over the cable (`rescue`), the session after a pairing, every pairing connection at
+  home (`HomeDialer`), and RemoteConnector's dials and pairings from afar. Plain TCP remains for a plain
+  door only, which `homeDial` gives a DEBUG build alone, and only for a Mac never seen with `p`. A move
+  of a TLS session is pinned as the session is (`moveParameters`; parameters that never connect should
+  the key be unreadable, so nothing goes out plain). `DeviceIdentity.loadOrCreate()` runs at the first
+  TLS dial.
+- `p` on every row: `FoundMac.door` (HomeDoorTXT.door over the result's record, both browsers) and
+  `homeWord` (`rowWord`: "Not paired", "Wired" for an unpaired Mac over the cable, "Update Sill"; the
+  cable bit from getifaddrs), which `word` shows. A saved Mac seen with `p` is marked `homeTLS` before
+  the rows are built, so a plain row of it reads "Update Sill" at once.
+- Taps and the reconnect go by `homeDial`: pinned, any key (an open door), the ask (a tap's only), plain
+  (DEBUG), or nothing ("‹Mac› runs an older Sill…"). The reconnect never asks, and skips a row it took by
+  Bonjour name whose key was another's (`pinRefusedRows`).
+- The session gate: a TLS session is connected at its first window list (`homeSessionReady`:
+  `connected`, `connectedAt`, `reconnect = nil`, "Connected to …", the DEBUG move and path tests, the
+  moves), with a remote session's 10 s first-list deadline; the route word is read at `.ready`. An open
+  door's session pins the key its first connection saw for every later hop (`trust(_:readyWith:)`). A TLS
+  error while connecting ends the dial at once.
+- How a home session ends (`homeEnd`): goodbye `removed`, or -9825/-9829 on a saved Mac's dial → the
+  record `revoked`, "‹Mac› removed this ‹iPad›. Tap it to pair again.", no reconnect; goodbye
+  `pairingRequired`, or a refused key on an open session → "‹Mac› now asks devices to pair. Tap it to
+  pair this ‹iPad›.", no reconnect; -9808 on a pinned dial → the other rows the tag names, pinned, then
+  the remote path's wrong-Mac words (none for a row taken by name alone). A goodbye `removed` on a remote
+  session revokes the record too.
+- The ask: `sill-pair/1` to the row as a tap dials it (its wired interface first, IPv6 only, then the
+  row as listed after 2.5 s or at once), pinned to a revoked Mac's saved key, else any key; the device's
+  cable check at `.ready` (`onCable` over the path's address, its scope and getifaddrs; the DEBUG
+  console's "home: cable: …"); kind 19 `ask` with `cable: true` only then; kind 20 within 15 s, judged by
+  the new pure `askAnswer`: the cable's proof-less ok only for an ask that claimed it, naming the key the
+  connection saw, with a 32-byte recognition key (saved with method "cable", `homeTLS`, the Bonjour name;
+  then a pinned session); `shown` → `homeAsk` (the home card's state for step 5: the asked key and the
+  endpoint that answered); `openOnMac`, `locked` and the rest in §7.7's words; `busy` one silent retry;
+  any other ok "Pairing didn’t finish…".
+- Proofs at the home door (`homeProof`): the home card's code (`pairHome`), its scanner and an outside
+  link (`pairLinkAtHome`: the connection the ask reached when the link names its key, else every row
+  with `p` pinned to the link's key, then the link's addresses), and Pair This ‹iPad›… over a TLS session
+  (`pairOverlayTyped`, and its scanner: the session's own row, pinned to the key it saw). proof_M
+  checked; saved as the remote path saves plus `homeTLS` and the Bonjour name; then a pinned session on
+  the row, or over a stream the session goes on with a saved Mac. The home card's errors are new
+  `PairingProblem` cases.
+- Pure: DiscoveryPolicy's `HomeTrust`, `pin`, `sessionTrust`, `trust(_:readyWith:)`, `homeEnd`,
+  `nextPinnedRow`, `askAnswer`, `linkRows` and `HomeCopy`; SavedMacs' `seenOverTLS`, `revoking` and
+  `forgettingHomeTLS`.
+- DEBUG: `-SillServiceType`, with `_silltest._tcp` declared in the Debug configuration's own
+  `Info-Debug.plist` (Release's Info.plist declares `_sill._tcp` alone); `-SillHomeDoor`,
+  `-SillForgetHomeTLS`, `-SillCableTest`; and for the gates, which drive no UI, `-SillTapRow`,
+  `-SillHomeCode`, `-SillHomeLink`, `-SillOverlayCode` (§7.9).
+
+**H1.** iOS Debug for the simulator (signed ad hoc, for its keychain), Release for the simulator and
+Debug for `generic/platform=iOS` (build only, unsigned; the iPad was not touched): only the old
+`StreamClient` capture warning. `NSBonjourServices`: Debug `_sill._tcp`, `_silltest._tcp` (simulator and
+device products); Release `_sill._tcp`. No package source changed (`swift build -c release`: nothing to
+do).
+
+**H3 (device)**, each check with its mutants (`$SP/out`, `$SP/out-ext`): the device check 111 (61 + 50:
+the pin of each hop, `sessionTrust` over all 192 `homeDial` answers, `homeEnd` over 360 combinations,
+`askAnswer` over 10,240 with the proof-less ok taken in exactly one shape, `linkRows`, `nextPinnedRow`,
+§7.7's words) and 66 of 66 mutants (31 + 35); the records 30 (20 + 10) and 16 of 16 (10 + 6); a new
+`home` check, 34 (the literals DiscoveryPolicy spells against Goodbye's and PairResult's, real kind 20
+JSON, and pairing at home walked end to end: unpaired, the cable's ok, the pinned session, removed,
+paired again, an older Sill.app, `-SillForgetHomeTLS`, an open door, a look-alike, links) and 11 of 11;
+the policy check grown to 336 (286 + the same 50) with 105 of 105 mutants (step 0's 70, still caught
+against this tree, and 35); the rf2 remote check grown to 102 (64 + the home model and the saved Macs'
+home fields) with 52 of 52 mutants (step 0's 35, still caught against this tree, and 17: the home
+model's 11 and the saved Macs' 6); the fence check, whose SessionLink this step does not touch, 14 of 14
+modes and 19 of 19 of its mutants (step 0's, against this tree).
+
+**H17.** Step 1's checks (DoorPolicy 104, CableLink 40, AskLimits 27, HomeDoorTXT 39) and their
+mutants (41, 20, 15 and 19, all caught); the wire probe's 50 lines byte for byte; step 0's (the policy
+286, the ledger 90, the fence 14 of 14 modes, remote-rules 64, addresses 41, the pairing address 80,
+origin 66, ClientLink 89, the protocol 188 and its 8 cross-checks): all pass. Step 2's host checks were
+not rerun: no host file changed.
+
+**S (simulator, `sgates-final.out`: 60 of 60 on the final build).**
+- S2: `SILL_TEST_SERVICE_TYPE=_silltest._tcp SillHost --synthetic --pairing` listed as "Sill test ‹pid›"
+  (p=1); with Noah's iPad on this Mac's cable the simulator sees the Mac on anri0 and en14 too, so the
+  unpaired row read "Wired", as S2 says it would (`notpaired.png`); the tap asked over anri0, the
+  device's check said "cable: no, fe80::… is this device’s own address", the CLI printed its ask and code
+  lines ("asked to pair; the code is already showing."), the code typed paired at the home door ("…
+  with the code."), and a pinned session was connected at its first list and streamed. Saved: method
+  "code", `homeTLS`, the Bonjour name. Relaunched, the row listed again (the Debug plist: no -65555) with
+  its method word and connected pinned, with no ask.
+- S2b (added): the host gone and back with the same identity under a new Bonjour name: the reconnect
+  found it by its tag and dialed it pinned, no ask.
+- S3: `SILL_TEST_CABLE_INTERFACE=en0 … --pairing`, the app at this Mac's `fe80::…%en0` with
+  `-SillHomeDoor paired -SillCableTest 1`: the ask claimed the cable, the host paired it by itself
+  ("Paired … over the USB cable (fe80::…%en0)."), the device took the ok ("Paired with … over the
+  cable."), no card, a pinned session streaming; saved with method "cable" and `homeTLS`; the host's
+  `paired.json` with the method and a `cableDevice`. S3b: without `-SillCableTest` the device's check
+  said no (en0 is Wi-Fi), the ask claimed nothing, the host answered `shown` ("Cable pairing: … not paired
+  by itself (it didn’t find the cable on its side)"), nothing saved; the stand-in (a swiftc tool over
+  RemoteTLS's server options) answered an unclaimed ask with a proof-less ok and the device refused it
+  ("Pairing didn’t finish: … couldn’t show it knows the code…"), nothing saved.
+- S4, after S3's pairing (its host identity kept in a test directory): `-SillMoveTest 1` (dialed pinned,
+  the move's connection read to its first list, the fence down, "Client connected" per connection, no
+  ask and no refused plain connection on the host) and `to:` this Mac's `fe80::…%en0` (the route word
+  Wi-Fi at the hand-over); `-SillPathTest` with this Mac's own `fe80::…%en14` as the cable (the iPad
+  plugged in): up to the cable, down to Wi-Fi when its path went, up again, the connection cut and
+  carried on over Wi-Fi at once, every hop pinned, the host seeing `%en14` and `%en0`; and a move to a
+  stand-in that presents the Mac's key and refuses this device's (a key removed on the Mac) ended as a
+  failed move while the session streamed on.
+- S5 (the bare app): paired with `-SillPairAfter`'s code at the home door, then `-SillUnpairAfter`:
+  "… removed this iPad. Tap it to pair again.", the record revoked, and the next dial the ask pinned to
+  the saved key (answered `openOnMac`: no window, from this Mac); `-requirePairing NO` then
+  `requirePairing=1` with an unsaved session on the open door: "… now asks devices to pair. Tap it to
+  pair this iPad.", no reconnect. S5c (added): Pair This ‹iPad›… over that open session with
+  `-SillPairAfter`'s code went to the session's own row, pinned ("this session's Mac"), never the remote
+  door; saved; Require pairing turned on then left the now paired session streaming.
+- S6: the base's (1f3072a) `SillHost --synthetic` and this CLI without `--pairing`, with `-SillConnect`:
+  plain, connected at `.ready`, streaming, as before.
+
+**Not verified.** The home card, the rows' VoiceOver labels and hints, the panel's Away from home
+(step 5); "Not paired" on a live row (only with no device on this Mac's cable; the pure checks and step
+5's photos cover it); the real cable at both ends: the simulator is this Mac, so its check always finds
+the Mac's address its own, and S3 ran on the host's stand-in and `-SillCableTest`; a Direct row's ask and
+session over AWDL (no AWDL-on test here); an outside link from `simctl openurl`; Noah's devices (P1–P16).
+
+**Deviations from the plan's sketches.**
+- The device's home code is a new file, `StreamClient+Home.swift` (§7.1 now says so), and the Debug
+  configuration's `NSBonjourServices` comes from its own `Info-Debug.plist` (§7.9's "a
+  per-configuration plist").
+- DEBUG arguments beyond §7.9's for the gates, which drive no UI: `-SillTapRow`, `-SillHomeCode`,
+  `-SillHomeLink`, `-SillOverlayCode` (§7.9 now lists them); the move and path tests' rows count as the
+  one saved Mac under `-SillHomeDoor`.
+- A TLS session at home has a remote session's 10 s first-list deadline; a TLS error while connecting
+  ends a dial at once rather than after `.waiting`'s 5 s.
+- A goodbye `removed` on a remote session revokes the saved Mac too (one trust list).
+- Copy §7.7 did not have: after `shown`, the status line is "‹Mac› is showing a code. Point this ‹iPad›
+  at it." (the card's scan line), and an ask or a proof nothing answered says "‹Mac› didn’t answer.
+  Check that Sill is open on it, then tap it again." (§7.7 now lists both).
+- RemoteConnector builds its TLS options through `DeviceTLS` (the same verify rule as before).
+- `HomeDoor` and `RowWord` are Hashable (FoundMac is).
+- Commits end with this session's attribution line, as steps 0 to 3 did.
+
+**What step 4 changed in this plan:** §7.1 (the new file and the Debug plist), §7.7 (two lines) and
+§7.9 (the gates' arguments).

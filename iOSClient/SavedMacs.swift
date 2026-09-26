@@ -141,6 +141,40 @@ enum SavedMacs {
         return out
     }
 
+    /// `homeTLS` set on the Macs of `ids`: seen with `p`, or a TLS session at home with them ran
+    /// (docs/home-pairing-plan.md §7.3). Nil when none changes, so a caller writes only a change.
+    static func seenOverTLS(_ ids: Set<String>, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { ids.contains($0.macID) && $0.homeTLS != true }) else { return nil }
+        return list.map { mac in
+            guard ids.contains(mac.macID) else { return mac }
+            var next = mac
+            next.homeTLS = true
+            return next
+        }
+    }
+
+    /// `revoked` set on `id`: the Mac removed this device (goodbye `removed`), or refused its key on
+    /// a pinned home dial (§7.6). Nil when `id` is not saved or is revoked already.
+    static func revoking(_ id: String, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { $0.macID == id && $0.revoked != true }) else { return nil }
+        return list.map { mac in
+            guard mac.macID == id else { return mac }
+            var next = mac
+            next.revoked = true
+            return next
+        }
+    }
+
+    /// DEBUG `-SillForgetHomeTLS 1` (§3.4, §7.9): `homeTLS` cleared on every saved Mac, so a DEBUG
+    /// build dials an older Sill.app (another branch's) plainly again.
+    static func forgettingHomeTLS(_ list: [SavedMac]) -> [SavedMac] {
+        list.map { mac in
+            var next = mac
+            next.homeTLS = nil
+            return next
+        }
+    }
+
     /// The saved Mac whose recognition key made `tag`, if any.
     static func recognize(tag: String?, in list: [SavedMac]) -> String? {
         guard let tag, !tag.isEmpty else { return nil }
