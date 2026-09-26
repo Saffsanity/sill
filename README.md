@@ -22,13 +22,12 @@ server in between.
 -->
 
 <!-- App Store: once the iPhone and iPad app is listed, put Apple's "Download on
-     the App Store" badge here, linked to the listing. Edit the sentence below
-     as the App Store listing and the first notarized build of Sill for Mac come
-     out, and delete it once both have. -->
+     the App Store" badge here, linked to the listing, and delete the sentence
+     below. -->
 
-The first public build of Sill for Mac is being prepared, and the iPhone and
-iPad app is not on the App Store yet. Until then, you can build both from
-source.
+Sill for Mac is a free, notarized download from
+[getsill.app](https://getsill.app/download). The iPhone and iPad app is not on
+the App Store yet; until it is, you can build it from source (below).
 
 ## Requirements
 
