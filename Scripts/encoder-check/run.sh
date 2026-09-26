@@ -5,8 +5,7 @@
 #   probe     EncoderProbe.throughput's loop (the real file) against a stand-in HEVCEncoder, in real
 #             time, and SILL_TEST_PROBE_HOLD=0.08 through it
 #   encoder   the real HEVCEncoder.swift (with EncoderMailbox.swift and EncoderProbe.swift) against a
-#             stand-in VideoToolbox (encoder/FakeVT.swift), in real time: by default and again
-#             with SILL_TEST_ENCODER_IN_FLIGHT=2
+#             stand-in VideoToolbox (encoder/FakeVT.swift), in real time
 # usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe] [encoder]   (no argument: all)
 # Builds under .build/encoder-check/. Every binary is checked with otool before it runs: one that
 # links VideoToolbox is refused, so nothing here can open an encoder session, and these checks are
@@ -56,7 +55,6 @@ encoder)
   encoder_free $OUT/encoder-check || { failed=1; continue }
   if nm -u $OUT/encoder-check | grep -q '_VT'; then echo "REFUSED: encoder-check imports a VideoToolbox symbol"; failed=1; continue; fi
   $OUT/encoder-check || failed=1
-  SILL_TEST_ENCODER_IN_FLIGHT=2 $OUT/encoder-check || failed=1
   ;;
 *) echo "unknown step $step"; failed=1 ;;
 esac

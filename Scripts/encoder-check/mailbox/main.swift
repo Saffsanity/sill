@@ -3,10 +3,11 @@ import CoreMedia
 
 // Encoder-free check of HEVCEncoder's frame bookkeeping. Sources/SillHost/EncoderMailbox.swift (the
 // real file) is compiled beside this one; `StandIn` below mirrors HEVCEncoder's glue call for call
-// (enqueue, submit on a serial queue, the encode call, frameReturned from the output handler or a
-// refusal, the watchdog every 0.5 s, requestKeyframe, abandon, the deinit's teardown) around a
-// stand-in for VideoToolbox that returns each frame after a programmable delay, in any order, in
-// virtual time. Nothing here links VideoToolbox.
+// (encode and the re-encode's admission, submit on a serial queue, the encode call, frameReturned
+// from the output handler or a refusal, the watchdog every 0.5 s, requestKeyframe and its second
+// look, abandon, the deinit's teardown) around a stand-in for VideoToolbox that returns each frame
+// after a programmable delay, in virtual time. One frame is inside at a time, as in HEVCEncoder.
+// Nothing here links VideoToolbox.
 //
 //   Scripts/encoder-check/run.sh mailbox mutants      (from the repository's root)
 // or by hand:
@@ -59,11 +60,9 @@ struct Frame {
 func cm(_ t: Double) -> CMTime { CMTime(value: CMTimeValue((t * 1_000_000).rounded()), timescale: 1_000_000) }
 
 enum Engine {
-    /// Each frame comes back `turnaround` seconds after its encode call (nil: never), whatever the
-    /// others do, so a later frame can come back first.
+    /// Each frame comes back `turnaround` seconds after its encode call (nil: never).
     case independent((Frame) -> Double?)
-    /// One engine: `chip` seconds a frame, one frame at a time; `pre` before it and `post` after
-    /// it overlap other frames. pre 0, post 0: the whole turnaround runs one frame at a time.
+    /// One engine: `chip` seconds a frame, one frame at a time; `pre` before it and `post` after it.
     case serial(pre: Double, chip: Double, post: Double)
 }
 
@@ -72,11 +71,12 @@ typealias Box = EncoderMailbox<Frame>
 /// HEVCEncoder with VideoToolbox replaced by `engine`. Every method mirrors the real one.
 final class StandIn {
     let clock: Clock
-    var box: Box
+    var box = Box()
     let engine: Engine
     let hangAfter: Double = 1.5      // HEVCEncoder.hangAfter
+    let stillAfter: Double = 0.05    // HEVCEncoder.stillAfter
     /// Output in decode order, as VideoToolbox documents it: a frame's output waits for every
-    /// frame handed over before it. False: whatever order the delays give.
+    /// frame handed over before it. With one frame inside they come back in order anyway.
     var inOrder = false
     var refuse: (Frame) -> Bool = { _ in false }
     var duplicateAfterRefusal: (Frame) -> Bool = { _ in false }
@@ -98,6 +98,8 @@ final class StandIn {
     private var queue: [(Frame, Int)] = []
     private var queueBusy = false
     private(set) var onQueue: Set<Int> = []
+    /// Ids the mailbox handed over (`handOver` returned a hand-over).
+    private(set) var handedOver: Set<Int> = []
 
     // HEVCEncoder's own state.
     var lastFrame: Frame?
@@ -115,14 +117,14 @@ final class StandIn {
     var handOverLog: [(id: Int, keyframe: Bool, at: Double)] = []   // the mailbox's hand-overs (the flag is taken there)
     var returnOrder: [Int] = []
     var keyframeRequestTimes: [Double] = []
+    var keyframeRequestMarks: [Int] = []   // how many frames had been handed over at each request
     var created: [Int: Frame] = [:]
     var fate: [Int: String] = [:]
     private var nextSerial = 0
 
-    init(clock: Clock, limit: Int, engine: Engine) {
+    init(clock: Clock, engine: Engine) {
         self.clock = clock
         self.engine = engine
-        box = Box(limit: limit)
     }
 
     func newFrame(index: Int, pts: CMTime, capturedAt: Double, reencode: Bool) -> Frame {
@@ -137,29 +139,28 @@ final class StandIn {
         fate[f.serial] = what
     }
 
-    /// While the session is live, the mailbox's frames inside are exactly those on encodeQueue or
-    /// inside VideoToolbox, never more than the limit, and a waiting frame means all places are taken.
+    /// While the session is live, the mailbox's frame inside is exactly the one on encodeQueue or
+    /// inside VideoToolbox, it counts as handed over exactly when the mailbox handed it over, and a
+    /// frame waits only while the place is taken.
     func invariants(_ at: String) {
         guard !gone else { return }
-        expect(box.inside.count <= box.places, "\(at): \(box.inside.count) inside, over the \(box.places) places open")
-        expect(box.places == (box.anyReturned ? box.limit : 1), "\(at): \(box.places) places open, returned before: \(box.anyReturned)")
-        if box.waiting != nil { expect(!box.dead && box.inside.count == box.places, "\(at): a frame waits while a place is free or the session is dead") }
-        expect(box.handed.isSubset(of: Set(box.inside.keys)), "\(at): handed over \(box.handed.sorted()), not all inside \(box.inside.keys.sorted())")
-        if !box.dead {
-            let bookkept = Set(box.inside.keys), real = Set(vtHolds.keys).union(onQueue)
-            expect(bookkept == real, "\(at): the mailbox has \(bookkept.sorted()) inside, the queue and VideoToolbox hold \(real.sorted())")
-            expect(Set(vtHolds.keys).isSubset(of: box.handed), "\(at): VideoToolbox holds \(vtHolds.keys.sorted()), handed over \(box.handed.sorted())")
+        if box.waiting != nil { expect(!box.dead && box.inside != nil, "\(at): a frame waits while the place is free or the session is dead") }
+        guard !box.dead else { return }
+        let bookkept = Set(box.inside.map { [$0.id] } ?? []), real = Set(vtHolds.keys).union(onQueue)
+        expect(bookkept == real, "\(at): the mailbox has \(bookkept.sorted()) inside, the queue and VideoToolbox hold \(real.sorted())")
+        if let inside = box.inside {
+            expect(inside.handed == handedOver.contains(inside.id), "\(at): frame \(inside.id) counts as handed over: \(inside.handed), handed over: \(handedOver.contains(inside.id))")
         }
     }
 
     // HEVCEncoder.encode(_:pts:)
     func capture(index: Int) {
         let f = newFrame(index: index, pts: cm(clock.now), capturedAt: clock.now, reencode: false)
-        enqueue(f, fromCapture: true)
+        admit(f, fromCapture: true)
     }
 
-    // HEVCEncoder.enqueue
-    func enqueue(_ f: Frame, fromCapture: Bool) {
+    // HEVCEncoder.admitLocked and count
+    func admit(_ f: Frame, fromCapture: Bool) {
         let before = box.waiting
         let now = clock.now
         let admission = box.admit(f, now: now)
@@ -180,7 +181,7 @@ final class StandIn {
             deadDrop += 1
             settle(f, "dropped: dead")
         }
-        invariants("enqueue")
+        invariants("admit")
     }
 
     private func async(_ f: Frame, _ id: Int) {
@@ -206,6 +207,7 @@ final class StandIn {
             runQueue()
             return
         }
+        handedOver.insert(id)
         handOverLog.append((id, h.keyframe, clock.now))
         if h.ptsFixed { ptsFixed += 1 }
         let wait = hold(id)
@@ -235,8 +237,7 @@ final class StandIn {
         }
         vtHolds[id] = f
         maxVTHolds = max(maxVTHolds, vtHolds.count)
-        expect(vtHolds.count <= box.limit, "VideoToolbox holds \(vtHolds.count) frames at \(clock.now), over the limit of \(box.limit)")
-        if !box.anyReturned { expect(vtHolds.count <= 1, "VideoToolbox holds \(vtHolds.count) frames before the session let go of one") }
+        expect(vtHolds.count <= 1, "VideoToolbox holds \(vtHolds.count) frames at \(clock.now), not one at most")
         let done: Double?
         switch engine {
         case .independent(let turnaround): done = turnaround(f).map { clock.now + $0 }
@@ -328,12 +329,12 @@ final class StandIn {
     // HEVCEncoder.requestKeyframe (one hold of the lock: atomic here, as everything in virtual time)
     func requestKeyframe() {
         keyframeRequestTimes.append(clock.now)
+        keyframeRequestMarks.append(handOverLog.count)
         box.keyframeRequested = true
-        let recent = clock.now - lastFrameAt < 0.05
-        if !recent {
+        if clock.now - lastFrameAt >= stillAfter {
             reencodeLast()
         } else {
-            clock.at(lastFrameAt + 0.05 + 0.01) { [self] in keyframeCheck() }
+            clock.at(lastFrameAt + stillAfter + 0.01) { [self] in keyframeCheck() }
         }
     }
 
@@ -341,7 +342,7 @@ final class StandIn {
     func keyframeCheck() {
         guard !gone else { return }
         keyframeChecks += 1
-        guard box.keyframeRequested, !box.dead, !box.frameOnItsWay, clock.now - lastFrameAt >= 0.05 else { return }
+        guard box.keyframeRequested, !box.dead, !box.frameOnItsWay, clock.now - lastFrameAt >= stillAfter else { return }
         reencodeLast()
     }
 
@@ -349,7 +350,7 @@ final class StandIn {
         guard let last = lastFrame else { return }
         let lastPTS = box.lastPTS
         let pts = lastPTS.isValid ? CMTimeAdd(lastPTS, CMTime(value: 1, timescale: 1000)) : cm(clock.now)
-        enqueue(newFrame(index: last.index, pts: pts, capturedAt: last.capturedAt, reencode: true), fromCapture: false)
+        admit(newFrame(index: last.index, pts: pts, capturedAt: last.capturedAt, reencode: true), fromCapture: false)
     }
 
     private func retryKeyframe() {
@@ -447,16 +448,13 @@ struct LCG {
 }
 
 let fps = 60.0
-/// HEVCEncoder's limits: one frame inside VideoToolbox (the default, both encoders), two on the
-/// hardware encoder under the plateau experiment's SILL_TEST_ENCODER_IN_FLIGHT=2.
-let oneInside = 1, twoInside = 2
 
 // MARK: - Scenarios
 
-func steady(_ name: String, limit: Int, engine: Engine, seconds: Double = 10) -> (StandIn, Summary) {
+func steady(_ name: String, engine: Engine, seconds: Double = 10) -> (StandIn, Summary) {
     scenarioName = name
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: limit, engine: engine)
+    let s = StandIn(clock: clock, engine: engine)
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: seconds))
     s.startWatchdog(until: seconds + 2)
     clock.run()
@@ -467,71 +465,53 @@ func steady(_ name: String, limit: Int, engine: Engine, seconds: Double = 10) ->
     expect(s.late == 0 && s.deadDrop == 0, "late \(s.late) / deadDrop \(s.deadDrop) on a healthy pipeline")
     // Every frame captured is output or pushed out of the mailbox, nothing else.
     expect(s.out + s.mailboxDrop == Int(seconds * fps), "out \(s.out) + mailboxDrop \(s.mailboxDrop) != \(Int(seconds * fps)) captured")
+    expect(s.maxVTHolds == 1, "VideoToolbox held \(s.maxVTHolds) frames at most, not 1")
     let pts = s.handOvers.map(\.pts)
     expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "timestamps handed to VideoToolbox went backwards")
     return (s, m)
 }
 
-scenarioName = "limits"
-print("== EncoderMailbox against a stand-in VideoToolbox, 60 fps capture")
-expect(Box(limit: 1).limit == 1 && Box(limit: 2).limit == 2, "the limits are \(Box(limit: 1).limit) and \(Box(limit: 2).limit), not 1 and 2")
-expect(Box(limit: 0).limit == 1, "a limit of 0 gives \(Box(limit: 0).limit), not 1")
+print("== EncoderMailbox against a stand-in VideoToolbox, 60 fps capture, one frame inside")
 
-// S1: the fast state (~9 ms a frame): nothing waits, on either limit.
+// S1: the fast state (~9 ms a frame): nothing waits.
 do {
-    let (s, m) = steady("fast state, 9 ms, two inside", limit: twoInside, engine: .independent { _ in 0.009 })
+    let (s, m) = steady("fast state, 9 ms a frame", engine: .independent { _ in 0.009 })
     expect(s.out == 600 && s.mailboxDrop == 0, "fast state: out \(s.out), mailboxDrop \(s.mailboxDrop)")
+    expect(m.rate >= 59.5 && m.rate <= 60.5, "fast state: \(m.rate) fps, not 60")
     expect(abs(m.latencyMax - 9) < 0.01, "fast state: latency max \(m.latencyMax) ms, not 9")
-    let (s1, _) = steady("fast state, 9 ms, one inside", limit: oneInside, engine: .independent { _ in 0.009 })
-    expect(s1.out == 600 && s1.mailboxDrop == 0, "fast state, one inside: out \(s1.out), mailboxDrop \(s1.mailboxDrop)")
 }
 
-// S2: the slow state, 30 ms a frame, each frame on its own (the time around the chip overlaps).
+// S2: the slow state (~30 ms a frame): one over the turnaround, 33.3 fps, the rest mailbox drops.
 do {
-    let (s, m) = steady("slow state, 30 ms, two inside", limit: twoInside, engine: .independent { _ in 0.030 })
-    expect(m.rate >= 59.5 && m.rate <= 60.5, "slow state, two inside: \(m.rate) fps, not ~60")
-    expect(s.out == 600 && s.mailboxDrop == 0, "slow state, two inside: out \(s.out), mailboxDrop \(s.mailboxDrop)")
-    expect(s.maxVTHolds == 2, "slow state, two inside: VideoToolbox never held two (\(s.maxVTHolds))")
-    expect(abs(m.latencyMedian - 30) < 0.01, "slow state, two inside: latency median \(m.latencyMedian), not 30")
-    let (s1, m1) = steady("slow state, 30 ms, one inside", limit: oneInside, engine: .independent { _ in 0.030 })
-    expect(m1.rate >= 32.5 && m1.rate <= 34.5, "slow state, one inside: \(m1.rate) fps, not ~33")
-    expect(m1.drops >= 25 && m1.drops <= 28, "slow state, one inside: \(m1.drops) mailbox drops a second, not ~26")
-    expect(s1.maxVTHolds == 1, "one inside: VideoToolbox held \(s1.maxVTHolds)")
-    // The newest frame wins: a promoted frame waited at most one capture interval.
-    expect(m1.latencyMax <= 30 + 1000 / fps + 0.01, "one inside: latency max \(m1.latencyMax) ms, over 30 ms plus one frame interval")
+    let (s, m) = steady("slow state, 30 ms a frame", engine: .independent { _ in 0.030 })
+    expect(m.rate >= 32.5 && m.rate <= 34.5, "slow state: \(m.rate) fps, not ~33.3")
+    expect(m.drops >= 25 && m.drops <= 28, "slow state: \(m.drops) mailbox drops a second, not ~26.7")
+    // The newest frame wins: a frame let in from the mailbox waited at most one capture interval.
+    expect(m.latencyMax <= 30 + 1000 / fps + 0.01, "slow state: latency max \(m.latencyMax) ms, over 30 ms plus one frame interval")
+    _ = s
 }
 
-// S3: 40 ms a frame: two inside carry 50 fps, and the rest are mailbox drops, counted exactly.
+// S3: 40 ms a frame: 25 fps, 35 mailbox drops a second, counted exactly.
 do {
-    let (s, m) = steady("40 ms, two inside", limit: twoInside, engine: .independent { _ in 0.040 })
-    expect(m.rate >= 49.5 && m.rate <= 50.5, "40 ms, two inside: \(m.rate) fps, not ~50")
-    expect(m.drops >= 9.5 && m.drops <= 10.5, "40 ms, two inside: \(m.drops) drops a second, not ~10")
-    expect(s.maxVTHolds == 2, "40 ms: VideoToolbox held \(s.maxVTHolds)")
+    let (_, m) = steady("40 ms a frame", engine: .independent { _ in 0.040 })
+    expect(m.rate >= 24.5 && m.rate <= 25.5, "40 ms: \(m.rate) fps, not ~25")
+    expect(m.drops >= 34.5 && m.drops <= 35.5, "40 ms: \(m.drops) drops a second, not ~35")
 }
 
-// S4: what the fix assumes. If the engine did the whole 30 ms one frame at a time, two inside
-// could not beat 33 fps and would add up to a turnaround of latency; if half of it is outside the
-// chip, two inside reach the capture rate. Not a property of the code: printed for the record, and
-// only checked to never do worse than one inside.
+// S4: one engine doing one frame at a time, 30 ms each: the same one over the turnaround.
 do {
-    let (sB2, mB2) = steady("serial engine, all 30 ms one at a time, two inside", limit: twoInside, engine: .serial(pre: 0, chip: 0.030, post: 0))
-    let (_, mB1) = steady("serial engine, all 30 ms one at a time, one inside", limit: oneInside, engine: .serial(pre: 0, chip: 0.030, post: 0))
-    expect(mB2.rate >= mB1.rate - 0.5, "serial engine: two inside \(mB2.rate) fps, below one inside \(mB1.rate)")
-    _ = sB2
-    let (_, mA2) = steady("serial chip 15 ms, 7.5 ms before and after, two inside", limit: twoInside, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
-    let (_, mA1) = steady("serial chip 15 ms, 7.5 ms before and after, one inside", limit: oneInside, engine: .serial(pre: 0.0075, chip: 0.015, post: 0.0075))
-    expect(mA2.rate >= 59.5, "chip 15 ms with overlap: two inside \(mA2.rate) fps, not ~60")
-    expect(mA1.rate <= 34.5, "chip 15 ms with overlap: one inside \(mA1.rate) fps, not ~33")
+    let (_, m) = steady("one engine, 30 ms a frame one at a time", engine: .serial(pre: 0, chip: 0.030, post: 0))
+    expect(m.rate >= 32.5 && m.rate <= 34.5, "serial engine at 30 ms: \(m.rate) fps, not ~33.3")
 }
 
-// S5: out-of-order returns, refusals, a duplicate notice after some refusals, rate-control drops
-// and keyframe requests, on two inside.
+// S5: turnarounds of 4 to 45 ms, refusals, a duplicate notice after some refusals, rate-control
+// drops and keyframe requests.
 do {
-    scenarioName = "out of order"
+    scenarioName = "random turnarounds"
     let clock = Clock()
     var rng = LCG(state: 42)
     var delays: [Int: Double] = [:]
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { f in
+    let s = StandIn(clock: clock, engine: .independent { f in
         if let d = delays[f.serial] { return d }
         let d = 0.004 + 0.041 * rng.next()
         delays[f.serial] = d
@@ -545,31 +525,34 @@ do {
     s.startWatchdog(until: 12)
     clock.run()
     let m = summary(s, from: 2, to: 9)
-    print(line("out of order, 4-45 ms, refusals, errors, keyframes", s, m))
+    print(line("turnarounds 4-45 ms, refusals, errors, keyframes", s, m))
     expectAllSettled(s)
-    var inversions = 0
-    let position = Dictionary(uniqueKeysWithValues: s.handOvers.enumerated().map { ($0.element.id, $0.offset) })
-    for (a, b) in zip(s.returnOrder, s.returnOrder.dropFirst()) where (position[a] ?? 0) > (position[b] ?? 0) { inversions += 1 }
-    expect(inversions >= 50, "only \(inversions) frames came back before one handed over earlier: the scenario does not exercise out of order")
-    expect(s.hungAt == nil, "out of order: the watchdog fired at \(s.hungAt ?? -1)")
+    expect(s.hungAt == nil, "random turnarounds: the watchdog fired at \(s.hungAt ?? -1)")
     let refusals = s.handOvers.filter { s.refuse($0.frame) }.count
     let dupNotices = s.handOvers.filter { s.refuse($0.frame) && s.duplicateAfterRefusal($0.frame) }.count
-    expect(s.refused == refusals && refusals >= 10, "refused \(s.refused), handed over refused \(refusals)")
-    expect(s.duplicates == dupNotices && dupNotices >= 3, "duplicates \(s.duplicates), expected \(dupNotices)")
-    expect(s.errors == s.handOvers.filter { s.failOutput($0.frame) }.count + dupNotices, "errors \(s.errors)")
+    expect(s.refused == refusals && refusals >= 5, "refused \(s.refused), handed over refused \(refusals)")
+    expect(s.duplicates == dupNotices && dupNotices >= 2, "duplicates \(s.duplicates), expected \(dupNotices)")
+    let failed = s.handOvers.filter { s.failOutput($0.frame) }.count
+    expect(s.errors == failed + dupNotices && failed >= 5, "errors \(s.errors), expected \(failed) failed outputs and \(dupNotices) duplicate notices")
     expect(Set(s.outputs.map(\.frame.serial)).count == s.outputs.count, "a frame was output twice")
     let pts = s.handOvers.map(\.pts)
-    expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "out of order: timestamps went backwards")
-    expect(s.maxVTHolds == 2, "out of order: VideoToolbox held \(s.maxVTHolds)")
+    expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "random turnarounds: timestamps went backwards")
+    expect(s.maxVTHolds == 1, "random turnarounds: VideoToolbox held \(s.maxVTHolds)")
+    // Every request, retries of dropped keyframes included, goes with the first frame handed over
+    // after it (two requests before one hand-over share it).
+    for (mark, r) in zip(s.keyframeRequestMarks, s.keyframeRequestTimes) {
+        expect(mark < s.handOverLog.count && s.handOverLog[mark].keyframe, "the first frame handed over after the request at \(r) is not a keyframe")
+    }
+    expect(s.keyframeRequestTimes.count > 20, "only \(s.keyframeRequestTimes.count) keyframe requests")
 }
 
-// S6: one frame stuck for good while the other place keeps flowing (any order), and the same in
-// decode order (everything behind the stuck frame waits); with one inside, everything waits.
-for (limit, inOrder) in [(twoInside, false), (twoInside, true), (oneInside, true)] {
-    scenarioName = "stuck frame, \(limit) inside, \(inOrder ? "decode order" : "any order")"
+// S6: a frame stuck for good: everything waits behind it, the watchdog fires 1.5 to 2.0 s after it
+// went in, nothing is forwarded, handed over or let in afterwards, and the teardown is stalled.
+do {
+    scenarioName = "stuck frame"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: limit, engine: .independent { $0.index == 100 ? nil : 0.009 })
-    s.inOrder = inOrder
+    let s = StandIn(clock: clock, engine: .independent { $0.index == 100 ? nil : 0.009 })
+    s.inOrder = true
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 6))
     s.startWatchdog(until: 8)
     clock.run(until: 8)
@@ -587,23 +570,23 @@ for (limit, inOrder) in [(twoInside, false), (twoInside, true), (oneInside, true
     }
     expect(s.hung == 1, "the watchdog fired \(s.hung) times")
     let teardown = s.release()
-    expect(teardown == .stalled(since: t), "teardown \(teardown), not stalled since \(t) (the oldest)")
+    expect(teardown == .stalled(since: t), "teardown \(teardown), not stalled since \(t)")
 }
 
-// S7: SILL_TEST_ENCODER_HANG: frame 90 waits 3 s on encodeQueue before its encode call, then goes
-// in and comes back. The watchdog must fire 1.5 s after it went in, the frame let in behind it
-// must never go in, and the late one must not be forwarded.
-for limit in [twoInside, oneInside] {
-    scenarioName = "TestHang, \(limit) inside"
+// S7: SILL_TEST_ENCODER_HANG: frame 90 waits 3 s on encodeQueue after its hand-over, before its
+// encode call, then goes in and comes back. The watchdog must fire 1.5 s after it was handed over
+// and the late output must not be forwarded.
+do {
+    scenarioName = "TestHang"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: limit, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
     s.hold = { $0 == 90 ? 3 : 0 }
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 6))
     s.startWatchdog(until: 8)
     clock.run(until: 8)
     let t = s.handOvers.first { $0.id == 90 }?.at ?? -1
     // The hand-over (the clock) is before the hold; the encode call after it.
-    let tIn = s.box.inside[90] ?? -1
+    let tIn = s.box.inside?.id == 90 ? s.box.inside!.since : -1
     print(line(scenarioName + String(format: ", id 90 in at %.3f s", tIn), s, summary(s, from: 0.5, to: 1.4)))
     expect(t >= tIn + 3 - 1e-9, "frame 90's encode call at \(t), not 3 s after it went in at \(tIn)")
     if let hungAt = s.hungAt {
@@ -614,21 +597,16 @@ for limit in [twoInside, oneInside] {
     }
     expect(s.late == 1, "late \(s.late): frame 90's output should come back late, once")
     expect(s.outputs.allSatisfy { $0.id < 90 }, "a frame after 90 was forwarded")
-    if limit == twoInside {
-        expect(s.handOversAfterDeath == 1, "\(s.handOversAfterDeath) frames reached the hand-over after the watchdog (the one let in behind 90 should)")
-    }
     let teardown = s.release()
     expect(teardown == .stalled(since: tIn), "teardown \(teardown), not stalled since \(tIn)")
 }
 
-// S8: slow but healthy: no false alarm. 1.2 s a frame each on its own; one engine at 0.7 s a
-// frame (a second frame inside waits up to 1.4 s); frames 2 s apart (nothing inside between).
+// S8: slow but healthy: no false alarm at 1.2 s a frame, nor with frames 2 s apart.
 do {
-    let (_, _) = steady("1.2 s a frame, two inside", limit: twoInside, engine: .independent { _ in 1.2 }, seconds: 8)
-    let (_, _) = steady("one engine at 0.7 s a frame, two inside", limit: twoInside, engine: .serial(pre: 0, chip: 0.7, post: 0), seconds: 8)
+    let (_, _) = steady("1.2 s a frame", engine: .independent { _ in 1.2 }, seconds: 8)
     scenarioName = "sparse frames"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
     schedule(s, captures: stride(from: 0.0, to: 20, by: 2).map { $0 })
     s.startWatchdog(until: 22)
     clock.run()
@@ -636,118 +614,122 @@ do {
     expectAllSettled(s)
 }
 
-// S9: EncoderProbe's giveUp (`abandon`) with two inside (after a first frame came back: before
-// that one goes in at a time), and with none.
+// S9: EncoderProbe's giveUp (`abandon`): with the frame inside VideoToolbox (true, and the teardown
+// stalled since it went in), with nothing inside (false, idle), and with the frame let in but still
+// on encodeQueue behind an encode call that has not returned (false: it never goes in now, and the
+// teardown is idle, as at 4fe37d4, which counted only a frame handed over).
 do {
-    scenarioName = "abandon"
+    scenarioName = "abandon, the frame inside"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index == 1 || $0.index == 2 ? 5 : 0.009 })
-    s.clock.at(0) { s.capture(index: 0) }
-    s.clock.at(0.05) { s.capture(index: 1) }
-    s.clock.at(0.06) { s.capture(index: 2) }
-    s.clock.at(0.07) { s.capture(index: 3) }
+    let s = StandIn(clock: clock, engine: .independent { $0.index == 0 ? 5 : 0.009 })
+    clock.at(0) { s.capture(index: 0) }
+    clock.at(0.01) { s.capture(index: 1) }
+    clock.at(0.02) { s.capture(index: 2) }
     clock.run(until: 1.0)
-    expect(s.vtHolds.count == 2 && s.box.waiting != nil, "abandon: \(s.vtHolds.count) inside, waiting \(s.box.waiting != nil)")
-    expect(s.abandon(), "abandon with two inside returned false")
-    s.clock.at(1.1) { s.capture(index: 4) }
+    expect(s.vtHolds.count == 1 && s.box.waiting != nil && s.mailboxDrop == 1,
+           "abandon: \(s.vtHolds.count) inside, waiting \(s.box.waiting != nil), mailboxDrop \(s.mailboxDrop)")
+    expect(s.abandon(), "abandon with the frame inside returned false")
+    clock.at(1.1) { s.capture(index: 3) }
     clock.run()
-    expect(s.late == 2 && s.out == 1 && s.deadDrop == 1, "abandon: late \(s.late), out \(s.out), deadDrop \(s.deadDrop)")
-    expect(s.release() == .stalled(since: 0.05), "abandon: teardown not stalled since 0.05")
+    expect(s.late == 1 && s.out == 0 && s.deadDrop == 1, "abandon: late \(s.late), out \(s.out), deadDrop \(s.deadDrop)")
+    expect(s.release() == .stalled(since: 0), "abandon: teardown not stalled since 0")
+    expectAllSettled(s)
+
     scenarioName = "abandon, nothing inside"
     let c2 = Clock()
-    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { _ in 0.009 })
+    let s2 = StandIn(clock: c2, engine: .independent { _ in 0.009 })
     c2.at(0) { s2.capture(index: 0) }
     c2.run()
     expect(!s2.abandon(), "abandon with nothing inside returned true")
     expect(s2.release() == .idle, "abandon, nothing inside: teardown not idle")
-    // One inside (the default): the first frame inside, the newest of the others waiting.
-    scenarioName = "abandon, one inside"
+    expectAllSettled(s2)
+
+    scenarioName = "abandon, the frame still on encodeQueue"
     let c3 = Clock()
-    let s3 = StandIn(clock: c3, limit: oneInside, engine: .independent { $0.index == 0 ? 5 : 0.009 })
+    let s3 = StandIn(clock: c3, engine: .independent { _ in 0.009 })
+    s3.callBlocks = { $0 == 1 ? 0.5 : 0 }   // frame 1 is back in 9 ms, its encode call returns at 0.5 s
     c3.at(0) { s3.capture(index: 0) }
-    c3.at(0.01) { s3.capture(index: 1) }
-    c3.at(0.02) { s3.capture(index: 2) }
-    c3.run(until: 1.0)
-    expect(s3.vtHolds.count == 1 && s3.box.waiting != nil && s3.mailboxDrop == 1,
-           "abandon, one inside: \(s3.vtHolds.count) inside, waiting \(s3.box.waiting != nil), mailboxDrop \(s3.mailboxDrop)")
-    expect(s3.abandon(), "abandon with one inside returned false")
-    c3.at(1.1) { s3.capture(index: 3) }
+    c3.at(0.02) { s3.capture(index: 1) }    // let in as frame 2, queued behind the blocked call
+    c3.run(until: 0.1)
+    expect(s3.box.inside?.id == 2 && s3.box.inside?.handed == false, "abandon, on encodeQueue: inside \(String(describing: s3.box.inside))")
+    expect(!s3.abandon(), "abandon with the frame still on encodeQueue returned true")
     c3.run()
-    expect(s3.late == 1 && s3.out == 0 && s3.deadDrop == 1, "abandon, one inside: late \(s3.late), out \(s3.out), deadDrop \(s3.deadDrop)")
-    expect(s3.release() == .stalled(since: 0), "abandon, one inside: teardown not stalled since 0")
+    expect(s3.handOversAfterDeath == 1 && s3.handOvers.count == 1, "abandon, on encodeQueue: \(s3.handOversAfterDeath) dropped at the hand-over, \(s3.handOvers.count) encode calls")
+    expect(s3.release() == .idle, "abandon, on encodeQueue: teardown not idle")
     expectAllSettled(s3)
 }
 
-// S10: keyframes and timestamps with two inside. Frames every 16.7 ms until 3.0 s, 30 ms each;
-// frame 179's encode call waits 100 ms (so 180 is let in behind it, not yet handed over); then a
-// still window. Requests: while frames flow (only the flag), at 3.06 s (still: the last frame is
-// re-encoded, stamped just after the last timestamp handed over, which 180 then passes), at 3.5 s
-// (still, nothing inside). Every request's flag goes with the first frame handed over after it.
+// S10: keyframes and timestamps. 9 ms a frame; frame 179's encode call returns 100 ms late (its
+// output is back in 9 ms), so capture 179 is let in behind it and handed over at 3.067 s. Requests:
+// at 1.0 and 2.0 s while frames flow (only the flag), at 3.06 s on a still window (the last frame
+// is re-encoded, stamped just after the last timestamp handed over; it waits behind capture 179,
+// which takes the flag, and is then moved past it), at 3.5 s (still, nothing inside). Every
+// request's flag goes with the first frame handed over after it.
 do {
-    scenarioName = "keyframes"
+    scenarioName = "keyframes and timestamps"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.030 })
-    let caps = captureTimes(fps: fps, from: 0, to: 3.0 + 1e-6)
-    schedule(s, captures: caps)
-    // Nothing is dropped or re-encoded before it, so capture 179 is let in as frame 180.
-    s.hold = { id in id == 180 ? 0.1 : 0 }
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
+    schedule(s, captures: captureTimes(fps: fps, from: 0, to: 3.0 + 1e-6))
+    s.callBlocks = { $0 == 179 ? 0.1 : 0 }   // capture 178 is frame 179 (nothing waits at 9 ms)
     var marks: [Int] = []   // how many frames had been handed over at each request
     for t in [1.0, 2.0, 3.06, 3.5] { clock.at(t) { marks.append(s.handOverLog.count); s.requestKeyframe() } }
     s.startWatchdog(until: 5)
     clock.run()
     print(line("keyframes and timestamps", s, summary(s, from: 0.5, to: 2.9)))
-    if ProcessInfo.processInfo.environment["DEBUG_KF"] != nil {
-        for h in s.handOvers where h.at > 2.9 { print(String(format: "  hand-over id %d capture %d%@ at %.4f pts %.4f key %@", h.id, h.frame.index, h.frame.reencode ? " (re-encode)" : "", h.at, CMTimeGetSeconds(h.pts), h.keyframe ? "yes" : "no")) }
-        print("  marks \(marks) requests \(s.keyframeRequestTimes)")
-    }
     expectAllSettled(s)
     let pts = s.handOvers.map(\.pts)
     expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "keyframes: timestamps went backwards")
-    expect(s.ptsFixed >= 1, "keyframes: no timestamp needed fixing (the scenario does not exercise the fix)")
+    expect(s.ptsFixed == 1, "keyframes: \(s.ptsFixed) timestamps fixed, not 1 (the re-encode behind capture 179)")
     let keyed = s.handOvers.filter(\.keyframe)
     expect(keyed.count == s.keyframeRequestTimes.count, "\(keyed.count) keyframes handed over for \(s.keyframeRequestTimes.count) requests")
     for (mark, r) in zip(marks, s.keyframeRequestTimes) {
         expect(mark < s.handOverLog.count && s.handOverLog[mark].keyframe, "the first frame handed over after the request at \(r) is not a keyframe")
     }
-    expect(s.handOvers.first { $0.frame.index == 180 && !$0.frame.reencode }?.keyframe == true,
-           "capture 180, let in before the request at 3.06 s but handed over after it, is not the keyframe")
+    expect(s.handOvers.first { $0.frame.index == 179 && !$0.frame.reencode }?.keyframe == true,
+           "capture 179, let in before the request at 3.06 s and handed over after it, is not the keyframe")
     let reencodes = s.handOvers.filter { $0.frame.reencode }.count
     expect(reencodes == 2, "\(reencodes) re-encodes, expected 2 (the two requests on a still window)")
 }
 
-// S11: teardown of a live session with two inside drains them; with nothing inside, idle.
+// S11: teardown of a live session: the frame inside VideoToolbox drained; a frame let in and still
+// on encodeQueue drained too (as at 4fe37d4: nothing is inside, so the drain returns at once);
+// nothing inside, idle.
 do {
     scenarioName = "teardown"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { _ in 0.030 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.030 })
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 2))
     clock.run(until: 1.0 + 1.0 / fps / 2)
-    expect(s.vtHolds.count == 2, "teardown: \(s.vtHolds.count) inside at 1.008 s, expected 2")
-    expect(s.release() == .drain, "teardown with two inside is not a drain")
-    expect(s.vtHolds.isEmpty, "teardown: the drain left frames inside")
+    expect(s.vtHolds.count == 1, "teardown: \(s.vtHolds.count) inside at 1.008 s, expected 1")
+    expect(s.release() == .drain, "teardown with the frame inside is not a drain")
+    expect(s.vtHolds.isEmpty, "teardown: the drain left a frame inside")
     let c2 = Clock()
-    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { _ in 0.030 })
+    let s2 = StandIn(clock: c2, engine: .independent { _ in 0.030 })
     schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 1))
     c2.run()
     expect(s2.release() == .idle, "teardown with nothing inside is not idle")
-    scenarioName = "teardown, one inside"
+    scenarioName = "teardown, the frame on encodeQueue"
     let c3 = Clock()
-    let s3 = StandIn(clock: c3, limit: oneInside, engine: .independent { _ in 0.030 })
-    schedule(s3, captures: captureTimes(fps: fps, from: 0, to: 2))
-    c3.run(until: 1.0 + 1.0 / fps / 2)
-    expect(s3.vtHolds.count == 1, "teardown, one inside: \(s3.vtHolds.count) inside at 1.008 s, expected 1")
-    expect(s3.release() == .drain, "teardown with one inside is not a drain")
-    expect(s3.vtHolds.isEmpty, "teardown, one inside: the drain left a frame inside")
+    let s3 = StandIn(clock: c3, engine: .independent { _ in 0.009 })
+    s3.callBlocks = { $0 == 1 ? 0.5 : 0 }
+    c3.at(0) { s3.capture(index: 0) }
+    c3.at(0.02) { s3.capture(index: 1) }
+    c3.run(until: 0.1)
+    expect(s3.box.inside?.handed == false, "teardown, on encodeQueue: inside \(String(describing: s3.box.inside))")
+    expect(s3.release() == .drain, "teardown of a live session with a frame on encodeQueue is not a drain")
 }
 
 // S12: an encode call that returns 1.3 s after VideoToolbox took its frame (whose output came back
-// in 9 ms): the two frames let in behind it wait on encodeQueue with their clocks running from when
-// they were let in, and each clock starts again when the frame is handed over, as `submittedAt` did.
-// The first of them then takes 0.8 s inside: no watchdog, since no frame was inside for 1.5 s.
+// in 9 ms): the frame let in behind it waits on encodeQueue with its clock running from when it was
+// let in, and the clock starts again when it is handed over, as `submittedAt` did; it then takes
+// 0.8 s inside: no watchdog, since no frame was inside for 1.5 s. A call blocked for good: the frame
+// behind it is timed from when it was let in, so the watchdog fires 1.5 to 2.0 s later, and the
+// teardown is idle (it never went in). A call blocked 2.5 s: the watchdog fires the same, and the
+// frame reaches the hand-over after it and is dropped there.
 do {
     scenarioName = "slow encode call"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: twoInside, engine: .independent { $0.index == 21 ? 0.8 : 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { $0.index == 21 ? 0.8 : 0.009 })
     s.callBlocks = { $0 == 21 ? 1.3 : 0 }   // capture 20 is let in as frame 21
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 4))
     s.startWatchdog(until: 6)
@@ -757,31 +739,32 @@ do {
     let c21 = s.handOverLog.first { $0.id == 22 }?.at ?? -1
     expect(abs(c21 - (20.0 / fps + 1.3)) < 1e-6, "capture 21 handed over at \(c21), not when the blocked call returned")
     expectAllSettled(s)
-    // A call blocked for good behind a frame already back: the frame let in behind it is timed from
-    // when it was let in (0.5 s: no older frame's clock, though capture 28, in since 0.467 s for
-    // 1.0 s, is inside with it), so the watchdog fires at the 2.5 s tick, not at 2.0.
-    scenarioName = "encode call blocked for good"
-    let c2 = Clock()
-    let s2 = StandIn(clock: c2, limit: twoInside, engine: .independent { $0.index == 28 ? 1.0 : 0.009 })
-    s2.callBlocks = { $0 == 30 ? 1_000 : 0 }   // capture 29 is let in as frame 30
-    schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 4))
-    s2.startWatchdog(until: 6)
-    c2.run(until: 6)
-    let admitted = 30.0 / fps   // capture 30, let in behind the blocked call
-    if let hungAt = s2.hungAt {
-        expect(hungAt > admitted + 1.5 && hungAt <= admitted + 2.0 + 1e-9, "blocked call: watchdog at \(hungAt), not within 2 s of \(admitted)")
-    } else {
-        expect(false, "blocked call: the watchdog never fired")
+
+    for (blocked, name) in [(1_000.0, "encode call blocked for good"), (2.5, "encode call blocked 2.5 s")] {
+        scenarioName = name
+        let c2 = Clock()
+        let s2 = StandIn(clock: c2, engine: .independent { _ in 0.009 })
+        s2.callBlocks = { $0 == 30 ? blocked : 0 }   // capture 29 is frame 30; capture 30, let in behind it at 0.5 s, is frame 31
+        schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 4))
+        s2.startWatchdog(until: 6)
+        c2.run(until: 6)
+        let admitted = 30.0 / fps
+        if let hungAt = s2.hungAt {
+            expect(hungAt > admitted + 1.5 && hungAt <= admitted + 2.0 + 1e-9, "\(name): watchdog at \(hungAt), not within 2 s of \(admitted)")
+            expect(!s2.handOvers.contains { $0.at > hungAt }, "\(name): a frame handed to VideoToolbox after the watchdog")
+        } else {
+            expect(false, "\(name): the watchdog never fired")
+        }
+        expect(s2.handOversAfterDeath == (blocked < 10 ? 1 : 0), "\(name): \(s2.handOversAfterDeath) frames dropped at the hand-over")
+        expect(s2.release() == .idle, "\(name): teardown not idle (the frame never went in)")
     }
 }
 
-// S13: a session stuck on its very first frame (every session through the 2026-09-22 wedge) keeps
-// one frame inside whatever the limit: a second goes in only once the session has let go of one,
-// so the stuck encoder holds one surface for good. Stuck mid-stream, it holds as many as the limit.
-for limit in [twoInside, oneInside] {
-    scenarioName = "stuck on its first frame, \(limit) inside"
+// S13: a session stuck on its very first frame (every session through the 2026-09-22 wedge).
+do {
+    scenarioName = "stuck on its first frame"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: limit, engine: .independent { $0.index == 0 ? nil : 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { $0.index == 0 ? nil : 0.009 })
     s.inOrder = true
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 4))
     s.startWatchdog(until: 5)
@@ -796,32 +779,20 @@ for limit in [twoInside, oneInside] {
     }
     expect(s.vtHolds.count == 1, "stuck on its first frame: \(s.vtHolds.count) frames left inside, not 1")
     expect(s.release() == .stalled(since: 0), "stuck on its first frame: teardown not stalled since 0")
-    scenarioName = "stuck mid-stream, \(limit) inside"
-    let c2 = Clock()
-    let s2 = StandIn(clock: c2, limit: limit, engine: .independent { $0.index == 100 ? nil : 0.030 })
-    s2.inOrder = true
-    schedule(s2, captures: captureTimes(fps: fps, from: 0, to: 6))
-    s2.startWatchdog(until: 7)
-    c2.run(until: 7)
-    expect(s2.hungAt != nil && s2.vtHolds.count == limit, "stuck mid-stream: \(s2.vtHolds.count) frames left inside, not \(limit)")
 }
 
-// S14: one engine doing one frame at a time, T seconds each. With two inside, the frame behind
-// waits T for the engine and then takes T of its own; its clock starts again when the one ahead
-// comes back, so the watchdog fires only when a frame itself takes over hangAfter, as with one
-// inside. (Before, two inside fired it at 0.8, 1.0 and 1.4 s a frame: 2T from the hand-over.)
-for (limit, t, fires) in [(twoInside, 0.8, false), (twoInside, 1.0, false), (twoInside, 1.4, false), (twoInside, 2.0, true),
-                          (oneInside, 1.4, false), (oneInside, 2.0, true)] {
-    scenarioName = "serial engine at \(t) s a frame, \(limit) inside"
+// S14: one engine doing one frame at a time, T seconds each: the watchdog fires only when a frame
+// itself takes over hangAfter.
+for (t, fires) in [(1.4, false), (2.0, true)] {
+    scenarioName = "serial engine at \(t) s a frame"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: limit, engine: .serial(pre: 0, chip: t, post: 0))
+    let s = StandIn(clock: clock, engine: .serial(pre: 0, chip: t, post: 0))
     s.inOrder = true
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 8))
     s.startWatchdog(until: 10)
     clock.run(until: 10)
     print(line(scenarioName, s, summary(s, from: 0, to: 8)))
-    expect((s.hungAt != nil) == fires, "serial engine at \(t) s a frame, \(limit) inside: watchdog \(s.hungAt.map { "at \($0) s" } ?? "never"), expected \(fires ? "to fire" : "never")")
-    if limit == twoInside, !fires { expect(s.maxVTHolds == 2, "serial engine at \(t) s: VideoToolbox never held two") }
+    expect((s.hungAt != nil) == fires, "serial engine at \(t) s a frame: watchdog \(s.hungAt.map { "at \($0) s" } ?? "never"), expected \(fires ? "to fire" : "never")")
 }
 
 // S15: a keyframe asked for within 50 ms of the last repaint of a window that then stays still
@@ -829,11 +800,11 @@ for (limit, t, fires) in [(twoInside, 0.8, false), (twoInside, 1.0, false), (two
 // flag, so the request is looked at again 60 ms after that repaint and the last frame re-encoded.
 // While frames keep coming they carry it, and so does a frame on its way to VideoToolbox (waiting
 // in the mailbox, or queued behind an encode call that has not returned): no re-encode then.
-for (limit, turnaround) in [(oneInside, 0.009), (oneInside, 0.028), (twoInside, 0.009), (twoInside, 0.028)] {
+for turnaround in [0.009, 0.028] {
     for gap in [0.005, 0.020, 0.045] {
-        scenarioName = "keyframe \(Int(gap * 1000)) ms after the last repaint, \(limit) inside, \(Int(turnaround * 1000)) ms a frame"
+        scenarioName = "keyframe \(Int(gap * 1000)) ms after the last repaint, \(Int(turnaround * 1000)) ms a frame"
         let clock = Clock()
-        let s = StandIn(clock: clock, limit: limit, engine: .independent { _ in turnaround })
+        let s = StandIn(clock: clock, engine: .independent { _ in turnaround })
         s.inOrder = true
         let caps = captureTimes(fps: fps, from: 0, to: 0.5)
         schedule(s, captures: caps)
@@ -852,10 +823,32 @@ for (limit, turnaround) in [(oneInside, 0.009), (oneInside, 0.028), (twoInside, 
     }
 }
 do {
+    // The last repaint is still inside VideoToolbox at the second look (it takes 100 ms): it went in
+    // before the request and carries nothing, so the last frame is re-encoded behind it and goes in
+    // with the flag when it comes back.
+    scenarioName = "keyframe while the last repaint is inside VideoToolbox"
+    let clock = Clock()
+    let caps = captureTimes(fps: fps, from: 0, to: 0.5)
+    let lastIndex = caps.count - 1
+    let s = StandIn(clock: clock, engine: .independent { $0.index == lastIndex && !$0.reencode ? 0.100 : 0.009 })
+    s.inOrder = true
+    schedule(s, captures: caps)
+    let last = caps.last!
+    clock.at(last + 0.010) { s.requestKeyframe() }
+    s.startWatchdog(until: 1.5)
+    clock.run()
+    let keyed = s.handOvers.filter(\.keyframe)
+    let key = keyed.last
+    expect(keyed.count == 1 && key?.frame.reencode == true && key?.frame.index == lastIndex,
+           "inside VideoToolbox: \(keyed.count) keyframes handed over, not one re-encode of the last repaint (\(key.map { "capture \($0.frame.index)\($0.frame.reencode ? ", a re-encode" : "")" } ?? "none"))")
+    if let key { expect(abs(key.at - (last + 0.100)) < 1e-6, "inside VideoToolbox: the re-encode went in at \(key.at), not when the last repaint came back") }
+    expectAllSettled(s)
+}
+do {
     // While frames keep coming, the next capture carries the flag: no re-encode.
     scenarioName = "keyframe while frames keep coming"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
     schedule(s, captures: captureTimes(fps: fps, from: 0, to: 2))
     for t in stride(from: 0.51, to: 1.9, by: 0.2) { clock.at(t) { s.requestKeyframe() } }
     s.startWatchdog(until: 3)
@@ -864,11 +857,11 @@ do {
     expect(s.handOvers.filter(\.keyframe).count == 7, "while frames keep coming: \(s.handOvers.filter(\.keyframe).count) keyframes handed over for 7 requests")
 }
 do {
-    // The last repaint waits in the mailbox behind a slow frame (150 ms a frame, one inside) when
-    // the request is looked at again: it carries the flag when it goes in.
+    // The last repaint waits in the mailbox behind a slow frame (150 ms a frame) when the request is
+    // looked at again: it carries the flag when it goes in.
     scenarioName = "keyframe while the last repaint waits in the mailbox"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.150 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.150 })
     let caps = captureTimes(fps: fps, from: 0, to: 0.5)
     schedule(s, captures: caps)
     clock.at(caps.last! + 0.010) { s.requestKeyframe() }
@@ -884,7 +877,7 @@ do {
     // is already back) when the request is looked at again: it carries the flag when it goes in.
     scenarioName = "keyframe while the last repaint is queued behind a blocked encode call"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
     let caps = captureTimes(fps: fps, from: 0, to: 0.5)   // 30 captures; capture 28 goes in as frame 29
     s.callBlocks = { $0 == 29 ? 0.3 : 0 }
     schedule(s, captures: caps)
@@ -905,7 +898,7 @@ do {
 do {
     scenarioName = "two re-encodes stamped alike"
     let clock = Clock()
-    let s = StandIn(clock: clock, limit: oneInside, engine: .independent { _ in 0.009 })
+    let s = StandIn(clock: clock, engine: .independent { _ in 0.009 })
     let caps = captureTimes(fps: fps, from: 0, to: 0.5)   // 30 captures, let in as frames 1 to 30
     s.callBlocks = { $0 == caps.count ? 0.2 : 0 }
     schedule(s, captures: caps)
@@ -926,16 +919,36 @@ do {
     expectAllSettled(s)
 }
 
-// S17: EncoderMailbox on its own. A timestamp equal to the last one handed over is moved past it,
-// as an earlier one is. The watchdog is true once, when a frame has been inside for over `after`,
-// and never again: not on the session it gave up on, nor on one its owner gave up on (`abandon`).
+// S17: EncoderMailbox on its own.
 do {
+    typealias B = EncoderMailbox<Int>
+    scenarioName = "direct: one place"
+    var o = B()
+    expect(o.admit(1, now: 0) == .goesIn(id: 1), "the first frame was not let in as frame 1")
+    expect(o.admit(2, now: 0.01) == .waits(replaced: false), "the second frame did not wait")
+    expect(o.admit(3, now: 0.02) == .waits(replaced: true), "the third frame did not replace the second")
+    expect(o.frameOnItsWay, "frames let in and waiting do not count as on their way")
+    _ = o.handOver(1, pts: CMTime(value: 1, timescale: 1000), now: 0.03)
+    expect(o.frameOnItsWay, "a waiting frame does not count as on its way")
+    if case .next(let f, let id) = o.returned(1, now: 0.04) {
+        expect(f == 3 && id == 2, "the waiting frame came in as \(f), frame \(id), not 3, frame 2")
+    } else {
+        expect(false, "the waiting frame did not take the place")
+    }
+    expect(o.inside == B.Inside(id: 2, since: 0.04, handed: false), "after the return: inside \(String(describing: o.inside))")
+    expect(o.frameOnItsWay, "a frame let in and not handed over does not count as on its way")
+    _ = o.handOver(2, pts: CMTime(value: 2, timescale: 1000), now: 0.05)
+    expect(!o.frameOnItsWay, "a frame handed over counts as on its way")
+    if case .freed = o.returned(2, now: 0.06) {} else { expect(false, "the last frame back did not free the place") }
+    if case .duplicate = o.returned(2, now: 0.07) {} else { expect(false, "a second notice was not a duplicate") }
+    expect(o.inside == nil && o.waiting == nil, "nothing inside and nothing waiting at the end: \(String(describing: o.inside))")
+
     scenarioName = "direct: an equal timestamp"
-    var b = EncoderMailbox<Int>(limit: 1)
+    var b = B()
     let p = CMTime(value: 1000, timescale: 1000)
     expect(b.admit(1, now: 0) == .goesIn(id: 1), "the first frame was not let in as frame 1")
     let first = b.handOver(1, pts: p, now: 0)
-    expect(first == EncoderMailbox<Int>.HandOver(pts: p, keyframe: false, ptsFixed: false), "the first hand-over: \(String(describing: first))")
+    expect(first == B.HandOver(pts: p, keyframe: false, ptsFixed: false), "the first hand-over: \(String(describing: first))")
     _ = b.returned(1, now: 0.01)
     expect(b.admit(2, now: 0.02) == .goesIn(id: 2), "the second frame was not let in as frame 2")
     let second = b.handOver(2, pts: p, now: 0.02)
@@ -943,16 +956,42 @@ do {
            "a timestamp equal to the last one went in as \(second.map { CMTimeGetSeconds($0.pts) } ?? -1) s (fixed: \(second?.ptsFixed == true)), not after 1 s")
     expect(second.map { CMTimeCompare(b.lastPTS, $0.pts) == 0 } == true, "the last timestamp is \(CMTimeGetSeconds(b.lastPTS)) s, not the one handed over")
 
-    scenarioName = "direct: the watchdog, once"
-    var w = EncoderMailbox<Int>(limit: 1)
-    _ = w.admit(1, now: 0)   // inside from 0, never back
-    expect(!w.giveUpIfHung(now: 1.4, after: 1.5), "the watchdog fired 1.4 s after the frame went in")
-    expect(w.giveUpIfHung(now: 2.0, after: 1.5) && w.dead, "the watchdog did not give up 2.0 s after the frame went in")
-    expect(!w.giveUpIfHung(now: 2.5, after: 1.5), "the watchdog fired again on the session it gave up on")
-    var a = EncoderMailbox<Int>(limit: 1)
+    scenarioName = "direct: the watchdog"
+    var w = B()
+    _ = w.admit(1, now: 0)   // let in at 0, handed over at 1.0, never back
+    _ = w.handOver(1, pts: p, now: 1.0)
+    expect(!w.giveUpIfHung(now: 2.4, after: 1.5), "the watchdog fired 1.4 s after the hand-over (its clock did not start again there)")
+    expect(w.giveUpIfHung(now: 2.6, after: 1.5) && w.dead, "the watchdog did not give up 1.6 s after the hand-over")
+    expect(!w.giveUpIfHung(now: 3.0, after: 1.5), "the watchdog fired again on the session it gave up on")
+    expect(w.teardown == .stalled(since: 1.0), "given up on with the frame inside: teardown \(w.teardown), not stalled since the hand-over")
+    var q = B()
+    _ = q.admit(1, now: 0)   // let in, never handed over (an encode call ahead of it never returns)
+    expect(q.giveUpIfHung(now: 1.6, after: 1.5), "the watchdog did not fire on a frame let in 1.6 s ago")
+    expect(q.teardown == .idle, "given up on with the frame on encodeQueue: teardown \(q.teardown), not idle (it never went in)")
+    expect(q.handOver(1, pts: p, now: 2) == nil, "a frame was handed over after the watchdog")
+
+    scenarioName = "direct: giving up"
+    var a = B()
     _ = a.admit(1, now: 0)
-    expect(a.giveUp(), "giving up with a frame inside returned false")
+    _ = a.handOver(1, pts: p, now: 0)
+    expect(a.giveUp(), "giving up with the frame inside VideoToolbox returned false")
     expect(!a.giveUpIfHung(now: 5, after: 1.5), "the watchdog fired on a session its owner gave up on")
+    expect(a.admit(2, now: 5) == .dropped, "a frame was let into a session given up on")
+    if case .late = a.returned(1, now: 6) {} else { expect(false, "the frame back after giving up was not late") }
+    expect(a.teardown == .stalled(since: 0), "given up on: teardown \(a.teardown), not stalled since 0")
+    var e = B()
+    _ = e.admit(1, now: 0)
+    expect(!e.giveUp(), "giving up with the frame still on encodeQueue returned true")
+    var n = B()
+    expect(!n.giveUp() && n.teardown == .idle, "giving up with nothing inside: \(n.teardown)")
+
+    scenarioName = "direct: teardown of a live session"
+    var l = B()
+    expect(l.teardown == .idle, "a fresh session tears down as \(l.teardown), not idle")
+    _ = l.admit(1, now: 0)
+    expect(l.teardown == .drain, "a live session with a frame on encodeQueue tears down as \(l.teardown), not a drain")
+    _ = l.handOver(1, pts: p, now: 0)
+    expect(l.teardown == .drain, "a live session with the frame inside tears down as \(l.teardown), not a drain")
 }
 
 print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")

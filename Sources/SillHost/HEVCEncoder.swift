@@ -17,28 +17,13 @@ import StreamProtocol
 ///   One frame is inside VT at a time: the next goes in when the last came back, and a frame that
 ///   finds the place taken waits in the mailbox, where a newer one replaces it (`EncoderMailbox`,
 ///   which keeps this bookkeeping and is checked on its own). Latency beats quality: a frame the
-///   encoder has no room for waits in the mailbox, never inside VT behind another. VT hands
-///   outputs back in decode order, which without reordering is the order the frames went in.
-///   Two inside is an experiment, off unless `SILL_TEST_ENCODER_IN_FLIGHT=2` (hardware sessions
-///   only; `InFlightTest`). At the Retina Desktop's size (3024×1964) the hardware encoder can fall
-///   into a slow state, often after a few seconds of fewer frames, at any bitrate, where a frame
-///   takes 29–30 ms from submit to output (15 ms on the encoder chip by the kernel's AppleAVE2
-///   counters, against 9 ms in the fast state): one frame inside gives one over that, 33 fps, with
-///   ~24 `enc.mailboxDrop` a second of 57 captured (a third of the logged seconds of Noah's Retina
-///   Desktop streams at 40 Mbps, 2026-09-25). A second frame inside could overlap the part of a
-///   turnaround spent beside the chip. But on an engine shared with another session it gained no
-///   frames and added a turnaround of latency (28 ms at the median), and on any engine a frame
-///   that finds the other inside waits a whole turnaround in VT instead of in the mailbox: in the
-///   slow state, and at 120 fps (8.3 ms between frames against a 9 ms encode) even in the fast
-///   one. So it stays off until a run on an engine nobody else uses shows the slow state lifted to
-///   ~55 fps, and would then be kept only while it adds frames (CLAUDE.md, "The 33 fps plateau").
-///   Under it too a second frame goes in only once the session has let go of one
-///   (`EncoderMailbox.places`), so a session stuck on its first frame holds one surface for good.
+///   encoder has no room for waits in the mailbox, never inside VT behind another. Two inside at
+///   once was measured against the hardware's slow state and dropped (CLAUDE.md, "The 33 fps
+///   plateau").
 /// - A watchdog on its own queue declares the session dead when a frame has been inside VT
-///   `hangAfter` seconds without an output (one that waited inside behind another is timed from
-///   when that one came back: `EncoderMailbox.returned`). The owner is told (`onHung`) and starts
-///   over on the software encoder, and leaves it again once a re-check finds the hardware keeping
-///   up with the stream (StreamCoordinator, EncoderProbe). It has fired for two different reasons:
+///   `hangAfter` seconds without an output. The owner is told (`onHung`) and starts over on the
+///   software encoder, and leaves it again once a re-check finds the hardware keeping up with the
+///   stream (StreamCoordinator, EncoderProbe). It has fired for two different reasons:
 ///   - Stuck. 2026-09-22 the Mac's hardware encoder wedged system-wide for about three hours: a
 ///     fresh session in a fresh process never returned a single frame. With the old direct call
 ///     that froze the capture queue, then `stopCapture`, then every later source switch.
@@ -47,8 +32,8 @@ import StreamProtocol
 ///     encoder engine served the recorder while this session's frame waited 1.8 s and 8.6 s. Both
 ///     frames came back, and fresh sessions answered at once. The kernel's AppleAVE2 log showed it
 ///     (CLAUDE.md, "Frozen stream").
-///   A session given up on reports on its way out whether its stalled frames ever came back
-///   (`deinit`): a busy encoder hands them back, a stuck one never does.
+///   A session given up on reports on its way out whether its stalled frame ever came back
+///   (`deinit`): a busy encoder hands it back, a stuck one never does.
 final class HEVCEncoder {
     let width: Int
     let height: Int
@@ -59,10 +44,6 @@ final class HEVCEncoder {
     /// Increases with every encoder this process creates, so the owner can tell an encoder made
     /// before some moment from one made after it (`latestSerial` then).
     let serial: Int
-    /// How many frames this session lets inside VideoToolbox at once (`EncoderMailbox`): one, and
-    /// two on the hardware encoder under the plateau experiment's switch (`InFlightTest`).
-    /// EncoderProbe's test keeps as many inside as a stream would.
-    let maxInFlight: Int
     private var session: VTCompressionSession?
 
     /// Called on VideoToolbox's callback thread with one access unit (length-prefixed NALs).
@@ -70,10 +51,10 @@ final class HEVCEncoder {
     /// The session stopped returning frames. Called once, on the watchdog's queue. The encoder is
     /// dead afterwards: it drops every further frame.
     var onHung: (() -> Void)?
-    /// For a session given up on (the watchdog, or `abandon`) with frames still inside: called on a
-    /// utility queue once VideoToolbox has let go of them, with the seconds since the one inside
-    /// longest went in. Never called while they stay inside, which is what a stuck encoder does.
-    /// Set it before the encoder is released.
+    /// For a session given up on (the watchdog, or `abandon`) with a frame still inside: called on a
+    /// utility queue once VideoToolbox has let go of that frame, with the seconds since it went in.
+    /// Never called while the frame stays inside, which is what a stuck encoder does. Set it before
+    /// the encoder is released.
     var onStalledFrameBack: ((TimeInterval) -> Void)?
     /// TEST ONLY (EncoderProbe's SILL_TEST_PROBE_HOLD): every frame waits this long on
     /// `encodeQueue` before it goes in, as in a starved encoder (tens of ms), a busy one (seconds)
@@ -87,9 +68,9 @@ final class HEVCEncoder {
 
     // Guarded by `lock`.
     private let lock = NSLock()
-    /// The frames inside VideoToolbox, the one waiting behind them, whether the session is dead,
-    /// and what the next frame to go in carries (its timestamp, a requested keyframe).
-    private var mailbox: EncoderMailbox<(CVPixelBuffer, CMTime)>
+    /// The frame inside VideoToolbox, the one waiting behind it, whether the session is dead, and
+    /// what the next frame to go in carries (its timestamp, a requested keyframe).
+    private var mailbox = EncoderMailbox<(CVPixelBuffer, CMTime)>()
     /// Forced keyframes VideoToolbox dropped and we asked for again (bounded, see `submit`).
     private var forcedRetries = 0
     /// Most recent captured frame. ScreenCaptureKit only delivers frames when the window repaints,
@@ -113,8 +94,6 @@ final class HEVCEncoder {
         self.height = height
         self.software = software
         self.quiet = quiet
-        mailbox = EncoderMailbox(limit: software ? 1 : InFlightTest.hardwareLimit)
-        maxInFlight = mailbox.limit
         Self.serialLock.lock(); Self.lastSerial += 1; serial = Self.lastSerial; Self.serialLock.unlock()
         var s: VTCompressionSession?
         var spec: [CFString: Any] = [:]
@@ -142,9 +121,6 @@ final class HEVCEncoder {
             set(kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, kCFBooleanTrue)
         }
         VTCompressionSessionPrepareToEncodeFrames(session)
-        if maxInFlight > 1, !quiet, InFlightTest.announce() {
-            print("TEST: hardware sessions let up to \(maxInFlight) frames inside the encoder at once (SILL_TEST_ENCODER_IN_FLIGHT)")
-        }
 
         let t = DispatchSource.makeTimerSource(queue: watchdogQueue)
         t.schedule(deadline: .now() + 0.5, repeating: 0.5, leeway: .milliseconds(100))
@@ -158,9 +134,9 @@ final class HEVCEncoder {
     var isDead: Bool { lock.lock(); defer { lock.unlock() }; return mailbox.dead }
 
     /// Give up on this session quietly: no watchdog report, no `enc.hung`. A probe calls this when
-    /// a frame has not come back in time, since the owner already knows. True when a frame is
-    /// still inside VideoToolbox (then `onStalledFrameBack` tells when they come out); false when
-    /// the last came back just now.
+    /// its frame has not come back in time, since the owner already knows. True when that frame
+    /// is still inside VideoToolbox (then `onStalledFrameBack` tells when it comes out); false
+    /// when it came back just now.
     @discardableResult
     func abandon() -> Bool {
         lock.lock(); let inside = mailbox.giveUp(); lastFrame = nil; lock.unlock()
@@ -172,9 +148,9 @@ final class HEVCEncoder {
         watchdog?.cancel()
         guard let session else { return }
         lock.lock()
-        // Drain a live session with frames inside. One given up on with frames inside VideoToolbox
-        // (the watchdog, or a probe's `abandon`) is stalled: a dead session never clears them, and
-        // `since` is when the one inside longest went in.
+        // Drain a live session with a frame let in. One given up on with a frame inside VideoToolbox
+        // (the watchdog, or a probe's `abandon`) is stalled: a dead session never clears it, and
+        // `since` is when that frame went in.
         let teardown = mailbox.teardown
         let report = hungReported && !quiet
         lock.unlock()
@@ -184,16 +160,16 @@ final class HEVCEncoder {
         // log for 2026-09-22 shows every wedge began with a session whose first frame never came
         // back after the session was invalidated under it (the encoder service then logs "Frame
         // POC 0 timed out" every 4 s for good, and two such orphans stalled the hardware for every
-        // later session until a reboot). Draining first costs a frame or two's time on a healthy
-        // session (a few ms; 30 ms a frame in the slow state above). A dead
-        // session is not drained: that call would never return if the encoder is stuck. Invalidating
-        // it can itself block, so none of this runs on the caller's thread.
+        // later session until a reboot). Draining first costs up to a frame's time on a healthy
+        // session (a few ms; about 29 ms in the hardware's slow state). A dead session is not
+        // drained: that call would never return if the encoder is stuck. Invalidating it can itself
+        // block, so none of this runs on the caller's thread.
         //
-        // The invalidate waits for frames still inside (measured 2026-09-25: 17 ms for a 3024×1898
+        // The invalidate waits for a frame still inside (measured 2026-09-25: 17 ms for a 3024×1898
         // frame in flight, whose output handler ran just before it returned; 2026-09-24 the encoder
         // service's own invalidate waited 0.17 s and 7.06 s for the stalled frames, which then
-        // completed). So its return is when the stalled frames came back: a busy encoder, not a
-        // stuck one, which never lets go and leaves this thread blocked for good.
+        // completed). So its return is when a stalled frame came back: a busy encoder, not a stuck
+        // one, which never lets go and leaves this thread blocked for good.
         DispatchQueue.global(qos: .utility).async {
             if teardown == .drain { VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid) }
             VTCompressionSessionInvalidate(session)
@@ -298,7 +274,7 @@ final class HEVCEncoder {
     }
 
     /// encodeQueue: frames go into VideoToolbox one after another, in the order they were let in,
-    /// `maxInFlight` inside at once (`EncoderMailbox`).
+    /// one inside at a time (`EncoderMailbox`).
     private func submit(_ pixelBuffer: CVPixelBuffer, pts requested: CMTime, id: Int) {
         guard let session else { return }
         lock.lock()
@@ -433,11 +409,11 @@ final class HEVCEncoder {
 
     /// TEST ONLY. `SILL_TEST_ENCODER_HANG=N`: the first N hardware stream sessions of this process
     /// each hold their 90th frame on `encodeQueue` for 3 s before handing it to VideoToolbox (later
-    /// frames wait in the mailbox; with two inside, the one let in beside it waits behind it on
-    /// the queue), so the watchdog fires 1.5 s after it went in, the owner falls back to the
-    /// software encoder, and the frame then goes in and comes back late, as in a busy engine
-    /// (2026-09-24). N = 2 makes the return to the hardware hang once more, for the re-check's
-    /// backoff. Probes (quiet) never take one. Read once; nothing else changes without the variable.
+    /// frames wait in the mailbox), so the watchdog fires 1.5 s after it went in, the owner falls
+    /// back to the software encoder, and the frame then goes in and comes back late, as in a busy
+    /// engine (2026-09-24). N = 2 makes the return to the hardware hang once more, for the
+    /// re-check's backoff. Probes (quiet) never take one. Read once; nothing else changes without
+    /// the variable.
     private enum TestHang {
         static let frame = 90
         static let hold: TimeInterval = 3
@@ -447,24 +423,6 @@ final class HEVCEncoder {
             lock.lock(); defer { lock.unlock() }
             guard left > 0 else { return false }
             left -= 1
-            return true
-        }
-    }
-
-    /// TEST ONLY. `SILL_TEST_ENCODER_IN_FLIGHT=2`: hardware sessions (streams, the launch probe and
-    /// the re-check's test alike) let up to two frames inside VideoToolbox at once instead of one:
-    /// the plateau experiment (the type's doc; CLAUDE.md, "The 33 fps plateau"). Read once; any
-    /// other value is one, and so is the software encoder always. The first such session that is
-    /// not a quiet probe's prints a "TEST:" line, once per process.
-    private enum InFlightTest {
-        static let hardwareLimit = ProcessInfo.processInfo.environment["SILL_TEST_ENCODER_IN_FLIGHT"] == "2" ? 2 : 1
-        private static let lock = NSLock()
-        private static var announced = false
-        /// True the first time it is asked.
-        static func announce() -> Bool {
-            lock.lock(); defer { lock.unlock() }
-            guard !announced else { return false }
-            announced = true
             return true
         }
     }

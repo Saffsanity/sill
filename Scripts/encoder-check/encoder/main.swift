@@ -1,9 +1,10 @@
 // Encoder-free check of the real HEVCEncoder.swift (with the real EncoderMailbox.swift and
 // EncoderProbe.swift) against the stand-in VideoToolbox in FakeVT.swift, in real time: capture,
 // network and callback threads as the host has them. What EncoderMailbox's own check cannot see:
-// how many frames the encoder lets in by default and under SILL_TEST_ENCODER_IN_FLIGHT=2.
+// the glue's threads, locks and queues, the frames a stuck encoder keeps, the keyframe's second
+// look on the watchdog's queue.
 //
-//   Scripts/encoder-check/run.sh encoder      (runs it twice: by default, and with the variable)
+//   Scripts/encoder-check/run.sh encoder
 import Foundation
 import CoreMedia
 import CoreVideo
@@ -18,10 +19,7 @@ func expect(_ ok: Bool, _ what: @autoclosure () -> String) {
     if !ok { failures += 1; print("  FAIL: \(what())") }
 }
 
-/// The limit this run expects on the hardware encoder.
-let two = ProcessInfo.processInfo.environment["SILL_TEST_ENCODER_IN_FLIGHT"] == "2"
-let hardwareLimit = two ? 2 : 1
-print("== the real HEVCEncoder against a stand-in VideoToolbox, \(two ? "SILL_TEST_ENCODER_IN_FLIGHT=2 (two inside on the hardware)" : "by default (one inside)")")
+print("== the real HEVCEncoder against a stand-in VideoToolbox")
 
 func sleepUntil(_ t: CFTimeInterval) {
     let d = t - CACurrentMediaTime()
@@ -69,30 +67,31 @@ func feed(_ enc: HEVCEncoder, count: Int, fps: Double = 60, from: Int = 0, captu
     return start
 }
 
-// E1 (first: the "TEST:" line is once per process): how many frames each kind of session lets in.
+// E1: every kind of session (a stream's on the hardware, a probe's, the software encoder's) lets
+// one frame in at a time, and none prints anything when it is made.
 do {
-    FakeVT.reset()
-    var hardware: HEVCEncoder?, hardware2: HEVCEncoder?, software: HEVCEncoder?, quiet: HEVCEncoder?
-    let first = capturingStdout { hardware = makeEncoder() }
-    let later = capturingStdout {
-        hardware2 = makeEncoder()
-        software = makeEncoder(software: true)
-        quiet = makeEncoder(quiet: true)
+    var held: [String: Int] = [:]
+    var printed = ""
+    for (name, software, quiet) in [("hardware", false, false), ("probe", false, true), ("software", true, false)] {
+        FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.030) })
+        var enc: HEVCEncoder?
+        printed += capturingStdout { enc = makeEncoder(software: software, quiet: quiet) }
+        let session = FakeVT.lastSession
+        let capture = DispatchQueue(label: "capture.e1", qos: .userInteractive)
+        feed(enc!, count: 12, capture: capture)
+        Thread.sleep(forTimeInterval: 0.1)
+        held[name] = FakeVT.lock.run { FakeVT.maxHeld[session] ?? 0 }
+        withExtendedLifetime(enc) {}
     }
-    expect(hardware?.maxInFlight == hardwareLimit, "a hardware session lets \(hardware?.maxInFlight ?? -1) in, not \(hardwareLimit)")
-    expect(hardware2?.maxInFlight == hardwareLimit, "a second hardware session lets \(hardware2?.maxInFlight ?? -1) in, not \(hardwareLimit)")
-    expect(quiet?.maxInFlight == hardwareLimit, "a probe's session lets \(quiet?.maxInFlight ?? -1) in, not \(hardwareLimit) as a stream's")
-    expect(software?.maxInFlight == 1, "a software session lets \(software?.maxInFlight ?? -1) in, not 1")
-    let line = "TEST: hardware sessions let up to 2 frames inside the encoder at once (SILL_TEST_ENCODER_IN_FLIGHT)"
-    expect(first.contains(line) == two, "the first hardware session printed \(first.debugDescription), \(two ? "not" : "yet") the TEST line")
-    expect(!later.contains("TEST"), "later sessions printed \(later.debugDescription)")
-    print("limits: hardware \(hardware?.maxInFlight ?? -1), probe \(quiet?.maxInFlight ?? -1), software \(software?.maxInFlight ?? -1); first session printed \(first.isEmpty ? "nothing" : first.debugDescription)")
+    print("inside at most: hardware \(held["hardware"] ?? -1), probe \(held["probe"] ?? -1), software \(held["software"] ?? -1); printed \(printed.isEmpty ? "nothing" : printed.debugDescription)")
+    expect(held.values.allSatisfy { $0 == 1 } && held.count == 3, "frames inside at most: \(held), not 1 each")
+    expect(printed.isEmpty, "making the sessions printed \(printed.debugDescription)")
 }
 
-// E2: a stream at 60 fps against frames that each take 30 ms (overlapping, outputs in decode
-// order): one inside gives one over the turnaround (~33 fps), two inside the capture rate.
-do {
-    FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.030) })
+// E2: a stream at 60 fps against frames that each take 30 ms, then 9 ms (outputs in decode
+// order): one over the turnaround (~33 fps), then the capture rate.
+for (turnaround, low, high) in [(0.030, 25.0, 34.0), (0.009, 55.0, 61.0)] {
+    FakeVT.reset(plan: { _, _, _, _ in .returnAfter(turnaround) })
     let enc = makeEncoder()
     let session = FakeVT.lastSession
     let outs = Outputs()
@@ -105,13 +104,9 @@ do {
     let held = FakeVT.lock.run { FakeVT.maxHeld[session] ?? 0 }
     let calls = FakeVT.callsOf(session)
     let pts = calls.map(\.pts)
-    print(String(format: "steady, 30 ms a frame at 60 fps: %.0f fps out, at most %d inside, %d encode calls for 90 frames", rate, held, calls.count))
-    expect(held == hardwareLimit, "at most \(held) inside VideoToolbox, not \(hardwareLimit)")
-    if two {
-        expect(rate >= 54 && rate <= 61, "two inside at 30 ms: \(rate) fps, not ~60")
-    } else {
-        expect(rate >= 25 && rate <= 34, "one inside at 30 ms: \(rate) fps, not ~32")
-    }
+    print(String(format: "steady, %.0f ms a frame at 60 fps: %.0f fps out, at most %d inside, %d encode calls for 90 frames", turnaround * 1000, rate, held, calls.count))
+    expect(held == 1, "\(Int(turnaround * 1000)) ms a frame: at most \(held) inside VideoToolbox, not 1")
+    expect(rate >= low && rate <= high, "\(Int(turnaround * 1000)) ms a frame: \(rate) fps, not \(low) to \(high)")
     expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "timestamps handed to VideoToolbox went backwards")
     expect(outs.keyframes >= 1, "no keyframe (the session's first frame is one)")
     withExtendedLifetime(enc) {}
@@ -158,10 +153,9 @@ func probesThenSettle(_ n: Int, settle: Double) -> (ok: [Bool], alive: [Int]) {
     return (ok, Tracker.alive.filter { $0 >= from && $0 <= to })
 }
 
-// E3: what a stuck encoder keeps for good. A session stuck on its first frame (every session and
-// probe through the 2026-09-22 wedge) keeps that one frame whatever the limit: a second goes in
-// only once the session has let go of one. Stuck mid-stream it keeps as many as it lets in. A busy
-// encoder hands everything back.
+// E3: what a stuck encoder keeps for good: the one frame inside it, whether it stuck on its first
+// frame (every session and probe through the 2026-09-22 wedge) or mid-stream. A busy encoder
+// hands everything back.
 do {
     FakeVT.reset(plan: { _, call, _, software in call == 1 && !software ? .stuck : .returnAfter(0.005) })
     let r = streamThenRelease(base: 10_000, seconds: 3, settle: 0.5)
@@ -176,7 +170,7 @@ do {
     FakeVT.reset(plan: { _, call, _, software in call == 50 && !software ? .stuck : .returnAfter(0.005) })
     let m = streamThenRelease(base: 30_000, seconds: 4, settle: 0.5)
     print("stream stuck at its 50th frame: hung at \(m.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(m.alive)")
-    expect(m.hungAt != nil && m.alive.count == hardwareLimit, "stuck mid-stream: \(m.alive.count) frames kept, not \(hardwareLimit)")
+    expect(m.hungAt != nil && m.alive.count == 1, "stuck mid-stream: \(m.alive.count) frames kept, not 1")
 
     FakeVT.reset(plan: { _, call, _, software in call == 50 && !software ? .returnAfter(2.5) : .returnAfter(0.005) })
     let busy = streamThenRelease(base: 40_000, seconds: 4, settle: 3.0)
@@ -193,13 +187,11 @@ do {
     FakeVT.reset(plan: { _, call, _, _ in call == 5 ? .stuck : .returnAfter(0.005) })
     let fifth = probesThenSettle(1, settle: 0.5)
     print("a re-check stuck at its 5th frame: ok \(fifth.ok), test frames kept \(fifth.alive.count)")
-    expect(fifth.ok == [false] && fifth.alive.count == hardwareLimit, "a re-check stuck at its 5th frame keeps \(fifth.alive.count), not \(hardwareLimit)")
+    expect(fifth.ok == [false] && fifth.alive.count == 1, "a re-check stuck at its 5th frame keeps \(fifth.alive.count), not 1")
 }
 
-// E4: one engine doing one frame at a time, 0.9 s each: slow, not hung. With two inside the frame
-// behind waits 0.9 s for the engine, then takes its own 0.9 s; its watchdog clock starts again when
-// the one ahead comes back, so the watchdog stays quiet, as with one inside (it fired at ~2 s
-// before: 1.8 s from the hand-over).
+// E4: one engine doing one frame at a time, 0.9 s each: slow, not hung, so the watchdog stays
+// quiet.
 do {
     FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.9) }, serial: true)
     let hungAt = Shared<Double?>(nil)
@@ -214,7 +206,7 @@ do {
     let held = FakeVT.lock.run { FakeVT.maxHeld[session] ?? 0 }
     print("serial engine at 0.9 s a frame for 4 s: \(outs.all.count) out, at most \(held) inside, watchdog \(hungAt.value.map { String(format: "at %.2f s", $0) } ?? "quiet")")
     expect(hungAt.value == nil, "serial engine at 0.9 s a frame: the watchdog fired at \(hungAt.value ?? -1) s")
-    expect(held == hardwareLimit, "serial engine at 0.9 s a frame: at most \(held) inside, not \(hardwareLimit)")
+    expect(held == 1, "serial engine at 0.9 s a frame: at most \(held) inside, not 1")
     withExtendedLifetime(enc) {}
 }
 
@@ -267,37 +259,7 @@ do {
         print("a re-encode and a repaint 1 ms apart, the network thread held 4 ms after unlock \(sleepOn): older picture into VideoToolbox last in \(inverted) of \(trials)")
         expect(inverted == 0, "re-encode race (after unlock \(sleepOn)): older picture last in \(inverted) of \(trials)")
     }
-    // (b) Two inside: frame A's output lets the waiting W in and its thread is held 8 ms; meanwhile
-    // K, inside beside A, is refused on encodeQueue, which lets the newer C in. W went in after C.
-    if two {
-        var inverted = 0, trials = 0
-        for t in 1...10 {
-            let base = 200_000 + t * 100
-            let a = base + 1, k = base + 2, w = base + 3, c = base + 4
-            FakeVT.reset(plan: { _, _, seq, _ in seq == k ? .refuse(after: 0.006) : .returnAfter(0.002) })
-            FakeVT.lock.run { FakeVT.injectOnOutputOf = [a: (sleepOn: 1, delay: 0.008)] }
-            let enc = makeEncoder()
-            let session = FakeVT.lastSession
-            let outs = Outputs()
-            enc.onEncoded = { _, key, _ in outs.add(key: key) }
-            // A first frame back, so two may go in.
-            autoreleasepool { capture.sync { enc.encode(makeFrame(seq: base), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
-            while outs.all.isEmpty { Thread.sleep(forTimeInterval: 0.001) }
-            for (seq, gap) in [(a, 0.0002), (k, 0.0003), (w, 0.0025), (c, 0.0)] {
-                autoreleasepool { capture.sync { enc.encode(makeFrame(seq: seq), pts: CMClockGetTime(CMClockGetHostTimeClock())) } }
-                if gap > 0 { Thread.sleep(forTimeInterval: gap) }
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-            let calls = FakeVT.callsOf(session)
-            trials += 1
-            if inversions(calls) > 0 { inverted += 1 }
-            expect(calls.contains { $0.seq == k && $0.refused }, "hand-over race: K was not refused (the scenario did not run)")
-            withExtendedLifetime(enc) {}
-        }
-        print("two inside, a waiting frame let in by an output whose thread is held 8 ms while a refusal lets a newer one in: older frame into VideoToolbox after newer in \(inverted) of \(trials)")
-        expect(inverted == 0, "hand-over race: older frame after newer in \(inverted) of \(trials)")
-    }
-    // (c) No stand-in deschedule: four encoders, each a still window where a keyframe request and a
+    // (b) No stand-in deschedule: four encoders, each a still window where a keyframe request and a
     // repaint are released together at a swept offset, for 2 s.
     FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.009) })
     let group = DispatchGroup()

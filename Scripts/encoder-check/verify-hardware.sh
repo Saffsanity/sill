@@ -13,21 +13,19 @@
 #   parity   SillHost --synthetic idle 35 s, base then new: new's stdout masked and sorted must
 #            equal base's
 #   stream   SillHost --synthetic + Scripts/sillclient.py picking the Desktop (3024×1898 @ 60 fps)
-#            30 s, new then two: enc.out / enc.mailboxDrop per second, AppleAVE2 HeartBeat times
-#   harness  the real HEVCEncoder at 3024×1964, 40 Mbps, new then two: 3 s at 60 fps, 6 s of one
+#            30 s, base then new: enc.out / enc.mailboxDrop per second, AppleAVE2 HeartBeat times
+#   harness  the real HEVCEncoder at 3024×1964, 40 Mbps, base then new: 3 s at 60 fps, 6 s of one
 #            frame every 0.3 s (to bring on the slow state), 20 s at 60 fps; per second enc.out,
 #            mailboxDrop, capture-to-output latency; HeartBeat per-frame times
-#   probe    EncoderProbe.throughput, new then two, 3 times at 3024×1904 and at 1512×948
+#   probe    EncoderProbe.throughput, base then new, 3 times at 3024×1904 and at 1512×948
 #   keyframe base then new, 6 sessions at 3024×1964: 12 frames at 60 fps, a keyframe asked for 5,
 #            20 or 40 ms after the last (a device joining just after a repaint), then still for
 #            0.5 s: base answers none (the next repaint would carry it), new every one, 60 ms
 #            and a turnaround after the last frame (HEVCEncoder.keyframeCheck)
-# The builds compared: base is ENCODER_CHECK_BASE (default 4fe37d4, encoder-recovery, one frame
-# inside), from git archive under .build/encoder-check/; new is this working tree as it ships (one
-# inside); two is this tree with SILL_TEST_ENCODER_IN_FLIGHT=2 (two inside on the hardware, the
-# plateau experiment). ENCODER_CHECK_VARIANTS="base new two" runs those in every step but parity.
-# It builds everything first (building never touches the encoder). Results:
-# .build/encoder-check/hw/*.txt, and a summary on stdout.
+# The builds compared: base is ENCODER_CHECK_BASE (default 4fe37d4, encoder-recovery), from git
+# archive under .build/encoder-check/; new is this working tree. ENCODER_CHECK_VARIANTS="new" runs
+# only this tree in every step but parity. It builds everything first (building never touches the
+# encoder). Results: .build/encoder-check/hw/*.txt, and a summary on stdout.
 set -u
 HERE=${0:A:h}
 ROOT=${HERE:h:h}
@@ -43,12 +41,11 @@ steps=("$@"); (( ${#steps} )) || steps=(parity stream harness probe keyframe)
 typeset -A HOST HARNESS ENVV
 HOST[base]=$OUT/tree-$BASE/.build/release/SillHost; HARNESS[base]=$OUT/harness-base; ENVV[base]=""
 HOST[new]=$ROOT/.build/release/SillHost;            HARNESS[new]=$OUT/harness-new;  ENVV[new]=""
-HOST[two]=$ROOT/.build/release/SillHost;            HARNESS[two]=$OUT/harness-new;  ENVV[two]="SILL_TEST_ENCODER_IN_FLIGHT=2"
 typeset -A VARIANTS
 VARIANTS[parity]="base new"
-VARIANTS[stream]=${ENCODER_CHECK_VARIANTS:-"new two"}
-VARIANTS[harness]=${ENCODER_CHECK_VARIANTS:-"new two"}
-VARIANTS[probe]=${ENCODER_CHECK_VARIANTS:-"new two"}
+VARIANTS[stream]=${ENCODER_CHECK_VARIANTS:-"base new"}
+VARIANTS[harness]=${ENCODER_CHECK_VARIANTS:-"base new"}
+VARIANTS[probe]=${ENCODER_CHECK_VARIANTS:-"base new"}
 VARIANTS[keyframe]=${ENCODER_CHECK_VARIANTS:-"base new"}
 
 echo "building (never touches the encoder): this tree, $BASE from git archive, the harness"

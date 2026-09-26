@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # AppleAVE2 HeartBeat lines (log show --info --debug --style compact, sender == "AppleAVE2") ->
 # per 5 s window: each session's frames completed and fps, and the engine's counters per frame
-# (C/F is what the 2026-09-25 investigation read as the time per frame on the encoder: ~9 ms in the
-# fast state, ~15 in the slow one; the counters are the engine's, so C/F is only a session's own
-# when it is alone on the engine). A/s: the first counter's growth a second. CLAUDE.md, "The 33 fps
-# plateau".
+# (C/F is what the 2026-09-25 investigation read as the time per frame on the encoder: 9.0 ms in
+# the fast state, 14.0 in the slow one, alone on the engine at 3024×1964; the counters are the
+# engine's, so C/F is only a session's own when it is alone on the engine). A/s: the first
+# counter's growth a second. CLAUDE.md, "The 33 fps plateau".
 # usage: hbparse.py FILE      (the output of the log show above)
 import re, sys
 res, prev = {}, None

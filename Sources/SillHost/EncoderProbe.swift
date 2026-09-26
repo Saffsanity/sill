@@ -4,9 +4,8 @@ import CoreMedia
 
 /// Frames through a new hardware HEVC session, to learn whether the encoder can carry a stream:
 /// at launch one small frame (`hardwareResponds`, about 100 ms when healthy), and while the host
-/// streams on the software encoder a short run at the stream's own size, as many frames inside at
-/// once as a stream keeps (`throughput`, the coordinator's re-check), held against the rate a
-/// return needs (`returnBar`).
+/// streams on the software encoder a short run at the stream's own size (`throughput`, the
+/// coordinator's re-check), held against the rate a return needs (`returnBar`).
 ///
 /// A probe that gets no answer is one of two things. On 2026-09-22 the Mac's hardware encoder was
 /// stuck system-wide for about three hours: every session took a frame and never answered, and
@@ -90,15 +89,14 @@ enum EncoderProbe {
     }
 
     /// Whether the hardware keeps up with a stream of this size now: frames of a moving test
-    /// pattern through a quiet hardware session (no line, no counter), kept inside it as a stream
-    /// keeps them (`HEVCEncoder.maxInFlight`: one at a time, the next going in when the last came
-    /// back; two under the plateau experiment's SILL_TEST_ENCODER_IN_FLIGHT=2, the next going in
-    /// each time one comes back), and the rate the last `frames` of them came back at, so the bar a
-    /// return needs (`returnBar`) and the engine rate learned from the best test are of the same
-    /// kind as what the stream will get. Three frames are drawn before the session opens and then
-    /// reused, as a capture stream reuses its surfaces, and the first pass over them is left out
-    /// (the session's warm-up, ~50 ms at Retina size, and each surface's first trip into the
-    /// encoder): drawing a frame costs milliseconds a stream never spends there (30 MB of fresh
+    /// pattern through a quiet hardware session (no line, no counter), and the rate the last
+    /// `frames` of them came back at. They go in one at a time, the next when the last came back,
+    /// because a stream sends them so (HEVCEncoder keeps one frame inside VideoToolbox): the rate
+    /// measured, the bar a return needs (`returnBar`) and the engine rate learned from the best
+    /// test are then of the kind a stream gets. Three frames are drawn before the session opens
+    /// and then reused, as a capture stream reuses its surfaces, and the first pass over them is
+    /// left out (the session's warm-up, ~50 ms at Retina size, and each surface's first trip into
+    /// the encoder): drawing a frame costs milliseconds a stream never spends there (30 MB of fresh
     /// memory at Retina 6K), and inside the timing it counted against the engine. `ok` false: a
     /// frame took longer than `timeout` (it then counts as stuck until it comes back). `fps` nil:
     /// nothing could be measured (no pixel buffers), so assume it keeps up. About 110 ms at
@@ -118,28 +116,14 @@ enum EncoderProbe {
         enc.onEncoded = { _, _, _ in done.signal() }
         enc.testHoldEachFrame = testHold
         let timed = max(1, frames)
-        let total = drawn.count + timed
         var timedFrom: CFAbsoluteTime = 0
-        var sent = 0
-        func send() {
-            enc.encode(drawn[sent % drawn.count], pts: CMTime(value: CMTimeValue(sent), timescale: 60))
-            sent += 1
-        }
-        // The first frame alone: a session lets a second in only once it has let go of one
-        // (`EncoderMailbox.places`), and one stuck on its first frame then holds one test frame, not
-        // two. After it, as many inside as the stream would have (one; two under the experiment),
-        // fewer than the three surfaces, and one more each time one comes back. VideoToolbox hands
-        // frames back in the order they went in, so the next surface is the one just back, never
-        // one still inside.
-        let keep = min(enc.maxInFlight, drawn.count - 1)
-        send()
-        for back in 0..<total {
+        for i in 0..<(drawn.count + timed) {
+            enc.encode(drawn[i % drawn.count], pts: CMTime(value: CMTimeValue(i), timescale: 60))
             guard done.wait(timeout: .now() + timeout) == .success else {
                 giveUp(enc)
                 return (false, nil, elapsed())
             }
-            if back == drawn.count - 1 { timedFrom = CFAbsoluteTimeGetCurrent() }   // the warm-up pass is back
-            while sent < total, sent - (back + 1) < keep { send() }
+            if i == drawn.count - 1 { timedFrom = CFAbsoluteTimeGetCurrent() }   // the warm-up pass is back
         }
         let span = CFAbsoluteTimeGetCurrent() - timedFrom
         withExtendedLifetime(enc) {}

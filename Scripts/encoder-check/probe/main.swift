@@ -5,11 +5,10 @@ import CoreVideo
 // Encoder-free check of EncoderProbe.throughput's send/wait loop (the real
 // Sources/SillHost/EncoderProbe.swift, compiled beside this file with Stats.swift) against a
 // stand-in HEVCEncoder whose frames come back after programmable delays in real time. It checks
-// that the test keeps exactly as many frames inside as the encoder lets in (never more: a third
-// would wait in the mailbox and a fourth would push it out, so the test would wait for a frame
-// that never comes; and one until the session has let go of a frame, as EncoderMailbox.places
-// has it), never the same surface inside twice, measures the rate with one and with two inside,
-// and gives up and counts a stuck frame as before. Nothing here links VideoToolbox.
+// that the test sends one frame at a time, as a stream does (a frame sent while one is inside
+// would wait in the mailbox, and the next would push it out, so the test would wait for a frame
+// that never comes), never the same surface inside twice, measures the rate, and gives up and
+// counts a stuck frame. Nothing here links VideoToolbox.
 //
 //   Scripts/encoder-check/run.sh probe      (from the repository's root; also runs the hold case)
 // or by hand:
@@ -25,7 +24,6 @@ enum Engine {
     case serial(Double)                      // one engine: this long a frame, one at a time
 }
 struct StandInConfig {
-    static var limit = 2
     static var engine = Engine.independent(0.030)
     static var stuck: Set<Int> = []          // frame indexes (0-based, per encoder) that never come back
     static var late: [Int: Double] = [:]     // frame index -> seconds it takes instead
@@ -40,30 +38,23 @@ final class HEVCEncoder {
     var onEncoded: ((_ data: Data, _ isKeyframe: Bool, _ parameterSets: ParameterSets?) -> Void)?
     var onStalledFrameBack: ((TimeInterval) -> Void)?
     var testHoldEachFrame: TimeInterval = 0
-    let maxInFlight: Int
     private let lock = NSLock()
     private var inside: [Int: (buffer: CVPixelBuffer, since: Double, back: Double?)] = [:]
     private var dead = false
-    /// A frame has come back: from then on `maxInFlight` may be inside, before it one (as the real
-    /// encoder's mailbox has it).
-    private var anyBack = false
     private var next = 0
     private var engineFree = 0.0
     private let queue = DispatchQueue(label: "standin.encode")
     private let start = CFAbsoluteTimeGetCurrent()
     private func now() -> Double { CFAbsoluteTimeGetCurrent() - start }
 
-    init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool, software: Bool = false, quiet: Bool = false) throws {
-        maxInFlight = software ? 1 : StandInConfig.limit
-    }
+    init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool, software: Bool = false, quiet: Bool = false) throws {}
 
     func encode(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
         lock.lock()
         StandInConfig.encodes += 1
         let index = next; next += 1
-        let places = anyBack ? maxInFlight : 1
-        if inside.count >= places {
-            StandInConfig.violations.append("frame \(index) sent with \(inside.count) inside (\(places) places open): it would wait in the mailbox")
+        if !inside.isEmpty {
+            StandInConfig.violations.append("frame \(index) sent with \(inside.count) inside: it would wait in the mailbox")
         }
         if inside.values.contains(where: { $0.buffer === pixelBuffer }) {
             StandInConfig.violations.append("frame \(index): a surface already inside went in again")
@@ -102,7 +93,6 @@ final class HEVCEncoder {
         } else if inside.removeValue(forKey: index) != nil {
             finished.remove(index); out.append(index)
         }
-        if !out.isEmpty { anyBack = true }
         let forward = !dead
         lock.unlock()
         if forward { for _ in out { onEncoded?(Data(), false, nil) } }
@@ -114,15 +104,11 @@ final class HEVCEncoder {
     }
 
     deinit {
-        // As HEVCEncoder's teardown: a session given up on with frames inside calls back once they
-        // are all out (never while one is stuck), with the seconds since the oldest went in.
-        guard dead, !inside.isEmpty else { return }
-        let backs = inside.values.map(\.back)
-        let since = inside.values.map(\.since).min()!
-        guard backs.allSatisfy({ $0 != nil }) else { return }
-        let last = backs.compactMap { $0 }.max()!
+        // As HEVCEncoder's teardown: a session given up on with its frame inside calls back once
+        // that frame is out (never while it is stuck), with the seconds since it went in.
+        guard dead, let frame = inside.values.first, let back = frame.back else { return }
         let t = now(), callback = onStalledFrameBack
-        onTime(after: max(0, last - t)) { callback?(last - since) }
+        onTime(after: max(0, back - t)) { callback?(back - frame.since) }
     }
 }
 
@@ -139,8 +125,8 @@ func onTime(after delay: Double, _ run: @escaping () -> Void) {
 
 var failures = 0, checks = 0
 func expect(_ ok: Bool, _ what: String) { checks += 1; if !ok { failures += 1; print("  FAIL: \(what)") } }
-func reset(limit: Int = 2, engine: Engine, stuck: Set<Int> = [], late: [Int: Double] = [:], inOrder: Bool = true) {
-    StandInConfig.limit = limit; StandInConfig.engine = engine; StandInConfig.stuck = stuck; StandInConfig.late = late
+func reset(engine: Engine, stuck: Set<Int> = [], late: [Int: Double] = [:], inOrder: Bool = true) {
+    StandInConfig.engine = engine; StandInConfig.stuck = stuck; StandInConfig.late = late
     StandInConfig.inOrder = inOrder
     StandInConfig.violations = []; StandInConfig.maxInside = 0; StandInConfig.encodes = 0
 }
@@ -159,10 +145,10 @@ EncoderProbe.onStalledProbeBack = { s in backsLock.lock(); backs.append(s); back
 if CommandLine.arguments.dropFirst().first == "hold" {
     // SILL_TEST_PROBE_HOLD=0.08: every frame waits 80 ms on the serial queue before it goes in.
     reset(engine: .independent(0.009))
-    let r = run("hold 0.08 s a frame, 9 ms each, two inside")
-    // Serial on encodeQueue: one hold after another, ~12.5 fps less the sleeps' overshoot (11.1 to
-    // 11.6 while Sill.app streamed beside); two holds at once would read ~25.
-    expect(r.ok && r.fps.map { $0 > 10 && $0 < 13 } == true, "hold 0.08: \(r.fps ?? -1) fps, not ~12")
+    let r = run("hold 0.08 s a frame, 9 ms each")
+    // One hold after another, each with its frame's 9 ms: ~11.2 fps less the sleeps' overshoot
+    // (10.5 here).
+    expect(r.ok && r.fps.map { $0 > 9.5 && $0 < 12 } == true, "hold 0.08: \(r.fps ?? -1) fps, not ~11")
     print(failures == 0 ? "PASS: \(checks) checks" : "FAIL: \(failures) of \(checks) checks")
     exit(failures == 0 ? 0 : 1)
 }
@@ -170,32 +156,20 @@ if CommandLine.arguments.dropFirst().first == "hold" {
 print("== EncoderProbe.throughput against a stand-in encoder (real time)")
 do {
     reset(engine: .independent(0.030))
-    let r2 = run("30 ms a frame, each on its own, two inside")
-    // Two frames back every 30 ms: the 7 timed frames span three or four turnarounds (78 or 58 fps).
-    expect(r2.ok && r2.fps.map { $0 > 50 && $0 < 85 } == true, "two inside at 30 ms: \(r2.fps ?? -1) fps, not 50 to 85")
-    expect(StandInConfig.maxInside == 2, "two inside at 30 ms: \(StandInConfig.maxInside) inside at most")
+    let r1 = run("30 ms a frame")
+    expect(r1.ok && r1.fps.map { $0 > 27 && $0 < 35 } == true, "30 ms a frame: \(r1.fps ?? -1) fps, not ~33")
+    expect(StandInConfig.maxInside == 1, "30 ms a frame: \(StandInConfig.maxInside) inside at most")
     expect(StandInConfig.encodes == 10, "\(StandInConfig.encodes) frames sent, not 10")
-    reset(limit: 1, engine: .independent(0.030))
-    let r1 = run("30 ms a frame, one inside (the default)")
-    expect(r1.ok && r1.fps.map { $0 > 27 && $0 < 35 } == true, "one inside at 30 ms: \(r1.fps ?? -1) fps, not ~33")
-    expect(StandInConfig.maxInside == 1, "one inside: \(StandInConfig.maxInside) inside at most")
+    reset(engine: .independent(0.009))
+    let r9 = run("9 ms a frame")
+    expect(r9.ok && r9.fps.map { $0 > 90 && $0 < 112 } == true, "9 ms a frame: \(r9.fps ?? -1) fps, not ~111")
     reset(engine: .serial(0.015))
-    let rs = run("one engine at 15 ms a frame, two inside")
+    let rs = run("one engine at 15 ms a frame")
     expect(rs.ok && rs.fps.map { $0 > 58 && $0 < 70 } == true, "serial 15 ms: \(rs.fps ?? -1) fps, not ~66")
-    reset(engine: .serial(0.030))
-    let rs30 = run("one engine at 30 ms a frame, two inside")
-    expect(rs30.ok && rs30.fps.map { $0 > 30 && $0 < 35 } == true, "serial 30 ms: \(rs30.fps ?? -1) fps, not ~33")
-}
-do {
-    // Out of order (VideoToolbox does not do this; the test only counts returns): frames 3, 5 and 7
-    // slow, the ones after them fast.
-    reset(engine: .independent(0.010), late: [3: 0.040, 5: 0.040, 7: 0.040], inOrder: false)
-    let r = run("returns out of order (frames 3, 5, 7 slow)")
-    expect(r.ok && r.fps != nil, "out of order: not ok")
-    // In decode order, the same slow frames hold the ones behind them.
+    // Frames 3, 5 and 7 slow: the rate falls, the test still answers.
     reset(engine: .independent(0.010), late: [3: 0.040, 5: 0.040, 7: 0.040])
-    let r2 = run("in decode order (frames 3, 5, 7 slow)")
-    expect(r2.ok && r2.fps != nil, "decode order: not ok")
+    let r2 = run("frames 3, 5, 7 slow")
+    expect(r2.ok && r2.fps.map { $0 > 30 && $0 < 60 } == true, "frames 3, 5, 7 slow: \(r2.fps ?? -1) fps, not 30 to 60")
 }
 do {
     // A frame that never comes back: no answer within 1 s, counted as stuck, never back.
@@ -212,21 +186,21 @@ do {
     expect(backs.isEmpty, "stuck: a stalled frame reported back")
 }
 do {
-    // The first frame never comes back (every session through the 2026-09-22 wedge): the test
-    // sent it alone, so the session holds one test frame, not two.
+    // The first frame never comes back (every session through the 2026-09-22 wedge): the session
+    // holds that one test frame.
     reset(engine: .independent(0.010), stuck: [0])
     let before = EncoderProbe.stuckProbes
-    let r = run("frame 0 never comes back, two inside")
+    let r = run("frame 0 never comes back")
     expect(!r.ok && StandInConfig.encodes == 1 && StandInConfig.maxInside == 1,
            "stuck on the first frame: ok \(r.ok), \(StandInConfig.encodes) sent, \(StandInConfig.maxInside) inside at most, not 1")
     expect(EncoderProbe.stuckProbes == before + 1, "stuck on the first frame: stuckProbes \(EncoderProbe.stuckProbes), not \(before + 1)")
-    // One inside (the default): frames 0 to 4 sent one at a time, frame 4 never back.
-    reset(limit: 1, engine: .independent(0.010), stuck: [4])
+    // Frames 0 to 4 sent one at a time, frame 4 never back.
+    reset(engine: .independent(0.010), stuck: [4])
     let before1 = EncoderProbe.stuckProbes
-    let r1 = run("frame 4 never comes back, one inside")
+    let r1 = run("frame 4 never comes back, five sent")
     expect(!r1.ok && StandInConfig.encodes == 5 && StandInConfig.maxInside == 1,
-           "one inside, frame 4 stuck: ok \(r1.ok), \(StandInConfig.encodes) sent, \(StandInConfig.maxInside) inside at most")
-    expect(EncoderProbe.stuckProbes == before1 + 1, "one inside, frame 4 stuck: stuckProbes \(EncoderProbe.stuckProbes), not \(before1 + 1)")
+           "frame 4 stuck: ok \(r1.ok), \(StandInConfig.encodes) sent, \(StandInConfig.maxInside) inside at most")
+    expect(EncoderProbe.stuckProbes == before1 + 1, "frame 4 stuck: stuckProbes \(EncoderProbe.stuckProbes), not \(before1 + 1)")
 }
 do {
     // A frame 1.5 s late (a busy encoder): no answer in time, stuck until it comes back, then

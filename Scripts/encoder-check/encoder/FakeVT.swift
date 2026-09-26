@@ -94,8 +94,6 @@ enum FakeVT {
     /// One engine: a frame's time starts when the frame before it is done. Else each frame's time
     /// starts at its call and they overlap.
     static var serialEngine = false
-    /// Content numbers whose output handler runs with Inject armed on the callback thread (`Inject`).
-    static var injectOnOutputOf: [Int: (sleepOn: Int, delay: Double)] = [:]
     static var calls: [Call] = []
     static var outputs: [Output] = []
     /// The most frames each session held at once, by session number.
@@ -104,7 +102,7 @@ enum FakeVT {
 
     static func reset(plan p: @escaping (_ session: Int, _ call: Int, _ seq: Int, _ software: Bool) -> Behavior = { _, _, _, _ in .returnAfter(0.009) },
                       serial: Bool = false) {
-        lock.run { plan = p; serialEngine = serial; injectOnOutputOf = [:]; calls = []; outputs = []; maxHeld = [:] }
+        lock.run { plan = p; serialEngine = serial; calls = []; outputs = []; maxHeld = [:] }
     }
     static func newSession() -> Int { lock.run { sessionCount += 1; return sessionCount } }
     static var lastSession: Int { lock.run { sessionCount } }
@@ -157,9 +155,9 @@ final class VTCompressionSession {
             callbacks.async { [never] in never.wait() }   // decode order: nothing after it comes out
             return noErr
         case .returnAfter(let d):
-            let (serial, inject) = FakeVT.lock.run { () -> (Bool, (sleepOn: Int, delay: Double)?) in
+            let serial = FakeVT.lock.run { () -> Bool in
                 FakeVT.calls.append(call)
-                return (FakeVT.serialEngine, FakeVT.injectOnOutputOf[seq])
+                return FakeVT.serialEngine
             }
             let key = forced || n == 1
             let (due, count) = lock.run { () -> (CFTimeInterval, Int) in
@@ -177,9 +175,7 @@ final class VTCompressionSession {
                 if wait > 0 { Thread.sleep(forTimeInterval: wait) }
                 lock.run { _ = held.removeValue(forKey: n) }
                 FakeVT.lock.run { FakeVT.outputs.append(Output(session: session, n: n, at: CACurrentMediaTime())) }
-                if let inject { Inject.arm(sleepOn: inject.sleepOn, delay: inject.delay) }
                 handler(noErr, [], Self.sample(call: n, pts: pts, key: key))
-                if inject != nil { Inject.disarm() }
             }
             return noErr
         }
