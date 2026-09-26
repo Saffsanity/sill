@@ -16,10 +16,7 @@ server in between.
 [Support](https://getsill.app/support) ·
 [Privacy](https://getsill.app/privacy)
 
-<!-- CI badge: uncomment once the repository is public (a private repository's badge shows
-     visitors nothing).
 [![CI](https://github.com/Saffsanity/sill/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Saffsanity/sill/actions/workflows/ci.yml)
--->
 
 <!-- App Store: once the iPhone and iPad app is listed, put Apple's "Download on
      the App Store" badge here, linked to the listing, and delete the sentence
