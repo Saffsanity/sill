@@ -816,7 +816,9 @@ only one. Protections now in the host:
   mailbox (`EncoderMailbox`): the capture queue never waits; one frame at a
   time is inside VideoToolbox (two at once was measured and dropped: "The 33
   fps plateau" below); a watchdog on a separate queue declares the session
-  hung after 1.5 s and calls `onHung`.
+  hung after 1.5 s and calls `onHung`. A stream whose session settles in the
+  hardware's slow state gets a new session in place (`EncoderSlowState`; "The
+  33 fps plateau" below).
 - The coordinator then restarts the source on the software encoder at half
   scale (slow, ~10 fps under load, but live) and says so in the log; three
   software hangs stop the stream instead of looping. Since 2026-09-25 that
@@ -1154,8 +1156,9 @@ the fast state. One and two frames inside (the switch,
   fps at C/F ~6 ms, and it fell back to ~34 when that load paused: load, not a
   second frame of the same stream, moves the engine. Next to try: the engine's
   power state or rate control (`EnableLowLatencyRateControl`, "Busy, not
-  stuck" above), not pipelining. Meanwhile Resolution: Standard avoids the
-  plateau (57 fps with no drops at 1512×982).
+  stuck" above), not pipelining. Tried first instead, and kept: a new session
+  (below). Resolution: Standard avoids the plateau too (57 fps with no drops
+  at 1512×982).
 - Not measured: Sill.app (the CLI only), 120 fps, other bitrates, a device,
   other chips (a Max has two encode engines), real content beyond the
   scrolling window.
@@ -1234,6 +1237,121 @@ What the branch keeps:
 - **Untested, for Noah:** a device joining a still window gets its picture
   within about 0.1 s (the keyframe's second look has run only in the checks and
   the hardware harness).
+
+**A new session for the slow state (2026-09-25, 22:24–22:39; c27d6df,
+b3042de, dd0dc15).** The solo measurement read the slow state as a session's,
+not the engine's: every fresh session started fast, and the slow state set in
+only after about a second of sparse frames into an existing one. So a stream
+whose session has settled in it gets a new session in place, on by default
+(`HEVCEncoder.replacesSlowSessions`):
+- The rule (`EncoderSlowState`, pure, Foundation only): a session that has run
+  fast (a frame back in under 25 ms; turnaround is hand-over to output, by the
+  mailbox's own clock) and now, over the last 2 s, gets at least 45 frames
+  from the capture in each second while the median turnaround of what came
+  back is at least 25 ms, is replaced, at most once per 10 s (a new session
+  that could not be made counts too). The new session is timed on its 30
+  frames after its first (a keyframe), or on those back within 2 s if at least
+  5; one no faster (then the engine is slow, as beside another app) ends the
+  replacing for that stream. A session that never ran fast (a size the engine
+  is simply slow at) is never replaced; probes and the software encoder never
+  are.
+- The swap (`HEVCEncoder`): the new session is made with the stream's settings
+  on a queue of its own while the old one goes on (the kernel opened it 39–42
+  ms before it took over); `submit` hands it the next frame with a forced
+  keyframe, whose parameter sets go out with it; the old one holds no frame by
+  then (one inside at a time) and is completed and invalidated off the queue.
+  The mailbox, its ids, the watchdog and the capture carry on. One line once
+  the new session's first frames are back, e.g. "Encoder (hardware HEVC
+  3024×1964): frames took 29 ms each (31 fps out of 51 captured); a new
+  session takes 9 ms (a 329 kB keyframe, 28 ms between frames).", or "…
+  takes 28 ms, no faster, so this stream keeps it and gets no other (…)".
+  Nothing else prints and no counter changes.
+- With encoder-recovery: a frame's clock starts at its hand-over, as before,
+  so making a session counts against no frame, and the watchdog, `onHung`,
+  the software fallback and the re-check never see a swap (the encoder check's
+  E7: no `onHung`, no `enc.hung`, no hang or stalled line; none in the
+  hardware runs either). A new session that hangs is a hang like any other:
+  the watchdog gives up on it 1.5–2 s after the swap and the stream falls
+  back, and the old session, retired holding nothing, is not reported
+  stalled. A waiting new session is dropped when the stream's session dies
+  (the watchdog, `abandon`), with the encoder, or when it is made after the
+  encoder went.
+- `SILL_TEST_ENCODER_RECYCLE=1` or `0` overrides the constant for one process
+  (an A/B from one binary; a "TEST:" line says so).
+
+Measured alone on the engine with the solo measurement's method (its scripts,
+guards and motion window, copied): the CLI built from c27d6df by `git
+archive`, the real Desktop at 3024×1964, 60 fps and 40 Mbps to a loopback
+test client, this M2 Pro on AC power. No device connected (Sill.log's last
+connect 18:50:52; the guard before and after every run), no user input
+(HIDIdleTime rising through every run), and each run's HeartBeat listing only
+its own sessions (the stream's and, switched on, its replacement, both
+3024×1968 at 40 Mbps and priority 0) besides one-frame 256×256 launch probes.
+Schedule: 4 s of motion, 10 s still, 35 s of motion, the switch on and off
+alternating, three runs each; the fast state: 35 s of motion from the start,
+two runs each. Figures are the resumed motion less its first 2 s:
+
+| | fps out (min–max) | drops/s | turnaround med / p95 ms | capture→output med / p95 ms | C/F ms |
+|---|---|---|---|---|---|
+| on | 57.3, 57.3, 57.2 (55–59) | 0 | 16.3–16.6 / 16.7–17.4 | 17.4–17.6 / 25.0–25.5 | 8.7–9.0 |
+| off | 34.5, 34.5, 34.2 (33–36) | 22.7–23.2 | 29.0–29.1 / 29.2–29.8 | 39.5–39.8 / 51.1–51.7 | 13.9–14.0 |
+| fast, on | 57.2, 57.0 (54–59) | 0, 0.2 | 16.3 / 16.7–17.4 | 18.5 / 25.1–28.2 | 9.0 |
+| fast, off | 57.3, 57.2 (55–59) | 0 | 16.3–16.4 / 16.7 | 17.5–17.7 / 25.1–25.2 | 9.0 |
+
+- Each run switched on replaced its session once, 1.80, 1.83 and 1.85 s into
+  the motion. The new session's first frame, a forced keyframe of 247, 322 and
+  369 KiB (the stream's first keyframe was 280–372 KiB, the 4 s safety
+  keyframes 437–772 KiB, a delta frame ~30 KiB), came out 30.2, 27.8 and
+  27.5 ms after the old session's last frame: the slow state's own spacing
+  just before (29.6, 29.1, 29.0 ms), so no frame waits longer than a slow one
+  did. Its next 30 frames took 9.5, 9.3 and 9.0 ms (median), then ~16 ms paced
+  to the capture, as a fresh session does. The second holding the swap put
+  out 46–54 frames, every later one 55–59. The parameter sets were byte for
+  byte the stream's first ones (one hash across 11–12 sets), so a device's
+  display layer has nothing to flush.
+- Motion from the start never set it off (one session in each fast run).
+  "fast, on" run b's 1–2 drops a second over four seconds came with the
+  loopback ping's maxima at 6–8 ms and the turnaround steady at 16 ms: the
+  host, not the encoder.
+- One more run switched on, with two still spells (4 s motion, 10 s still,
+  15 s motion, 10 s still, 15 s motion): replaced twice, 1.8 s into each
+  resumed motion and 25 s apart, keyframes of 261 and 324 KiB, 26 ms between
+  frames each time, then 9.0 and 9.8 ms a frame and 55–59 fps.
+- Kept, on by default: the slow state is a session's, a new session starts
+  fast, and the price is one keyframe smaller than the 4 s safety one with no
+  wait beyond the slow state's own.
+- The checks: `run.sh slowstate` (798 checks: the rule at its edges, and
+  streams in virtual time through a stand-in for the glue) and
+  `mutants-slowstate` (20 of 20 caught); the encoder check's E7, the real
+  `HEVCEncoder` against FakeVT (97 checks switched on, 12 off); the rest as
+  before (the mailbox 38,256 and 27 of 27 mutants, the probe 19 and the hold).
+  The CLI against origin/main (1f3072a), each built from `git archive`
+  (dd0dc15 here), no device connected, each run's HeartBeat only its own
+  sessions: `--synthetic` idle for 35 s identical masked and sorted (7 lines;
+  in order too but for where the installed-apps line lands). With a loopback
+  client streaming the synthetic Desktop for 22 s (origin/main four times,
+  this branch six, alternating as another session's hosts allowed): no new
+  kind of line, no new stats key, no "Encoder" or "TEST:" line, and one
+  stream session each (nothing replaced). Which counters a second lists
+  varies from run to run in both builds: with the first streaming second and
+  the client's last left out, origin/main's four runs and three of this
+  branch's six are identical; the other three differ by 6 and 2 mailbox drops
+  in the seconds after a start that fell 80 ms before a stats tick, by one
+  mailbox drop, and by `cursor.shape` in two seconds (the Mac's cursor
+  changed).
+- Not measured: Sill.app (the CLI only; the same core), a device (the keyframe
+  over Wi-Fi, its decode), 120 fps, other bitrates, a shared engine (a new
+  session there should be judged no faster and kept: the checks only), a size
+  the engine is slow at (never replaced: the checks only), other chips, other
+  content than the scrolling window.
+- **Untested, for Noah:** stream the Retina Desktop from Sill.app to the iPad,
+  leave the screen still for a few seconds, then scroll: about 2 s into the
+  scroll the log shows one "Encoder (hardware HEVC …): frames took 29 ms each
+  …; a new session takes 9 ms …" line and `enc.out` climbs back to
+  `cap.complete` with no `enc.mailboxDrop`; on the iPad the picture does not
+  flash or go black at that moment and the frame age does not jump. Beside
+  the Simulator panel (another app encoding), at most one "no faster" line
+  per stream.
 
 Still open: the unexplained one-off stall where new clients received no catalog
 (2026-09-22, hardened since, never reproduced). Keep the connect-path logging.
@@ -1326,7 +1444,9 @@ good.
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
   `--synthetic`), `HEVCEncoder` (VideoToolbox with one frame inside, a
   one-slot mailbox behind it and a hang watchdog; hardware or software; says
-  whether a stalled frame came back), `EncoderMailbox` (its bookkeeping: the
+  whether a stalled frame came back; gives a stream whose session settled in
+  the slow state a new one), `EncoderSlowState` (when that is, and whether the
+  new session ran faster; pure, checked with swiftc), `EncoderMailbox` (its bookkeeping: the
   frame inside with its
   watchdog clock, the mailbox, the watchdog's test, timestamps and keyframe
   requests; pure, checked with swiftc), `EncoderProbe` (one small frame
@@ -1373,8 +1493,9 @@ good.
   every argument is checked before it connects, and a bad one exits 2).
   `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
   `run.sh` builds and runs those that never touch an encoder (the mailbox
-  check and its mutants, the probe and encoder checks; it refuses any binary
-  that links VideoToolbox), and `verify-hardware.sh` the hardware runs
+  check and its mutants, the probe and encoder checks, the slow-state check
+  and its mutants; it refuses any binary that links VideoToolbox), and
+  `verify-hardware.sh` the hardware runs
   against a base commit built from `git archive` (parity, stream, harness,
   probe, keyframe), each only while `no-device.sh` finds no device connected
   to Sill.app; outputs go to `.build/encoder-check/`.
@@ -1420,6 +1541,7 @@ Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
+SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost --synthetic   # keeps each hardware session (no new session for the slow state; 1 forces it)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
 Needs Xcode as the active developer directory with its license accepted; with

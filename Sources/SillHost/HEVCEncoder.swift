@@ -92,8 +92,9 @@ final class HEVCEncoder {
     private var lastFrameAt: CFTimeInterval = 0
     /// The watchdog gave up on this session (not `abandon`): its deinit says whether the frame came back.
     private var hungReported = false
-    /// Watches the stream's session for the slow state; nil when it is never replaced (a probe, the
-    /// software encoder, or `replacesSlowSessions` off).
+    /// Watches the stream's session for the slow state; nil when it is never replaced (a quiet probe,
+    /// the software encoder, or `replacesSlowSessions` off). The launch probe has one, and its one
+    /// frame never meets the rule.
     private var slowState: EncoderSlowState?
     /// A new session, made and prepared, that the next frame handed over goes into.
     private var replacement: VTCompressionSession?
@@ -110,8 +111,8 @@ final class HEVCEncoder {
     /// 57 fps against 34 without it. False keeps each session for the stream's life.
     static let replacesSlowSessions = true
     /// `replacesSlowSessions`, unless TEST ONLY `SILL_TEST_ENCODER_RECYCLE=1` or `0` says otherwise for
-    /// this process (an A/B from one binary), which it says once, when the first hardware stream
-    /// session is made.
+    /// this process (an A/B from one binary), which it says once, when the first hardware session
+    /// that is not a quiet probe's is made (in a host, the launch probe's).
     static let replacingSlowSessions: Bool = {
         guard let value = ProcessInfo.processInfo.environment["SILL_TEST_ENCODER_RECYCLE"], let n = Int(value) else {
             return replacesSlowSessions

@@ -216,7 +216,12 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
   them apart (`Scripts/encoder-check/hbparse.py` reads it; its header says
   how to fetch it): it lists another session beside Sill's while an app
   shares the encoder, and a time per frame (C/F) of about 10 ms, against
-  about 15 in the slow state.
+  about 15 in the slow state. The host gives a stream in the slow state a new
+  encoder session about 2 s into the motion, which runs at the full rate
+  again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
+  ms each …; a new session takes 9 ms …"); if a new session is no faster
+  (another app sharing the encoder, say), the log says that and the stream
+  keeps it.
 - Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
   it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
