@@ -452,11 +452,14 @@ extension StreamClient {
     /// has no window list yet takes over from it; an established remote session is never moved.
     /// Unsaved Macs keep the old rule, by exact Bonjour name: two Macs can share a computer name
     /// ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one.
+    /// Never while a move is under way (`moveUnderWay`): a session at home whose connection went is
+    /// carried on by one (StreamClient.rescue) and stays connected until it takes over, or until it
+    /// fails and the session's end brings the reconnect here.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
         reconnectCheck = nil
-        guard !connected, var r = reconnect else { return false }
+        guard !connected, !moveUnderWay, var r = reconnect else { return false }
         let now = ProcessInfo.processInfo.systemUptime
         let dialingAutomatically = remoteDial != nil || session?.why == .automatic
         guard connection == nil || dialingAutomatically else { return false }

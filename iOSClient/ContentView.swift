@@ -94,6 +94,22 @@ struct ContentView: View {
 ///   the address they would have dialled as the fallback: `192.0.2.1:9` (never answers) gives way
 ///   after 2.5 s, `127.0.0.1:1` (nothing listens) at once, and the session comes up on the
 ///   address as before ("wired dial … dialing unconstrained" on the console).
+/// * `-SillPathTest '<spec>'` — with `-SillConnect`: the session's Mac is listed as a network row
+///   whose interfaces change on cue, so the session follows the best path for real
+///   (`StreamClient.followBestPath`). The spec: `wifi=HOST:PORT cable=HOST:PORT` (where a dial to
+///   the row's Wi-Fi and to its cable goes), then events `SECONDS:WHAT` from the first `.ready`:
+///   `+cable` (the row gains anpi0), `-cable` (it loses it, and a session on the cable is reported
+///   unsatisfied, as iOS reports a pulled cable), `cut` (it loses it, and a session on the cable is
+///   closed at once), `close` (the session's connection closed at once, the row as it is: the Mac
+///   evicting the device), `-row` (it loses it, nothing more), `mute` (pongs stop counting),
+///   `-wifi`, `+wifi`. A `cable=` that never answers (`192.0.2.1:9`), refuses (`127.0.0.1:1`) or
+///   is another synthetic host fails each move to the cable (tried less often each time, and
+///   another host's listing not again). `direct` counts the session as one over AWDL, so the row
+///   is where the move from AWDL takes it. With the iPad on this Mac's cable, this Mac's own
+///   `fe80::…%en14` reads "Wired" and `fe80::…%en0` "Wi-Fi": `-SillConnect fe80::…%en0:PORT
+///   -SillPathTest 'wifi=fe80::…%en0:PORT cable=fe80::…%en14:PORT 3:+cable'` moves the session to
+///   the cable 2 s after the cable is listed, and the host logs "Client connected: …%en14" and
+///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
@@ -261,7 +277,9 @@ struct LayoutHarness: View {
 /// nothing when the device cannot tell); when none turns up on the network, why, with Search
 /// Nearby; and Add a Mac… last, which unfolds the pairing card in the column's place
 /// (docs/remote-access-plan.md §7.8, §7.10). A saved Mac's row has a menu: Connect or Connect
-/// Remotely, and Forget.
+/// Remotely, and Forget. Along the bottom, a footer says Sill needs its free Mac app and where to
+/// get it, and links support and the privacy policy (App Review guidelines 1.5, 2.1 and 5.1.1(i)).
+/// None of it shows while connected: the stream screen takes this one's place (`ContentView`).
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
     @State private var adding: Bool
@@ -285,26 +303,65 @@ struct ConnectScreen: View {
     /// Where the scanner cannot run (the simulator), the card starts on the typed path.
     private var scannerUsable: Bool { scannerOverride != nil || CodeScanner.isSupported }
 
+    /// The least room between the column and the footer.
+    private static let footerGap: CGFloat = 24
+    /// How far a footer link's tap area reaches above and below its words: a footnote line is about
+    /// 16 pt, so the area is about 44 pt tall at the default size. The layout never sees it (the
+    /// Settings panel's Done does the same).
+    private static let linkReach: CGFloat = 14
+
     var body: some View {
         GeometryReader { geo in
             let layout = ConnectLayout(size: geo.size)
             // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
             // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
-            // safe area below, so nothing else moves.
+            // safe area below, so nothing else moves (the footer stays under the keyboard).
             let toTop = editing && !layout.topHalf
-            column(layout)
-                .frame(width: adding && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth, alignment: .leading)
-                // Placed by its leading edge, not centred: the side-by-side card is wider than the
-                // rows, and centring it moved the title sideways as the card unfolded.
-                .padding(.leading, layout.columnX)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, toTop ? 16 : 0)
-                // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing crosses
-                // the crease and the keyboard has the lower half. With a field's keyboard up: at the
-                // top. Elsewhere centred, as before.
-                .frame(maxWidth: .infinity, maxHeight: layout.topHalf ? min(geo.size.height / 2, 500) : (toTop ? nil : .infinity),
-                       alignment: toTop ? .top : .center)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: layout.topHalf || toTop ? .top : .center)
+            // The column where it sat before there was a footer, and the footer along the bottom:
+            // the footer never moves the title. Only a column that would come within the gap of the
+            // footer rises to keep it; one too tall for that even at the top (many Macs on a phone
+            // held sideways) scrolls above the footer, which stays in reach, as the Settings panel
+            // keeps its header and foot. One scroll view whatever the fit, so a fit that changes
+            // (the card's words folding while a field has the keyboard, a row more) never builds
+            // the column anew: the card keeps its fields and its camera.
+            VStack(spacing: 0) {
+                ScrollView(.vertical) {
+                    ColumnOverFooter(
+                        // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing
+                        // crosses the crease and the keyboard has the lower half (the footer stays along
+                        // the bottom, under the keyboard while it is up). Elsewhere centred in the whole
+                        // height, as before.
+                        centreHeight: layout.topHalf ? min(geo.size.height / 2, 500) : geo.size.height,
+                        visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
+                        column(layout)
+                            .frame(width: adding && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
+                                   alignment: .leading)
+                            // Placed by its leading edge, not centred: the side-by-side card is wider
+                            // than the rows, and centring it moved the title sideways as the card
+                            // unfolded.
+                            .padding(.leading, layout.columnX)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // The footer's height, measured here; the one shown is the one below.
+                        footer(layout)
+                            .hidden()
+                            .accessibilityHidden(true)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicatorsFlash(onAppear: true)
+                // A column that scrolls fades out above the footer instead of being cut off at it, and
+                // keeps a little room before it. Both are in the gap, which a column that fits keeps
+                // clear, so neither ever reaches one.
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: Self.footerGap / 2)
+                        Color.clear.frame(height: Self.footerGap / 2)
+                    }
+                }
+                footer(layout)
+            }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onChange(of: client.pairing) { old, new in
@@ -328,7 +385,8 @@ struct ConnectScreen: View {
     private func column(_ layout: ConnectLayout) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // Leading, so the title never jumps sideways when the hint, a row or the card widens the
-            // column. Vertically it is still centred: what adds height moves it up by half as much.
+            // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
+            // by half as much.
             Text(adding || client.pendingLink != nil ? "Add a Mac" : "Connect to a Mac")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
@@ -457,5 +515,138 @@ struct ConnectScreen: View {
         editing = false
         withAnimation(.easeOut(duration: 0.18)) { adding = false }
         titleFocused = true
+    }
+
+    // MARK: The footer
+
+    /// For someone who found Sill here first, and for App Review: what else it needs, where to get
+    /// it, where to get help, and the privacy policy. Muted and 13 pt like the status line, but it
+    /// follows the text size, up to the Settings panel's cap (the column keeps its fixed sizes); it
+    /// wraps, never truncates. Each link opens in Safari (a Link hands its URL to the environment's
+    /// openURL), and VoiceOver reads it as a link. The addresses are SillLinks'.
+    private func footer(_ layout: ConnectLayout) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Needs the free Sill app on your Mac.")
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            // All three on one line while they fit, else the download link over the other two,
+            // the lines far enough apart that their tap areas meet without overlapping. Upward the
+            // areas reach a little into the line above, which is plain text.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    downloadLink
+                    linkSeparator
+                    supportAndPrivacy
+                }
+                VStack(alignment: .leading, spacing: 2 * Self.linkReach) {
+                    downloadLink
+                    supportAndPrivacy
+                }
+            }
+        }
+        .font(.footnote)
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        .padding(.horizontal, 10)
+        // Under the column's own edge and as wide as the rows, so the two line up; on a screen
+        // narrower than 412 pt (a phone, a window in Slide Over) that is the screen's width less
+        // the margins, so the links go to a second line rather than past the edge.
+        .frame(width: layout.columnWidth, alignment: .leading)
+        .padding(.leading, layout.columnX)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Room for the last link's tap area, which then stays on the screen.
+        .padding(.bottom, Self.linkReach)
+    }
+
+    private var downloadLink: some View {
+        footerLink("Get it at \(SillLinks.siteName)", to: SillLinks.download)
+    }
+
+    /// Support, then the privacy policy, on one line.
+    private var supportAndPrivacy: some View {
+        HStack(spacing: 0) {
+            footerLink("Support", to: SillLinks.support)
+            linkSeparator
+            footerLink("Privacy Policy", to: SillLinks.privacy)
+        }
+    }
+
+    /// The dot between two links on a line. VoiceOver skips it.
+    private var linkSeparator: some View {
+        Text(" · ")
+            .foregroundStyle(Palette.muted)
+            .accessibilityHidden(true)
+    }
+
+    private func footerLink(_ title: LocalizedStringKey, to url: URL) -> some View {
+        Link(destination: url) {
+            Text(title)
+                .foregroundStyle(Palette.accent)
+                // A link centres a label that wraps (a longer address); keep it on the footer's edge.
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, Self.linkReach)
+                .contentShape(Rectangle())
+        }
+        .padding(.vertical, -Self.linkReach)
+    }
+}
+
+/// The connect screen's column inside the scroll view that sits above its footer. The column sits
+/// where it would without a footer: centred in `centreHeight` (the whole height, or the Duo's top
+/// half) or, while a field has the keyboard, at the top. A column that would come within `gap` of
+/// the footer rises to keep it, but never closer than 16 pt to the top. The content is then exactly
+/// the scroll view's height, so nothing scrolls; a column that cannot keep both makes the content
+/// taller, with the same 16 pt above it, and scrolls. So at the switch the column neither moves nor
+/// jumps: it rises until it is 16 pt from the top, and from there it scrolls.
+///
+/// The second subview is the footer again, hidden, which only gives the footer's height: the scroll
+/// view is `visibleHeight` less that, and its content never learns its container's height.
+private struct ColumnOverFooter: Layout {
+    /// The height the column is centred in, from the top.
+    let centreHeight: CGFloat
+    /// The scroll view and the footer together: the screen's height.
+    let visibleHeight: CGFloat
+    let gap: CGFloat
+    /// A field has the keyboard: the column at the top.
+    let atTop: Bool
+    /// The least room above the column, however it sits: risen, at the top or scrolling.
+    private let topRoom: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let (column, footer) = sizes(width: proposal.width, subviews) else { return .zero }
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(column.width, footer.width)
+        let room = visibleHeight - footer.height
+        // A point short of the scroll view while it fits, so no rounding ever lets it scroll.
+        return CGSize(width: width, height: fits(column: column.height, room: room) ? max(0, room - 1)
+                                                                                   : topRoom + column.height + gap)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
+        let room = visibleHeight - footer.height
+        let y: CGFloat
+        if !fits(column: column.height, room: room) || atTop {
+            y = topRoom
+        } else {
+            let centred = centreHeight / 2 - column.height / 2
+            let clear = room - gap - column.height
+            y = max(topRoom, min(centred, clear))
+        }
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + y), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: column.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: footer.height))
+    }
+
+    /// Whether the column keeps the room above it and the gap below without scrolling.
+    private func fits(column: CGFloat, room: CGFloat) -> Bool {
+        topRoom + column + gap <= room
+    }
+
+    /// The column's and the footer's heights at this width, each as tall as it wants.
+    private func sizes(width: CGFloat?, _ subviews: Subviews) -> (CGSize, CGSize)? {
+        guard subviews.count == 2 else { return nil }
+        let proposal = ProposedViewSize(width: width, height: nil)
+        return (subviews[0].sizeThatFits(proposal), subviews[1].sizeThatFits(proposal))
     }
 }
