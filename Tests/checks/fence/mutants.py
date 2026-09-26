@@ -44,6 +44,10 @@ MUTANTS = {
                                          "        holding = nil\n        waiting = []\n        fencedOff = []\n"),
     "N3 dropHandOver keeps the hold": ("        fences = []\n        holding = nil\n        waiting = []\n        fencedOff = []\n",
                                        "        fences = []\n        waiting = []\n        fencedOff = []\n"),
+    # ci-fence-fix (2026-09-26): the check waits on events now, not the clock, and no longer bounds how long a
+    # fence stood; a fence that its own pong never ends (here it comes back on the new connection) must still fail it
+    "F1 the fence ping goes out on the new connection": ("        old.send(content: fencePing, completion: .contentProcessed { _ in })\n",
+                                                         "        new.send(content: fencePing, completion: .contentProcessed { _ in })\n"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
