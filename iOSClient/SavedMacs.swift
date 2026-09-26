@@ -33,6 +33,17 @@ struct SavedMac: Codable, Hashable, Identifiable {
     var lastConnectedAt: Date?
     /// "Tailscale", "your VPN", "the internet" or "by address".
     var lastRoute: String?
+    /// This device has seen the Mac's home door speak TLS: a TXT record with `p`, or a TLS session
+    /// at home (docs/home-pairing-plan.md §7.3). Its rows are then dialed only over TLS, in DEBUG
+    /// too, and a row of it without `p` reads "Update Sill" (no downgrade: its own Sill never goes
+    /// back to plain, and someone may be replaying its tag). Kept by a new pairing with the same
+    /// Mac (`SavedMacs.adding`). Optional, so a record from before it decodes.
+    var homeTLS: Bool?
+    /// The Mac removed this device (goodbye `removed`), or refused its key on a pinned home dial
+    /// (-9825, -9829): no automatic reconnect, its row reads "Not paired" ("Wired" on the cable),
+    /// and a tap asks, pinned to this record's key. Cleared by the next pairing, whose record
+    /// replaces this one. Optional, so a record from before it decodes.
+    var revoked: Bool?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }
@@ -82,8 +93,13 @@ enum SavedMacs {
     }
 
     /// After a pairing: replaces the record with the same Mac ID, then keeps at most `cap`,
-    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`).
+    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`). The record it replaces
+    /// is the same Mac (the Mac ID is its key's), so what this device has seen of its home door
+    /// stays (`homeTLS`): a pairing from away after a removal must not let a plain row of that Mac
+    /// be dialed again. `revoked` goes with the old record.
     static func adding(_ mac: SavedMac, to list: [SavedMac]) -> [SavedMac] {
+        var mac = mac
+        if list.contains(where: { $0.macID == mac.macID && $0.homeTLS == true }) { mac.homeTLS = true }
         var next = list.filter { $0.macID != mac.macID }
         next.append(mac)
         while next.count > cap {

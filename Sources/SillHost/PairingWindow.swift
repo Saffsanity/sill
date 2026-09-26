@@ -125,3 +125,77 @@ struct PairingWindow {
         return .reject(triesLeft: Self.maxFailures - w.failures)
     }
 }
+
+/// How often devices may put a code on this Mac's screen by asking (docs/home-pairing-plan.md
+/// §4.7, the ask rule's step 5): at most `maxWindows` device-opened windows in any `span`, and a
+/// device whose window the Mac's user cancelled, or that expired or stopped after five wrong codes,
+/// opens none for `quietFor`, by its key and by its address, so a stranger asking again with a new
+/// key from the same address, or from a new address with the same key, stays quiet. One window at
+/// a time is the ask rule's own step 3. Pure (no clock: `now` is passed in; the caller uses a
+/// monotonic one, so a clock change moves nothing), checked on its own with swiftc. RemoteAccess
+/// owns one on the main actor.
+struct AskLimits {
+    static let quietFor: Double = 600
+    static let span: Double = 600
+    static let maxWindows = 3
+
+    /// This host's `quietFor` and `span`: both 600 s, or SILL_TEST_ASK_QUIET's (`testSeconds`).
+    let quietSeconds: Double
+    let spanSeconds: Double
+
+    /// When each device-opened window within `spanSeconds` opened.
+    private var openedAt: [Double] = []
+    /// When a device-opened window last closed unused, by the asking key and by its address.
+    private var quietKeys: [Data: Double] = [:]
+    private var quietSources: [String: Double] = [:]
+
+    init(seconds: Double? = nil) {
+        quietSeconds = seconds ?? Self.quietFor
+        spanSeconds = seconds ?? Self.span
+    }
+
+    /// Whether this key or this address may not open a window now.
+    func quiet(fingerprint: Data, source: String, now: Double) -> Bool {
+        quietSince(fingerprint: fingerprint, source: source, now: now) != nil
+    }
+
+    /// When the window that keeps this key or this address quiet closed (the later of the two),
+    /// for the log's "its last window was closed 3 minutes ago"; nil when neither is quiet.
+    func quietSince(fingerprint: Data, source: String, now: Double) -> Double? {
+        [quietKeys[fingerprint], quietSources[source]].compactMap { $0 }.filter { now - $0 < quietSeconds }.max()
+    }
+
+    /// Device-opened windows in the last `spanSeconds`.
+    func recentWindows(now: Double) -> Int {
+        openedAt.filter { now - $0 < spanSeconds }.count
+    }
+
+    /// A device's ask opened a window.
+    mutating func opened(now: Double) {
+        openedAt = openedAt.filter { now - $0 < spanSeconds } + [now]
+    }
+
+    /// A device-opened window closed unused (`quiets`): its asker's key and address go quiet.
+    mutating func closedUnused(fingerprint: Data, source: String, now: Double) {
+        quietKeys = quietKeys.filter { now - $0.value < quietSeconds }
+        quietSources = quietSources.filter { now - $0.value < quietSeconds }
+        quietKeys[fingerprint] = now
+        quietSources[source] = now
+    }
+
+    /// Whether a device-opened window that closed this way quiets its asker: cancelled on the Mac,
+    /// expired, or stopped after five wrong codes. Not one a device paired with.
+    static func quiets(_ reason: PairingWindow.CloseReason) -> Bool {
+        switch reason {
+        case .cancelled, .expired, .stopped: return true
+        case .used, .none: return false
+        }
+    }
+
+    /// TEST ONLY: SILL_TEST_ASK_QUIET=<s> replaces both 600 s, on a test host only
+    /// (DoorPolicy.isTestHost); a positive finite number of seconds, anything else nil.
+    static func testSeconds(testHost: Bool, environment: [String: String]) -> Double? {
+        guard testHost, let v = environment["SILL_TEST_ASK_QUIET"], let s = Double(v), s.isFinite, s > 0 else { return nil }
+        return s
+    }
+}

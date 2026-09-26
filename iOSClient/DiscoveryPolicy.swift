@@ -6,7 +6,8 @@ import Foundation
 /// on, when a reconnect may take a Direct row, when a session over AWDL moves to the network,
 /// when a live session at home moves to the cable that came or off the one that went (`pathPlan`),
 /// and, for the Macs this device paired with, when they show as Remote rows and when a lost one is
-/// dialed away from home.
+/// dialed away from home; at home, what a row of a Mac whose door speaks TLS says and what a tap
+/// on it does, and whether a connection runs over the USB cable as this device sees it.
 /// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
@@ -592,5 +593,192 @@ enum DiscoveryPolicy {
     /// The wait before the next automatic remote dial after `failures` failed ones.
     static func remoteRetryDelay(afterFailures failures: Int) -> Double {
         remoteRetry[min(max(failures, 1), remoteRetry.count) - 1]
+    }
+
+    // MARK: Pairing at home (docs/home-pairing-plan.md §7.3–7.5)
+
+    /// A home door as its Bonjour TXT record's `p` says (HomeDoorTXT.Door, spelled here so that this
+    /// file needs Foundation only; StreamClient maps it case for case): no `p` is a plain door,
+    /// "0" a TLS door open to any device, anything else a TLS door for paired devices only.
+    enum HomeDoor: Equatable { case plain, pairingRequired, open }
+
+    /// What a network or Direct row of a Mac at home ends in, and what VoiceOver says for it (§7.3).
+    enum RowWord: Equatable {
+        /// How the Mac is reachable (`method`), as before: a saved Mac on a TLS door, an unsaved one
+        /// on an open door, a plain door in a DEBUG build. Nil when its interfaces do not say.
+        case method(Method?)
+        /// Not saved (or it removed this device) and pairing is required: a tap asks, and the Mac
+        /// shows a code.
+        case notPaired
+        /// The same over the USB cable: a tap asks, and the Mac pairs this device by itself. Its
+        /// word is "Wired".
+        case pairsOverCable
+        /// No `p`: the Mac's Sill is from before pairing at home, and this build (a Release one, or
+        /// one that has seen that Mac over TLS) dials no plain door. Nothing is dialed.
+        case updateSill
+
+        /// The word at the end of the row.
+        var word: String? {
+            switch self {
+            case .method(let m): return m?.word
+            case .notPaired: return "Not paired"
+            case .pairsOverCable: return Method.wired.word
+            case .updateSill: return "Update Sill"
+            }
+        }
+
+        /// VoiceOver's label: "Mac mini, Wired", "Mac mini, not paired"; the name alone without a word.
+        func label(name: String) -> String {
+            if self == .notPaired { return "\(name), not paired" }
+            return word.map { "\(name), \($0)" } ?? name
+        }
+
+        /// VoiceOver's hint; `device` is this device's kind ("iPad"). A row that says how its Mac
+        /// is reachable keeps the hint it had ("" but for a Direct row).
+        func hint(name: String, device: String, direct: Bool) -> String {
+            switch self {
+            case .method: return direct ? "Connects without a shared Wi\u{2011}Fi network" : ""
+            case .notPaired: return "Pairs with a code \(name) shows, then connects."
+            case .pairsOverCable: return "Pairs over the USB cable, then connects."
+            case .updateSill: return "\(name)\u{2019}s Sill is too old for this \(device)."
+            }
+        }
+    }
+
+    /// A row's word (§7.3). `saved`: the row is a saved Mac (its TXT tag named one, or an automatic
+    /// reconnect took it by its Bonjour name); `revoked`: that Mac removed this device or refused
+    /// its key (SavedMac.revoked); `homeTLS`: this device has seen that Mac's home door speak TLS
+    /// (SavedMac.homeTLS; false for an unsaved Mac); `debug`: a DEBUG build, the only kind that
+    /// dials a plain door; `cable`: the row's wired interface carries only link-local addresses on
+    /// this device (`carriesOnlyLinkLocal`), which counts only for a row that says Wired.
+    static func rowWord(door: HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool,
+                        method: Method?, cable: Bool) -> RowWord {
+        switch door {
+        case .plain:
+            // No downgrade: once a Mac was seen over TLS, a row of it without `p` is not dialed.
+            return debug && !homeTLS ? .method(method) : .updateSill
+        case .pairingRequired, .open:
+            if saved && !revoked { return .method(method) }
+            if !saved && door == .open { return .method(method) }
+            return method == .wired && cable ? .pairsOverCable : .notPaired
+        }
+    }
+
+    /// What a connection to a Mac at home is (§7.4).
+    enum HomeDial: Equatable {
+        /// `sill/1`, pinned to the saved Mac's key; connected at its first window list.
+        case pinned
+        /// `sill/1` taking any Mac key: an unsaved Mac on an open door (`p=0`). Nothing is saved.
+        case anyKey
+        /// The ask (`sill-pair/1`, kind 19 "ask"): pinned to the saved key for a saved Mac that
+        /// removed this device (only its trust in this device changed, so no look-alike can answer
+        /// and a typed code goes only to the real Mac), else taking any key and remembering it.
+        case ask(pinned: Bool)
+        /// Plain TCP, as before pairing at home: a DEBUG build, a Mac never seen over TLS.
+        case plain
+        /// Nothing dialed: the Mac's Sill is too old for this build (`updateSillStatus`).
+        case updateSill
+        /// Nothing dialed: an automatic reconnect never asks; an ask is a tap's.
+        case waitForTap
+    }
+
+    /// A tap on a row (`tap`), or an automatic reconnect of it, which follows the same table but
+    /// never asks: a saved Mac that removed this device, and an unsaved one that requires pairing,
+    /// wait for a tap.
+    static func homeDial(door: HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool, tap: Bool) -> HomeDial {
+        switch door {
+        case .plain:
+            return debug && !homeTLS ? .plain : .updateSill
+        case .pairingRequired, .open:
+            if saved { return revoked ? (tap ? .ask(pinned: true) : .waitForTap) : .pinned }
+            if door == .open { return .anyKey }
+            return tap ? .ask(pinned: false) : .waitForTap
+        }
+    }
+
+    /// The status line after a tap that dialed nothing because the Mac's Sill is too old.
+    static func updateSillStatus(mac: String) -> String {
+        "\(mac) runs an older Sill. Update Sill on the Mac to connect."
+    }
+
+    /// Whether this device's connection runs over the USB cable to the Mac, as this device sees it
+    /// (§7.5): what the ask's `cable: true` says. All of: the Mac's address is IPv6 link-local
+    /// (IPv4 never counts, 169.254/16 included, as on the Mac) and scoped to a wired interface
+    /// (the iPad saw the Mac on en2, 2026-09-25); it is none of this device's own addresses
+    /// (another app here, listening on this device's own en2 address behind a look-alike row,
+    /// would otherwise be "the Mac"); and that interface carries no address but link-local ones:
+    /// the USB link to a Mac has only those, while a USB Ethernet adapter on the LAN, which iPadOS
+    /// also types as wired Ethernet and whose row also says Wired, has the network's DHCP or SLAAC
+    /// address, and a look-alike Mac on that LAN could otherwise be pinned without a code. So could
+    /// an iPhone sharing its connection over USB, whose end carries 172.20.10.1. `mac` is the
+    /// Mac's address (4 or 16 bytes); `scope` the interface it is scoped to; `own` this device's
+    /// addresses (getifaddrs), each with its interface.
+    static func onCable(mac: [UInt8], scope: Interface?, own: [(interface: String, address: [UInt8])]) -> CableCheck {
+        guard mac.count == 16, isLinkLocal(mac) else {
+            return CableCheck(cable: false, console: "cable: no, the Mac\u{2019}s address \(addressText(mac)) is not IPv6 link-local")
+        }
+        guard let scope else {
+            return CableCheck(cable: false, console: "cable: no, the Mac\u{2019}s address names no interface")
+        }
+        guard scope.type == .wiredEthernet, !isPeerToPeer(scope.name) else {
+            return CableCheck(cable: false, console: "cable: no, \(scope.name) is not wired Ethernet")
+        }
+        let m = unscoped(mac)
+        guard !own.contains(where: { unscoped($0.address) == m }) else {
+            return CableCheck(cable: false, console: "cable: no, \(addressText(mac)) is this device\u{2019}s own address")
+        }
+        let mine = own.filter { $0.interface == scope.name }.map(\.address)
+        guard !mine.isEmpty else {
+            return CableCheck(cable: false, console: "cable: no, \(scope.name) has no address")
+        }
+        if let routable = mine.first(where: { !isLinkLocal($0) }) {
+            return CableCheck(cable: false, console: "cable: no, \(scope.name) has \(addressText(routable))")
+        }
+        return CableCheck(cable: true, console: "cable: yes, \(scope.name) carries only link-local addresses")
+    }
+
+    /// `onCable`'s answer, with what it read for the DEBUG console ("cable: yes, en2 carries only
+    /// link-local addresses"; "cable: no, en3 has 10.128.0.52").
+    struct CableCheck: Equatable {
+        var cable: Bool
+        var console: String
+    }
+
+    /// Whether `interface` carries addresses on this device and only link-local ones: a row that
+    /// says Wired over such an interface pairs over the cable (`rowWord`'s `cable`); over a USB
+    /// Ethernet adapter on the LAN it does not.
+    static func carriesOnlyLinkLocal(_ interface: String, own: [(interface: String, address: [UInt8])]) -> Bool {
+        let mine = own.filter { $0.interface == interface }.map(\.address)
+        return !mine.isEmpty && mine.allSatisfy(isLinkLocal)
+    }
+
+    /// fe80::/10 or 169.254/16; anything but 4 or 16 bytes is not.
+    static func isLinkLocal(_ a: [UInt8]) -> Bool {
+        if a.count == 4 { return a[0] == 169 && a[1] == 254 }
+        if a.count == 16 { return a[0] == 0xFE && a[1] & 0xC0 == 0x80 }
+        return false
+    }
+
+    /// An IPv6 link-local address without the scope the kernel embeds in bytes 2–3 of the ones
+    /// getifaddrs returns; any other address as it is.
+    static func unscoped(_ a: [UInt8]) -> [UInt8] {
+        guard a.count == 16, isLinkLocal(a) else { return a }
+        var b = a
+        b[2] = 0; b[3] = 0
+        return b
+    }
+
+    /// "10.128.0.52", "fe80::1c0f:2a:6e1:9b3": for the console only.
+    static func addressText(_ a: [UInt8]) -> String {
+        var buffer = [CChar](repeating: 0, count: 64)
+        if a.count == 4 {
+            var v4 = in_addr()
+            withUnsafeMutableBytes(of: &v4) { $0.copyBytes(from: a) }
+            return inet_ntop(AF_INET, &v4, &buffer, socklen_t(buffer.count)).map { String(cString: $0) } ?? "?"
+        }
+        guard a.count == 16 else { return "?" }
+        var v6 = in6_addr()
+        withUnsafeMutableBytes(of: &v6) { $0.copyBytes(from: unscoped(a)) }
+        return inet_ntop(AF_INET6, &v6, &buffer, socklen_t(buffer.count)).map { String(cString: $0) } ?? "?"
     }
 }

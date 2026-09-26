@@ -93,12 +93,22 @@ public enum RemoteTLS {
         return tcp
     }
 
-    /// Parameters for either end: the TLS options above over `tcpOptions`, the video service class
-    /// the home door uses, and never peer-to-peer (Direct Wireless is the home door's alone).
+    /// Parameters for either end of the remote door: the TLS options above over `tcpOptions`, the
+    /// video service class the home door uses, and never peer-to-peer (Direct Wireless is the home
+    /// door's alone).
     public static func parameters(tls: NWProtocolTLS.Options, dialing: Bool) -> NWParameters {
-        let p = NWParameters(tls: tls, tcp: tcpOptions(dialing: dialing))
+        parameters(tls: tls, tcp: tcpOptions(dialing: dialing), peerToPeer: false)
+    }
+
+    /// Parameters for either end of the home door once it speaks TLS (docs/home-pairing-plan.md
+    /// §3.3): the TLS options above over the caller's own TCP options (the Mac's home door: no
+    /// Nagle and keepalive, but no `connectionDropTime`, since home clients keep their 4 s drain
+    /// rule; the device: no Nagle), the video service class, and peer-to-peer (AWDL) exactly when
+    /// the caller says: Direct Wireless on the Mac, a Direct row on the device.
+    public static func parameters(tls: NWProtocolTLS.Options, tcp: NWProtocolTCP.Options, peerToPeer: Bool) -> NWParameters {
+        let p = NWParameters(tls: tls, tcp: tcp)
         p.serviceClass = .interactiveVideo
-        p.includePeerToPeer = false
+        p.includePeerToPeer = peerToPeer
         return p
     }
 

@@ -354,7 +354,8 @@ public struct PairResult: Codable, Sendable {
 extension Goodbye { public static let pairingRequired = "pairingRequired" }
 ```
 
-**Examples as they cross the wire:**
+**Examples as they cross the wire** (keys in no fixed order: JSONEncoder's follows the process's hash
+seed, step 1's Results):
 
 ```json
 // kind 19, a tap on an unpaired row; on a cable the device checked, with "cable":true
@@ -394,8 +395,11 @@ public enum HomeDoorTXT {
     public enum Door: Equatable, Sendable { case plain, pairingRequired, open }
     public static func value(requirePairing: Bool) -> String { requirePairing ? "1" : "0" }
     public static func door(_ txt: [String: String]) -> Door   // no "p": .plain; "0": .open; else .pairingRequired
+    public static func door(_ record: NWTXTRecord) -> Door     // the same, entry by entry: a bare "p" reads as "1"
 }
 ```
+NWTXTRecord's `dictionary` and subscript leave out a key without a value (step 1's Results), so a
+device reads `p` from the result's record with the second form.
 
 #### 3.3 TLS on the home door
 
@@ -497,6 +501,7 @@ here unchanged; the home door's are new.
 enum DoorPolicy {
     enum Door: Equatable, Sendable { case home, remote }
     struct Trust: Equatable, Sendable {
+        var hasKey: Bool            // a P-256 key (a fingerprint); without one nothing is trusted
         var paired: Bool            // the peer's key is in the trust list
         var requirePairing: Bool
         var remoteAccess: Bool
@@ -508,16 +513,20 @@ enum DoorPolicy {
     static func trusts(_ door: Door, alpn: String?, _ t: Trust) -> Bool          // the verify block
     enum AtReady: Equatable, Sendable {
         case session
-        case pairing(methods: Set<String>)   // what its one kind 19 may be
+        case pairing                         // read its one kind 19; `pairing(_:method:)` says how
         case goodbye(String)                 // "remoteOff", "busy"
         case refuse(String)                  // counted for the summary ("unpaired")
     }
     static func atReady(_ door: Door, alpn: String?, _ t: Trust, remoteSessions: Int) -> AtReady
+    enum Pairing: Equatable, Sendable { case ask, window, closed }   // home ask → ask; remote ask → closed; else the window
+    static func pairing(_ door: Door, method: String) -> Pairing
     enum Ask: Equatable, Sendable { case pairNow, shown(opened: Bool), openOnMac(String), locked }
-    /// onCable: the Mac's rule (§4.3) and the ask's `cable: true`. fromThisMac: loopback, or a
-    /// source that is one of this Mac's own addresses.
-    static func ask(unlocked: Bool, onCable: Bool, otherKeyOfDevice: Bool, windowOpen: Bool,
+    /// cableSeen: the Mac's rule (§4.3); cableClaimed: the ask's `cable: true`. fromThisMac:
+    /// loopback, or a source that is one of this Mac's own addresses (`isFromThisMac`).
+    static func ask(unlocked: Bool, cableSeen: Bool, cableClaimed: Bool, otherKeyOfDevice: Bool, windowOpen: Bool,
                     fromThisMac: Bool, quiet: Bool, recentDeviceWindows: Int) -> Ask
+    // Also (step 1): refusalBeforeStart, handshakeRefusal (§4.4), reason, menuRequest (§4.10),
+    // isFromThisMac, otherKeyOfDevice, isTestHost, testAsksAsDevice.
 }
 ```
 
@@ -1053,7 +1062,8 @@ New attention items (first group, orange):
 
 #### 7.3 Discovery: the TXT record, rows and their words
 
-- `recomputeMacs` (:575; :648 at `cea195c`) reads `p` with `HomeDoorTXT.door` beside `r`
+- `recomputeMacs` (:575; :648 at `cea195c`) reads `p` with `HomeDoorTXT.door` (the result's
+  NWTXTRecord, entry by entry, §3.2) beside `r`
   (`tag(of:)`, :620; :704), for
   both browsers. `FoundMac` gains `door: HomeDoorTXT.Door`.
 - `SavedMac` gains `homeTLS: Bool?` (the Mac was seen with `p`, or a TLS home session with it ran)
@@ -1710,3 +1720,83 @@ registration callback), §3.3 (what a plain client and other clients get; the co
 first row), §4.4 (only -9836 is an older Sill; -9858 counts as unpaired), §7.9 (the Debug-only
 NSBonjourServices entry), §8 (the measured cost of the bytes and the tick) and H5 (the alert, and
 an HTTP request).
+
+### Step 1: the protocol and the pure policies
+
+`$SP` here is `scratchpad/home-pairing/1`: the checks are in `$SP/checks` (`run.sh` runs every one,
+its mutants, the wire probe and step 0's checks; outputs in `$SP/out`). No host was started.
+
+**What landed.** StreamProtocol: `PairRequest.ask` and `.cable`, `PairResult`'s reasons `shown`,
+`openOnMac` and `locked`, `.method` and its one value `PairResult.cable`, `Goodbye.pairingRequired`
+(Remote.swift); `HomeDoorTXT` (Pairing.swift); `RemoteTLS.parameters(tls:tcp:peerToPeer:)`, which
+the remote door's builder now calls with its own TCP options and no peer-to-peer, as before. The
+host: `DoorPolicy.swift`, `CableLink.swift`, `AskLimits` (PairingWindow.swift), `IPBytes.unmapped`
+and `.unscoped` (OriginPolicy.swift), `PairedDevice.cableDevice` and `.displayMethod`. The device:
+`DiscoveryPolicy`'s `rowWord`, `homeDial`, `onCable` and `carriesOnlyLinkLocal`; `SavedMac.homeTLS`
+and `.revoked`, and `SavedMacs.adding` keeping `homeTLS`. Nothing calls the new rules yet (step 2
+wires the host, step 4 the device), so nothing a device or the CLI sees has changed.
+
+**H1.** `swift build -c release` from an empty scratch path: only the old CaptureProbe warning.
+iOS Debug and Release for the simulator and Debug for `generic/platform=iOS` (build only,
+unsigned; the iPad was not touched): only the old `StreamClient` capture warning.
+
+**H3**, each check with its mutants (`$SP/out`): DoorPolicy 104 checks and 41 of 41 mutants
+caught (both doors × each origin; both doors × 7 ALPNs × every trust, 1,792 verify-block and
+7,168 `.ready` combinations against §4.2's table; the ask rule's 768 combinations against its six
+steps; the -9836 rule; the menu never lit from this Mac; every one of a fixture Mac's own
+addresses, v4-mapped and with the kernel's embedded scope; the test hooks only on a test host);
+CableLink 40 and 20 of 20 (this Mac's en14 and anri0 from H0's P2, an iPhone, device-mode
+ports, Thunderbolt, Wi-Fi, bridges, Realtek and Apple USB Ethernet adapters, another Mac, no NCM,
+no name, no serial, routed and IPv4 sources, this Mac's own fe80 and 169.254 on en14 (the
+Simulator's), the stand-in; `deviceID` against Python's hashlib, 22 characters, never the serial);
+AskLimits 27 and 15 of 15; the records 20 and 10 of 10 (a trust list and saved Macs from before
+the fields decode and re-encode byte for byte; 1f3072a's types read the new records); the device's
+rules 61 and 31 of 31 (all 384 `rowWord` and 96 `homeDial` combinations against §7.3 and §7.4,
+the word agreeing with what a tap does in all 384, no reconnect ever asking, no Release or
+`homeTLS` plain dial, the cable check's cases, the VoiceOver labels and hints); the protocol's
+new values 39 and 19 of 19: 291 checks, 136 of 136 mutants.
+
+**H17.** Step 0's checks against this tree, unchanged: the discovery policy 286, the ledger 90, the
+fence 14 of 14 modes, remote-rules 64, AddressList and PairingWindow 41, the pairing window's
+address rule 80, OriginPolicy 66, ClientLink 89, the protocol 188 and its 8 cross-checks.
+
+**The wire** (`$SP/checks/wire`). Every payload of kinds 18–22 as it goes out today, the pairing
+link, the tag, both proofs and a framed goodbye, built against 1f3072a's StreamProtocol and this
+one: 50 lines byte for byte identical with `SWIFT_DETERMINISTIC_HASHING=1`, and identical in
+canonical form in runs with random hash seeds; `{"reason":"quit"}` is `{"reason":"quit"}`.
+1f3072a's types read every new message (an ask with and without `cable`, the cable's ok, `shown`,
+`openOnMac`, `locked`, `pairingRequired`) as this build does, the new key ignored.
+
+**Learned.**
+- JSONEncoder (`Wire.encode`) writes an object's keys in an order that follows the process's hash
+  seed: `pairResult ok` came out in 3 orders in 3 runs. The plan's examples (§3.1) show the keys,
+  not their order; the checks compare JSON canonically, and the probe with deterministic hashing.
+- NWTXTRecord's `dictionary`, and its subscript, leave out a key without a value (DNS-SD's boolean
+  attribute): `HomeDoorTXT.door(_: [String: String])` would read a bare `p` as a plain door.
+  `HomeDoorTXT.door(_: NWTXTRecord)` reads the entry (a bare or empty `p` reads as "1"); step 4's
+  rows read `p` through it. Its subscript is case-insensitive; the dictionary form takes `p`, else
+  `P`.
+
+**Deviations from the sketches (the rules are §4.2's, §4.7's and §7's).**
+- `DoorPolicy.ask` takes the Mac's rule and the ask's claim as two arguments (`cableSeen`,
+  `cableClaimed`) where §4.2 had `onCable`, so H3 checks "step 2 only with both".
+- `AtReady.pairing` carries no set of methods: `DoorPolicy.pairing(_:method:)` says how the one
+  kind 19 is treated (home: `ask` → the ask rule; remote: `ask` → `closed`, no try counted; `qr`,
+  `code` and any other method → the window, which counts an unknown one as a wrong proof, as the
+  remote door always has).
+- `Trust.hasKey`: RemoteServer's "no fingerprint, no trust" moved into the policy, so a peer
+  without a P-256 key is refused at home even with Require pairing off.
+- Added, as pure functions of the plan's rules so the checks reach them: `refusalBeforeStart`,
+  `handshakeRefusal` (§4.4), `reason`, `menuRequest` (§4.10), `isFromThisMac`, `otherKeyOfDevice`,
+  `isTestHost` and the readers of `SILL_TEST_ASK_FROM_THIS_MAC`, `SILL_TEST_CABLE_INTERFACE` and
+  `SILL_TEST_ASK_QUIET`, each honoured only with `testHost`; `AskLimits.quietSince` (the log's
+  "closed 3 minutes ago") and `.quiets`; `RowWord`'s labels and hints (§7.3, S7),
+  `updateSillStatus` (§7.4), `HomeDial.waitForTap` (a reconnect never asks),
+  `carriesOnlyLinkLocal` (the row's cable), `SavedMacs.adding` keeping `homeTLS` (a pairing from
+  away after a removal must not undo "no downgrade"), `HomeDoorTXT.door(_: NWTXTRecord)` (above).
+- `DoorPolicy.maxRemoteSessions` repeats RemoteServer's 8 until step 2's Door uses it.
+- `SILL_TEST_SOFTWARE_ENCODER` stays step 2's, as §12 orders; step 1 started no host.
+
+**What step 1 changed in this plan:** §3.1 (the examples' key order), §3.2 (the record reader),
+§4.2 (the sketch: `Trust.hasKey`, `AtReady.pairing`, `pairing(_:method:)`, the ask's two cable
+arguments and the helpers) and §7.3 (`p` read from the record).

@@ -14,11 +14,29 @@ package struct PairedDevice: Codable, Hashable, Sendable {
     package var model: String?
     /// Seconds since 1970.
     package var pairedAt: Double
-    /// "qr" or "code" (M5 adds "icloud"): how it was trusted.
+    /// "qr", "code" or "cable" (paired by itself over the USB cable, docs/home-pairing-plan.md
+    /// §4.8; M5 adds "icloud"): how it was trusted.
     package var method: String
+    /// The iPhone or iPad this key paired over, or ran a session over, by the USB cable:
+    /// CableLink.deviceID of its USB serial number, never the serial. A different key from the
+    /// same device then pairs only with the code; Remove frees the device. Nil for a key never seen
+    /// on the cable. Optional, so a list from before it decodes, and left out of the JSON when nil.
+    package var cableDevice: String?
 
-    package init(fingerprint: String, name: String, model: String?, pairedAt: Double, method: String) {
+    package init(fingerprint: String, name: String, model: String?, pairedAt: Double, method: String, cableDevice: String? = nil) {
         self.fingerprint = fingerprint; self.name = name; self.model = model; self.pairedAt = pairedAt; self.method = method
+        self.cableDevice = cableDevice
+    }
+
+    /// How it was paired, as the Devices pane words it: "with the QR code", "with a code", "over
+    /// the USB cable"; nil for a method this build does not know.
+    package var displayMethod: String? {
+        switch method {
+        case PairRequest.qr: return "with the QR code"
+        case PairRequest.code: return "with a code"
+        case PairResult.cable: return "over the USB cable"
+        default: return nil
+        }
     }
 
     /// "iPad (iPad14,1)", or the name alone.

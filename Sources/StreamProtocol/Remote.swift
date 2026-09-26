@@ -2,11 +2,13 @@ import Foundation
 import Security
 import CryptoKit
 
-// Remote access payloads (kinds 18–22, docs/remote-access-plan.md §3.2). The rules of
-// HostSettings.swift apply to every one of them: JSON only; fields added later are optional; no
-// enums on the wire (strings, so an unknown value is skipped instead of failing the whole decode);
-// never rename or retype a field. The generation is in the ALPN (`sill/1`), `MacInfo.v`,
-// `PairRequest.v` and the pairing link's `v`.
+// Remote access payloads (kinds 18–22, docs/remote-access-plan.md §3.2), which pairing at home
+// uses too (docs/home-pairing-plan.md §3.1: no new kinds, only new string values and two optional
+// fields, `PairRequest.cable` and `PairResult.method`). The rules of HostSettings.swift apply to
+// every one of them: JSON only; fields added later are optional; no enums on the wire (strings, so
+// an unknown value is skipped instead of failing the whole decode); never rename or retype a field.
+// The generation is in the ALPN (`sill/1`), `MacInfo.v`, `PairRequest.v` and the pairing link's
+// `v`.
 
 /// One way to reach the Mac from afar. Plain values, never enums: an unknown case would fail an
 /// older reader.
@@ -107,20 +109,27 @@ public struct SignedMacInfo: Codable, Sendable {
 public struct PairRequest: Codable, Sendable {
     /// 1.
     public var v: Int
-    /// "qr" or "code".
+    /// "qr" or "code": a proof for the pairing window. "ask", at the home door only: "pair me, now
+    /// if you can, else show me your code" (docs/home-pairing-plan.md §3.1); the remote door
+    /// answers it `closed` without counting a try. A device sends "ask" only to a Mac whose TXT
+    /// record carries `p` (HomeDoorTXT), so an older host never receives one.
     public var method: String
-    /// base64url(proof_D) (PairingProof).
+    /// base64url(proof_D) (PairingProof); "" with "ask".
     public var proof: String
     /// "iPad"; the Mac applies SafeText.
     public var name: String
     /// "iPad14,1".
     public var model: String?
+    /// "ask" only: true when the device judged this connection to be the USB cable to the Mac
+    /// (DiscoveryPolicy.onCable); absent otherwise. The Mac pairs by itself only when its own rule
+    /// (CableLink) agrees as well, so the claim can only narrow what the Mac does.
+    public var cable: Bool?
 
-    public init(v: Int = 1, method: String, proof: String, name: String, model: String?) {
-        self.v = v; self.method = method; self.proof = proof; self.name = name; self.model = model
+    public init(v: Int = 1, method: String, proof: String, name: String, model: String?, cable: Bool? = nil) {
+        self.v = v; self.method = method; self.proof = proof; self.name = name; self.model = model; self.cable = cable
     }
 
-    public static let qr = "qr", code = "code"
+    public static let qr = "qr", code = "code", ask = "ask"
 }
 
 /// Kind 20: the Mac's answer to kind 19. The Mac closes the connection after sending it.
@@ -135,28 +144,40 @@ public struct PairResult: Codable, Sendable {
     /// ok: base64url of 32 bytes that resolve the Mac's Bonjour TXT tag (RecognitionTag). Sent
     /// nowhere else.
     public var recognitionKey: String?
-    /// Not ok: "code", "closed", "expired", "stopped" or "busy".
+    /// Not ok: "code", "closed", "expired", "stopped" or "busy". After an ask at the home door also
+    /// "shown" (the window shows a code now: scan it or type it), "openOnMac" (the Mac showed none
+    /// by itself: choose Pair iPhone or iPad… on the Mac) or "locked" (the Mac is locked).
     public var reason: String?
     /// With "code": the wrong proofs the window still takes.
     public var triesLeft: Int?
     /// With "busy": seconds until the Mac takes another proof.
     public var retryAfter: Double?
+    /// ok without a proof: how the Mac paired this device by itself, "cable" (`PairResult.cable`,
+    /// the USB cable); nil otherwise, and then left out of the JSON, so every other kind 20 is as
+    /// before. A device accepts such an ok only as the answer to its own ask that said
+    /// `cable: true` (docs/home-pairing-plan.md §7.5).
+    public var method: String?
 
     public init(ok: Bool, proof: String? = nil, macID: String? = nil, name: String? = nil, recognitionKey: String? = nil,
-                reason: String? = nil, triesLeft: Int? = nil, retryAfter: Double? = nil) {
+                reason: String? = nil, triesLeft: Int? = nil, retryAfter: Double? = nil, method: String? = nil) {
         self.ok = ok; self.proof = proof; self.macID = macID; self.name = name; self.recognitionKey = recognitionKey
-        self.reason = reason; self.triesLeft = triesLeft; self.retryAfter = retryAfter
+        self.reason = reason; self.triesLeft = triesLeft; self.retryAfter = retryAfter; self.method = method
     }
 
     public static let code = "code", closed = "closed", expired = "expired", stopped = "stopped", busy = "busy"
+    public static let shown = "shown", openOnMac = "openOnMac", locked = "locked"
+    /// `method`'s one value: paired by itself over the USB cable.
+    public static let cable = "cable"
 }
 
 /// Kind 22: why the host is about to close this session.
 public struct Goodbye: Codable, Sendable {
-    /// "removed", "remoteOff", "internetOff", "quit" or "busy".
+    /// "removed", "remoteOff", "internetOff", "quit", "busy" or "pairingRequired" (Require pairing
+    /// was turned on while this unpaired device was connected at home).
     public var reason: String
 
     public init(reason: String) { self.reason = reason }
 
     public static let removed = "removed", remoteOff = "remoteOff", internetOff = "internetOff", quit = "quit", busy = "busy"
+    public static let pairingRequired = "pairingRequired"
 }
