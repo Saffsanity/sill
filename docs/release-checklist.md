@@ -7,20 +7,22 @@ no build step), and `Scripts/release.sh` makes the notarized Mac download.
 
 ## Placeholders
 
-Noah hasn't confirmed these yet. Each lives in the places listed, and one command changes them all.
+The domain and the support address are Noah's (confirmed 2026-09-25); only the App Store address
+still waits, for the App Store Connect record. Each lives in the places listed.
 
 | What | Now | Where |
 |---|---|---|
-| The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `docs/app-store-metadata.md`, this file |
-| The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `docs/app-store-metadata.md` |
+| The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `README.md`, `docs/DEVELOPMENT.md`, `docs/app-store-metadata.md`, `Scripts/release.sh`, this file |
+| The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `README.md`, `docs/app-store-metadata.md`, this file |
 | The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names | `site/download.html` (never edited per release, part 2) |
 | The App Store address | `APP_STORE_URL_PLACEHOLDER`: until it is replaced, a Mac's update notice on the device shows no "Update Sill in the App Store" link (its words still say what to do) | `iOSClient/SillLinks.swift` (`appStoreText`; part 1 §4 says when) |
 
-With the real values in place of `<domain>` and `<address>`:
+To change one, with the new value in place of `<address>` or `<domain>`: the first command
+changes the support address, the second the domain everywhere, the address's own included.
 
 ```
-grep -rl 'sill\.saffer\.me' site iOSClient docs | xargs sed -i '' 's#sill\.saffer\.me#<domain>#g'
-grep -rl support@getsill.app site docs/app-store-metadata.md | xargs sed -i '' 's#support@getsill.app#<address>#g'
+grep -rl 'support@getsill\.app' site README.md docs/app-store-metadata.md docs/release-checklist.md | xargs sed -i '' 's#support@getsill\.app#<address>#g'
+grep -rl 'getsill\.app' site iOSClient docs Scripts README.md | xargs sed -i '' 's#getsill\.app#<domain>#g'
 ```
 
 ## Part 1: once
@@ -81,8 +83,8 @@ Preview it with `python3 -m http.server 8000 --directory site` and http://localh
 
 Before it goes public:
 
-- [ ] Replace `support@getsill.app` (above) with an address someone reads. Apple wants real
-      contact details behind the Support URL (guideline 1.5).
+- [x] Done 2026-09-25: `support@getsill.app` reaches Noah's mailbox (Cloudflare Email Routing,
+      below). Apple wants real contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.

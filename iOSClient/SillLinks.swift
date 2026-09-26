@@ -1,9 +1,8 @@
 import Foundation
 
 /// Where Sill sends people outside the app: Sill's addresses on the web, written once, and its App
-/// Store page. The site is not final (getsill.app, on Noah's saffer.me, is still to be confirmed):
-/// change `site` and the download, support and privacy links and the connect screen's "Get it at …"
-/// all follow.
+/// Store page. The site is getsill.app (Noah's, confirmed 2026-09-25): change `site` and the
+/// download, support and privacy links and the connect screen's "Get it at …" all follow.
 enum SillLinks {
     /// The site. Its host is what the connect screen prints.
     static let site = URL(string: "https://getsill.app")!

@@ -10,23 +10,25 @@ file" at the end). Paste blocks keep their line breaks.
 
 ## Values this file assumes
 
-Noah has not confirmed these yet. The paste blocks below repeat them
-literally, and the command under the table changes every copy in this file.
+Noah confirmed the site and the contact address on 2026-09-25; Remote Access
+in 1.0 is still his call. The paste blocks below repeat them literally, and
+the command under the table changes every copy in this file.
 
 | What | Value | Status |
 |---|---|---|
-| Site | `https://getsill.app` | Assumed. Noah owns saffer.me; nothing is served there yet. |
-| Support URL | `https://getsill.app/support` | Assumed. The page is `site/support.html`; it must show a real contact before submitting. The same link as `SillLinks.support` in the app (guideline 1.5). |
+| Site | `https://getsill.app` | Noah's (bought 2026-09-25); the site is live. |
+| Support URL | `https://getsill.app/support` | The page is `site/support.html`, which gives the contact address. The same link as `SillLinks.support` in the app (guideline 1.5). |
 | Privacy Policy URL | `https://getsill.app/privacy` | `site/privacy.html`; the same link as `SillLinks.privacy` in the app. |
 | Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
-| Contact address | `support@getsill.app` | Placeholder. Never ship it. |
+| Contact address | `support@getsill.app` | Noah's: Cloudflare Email Routing forwards it to his mailbox (2026-09-25). |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
 | Remote Access in 1.0 | Undecided: main has it since ba91136 (PR #13) | Noah decides, before anything is pasted, whether 1.0 keeps it or ships without it (the audit's advice, given before it merged). |
 
-To change the domain or fill in the contact address in this file:
+To change the domain or the contact address in this file, with both values
+filled in (the address first: the domain's expression would change it too):
 
 ```sh
-sed -i '' -e 's#sill\.saffer\.me#NEW.DOMAIN#g' -e 's#support@getsill.app#THE.REAL.ADDRESS#g' docs/app-store-metadata.md
+sed -i '' -e 's#support@getsill\.app#THE.REAL.ADDRESS#g' -e 's#getsill\.app#NEW.DOMAIN#g' docs/app-store-metadata.md
 ```
 
 The app's own copy of the site and of the download, support and privacy links

@@ -216,12 +216,12 @@ Apple's sources and every text to paste into App Store Connect;
   5.1.1(i); the website in `site/` and `Scripts/release.sh` (Layout); the two
   docs, with the Remote Access switch (the cuts for a 1.0 without it).
 - Confirmed by Noah on 2026-09-25 (the site is live): the site at `https://getsill.app`
-  (`site/CNAME`, `SillLinks.swift`, both docs; nothing is served there yet),
-  the contact address `support@getsill.app` (the privacy and support
-  pages and the metadata; never ship it), and the Mac download at `/download`
-  (`site/download.html`, whose version, link and SHA-256 are placeholders that
-  release.sh's output fills in). The checklist's Placeholders table has the one
-  command that changes each everywhere.
+  (`site/CNAME`, `SillLinks.swift`, both docs), the contact address
+  `support@getsill.app` (the privacy and support pages, the README and the
+  metadata; Cloudflare Email Routing forwards it to Noah), and the Mac download
+  at `/download` (`site/download.html`, which links the newest GitHub Release's
+  `Sill.zip` and is never edited per release). The checklist's Placeholders
+  table has the commands that change each everywhere.
 - The merge: the footer sits under main's connect screen (Add a Mac…, the
   Remote rows, the card, the leading anchor, the Duo's top half, the column at
   the top while a field has the keyboard). The branch drew the column twice,
