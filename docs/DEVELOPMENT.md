@@ -337,6 +337,9 @@ tests of Direct Wireless Connection and remote access.
 
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
+which door, how frames go into the video encoder and when a stream gets a new
+encoder session) on their own with a check each, and runs them: about two
+minutes, no device, permission or encoder. `--mutants` also checks that each check fails
 which door, the device floor, how a session ends, the update check) on their
 own with a check each, and runs them: about two minutes,
 no device, permission or encoder. `--mutants` also checks that each check fails
@@ -432,7 +435,30 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ### What to try if it's slow
 
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Read the host's stats line. `enc.mailboxDrop` counts captured frames the
+  encoder had no room for, so `enc.out` well under `cap.complete` with the
+  difference in `enc.mailboxDrop` means the encoder takes longer than a frame
+  interval. At the Retina Desktop's size that is either its slow state (about
+  30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
+  seconds of few frames, at any bitrate) or another app encoding at the same
+  time (a screen recording, the Simulator's recorder, or the Claude app's iOS
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The stats
+  line can read alike for both: a test-pattern Retina stream beside that panel
+  alone read about 32 fps with about 27 drops a second. The kernel's encoder
+  log tells them apart (`Scripts/encoder-check/hbparse.py` reads it; its
+  header says how to fetch it): while another app shares the encoder, it lists
+  that app's session beside Sill's, and hbparse.py marks those windows
+  "(shared)"; in the slow state Sill's session is alone. Its C/F column is the
+  engine's figure, not Sill's time per frame, and moves with how many frames
+  the engine completes in all: about 14 ms in the slow state alone, about 10
+  beside the Simulator panel. The host gives a stream in the slow state a new
+  encoder session about 2 s into the motion, which runs at the full rate
+  again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
+  ms each …; a new session takes 9 ms …"); if a new session is no faster
+  (another app sharing the encoder, say), the log says that and the stream
+  keeps it.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
+  it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.

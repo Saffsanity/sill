@@ -228,7 +228,8 @@ package final class StreamCoordinator {
             }
         }
         server.onKeyframeNeeded = { [weak self] in
-            // Network queue → encoder lock; requestKeyframe re-encodes the last frame right away.
+            // Network queue → encoder lock: the next repaint carries the keyframe, or the last frame is
+            // re-encoded once the window has been still for 50 ms (HEVCEncoder.requestKeyframe).
             self?.encoderBox.current?.requestKeyframe()
         }
         server.onClientDisconnected = { [weak self] connection in

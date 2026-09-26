@@ -261,9 +261,12 @@ has both ways out: go public, or publish in sill-site). Added:
   mutants), fence 14 modes (review-moves-b's, 19), ledger 90 (ledger-union,
   no mutants), clientlink 89 (14), remote-rules 64 (rf2, 35), origin 66 (10),
   protocol 188 plus crosscheck.py's 8 (20), addresses 41 (step 3, 15),
-  pairing-address 80 (pairing-address/fixes, 35). Not here: EncoderMailbox's
-  (only on encoder-two-in-flight, which carries it as Scripts/encoder-check),
-  and update-notice's one-line change to protocol's kind 23 case.
+  pairing-address 80 (pairing-address/fixes, 35). Not here then:
+  EncoderMailbox's (only on encoder-two-in-flight, which carried it as
+  Scripts/encoder-check; since that branch merged main at 32d532b,
+  `encoder-mailbox` and `encoder-slowstate` are here and in CI: "A new
+  session for the slow state"), and update-notice's one-line change to
+  protocol's kind 23 case.
 - Verified here, nothing pushed and no Actions run: `Tests/checks/run-all.sh`
   passes (all nine, 132 s); every mutant caught (`run-all.sh --mutants`, about
   44 minutes here: policy 70, fence 19, remote-rules 35, pairing-address 35,
@@ -698,6 +701,384 @@ the cable landing 1.5 s before the move from "AWDL"'s fence was down, the two
 fences down by their timeouts, then everything that waited out on the cable
 and both old connections closed; the earlier scenarios unchanged.
 
+**The 33 fps plateau (2026-09-25, branch `encoder-two-in-flight` from
+`encoder-recovery` at 4fe37d4, with main at 32d532b merged in and the review's
+fixes after it: the next section's last bullets).** A Retina Desktop stream
+(3024×1964, hardware encoder) sat at 30–36 fps in a third of the logged seconds
+of Noah's home streams at 40 Mbps (7,445 of 22,081 seconds with 50 or more
+frames captured and none idle), and nearly always over Tailscale at 4 and 15
+Mbps; every such second read like
+`cap.complete 56 enc.mailboxDrop 24 enc.out 33 net.sent 33`. An investigation
+and a verifier (read-only: Sill.log and the kernel's AppleAVE2 log) found:
+- The network held nothing back (`net.dropped` 0, `net.sent` = `enc.out`);
+  nothing after the encoder waits. The whole loss was the mailbox.
+- The hardware encoder falls into a slow state, often after a few seconds of
+  fewer frames (a mostly still screen; once while scrolling at 38 fps) and at
+  any bitrate (4, 15, 40 and 150 Mbps): a frame takes 29–30 ms from submit to
+  output, and the HeartBeat's C/F (read as the engine's time per frame) 14–15
+  ms, against 9 at 57 fps. Sessions started fast (7.5–9 ms a frame in their
+  first windows, one at 12.3); 1512×982 never plateaued (6 ms a frame). With
+  one frame inside VideoToolbox the output rate is one over the turnaround:
+  33 fps.
+- The HeartBeat needs `--predicate 'sender == "AppleAVE2"'` with `--info
+  --debug`; `eventMessage CONTAINS "AppleAVE2"` returns only firmware lines.
+  Per session and 5 s window it gives frames submitted | completed and three
+  cumulative counters (C/F: the third's delta over frames;
+  `Scripts/encoder-check/hbparse.py` prints it).
+- 33 = 1000/30 matching the 30 ms tick timer is a coincidence (`net.tick` 33
+  beside `enc.out` 55 on the cable).
+
+The branch first let two frames into the hardware encoder at once, on the
+reading that part of the 29 ms might overlap, then only under a test switch
+after review (its commits 63a365b–e68408f have the design, the review and runs
+on an engine shared with the Claude app's iOS Simulator panel, where two inside
+gained nothing: 35.7 against 35.6 fps, capture to output 36 → 64 ms). Sharing
+alone reads like the slow state in the stats line: in those runs a synthetic
+Retina stream with one inside, beside the panel alone (15:43:39–15:44:09),
+read ~32 fps with ~27 drops a second, and Noah's Retina Desktop beside it
+33–36 fps (the operational rule in "The hardware encoder: busy, not stuck").
+The HeartBeat tells them apart: it lists the panel's session beside Sill's,
+and its C/F, the engine's figure, read 9.5–10.6 ms there against 14.0 for the
+slow state alone. The deciding run had the engine alone:
+
+Measured alone (2026-09-25, 20:16–21:04; no device connected, and each kept
+run's HeartBeat lists only its own session): the CLI host built from e68408f
+streaming the real Desktop at 3024×1964, 60 fps and 40 Mbps (Pro) to a loopback
+test client, on this M2 Pro (Mac14,9, one encode engine) on AC power. Motion
+came from a scratch window scrolling text-like content 6 pt a frame over a
+static backdrop (57–60 frames captured a second; still, the menu bar clock
+gives about one), each frame's encode call and output were timed by an
+interposer on `VTCompressionSessionEncodeFrameWithOutputHandler`
+(`DYLD_INSERT_LIBRARIES`), and C/F came from the HeartBeat. Schedules: 4 s of
+motion, then 5, 10 or 20 s still (or 15 s with a step every 0.3 s), then 35 s
+of motion (90 s once), for the slow state; 35 s of motion from the start for
+the fast state. One and two frames inside (the switch,
+`SILL_TEST_ENCODER_IN_FLIGHT=2`), in alternating pairs.
+- What the slow state is. A fresh session's turnaround (submit to output) is
+  8.7–9.2 ms for its first ~4 s, then ~16.2 ms at the same 57 fps, just under
+  the frame interval, with C/F 9.0 throughout. About a second into a quiet
+  phase an isolated frame takes 29 ms instead of 16 (the last 16 ms frame
+  0.6–1.4 s in, the first 29 ms one 1.0–2.4 s in; in all 16 runs), and once
+  motion resumes every frame does: 28.8–29.0 ms (median; p95 29.0–29.6), C/F
+  14.0, 34.3–34.7 fps out of 57 captured with ~23 `enc.mailboxDrop` a second, in
+  every second (35 of 35 s; 90 of 90 s in the long run). Motion from the start
+  never went slow (57.3–57.5 fps, no drops). Capture to output
+  (ScreenCaptureKit's timestamp to the output handler): median 39.7 ms (p95 51)
+  slow, 17.6 ms (25) fast. C/F is weak evidence of a slower clock on its own:
+  its counter grew 481–485 a second in the slow runs and 516 in the fast ones,
+  so C/F moves with the frame rate.
+- What two inside did. In the slow state 35.5–44.3 fps (mean 42.1, against 34.5
+  with one), never above 49 in any second and never back to the fast state, in
+  35 s or in 90 s. VideoToolbox served the second frame only after the first:
+  it waited inside for a whole service time (22–28 ms) and came out that long
+  after it, in order (0 of 40,774 outputs reordered); at the slow level two
+  inside served one frame per 28.2 ms against 28.9 with one. The only gain was
+  the engine stepping up once, 3.4–4.4 s into the motion, from 28.2 to 23–25.5
+  ms a frame (40–45 fps), in 6 of 8 runs (one was on the faster step from its
+  first second, one never stepped: 35.5 fps), which one inside never did. It
+  cost 17–27 ms from capture to output per pair (median 39.7 → 59.4 ms, p95 51
+  → 68.5; the turnaround 28.9 → 45–56 ms), which Sill's frame age, taken after
+  the encoder, cannot show. In the fast state it gained and lost nothing
+  (57.3–57.5 fps either way, +0.2 ms at the median). The harness (the real
+  `HEVCEncoder` with synthetic frames, no ScreenCaptureKit: 3 s at 60 fps, 6 s
+  of a frame every 0.3 s, 20 s at 60 fps) agreed: one inside 34–35 fps and a
+  latency median of 35–38 ms, two inside 37–38 fps and 62–65 ms, no step in
+  20 s.
+- Dropped (the bar set before the run was ~55 fps, and ~8 fps for ~20 ms of
+  latency is the wrong trade: latency beats quality). The switch and every
+  path that served a second frame are gone: the mailbox's second place, the
+  gate that kept a second frame out until the session had let go of one, the
+  watchdog's clock restarted behind a returned frame, the re-check's test
+  keeping two inside, the capture's reasoning about three surfaces. The
+  re-check's test sends one frame at a time again, as a stream does.
+- Observed, not verified as mechanisms: with one inside the slow state is a
+  stable equilibrium (the engine is fed exactly what it completes; 90 s of
+  motion never moved it); the engine paces itself to the rate it sees (9 → 16
+  ms at 57 fps with C/F unchanged); at the slow levels the turnaround is about
+  twice C/F. In two runs discarded for sharing, another agent's independent
+  3024×1904 session on the engine lifted Sill's one-inside session to 49–57
+  fps at C/F ~6 ms, and it fell back to ~34 when that load paused: load, not a
+  second frame of the same stream, moves the engine. Next to try: the engine's
+  power state or rate control (`EnableLowLatencyRateControl`, "The hardware
+  encoder: busy, not stuck" below), not pipelining. Tried first instead, and
+  kept: a new session (below). Resolution: Standard avoids the plateau too
+  (57 fps with no drops at 1512×982).
+- Not measured: Sill.app (the CLI only), 120 fps, other bitrates, a device,
+  other chips (a Max has two encode engines), real content beyond the
+  scrolling window.
+
+What the branch keeps:
+- `EncoderMailbox` (pure; Foundation and CoreMedia): `HEVCEncoder`'s
+  bookkeeping as one type under its lock, one frame inside for every session:
+  the frame inside (its id, its watchdog clock, whether `submit` has handed it
+  over), the one-slot mailbox, `dead`, the timestamp fix and the keyframe flag
+  (at 4fe37d4 eight variables). Behaviour as at 4fe37d4, edge cases included:
+  `abandon` and the teardown count only a frame handed over (`outstandingID`
+  then), so a frame let in and still on `encodeQueue` when the session dies,
+  which never goes in, is not reported stalled, and a live session with one
+  drains, as `inFlight` did.
+- The order fix: a frame let in is queued on `encodeQueue` before the lock that
+  let it in is released, and `requestKeyframe` sets the flag, decides whether
+  the window is still and admits its re-encode in one hold. At 4fe37d4 those
+  were two holds, and a repaint landing between them went into VideoToolbox
+  ahead of the stale re-encode, so the device kept the older picture until the
+  next repaint and `lastFrame` fell back to it (a reviewer saw it in about one
+  in five coincidences of a request and a repaint, with nothing forced; the
+  encoder check forces it by holding the requesting thread 4 ms after its first
+  unlock: the older picture last in 10 of 10 trials before the fix, 0 now).
+- The keyframe's second look: a keyframe asked for within 50 ms of the last
+  repaint of a window that then stays still is looked at again
+  (`keyframeCheck`, on the watchdog's queue, 60 ms after that repaint): the
+  last frame is re-encoded if the flag is still set, the session is live, no
+  frame is on its way to carry the flag (`EncoderMailbox.frameOnItsWay`:
+  waiting in the mailbox, or let in and still on `encodeQueue`) and the window
+  has not repainted. At 4fe37d4 such a request only set the flag: a device
+  joining (`onClientConnected`) waited on black, and one whose delta was
+  dropped (`net.dropped`, then `onKeyframeNeeded`) on a stale picture, until
+  the window next repainted. On the hardware
+  (`Scripts/encoder-check/verify-hardware.sh keyframe`: 6 sessions at
+  3024×1964 and 40 Mbps, a request 5, 20 or 40 ms after a burst's last frame,
+  then still): 4fe37d4 answered none, this branch all six, the keyframe out
+  70–73 ms after the last frame (19:52–19:54) and, after the rework, 76–78 ms
+  (22:02–22:03, the engine alone).
+- The checks. `Scripts/encoder-check/run.sh` runs those that never touch an
+  encoder (it refuses any binary that links VideoToolbox): the mailbox check,
+  the real `EncoderMailbox.swift` against a stand-in VideoToolbox in virtual
+  time through a copy of `HEVCEncoder`'s glue (S1–S17: 9 ms a frame 60 fps;
+  30 ms 33.3 fps with 26.7 mailbox drops a second and a latency median of
+  36.7 ms; 40 ms 25 fps; random turnarounds with refusals, second notices,
+  rate-control drops and keyframe requests, every frame settled once; a stuck
+  frame, `SILL_TEST_ENCODER_HANG`, slow and blocked encode calls, `abandon`,
+  the teardown, keyframes and timestamps), and its mutants (`mutants.py`, each
+  must fail it); the probe check, the real `EncoderProbe.swift` against a
+  stand-in encoder in real time (one frame inside at most, 33 fps at 30 ms a
+  frame, a stuck frame counted and reported back, `SILL_TEST_PROBE_HOLD=0.08`
+  ~11 fps); the encoder check, the real `HEVCEncoder.swift` against
+  `encoder/FakeVT.swift` in real time (every kind of session holds one frame at
+  most and prints nothing when made, what a stuck encoder keeps, the order
+  race, the keyframe's second look). `verify-hardware.sh` runs the hardware
+  steps (parity, stream, harness, probe, keyframe) against 4fe37d4 built from
+  `git archive`, each only while `no-device.sh` finds no device connected to
+  Sill.app.
+- Verified after the two-inside paths were removed (2026-09-25, 21:30–22:05):
+  a clean `swift build -c release` from `git archive` (only the old
+  CaptureProbe warning); the mailbox check, 38,256 checks, and 27 of 27 mutants
+  caught; the probe check (19 checks and the hold) and the encoder check (75);
+  a differential check (scratch, not in the repository) of `EncoderMailbox`
+  against a transcription of 4fe37d4's bookkeeping, through 100,000 random
+  sequences of the glue's events (admissions, hand-overs, outputs and
+  refusals, second notices, watchdog ticks, keyframe requests, `abandon`),
+  every outcome equal in 56,082,887 comparisons, while the type as it was
+  before (a frame on `encodeQueue` counted as inside) failed it; the keyframe
+  step above; the CLI against origin/main (1f3072a) and against this branch
+  merged into it (`git merge-tree`: only CLAUDE.md and README.md conflict),
+  each built from `git archive`, no device connected, each run's HeartBeat
+  listing only the host's own sessions: `--synthetic` idle for 35 s identical
+  masked and sorted (7 lines; in order too), and with a loopback client
+  streaming the synthetic Desktop for 22 s identical (40 lines) but for one
+  `enc.mailboxDrop` in the first streaming second of one of origin/main's two
+  runs.
+- **Untested, for Noah:** a device joining a still window gets its picture
+  within about 0.1 s (the keyframe's second look has run only in the checks and
+  the hardware harness).
+
+**A new session for the slow state (2026-09-25, 22:24–22:39; c27d6df,
+b3042de, dd0dc15).** The solo measurement read the slow state as a session's,
+not the engine's: every fresh session started fast, and the slow state set in
+only after about a second of sparse frames into an existing one. So a stream
+whose session has settled in it gets a new session in place, on by default
+(`HEVCEncoder.replacesSlowSessions`):
+- The rule (`EncoderSlowState`, pure, Foundation only): a session that has run
+  fast (a frame back in under 25 ms; turnaround is hand-over to output, by the
+  mailbox's own clock) and now, over the last 2 s, gets at least 45 frames a
+  second from the capture in each half of that window while the median
+  turnaround of what came back is at least 25 ms and at least 1.5 times the
+  fastest frame the session has returned, is replaced, at most once per 10 s
+  (a new session that could not be made counts too). The new session is timed
+  on its frames after its first (a keyframe) while the motion that set off the
+  swap lasts: a frame counts only if the capture before its hand-over came
+  within 0.1 s of the one before that and 45 came in the second before it, and
+  the first frame without motion ends the timing. The verdict comes at 30
+  timed frames, when the timing ends, or at the first frame back 2 s after the
+  swap: their median if at least 5, else none (the picture went still). One no
+  faster (its median at least 0.8 of the replaced session's: then the engine
+  is slow, as beside another app) ends the replacing for that stream. A
+  session that never ran fast (a size the engine is simply slow at) is never
+  replaced; probes and the software encoder never are.
+- The swap (`HEVCEncoder`): the new session is made with the stream's settings
+  on a queue of its own while the old one goes on (the kernel opened it 39–42
+  ms before it took over); `submit` hands it the next frame with a forced
+  keyframe, whose parameter sets go out with it; the old one holds no frame by
+  then (one inside at a time). `submit` completes it before the new session's
+  first frame goes in, which waits for its last output handler to return, so
+  that frame reaches `onEncoded` before the new keyframe (each session calls
+  back on its own queue, and that handler lets the next frame in before it
+  hands its own frame on: a callback thread descheduled for longer than the
+  keyframe takes would put an old delta after it on the device), then
+  invalidates it off the queue.
+  The mailbox, its ids, the watchdog and the capture carry on. One line once
+  the new session's first frames are back, e.g. "Encoder (hardware HEVC
+  3024×1964): frames took 29 ms each (31 fps out of 51 captured); a new
+  session takes 9 ms (a 329 kB keyframe, 28 ms between frames).", or "…
+  takes 28 ms, no faster, so this stream keeps it and gets no other (…)".
+  Nothing else prints and no counter changes.
+- With encoder-recovery: a frame's clock starts at its hand-over, as before,
+  so making a session counts against no frame, and the watchdog, `onHung`,
+  the software fallback and the re-check never see a swap (the encoder check's
+  E7: no `onHung`, no `enc.hung`, no hang or stalled line; none in the
+  hardware runs either). A new session that hangs is a hang like any other:
+  the watchdog gives up on it 1.5–2 s after the swap and the stream falls
+  back, and the old session, retired holding nothing, is not reported
+  stalled. A waiting new session is dropped when the stream's session dies
+  (the watchdog, `abandon`), with the encoder, or when it is made after the
+  encoder went.
+- `SILL_TEST_ENCODER_RECYCLE=1` or `0` overrides the constant for one process
+  (an A/B from one binary; a "TEST:" line says so).
+
+Measured alone on the engine with the solo measurement's method (its scripts,
+guards and motion window, copied): the CLI built from c27d6df by `git
+archive`, the real Desktop at 3024×1964, 60 fps and 40 Mbps to a loopback
+test client, this M2 Pro on AC power. No device connected (Sill.log's last
+connect 18:50:52; the guard before and after every run), no user input
+(HIDIdleTime rising through every run), and each run's HeartBeat listing only
+its own sessions (the stream's and, switched on, its replacement, both
+3024×1968 at 40 Mbps and priority 0) besides one-frame 256×256 launch probes.
+Schedule: 4 s of motion, 10 s still, 35 s of motion, the switch on and off
+alternating, three runs each; the fast state: 35 s of motion from the start,
+two runs each. Figures are the resumed motion less its first 2 s:
+
+| | fps out (min–max) | drops/s | turnaround med / p95 ms | capture→output med / p95 ms | C/F ms |
+|---|---|---|---|---|---|
+| on | 57.3, 57.3, 57.2 (55–59) | 0 | 16.3–16.6 / 16.7–17.4 | 17.4–17.6 / 25.0–25.5 | 8.7–9.0 |
+| off | 34.5, 34.5, 34.2 (33–36) | 22.7–23.2 | 29.0–29.1 / 29.2–29.8 | 39.5–39.8 / 51.1–51.7 | 13.9–14.0 |
+| fast, on | 57.2, 57.0 (54–59) | 0, 0.2 | 16.3 / 16.7–17.4 | 18.5 / 25.1–28.2 | 9.0 |
+| fast, off | 57.3, 57.2 (55–59) | 0 | 16.3–16.4 / 16.7 | 17.5–17.7 / 25.1–25.2 | 9.0 |
+
+- Each run switched on replaced its session once, 1.80, 1.83 and 1.85 s into
+  the motion. The new session's first frame, a forced keyframe of 247, 322 and
+  369 KiB (the stream's first keyframe was 280–372 KiB, the 4 s safety
+  keyframes 437–772 KiB, a delta frame ~30 KiB), came out 30.2, 27.8 and
+  27.5 ms after the old session's last frame: the slow state's own spacing
+  just before (29.6, 29.1, 29.0 ms), so no frame waits longer than a slow one
+  did. Its next 30 frames took 9.5, 9.3 and 9.0 ms (median), then ~16 ms paced
+  to the capture, as a fresh session does. The second holding the swap put
+  out 46–54 frames, every later one 55–59. The parameter sets were byte for
+  byte the stream's first ones (one hash across 11–12 sets), so a device's
+  display layer has nothing to flush.
+- Motion from the start never set it off (one session in each fast run).
+  "fast, on" run b's 1–2 drops a second over four seconds came with the
+  loopback ping's maxima at 6–8 ms and the turnaround steady at 16 ms: the
+  host, not the encoder.
+- One more run switched on, with two still spells (4 s motion, 10 s still,
+  15 s motion, 10 s still, 15 s motion): replaced twice, 1.8 s into each
+  resumed motion and 25 s apart, keyframes of 261 and 324 KiB, 26 ms between
+  frames each time, then 9.0 and 9.8 ms a frame and 55–59 fps.
+- Kept, on by default: the slow state is a session's, a new session starts
+  fast, and the price is one keyframe smaller than the 4 s safety one with no
+  wait beyond the slow state's own.
+- The checks: `run.sh slowstate` (798 checks: the rule at its edges, and
+  streams in virtual time through a stand-in for the glue) and
+  `mutants-slowstate` (20 of 20 caught); the encoder check's E7, the real
+  `HEVCEncoder` against FakeVT (97 checks switched on, 12 off); the rest as
+  before (the mailbox 38,256 and 27 of 27 mutants, the probe 19 and the hold).
+  The CLI against origin/main (1f3072a), each built from `git archive`
+  (dd0dc15 here), no device connected, each run's HeartBeat only its own
+  sessions: `--synthetic` idle for 35 s identical masked and sorted (7 lines;
+  in order too but for where the installed-apps line lands). With a loopback
+  client streaming the synthetic Desktop for 22 s (origin/main four times,
+  this branch six, alternating as another session's hosts allowed): no new
+  kind of line, no new stats key, no "Encoder" or "TEST:" line, and one
+  stream session each (nothing replaced). Which counters a second lists
+  varies from run to run in both builds: with the first streaming second and
+  the client's last left out, origin/main's four runs and three of this
+  branch's six are identical; the other three differ by 6 and 2 mailbox drops
+  in the seconds after a start that fell 80 ms before a stats tick, by one
+  mailbox drop, and by `cursor.shape` in two seconds (the Mac's cursor
+  changed).
+- Not measured: Sill.app (the CLI only; the same core), a device (the keyframe
+  over Wi-Fi, its decode), 120 fps, other bitrates, a shared engine (a new
+  session there should be judged no faster and kept: the checks only), a size
+  the engine is slow at (never replaced: the checks only; since the review
+  fixes, one hardware run at 6880×2880, below), other chips, other content
+  than the scrolling window.
+- Merged with main at 32d532b (2026-09-26; one merge commit, not a rebase):
+  since 4fe37d4 main gained remote access (#13), encoder-recovery itself
+  (#11), follow-best-path (#12, #16), App Store readiness (#14), the public
+  README (#15) and GitHub Actions (#17). Git stopped only on CLAUDE.md and
+  README.md; the sources merged by themselves (this branch changed only a
+  comment in `StreamCoordinator`, which main also changed). README.md is
+  main's, the public front page; this branch's slow-stream bullet and its
+  Resolution note moved to `docs/DEVELOPMENT.md`, "What to try if it's
+  slow", as the Public README entry asks. CLAUDE.md keeps main's newer copy
+  of "The hardware encoder: busy, not stuck", with this branch's sentence on
+  the Simulator panel in its operational rule, and these two sections moved
+  from after it to just before it; the Layout and Build and run keep both
+  sides.
+- Review fixes (2026-09-26, after the merge; 78f0459, d1d673c, 5217f55,
+  0138d6a):
+  - The order at the swap: `submit` completes the old session before the new
+    one's first frame goes in ("The swap" above). The review found the old
+    session's last delta reaching `onEncoded` after the new keyframe whenever
+    its callback thread was held about as long as the keyframe took: with
+    FakeVT, and on this Mac's hardware with the handler held on purpose (at
+    20 ms and more at 1280×800, 40 ms and more at 3024×1964); a Mac decoder
+    given that order failed every frame until the next keyframe. With the
+    wait the order held 8 of 8 on the hardware, the wait ending 0.07–0.13 ms
+    after the handler. E7 now holds the old session's handlers 20 and 40 ms:
+    the order holds, and a copy without the wait fails at both, 3 runs of 3.
+  - The rule ("The rule" above): slow against the session's own fastest
+    frame, no faster against the session replaced, only frames in motion
+    timed, the input per second as documented. The review's hardware runs of
+    62f2c16: at 6880×2880 and 60 fps (the Desktop of a 3440×1440 display at
+    scale 2; 24.65 ms at best, 25.5 at the median) the session was replaced
+    2.02 s in for nothing in both runs (a keyframe, a 52–59 ms wait, "no
+    faster"); at 3024×1964, with the motion stopping at the swap and 4
+    repaints a second after, the new session was judged "no faster" on sparse
+    frames (29–30 ms from 0.56 s on) though it ran 15 ms a frame once motion
+    came back, and the stream then stayed at 34 fps for good. The review
+    suggested twice the fastest frame; it is 1.5, since the slow state is only
+    1.8 times the paced fast state (29 ms against 16), and a session whose
+    best frames came paced or sparse would never be replaced at twice.
+  - The mailbox and slow-state checks moved to `Tests/checks`
+    (`encoder-mailbox`, `encoder-slowstate`), which CI runs, their mutants in
+    its mutants matrix; `Scripts/encoder-check/run.sh` runs them as before,
+    with the real-time probe and encoder checks, which stay out of CI.
+  - Verified (2026-09-26, 00:20–01:03), without the hardware: the mailbox
+    check 38,256 and 27 of 27 mutants; the probe check 19 and the hold; the
+    encoder check with FakeVT 111 switched on and 12 off; the slow-state check
+    1,207 (798 before; 62f2c16's rule fails 77 of the new cases) and 29 of 29
+    mutants; `Tests/checks/run-all.sh`, all eleven (112 s); a clean `swift
+    build -c release` of 0138d6a from `git archive` (only the CaptureProbe
+    warning). With the hardware, no device connected (the guard before, every
+    2 s during and after each run) and each run's HeartBeat listing only its
+    own sessions: the CLI against origin/main (32d532b), both from `git
+    archive`, idle 35 s identical masked and sorted (7 lines), and with a
+    loopback client streaming the synthetic Desktop for 22 s identical (40
+    lines; nothing replaced). The harness with 0138d6a's `HEVCEncoder` and
+    synthetic moving bars: the review's schedule at 3024×1964 and 40 Mbps (3 s
+    motion, 6 s of a frame every 0.3 s, motion until the swap, 3 s at 4 frames
+    a second, 3 s motion, 6 s at one every 0.3 s, 7 s motion) swapped 1.77 s
+    into the motion and said at once "… and the picture went still before it
+    could be timed."; the motion after ran 15.1 ms a frame (56 fps); after the
+    second still spell 29 ms for 2 s, then a second swap 13.78 s after the
+    first ("a new session takes 9 ms") and 59–61 fps. At 6880×2880 and 15
+    Mbps, 12 s of motion from the start: no replace (24.64 ms at best, 32.8 at
+    the median, the engine slowing to ~33 ms after about 4.5 s, as the review
+    saw).
+  - Not measured: the order fix or the new rule in Sill.app or SillHost with
+    ScreenCaptureKit and real content, the iPad's decoder at a swap, other
+    sizes, rates and bitrates.
+- **Untested, for Noah:** stream the Retina Desktop from Sill.app to the iPad,
+  leave the screen still for a few seconds, then scroll: about 2 s into the
+  scroll the log shows one "Encoder (hardware HEVC …): frames took 29 ms each
+  …; a new session takes 9 ms …" line and `enc.out` climbs back to
+  `cap.complete` with no `enc.mailboxDrop`; on the iPad the picture does not
+  flash or go black at that moment and the frame age does not jump. A scroll
+  that stops about 2 s in, as that line would come, gives "… the picture went
+  still before it could be timed." instead, and the next scroll after a still
+  spell gets another new session. Beside the Simulator panel (another app
+  encoding), at most one "no faster" line per stream.
+
 **The hardware encoder: busy, not stuck (2026-09-24; fixed 2026-09-25, branch
 `encoder-recovery` from main at 76366e8, with main at ba91136 merged in: the
 bullet before the last).** Sill.app's watchdog fired twice on 2026-09-24 and
@@ -837,7 +1218,12 @@ What the host does now:
   sessions (the next "AVE : open") to client PIDs.
 - Operational rule, from the same logs: while Noah streams, agents do not run
   `simctl io recordVideo`, SillHost streams, ReelRenderer or encoder benchmarks;
-  each shares the one engine, and the recorder outranks Sill.
+  each shares the one engine, and the recorder outranks Sill. The Claude app's
+  iOS Simulator panel counts too: `claude-ios-sim` encodes the simulator's
+  screen at priority 60 (~62 fps at 2064×2752), and Noah's Retina Desktop fell
+  from 57 to 33–36 fps beside it (33–34 for its first 40 s), and to 11–18 fps
+  while another agent's priority-80 recording of that simulator ran as well
+  (8–17 with a SillHost besides; 2026-09-25, 15:14–15:24).
 - Not in this change: `EnableLowLatencyRateControl` would put Sill at priority
   60 (above every default session, still below the recorder's 80) and follows
   live bitrate changes, but it changes the bitstream and rate control (frames
@@ -1954,9 +2340,13 @@ only one. Protections now in the host:
   (`EncoderProbe`, ~100 ms when healthy, 1 s deadline). No answer means the
   host starts on the software encoder at once and says so, instead of hanging
   the first stream for 1.5 s and restarting it.
-- `HEVCEncoder` is a one-slot mailbox: the capture queue never waits; one frame
-  at a time is inside VideoToolbox on its own queue; a watchdog on a separate
-  queue declares the session hung after 1.5 s and calls `onHung`.
+- `HEVCEncoder` feeds VideoToolbox from its own queue behind a one-slot
+  mailbox (`EncoderMailbox`): the capture queue never waits; one frame at a
+  time is inside VideoToolbox (two at once was measured and dropped: Current
+  step, "The 33 fps plateau"); a watchdog on a separate queue declares the
+  session hung after 1.5 s and calls `onHung`. A stream whose session settles
+  in the hardware's slow state gets a new session in place
+  (`EncoderSlowState`; Current step, "A new session for the slow state").
 - The coordinator then restarts the source on the software encoder at half
   scale (slow, ~10 fps under load, but live) and says so in the log; three
   software hangs stop the stream instead of looping. Since 2026-09-25 that
@@ -2097,11 +2487,17 @@ good.
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
-  `--synthetic`), `HEVCEncoder` (VideoToolbox behind a one-slot mailbox with a
-  hang watchdog; hardware or software; says whether a stalled frame came
-  back), `EncoderProbe` (one small frame through a hardware session at
-  launch; for the re-check a short quiet run at the stream's size, the rate it
-  keeps and the rate a return needs), `EncoderSelfTest`
+  `--synthetic`), `HEVCEncoder` (VideoToolbox with one frame inside, a
+  one-slot mailbox behind it and a hang watchdog; hardware or software; says
+  whether a stalled frame came back; gives a stream whose session settled in
+  the slow state a new one), `EncoderSlowState` (when that is, and whether the
+  new session ran faster; pure, `Tests/checks/encoder-slowstate`),
+  `EncoderMailbox` (its bookkeeping: the frame inside with its watchdog
+  clock, the mailbox, the watchdog's test, timestamps and keyframe requests;
+  pure, `Tests/checks/encoder-mailbox`), `EncoderProbe` (one small frame
+  through a hardware session at launch; for the re-check a short quiet run at
+  the stream's size, one frame at a time like a stream, the rate it keeps and
+  the rate a return needs), `EncoderSelfTest`
   (`--encoder-selftest`), `CursorShapeWatcher` (NSCursor.currentSystem →
   `.cursorShape`), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
@@ -2187,6 +2583,16 @@ good.
   before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
+  through).
+  `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
+  `run.sh` builds and runs those that never touch an encoder (the probe and
+  encoder checks, which run in real time with tight bounds and so stay out of
+  CI, and through `Tests/checks/encoder-mailbox` and `encoder-slowstate` the
+  mailbox and slow-state checks and their mutants; it refuses any binary that
+  links VideoToolbox), and `verify-hardware.sh` the hardware runs against a
+  base commit built from `git archive` (parity, stream, harness, probe,
+  keyframe), each only while `no-device.sh` finds no device connected to
+  Sill.app; outputs go to `.build/encoder-check/`.
   through). `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's
   hello first, and kind 22's new fields are printed. `Scripts/sillfeed.py PORT`
   is a fake GitHub releases feed for the update check's tests (`--tag`,
@@ -2304,6 +2710,10 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
+  `encoder-mailbox`, `encoder-slowstate`, `fence`, `ledger`, `origin`,
+  `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
+  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
+  [-v] [name…]` runs them and exits
   `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
   `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
   `run-all.sh [--mutants] [-v] [name…]` runs them and exits
@@ -2333,6 +2743,9 @@ Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
+Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
+SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
+Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
 Needs Xcode as the active developer directory with its license accepted; with
 Command Line Tools only, add `--build-system native`.
