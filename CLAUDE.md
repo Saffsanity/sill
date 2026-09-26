@@ -2280,8 +2280,9 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `fence`, `ledger`, `origin`, `pairing-address`, `policy`, `protocol`,
-  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
+  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
+  `run-all.sh [--mutants] [-v] [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked

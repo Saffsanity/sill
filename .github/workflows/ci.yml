@@ -119,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, clientlink, fence, origin, pairing-address, policy, protocol, remote-rules]
+        check: [addresses, clientlink, compatibility, device-gate, fence, goodbye, origin, pairing-address, policy, protocol, remote-rules, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
