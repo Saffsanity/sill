@@ -540,9 +540,11 @@ signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
 checked (the version and build, the export compliance key, the Local Network
 and camera strings, the privacy manifest, an App Store signature and
 profile), and with `--upload` uploaded. `--bump` gives each upload of a
-version the next build number, alone in a commit. It signs and uploads
+version the next build number, alone in a commit; both refuse uncommitted
+changes, so every uploaded build is a commit's. It signs and uploads
 through the Apple Account in Xcode › Settings › Accounts, or through an App
-Store Connect API key (`--api-key`, `--api-issuer`), and it needs Xcode 27.
+Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
+and it needs Xcode 27.
 `--privacy-report` lists what the archive's privacy manifest declares and the
 required-reason APIs its binary uses. The TestFlight workflow
 (`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.

@@ -182,12 +182,12 @@ one who skips the EU, and Apple can't decide it for you.
 - Price: Free.
 - Availability: all countries and regions. The export compliance answer needs
   no French declaration (section 6).
-- iPhone and iPad Apps on Apple Silicon Macs: **uncheck** "Make this app
+- iPhone and iPad Apps on Apple Silicon Mac: **uncheck** "Make this app
   available". Otherwise the iPad app shows up in the Mac App Store, where
   people look for Sill for Mac, and on a Mac it would only stream that Mac to
   itself.
-- Apple Vision Pro: **uncheck** "Make this app available". Nobody has tried it
-  there.
+- iPhone and iPad Apps on Apple Vision Pro: **uncheck** "Make this app
+  available on Apple Vision Pro". Nobody has tried it there.
 
 ## 4. App Privacy
 
@@ -313,7 +313,7 @@ company's name.
 | Marketing URL (optional) | `https://getsill.app` |
 | Version | 0.5 (App Store Connect proposes 1.0 for a new app; the build says 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
-| App Previews | None for 1.0. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
+| App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
 | Build | The Release archive with the privacy manifest and the export compliance key |

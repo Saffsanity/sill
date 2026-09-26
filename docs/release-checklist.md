@@ -108,9 +108,12 @@ serves the root or `/docs`, never `/site`. So:
 
 ```
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
-rsync -a --delete --exclude .git site/ ../sill-site/                    # whenever the site changes
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # whenever the site changes
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
+
+sill-site has two files of its own that `site/` lacks, `.nojekyll` and `.github/FUNDING.yml` (its
+Sponsor button); the two excludes keep `--delete` off them.
 
 - [x] Domain, done 2026-09-25: getsill.app at Cloudflare, with A records to GitHub Pages
       (185.199.108.153, .109, .110, .111), the matching AAAA records (2606:50c0:8000::153 to
@@ -198,7 +201,7 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       don't also run `--publish` here (whichever comes second stops at "already exists"); without
       it the run only verifies (macOS minutes either way).
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
-      republish `site/` (the rsync below) so the button shows. Then, in a private window, download
+      republish `site/` (part 1 §3's rsync) so the button shows. Then, in a private window, download
       it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
 - [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without
       `--bump`, once `MARKETING_VERSION` says it); TestFlight §4 below. Or in Xcode: Any iOS
@@ -238,7 +241,8 @@ App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Nothing
 | SKU | `sill-ios` (never shown; can't change) |
 | User Access | Full Access |
 
-- [ ] Then in the record. The reasons, and the long texts, are metadata §2 to §7:
+- [ ] Then in the record. The reasons, and the long texts, are metadata §2 to §7; the version
+      page's texts, screenshots and App Review Information wait for the App Store (part 1 §4):
 
 | Where | Field | Value |
 |---|---|---|
@@ -252,8 +256,8 @@ App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Nothing
 | App Privacy | Data collection | Get Started › "No, we do not collect data from this app" › Save, then Publish: the page says Data Not Collected |
 | Pricing and Availability | Price | Free |
 | Pricing and Availability | Availability | All countries and regions |
-| Pricing and Availability | iPhone and iPad Apps on Apple Silicon Macs | Uncheck "Make this app available" |
-| Pricing and Availability | Apple Vision Pro | Uncheck "Make this app available" |
+| Pricing and Availability | iPhone and iPad Apps on Apple Silicon Mac | Uncheck "Make this app available" |
+| Pricing and Availability | iPhone and iPad Apps on Apple Vision Pro | Uncheck "Make this app available on Apple Vision Pro" |
 | Business › Agreements › Compliance › Digital Services Act | Trader status | "This is not a trader account": free, no in-app purchase, no ads (metadata §2; look again when the tip jar comes; not legal advice) |
 | The version page, "1.0 Prepare for Submission" | Version | `0.5`. App Store Connect names a new app's first version 1.0, and only a build whose version matches can be added to it (for the App Store, not for TestFlight) |
 | The version page | Support URL, Marketing URL | `https://getsill.app/support`, `https://getsill.app` |
@@ -273,19 +277,22 @@ git commit -m "iOS: the App Store address, for a Mac's update notice" iOSClient/
 
 A Mac that needs a newer Sill on the device then shows "Update Sill in the App Store" under its
 notice. The address answers only once the app is on the App Store. Until the line changes,
-`release-ios.sh` warns at every build.
+`release-ios.sh` warns at every build, and a line that is neither the placeholder nor an App Store
+address (the number left out, say) stops it before it builds.
 
 ### 3. The site
 
 - [ ] App Store Connect links the privacy policy and the support page, and the App Privacy answers
-      and the policy must agree. On 2026-09-26 the published pages matched `site/` on main (the
-      policy's Update check section and the footer's GitHub links included) but for two things:
+      and the policy must agree. On 2026-09-26 Saffsanity/sill-site held main's `site/` file for
+      file (the policy's Update check section and the footer's GitHub links included) but for
       `download.html`, which says "being prepared" on purpose until the first Mac release (part 2),
-      and the `<!--email_off-->` comments around the address. Until that release, republish
-      without the download page:
+      so TestFlight needs no republish. The pages getsill.app serves lack the `<!--email_off-->`
+      comments only because Cloudflare takes them out. If `site/` changes before that release,
+      republish it without the download page (and, as in part 1 §3, without touching sill-site's
+      own `.nojekyll` and `.github`):
 
 ```
-rsync -a --delete --exclude .git --exclude download.html site/ ../sill-site/
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll --exclude download.html site/ ../sill-site/
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -302,11 +309,14 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
 ```
 
 - It needs Xcode 27 selected (it refuses any other) and the Apple Account of team 9B2KKVM937 in
-  Xcode › Settings › Accounts, which signs and uploads (Account Holder, Admin or App Manager may
-  upload). Or an App Store Connect API key instead: `--api-key <path>/AuthKey_<Key ID>.p8
-  --api-issuer <Issuer ID>`, the key kept outside the repository. Signing through a key takes the
-  Admin role, uploading App Manager; the notary key of part 1 §2 (Developer) can do neither. Nothing
-  is stored: only the key's path goes to xcodebuild.
+  Xcode › Settings › Accounts, which signs and uploads. Uploading takes Account Holder, Admin, App
+  Manager or Developer; signing with the cloud-managed certificate takes Account Holder or Admin
+  (or the permission Access to Cloud Managed Distribution Certificate in Users and Access). Or an
+  App Store Connect API key instead, kept outside the repository:
+  `--api-key <path>/AuthKey_<Key ID>.p8 --api-issuer <Issuer ID>`. Every export signs through the
+  key, which takes the Admin role: any other key, the notary key of part 1 §2 (Developer)
+  included, gets "Cloud signing permission error". Nothing is stored: only the key's path goes to
+  xcodebuild.
 - It prints one line per step, and xcodebuild's output goes to `.build/ios/*.log` (`-v` shows it
   too). Before any upload it checks the exported .ipa: the version and build the project says,
   `ITSAppUsesNonExemptEncryption` NO, the Local Network, Bonjour and camera entries, the privacy
@@ -316,8 +326,10 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
   record to create, `--bump`.
 - Build numbers: App Store Connect takes each number once per version, and the export keeps the
   project's (`manageAppVersionAndBuildNumber` NO in `Packaging/ExportOptions-appstore.plist`), so
-  every build there names one commit. `--bump` refuses a working tree with changes, adds 1 to
-  `CURRENT_PROJECT_VERSION` in both configurations and commits that alone; push it with the rest.
+  every build there names one commit. `--bump` and `--upload` refuse a working tree with changes
+  (new files count in `iOSClient` and `Sources/StreamProtocol`, which the build takes whole; a
+  build that stays here only warns). `--bump` adds 1 to `CURRENT_PROJECT_VERSION` in both
+  configurations and commits that alone; push it with the rest.
   A new version: `MARKETING_VERSION` in both configurations (Xcode › target Sill › General ›
   Version), committed; its builds may start again at 1.
 - The rehearsal on 2026-09-26 (main at 6f2a934, whose iOS app is 150f781's): archive and export in
@@ -367,7 +379,7 @@ To send feedback, take a screenshot while you use Sill, or use Send Beta Feedbac
 ### 7. External testers and Beta App Review
 
 - [ ] TestFlight › External Testing › + : a group such as `Beta`. Add Builds › 0.5 (1), and What to
-      Test: metadata §5's What's New. Submit for Review.
+      Test: metadata §5's What's New. Submit Review.
 - Beta App Review looks at the first build of a version in full (later builds of the same version
   may not need it), up to six builds a day. It needs what App Review needs: Sill for Mac
   downloadable at https://getsill.app/download (not yet: no Mac release, and the repository is
@@ -565,16 +577,16 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 
 ### The runner image
 
-All three workflows run on `xcode-27`, the newest macOS image GitHub offers and the only one with Xcode
-27, which Sill is built with: macOS 27.0 with Xcode 27.0 (the default), 27.1 and a 27.2 beta in
-September 2026. GitHub calls it a public preview, so jobs can wait in a queue longer and software
-on it can change. `macos-latest` is macOS 26 with Xcode 26.0.1 to 26.6, and `macos-15` has Xcode
-16.0 to 16.4 and 26.0.1 to 26.3; Sill has not been built with those. A step
+All three workflows run on `xcode-27`, the newest macOS image GitHub offers and the only one with
+Xcode 27, which Sill is built with: macOS 27.0 with Xcode 27.0 (the default), 27.1 and a 27.2 beta
+in September 2026. GitHub calls it a public preview, so jobs can wait in a queue longer and
+software on it can change. `macos-latest` is macOS 26 with Xcode 26.0.1 to 26.6, and `macos-15`
+has Xcode 16.0 to 16.4 and 26.0.1 to 26.3; Sill has not been built with those. A step
 (`.github/actions/select-xcode`, asked for version 27) selects the newest Xcode 27 that is not a
 beta and prints `xcodebuild -version`: on today's image that is Xcode 27.0 (27A266a), the same
 build as on Noah's Mac, since the image installs 27.1 under a name that says beta. On an image
 without an Xcode 27, CI warns and builds with the newest Xcode there, and the release and
-TestFlight workflows stop: a release is built with Xcode 27 or not at all. When GitHub replaces the preview with a
-regular macOS 27 image, change `runs-on` in the three files. The image's `bash` is 3.2, macOS's own,
-and runs every `run:` step: write steps it can parse (it ends a `$(` at the `)` of a `case`
-pattern inside it) and try them with `/bin/bash`, not zsh.
+TestFlight workflows stop: a release is built with Xcode 27 or not at all. When GitHub replaces the
+preview with a regular macOS 27 image, change `runs-on` in the three files. The image's `bash` is
+3.2, macOS's own, and runs every `run:` step: write steps it can parse (it ends a `$(` at the `)`
+of a `case` pattern inside it) and try them with `/bin/bash`, not zsh.

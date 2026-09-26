@@ -36,17 +36,18 @@ the record field by field. Nothing was uploaded and no record was created.
   with `CODE_SIGNING_ALLOWED=NO` exports the same way with the same
   entitlements, so CI needs no certificate or profile, only an App Store
   Connect key with the Admin role (cloud signing refuses others). Uploading
-  takes Account Holder, Admin or App Manager; the notary key's Developer
-  role can't.
+  takes Account Holder, Admin, App Manager or Developer, but every export
+  signs, so the notary key (Developer) can't run the script.
 - `.github/workflows/testflight.yml` (Layout): by hand only. Without the key
   `--unsigned` and that .ipa as the artifact; with the secrets
   `SILL_TESTFLIGHT_KEY_ID`, `SILL_TESTFLIGHT_ISSUER_ID` and
   `SILL_TESTFLIGHT_KEY_P8`, `--sign-at-export` and the signed .ipa; with the
   variable `SILL_TESTFLIGHT_IN_CI` true too, `--upload`.
 - docs/release-checklist.md, "TestFlight": the record field by field (§1),
-  the App Store address (§2), the site (§3: the live pages were main's but
-  for download.html, kept at "being prepared" on purpose, and the
-  `email_off` comments, so republish without download.html), the build (§4),
+  the App Store address (§2), the site (§3: sill-site holds main's `site/`
+  but for download.html, kept at "being prepared" on purpose, so TestFlight
+  needs no republish; a later one leaves out download.html, `.nojekyll` and
+  `.github`), the build (§4),
   internal testers (§5), Test Information with a beta description (§6),
   external testers and Beta App Review (§7), the screenshot session (§8,
   metadata §9) and TestFlight from GitHub Actions. docs/app-store-metadata.md:
@@ -62,6 +63,27 @@ the record field by field. Nothing was uploaded and no record was created.
   27 of 27 mutants caught; in the session's scratchpad, `testflight/tests`);
   the workflow's YAML (every action pinned, no expression in a run script,
   bash 3.2 parses each run block) and its shell steps with fake inputs.
+- Review fixes (2026-09-26): `--upload` refuses uncommitted changes as
+  `--bump` does (a build that stays here only warns), and both count new
+  files in iOSClient and Sources/StreamProtocol, which reach the build
+  unlisted (the local StreamProtocol package, the asset catalog); an
+  `appStoreText` that is neither the placeholder nor an App Store address
+  stops the build; `--api-key` refuses a file that isn't a .p8 key, and a
+  relative `--api-key` or `--privacy-report` path is the caller's, not the
+  repository's; an expired Xcode sign-in, and a failure after `--bump` (its
+  commit, then run again without it), are named. Roles, from Apple's pages:
+  uploading takes Developer or above and signing through a key Admin (the
+  docs had App Manager, and a notary key that could do neither). The
+  workflow's key step names a secret that isn't base64 (it ended at
+  base64's own complaint). The checklist's republish (§3, and part 1 §3's)
+  deleted sill-site's own `.nojekyll` and `.github/FUNDING.yml` (tried with
+  this Mac's openrsync on a copy), part 2's first release pointed at the
+  rsync below, which leaves out download.html, and §3 said the published
+  pages lacked the email_off comments (Cloudflare strips them; sill-site
+  has them). Verified: the offline checks, 150 (123 and 27 new), and 39 of
+  39 mutants (27 and 12 new); the key step under bash 3.2 with a good, a
+  raw, a garbled and an empty secret; the export options against Xcode
+  27.0's `xcodebuild -help`.
 - **Untested, for Noah:** the record, the upload (`Scripts/release-ios.sh
   --upload` after the checklist's TestFlight §1 and §2), TestFlight on the
   devices, any run on GitHub (unsigned first, then with the key), signing
@@ -2615,10 +2637,13 @@ good.
   the Local Network, Bonjour and camera entries, the privacy manifest, an
   Apple Distribution signature, an App Store profile, no get-task-allow, the
   required-reason APIs against the manifest), `--bump`, `--api-key`,
-  `--print-version` and `--privacy-report`; it refuses any Xcode but 27, and
-  sourced it only defines its functions (docs/release-checklist.md,
-  TestFlight). `Scripts/make-app.sh` builds, iconizes, signs and
-  installs the bundle; `Scripts/release.sh` (M6) makes the download from it:
+  `--print-version` and `--privacy-report`; it refuses any Xcode but 27,
+  with `--bump` or `--upload` a working tree with changes (new files in
+  iOSClient and Sources/StreamProtocol count), and an App Store address in
+  `SillLinks.swift` that isn't one, and sourced it only defines its
+  functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
+  builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
+  (M6) makes the download from it:
   `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
   service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
   the ticket stapled, the zip made again with the ticket inside, and a copy

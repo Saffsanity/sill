@@ -112,12 +112,14 @@ jobs:
           dir="$RUNNER_TEMP/sill-testflight-key"
           mkdir -m 700 "$dir"
           key="$dir/AuthKey_$SILL_TESTFLIGHT_KEY_ID.p8"
-          printf '%s' "$SILL_TESTFLIGHT_KEY_P8" | base64 --decode > "$key"
-          chmod 600 "$key"
-          if ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
+          # Tested inside the if, so a secret that isn't base64 gets this message too: bash -e with
+          # pipefail would otherwise end the step at base64's own complaint.
+          if ! printf '%s' "$SILL_TESTFLIGHT_KEY_P8" | base64 --decode > "$key" 2>/dev/null \
+              || ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
             echo "::error::SILL_TESTFLIGHT_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8)."
             exit 1
           fi
+          chmod 600 "$key"
           echo "SILL_TESTFLIGHT_KEY_FILE=$key" >> "$GITHUB_ENV"
 
       - name: Archive without signing and check it (Scripts/release-ios.sh --unsigned)

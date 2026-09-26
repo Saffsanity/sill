@@ -3,7 +3,7 @@
 # App Store): a Release archive of iOSClient/Sill.xcodeproj, signed for App Store Connect and
 # exported as an .ipa on this Mac, or uploaded.
 #
-#   Scripts/release-ios.sh                    archive, export .build/ios/export/Sill.ipa and check it;
+#   Scripts/release-ios.sh                    archive, export and check .build/ios/export/Sill.ipa;
 #                                             nothing goes to App Store Connect
 #   Scripts/release-ios.sh --upload           the same, then the archive goes to App Store Connect,
 #                                             where it becomes a TestFlight build
@@ -35,8 +35,10 @@
 # without signing exports the same way, with the same entitlements: --sign-at-export.
 #
 # Uploading needs the app's record in App Store Connect (docs/release-checklist.md, TestFlight) and
-# a build number that version hasn't had: --bump. Uploading takes the Account Holder, Admin or App
-# Manager role; signing through an API key (cloud-managed certificates) takes Admin.
+# a build number that version hasn't had: --bump. Uploading takes the Account Holder, Admin, App
+# Manager or Developer role, but every export here signs, and signing through an API key
+# (cloud-managed certificates) takes Admin: any other key, the notary key (Developer) included,
+# gets "Cloud signing permission error".
 #
 # Nothing here stores a credential. The API key file stays where you keep it (outside the
 # repository: the script refuses a key inside it) and only its path goes to xcodebuild; with the
@@ -45,10 +47,13 @@
 # Why each step:
 # - Xcode 27 or nothing: App Store Connect takes builds made with a current SDK only, and the
 #   project, CI and Sill for Mac are all built with Xcode 27. Raise `xcode_major` with them.
-# - --bump refuses a working tree with changes because it commits the new number alone: an
-#   uploaded build then names exactly one commit. The export keeps the project's number
-#   (manageAppVersionAndBuildNumber NO in Packaging/ExportOptions-appstore.plist), so App Store
-#   Connect refuses a number it has seen instead of Xcode quietly picking another.
+# - --bump and --upload refuse a working tree with changes (a build that stays on this Mac only
+#   gets a warning): --bump commits the new number alone, and an uploaded build then names exactly
+#   one commit. New files count where the build takes files the project doesn't list: the asset
+#   catalog in iOSClient, and the StreamProtocol package, which Xcode builds from the repository's
+#   Package.swift with every Swift file in Sources/StreamProtocol. The export keeps the project's
+#   number (manageAppVersionAndBuildNumber NO in Packaging/ExportOptions-appstore.plist), so App
+#   Store Connect refuses a number it has seen instead of Xcode quietly picking another.
 # - The archive and every xcodebuild step log to .build/ios/*.log; this prints one line per step
 #   and, when one fails, its errors and what usually fixes them.
 # - The exported .ipa is unpacked and checked before anything is uploaded: the version and build
@@ -79,6 +84,7 @@ usage: Scripts/release-ios.sh [--bump] [--upload] [--sign-at-export] [--api-key 
   --upload
       then uploads the archive to App Store Connect, where it becomes a TestFlight build. It needs
       the app's record there (bundle ID me.saffer.sill) and a build number not uploaded before.
+      Refuses when the working tree has changes.
   --bump
       first adds 1 to CURRENT_PROJECT_VERSION in iOSClient/Sill.xcodeproj and commits that alone
       ("iOS: build N of version V"). Refuses when the working tree has changes.
@@ -86,8 +92,8 @@ usage: Scripts/release-ios.sh [--bump] [--upload] [--sign-at-export] [--api-key 
       an App Store Connect API key (App Store Connect › Users and Access › Integrations › App Store
       Connect API) for signing and uploading, instead of the Apple Account in Xcode › Settings ›
       Accounts. PATH is the AuthKey_<Key ID>.p8 file, kept outside the repository; the Key ID
-      comes from its name unless --api-key-id gives it. Signing through a key (cloud-managed
-      certificates) needs the Admin role; uploading, Admin or App Manager.
+      comes from its name unless --api-key-id gives it. The key needs the Admin role: every
+      export signs through it with a cloud-managed certificate, which no other role may.
   --sign-at-export
       archives without signing; the export signs (Apple Distribution, App Store profile) as it
       always does. For a Mac or runner without a development certificate, such as the TestFlight
@@ -126,6 +132,7 @@ verbose=0
 auth=()          # xcodebuild's -authenticationKey* arguments, when an API key is given
 signer="the Apple Account in Xcode"   # who Xcode signs and uploads through, for the step lines
 unpacked=""      # an .ipa's copy being checked; removed on exit
+bumped=""        # the build --bump committed, for a failure's last line
 
 say() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -180,20 +187,41 @@ project_setting() {
     printf '%s\n' "$values"
 }
 
-# --bump: CURRENT_PROJECT_VERSION + 1 in every configuration, committed alone. Refuses a working
-# tree with changes to tracked files (untracked ones can't be in the build: the project lists its
-# files).
-bump_build() {
-    local version="$1" build="$2" next dirty others
-    dirty="$(git status --porcelain --untracked-files=no)"
-    if [ -n "$dirty" ]; then
-        {
-            echo "error: --bump commits the new build number alone, and the working tree has changes:"
-            printf '%s\n' "$dirty" | sed 's/^/  /'
-            echo "Commit or stash them first. Nothing was changed."
-        } >&2
-        exit 2
+# What would make a build no commit's, as `git status --porcelain` lines: every change to a tracked
+# file, and new files where the build takes files the project doesn't list. Xcode builds the
+# StreamProtocol package from the repository's Package.swift, which compiles every Swift file in
+# Sources/StreamProtocol, and the asset catalog in iOSClient takes every folder in it. New files
+# elsewhere, such as design work, can't reach the build and don't count.
+uncommitted_changes() {
+    {
+        git status --porcelain --untracked-files=no || true
+        git status --porcelain --untracked-files=all -- iOSClient Sources/StreamProtocol Package.swift | grep '^??' || true
+    } 2>/dev/null
+}
+
+# The changes a build would carry that no commit has. $1 says why they matter, and the run stops
+# there (exit 2, nothing changed or built); without $1, for a build that stays on this Mac, only a
+# warning.
+check_committed() {
+    local why="$1" changes
+    changes="$(uncommitted_changes)"
+    if [ -z "$changes" ]; then return 0; fi
+    if [ -z "$why" ]; then
+        warn "the working tree has uncommitted changes, so this build is not any commit's. Commit first (then --bump) for a build you can find again."
+        return 0
     fi
+    {
+        echo "error: $why, and the working tree has changes:"
+        printf '%s\n' "$changes" | sed 's/^/  /'
+        echo "Commit or stash them first. Nothing was changed or built."
+    } >&2
+    exit 2
+}
+
+# --bump: CURRENT_PROJECT_VERSION + 1 in every configuration, committed alone, on a tree that
+# check_committed found clean.
+bump_build() {
+    local version="$1" build="$2" next others
     if ! [[ "$build" =~ ^[0-9]+$ ]]; then
         fail "--bump adds 1 to a whole number, and CURRENT_PROJECT_VERSION is '$build'. Set the next number in Xcode (target Sill › General › Build) and commit it. Nothing was changed."
     fi
@@ -206,6 +234,7 @@ bump_build() {
     fi
     git commit -q -m "iOS: build $next of version $version" \
         -m "The next build for App Store Connect (Scripts/release-ios.sh --bump)." -- "$pbxproj"
+    bumped="$next of $version ($(git rev-parse --short HEAD))"
     say "Build number $build → $next, committed as $(git rev-parse --short HEAD) (iOS: build $next of version $version)"
 }
 
@@ -215,6 +244,7 @@ use_api_key() {
     local key="$1" issuer="$2" key_id="$3" dir file root
     if [ -z "$issuer" ]; then fail "--api-key needs --api-issuer: the Issuer ID above the keys in App Store Connect › Users and Access › Integrations › App Store Connect API."; fi
     if [ ! -f "$key" ] || [ ! -r "$key" ]; then fail "--api-key: $key is not a file this user can read."; fi
+    if ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then fail "--api-key: $key is not an App Store Connect API key, the .p8 file that begins -----BEGIN PRIVATE KEY-----."; fi
     dir="$(cd "$(dirname "$key")" && pwd -P)"
     file="$(basename "$key")"
     root="$(pwd -P)"
@@ -254,16 +284,25 @@ explain_failure() {
             echo "Xcode has no way to sign for team $team here: add its Apple Account in Xcode › Settings › Accounts (it makes and renews the certificates and profiles), or give --api-key and --api-issuer."
         fi
         if grep -q -i 'Cloud signing permission error' "$log"; then
-            echo "The API key may not use cloud-managed distribution certificates: signing through a key needs one with the Admin role (App Store Connect › Users and Access › Integrations)."
+            if [ "$signer" = "the Apple Account in Xcode" ]; then
+                echo "The Apple Account in Xcode may not sign with a cloud-managed distribution certificate: that takes Account Holder or Admin, or the permission Access to Cloud Managed Distribution Certificate (App Store Connect › Users and Access)."
+            else
+                echo "The API key may not use cloud-managed distribution certificates: signing through a key needs one with the Admin role (App Store Connect › Users and Access › Integrations)."
+            fi
         fi
         if grep -q -i -E 'App Store Connect access|not a member of|Unable to authenticate' "$log"; then
             echo "The account or key can't reach App Store Connect for team $team: check the Apple Account in Xcode › Settings › Accounts (signed in, a role that may upload), or the API key and its role."
+        fi
+        if grep -q -i 'session has expired' "$log"; then
+            echo "Xcode's sign-in to the Apple Account has expired: open Xcode › Settings › Accounts (sign in again if it asks), then run this again."
         fi
         if grep -q -i 'No suitable application records' "$log"; then
             echo "App Store Connect has no app with the bundle ID $bundle_id yet: create its record (docs/release-checklist.md, TestFlight, step 1), then run this again."
         fi
         if grep -q -i -E 'Redundant Binary Upload|must be higher than the previously uploaded|already uploaded a build' "$log"; then
             echo "App Store Connect already has this build number for this version: run again with --bump."
+        elif [ -n "$bumped" ]; then
+            echo "--bump already committed build $bumped: once this is fixed, run this again without --bump."
         fi
     } >&2
 }
@@ -522,10 +561,19 @@ make_archive() {
     fi
 }
 
-# The line to show when the source isn't committed: a build made from changes nobody can see again.
-dirty_warning() {
-    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-        warn "the working tree has uncommitted changes, so this build is not any commit's. Commit first (then --bump) for a build you can find again."
+# SillLinks.appStoreText, the link under a Mac's update notice: the placeholder only warns (no link
+# shows), and anything else must be an App Store address, such as
+# https://apps.apple.com/app/id6712345678: the app would show a mistyped one as a link to nowhere.
+check_app_store_address() {
+    local text pattern='^https://apps\.apple\.com/([a-z]{2}/)?app/([^/]+/)?id[0-9]+$'
+    text="$(sed -n -E 's/^[[:space:]]*static let appStoreText = "([^"]*)".*$/\1/p' "$links" | head -1)"
+    if [ "$text" = APP_STORE_URL_PLACEHOLDER ]; then
+        warn "$links still says APP_STORE_URL_PLACEHOLDER, so a Mac's update notice shows no App Store link in this build. Once the App Store Connect record exists, put its address there (docs/release-checklist.md, TestFlight §2)."
+    elif [ -z "$text" ]; then
+        warn "$links has no appStoreText line this script can read, so the App Store address went unchecked."
+    elif ! [[ "$text" =~ $pattern ]]; then
+        echo "error: $links gives appStoreText \"$text\", which is not an App Store address such as https://apps.apple.com/app/id6712345678 (the Apple ID is in App Store Connect › App Information; docs/release-checklist.md, TestFlight §2). Nothing was built." >&2
+        exit 2
     fi
 }
 
@@ -553,6 +601,9 @@ main() {
         esac
         shift
     done
+    # A path given relative to where this runs from, before moving to the repository's root.
+    case "$api_key" in ""|/*) ;; *) api_key="$PWD/$api_key" ;; esac
+    case "$report_archive" in ""|/*) ;; *) report_archive="$PWD/$report_archive" ;; esac
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
     if [ "$unsigned" = 1 ] && { [ "$upload" = 1 ] || [ "$bump" = 1 ] || [ "$sign_at_export" = 1 ] || [ -n "$api_key" ]; }; then
@@ -582,16 +633,19 @@ main() {
         exit 2
     fi
     if [ -n "$api_key" ]; then use_api_key "$api_key" "$api_issuer" "$api_key_id"; fi
+    if [ "$bump" = 1 ]; then
+        check_committed "--bump commits the new build number alone"
+    elif [ "$upload" = 1 ]; then
+        check_committed "--upload sends App Store Connect only a build of a commit"
+    else
+        check_committed ""
+    fi
+    check_app_store_address
     trap cleanup EXIT
 
     if [ "$bump" = 1 ]; then
         bump_build "$version" "$build"
         build="$(project_setting CURRENT_PROJECT_VERSION)"
-    else
-        dirty_warning
-    fi
-    if grep -q 'APP_STORE_URL_PLACEHOLDER' "$links"; then
-        warn "$links still says APP_STORE_URL_PLACEHOLDER, so a Mac's update notice shows no App Store link in this build. Once the App Store Connect record exists, put its address there (docs/release-checklist.md, TestFlight)."
     fi
 
     local info
