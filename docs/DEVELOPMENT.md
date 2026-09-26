@@ -91,16 +91,18 @@ when one has, the menu offers "Sill 0.4 Is Available…" and Settings › Genera
 says so; either opens the release's page on GitHub, where you download it.
 Sill never downloads or installs anything by itself, and a failed check is one
 line in the log and in Settings, never an alert. The request carries the Mac's
-IP address (like any visit to a website) and Sill's version in its User-Agent
-("Sill/0.3.0"), and nothing else: no identifier, no cookie, nothing about your
-devices. "Check for updates automatically" turns the daily check off (what an
-earlier check found stays in the menu); the check needs a published GitHub
-release, so while the repository has none it logs "GitHub has no release of
-Sill (HTTP 404)" once a day. It keeps `updateLastCheck`, `updateETag`,
-`updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`; to make the
-next launch check again after 30 s: `for k in updateLastCheck updateETag
-updateLatestTag updateLatestURL; do defaults delete me.saffer.sill.mac $k;
-done` (`defaults delete` takes one key at a time).
+IP address (like any visit to a website), Sill's version in its User-Agent
+("Sill/0.3.0"), a fixed `Accept-Language: en` (URLSession would otherwise send
+the Mac's languages) and, after a first answer, GitHub's own ETag back
+(If-None-Match); nothing else about the Mac or you: no identifier, no cookie,
+nothing about your devices. "Check for updates automatically" turns the daily
+check off (what an earlier check found stays in the menu); the check needs a
+published GitHub release, so while the repository has none it logs "GitHub has
+no release of Sill (HTTP 404)" once a day. It keeps `updateLastCheck`,
+`updateETag`, `updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`;
+to make the next launch check again after 30 s: `for k in updateLastCheck
+updateETag updateLatestTag updateLatestURL; do defaults delete
+me.saffer.sill.mac $k; done` (`defaults delete` takes one key at a time).
 
 ### The command-line host
 

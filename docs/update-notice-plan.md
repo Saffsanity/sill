@@ -740,8 +740,9 @@ In `me.saffer.sill.mac` (the bare binary's domain is `SillMenuBar`):
 - **Where it goes:** GitHub's logs, under GitHub's privacy statement. The developer receives nothing:
   there is no server of ours.
 - **Opening the release page** is an ordinary visit to github.com in the person's browser.
-- **The device's hello** (§3.1) goes only to the Mac it connects to, over the home network or the
-  person's own VPN.
+- **The device's hello** (§3.1) goes only to the Mac it connects to, on whatever carries the
+  session: the home network, the cable, Direct Wireless, or with Remote Access the person's own VPN
+  or forwarded port.
 
 **The line for `site/privacy.html` (app-store-readiness), as written:**
 
@@ -753,8 +754,8 @@ In `me.saffer.sill.mac` (the bare binary's domain is `SillMenuBar`):
 > your devices or what you stream. We receive nothing from these checks; GitHub’s privacy statement
 > covers what GitHub keeps. Sill never downloads or installs anything by itself. The iPhone and iPad
 > app checks for nothing: the App Store updates it. It does tell your Mac which version of Sill it
-> runs, over your own network or VPN, so that your Mac can say when the app needs an update to keep
-> working with it.
+> runs when it connects, so that your Mac can say when the app needs an update to keep working with
+> it.
 
 The iOS app's App Privacy answer stays "Data Not Collected": the device sends its version only to
 the person's own Mac.
