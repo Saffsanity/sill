@@ -520,7 +520,8 @@ final class StreamClient: ObservableObject {
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
     // live connection never goes quiet for long; a dead path used to keep a frozen picture.
-    /// The last completed receive with data (CACurrentMediaTime).
+    /// When the last bytes came (CACurrentMediaTime): every header and every piece of a payload
+    /// (MessageReader, at most 256 KB a read), so a session is live while any byte arrives.
     private var lastReceivedAt = 0.0
     /// The worst round trip of the last second that measured one, ms.
     private var worstRecentRttMs: Double?
@@ -952,7 +953,7 @@ final class StreamClient: ObservableObject {
                     self.followBestPath()
                 }
                 self.startMeasuring(c, remote: false)   // before the first read, so the first window is this connection's alone
-                self.readHeader(on: c)
+                self.startReading(c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
                 // Once `c` carries the session (a wired dial's too), waiting again means its path is gone.
@@ -1215,7 +1216,8 @@ final class StreamClient: ObservableObject {
     /// Mac adds a connection to its broadcasts before its catalog goes out. A goodbye (kind 22)
     /// before the list goes to `moveSaidGoodbye`, and the reading goes on to the Mac's close. A read
     /// that fails, a message cut short, or one bigger than the session's reader takes
-    /// (`readHeader`), cancels `c`, which ends the move (`moveEnded`).
+    /// (MessageReader's caps), cancels `c`, which ends the move (`moveEnded`). Its own reads, whole
+    /// messages at a time: its 5 s bound it, and it reads only up to the first window list.
     private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -1247,8 +1249,8 @@ final class StreamClient: ObservableObject {
             }
             if header.payloadLength == 0 { next(Data()); return }
             c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
-                // As in readPayload: fewer bytes than announced is the connection ending mid-message,
-                // never a message to keep.
+                // As in MessageReader: fewer bytes than announced is the connection ending
+                // mid-message, never a message to keep.
                 guard let data, data.count == header.payloadLength else {
                     if isComplete || error != nil || data != nil { c.cancel() }
                     return
@@ -1374,7 +1376,7 @@ final class StreamClient: ObservableObject {
         queue.async {
             self.startMeasuring(c, remote: false)
             for m in kept { self.handle(m.header, m.payload) }
-            self.readHeader(on: c)
+            self.startReading(c)
         }
         // The Mac keeps a frame rate per connection: this one's viewport is the first thing the new
         // connection carries once the fence is down, and the old one closes half a second after
@@ -2003,7 +2005,7 @@ final class StreamClient: ObservableObject {
         connection = c
         queue.async { [weak self] in
             self?.startMeasuring(c, remote: true)
-            self?.readHeader(on: c)
+            self?.startReading(c)
         }
     }
 
@@ -2237,53 +2239,34 @@ final class StreamClient: ObservableObject {
 
     // MARK: - Host → client
 
-    /// The read loop is bound to one connection: a replaced connection's loop stops at its next
-    /// read instead of reading from the new one. The direct connection a move is leaving is read on
-    /// until its fence's pong (`deliver`): the same loop, so no message is split between two.
-    private func readHeader(on c: NWConnection) {
-        guard link.reads(c) else { return }
-        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
-            guard let self, self.link.reads(c) else { return }
-            guard let data, let header = StreamMessage.parseHeader(data) else {
-                // EOF (the host closed cleanly) or a read error: both mean the Mac is gone.
-                if let error { print("read error: \(error)") }
-                if isComplete || error != nil { self.connectionLost(c, error: error) }
-                return
-            }
-            self.lastReceivedAt = CACurrentMediaTime()
-            // Nothing a Sill host sends is bigger than these (docs/remote-access-plan.md §3.7). A
-            // reader that waited for whatever a header announces could be held for ever, or read
-            // an SSH banner as a 1.7 GB payload: closed, and on a remote dial that is "not Sill".
-            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
-            guard header.payloadLength <= cap else {
-                print("closing: the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
-                self.connectionLost(c, end: .notSill)
-                c.cancel()
-                return
-            }
-            self.readPayload(header, on: c)
-        }
+    /// Reads `c` (MessageReader) for as long as SessionLink reads it: a replaced connection's
+    /// reading stops at its next read instead of reading from the new one, and the direct connection
+    /// a move is leaving is read on until its fence's pong (`deliver`), by the same reader, so no
+    /// message is split between two. Every header and every piece of a payload stamps liveness
+    /// (`lastReceivedAt`), so a large message crossing a slow path keeps its session alive. On
+    /// `queue`.
+    private func startReading(_ c: NWConnection) {
+        MessageReader(connection: c,
+                      stillReads: { [weak self] in self?.link.reads(c) ?? false },
+                      onBytes: { [weak self] _ in self?.lastReceivedAt = CACurrentMediaTime() },
+                      onMessage: { [weak self] header, data in self?.deliver(header, data, from: c) },
+                      onEnd: { [weak self] end in self?.readingEnded(c, end) }).start()
     }
 
-    private func readPayload(_ header: StreamHeader, on c: NWConnection) {
-        // A zero-length payload is legal (an empty window list, say); receive() rejects length 0.
-        guard header.payloadLength > 0 else {
-            deliver(header, Data(), from: c)
-            readHeader(on: c)
-            return
-        }
-        c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { [weak self] data, _, isComplete, error in
-            guard let self, self.link.reads(c) else { return }
-            // EOF or an error mid-message is the Mac gone, as it is between messages: ignoring it
-            // left a dead connection on screen with a frozen picture.
-            guard let data, data.count == header.payloadLength else {
-                if let error { print("read error: \(error)") }
-                if isComplete || error != nil || data != nil { self.connectionLost(c, error: error) }
-                return
-            }
-            self.lastReceivedAt = CACurrentMediaTime()
-            self.deliver(header, data, from: c)
-            self.readHeader(on: c)
+    /// `c`'s reading ended by itself. On `queue`.
+    private func readingEnded(_ c: NWConnection, _ end: MessageReader.End) {
+        switch end {
+        case .closed(let error):
+            // EOF (the host closed cleanly) or a read error, between messages or in the middle of
+            // one: both mean the Mac is gone.
+            if let error { print("read error: \(error)") }
+            connectionLost(c, error: error)
+        case .tooBig(let header):
+            // Nothing a Sill host sends is bigger (docs/remote-access-plan.md §3.7): closed, and on
+            // a remote dial that is "not Sill".
+            print("closing: the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
+            connectionLost(c, end: .notSill)
+            c.cancel()
         }
     }
 

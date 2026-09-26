@@ -1,20 +1,14 @@
 # Pure checks
 
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
-takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
-video encoder and when a stream gets a new encoder session) are plain Swift files that compile on
-their own. Each folder here compiles one or a few of those files, exactly as they are in `Sources/`
-and `iOSClient/`, together with its own `main.swift`, and runs the result. Nothing here needs a
-device, Screen Recording, Accessibility, the video encoder or any network but loopback, so the
-checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and pushes
-to `main`.
 takes, the settings ledger, the wire format, pairing, who may use which door, which device versions a
-Mac serves, how a session ends, what the update check makes of GitHub's answer) are plain Swift files
-that compile on their own. Each folder here compiles one or a few of those files, exactly as they
-are in `Sources/` and `iOSClient/`, together with its own `main.swift`, and runs the result. Nothing
-here needs a device, Screen Recording, Accessibility, the video encoder or any network but
-loopback, so the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull
-requests and pushes to `main`.
+Mac serves, how a session ends, how the device reads the Mac's messages, what the update check makes
+of GitHub's answer, how frames go into the video encoder and when a stream gets a new encoder
+session) are plain Swift files that compile on their own. Each folder here compiles one or a few of
+those files, exactly as they are in `Sources/` and `iOSClient/`, together with its own `main.swift`,
+and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the video encoder
+or any network but loopback, so the checks run anywhere Xcode does, and in CI
+(`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about two minutes on an M-series Mac
@@ -40,6 +34,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order | 14 modes | 19 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
+| `message-reader` | `iOSClient/MessageReader.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's reader against a stand-in Mac on loopback: 2,000 random messages in random chunks delivered byte for byte and in order, payloads read in pieces of at most 256 KB with every piece reported (liveness counts bytes), the end mid-message and with the last bytes, the caps, and a stop between messages and mid-payload | 43 | 16 |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
 | `policy` | `iOSClient/DiscoveryPolicy.swift` | when the device looks nearby, its rows and their words, the route word, the wired dial, reconnects, the move off AWDL, a session following the best path (the cable, Wi-Fi, Direct) and the remote rule | 286 | 70 |
@@ -47,11 +42,11 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
 | `update-policy` | `Sources/SillMenuBar/UpdatePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | Sill.app's update check: what each answer from GitHub's releases feed means, the offer, the schedule, the feeds and pages it accepts, every text | 124 | 18 |
 
-The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
-two encoder checks' are those of the encoder-two-in-flight branch that brought them.
-The counts are those of main at 1f3072a, where every check passes and every mutant is caught, and
-for the four the `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`,
-`update-policy`), those of its merge with main at 32d532b.
+The counts are those of main at 1f3072a, where every check passes and every mutant is caught; for
+the four the `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`,
+`update-policy`), those of its merge with main at 32d532b; the two encoder checks', those of the
+encoder-two-in-flight branch that brought them; and `message-reader`'s, the `remote-pacing`
+branch's (docs/remote-bundle-plan.md, H5).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -99,4 +94,6 @@ a permission, a device or the network, and never anything that links VideoToolbo
   (`mailbox` with its mutants, `probe`, `encoder`; `Scripts/encoder-check/run.sh`), which refuse to
   run any binary that links VideoToolbox. When it merges, move them here (or call that script from
   `ci.yml`).
-- `home-pairing` and `remote-bundle` are plans so far, without checks.
+- `home-pairing` and the rest of `remote-bundle` (items 2–4) are plans so far, without checks. Its
+  item 1's host side is measured by the pacing harness (`Scripts/pacing/run.sh`), which needs no
+  encoder but runs for minutes and on loopback at up to 600 Mbit/s, so it is not a pure check.
