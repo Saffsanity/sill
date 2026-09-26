@@ -88,7 +88,7 @@ Apps › + › New App:
 | Field | Value |
 |---|---|
 | Platforms | iOS |
-| Name | `Sill` (see section 2 if it is refused) |
+| Name | `Sill – Window Streaming` ("Sill" was taken in App Store Connect on 2026-09-26; section 2) |
 | Primary Language | English (U.S.) |
 | Bundle ID | `me.saffer.sill` (Xcode's automatic signing on team 9B2KKVM937 should have registered it; if the menu lacks it, add it under Certificates, Identifiers & Profiles. It can't change after the first upload.) |
 | SKU | `sill-ios` (never shown; can't change) |
