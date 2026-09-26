@@ -8,6 +8,208 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Update check and device notice (2026-09-25, branch `update-notice` from
+`remote-access` at cb0ec55, PR #13, with main merged in at 1f3072a and again
+at 32d532b, not rebased; the plan, its open questions with the defaults taken,
+and the results are in `docs/update-notice-plan.md`).** Noah's
+request: an update check in Sill.app with Apple frameworks only (GitHub's
+releases feed, not Sparkle), and a host-to-device notice so a later Mac can tell
+an old device to update instead of failing silently. The first public builds
+set the compatibility floor for good (the section before Conventions).
+- Wire (additive; `Compatibility.swift`): kind 23 `Hello {appVersion, build,
+  protocol, device}`, the first message of every session connection a device
+  makes (never a pairing connection; older hosts skip it); `SillVersion` (tags,
+  bundles and the wire's versions: "v" dropped, the digits-and-dots prefix,
+  compared part by part, "0.10" > "0.9"); `SillProtocol.current` 1. Kind 22
+  gains `message`, `minimumVersion`, `reconnect` and the reason "update" (nil
+  fields left out: the five goodbyes of today are byte for byte what they were).
+  Window lists carry `hostVersion` (Sill.app's; nil from SillHost) and
+  `protocol`.
+- Host: `DeviceGate.minimumDeviceVersion` is "0": nobody is refused and nothing
+  waits. Above it (only `SILL_TEST_MIN_DEVICE_VERSION` on a host that does not
+  advertise, in this build), both doors hold a ready connection unregistered
+  until its first message: a hello the floor admits is served; a lower version,
+  no hello, another kind, the end or 2 s of silence gets kind 22 "update" ("Update
+  Sill on your iPad to keep using ‹Mac›. It needs version 1.2 or later.",
+  `"reconnect":false`) and this side's FIN, what it still sends is read and
+  dropped until it closes (at most 1 s: cancelling at once answered its later
+  messages with a reset, which can beat the notice), and it is never registered
+  (no "Client connected", no "Client left", no "Remote client connected"). One Refused line per source a
+  minute, then a count line; a source refused 5 times in 60 s hears it 2 s late.
+  `SILL_TEST_GOODBYE` sends another kind 22 instead. A hello is logged ("Client
+  hello: iPad (iPad14,1), Sill 1.0 (42), protocol 1 (…)") and names the Mac
+  card's row before its stats. Pairing is never refused for age. What changed
+  while the gate held a connection is judged again as it admits it: the remote
+  door re-reads its trust snapshot (`serve`'s recheck, `RemoteServer.stillAdmits`:
+  removed, Remote Access or internet access off, the 8-session limit, each with
+  its goodbye and closeSessions' line), and at home a connection on peer-to-peer
+  Wi-Fi that the peer-to-peer listener accepted is disconnected if Direct
+  Wireless went off meanwhile. The remote door's refusals at admission
+  (remoteOff, busy) close like the
+  gate's (`closeWithGoodbye`); over TLS the close_notify and FIN go only at the
+  cancel, so the device sees the end, and the notice, up to 1 s after the
+  goodbye.
+- Device: `GoodbyePolicy` is the one rule for how a session ends. Today's five
+  reasons keep their words; "update" and any reason this build does not know
+  are notices: the Mac's message (SafeText, at most 300 characters) as the status
+  line, spoken, a reconnect only with `"reconnect":true`, looked at before a
+  remote dial's failure rules (before, an unknown reason showed "disconnected"
+  and redialled at once: a loop against a Mac that refuses). "update" adds
+  "Update Sill in the App Store" under it once `SillLinks.appStoreText` holds
+  the App Store address (a placeholder now; DEBUG `-SillAppStoreURL`). The
+  hello goes out first on a tap's, a reconnect's, a wired dial's and its
+  fallback's, a move's and a remote winner's connection (`-SillHelloVersion`),
+  written to a home dial's connection as it is made, before it is the
+  session's (a send made before `.ready` then follows it), and a tear-down
+  forgets the session's viewport and a pointer re-send still waiting;
+  `hostVersion`/`hostProtocol` are kept, shown nowhere. A refused home session
+  shows the stream screen for a frame or two first (connected at `.ready`;
+  accepted, open question 10).
+- Sill.app: `UpdateChecker` (+ pure `UpdatePolicy`) asks
+  https://api.github.com/repos/Saffsanity/sill/releases/latest 30 s after launch
+  when due, then every 24 h plus 0–30 min, an hour after a check with no answer,
+  re-armed at wake, and at Check Now: an ephemeral URLSession, `User-Agent:
+  Sill/‹version›`, GitHub's Accept and API version, `Accept-Language: en` (it would
+  otherwise send the Mac's languages), If-None-Match; no cookies, cache or
+  credentials; redirects only to api.github.com; 1 MB, 10 s. A published release
+  (not a draft or prerelease, its page on github.com) whose tag is newer than
+  CFBundleShortVersionString is offered as "Sill 0.4 Is Available…" after the
+  card (the glyph stays) and in Settings › General ("Check for updates
+  automatically", on by default, wired to the checker from launch; Check Now's
+  result until GitHub answers an automatic check, else the offer or the last
+  check; Open Release Page…; Check Now); both open the page in the browser,
+  nothing is downloaded. A 404
+  (the repository is private today) is one log line a day and nothing else.
+  `make-app.sh --release` builds only a commit tagged `v‹version›`.
+- Verified (the plan's Results has every number): clean builds (only the
+  CaptureProbe and `StreamClient` capture warnings); pure checks with swiftc
+  and mutants: the protocol 74 (13 of 13), DeviceGate 58 (14 of 14),
+  GoodbyePolicy 42 (16 of 16), UpdatePolicy 124 (18 of 18); cb0ec55's
+  StreamProtocol reads the new payloads and skips kind 23; the CLI's stdout,
+  idle 35 s and with a Desktop pick, masked and sorted, equals cb0ec55's;
+  UpdateChecker alone against `sillfeed.py` (every answer of §6.4, the headers
+  and nothing else, the timeout, the retry, Check Now joining); the bare app end
+  to end (the live menu item, the pane, 304, 404 silent, off, test pattern
+  mode); previews differ from cb0ec55's only in General, menu.txt's new sample
+  and the new update states; the gate on the CLI (both doors, the loop
+  slowdown, the count line, SILL_TEST_GOODBYE) and on StreamServer alone (no
+  resets); the simulator against real hosts: the notice at home and through
+  the remote door, no reconnect, redials only when asked, an older host, and
+  photos at eight sizes.
+- Review fixes (2026-09-25, after a85118d; the plan's "Review fixes"), in the
+  bullets above: the hello written as a home dial is made, the gate's second
+  look, the door's refusals with a FIN, the pane after a later check, the switch
+  from launch. Checked: a stand-in with
+  the real SessionLink.swift and a listener logging kinds: the hello first in 5
+  of 5 each for a send right after start, after a hop to the network queue and
+  200 ms into a Bonjour dial still resolving (the old order lost it in all
+  three); the device against a stand-in Mac. A rig of StreamServer and
+  RemoteAccess alone (no encoder): a hello held through Remove, Remote Access
+  off and internet access off gets removed, remoteOff and internetOff with their
+  lines (the build before served all three); 12 held sessions: 8 served, 4 busy
+  (12 before); remoteOff and busy at admission with the hello 0.5 ms after the
+  handshake: 30 of 30 end in a FIN (8 and 21 resets in 30 before). The real CLI
+  with the en0 stand-in: a held connection is disconnected once Direct Wireless
+  is off (the build before registered and served it). The checker alone: Check
+  Now's result, then an automatic answer, 12 of 12 (5 failures before); the
+  bare app: off at 0 s sends nothing, on at 0 s from a saved off asks (the build
+  before did the reverse), the pane follows a release found after Check Now.
+  H4–H6, H7 (42), UpdatePolicy (124) and H8's seven runs pass; the CLI's stdout,
+  masked and sorted, equals cb0ec55's; previews equal the build before's; iOS
+  Debug, Release and device builds with only the old warning.
+- Merged with main (merge 104a9bd of main at 1f3072a: PRs #11 encoder recovery,
+  #12 follow-best-path, #14 App Store readiness, #15 the public README). Where
+  they meet: every connection the device opens says hello first, #12's moves
+  included: `startMove` (from AWDL, to the cable, to Wi-Fi, a rescue's
+  reconnect, each fallback) writes it as the connection is made, as
+  `connect(to:)` does, and a remote winner says it in `adopt`; main's `rescue`
+  reads `goodbye`. `SillLinks` is one enum (the site's addresses and the App
+  Store one), once in the project file. The public README stays main's; this
+  branch's Updates, tag and hello paragraphs are in docs/DEVELOPMENT.md. The
+  pointer plan's Mac menu bar kinds move to 24, 25 and 27 (23 is the hello).
+  Fix-ups: `release.sh --dry-run` builds an untagged commit again
+  (`SILL_RELEASE_DRY_RUN=1`) while a real run names the missing tag in its
+  preflight, and the checklist gains the tag and the App Store address
+  (184d902); the privacy policy's Update check section, and the download page
+  (05d9d3a). Verified on the merge: clean builds (only the CaptureProbe and
+  `StreamClient` capture warnings; `make-app.sh` without `--install`); this
+  branch's pure checks against the merged sources (the protocol 74, DeviceGate
+  58, GoodbyePolicy 42, UpdatePolicy 124, their 61 mutants caught) and main's
+  (the discovery policy 286 with 70 of 70 mutants, main's own 187 with the 20
+  older ones, the fence in its 12 modes with 16 of 16, the remote rules 64
+  with 35 of 35, the ledger 90 with 5,000 random runs and 3 of 3, the remote
+  protocol 188); the hello first on the merged SessionLink (the review's check,
+  and a new one for #12's hold and fenced hand-overs: the move's connection
+  says hello first, one without it is caught; the source: two connections
+  made, three hellos sent); the checker alone against sillfeed.py (42, and the
+  stale-result check); the bare app's H8 runs 1 and 2; previews from the bundle
+  against origin/main's: only General, menu.txt's `update-available` sample and
+  the 20 new update states differ; the CLI's stdout against origin/main's,
+  idle 35 s and with a Desktop pick, masked and sorted: identical; the gate on
+  the merged CLI (H5, H6 a–h with the remote door, the slowdown and its count
+  line) and origin/main's host skipping the hello; a simulator of its own
+  (deleted after): at floor 99 the notice, no reconnect, no second connection
+  in 60 s; at floor 0.1 admitted and streaming, and with `-SillMoveTest 1` the
+  move's own connection admitted with its hello and the session moved to it;
+  the update and notice cases at four sizes above main's footer.
+- Review fixes after the merge (2026-09-25; the plan's "Review fixes after the
+  merge"): `release.sh --publish` refuses, before building, unless origin's tag
+  v‹version› names HEAD (gh would make a missing tag from the default branch's
+  tip), passes gh `--verify-tag` in Saffsanity/sill, and warns when
+  `SILL_RELEASE_REPO` is elsewhere, since every update check reads only
+  Saffsanity/sill (the checklist's sill-site fallback publishes a download no
+  Sill.app offers); the tag match is `grep -Fx`. A goodbye on a move's
+  connection before its window list ends a session whose own connection has
+  gone with the Mac's words (a rescue refused by a newer Mac: the notice, no
+  reconnect), and a live session's move up no longer retries the listing that
+  refused it. The privacy policy says the device tells the Mac its version
+  "when it connects" (no VPN outside the Remote Access markers), and its short
+  version names the fixed "en" and the IP address. §13 of the plan is the floor
+  as written here; getsill.app and support@getsill.app read as confirmed in
+  SillLinks, the checklist and the metadata. Verified: the builds; release.sh
+  and make-app.sh against scratch repositories (60 checks, 13 of 13 mutants;
+  d4abceb's fail 40) and `publish_release` against a fake GitHub API; the
+  simulator against Python stand-ins, before and after; the site's cut gate;
+  every pure check with its mutants, H7 (42) and the stale-result check (11).
+- Merged with main again (2026-09-26; merge c01610b of main at 32d532b: PR
+  #16, the best path's follow-ups, and PR #17, GitHub Actions; the plan's
+  "Merged with main again"). No host source changed on main since 1f3072a.
+  Where they met: `sessionEnded` keeps GoodbyePolicy's rule and passes #16's
+  `afterQuit` after goodbye "quit" (a notice never sets it); release.sh keeps
+  both sides' checks, main's `SILL_RELEASE_TAG`, `--check-tag`, icon check and
+  `gh api` preflight (`gh auth status`, which the Actions token can't answer,
+  is gone) and this branch's tag rule, and the release workflow
+  (`GITHUB_ACTIONS` with `SILL_RELEASE_TAG`) does not ask origin for the tag
+  (`in_release_workflow`: its checkout is origin's tag and keeps no
+  credentials); the checklist says a pushed tag starts the release workflow,
+  which publishes when `SILL_SIGN_IN_CI` is on, so `--publish` by hand then
+  does not. `Tests/checks`: protocol's kind 23 case is the hello, and this
+  branch's four pure checks moved in (662a70e): `compatibility` 74,
+  `device-gate` 58, `goodbye` 42 and `update-policy` 124, with 61 mutants, in
+  CI's mutants matrix too. Verified: a clean release build and the three iOS
+  builds (only the known warnings); CI's CLI step; `Tests/checks/run-all.sh`,
+  all 13, and `--mutants`, all 279 mutants caught; the hello first on the
+  merged SessionLink and StreamClient; release.sh and make-app.sh in scratch
+  repositories with a stub gh (101 checks, 20 of 20 mutants; the scripts
+  before the merge fail 26 and 50 of them) and `publish_release` against a
+  fake GitHub API; the simulator against this head's CLI (floor 99: the
+  notice, no reconnect; floor 0.1: admitted and streaming, and a move's own
+  connection with its hello; a goodbye "quit": its words and one connection).
+- **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
+  this Sill.app yourself; within a minute "Update check failed: GitHub has no
+  release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t
+  check: GitHub has no release of Sill yet.", `updateLastCheck` set), V2 once
+  the repository is public with a newer release, V3 a refusal on the iPad (its
+  Debug build, `-SillConnect <this Mac>:P`, against
+  `SILL_TEST_MIN_DEVICE_VERSION=99 SillHost --synthetic`; VoiceOver speaks it; no
+  reconnect in 2 minutes), V4 mixed builds (PR #13's iPad build against this
+  Sill.app and this iPad build against PR #13's: as before), V5 VoiceOver on the
+  Mac, V6 the first two notarized builds (permissions kept across the update;
+  `--release` refuses an untagged HEAD, `release.sh --dry-run` only warns,
+  `--publish` refuses until the tag is pushed), V7
+  the privacy policy's Update check section (site/privacy.html) on the
+  published site, once Saffsanity/sill-site is republished.
+
 **GitHub Actions (2026-09-25, branch `github-actions` from main at 1f3072a).**
 Noah: the download link still fails; a new release should be checked by
 GitHub, and does that cost money. The link fails twice over: there is no
@@ -180,12 +382,12 @@ Apple's sources and every text to paste into App Store Connect;
   5.1.1(i); the website in `site/` and `Scripts/release.sh` (Layout); the two
   docs, with the Remote Access switch (the cuts for a 1.0 without it).
 - Confirmed by Noah on 2026-09-25 (the site is live): the site at `https://getsill.app`
-  (`site/CNAME`, `SillLinks.swift`, both docs; nothing is served there yet),
-  the contact address `support@getsill.app` (the privacy and support
-  pages and the metadata; never ship it), and the Mac download at `/download`
-  (`site/download.html`, whose version, link and SHA-256 are placeholders that
-  release.sh's output fills in). The checklist's Placeholders table has the one
-  command that changes each everywhere.
+  (`site/CNAME`, `SillLinks.swift`, both docs), the contact address
+  `support@getsill.app` (the privacy and support pages, the README and the
+  metadata; Cloudflare Email Routing forwards it to Noah), and the Mac download
+  at `/download` (`site/download.html`, which links the newest GitHub Release's
+  `Sill.zip` and is never edited per release). The checklist's Placeholders
+  table has the commands that change each everywhere.
 - The merge: the footer sits under main's connect screen (Add a Mac…, the
   Remote rows, the card, the leading anchor, the Duo's top half, the column at
   the top while a field has the keyboard). The branch drew the column twice,
@@ -2259,6 +2461,11 @@ good.
   `RemoteIdentity.swift` (SPKI fingerprints, the Mac ID, the hand-built
   certificate, keys), `Pairing.swift` (`PairingCode`, `PairingProof`,
   `RecognitionTag`, `PairLink`), `AddressParser.swift`, `SafeText.swift`.
+  `Compatibility.swift` — `SillProtocol.current` (1), `SillVersion` (tags,
+  bundles and the wire's versions, compared part by part) and `Hello` (kind 23,
+  the device's first message); `Goodbye` (Remote.swift) carries `message`,
+  `minimumVersion` and `reconnect` too, and `WindowList` the host's
+  `hostVersion` and `protocol`.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -2319,6 +2526,10 @@ good.
   `PairingWindow` (pure), `RemoteServer` (the remote door), `Reachability`,
   `AddressList` (pure) and `RouterAddress` (read-only NAT-PMP/PCP),
   `RemoteAccess` (main actor; ties them together, signs kind 18).
+  `DeviceGate` (the device floor, "0" in every build so far, and a refusal's
+  words and log lines; pure, checked with swiftc; the gate itself, which runs
+  only above "0", is StreamServer's, with the TEST ONLY
+  SILL_TEST_MIN_DEVICE_VERSION and SILL_TEST_GOODBYE).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -2332,7 +2543,9 @@ good.
   (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
   code), `PairingWindowAddress` (the address that window gives to type:
   Tailscale's name and IPv4 first, another VPN's IP only under this network's
-  address; pure, checked with swiftc).
+  address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
+  and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
+  GitHub's releases feed and times the checks; compiles on its own with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
   (get-task-allow only). `Scripts/make-app.sh` builds, iconizes, signs and
   installs the bundle; `Scripts/release.sh` (M6) makes the download from it:
@@ -2343,13 +2556,21 @@ good.
   Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
   `site/download.html`. It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
-  keychain) or the profile, or with `SILL_RELEASE_TAG` (the release workflow
-  sets it) not `v<CFBundleShortVersionString>` or naming another commit
-  (`--check-tag` checks only that), and `--dry-run` stops before notarytool (the
-  profile only warned about); it refuses a build without Assets.car and
-  AppIcon.icns, and `--publish` asks `gh api repos/<repo>` whether it can reach
-  the repository (`gh auth status` asks GET /user, which the Actions token
-  can't answer); sourced, it only defines its functions.
+  keychain) or the profile, or on a HEAD without the tag v‹version› (the
+  update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
+  not `v<CFBundleShortVersionString>` or naming another commit (`--check-tag`
+  checks only that), and `--dry-run` stops before notarytool (the profile and
+  the tag only warned about: it sets `SILL_RELEASE_DRY_RUN=1`, with which
+  `make-app.sh --release` builds an untagged commit); it refuses a build
+  without Assets.car and AppIcon.icns. `--publish` makes the GitHub Release in
+  `SILL_RELEASE_REPO` (default Saffsanity/sill, the only repository the update
+  check reads), asks `gh api repos/<repo>` whether it can reach the repository
+  (`gh auth status` asks GET /user, which the Actions token can't answer), and
+  refuses to start unless origin's tag v‹version› names HEAD (gh would make a
+  missing tag from the default branch's tip; not asked in the release
+  workflow, whose checkout is that tag and keeps no credentials); in
+  Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
+  Sill.app will offer the release. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
@@ -2372,6 +2593,12 @@ good.
   base commit built from `git archive` (parity, stream, harness, probe,
   keyframe), each only while `no-device.sh` finds no device connected to
   Sill.app; outputs go to `.build/encoder-check/`.
+  through). `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's
+  hello first, and kind 22's new fields are printed. `Scripts/sillfeed.py PORT`
+  is a fake GitHub releases feed for the update check's tests (`--tag`,
+  `--status`, `--etag`, `--draft`, `--prerelease`, `--html-url`, `--body`,
+  `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
+  `--all-headers`; `GET /__control?key=value` changes them while it runs).
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
   `index.html`, `download.html` (the current release's version, link and
   SHA-256, set by hand from release.sh's output), `privacy.html` (the policy
@@ -2424,7 +2651,9 @@ good.
   whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
   footer), so a fit that changes never builds the card anew (its fields, the
   camera); + DEBUG harness), `SillLinks`
-  (the site's addresses, written once; getsill.app is live since 2026-09-25),
+  (the site's addresses, written once; getsill.app is live since 2026-09-25;
+  and the App Store address for a Mac's update notice, a placeholder until the
+  App Store Connect record exists),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
@@ -2432,7 +2661,9 @@ good.
   `SavedMacs` (pure), `RemoteDialPolicy` (pure), `RemoteConnector`,
   `StreamClient+Remote` (pairing, remote dials, the reconnect order, links),
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
-  `PairingOverlay` (Pair This iPad…).
+  `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
+  reconnect after a session ends, a Mac's notice included; pure, checked with
+  swiftc).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -2483,6 +2714,9 @@ good.
   `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
   checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
   [-v] [name…]` runs them and exits
+  `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
+  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
+  `run-all.sh [--mutants] [-v] [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
@@ -2520,14 +2754,25 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless), and a launch argument such as `-maxFPS 60`
-overrides one for one run. A device's change from its Settings panel is saved there too, like a
+virtualDisplay, directWireless, updateCheck; the update check keeps
+updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
+argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
 defaults domain `SillMenuBar`; delete it after): `--synthetic` (test pattern,
 off Bonjour; the port is in the "Status: Test Pattern Mode" line),
 `-SillLogFile <path>`, `-SillSetAfter '<s> key=value[,key=value][; <s> …]'`,
 `-SillQuitAfter <s>`, `-SillRenderPreviews <dir>` (panes, cards, glyphs,
-menu.txt; no permission needed). Render previews from
+menu.txt; no permission needed). The update check, in the bare binary (which
+has no version and never checks without these) and the app: `-SillUpdateFeed
+http://127.0.0.1:P/latest` (a feed on this Mac only: 127.0.0.1, ::1 or
+localhost; `Scripts/sillfeed.py P` serves one; test pattern mode checks only
+such a feed), `-SillUpdateVersion 0.3.0`, `-SillUpdateNow 1` (one check at
+start, as Check Now), `-SillUpdateInterval <s>` (24 h become s seconds, the
+retry s/24), `-SillPrintMenuAfter <s>` (the status menu as it would open, and
+Settings › General's update line, in the log), `-SillSetAfter '<s>
+updateCheck=0'`. Never run a test against GitHub. To make Sill.app check again at
+its next launch: `for k in updateLastCheck updateETag updateLatestTag
+updateLatestURL; do defaults delete me.saffer.sill.mac $k; done`. Render previews from
 `.build/Sill.app/Contents/MacOS/Sill` to see what Sill.app looks like: only the
 bundle's copy records the real SDK (make-app.sh sets it with vtool; see Current
 step), and the bare binary draws the pre-26 look. `--encoder-selftest` and
@@ -2563,6 +2808,11 @@ in a 0700 directory instead of memory or the keychain; the bare app's
 printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
 `SILL_TEST_ORIGIN=vpn|internet` (loopback counts as that origin) and
 `SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every headless host).
+The device floor, headless: `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the floor
+of a host that does not advertise (a device below it, or one that sends no
+hello, gets kind 22 "update" and is closed; a value that does not parse is
+ignored with one line), and `SILL_TEST_GOODBYE='<JSON Goodbye>'` makes its
+refusals send that payload instead (a reason the device does not know).
 The bare app takes `-remoteAccess 1 -remotePort P`, `-SillSetAfter '3
 remotePort=P2'`, `-SillPairAfter <s>` and `-SillUnpairAfter <s>`; its
 `-SillRenderPreviews` adds the Remote Access pane's states and the pairing
@@ -2583,9 +2833,11 @@ directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
 after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
 Wired, `noroute` none, and `remote`, `remoteinternet` and `remoteslow` none,
 where the route line says how),
-`-SillConnectCase looking|hint|nearby|methods|denied` (the connect screen in a discovery
-state; `methods` has a row ending in each word, none, and long names; the mock never
-browses) and remote access's `remote|addmac|addcode|addcodeerror|
+`-SillConnectCase looking|hint|nearby|methods|denied|update|notice` (the connect screen in a discovery
+state; `methods` has a row ending in each word, none, and long names; `update` a
+Mac's refusal with "Update Sill in the App Store" when `-SillAppStoreURL
+https://apps.apple.com/app/id000000000` gives it an address, `notice` a goodbye
+reason the device does not know; the mock never browses) and remote access's `remote|addmac|addcode|addcodeerror|
 pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
@@ -2595,7 +2847,8 @@ the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
 at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
 `-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
 `'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
-that route), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`
+that route), `-SillHelloVersion <v>` (the version the hello gives, against a
+host's floor), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`
 (a Secure Enclave device key, R0-a); `xcrun simctl openurl <udid>
 'sill://pair…'` shows the link's confirmation after the system's "Open in
 Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
@@ -2622,6 +2875,49 @@ real; the spec is ContentView's contract, the console's "path: …" lines say
 what happened). A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot.
+
+## Compatibility floor
+
+The first public builds (Sill for iPhone and iPad from the App Store, Sill.app from GitHub) set it
+for good. Sill.app changes only when its user downloads a new version (its update check only points
+at one), and a device can stay on an old version (automatic updates off, an iOS the next version
+dropped). So every later host keeps serving devices from the first public build on, and every later
+device keeps working with Macs from the first public build on, or each says why
+(docs/update-notice-plan.md):
+- Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
+  (docs/home-pairing-plan.md, branch `home-pairing`, in progress; it ships before 1.0, Noah
+  2026-09-25), not today's plain-TCP `_sill._tcp` door, which only development builds and the CLI
+  keep; the 14-byte header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of
+  Switcher, Input, Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16
+  within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`.
+- Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
+  numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
+  three cases (a new source goes in an optional field, with `active` still one of the three). A new
+  `InputEvent` case, scroll phase or window command goes only to a host that said it takes it (a
+  kind or a field only newer hosts send), and a gesture ends with a scroll phase the first build
+  knows.
+- A device is refused, never served wrong. A host that can no longer serve older devices raises
+  `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
+  before anything else. A device from 2026-09-25 on that receives it shows the host's message word
+  for word, with its App Store link, and does not reconnect; older development builds cannot. At
+  the TLS home door only devices from home pairing on receive it (Decided, below).
+- Every device says hello first (kind 23: its version, build, protocol and name), and every host's
+  window list gives its version and protocol (`hostVersion`, nil from SillHost and from Macs
+  before 2026-09-25). A later device facing an older Mac tells what it lacks from these and from
+  which kinds and fields arrive, and says "Update Sill on ‹Mac›", as the Settings panel already
+  does for a Mac without kind 16.
+- `SillProtocol.current` (1) rises only with a change an older peer cannot skip, and the floor
+  rises with it.
+- Decided (Noah, 2026-09-25; the plan's open question 14): home pairing ships before 1.0, so the
+  floor is the TLS home door with pairing, and no 1.0 device speaks plain TCP to Sill.app. The
+  hello goes first inside TLS at both doors, through `serve`'s gate: whichever of this branch and
+  `home-pairing` lands second puts the gate in home-pairing's `Door`, one place for both doors,
+  and settles `SillProtocol` against home pairing's ALPN (`sill/1`; a later generation `sill/2`):
+  if 1.0's TLS home door is protocol 1, pairing on the home door leaves the examples of what
+  raises it (Compatibility.swift, the plan's §3.2 and §4.6). Builds from before home pairing,
+  this one included, dial plain TCP and say hello in plaintext: at the TLS door they get a failed
+  handshake and EOF, never kind 22 "update", and redial. Only development and TestFlight builds
+  are that old, so no plaintext path or sniffer answers them.
 
 ## Conventions
 

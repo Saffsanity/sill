@@ -27,8 +27,8 @@ public enum StreamMessageKind: UInt8 {
                              // shows them and what this host allows; on connect (right after the window list), whenever it
                              // changes, and with `answering` set as the reply to one device's changeSettings
     case changeSettings = 17 // client → host: JSON HostSettingsChange — only the fields one control changed, plus a token.
-                             // No ack kind, no "send me the state" kind, no version handshake: the answer is a hostSettings
-                             // sent to that device alone
+                             // No ack kind, no "send me the state" kind, no version check for settings (a kind 16 on the
+                             // connection says the host has them): the answer is a hostSettings sent to that device alone
     // Remote access (Remote.swift, Pairing.swift). Older readers map all five to `.unknown` and skip them.
     case macInfo = 18        // host → device: JSON SignedMacInfo — who this Mac is and how to reach it from afar, signed
                              // with its identity key. In the catalog right after kind 16, on both doors, and again whenever
@@ -38,7 +38,13 @@ public enum StreamMessageKind: UInt8 {
     case pairResult = 20     // host → device: JSON PairResult — the answer to 19; the host then closes the connection
     case pairingWanted = 21  // device → host, empty payload: "show your pairing code" (Pair This iPad…). Home door only,
                              // from this Mac's own networks, at most once per 30 s per connection; ignored elsewhere
-    case goodbye = 22        // host → device: JSON Goodbye — why the host is about to close this session
+    case goodbye = 22        // host → device: JSON Goodbye — why the host is about to close this session, and
+                             // what the device should do then (a message to show, whether to reconnect)
+    // Compatibility (Compatibility.swift). Older hosts map it to `.unknown` and skip it.
+    case hello = 23          // device → host: JSON Hello — who the device is (its version, build, protocol and
+                             // name). The first message of every session connection, before anything else, so a
+                             // host can judge the device before it sends anything (DeviceGate). Never on a
+                             // pairing connection
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

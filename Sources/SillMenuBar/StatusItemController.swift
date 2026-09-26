@@ -24,6 +24,8 @@ struct MenuEntry: Equatable {
         case showSettingsTab(SettingsTab)
         /// Pair iPhone or iPad…: a pairing window, or the open one brought forward.
         case showPairing
+        /// Sill 0.4 Is Available…: the release's page on GitHub, in the browser (UpdateChecker).
+        case openUpdate(URL)
     }
 
     var kind: Kind
@@ -52,8 +54,12 @@ struct LoginState: Equatable {
 /// The status menu, top to bottom. Titles are title case, subtitles sentence case. The controls
 /// mirror the Settings window and only ever set the app's settings.
 enum MenuBuilder {
+    /// `update`: a newer release the update check found, and this Sill's version: one item right
+    /// after the card and anything needing attention. The glyph never changes for it: the attention
+    /// glyph means Sill needs the person before it can work, and an update needs nothing.
     static func entries(presentation p: StatusPresentation, config: HostConfig, login: LoginState,
-                        permissions: PermissionState) -> [MenuEntry] {
+                        permissions: PermissionState,
+                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil) -> [MenuEntry] {
         var menu: [MenuEntry] = [MenuEntry(kind: .card, title: p.header)]
         for a in p.attention {
             let action: MenuEntry.Action = switch a.action {
@@ -64,6 +70,10 @@ enum MenuBuilder {
             }
             menu.append(MenuEntry(kind: .item, title: a.title, subtitle: a.subtitle, enabled: action != .none,
                                   attention: true, action: action))
+        }
+        if let update {
+            menu.append(MenuEntry(kind: .item, title: UpdatePolicy.menuTitle(update.offer),
+                                  subtitle: UpdatePolicy.menuSubtitle(running: update.running), action: .openUpdate(update.offer.url)))
         }
         menu.append(.separator)
 
@@ -123,6 +133,20 @@ enum MenuBuilder {
         menu.append(.separator)
         menu.append(MenuEntry(kind: .item, title: "Quit Sill", key: "q", action: .quit))
         return menu
+    }
+
+    /// The live menu for `model` as it would open now (the status item's rebuild, and
+    /// -SillPrintMenuAfter): its presentation, settings, login item, permissions and any update the
+    /// check found.
+    @MainActor
+    static func entries(for model: AppModel) -> [MenuEntry] {
+        let login = LoginState(available: model.loginItem.available, on: model.loginItem.isOn,
+                               needsApproval: model.loginItem.needsApproval, error: model.loginItem.error)
+        let permissions = PermissionState(screenRecording: model.permissions.screenRecording,
+                                          accessibility: model.permissions.accessibility)
+        let update = model.updates.offer.flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
+        return entries(presentation: model.presentation, config: model.settings.config, login: login, permissions: permissions,
+                       update: update)
     }
 
     /// The menu as text, for the previews: "✓" checked, "⚠" attention, "(off)" disabled.
@@ -213,13 +237,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) { menuOpen = false }
 
     private func rebuild() {
-        let login = LoginState(available: model.loginItem.available, on: model.loginItem.isOn,
-                               needsApproval: model.loginItem.needsApproval, error: model.loginItem.error)
-        let permissions = PermissionState(screenRecording: model.permissions.screenRecording,
-                                          accessibility: model.permissions.accessibility)
         menu.removeAllItems()
-        for entry in MenuBuilder.entries(presentation: model.presentation, config: model.settings.config,
-                                         login: login, permissions: permissions) {
+        for entry in MenuBuilder.entries(for: model) {
             menu.addItem(makeItem(entry))
         }
     }
@@ -270,6 +289,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .showSettings: model.showSettings?(nil)
         case .showSettingsTab(let tab): model.showSettings?(tab)
         case .showPairing: model.pairDevice()
+        case .openUpdate(let url): NSWorkspace.shared.open(url)   // the browser; no modal loop
         case .quit: NSApp.terminate(nil)
         }
     }

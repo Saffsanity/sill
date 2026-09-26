@@ -7,19 +7,22 @@ no build step), and `Scripts/release.sh` makes the notarized Mac download.
 
 ## Placeholders
 
-Noah hasn't confirmed these yet. Each lives in the places listed, and one command changes them all.
+The domain and the support address are Noah's (confirmed 2026-09-25); only the App Store address
+still waits, for the App Store Connect record. Each lives in the places listed.
 
 | What | Now | Where |
 |---|---|---|
-| The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `docs/app-store-metadata.md`, this file |
-| The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `docs/app-store-metadata.md` |
+| The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `README.md`, `docs/DEVELOPMENT.md`, `docs/app-store-metadata.md`, `Scripts/release.sh`, this file |
+| The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `README.md`, `docs/app-store-metadata.md`, this file |
 | The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names | `site/download.html` (never edited per release, part 2) |
+| The App Store address | `APP_STORE_URL_PLACEHOLDER`: until it is replaced, a Mac's update notice on the device shows no "Update Sill in the App Store" link (its words still say what to do) | `iOSClient/SillLinks.swift` (`appStoreText`; part 1 §4 says when) |
 
-With the real values in place of `<domain>` and `<address>`:
+To change one, with the new value in place of `<address>` or `<domain>`: the first command
+changes the support address, the second the domain everywhere, the address's own included.
 
 ```
-grep -rl 'sill\.saffer\.me' site iOSClient docs | xargs sed -i '' 's#sill\.saffer\.me#<domain>#g'
-grep -rl support@getsill.app site docs/app-store-metadata.md | xargs sed -i '' 's#support@getsill.app#<address>#g'
+grep -rl 'support@getsill\.app' site README.md docs/app-store-metadata.md docs/release-checklist.md | xargs sed -i '' 's#support@getsill\.app#<address>#g'
+grep -rl 'getsill\.app' site iOSClient docs Scripts README.md | xargs sed -i '' 's#getsill\.app#<domain>#g'
 ```
 
 ## Part 1: once
@@ -71,6 +74,8 @@ shell.
 
 - [ ] Rehearse with that command: `--dry-run` checks the setup, builds, signs and zips, and stops
       before anything goes to Apple. When something is missing it says what, and builds nothing.
+      It builds any commit and only warns that HEAD lacks the release's tag (part 2), which a real
+      run refuses to build without.
 
 ### 3. The website
 
@@ -78,8 +83,8 @@ Preview it with `python3 -m http.server 8000 --directory site` and http://localh
 
 Before it goes public:
 
-- [ ] Replace `support@getsill.app` (above) with an address someone reads. Apple wants real
-      contact details behind the Support URL (guideline 1.5).
+- [x] Done 2026-09-25: `support@getsill.app` reaches Noah's mailbox (Cloudflare Email Routing,
+      below). Apple wants real contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
@@ -144,6 +149,10 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       (`ITSAppUsesNonExemptEncryption`), so the uploaded build must not show Missing Compliance.
 - [ ] App Review Information (metadata §7 and §8): contact, notes, the video.
 - [ ] Version Release: Manually release this version, so an approval waits for the Mac download.
+- [ ] Once the record exists, before the first upload: in `iOSClient/SillLinks.swift`, replace
+      `APP_STORE_URL_PLACEHOLDER` with `https://apps.apple.com/app/id<Apple ID>` (App Information
+      shows the Apple ID). A Mac that needs a newer Sill on the device then shows "Update Sill in
+      the App Store" under its notice.
 
 ## Part 2: every release
 
@@ -151,6 +160,14 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       build number is the commit count, which make-app.sh stamps in. The iOS app's are
       MARKETING_VERSION and CURRENT_PROJECT_VERSION in `iOSClient/Sill.xcodeproj` (target Sill ›
       General). Commit.
+- [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag v0.4.0` and
+      `git push origin v0.4.0` for 0.4.0. `make-app.sh --release` builds only the commit carrying
+      it, and `release.sh --publish` refuses to start until origin's tag names that commit, then
+      makes the GitHub Release for it. Every Sill.app's update check reads the releases of
+      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag (not
+      a draft, not a prerelease) with the version it runs: once Saffsanity/sill is public, within a
+      day of a release there, every older Sill.app offers it. While the repository is private,
+      GitHub answers the check with a 404 and no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, and prints the zip's
       path, its SHA-256 and where Apple's notary log is. It warns when the log lists issues: read
@@ -161,13 +178,21 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       for the review video (metadata §8).
 - [ ] Publish: `Scripts/release.sh --publish` (with the same two variables), or a pushed tag with
       the release workflow ("Releasing from GitHub Actions" below), creates the GitHub Release
-      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`. The site's
-      Download button links `releases/latest/download/Sill.zip`, which GitHub redirects to the newest
-      release, so download.html is never edited. The repository must be public for anonymous
-      downloads; until it is, set `SILL_RELEASE_REPO=Saffsanity/sill-site` and point the button there.
-      One way or the other for a version: a local `--publish` in Saffsanity/sill has gh create the
-      tag, and a tag created on GitHub can start the release workflow too (a verify-only run, or with
-      `SILL_SIGN_IN_CI` one that stops at "already exists" before building: macOS minutes either way).
+      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`; before it
+      builds, `--publish` checks that origin has the tag and that it names HEAD (the workflow's
+      checkout is that tag). The site's Download button links `releases/latest/download/Sill.zip`,
+      which GitHub redirects to the newest release, so download.html is never edited. The
+      repository must be public for anonymous downloads and for the update check. Until it is,
+      `SILL_RELEASE_REPO=Saffsanity/sill-site` publishes there instead (point download.html's three
+      GitHub links there too), and release.sh warns: a release in sill-site can be downloaded, but
+      no Sill.app will offer it, so the download page's "it tells you when a new version is out"
+      does not hold for it. Once sill is public: unset `SILL_RELEASE_REPO` (in `~/.sill-release`
+      and the repository variable of that name too), point the links back at Saffsanity/sill, and
+      publish the newest release there, so that every older Sill.app offers it. One way or the
+      other for a version: pushing the tag, which a local `--publish` needs first, also starts the
+      release workflow. With `SILL_SIGN_IN_CI` set to `true` that run publishes the release, so
+      don't also run `--publish` here (whichever comes second stops at "already exists"); without
+      it the run only verifies (macOS minutes either way).
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
       republish `site/` (the rsync below) so the button shows. Then, in a private window, download
       it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
@@ -303,9 +328,9 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   runs on Free. Each push to a pull request (drafts too) is a run, so a busy day of pushes can
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same. A signed release also waits for Apple's notary service, usually 15 to 30
-  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about an hour and a
-  half of macOS time across their eight jobs: some 900 included minutes, nearly half of Free's
-  month, or about $5.50.
+  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about two hours of
+  macOS time across their twelve jobs: some 1,200 included minutes, more than half of Free's
+  month, or about $7.50.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip of about 2 MB for 14 days, the notary log for 30) within the 500 MB of
   artifact storage on GitHub Free.

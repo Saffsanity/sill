@@ -2,7 +2,8 @@ import Foundation
 import Network
 
 /// The session's connection to the Mac as StreamClient uses it: the connection it reads, and the
-/// one door every message to the Mac goes out of (pings aside: each connection sends its own).
+/// one door every message to the Mac goes out of (pings and the hello aside: each connection sends
+/// its own, the hello first of all, straight to it).
 /// Thread-safe: the network queue reads and sends, the main thread connects, hands over and
 /// disconnects, and every send takes the lock, so messages leave in the order of the calls.
 ///

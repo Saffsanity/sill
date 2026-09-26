@@ -128,8 +128,12 @@ struct ContentView: View {
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
-///   `denied` (Local Network access denied: the status says what to do, no hint); or remote
-///   access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
+///   `denied` (Local Network access denied: the status says what to do, no hint); `update` (a Mac
+///   refused this version: "Update Sill on your iPad to keep using Mac mini. It needs version 1.2
+///   or later." as the status line above a Wi‑Fi row, and "Update Sill in the App Store" under it
+///   when `-SillAppStoreURL https://apps.apple.com/app/id000000000` gives the link an address) or
+///   `notice` (a goodbye reason this build does not know: the Mac's two-line message, no link);
+///   or remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
 ///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
 ///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
 ///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
@@ -149,6 +153,9 @@ struct ContentView: View {
 ///   memory of Macs seen with Direct Wireless on, which a launch argument sets for one run (`'()'`
 ///   empties it), in the normal app and under `-SillLive 1`. Unlike `-Sill.savedMacs`, what the
 ///   run learns is still saved.
+/// * Versions, in the normal app too: `-SillHelloVersion <v>` is the version this device's hello
+///   (kind 23) gives, for a host's device floor under test (`SILL_TEST_MIN_DEVICE_VERSION`);
+///   `-SillAppStoreURL <https url>` is the App Store link's address while SillLinks has none.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -432,6 +439,22 @@ struct ConnectScreen: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
+
+        // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
+        // status line above): where to get the new one, while the status line still says why. Not
+        // before Sill's App Store address is known (SillLinks): the words say what to do anyway.
+        if let notice = client.notice, notice.storeLink, notice.text == client.status, let url = SillLinks.appStore {
+            Link(destination: url) {
+                Text("Update Sill in the App Store")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the App Store.")
+        }
 
         ForEach(client.macs) { mac in
             // The kind of link, never the Wi-Fi network's name: that needs Location access, which

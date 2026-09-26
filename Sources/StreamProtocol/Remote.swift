@@ -151,12 +151,28 @@ public struct PairResult: Codable, Sendable {
     public static let code = "code", closed = "closed", expired = "expired", stopped = "stopped", busy = "busy"
 }
 
-/// Kind 22: why the host is about to close this session.
-public struct Goodbye: Codable, Sendable {
-    /// "removed", "remoteOff", "internetOff", "quit" or "busy".
+/// Kind 22: why the host is about to close this session, and what the device should do then
+/// (docs/update-notice-plan.md §3.3). Nil fields are left out of the JSON, so the five goodbyes
+/// sent before 2026-09-25 are still, byte for byte, `{"reason":"quit"}` and the like.
+public struct Goodbye: Codable, Sendable, Equatable {
+    /// "removed", "remoteOff", "internetOff", "quit", "busy" or "update". Always sent: a device from
+    /// before 2026-09-25 decodes nothing without it. A device from then on treats a reason it does not
+    /// know by `message` and `reconnect`, so a later host can tell it anything (GoodbyePolicy).
     public var reason: String
+    /// Shown word for word as the connect screen's status line (after SafeText.label, at most 300
+    /// characters). "update" always carries one, and a new reason should. Nil: the device's own words.
+    public var message: String?
+    /// With "update": the oldest device version this host serves, as SillVersion shows it ("1.2").
+    public var minimumVersion: String?
+    /// Whether the device reconnects by itself. Nil is false for "update" and for a reason the device
+    /// does not know; the older reasons keep their own rules. A refusal always sends false.
+    public var reconnect: Bool?
 
-    public init(reason: String) { self.reason = reason }
+    public init(reason: String, message: String? = nil, minimumVersion: String? = nil, reconnect: Bool? = nil) {
+        self.reason = reason; self.message = message; self.minimumVersion = minimumVersion; self.reconnect = reconnect
+    }
 
     public static let removed = "removed", remoteOff = "remoteOff", internetOff = "internetOff", quit = "quit", busy = "busy"
+    /// The host no longer serves this device's version: update it (DeviceGate).
+    public static let update = "update"
 }
