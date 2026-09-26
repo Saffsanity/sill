@@ -2,7 +2,8 @@
 
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
 takes, the settings ledger, the wire format, pairing, who may use which door, which device versions a
-Mac serves, how a session ends, what the update check makes of GitHub's answer) are plain Swift files
+Mac serves, how a session ends, what the update check makes of GitHub's answer, who moves the Mac's
+pointer and what the device's pointer sprite shows) are plain Swift files
 that compile on their own. Each folder here compiles one or a few of those files, exactly as they
 are in `Sources/` and `iOSClient/`, together with its own `main.swift`, and runs the result. Nothing
 here needs a device, Screen Recording, Accessibility, the video encoder or any network but
@@ -28,11 +29,13 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `clientlink` | `Sources/SillHost/ClientLink.swift` (`-package-name sill`) | which route a device came by, from its endpoint's scope and path, and the menu card's word for it | 89 | 14 |
 | `compatibility` | `Sources/StreamProtocol/*.swift` | `SillVersion` (tags, bundles and the wire's versions, and their order), `SillProtocol`, and the update notice's payloads: kind 23's hello, kind 22's new fields with the five older goodbyes byte for byte, the window list's `hostVersion` and `protocol` | 74 | 13 |
 | `device-gate` | `Sources/SillHost/DeviceGate.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's device floor: which hello it admits, the refusal's words, the Refused, count and hello lines, the shipped floor "0" | 58 | 14 |
-| `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order | 14 modes | 19 |
+| `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order; the inputs counted for the session's connection, which the Mac's pointer reports are judged by, equal those the stand-in read there (every mode, and `count` step by step) | 15 modes | 31 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
+| `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries; kind 26 itself (MacPointer's JSON, the kind table), with 5,000 random runs | 147 | 30 |
+| `pointer-presence` | `iOSClient/PointerPresence.swift` | what the device's pointer sprite shows, row by row of the plan's table (the Mac's, the portrait trackpad's, the Pencil's, both flips), a report's freshness, the network queue's feed (the anchor, takeovers, a hand-over's carry-over and restatements), the portrait pad's cursor and its mid-stroke re-seed | 141 | 36 |
 | `policy` | `iOSClient/DiscoveryPolicy.swift` | when the device looks nearby, its rows and their words, the route word, the wired dial, reconnects, the move off AWDL, a session following the best path (the cable, Wi-Fi, Direct) and the remote rule | 286 | 70 |
 | `protocol` | `Sources/StreamProtocol/*.swift`, then `crosscheck.py` | the address parser, SafeText, pairing codes and proofs, tags, the Mac ID, the certificate, kind 18's signature, framing, and TLS 1.3 with pinned keys on loopback; the cross-check repeats the certificate and signature with Python and `/usr/bin/openssl` | 188 + 8 | 20 |
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
@@ -40,7 +43,8 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 
 The counts are those of main at 1f3072a, where every check passes and every mutant is caught, and
 for the four the `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`,
-`update-policy`), those of its merge with main at 32d532b.
+`update-policy`), those of its merge with main at 32d532b; `pointer-control`, `pointer-presence` and
+`fence`'s count came with the `pointer-visibility` branch (docs/pointer-visibility-plan.md, H3).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
