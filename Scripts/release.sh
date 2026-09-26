@@ -47,6 +47,7 @@ usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
   --publish
       after the checks, creates the GitHub Release v<version> in $SILL_RELEASE_REPO
       (default Saffsanity/sill) with Sill.zip and Sill.zip.sha256, the names the site links.
+      Before building, it checks that gh reaches that repository and the release isn't there yet.
   --check-tag
       only checks that $SILL_RELEASE_TAG is v<version> of Packaging/Info.plist (and, when the tag
       is here, that it names the commit checked out), then exits.
@@ -96,10 +97,34 @@ tag_problems() {
     fi
 }
 
+# With --publish: what would otherwise stop the run only at its end, after the build and Apple's
+# notarization (in the release workflow, up to its whole hour): gh can't reach the repository, or
+# the release already exists. Prints one problem per line, and nothing when all is well.
+# publish_release asks again before it creates the release.
+publish_problems() {
+    local repo="${SILL_RELEASE_REPO:-Saffsanity/sill}" version
+    if ! command -v gh >/dev/null; then
+        echo "gh is not installed (brew install gh), or not on PATH."
+        return 0
+    fi
+    # Whether gh can reach the repository, not who it is signed in as: `gh auth status` asks that
+    # (GET /user), which the release workflow's GITHUB_TOKEN can't answer although it may create
+    # this repository's releases.
+    if ! gh api "repos/$repo" --silent >/dev/null 2>&1; then
+        echo "gh can't reach $repo: run gh auth login (in the release workflow: GH_TOKEN, or the SILL_RELEASE_TOKEN secret for another repository)."
+        return 0
+    fi
+    version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || return 0
+    if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
+        echo "The release v$version already exists in $repo. Bump CFBundleShortVersionString in Packaging/Info.plist, or delete that release (and its tag) first."
+    fi
+}
+
 # Everything a run needs before it builds, checked at once so that one run names every gap.
-# Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run.
+# Prints one problem per line, and nothing when all is well. $1 is 1 for a dry run, $2 1 for
+# --publish.
 preflight_problems() {
-    local dry_run="$1" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
+    local dry_run="$1" publish="${2:-0}" identity="${SILL_SIGN_IDENTITY:-}" profile="${SILL_NOTARY_PROFILE:-}"
     local matches count others tool
     if [ -z "$identity" ]; then
         echo "SILL_SIGN_IDENTITY is not set. Set it to your Developer ID Application identity, as in SILL_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)'."
@@ -125,6 +150,7 @@ preflight_problems() {
         done
     fi
     tag_problems
+    if [ "$publish" = 1 ]; then publish_problems; fi
 }
 
 # What notarization requires of the signature, read back from the built app. make-app.sh has
@@ -188,7 +214,7 @@ main() {
     fi
 
     local problems
-    problems="$(preflight_problems "$dry_run")"
+    problems="$(preflight_problems "$dry_run" "$publish")"
     if [ -n "$problems" ]; then
         {
             echo "error: Scripts/release.sh can't start:"
@@ -298,16 +324,10 @@ DRY
 # Sill.zip.sha256 so /releases/latest/download/<name> keeps working release after release.
 publish_release() {
     local zip="$1" version="$2" build="$3" sha="$4"
-    local repo="${SILL_RELEASE_REPO:-Saffsanity/sill}" dir asset
-    command -v gh >/dev/null || fail "gh is not installed (brew install gh), or not on PATH"
-    # Whether gh can reach the repository, not who it is signed in as: `gh auth status` asks that
-    # (GET /user), which the release workflow's GITHUB_TOKEN can't answer although it may create
-    # this repository's releases.
-    gh api "repos/$repo" --silent >/dev/null 2>&1 \
-        || fail "gh can't reach $repo: run gh auth login (in the release workflow: GH_TOKEN, or the SILL_RELEASE_TOKEN secret for another repository)"
-    if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
-        fail "release v$version already exists in $repo; bump the version in Packaging/Info.plist first"
-    fi
+    local repo="${SILL_RELEASE_REPO:-Saffsanity/sill}" dir asset problem
+    # Asked before the build too (publish_problems); again here, in case that changed meanwhile.
+    problem="$(publish_problems)"
+    if [ -n "$problem" ]; then fail "$problem (The notarized zip is $zip.)"; fi
     dir="$(mktemp -d "${TMPDIR:-/tmp}/sill-publish.XXXXXX")"
     asset="$dir/Sill.zip"
     cp "$zip" "$asset"

@@ -62,8 +62,12 @@ jobs:
           fetch-depth: 0 # make-app.sh's build number is the commit count
           persist-credentials: false
 
-      - name: Select the newest Xcode
+      # A release is built with Xcode 27 or not at all (make-app.sh records the SDK in the app).
+      - name: Select Xcode 27
         uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+          fallback: 'false'
 
       - name: Check the tag against Packaging/Info.plist
         run: Scripts/release.sh --check-tag
@@ -120,8 +124,12 @@ jobs:
           fetch-depth: 0 # make-app.sh's build number is the commit count
           persist-credentials: false
 
-      - name: Select the newest Xcode
+      # A release is built with Xcode 27 or not at all (make-app.sh records the SDK in the app).
+      - name: Select Xcode 27
         uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+          fallback: 'false'
 
       - name: Check the tag against Packaging/Info.plist
         run: Scripts/release.sh --check-tag

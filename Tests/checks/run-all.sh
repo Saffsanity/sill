@@ -9,7 +9,9 @@
 #   Tests/checks/run-all.sh -v [...]          show every check's whole output as it runs
 #
 # Each check's output goes to .build/checks/<name>/run.log (and mutants.log). A failing check's FAIL
-# lines and last lines are printed here. The exit status is the number of checks that failed.
+# lines and last lines are printed here. The exit status is the number of checks that failed. Every
+# folder with a run.sh is a check: one whose run.sh is not executable fails rather than being
+# skipped, so a new check can't sit out CI unnoticed.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -19,23 +21,33 @@ for arg in "$@"; do
     case "$arg" in
         --mutants) mutants=1 ;;
         -v|--verbose) verbose=1 ;;
-        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "usage: Tests/checks/run-all.sh [--mutants] [-v] [check ...]" >&2; exit 2 ;;
         *) names+=("$arg") ;;
     esac
 done
 if [ ${#names[@]} -eq 0 ]; then
     for dir in "$here"/*/; do
-        if [ -x "$dir/run.sh" ]; then names+=("$(basename "$dir")"); fi
+        if [ -f "$dir/run.sh" ]; then names+=("$(basename "$dir")"); fi
     done
+fi
+if [ ${#names[@]} -eq 0 ]; then
+    echo "error: no checks: no Tests/checks/<name>/run.sh" >&2
+    exit 1
 fi
 
 failed=()
 summary=()
 started=$SECONDS
 for name in "${names[@]}"; do
-    if [ ! -x "$here/$name/run.sh" ]; then
+    if [ ! -f "$here/$name/run.sh" ]; then
         echo "error: no check named '$name' (no Tests/checks/$name/run.sh)" >&2
+        failed+=("$name")
+        continue
+    fi
+    if [ ! -x "$here/$name/run.sh" ]; then
+        echo "error: Tests/checks/$name/run.sh is not executable: chmod +x it (git keeps the bit)" >&2
+        summary+=("$(printf '  FAILED  %4ss  %-26s run.sh is not executable' 0 "$name")")
         failed+=("$name")
         continue
     fi

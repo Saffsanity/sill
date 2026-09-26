@@ -165,6 +165,9 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
       Download button links `releases/latest/download/Sill.zip`, which GitHub redirects to the newest
       release, so download.html is never edited. The repository must be public for anonymous
       downloads; until it is, set `SILL_RELEASE_REPO=Saffsanity/sill-site` and point the button there.
+      One way or the other for a version: a local `--publish` in Saffsanity/sill has gh create the
+      tag, and a tag created on GitHub can start the release workflow too (a verify-only run, or with
+      `SILL_SIGN_IN_CI` one that stops at "already exists" before building: macOS minutes either way).
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
       republish `site/` (the rsync below) so the button shows. Then, in a private window, download
       it from https://getsill.app/download and compare its `shasum -a 256` with `Sill.zip.sha256`.
@@ -220,7 +223,9 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 - Then the rest of part 2 as usual: try the zip on another Mac, and for the first release,
   republish `site/`.
 - A failed run can be re-run from its page. A version that is already released is refused
-  (`release.sh` checks): bump the version, or delete that release and its tag first.
+  before anything is built or sent to Apple (`release.sh --publish` asks GitHub first, as it asks
+  whether its token reaches the repository): bump the version, or delete that release and its
+  tag first.
 
 ### Secrets and variables
 
@@ -280,21 +285,27 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 - A public repository: nothing. Standard GitHub-hosted runners, `xcode-27` included, are free and
   unlimited there.
 - A private repository, as Saffsanity/sill is today: each run's minutes count against the
-  account's included minutes (2,000 a month on GitHub Free, 3,000 on Pro), and a macOS minute
-  counts as about ten of them (GitHub's docs call it a minute multiplier; macOS costs $0.062 a
-  minute against Linux's $0.006). So roughly 200 macOS minutes a month are included on Free and
-  300 on Pro. After that, $0.062 a minute, rounded up per job, and only with a payment method on
-  file: without one, runs stop when the included minutes are used up.
+  account's included minutes (2,000 a month on GitHub Free, 3,000 on Pro). Count a macOS minute
+  as about ten of them: GitHub's billing pages no longer print the multiplier table they used to
+  (macOS 10, Linux 1), but they still speak of minute multipliers, and today's prices keep that
+  ratio ($0.062 a macOS minute against $0.006 for Linux). So plan on roughly 200 macOS minutes a
+  month on Free and 300 on Pro. After that, $0.062 a minute, rounded up per job, and only with a
+  payment method on file: without one, runs stop when the included minutes are used up.
 - To be sure nothing is ever charged while the repository is private (zero operating costs is a
-  hard rule): Settings › Billing and licensing › Budgets and alerts › New budget, for Actions,
-  $0. A personal account's budget always stops usage at its limit
-  ([budgets](https://docs.github.com/en/billing/how-tos/set-up-budgets)), so once the included
-  minutes are gone, runs wait for the next month instead. Each push to a pull request is a run,
-  so a busy day of pushes can use a week's share; making the repository public ends the question.
-- One CI run takes about 10 minutes (under 15): about $0.60 once the included minutes are gone.
-  A verify-only release about the same. A signed release also waits for Apple's notary service,
-  usually 15 to 30 minutes in all. The mutants (CI started by hand with "mutants" ticked) take an
-  hour or more of macOS time across their eight jobs.
+  hard rule): with no payment method on file, nothing can be. With one, add a budget: Settings ›
+  Billing and licensing › Budgets and alerts › New budget, product Actions, $0, and tick "Stop
+  usage when budget limit is reached" where the form offers it (where it doesn't, GitHub says the
+  budget always stops usage; [budgets](https://docs.github.com/en/billing/how-tos/set-up-budgets)).
+  Once the included minutes are gone, runs then wait for the next month. The same page's
+  "Included usage alerts" mail you at 90% and 100% of them.
+- One CI run takes about 10 minutes (under 15): about $0.60 once the included minutes are gone,
+  and about 100 included minutes before that, so the month's included minutes cover some 15 to 20
+  runs on Free. Each push to a pull request (drafts too) is a run, so a busy day of pushes can
+  use a week's share; making the repository public ends the question. A verify-only release
+  takes about the same. A signed release also waits for Apple's notary service, usually 15 to 30
+  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about an hour and a
+  half of macOS time across their eight jobs: some 900 included minutes, nearly half of Free's
+  month, or about $5.50.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip of about 2 MB for 14 days, the notary log for 30) within the 500 MB of
   artifact storage on GitHub Free.
@@ -305,8 +316,12 @@ Both workflows run on `xcode-27`, the newest macOS image GitHub offers and the o
 27, which Sill is built with: macOS 27.0 with Xcode 27.0 (the default), 27.1 and a 27.2 beta in
 September 2026. GitHub calls it a public preview, so jobs can wait in a queue longer and software
 on it can change. `macos-latest` is macOS 26 with Xcode 26.0.1 to 26.6, and `macos-15` has Xcode
-16.0 to 16.4 and 26.0.1 to 26.3; Sill has not been built with those. A step selects the newest
-Xcode that is not a beta (`.github/actions/select-xcode`) and prints `xcodebuild -version`: on
-today's image that is Xcode 27.0 (27A266a), the same build as on Noah's Mac, since the image
-installs 27.1 under a name that says beta. When GitHub replaces the preview with a regular macOS 27 image, change
-`runs-on` in both files.
+16.0 to 16.4 and 26.0.1 to 26.3; Sill has not been built with those. A step
+(`.github/actions/select-xcode`, asked for version 27) selects the newest Xcode 27 that is not a
+beta and prints `xcodebuild -version`: on today's image that is Xcode 27.0 (27A266a), the same
+build as on Noah's Mac, since the image installs 27.1 under a name that says beta. On an image
+without an Xcode 27, CI warns and builds with the newest Xcode there, and the release workflow
+stops: a release is built with Xcode 27 or not at all. When GitHub replaces the preview with a
+regular macOS 27 image, change `runs-on` in both files. The image's `bash` is 3.2, macOS's own,
+and runs every `run:` step: write steps it can parse (it ends a `$(` at the `)` of a `case`
+pattern inside it) and try them with `/bin/bash`, not zsh.

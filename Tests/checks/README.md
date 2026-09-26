@@ -58,9 +58,10 @@ A folder with a `main.swift` (prints `ok` or `FAIL` per case, exits non-zero on 
 `run.sh` that sets `here`, sources `../common.sh` (which sets `root` and `out` and changes to the
 root) and compiles with `swiftc` into `"$out"`. A `mutants.py` is optional; its last line must count
 the mutants (`N of M mutants caught`, or `mutants caught: N of M`), and `run.sh --mutants` hands it
-to `run_mutants`. `run-all.sh` picks up every folder with an executable `run.sh`. Only pure files:
-nothing that needs a permission, a device or the network, and never anything that links
-VideoToolbox.
+to `run_mutants`; add the check's name to the `mutants` matrix in `.github/workflows/ci.yml` too.
+`run-all.sh` picks up every folder with a `run.sh`, and fails a check whose `run.sh` is not
+executable (`chmod +x`; git keeps the bit) rather than skip it. Only pure files: nothing that needs
+a permission, a device or the network, and never anything that links VideoToolbox.
 
 ## Checks that belong to open branches
 

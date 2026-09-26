@@ -9,8 +9,8 @@
 #
 # Cost: GitHub-hosted runners are free for a public repository. For a private one, macOS minutes
 # count against the account's included minutes and are then billed per minute ($0.062 on
-# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, an hour or more of macOS
-# time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
+# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about an hour and a half
+# of macOS time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
 name: CI
 
 # A change that touches only documents, the website or design files starts no run. (Should this
@@ -36,9 +36,11 @@ defaults:
   run:
     shell: bash
 
-# A newer push to the same branch or pull request cancels the run still going for the older one.
+# A newer push to the same pull request, or to main, cancels the run still going for the older one.
+# The event is in the group so that a push to main never cancels a run started by hand (the
+# mutants: an hour and more of paid macOS time), nor the other way round.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -55,19 +57,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select the newest Xcode
+      # The newest Xcode 27 that is not a beta; without one, a warning and the newest Xcode there.
+      - name: Select Xcode 27
         id: xcode
         uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
 
       # The package has no dependencies (so no Package.resolved yet): the key is the toolchain and
       # the manifest. A checkout gives every source a new modification time, so most of them compile
-      # again; the cache mainly keeps what they share, such as the module cache. The pure checks'
-      # binaries stay out of it.
+      # again; the cache mainly keeps what depends only on the toolchain and the SDK, the SDK's
+      # precompiled modules and the module cache (about 200 MB in all). The pure checks' binaries
+      # stay out of it: .build/* with an exclusion, because actions/cache archives each path it
+      # lists whole, so ".build" with "!.build/checks" would still take .build/checks.
       - name: Restore SwiftPM's build folder
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            .build
+            .build/*
             !.build/checks
           key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.toolchain }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
@@ -80,12 +87,14 @@ jobs:
         run: Tests/checks/run-all.sh
 
       # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
-      # command failed with exit code 0", which reads like a failure.
-      - name: Build the iOS app for the simulator (Debug, not signed)
+      # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
+      # simulator destination would also compile every file for x86_64 (Intel Macs' simulators),
+      # twice the work on this arm64 runner, and no source depends on the architecture.
+      - name: Build the iOS app for the simulator (Debug, arm64, not signed)
         run: |
           xcodebuild -project iOSClient/Sill.xcodeproj -scheme Sill \
             -destination 'generic/platform=iOS Simulator' -configuration Debug \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO build
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
 
       # Only the CLI's paths that end before the host starts: a refused flag, and
       # --print-reachability, which reads this machine's network configuration once (read-only)
@@ -117,8 +126,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select the newest Xcode
+      - name: Select Xcode 27
         uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
 
       - name: The check, then its mutants
         env:

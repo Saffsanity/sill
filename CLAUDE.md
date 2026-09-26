@@ -16,22 +16,23 @@ Saffsanity/sill is private, so its release files are a 404 to anyone not signed
 in with access (docs/release-checklist.md, "Releasing from GitHub Actions",
 has both ways out: go public, or publish in sill-site). Added:
 - `.github/workflows/ci.yml` (Layout): pull requests and pushes to main that
-  touch more than documents, the site or design files, and by hand; one job
-  on `xcode-27`, 30 minutes, cancelling an older run of the same ref. Runner:
-  the newest image GitHub offers and the only one with Xcode 27 (macOS 27.0
-  26A428 with Xcode 27.0 27A266a as the default, 27.1 installed as
+  touch more than documents, the site or design files, and by hand; one job on
+  `xcode-27`, 30 minutes, cancelling an older run of the same event and ref.
+  Runner: the newest image GitHub offers and the only one with Xcode 27 (macOS
+  27.0 26A428 with Xcode 27.0 27A266a as the default, 27.1 installed as
   `Xcode_27.1_beta.app` and a 27.2 beta; a public preview, issue 14404);
-  `macos-latest` is macOS 26 with Xcode 26.6 at most, `macos-15` Xcode 16.4 and
-  26.3, never tried with this code. `.github/actions/select-xcode` takes the
-  newest Xcode whose folder is not a beta (27.0 there, the same build as this
-  Mac) and prints `xcodebuild -version`. The `.build` cache is keyed on that
-  toolchain and Package.swift (there is no Package.resolved), `.build/checks`
-  left out. The iOS build is not `-quiet`: Xcode 27's -quiet heads a compile
-  that only warned with "error: the following command failed with exit code
-  0". The CLI runs only where it exits before the host starts: `--internet`
-  alone (exit 2) and `--print-reachability`. Mutants only by hand, a job per
-  check. Actions pinned by commit (checkout v7.0.1, cache v6.1.0,
-  upload-artifact v7.0.1, the newest on 2026-09-25).
+  `macos-latest` is macOS 26 with Xcode 26.6 at most, `macos-15` Xcode 16.4
+  and 26.3, never tried with this code. `.github/actions/select-xcode` takes
+  the newest Xcode 27 whose folder is not a beta (27.0 there, the same build
+  as this Mac) and prints `xcodebuild -version`. The `.build` cache is keyed
+  on that toolchain and Package.swift (there is no Package.resolved),
+  `.build/checks` left out. The iOS build is arm64 only and not `-quiet`:
+  Xcode 27's -quiet heads a compile that only warned with "error: the
+  following command failed with exit code 0". The CLI runs only where it exits
+  before the host starts: `--internet` alone (exit 2) and
+  `--print-reachability`. Mutants only by hand, a job per check. Actions
+  pinned by commit (checkout v7.0.1, cache v6.1.0, upload-artifact v7.0.1, the
+  newest on 2026-09-25).
 - `.github/workflows/release.yml`: a pushed tag `v*` or by hand with a tag
   (`SILL_RELEASE_TAG`); checkout with the whole history (make-app.sh's build
   number is the commit count). Repository variable `SILL_SIGN_IN_CI` not
@@ -73,6 +74,48 @@ has both ways out: go public, or publish in sill-site). Added:
   commit and an annotated tag (a scratch clone), and a dry run with a wrong
   tag stopping before it builds; the Xcode rule on two fake image layouts; `gh
   api repos/Saffsanity/sill` answers.
+- Review fixes (one pass: triggers and permissions, secrets, the Xcode step,
+  the cache, injected failures, costs, docs):
+  - The Xcode step would have failed every job: the image's `bash` is 3.2 (its
+    README), which ends a `$(` at a `case` pattern's `)`, so the loop listing
+    the Xcodes stopped short and `sudo xcode-select --switch` was handed the
+    rest of the script as a path (reproduced with `/bin/bash`; zsh parses it).
+    The loop is a function now. The step takes `version` (27 in both
+    workflows: the newest 27.x that is not a beta, compared as text, as awk
+    finds 27.10 equal to 27.1) and `fallback` (CI: a warning and the newest
+    Xcode there; release.yml: `false`, the job fails); the old message said
+    the default stayed selected and exited 1. 13 fake layouts under
+    `/bin/bash` with stubbed sudo, xcodebuild and swift; every `run:` block
+    parses with `/bin/bash -n`.
+  - The cache's `!.build/checks` excluded nothing: actions/cache 6.1.0 globs
+    with implicitDescendants off and tars each listed path whole (its
+    dist/save/index.js), so `.build` took `.build/checks`; now `.build/*` with
+    the exclusion. `.build` is 196 MB here, 135 of it the SDK's precompiled
+    modules, module cache and stat caches.
+  - `run-all.sh` skipped a check whose `run.sh` had lost its exec bit (seven
+    of nine skipped: "All passed.", exit 0) and died on an unbound array with
+    none: now every folder with a `run.sh` is a check, a non-executable one
+    fails, none at all is an error.
+  - Failures injected in a scratch copy: a behaviour mutant for each of the
+    nine (the ledger's made by hand), a compile error for each build style
+    (swiftc in run.sh; build.sh without `set -e`; with `|| true`), a failing
+    cross-check, two broken checks under `bash -eo pipefail` (exit 2), a
+    no-op mutant (`--mutants` fails on 14 of 15): every one fails as it
+    should.
+  - CI's concurrency group has the event, so a push to main no longer cancels
+    a mutants run started by hand, nor the other way round.
+  - The iOS step builds arm64 only (`ARCHS=arm64`; the generic simulator
+    destination also compiled every file for x86_64): 61 compiles, 43 s of CPU
+    here, `** BUILD SUCCEEDED **`, only the StreamClient warning.
+  - `release.sh --publish` asks gh in its preflight whether it reaches the
+    repository and whether the release exists, before building; both used to
+    surface only after notarization (a stub gh: exists, missing, no access,
+    no gh; `--dry-run` and `--check-tag` make no gh call).
+  - The checklist's costs, against the fetched pages: they print no multiplier
+    table any more (the prices' ratio is still ten), a budget stops usage
+    only with "Stop usage when budget limit is reached" where offered, 15 to
+    20 CI runs a month fit in Free's included minutes, the mutants take about
+    an hour and a half (some 900 included minutes).
 - **Untested, for Noah:** every run on GitHub (the first will be this
   branch's pull request: a draft counts too). The keychain and notary steps
   never ran (they change the keychain search list and the default keychain,
@@ -1936,33 +1979,37 @@ good.
   `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
   line joins it once there is a Ko-fi handle). Tip links live there, in the
   README's Tips and on the site, never in the iOS app.
-- `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27 with
-  Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`: pull
-  requests and pushes to main that touch more than documents, the site or the
-  design files, and by hand; `swift build -c release`, `Tests/checks/run-all.sh`,
-  the iOS app for the generic simulator (Debug, `CODE_SIGNING_ALLOWED=NO`), and
-  the CLI's paths that exit before the host starts (`--internet` alone, exit 2;
-  `--print-reachability`); by hand with "mutants", each check's mutants in a job
-  of its own. `release.yml`: a pushed tag `v*`, or by hand with one; verify only
-  (the tag, the checks, `make-app.sh` signed ad hoc, zipped as an artifact)
-  unless the repository variable `SILL_SIGN_IN_CI` is `true`, then the Developer
-  ID .p12 into a temporary keychain, the notary key stored as a profile in it,
-  `release.sh --publish`, and the keychain deleted in an always() step. Secrets,
+- `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27
+  with Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`:
+  pull requests and pushes to main that touch more than documents, the site or
+  the design files, and by hand; `swift build -c release`,
+  `Tests/checks/run-all.sh`, the iOS app for the generic simulator (Debug,
+  arm64, `CODE_SIGNING_ALLOWED=NO`), and the CLI's paths that exit before the
+  host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
+  with "mutants", each check's mutants in a job of its own. `release.yml`: a
+  pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
+  `make-app.sh` signed ad hoc, zipped as an artifact) unless the repository
+  variable `SILL_SIGN_IN_CI` is `true`, then the Developer ID .p12 into a
+  temporary keychain, the notary key stored as a profile in it, `release.sh
+  --publish`, and the keychain deleted in an always() step. Secrets,
   variables, rotation and costs: docs/release-checklist.md, "Releasing from
   GitHub Actions". `.github/actions/select-xcode` — selects the newest Xcode
-  whose folder is not a beta and prints `xcodebuild -version` (CI only: it runs
-  `sudo xcode-select`). Actions are pinned by commit hash.
+  of the `version` asked for (27) whose folder is not a beta and prints
+  `xcodebuild -version`; without one, CI warns and takes the newest Xcode
+  there and a release (`fallback: false`) fails (CI only: it runs `sudo
+  xcode-select`). The runner's `bash` is 3.2: try `run:` steps with
+  `/bin/bash`. Actions are pinned by commit hash.
 - `Tests/checks/` — the pure checks, a folder each: `main.swift`, `run.sh`
-  (compiles the app's files it names with swiftc into `.build/checks/<name>/` and
-  runs; `--mutants` runs `mutants.py`, passing only when every mutant is
+  (compiles the app's files it names with swiftc into `.build/checks/<name>/`
+  and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
   `fence`, `ledger`, `origin`, `pairing-address`, `policy`, `protocol`,
-  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits with
-  the number that failed; `common.sh` is sourced by each `run.sh`; `README.md`
-  lists what each compiles and the checks that belong to open branches. A
-  change to a checked file updates its check (and a mutant's pattern) in the
-  same commit.
+  `remote-rules`. `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  with the number that failed (a folder whose `run.sh` is not executable
+  fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
+  compiles and the checks that belong to open branches. A change to a checked
+  file updates its check (and a mutant's pattern) in the same commit.
 
 ## Build and run
 
