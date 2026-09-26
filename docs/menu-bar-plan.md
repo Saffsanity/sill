@@ -1,5 +1,41 @@
 # The Mac's menu bar on the device — the plan
 
+## Status and hand-off (2026-09-26 03:50)
+
+Stopped by Noah at about 95 % of the week's usage, in the middle of the host build ("Stop trackpad
+gestures and menu bar mirror for now. Mark down next steps for agents that will pick up the task.").
+What the branch `menu-bar-mirror` holds (worktree `/Users/noah/Downloads/winstream-menubar`, from main
+at 150f781): 556f31a this plan, which was NEVER critiqued (the critique agent refused over a scope
+mix-up with a relayed message and changed nothing); 42d3116 the protocol, kinds 24, 25 and 27 and
+`Sources/StreamProtocol/MacMenu.swift`; and the commit after this one, the host side as the
+interrupted build agent left it: `MenuFormat.swift`, `MenuPolicy.swift`, `MenuReader.swift`,
+`MenuMirror.swift`, `MenuSelfTest.swift`, the hooks in `StreamCoordinator.swift`, `WindowCatalog.swift`,
+the CLI's `--menu-selftest[=APP]` and the app's main, `Scripts/menufixture.swift`, the new
+`sillclient.py` flags and `Tests/checks/menus`. On 2026-09-26 03:48 it builds clean and the menus check
+passes 267 of 267; the agent was running the check's mutants and the H4 gate against the fixture when
+it stopped, so both results are unknown, and none of it is reviewed. No iOS file has changed.
+
+Next agent, in order:
+1. Critique the plan as §§3–4 now stand against the code on the branch (the pass that never ran), then
+   merge main (a550e27 or later) into the branch.
+2. Verify the host: `Tests/checks/menus/run.sh --mutants`; `swift run -c release SillHost
+   --menu-selftest=TextEdit` (read-only Accessibility; it activates nothing); the H4 gate of §4.8 with
+   `Scripts/menufixture.swift`; the CLI's default stdout, masked and sorted, byte for byte main's
+   (§5); fix what fails and commit the host properly (one commit per file group, house style).
+3. The iOS side, §7: the files and their four pbxproj entries by hand, `MacMenuState` checked with
+   swiftc and mutants, the iPadOS 26 menu bar, the Menus button, `StreamClient`, the harness cases of
+   §7.8; photos at the four Duo sizes and on an iPhone.
+4. Sill.app, §6; the docs (CLAUDE.md's Layout and Current step, docs/DEVELOPMENT.md).
+5. Review (wire and hard rules, the AX reader's queue and timeouts, the device UI and its hazards in
+   §7.3), then a PR against main with Noah's device tests.
+Rules the build must keep: the reader presses nothing in any test but the fixture; no XCUITest or
+`simctl io recordVideo` while Sill.app streams; the CLI's output unchanged unless a device uses the
+menus. The workflow prompt must quote Noah's authorization in his words: "For apps used in Window
+mode, how can we access the menu bar options? Is there a way we can add that menu and submenu?"
+(2026-09-25) and "Work on 5-12 as well please" (2026-09-26, item 10), plus this stop and its
+resumption, so a relayed message about another topic does not stop the agents again.
+
+
 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of main (the `menu-bar-mirror` worktree, `/Users/noah/Downloads/winstream-menubar`),
 begun at 8b0d418 and checked again at 150f781, after PRs #20 and #21 merged; line numbers are at
