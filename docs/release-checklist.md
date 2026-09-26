@@ -257,6 +257,14 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 Settings › Secrets and variables › Actions, or `gh` from the repository's folder. Nothing here
 ever goes in the repository, a commit message or a shell profile.
 
+Until the repository is public, sign on this Mac instead (`Scripts/release.sh --publish`, with
+`SILL_SIGN_IN_CI` unset). Repository secrets reach any workflow on any branch or tag pushed here
+(never a fork's pull request), and an environment, which can keep them to release runs alone,
+needs a public repository on GitHub Free. Once it is public, before `SILL_SIGN_IN_CI` goes on: an
+environment `release` that only tags `v*` may deploy to, with Noah as its required reviewer,
+holds the five secrets (`gh secret set NAME --env release`), and release.yml's publish job names
+it (`environment: release`).
+
 | Name | Kind | What it holds |
 |---|---|---|
 | `SILL_SIGN_IN_CI` | variable | `true` turns on signing and publishing. Absent or anything else: verify only. |
@@ -273,16 +281,18 @@ also allows. The keychain, its password, the profile name `sill-notary` and the 
 repository's own release are made by each run and gone at its end.
 
 ```
-base64 -i DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12
+base64 -i <backup folder>/DeveloperID.p12 | gh secret set SILL_DEVELOPER_ID_P12
 gh secret set SILL_DEVELOPER_ID_P12_PASSWORD        # asks for the value; nothing lands in the shell history
 gh secret set SILL_NOTARY_KEY_ID
 gh secret set SILL_NOTARY_ISSUER_ID
-base64 -i AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8
+base64 -i <backup folder>/AuthKey_ABC123DEFG.p8 | gh secret set SILL_NOTARY_KEY_P8
 gh variable set SILL_SIGN_IN_CI --body true         # after a verify-only run has passed
 ```
 
-Keep the exported .p12 and .p8 where part 1 keeps its backups, outside the repository, and not in
-Downloads.
+`<backup folder>` is where part 1 keeps the exported .p12 and .p8: outside the repository (these
+commands run in it, so a bare file name would be read from there) and not in Downloads.
+`.gitignore` leaves out `*.p12`, `*.p8` and `AuthKey_*` in case one lands in the repository
+anyway.
 
 ### Rotating them
 
