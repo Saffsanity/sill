@@ -121,7 +121,8 @@ latency before picture quality. Open an issue before starting anything large.
 Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about two minutes and with no device.
 Contributions are accepted under the project's license. Please report a
-security problem by email to support@getsill.app, not in a public issue.
+security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
+public issue.
 
 ## License
 
