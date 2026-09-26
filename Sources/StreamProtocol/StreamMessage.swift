@@ -45,6 +45,17 @@ public enum StreamMessageKind: UInt8 {
                              // name). The first message of every session connection, before anything else, so a
                              // host can judge the device before it sends anything (DeviceGate). Never on a
                              // pairing connection
+    // The Mac's menus (MacMenu.swift). Older readers map all three to `.unknown` and skip them. 26 is
+    // the Mac's pointer (docs/pointer-visibility-plan.md), so the fetch is 27.
+    case macMenu = 24        // host → device: JSON MacMenu — the streamed app's menu bar (the Desktop's: the frontmost
+                             // app's), to a device that asked for it with a kind 27 without an id: its top level then, and
+                             // again whenever the app or its titles change. With `answering` set: the reply to one of
+                             // that device's kind 27s (one menu's items) or kind 25s
+    case pressMenuItem = 25  // device → host: JSON PressMenuItem — choose one item, by the id and title the device was
+                             // shown in that tree version. Answered to that device alone (a kind 24 with `pressed`)
+    case fetchMenu = 27      // device → host: JSON FetchMenu — one menu's current items, asked when the device opens it;
+                             // without an id, the top level, and a request for every later one on this connection.
+                             // Answered to that device alone, from a read of at most 1 s ago
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
