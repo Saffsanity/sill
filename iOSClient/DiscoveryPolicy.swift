@@ -937,6 +937,40 @@ enum DiscoveryPolicy {
         return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\.id)
     }
 
+    /// The Settings panel's last group, Away from home (§7.6): "Paired" for a Mac this device saved,
+    /// with how it is reached from afar under it; else Pair This iPad… wherever a pairing can start.
+    enum AwayFromHome: Equatable {
+        /// This device saved this Mac (its kind 18 verified against the saved key): "Paired".
+        case paired(PairedReach)
+        /// Not saved: Pair This iPad…. `atHome`: over a session at home that speaks TLS, which
+        /// pairs at that session's own door whatever the Mac's Remote Access says (such a session
+        /// is unpaired only while the Mac lets any device in: Require pairing off); otherwise over
+        /// a plain one, through the remote door, which needs Remote Access on.
+        case pairThisDevice(atHome: Bool)
+        /// Not saved, over a plain session, with Remote Access off: nothing to pair with; how to
+        /// turn it on.
+        case turnOnRemoteAccess
+
+        /// What the footnote under "Paired" says.
+        enum PairedReach: Equatable {
+            /// This session came through the remote door: "Connected through Tailscale."
+            case connected
+            /// "Away from home, Sill reaches Mac mini through Tailscale (…)."
+            case reaches
+            /// Remote Access is off on the Mac: how to turn it on (a Mac paired at home).
+            case turnOnRemoteAccess
+        }
+    }
+
+    /// `saved`: this session's Mac is one this device saved; `remoteSession`: the session came
+    /// through the remote door; `remoteAccess`: the Mac's kind 18 says Remote Access is on;
+    /// `tlsAtHome`: the session runs at home over TLS.
+    static func awayFromHome(saved: Bool, remoteSession: Bool, remoteAccess: Bool, tlsAtHome: Bool) -> AwayFromHome {
+        if saved { return .paired(remoteSession ? .connected : remoteAccess ? .reaches : .turnOnRemoteAccess) }
+        if tlsAtHome && !remoteSession { return .pairThisDevice(atHome: true) }
+        return remoteAccess ? .pairThisDevice(atHome: false) : .turnOnRemoteAccess
+    }
+
     /// The connect screen's words for pairing and sessions at home (§7.7). `mac` is what the row
     /// calls the Mac; `device` this device's kind ("iPad").
     enum HomeCopy {
@@ -944,7 +978,27 @@ enum DiscoveryPolicy {
             cable ? "Pairing with \(mac) over the cable\u{2026}" : "Pairing with \(mac)\u{2026}"
         }
         static func pairedOverCable(mac: String) -> String { "Paired with \(mac) over the cable." }
+        /// The status line while the home card is up, and the card's scan line.
         static func showing(mac: String, device: String) -> String { "\(mac) is showing a code. Point this \(device) at it." }
+        /// The home card (§7.7): its title, a heading; its typed path's line, which is also the
+        /// line it collapses to while the code has the keyboard; the viewfinder's caption, and
+        /// what VoiceOver says for the viewfinder.
+        static func cardTitle(mac: String) -> String { "Pair with \(mac)" }
+        static func typeCode(mac: String) -> String { "Type the code \(mac) shows." }
+        static func viewfinderCaption(mac: String) -> String { "Point at the code on \(mac)" }
+        static func viewfinderLabel(mac: String) -> String { "Camera. Point it at the code on \(mac)." }
+        /// Pair This iPad… over a session at home that needs no pairing (the Settings panel's
+        /// footnote, `AwayFromHome.pairThisDevice(atHome: true)`).
+        static func pairThisDeviceAtHome(mac: String, device: String) -> String {
+            "\(mac) lets devices connect without pairing. Pair this \(device) once to keep connecting if that changes, and to reach \(mac) away from home while Remote Access is on. \(mac) shows a code; scan it with this \(device)."
+        }
+        /// Pair This iPad…'s errors over a stream at home, where no row can be tapped: the Mac
+        /// could not prove it knows the code; nothing answered the pairing connection. (A refused
+        /// code says what the remote path's does: choose Pair iPhone or iPad… on the Mac.)
+        static func proofFailedOverStream(mac: String) -> String {
+            "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code."
+        }
+        static func noAnswerOverStream(mac: String) -> String { "\(mac) didn\u{2019}t answer. Try again." }
         static func openOnMac(mac: String) -> String {
             "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
         }

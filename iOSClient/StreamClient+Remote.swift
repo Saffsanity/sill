@@ -45,12 +45,17 @@ enum PairingProblem: Equatable {
     case homeUsed(String)
     case homeProofFailed(String)
     case homeNoAnswer(String)
+    /// Pair This iPad… over a stream at home, where there is no row to tap: the Mac could not prove
+    /// it knows the code; nothing answered the pairing connection.
+    case proofFailedOverStream(String)
+    case noAnswerOverStream(String)
 
     var field: Field {
         switch self {
         case .address, .zone, .nothingAnswered, .notSill, .localNetwork: return .address
         case .codeLength, .codeTypo, .wrongCode, .expired, .stopped, .homeStopped, .homeUsed: return .code
-        case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer: return .card
+        case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer, .proofFailedOverStream, .noAnswerOverStream:
+            return .card
         }
     }
 
@@ -61,7 +66,8 @@ enum PairingProblem: Equatable {
         case .codeLength: return "A code has 12 digits."
         case .codeTypo: return "That code has a typo. Check it against your Mac."
         case .wrongCode(let left):
-            return "That code didn’t work. Check the code on your Mac. \(left) tr\(left == 1 ? "y" : "ies") left."
+            // A no-break space keeps the count with its word when the line wraps ("4 / tries left").
+            return "That code didn’t work. Check the code on your Mac. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
         case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first."
         case .stopped(let mac):
             return "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code."
@@ -77,6 +83,8 @@ enum PairingProblem: Equatable {
         case .homeUsed(let mac): return DiscoveryPolicy.HomeCopy.usedOrExpired(mac: mac)
         case .homeProofFailed(let mac): return DiscoveryPolicy.HomeCopy.proofFailed(mac: mac)
         case .homeNoAnswer(let mac): return DiscoveryPolicy.HomeCopy.noAnswer(mac: mac)
+        case .proofFailedOverStream(let mac): return DiscoveryPolicy.HomeCopy.proofFailedOverStream(mac: mac)
+        case .noAnswerOverStream(let mac): return DiscoveryPolicy.HomeCopy.noAnswerOverStream(mac: mac)
         }
     }
 }
@@ -356,6 +364,7 @@ extension StreamClient {
         afterPairingWatch?.cancel()
         afterPairingWatch = nil
         reconnect = nil
+        cancelHomeAsk(idleStatus: false)      // as at home (markConnected): no ask is left for the connect screen
         connected = true
         remoteRoute = r
         askedNearby = false
@@ -842,7 +851,9 @@ extension StreamClient {
         }
     }
 
-    private static func problem(for r: PairResult, mac: String) -> PairingProblem {
+    /// A refused pairing's words, as the remote path says them; also Pair This iPad…'s over a
+    /// stream at home (StreamClient+Home's `homeProblem`), which has no row to tap.
+    static func problem(for r: PairResult, mac: String) -> PairingProblem {
         switch r.reason {
         case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
         case PairResult.expired?: return .expired

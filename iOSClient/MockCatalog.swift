@@ -104,12 +104,16 @@ enum MockCatalog {
         case nodirect    // a host without the setting (the ipad-host-settings build): no row
         case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
         case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
-        case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired for remote access
+        case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired
         case remoteinternet  // connected over the internet, 120 ms
         case remoteslow      // through Tailscale on a slow link (320 ms): the slow-link callout
-        case remotepair      // at home, Remote Access on, not saved: Pair This iPad…
-        case remoteoff       // at home, Remote Access off: the footnote only
+        case remotepair      // at home over a plain door, Remote Access on, not saved: Pair This iPad…
+        case remoteoff       // at home over a plain door, Remote Access off: the footnote only
         case noremote        // at home, an older Mac without kind 18: no Away from home group
+        // Pairing at home (docs/home-pairing-plan.md §7.6, §7.9): a session at home over TLS.
+        case paired          // a saved Mac, Remote Access on: Paired, and how Sill reaches it from afar
+        case pairedoff       // a saved Mac, Remote Access off: Paired, and how to turn it on
+        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…
     }
 
     /// The Mac's kind 18 in the remote cases: Tailscale's name and addresses, and Wi‑Fi.
@@ -186,6 +190,13 @@ enum MockCatalog {
             client.macInfo = macInfo()
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+        case .paired, .pairedoff:
+            client.macInfo = macInfo(remoteAccess: c == .paired)
+            client.macInfoSaved = true
+            client.mockHomeTLS = true
+        case .openpair:
+            client.macInfo = macInfo(remoteAccess: false)
+            client.mockHomeTLS = true
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
         }
@@ -219,15 +230,28 @@ enum MockCatalog {
         case remotefail    // a remote dial's failure, -SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff
         case camera        // Add a Mac with the camera refused
         case externalpair  // an outside sill://pair link waiting for its confirmation
+        // Pairing at home (docs/home-pairing-plan.md §7.3–7.9). Each row's word is DiscoveryPolicy.rowWord's.
+        case homerows        // a saved Wi-Fi row, Not paired, an unpaired Wired (the cable), a Wired row through a USB Ethernet adapter (Not paired), Update Sill, long names
+        case homeasking      // a tap on a Not paired row: "Pairing with Mac mini…", the row lit
+        case homecard        // the Mac shows its code: the home card, scanning (a drawn viewfinder)
+        case homecode        // the home card's typed path, empty
+        case homecodeerror   // the typed path after a wrong code: "That code didn’t work… 4 tries left."
+        case homelocked      // the Mac is locked (a Wired row over the cable): "Unlock Mac mini, then tap it again."
+        case homeopenonmac   // the Mac showed no code by itself: "…choose Pair iPhone or iPad… in the Sill menu…"
+        case homerevoked     // the Mac removed this device: its row reads Not paired
+        case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
+        case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
+        case pairingrequired // Require pairing turned on while this device was connected without pairing
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
-    /// viewfinder's stand-in.
+    /// viewfinder's stand-in. The home card unfolds from the client's `homeAsk` (ConnectScreen).
     static func connectScreenOptions(_ c: ConnectCase) -> (adding: Bool, typed: Bool, scanner: CodeScanner.Mode) {
         switch c {
         case .addmac, .pairing: return (true, false, .placeholder)
         case .addcode, .addcodeerror: return (true, true, .placeholder)
         case .camera: return (true, false, .denied)
+        case .homecode, .homecodeerror: return (false, true, .placeholder)
         default: return (false, false, .placeholder)
         }
     }
@@ -255,6 +279,28 @@ enum MockCatalog {
         func remote(_ name: String, _ id: String) -> FoundMac { FoundMac(name: name, endpoint: nil, route: .remote, macID: id) }
         let remoteRows = [mac("Studio", .wifi), mac("Mac mini", .direct),
                           remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21"), remote("Mac mini (2)", "0123456789ABCDEF")]
+        /// A row at home as `recomputeMacs` makes it: its door (`p`), what this device knows of its
+        /// Mac, and the word DiscoveryPolicy.rowWord gives them. `cable`: a Wired row whose interface
+        /// carries only link-local addresses (the USB cable to the Mac); false for a USB Ethernet
+        /// adapter on the LAN.
+        func home(_ name: String, _ method: DiscoveryPolicy.Method?, door: DiscoveryPolicy.HomeDoor = .pairingRequired,
+                  saved: Bool = false, revoked: Bool = false, homeTLS: Bool = false, cable: Bool = false) -> FoundMac {
+            let word = DiscoveryPolicy.rowWord(door: door, saved: saved, revoked: revoked, homeTLS: homeTLS,
+                                               debug: StreamClient.debugBuild, method: method, cable: cable)
+            return FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
+                            route: method == .direct ? .direct : .network, macID: saved ? "HOMEPAIRING\(name.count)" : nil,
+                            method: method, door: door, homeWord: word)
+        }
+        /// A tap's ask on `row` (`homeAsk`), waiting for its answer or answered `shown`.
+        func ask(_ row: FoundMac, shown: Bool) -> HomeAsk {
+            var a = HomeAsk(target: HomeDialer.Target(endpoint: row.endpoint!, peerToPeer: row.direct, row: row.id, label: row.name),
+                            name: row.name, cableRow: row.homeWord == .pairsOverCable, savedID: nil, tagNamed: false)
+            if shown { a.phase = .shown }
+            return a
+        }
+        let studio = home("Studio", .wifi, saved: true, homeTLS: true)
+        let device = StreamClient.deviceWord
+        typealias Copy = DiscoveryPolicy.HomeCopy
         switch c {
         case .looking:
             break
@@ -296,6 +342,45 @@ enum MockCatalog {
             client.status = failureCopy(UserDefaults.standard.string(forKey: "SillRemoteFailure") ?? "timeout")
         case .externalpair:
             client.pendingLink = mockLink
+        case .homerows:
+            // The long names check that "Not paired" and "Update Sill" never truncate or wrap: the
+            // title does.
+            client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true),
+                           home("Studio", .wifi),
+                           home("MacBook Pro", .wired, cable: true),
+                           home("Office iMac", .wired, cable: false),
+                           home("Mac Studio", .wifi, door: .plain, saved: true, homeTLS: true),
+                           home("Noah Saffer’s MacBook Pro in the Studio (2)", .wifi),
+                           home("Noah Saffer’s iMac on the Desk by the Window", .wired, door: .plain, saved: true, homeTLS: true)]
+        case .homeasking:
+            let mini = home("Mac mini", .wifi)
+            client.macs = [mini, studio]
+            client.homeAsk = ask(mini, shown: false)
+            client.status = Copy.pairing(mac: mini.name, cable: false)
+        case .homecard, .homecode, .homecodeerror:
+            let mini = home("Mac mini", .wifi)
+            client.macs = [mini, studio]
+            client.homeAsk = ask(mini, shown: true)
+            client.status = Copy.showing(mac: mini.name, device: device)
+            if c == .homecodeerror { client.pairing = .failed(.wrongCode(triesLeft: 4)) }
+        case .homelocked:
+            client.macs = [home("Mac mini", .wired, cable: true), studio]
+            client.status = Copy.locked(mac: "Mac mini")
+        case .homeopenonmac:
+            client.macs = [home("Mac mini", .wifi), studio]
+            client.status = Copy.openOnMac(mac: "Mac mini")
+        case .homerevoked:
+            client.macs = [home("Mac mini", .wifi, saved: true, revoked: true, homeTLS: true), studio]
+            client.status = Copy.removed(mac: "Mac mini", device: device)
+        case .homecabledone:
+            client.macs = [home("Mac mini", .wired, saved: true, homeTLS: true), studio]
+            client.status = Copy.pairedOverCable(mac: "Mac mini")
+        case .homeolder:
+            client.macs = [home("Mac mini", .wifi, door: .plain, saved: true, homeTLS: true), studio]
+            client.status = DiscoveryPolicy.updateSillStatus(mac: "Mac mini")
+        case .pairingrequired:
+            client.macs = [home("Mac mini", .wifi), studio]
+            client.status = Copy.pairingRequired(mac: "Mac mini", device: device)
         }
         return client
     }

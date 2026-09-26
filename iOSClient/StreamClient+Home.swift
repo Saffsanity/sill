@@ -551,13 +551,20 @@ extension StreamClient {
     }
 
     /// Cancel on the home card (and a new tap, and the Add a Mac card's Cancel): the ask or the
-    /// proof in flight stops, and nothing is saved.
-    func cancelHomeAsk() {
+    /// proof in flight stops, and nothing is saved. The ask's own status line ("Pairing with Mac
+    /// mini…", "Mac mini is showing a code…") goes with it, back to the idle one, which
+    /// updateDiscovery keeps in step with the search; any other line (a failure's) stays. A session
+    /// that connects clears an ask too (`idleStatus` false: its own line follows).
+    func cancelHomeAsk(idleStatus: Bool = true) {
         homeDialer?.cancel()
         homeDialer = nil
-        if homeAsk != nil {
-            pairingAttempt += 1
-            homeAsk = nil
+        guard let ask = homeAsk else { return }
+        pairingAttempt += 1
+        homeAsk = nil
+        if idleStatus, status == DiscoveryPolicy.HomeCopy.pairing(mac: ask.name, cable: ask.cableRow)
+            || status == DiscoveryPolicy.HomeCopy.showing(mac: ask.name, device: Self.deviceWord) {
+            status = Self.lookingOnNetwork
+            updateDiscovery()
         }
     }
 
@@ -591,6 +598,16 @@ extension StreamClient {
         guard connected, let s = session, !s.route.isRemote, let trust = s.home, let c = connection,
               case .key(let key) = DiscoveryPolicy.pin(trust) else { return nil }
         return (HomeDialer.Target(endpoint: c.endpoint, peerToPeer: connectedDirectly, row: s.row?.id, label: "this session's Mac"), key)
+    }
+
+    /// This session runs at home over TLS: Pair This iPad… pairs at its own door, whatever the
+    /// Mac's Remote Access says (the Settings panel's Away from home, DiscoveryPolicy.awayFromHome).
+    /// DEBUG: the harness's settings cases say so instead (`mockHomeTLS`).
+    var sessionAtHomeOverTLS: Bool {
+        #if DEBUG
+        if let mock = mockHomeTLS { return mock }
+        #endif
+        return sessionPairingTarget != nil
     }
 
     /// Pair This iPad…'s typed code: over a TLS session at home, on the session's row; over any
@@ -701,7 +718,7 @@ extension StreamClient {
                     self.pair(link: link, overlay: overlay, scanned: scannedSecret != nil)
                     return
                 }
-                self.pairing = .failed(.homeNoAnswer(name))
+                self.pairing = .failed(overlay ? .noAnswerOverStream(name) : .homeNoAnswer(name))
             }
         }
         dialer.start()
@@ -710,8 +727,10 @@ extension StreamClient {
     /// The Mac's answer to a proof at the home door. Main thread.
     private func proved(_ outcome: HomeExchange, winner w: HomeDialer.Winner, identity: RemoteIdentity, method: String, name: String,
                         overlay: Bool, busyRetried: Bool, retry: (Double) -> Void) {
+        // Over a stream (Pair This iPad…) no row can be tapped: its words say what to do there.
+        let proofFailed: PairingProblem = overlay ? .proofFailedOverStream(name) : .homeProofFailed(name)
         guard case .answer(let r, let key) = outcome else {
-            pairing = .failed(.homeProofFailed(name))
+            pairing = .failed(proofFailed)
             return
         }
         guard r.ok else {
@@ -719,7 +738,7 @@ extension StreamClient {
                 retry(max(0.2, min(r.retryAfter ?? 1, 10)))      // once, silently
                 return
             }
-            pairing = .failed(Self.homeProblem(for: r, mac: name))
+            pairing = .failed(Self.homeProblem(for: r, mac: name, overStream: overlay))
             return
         }
         // Nothing is saved unless the Mac proved it knows the same key, for the keys of this very
@@ -727,7 +746,7 @@ extension StreamClient {
         guard let key, let proofM = r.proof.flatMap(Base64URL.decode),
               PairingProof.isValidMacProof(proofM, key: key, macFingerprint: w.fingerprint, deviceFingerprint: identity.fingerprint),
               r.macID == MacID.make(fingerprint: w.fingerprint), r.recognitionKey.flatMap(Base64URL.decode)?.count == 32 else {
-            pairing = .failed(.homeProofFailed(name))
+            pairing = .failed(proofFailed)
             return
         }
         // Over a stream whose Mac is the one just paired, the session is now with a saved Mac and
@@ -754,7 +773,11 @@ extension StreamClient {
         sessionAfterHomePairing(id, target: w.target)
     }
 
-    static func homeProblem(for r: PairResult, mac: String) -> PairingProblem {
+    /// A refused proof at the home door: the home card's words, which send the person back to the
+    /// Mac's row ("Tap Mac mini for a new code"); over a stream (`overStream`, Pair This iPad…),
+    /// where there is no row, the remote path's, which send them to the Sill menu on the Mac.
+    static func homeProblem(for r: PairResult, mac: String, overStream: Bool = false) -> PairingProblem {
+        if overStream { return problem(for: r, mac: mac) }
         switch r.reason {
         case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
         case PairResult.stopped?: return .homeStopped(mac)

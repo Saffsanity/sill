@@ -158,8 +158,15 @@ final class StreamClient: ObservableObject {
     var macInfoVerified: (info: MacInfo, fingerprint: Data)?
     /// When this connection's first kind 18 arrived (the panel hides Away from home without one).
     @Published var macInfoAt: Date?
-    /// Pairing, as the Add a Mac card and the overlay show it.
-    @Published var pairing = PairingPhase.idle
+    /// Pairing, as the Add a Mac card, the home card and the overlay show it.
+    @Published var pairing = PairingPhase.idle {
+        didSet {
+            #if DEBUG
+            // The simulator gates read what the card or the overlay says here.
+            if pairing != oldValue, case .failed(let p) = pairing { print("pairing: \(p.text)") }
+            #endif
+        }
+    }
     /// A sill://pair link from outside the app (Camera, Messages, simctl openurl): never acted on
     /// until the person confirms it.
     @Published var pendingLink: PairLink?
@@ -230,6 +237,9 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// Harness `pending` case: the mock never answers and never times out.
     var mockFrozen = false
+    /// The harness's settings cases at home over TLS (`paired`, `pairedoff`, `openpair`): the
+    /// mock's session counts as one (`sessionAtHomeOverTLS`), having none of its own.
+    var mockHomeTLS: Bool?
     /// The harness's remote cases: one second's numbers, as the network queue would publish them,
     /// and whether five of them made a slow link.
     func showMockLinkStats(_ stats: LinkStats, slow: Bool = false) { linkStats = stats; slowLink = slow }
@@ -1117,6 +1127,9 @@ final class StreamClient: ObservableObject {
     /// on Wi-Fi with the cable listed may move at once. Main thread.
     func markConnected(endpoint: NWEndpoint?, name: String) {
         reconnect = nil
+        // Connected: no ask is left waiting (a pairing through a link's addresses leaves one), so the
+        // home card never comes back for it with the connect screen.
+        cancelHomeAsk(idleStatus: false)
         connected = true
         askedNearby = false
         connectedAt = Date()

@@ -1040,9 +1040,11 @@ New attention items (first group, orange):
 | `iOSClient/StreamClient.swift` | one TLS builder for every home dial; `p` from each result; the session gate at the first window list; revoked |
 | `iOSClient/StreamClient+Remote.swift` | the ask; pairing through the row; the cable's ok; the goodbyes at home. As built (step 4): these live in a new `iOSClient/StreamClient+Home.swift` (`DeviceTLS`, `HomeDialer`, `HomeAsk`, the ask, the proofs at the home door, the session gate, how a home session ends); +Remote routes its scanner, outside links and ends to it |
 | `iOSClient/Info-Debug.plist` (new, step 4) | the Debug configuration's Info.plist: Info.plist plus `_silltest._tcp` (§7.9) |
-| `iOSClient/AddMacCard.swift` | a home mode: the scanner, or the code alone |
+| `iOSClient/AddMacCard.swift` | a home mode: the scanner, or the code alone (as built, step 5: `home`, the row's name) |
 | `iOSClient/ContentView.swift` | row words and hints; the card for a row; the harness contract |
-| `iOSClient/HostSettingsPanel.swift` | Away from home: "Paired"; Pair This ‹iPad›… only in an unpaired session |
+| `iOSClient/HostSettingsPanel.swift` | Away from home: "Paired"; Pair This ‹iPad›… only in an unpaired session (as built, step 5: `DiscoveryPolicy.awayFromHome`, pure) |
+| `iOSClient/CodeScanner.swift` (step 5) | the viewfinder's caption and spoken label name the home card's Mac |
+| `iOSClient/StreamScreen.swift` (step 5) | `DrawerRow`'s trailing word keeps its whole width ("Not paired" and "Update Sill" hold a space): the title truncates instead |
 | `iOSClient/MockCatalog.swift` | the new cases |
 | PR #12's code (merged, `cea195c`) | its dial sites go through the builder: at `cea195c`, StreamClient.swift's `connect(to:…)` :867 (the connection at :887; the wired dial's fallback, `dialUnconstrained` :972, calls it again) and `startMove(to:kind:fallback:)` :1059, which every move uses: from AWDL, up to the cable, down to Wi‑Fi, and `reconnectNow` :1465 and `rescue` :1505 through it; `connectionParameters` :985 is the plain builder. A remote dial's `adopt` :1865 takes RemoteConnector's connection, already TLS |
 
@@ -1183,7 +1185,15 @@ New attention items (first group, orange):
   Sill was set up again on it, forget it here and pair again."; never a plain retry.
 - **The panel's Away from home group** (HostSettingsPanel.swift:303; :305 at `cea195c`): the
   saved Mac's row reads "Paired" (was "Paired for remote access"); Pair This ‹iPad›… shows only in
-  an unpaired session.
+  an unpaired session. As built (step 5, `DiscoveryPolicy.awayFromHome`, pure): under "Paired",
+  "Connected through Tailscale." on a remote session, "Away from home, Sill reaches Mac mini through
+  Tailscale (…)." with Remote Access on, else "To reach Mac mini away from home, turn on Remote Access
+  in Sill’s Settings on the Mac." (a Mac paired at home with Remote Access off). An unpaired session
+  at home over TLS (there is one only while Require pairing is off) offers Pair This ‹iPad›… whatever
+  Remote Access says, since it pairs at the session's own door: "Mac mini lets devices connect without
+  pairing. Pair this iPad once to keep connecting if that changes, and to reach Mac mini away from
+  home while Remote Access is on. Mac mini shows a code; scan it with this iPad." Over a plain door
+  (DEBUG), as before: Pair This ‹iPad›… with Remote Access on, the Remote Access footnote without it.
 
 #### 7.7 Copy on the device (inline; VoiceOver announces each status line, as today)
 
@@ -1206,6 +1216,17 @@ New attention items (first group, orange):
 | Links | "Enter Code Instead" / "Scan Code Instead" · "Cancel" |
 | Errors, under the field | "A code has 12 digits." · "That code has a typo. Check it against your Mac." · "That code didn’t work. Check the code on your Mac. 4 tries left." · "Mac mini stopped pairing after too many wrong codes. Tap Mac mini for a new code." · "That code was used or has expired. Tap Mac mini for a new one." · "Pairing didn’t finish: Mac mini couldn’t show it knows the code. Tap it to try again." |
 
+As built (step 5): the row a tap's ask is waiting on is lit (the app drawer's highlight) while
+"Pairing with…" shows; Cancel, Esc or the escape gesture stops the ask or the proof and puts the idle
+status line back; the card stays up through "Paired with Mac mini." until the session after it comes
+(or its 10 s run out: "Mac mini is saved. Tap it to connect."), and a session that connects leaves no
+ask behind. Pair This ‹iPad›… over a stream at home has no row to tap, so its errors are not the
+card's: a refused code in the remote path's words ("Mac mini stopped pairing after too many wrong
+codes. Choose Pair iPhone or iPad… on your Mac for a new code.", "This code expired. Choose Pair
+iPhone or iPad… on your Mac for a new one.", "Mac mini isn’t pairing right now. On your Mac, choose
+Pair iPhone or iPad… first."), and "Pairing didn’t finish: Mac mini couldn’t show it knows the
+code." · "Mac mini didn’t answer. Try again."
+
 #### 7.8 Layout
 
 The home card is AddMacCard in a home mode, with every layout rule of the remote plan §7.10: the
@@ -1218,9 +1239,10 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
 
 - `-SillConnectCase` gains `homerows` (a saved Wi‑Fi row, "Not paired", an unpaired "Wired", a
   Wired row through a USB Ethernet adapter reading "Not paired", "Update Sill", a long name), `homecard`, `homecode`, `homecodeerror`, `homeasking`, `homelocked`,
-  `homeopenonmac`, `homerevoked`, `homecabledone` and `pairingrequired`.
+  `homeopenonmac`, `homerevoked`, `homecabledone` and `pairingrequired`; and, as built (step 5),
+  `homeolder` (a tap on an "Update Sill" row: "Mac mini runs an older Sill…").
 - `-SillSettingsCase` gains `paired` (Away from home's "Paired") and `openpair` (an unpaired
-  session with Pair This iPad…).
+  session with Pair This iPad…); and, as built (step 5), `pairedoff` (paired, Remote Access off).
 - `-SillHomeDoor paired|open|plain`: what a `-SillConnect` address counts as, since an address has
   no TXT record. Default `plain`, today's behaviour, so every existing gate is unchanged. With
   `paired` the address is the one saved Mac when exactly one is saved (dialed pinned, as its row
@@ -2336,3 +2358,126 @@ session over AWDL (no AWDL-on test here); an outside link from `simctl openurl`;
 
 **What step 4 changed in this plan:** §7.1 (the new file and the Debug plist), §7.7 (two lines) and
 §7.9 (the gates' arguments).
+
+### Step 5: the iOS UI
+
+`$SP` here is `scratchpad/home-pairing/5`: the photos (`before/` and `after/`, the regression set on
+step 4's build and on this one; `new/`, this step's cases; `fix/`; `sheets/`), their tools
+(`photos.py`, which launches the harness and crops each `simctl io screenshot` to the fake screen;
+`imgtool.swift`, CoreGraphics only: crop, pixel diff, lit rows, sheets; `compare.py`), the checks
+(`checks/`: step 4's, with the device check's step-5 section and its mutants), the live gates
+(`sgates5.py`, `simlib.py`, `t-s2ui/`, `t-s5ui/`) and the builds' logs. Photos on this plan's own
+simulator ("iPad home-pairing H0", an iPad Pro 13"), with `simctl io screenshot` only: no tap, UI
+test, recording or panel; the harness draws each size inside it (so its words say "iPad" at the
+phone sizes too). Content size set with `simctl ui … content_size` and put back to `large`.
+
+**What landed.**
+- The rows. Each network or Direct row ends in its home word (step 4's `FoundMac.word`: "Not
+  paired", "Wired" for an unpaired Mac over the cable, "Update Sill", or how it is reached), and
+  VoiceOver reads `RowWord`'s label and hint ("Mac mini, not paired" · "Pairs with a code Mac mini
+  shows, then connects."; over the cable "Pairs over the USB cable, then connects."; "Mac mini’s Sill
+  is too old for this iPad."). The row a tap's ask is waiting on is lit, as the app drawer lights the
+  app on screen, while the status line says "Pairing with Mac mini…". `DrawerRow`'s trailing word
+  keeps its whole width (`fixedSize`): the title truncates, never "Not paired" or "Update Sill".
+- The home card: `AddMacCard`'s home mode (`home`, the row's name), unfolded in the rows' place when
+  the Mac answers the ask `shown` (`ConnectScreen.homeCard`, from `homeAsk`). Its title "Pair with Mac
+  mini" is a heading and VoiceOver's focus moves to it; the scanner under "Mac mini is showing a code.
+  Point this iPad at it.", its caption "Point at the code on Mac mini" (spoken "Camera. Point it at
+  the code on Mac mini."), or after Enter Code Instead "Type the code Mac mini shows." and the code
+  field alone, whose Pair and Return call `pairHome`; the errors under the field or in its place, in
+  §7.7's words; Cancel, Esc and the escape gesture fold it (the ask or proof stops, the idle status
+  line comes back). It stays through "Paired with Mac mini." until the session comes; side by side
+  under 520 pt; in the top half at 710×1000; on the typed path where there is no scanner (the
+  simulator), as Add a Mac is.
+- The panel's Away from home (`DiscoveryPolicy.awayFromHome`, pure; §7.6 as built): "Paired" (was
+  "Paired for remote access"), with "Connected through …", "Away from home, Sill reaches …" or, Remote
+  Access off, how to turn it on; Pair This ‹iPad›… only in an unpaired session: at home over TLS
+  (Require pairing off) whatever Remote Access says, with its own footnote; over a plain door as
+  before.
+- Pair This ‹iPad›… over a stream at home says what to do there, never "Tap Mac mini": a refused
+  code in the remote path's words (`problem(for:mac:)`, now shared), "Pairing didn’t finish: Mac mini
+  couldn’t show it knows the code." and "Mac mini didn’t answer. Try again." (`PairingProblem`'s
+  `proofFailedOverStream` and `noAnswerOverStream`, words in `HomeCopy`).
+- "That code didn’t work. Check the code on your Mac. 4 tries left." keeps "4 tries" together (a
+  no-break space): at 380 pt it wrapped as "…your Mac. 4" / "tries left.", on Add a Mac's card too.
+- Model hooks for the UI: `cancelHomeAsk` puts the idle status line back after the ask's own ("Pairing
+  with…", "… is showing a code…"); a session that connects (`markConnected`, `remoteSessionReady`)
+  clears any ask, so the card never comes back for one (a pairing that ended through a link's
+  addresses left it); Add a Mac… cancels an ask still waiting; `sessionAtHomeOverTLS`; a DEBUG console
+  line for each pairing failure ("pairing: …", for the gates).
+- The harness: `-SillConnectCase` `homerows`, `homeasking`, `homecard`, `homecode`, `homecodeerror`,
+  `homelocked`, `homeopenonmac`, `homerevoked`, `homecabledone`, `homeolder` and `pairingrequired`;
+  `-SillSettingsCase` `paired`, `pairedoff` and `openpair` (`mockHomeTLS`); each row's word comes from
+  `rowWord` itself. ContentView's contract names them, `-SillSettingsEnd` and §7.9's arguments.
+
+**H1.** iOS Debug for the simulator (signed ad hoc), Release for the simulator and Debug for
+`generic/platform=iOS` (unsigned, build only; the iPad was not touched): only the old `StreamClient`
+capture warning (now StreamClient.swift:2449). `NSBonjourServices`: Release `_sill._tcp`; Debug
+`_sill._tcp` and `_silltest._tcp`. `swift build -c release`: nothing to do (no package source changed).
+
+**H3 and S7** (`$SP/out`). The device check 111 → 128: the panel's Away from home over all 16 inputs
+(a saved Mac always "Paired", Pair This ‹iPad›… only unpaired, never at a home door for a remote
+session) and each of its rows, the card's title, typed line, viewfinder caption and spoken label, the
+scan line, the open door's footnote, and the overlay's words at home, which never say "Tap"; its
+mutants 66 → 79, all caught (13 new: `awayFromHome`'s branches, and the words). Against the final tree,
+with no mutant pattern gone ambiguous: the policy check 336 and 105 of 105 mutants, the rf2 remote
+check 102 and 52 of 52, the home check 34 and 11 of 11 (a first run lost one mutant to a compiler
+crash while the disk was full; run again, 11 of 11), the records 30. The labels, hints and announced
+status lines are those pure strings; the headings and focus moves were read in the source
+(ConnectScreen's title for either card, the card's escape action and Esc key, ProblemLine's
+announcements), not heard.
+
+**S1** (`$SP/new`, 162 photos). The 11 connect cases at 1000×710, 710×1000, 500×710, 710×500,
+402×874, 874×402 and 375×667, and at `accessibility-extra-large` at the four Duo sizes and 402×874;
+the three settings cases at those five sizes, both text sizes, scrolled to their end. Measured on all
+162 (`compare.py`): at 710×1000 nothing of the column lies below 500 pt (the lowest, `homerows`' seven
+rows, ends at 488 pt; the card at 404 pt); the title's leading edge is the same in every case at each
+size (1000×710: 642 or 643 px, the first glyph's side bearing, "C" or "P"). Read by eye, one by one
+or on sheets, about 50 of them: "Not paired" and "Update Sill" whole at every size down to 375×667,
+the long names truncated instead; the card side by side at 710×500 and 874×402, stacked elsewhere, in
+the top half at 710×1000; the status lines wrap and never truncate; the footer follows the larger
+text and the column keeps its fixed sizes, as before; the panel's Paired, Pair This ‹iPad›… and
+their footnotes at every size. The sheets are `$SP/sheets` (sent to Noah).
+
+**Regression** (`$SP/before`, `$SP/after`): 117 photos of the existing cases (every connect case at
+the four Duo sizes; every settings case at 1000×710, and scrolled to its end at 1000×710 and 500×710;
+the drawer), step 4's build (`git archive` of 41caa8f) against this one: 107 identical pixel for
+pixel. The other 10: the three `pairing` photos and `pending` (their spinners caught in other frames)
+and the six remote cases scrolled to Away from home ("Paired", was "Paired for remote access"). Then,
+with the no-break space, `addcodeerror` at the four Duo sizes differs in its error line alone ("…your
+Mac." / "4 tries left.").
+
+**S2 again, with the UI, and S5's end** (`sgates5.py`, `sgates5.out`: 16 of 16; the CLI host and the
+bare app on the software encoder, each under 90 s, Noah's Sill.log idle). The CLI's row read "Not
+paired" (no device on this Mac's cable this time); a tap asked ("Pairing with Sill test ‹pid›…") and
+the Mac's `shown` brought up the card, photographed: "Pair with Sill test ‹pid›", "Type the code …
+shows." (the simulator has no scanner), Pair and Cancel; a wrong code with a valid check digit came
+back "That code didn’t work. Check the code on your Mac. 4 tries left." on the card, photographed,
+nothing saved; the right code paired at the home door, then a pinned session streamed (the host's
+`[1s]` lines with the client); a second host with the same identity under another name: the row read
+"Wi‑Fi", and a tap connected pinned with no ask. The bare app: paired by its row with its own window's
+code, then `-SillUnpairAfter`: "… removed this iPad. Tap it to pair again." and the row "Not paired",
+photographed.
+
+**Not verified.** VoiceOver on a device (P14); any tap in the UI (no UI automation here: Enter Code
+Instead, Cancel, Esc, the escape gesture, the field; the gates type the code through
+`-SillHomeCode`); the live scanner (the card's scanner is the harness's drawn viewfinder;
+`-SillHomeLink` was not run in this step); "this iPhone" in a photo (the harness draws the phone
+sizes on the iPad, so its words say iPad; the words' device argument is pure-checked with iPhone); Pair
+This ‹iPad›…'s new error words in a live run (only their strings are checked); an unpaired row over a
+real cable ("Wired") live, and a Direct row's "Not paired"; Noah's devices (P1–P16).
+
+**Deviations from the plan's sketches.**
+- Beyond §7.7's copy: the row a tap's ask waits on is lit; Pair This ‹iPad›…'s errors over a stream
+  at home (the plan was silent, and step 4's said "Tap Mac mini", with no row to tap); the Away from
+  home footnotes of §7.6's new states (the plan named only "Paired"); "4 tries" kept together, which
+  changes Add a Mac's card too. §7.6 and §7.7 now say so.
+- Harness cases beyond §7.9's: `homeolder` and `pairedoff`, and a seventh row in `homerows` (a second
+  long name, reading "Update Sill"). §7.9 now lists them.
+- Small model changes for the UI in StreamClient: the ask's status line cleared on Cancel, an ask
+  cleared when a session connects, Add a Mac… cancelling a waiting ask, and a DEBUG console line per
+  pairing failure.
+- Commits end with this session's attribution line, as steps 0 to 4 did.
+
+**What step 5 changed in this plan:** §7.1 (two rows new, two amended), §7.6 (the panel as built), §7.7 (the UI's
+additions) and §7.9 (two cases).
