@@ -1,5 +1,6 @@
-"""Each mutant of SessionLink's fences, hold, adopt and unhold (follow-best-path and its review fixes) must fail the
-fence check in some mode. usage: mutants.py"""
+"""Each mutant of SessionLink's fences, hold, adopt and unhold (follow-best-path and its review fixes), and of its
+count of the inputs meant for the session's connection (pointer-visibility), must fail the fence check in some mode.
+usage: mutants.py"""
 import os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 WT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
@@ -7,7 +8,7 @@ OUT = os.path.join(WT, ".build", "checks", "fence")   # the mutants' sources and
 os.makedirs(OUT, exist_ok=True)
 SRC = WT + "/iOSClient/SessionLink.swift"
 orig = open(SRC).read()
-MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold"]
+MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count"]
 ADOPT_END = "        holding = nil\n        return endedLocked(since: h.since)\n    }\n\n    /// Ends the hold on `c`"
 UNHOLD_END = "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n"
 MUTANTS = {
@@ -17,11 +18,11 @@ MUTANTS = {
         "        guard let i = fences.firstIndex(where: { $0.old === old }) else { return nil }\n",
         "        guard let i = fences.firstIndex(where: { $0.old === old }) else {\n            if let h = holding, h.connection === old { holding = nil; return endedLocked(since: h.since) }\n            return nil\n        }\n"),
     "H4 adopt ends an earlier hand-over's fence at once": (
-        "        current = new\n        guard let h = holding else { return nil }\n",
-        "        current = new\n        fences = []\n        guard let h = holding else { _ = endedLocked(since: 0); return nil }\n"),
+        "        current = new\n        inputs = waitingInputs\n        guard let h = holding else { return nil }\n",
+        "        current = new\n        inputs = waitingInputs\n        fences = []\n        guard let h = holding else { _ = endedLocked(since: 0); return nil }\n"),
     "H5 unhold drops what waited": (UNHOLD_END, "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil; waiting = []\n        return Released(held: 0, waiting: 0, clear: true, seconds: 0, close: [])\n"),
-    "H6 adopt keeps the old connection as the session's": ("        lock.lock(); defer { lock.unlock() }\n        current = new\n        guard let h = holding",
-                                                           "        lock.lock(); defer { lock.unlock() }\n        guard let h = holding"),
+    "H6 adopt keeps the old connection as the session's": ("        lock.lock(); defer { lock.unlock() }\n        current = new\n        inputs = waitingInputs\n        guard let h = holding",
+                                                           "        lock.lock(); defer { lock.unlock() }\n        inputs = waitingInputs\n        guard let h = holding"),
     # review fixes
     "H7 a hand-over replaces an earlier fence (the finding)": ("        fences.append(Fence(old: old, nonce: nonce))\n", "        fences = [Fence(old: old, nonce: nonce)]\n"),
     "H8 a fence ending sends what waits despite the hold": ("        guard fences.isEmpty, holding == nil else {", "        guard fences.isEmpty else {"),
@@ -44,6 +45,25 @@ MUTANTS = {
                                          "        holding = nil\n        waiting = []\n        fencedOff = []\n"),
     "N3 dropHandOver keeps the hold": ("        fences = []\n        holding = nil\n        waiting = []\n        fencedOff = []\n",
                                        "        fences = []\n        waiting = []\n        fencedOff = []\n"),
+    # pointer-visibility: the inputs counted for the session's connection (docs/pointer-visibility-plan.md §3.3)
+    "C1 the setter keeps counting across connections": ("set { lock.lock(); current = newValue; inputs = waitingInputs; lock.unlock() }",
+                                                        "set { lock.lock(); current = newValue; lock.unlock() }"),
+    "C2 the setter restarts at 0, dropping what waits for the new connection": ("set { lock.lock(); current = newValue; inputs = waitingInputs; lock.unlock() }",
+                                                                                "set { lock.lock(); current = newValue; inputs = 0; lock.unlock() }"),
+    "C3 a hand-over restarts at 0, not at what waits": ("        current = new\n        inputs = waitingInputs\n        fences.append(",
+                                                        "        current = new\n        inputs = 0\n        fences.append("),
+    "C4 a hand-over keeps counting": ("        current = new\n        inputs = waitingInputs\n        fences.append(", "        current = new\n        fences.append("),
+    "C5 adopt keeps counting": ("        current = new\n        inputs = waitingInputs\n        guard let h = holding", "        current = new\n        guard let h = holding"),
+    "C6 adopt restarts at 0, not at what was held": ("        current = new\n        inputs = waitingInputs\n        guard let h = holding",
+                                                     "        current = new\n        inputs = 0\n        guard let h = holding"),
+    "C7 what waits is not counted": ("            waiting.append(data)\n            if Self.isInput(data) { inputs += 1 }\n", "            waiting.append(data)\n"),
+    "C8 what goes out at once is not counted": ("        if current != nil, Self.isInput(data) { inputs += 1 }\n", ""),
+    "C9 an input with no connection counted": ("        if current != nil, Self.isInput(data) { inputs += 1 }\n", "        if Self.isInput(data) { inputs += 1 }\n"),
+    "C10 every message counted, not only inputs": ("private static func isInput(_ data: Data) -> Bool { data.first == 8 }",
+                                                   "private static func isInput(_ data: Data) -> Bool { !data.isEmpty }"),
+    "C11 dropHandOver keeps counting what it dropped": ("        inputs -= waitingInputs\n", ""),
+    "C12 unhold restarts the count": ("        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n",
+                                      "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        inputs = 0\n        return endedLocked(since: h.since)\n"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
