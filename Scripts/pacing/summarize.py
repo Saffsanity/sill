@@ -117,8 +117,8 @@ for name, r in runs.items():
     m = re.match(r"(.+)-(\d+)-(base|new)$", name)
     if m: cases[m.group(1)][m.group(3)].append((int(m.group(2)), r))
 
-def near(new, base):   # equal within noise: fps within 2, drops within one a minute
-    return abs(new["fps"] - base["fps"]) <= 2 and new["drop"] <= base["drop"] + 1
+def no_worse(new, base):   # within noise of the base or better: 2 fps, one drop a minute
+    return new["fps"] >= base["fps"] - 2 and new["drop"] <= base["drop"] + 1
 
 GATES = {
     "real24": ("≥ 55 fps, 0 dropped", lambda r, b: r["fps"] >= 55 and r["drops"] == 0),
@@ -130,9 +130,9 @@ GATES = {
     "dip": ("no loss or eviction, the frame age back at 45 ms within 10 s", lambda r, b: r["lost"] == 0 and r["evict"] == 0 and r["rec"] is not None and r["rec"] <= 10),
     "bigkf8": ("recorded (bistable); each run ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "over8": ("recorded; ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
-    "low": ("equal to base within noise", lambda r, b: b is None or near(r, b)),
-    "switch": ("equal to base within noise", lambda r, b: b is None or near(r, b)),
-    "home": ("equal to base within noise", lambda r, b: b is None or near(r, b)),
+    "low": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
+    "switch": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
+    "home": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),
     "slowkf": ("recorded: the old device's liveness (whole messages)", None),
 }
 print(f"\n{'case':10} {'runs':>4}  {'base fps':>9} {'new fps':>9}  {'base drop/m':>11} {'new drop/m':>10}  {'base rec':>8} {'new rec':>8}  gate (new)")
