@@ -121,7 +121,24 @@ says; remote access works as its entries say. Where the two meet:
   gone and back (the session's end and the remote redial, which the quit fix
   runs through): 32 of 32 checks. The runner's app is signed to run locally:
   unsigned, the simulator gives it no keychain, and pairing stops at the
-  device key (-34018) before it prints anything.
+  device key (-34018) before it prints anything. Comments and docs: the
+  harness contract in `ContentView` names `-SillSettingsEnd 1`,
+  `-SillDeviceKeySE 1` and `-Sill.directWirelessMacs`, says the pairing
+  arguments run under `-SillLive 1` too, and which remote settings cases are
+  away from home (no route word) and which at home (Wi-Fi); `-SillWiredTest`'s
+  comment says network rows (a Remote row is not Direct either);
+  `address(argument:)` no longer repeats `address(_:)`'s paragraph. Left as
+  it is here: README's "four source files", which main's PR #15 replaced
+  (docs/DEVELOPMENT.md there says "its source files"). Verified on the last
+  tree, comments only since the simulator run: iOS Debug and Release for the
+  simulator and Debug for a device (generic, unsigned), only the old
+  `StreamClient` capture warning; `swift build -c release`, only the
+  CaptureProbe warning; on the same DiscoveryPolicy, SessionLink,
+  RemoteDialPolicy, SavedMacs and StreamProtocol: the policy check 310 of 310
+  and 80 of 80 mutants, main's 187 of 187 and 25 of 25, the 20 older mutants,
+  remote access's rules check 64 of 64 and 35 of 35, the fence check's 14
+  modes and 19 of 19 mutants. The branch still merges into main (1f3072a,
+  after PRs #14 and #15) without a conflict.
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
@@ -1817,7 +1834,8 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
 after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
-Wired, `noroute` none and the remote cases none, where the route line says how),
+Wired, `noroute` none, and `remote`, `remoteinternet` and `remoteslow` none,
+where the route line says how),
 `-SillConnectCase looking|hint|nearby|methods|denied` (the connect screen in a discovery
 state; `methods` has a row ending in each word, none, and long names; the mock never
 browses) and remote access's `remote|addmac|addcode|addcodeerror|
@@ -1826,8 +1844,8 @@ vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|remove
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
 scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay), and in
-the normal app `-SillPairURL '<sill://pair…>'` (pair at launch, no
-confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
+the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
+at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
 `-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
 `'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
 that route), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`

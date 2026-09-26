@@ -112,15 +112,18 @@ struct ContentView: View {
 ///   the cable 2 s after the cable is listed, and the host logs "Client connected: …%en14" and
 ///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
+/// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
+///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
-///   `noroute`; and away from home: `remote` (through Tailscale, 48 ms, saved), `remoteinternet`,
-///   `remoteslow` (the slow-link callout), `remotepair` (Pair This iPad…), `remoteoff` or
-///   `noremote` (no kind 18: no group) (see `MockCatalog.SettingsCase`). The mock answers a pick
-///   after 0.35 s. The session's route, the readout's last word: Wi-Fi, except `directlink`
-///   (Direct), `wired` (Wired), `noroute` (none, as a connection whose path says nothing) and the
-///   remote cases (none: the route line under it says how instead).
+///   `noroute`; and for the Away from home group, away from home: `remote` (through Tailscale,
+///   48 ms, saved), `remoteinternet` or `remoteslow` (the slow-link callout); at home:
+///   `remotepair` (Pair This iPad…), `remoteoff` (the footnote only) or `noremote` (no kind 18: no
+///   group) (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's
+///   route, the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired),
+///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
+///   and `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
@@ -132,14 +135,20 @@ struct ContentView: View {
 ///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
 ///   browses; Search Nearby and a row's tap only change what it shows (see
 ///   `MockCatalog.ConnectCase`).
-/// * Real pairing, in the normal app (not the harness): `-SillPairURL '<sill://pair…>'` pairs
-///   with that link at launch without the confirmation; `-SillPairCode <12 digits>
-///   -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first saved Mac as a
-///   tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and this device's key;
+/// * Real pairing, in the normal app and under `-SillLive 1` (not the mock): `-SillPairURL
+///   '<sill://pair…>'` pairs with that link at launch without the confirmation; `-SillPairCode
+///   <12 digits> -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first
+///   saved Mac as a tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and
+///   this device's key; `-SillDeviceKeySE 1` makes and uses a Secure Enclave device key under its
+///   own tag (R0-a: a real device only, the simulator has no Secure Enclave);
 ///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties);
 ///   `-SillRemoteRoute vpn|internet` makes a remote session to a test host on loopback count as
 ///   one through Tailscale or over the internet (the 60 fps request, the slow-link callout), and
 ///   `-SillScreenFPS 120` makes the simulator's screen count as a 120 Hz one (also in the mock).
+/// * `-Sill.directWirelessMacs '("Mac mini")'` — not a harness argument either: the device's saved
+///   memory of Macs seen with Direct Wireless on, which a launch argument sets for one run (`'()'`
+///   empties it), in the normal app and under `-SillLive 1`. Unlike `-Sill.savedMacs`, what the
+///   run learns is still saved.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
