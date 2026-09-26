@@ -236,8 +236,8 @@ The device already draws the pointer as a sprite in the Mac's live shape (`.curs
 - **Who skips it.** Every device and test client since b67f87d (2026-09-23) skips an unknown kind:
   `parseHeader` maps it to `.unknown`, StreamMessage.swift:89-98, and StreamClient.swift:1687-1688
   ignores it.
-- **Nothing else changes.** Kinds 0–22, `InputEvent` (kind 8) and `Viewport` (kind 9) are
-  untouched.
+- **Nothing else changes.** Kinds 0–23 (23 is the device's hello), `InputEvent` (kind 8) and
+  `Viewport` (kind 9) are untouched.
 
 #### 3.2 The payload (`Sources/StreamProtocol/Pointer.swift`, new; the iOS app gets it through the package, no pbxproj entry)
 
@@ -862,7 +862,7 @@ Commit messages end with the session's attribution lines.
 0. **Preflight** (no commit). Branch `pointer-visibility` from `remote-access` at this plan's
    commit: kinds 18–22 must exist, and once PR #13 has merged, branch from main. Then H0.
 1. **"Protocol: kind 26, the Mac's pointer."**
-   - StreamMessage.swift: the case and the 23–25 note.
+   - StreamMessage.swift: the case and its note (23 the hello; 24, 25 and 27 the menu bar's).
    - Pointer.swift: `MacPointer`.
 
    Gates: H1, H3 (the JSON), H13 (the decoder part).

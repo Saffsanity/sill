@@ -1096,7 +1096,7 @@ Commit messages end with the session's attribution lines.
 
 ### 13. Docs: CLAUDE.md's compatibility floor, and the rest
 
-**A new section in CLAUDE.md, before "## Conventions", as written:**
+**A new section in CLAUDE.md, before "## Conventions", as written (open question 14 answered):**
 
 > ## Compatibility floor
 >
@@ -1106,10 +1106,12 @@ Commit messages end with the session's attribution lines.
 > dropped). So every later host keeps serving devices from the first public build on, and every later
 > device keeps working with Macs from the first public build on, or each says why
 > (docs/update-notice-plan.md):
-> - Kept as they are: the plain-TCP `_sill._tcp` home door; the 14-byte header; kinds 0–23 and their
->   payloads (HEVC with ParameterSets; the JSON of Switcher, Input, Viewport, HostSettings, Remote
->   and Compatibility); the ping echo; a kind 16 within 2 s of the first window list; kind 22's
->   `reason`, `message` and `reconnect`.
+> - Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
+>   (docs/home-pairing-plan.md, branch `home-pairing`, in progress; it ships before 1.0, Noah
+>   2026-09-25), not today's plain-TCP `_sill._tcp` door, which only development builds and the CLI
+>   keep; the 14-byte header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of
+>   Switcher, Input, Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16
+>   within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`.
 > - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
 >   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
 >   three cases (a new source goes in an optional field, with `active` still one of the three). A new
@@ -1118,8 +1120,9 @@ Commit messages end with the session's attribution lines.
 >   knows.
 > - A device is refused, never served wrong. A host that can no longer serve older devices raises
 >   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
->   before anything else. A device from 2026-09-25 on shows the host's message word for word, with
->   its App Store link, and does not reconnect; older development builds cannot.
+>   before anything else. A device from 2026-09-25 on that receives it shows the host's message word
+>   for word, with its App Store link, and does not reconnect; older development builds cannot. At
+>   the TLS home door only devices from home pairing on receive it (Decided, below).
 > - Every device says hello first (kind 23: its version, build, protocol and name), and every host's
 >   window list gives its version and protocol (`hostVersion`, nil from SillHost and from Macs
 >   before 2026-09-25). A later device facing an older Mac tells what it lacks from these and from
@@ -1127,6 +1130,16 @@ Commit messages end with the session's attribution lines.
 >   does for a Mac without kind 16.
 > - `SillProtocol.current` (1) rises only with a change an older peer cannot skip, and the floor
 >   rises with it.
+> - Decided (Noah, 2026-09-25; the plan's open question 14): home pairing ships before 1.0, so the
+>   floor is the TLS home door with pairing, and no 1.0 device speaks plain TCP to Sill.app. The
+>   hello goes first inside TLS at both doors, through `serve`'s gate: whichever of this branch and
+>   `home-pairing` lands second puts the gate in home-pairing's `Door`, one place for both doors,
+>   and settles `SillProtocol` against home pairing's ALPN (`sill/1`; a later generation `sill/2`):
+>   if 1.0's TLS home door is protocol 1, pairing on the home door leaves the examples of what
+>   raises it (Compatibility.swift, the plan's §3.2 and §4.6). Builds from before home pairing,
+>   this one included, dial plain TCP and say hello in plaintext: at the TLS door they get a failed
+>   handshake and EOF, never kind 22 "update", and redial. Only development and TestFlight builds
+>   are that old, so no plaintext path or sniffer answers them.
 
 **CLAUDE.md, elsewhere:**
 - the current step: both features, the defaults taken, what was verified;
@@ -1150,12 +1163,11 @@ Commit messages end with the session's attribution lines.
   public build, it reads `hostVersion` and `protocol` (or the kinds that never come), and says
   "Update Sill on ‹Mac› to use it with this ‹iPad›. It needs version ‹v› or later." on the connect
   screen, with the Mac download page's link, without dialing again.
-- **Pairing on the home door (M5; the audit's finding 3; open question 14).** The host that brings
-  it raises the floor to the first device version that pairs there, and `SillProtocol.current` to
-  2. Devices from the first public build on then read the notice instead of looping, as long as
-  that host still reads their plaintext hello (open question 14). Superseded (Noah, 2026-09-25):
-  home pairing ships before 1.0, so the first public build already pairs at home over TLS, and its
-  hello goes first inside TLS; only pre-1.0 builds meet the TLS door unable to read a notice.
+- **Pairing on the home door (M5; the audit's finding 3; open question 14).** Superseded (Noah,
+  2026-09-25): home pairing ships before 1.0, so the first public build already pairs at home over
+  TLS, and its hello goes first inside TLS; only pre-1.0 builds meet the TLS door unable to read a
+  notice. (As first written, the host that brought it would have raised the floor to the first
+  device version that pairs there, and `SillProtocol.current` to 2.)
 - **The Mac's version on the device** (the Settings panel's footer), for support.
 - **"Skip This Version"**, release notes in Settings, and Sparkle, if BRIEF.md ever allows it (§6.1).
 
@@ -1194,14 +1206,18 @@ Commit messages end with the session's attribution lines.
     and sums them up in its log.
 14. **Home pairing before or after 1.0?** (Review, 2026-09-25; no default: Noah's call before either
     branch merges.) **Answered (Noah, 2026-09-25): before 1.0.** The floor is the TLS home door with
-    pairing (CLAUDE.md, Compatibility floor), and the hello goes first inside TLS. The compatibility floor (CLAUDE.md) keeps the plain-TCP `_sill._tcp` home door,
-    and §14 assumes pairing comes after the first public build; docs/home-pairing-plan.md (branch
+    pairing (CLAUDE.md, Compatibility floor, and §13), and the hello goes first inside TLS, through
+    `serve`'s gate. As asked: the floor then kept the plain-TCP `_sill._tcp` home door, and §14
+    assumed pairing would come after the first public build, while docs/home-pairing-plan.md (branch
     `home-pairing`) makes Sill.app's home door TLS-only for 1.0 and rejects a plain listener or a
-    sniffer for older builds. A device from this build at a TLS-only door gets a failed handshake and
-    EOF, never kind 22 "update", and redials. Pairing in 1.0: the floor reads "the home door as 1.0
-    ships it (TLS)", and the hello goes first inside TLS, through `serve`'s gate. After 1.0: the home
-    door keeps a plaintext path that reads the hello and answers kind 22 "update" (a first byte of
-    0x16 is a TLS handshake record; a device never sends kind 22).
+    sniffer for older builds, so a device from this build at a TLS-only door gets a failed handshake
+    and EOF, never kind 22 "update", and redials. Pairing in 1.0 made the floor "the home door as
+    1.0 ships it (TLS)"; after 1.0, the home door would have kept a plaintext path that reads the
+    hello and answers kind 22 "update" (a first byte of 0x16 is a TLS handshake record; a device
+    never sends kind 22). Left for the merge with `home-pairing`: whether 1.0's TLS home door is
+    `SillProtocol` 1 with ALPN `sill/1`; if it is, pairing on the home door leaves the examples of
+    what raises the protocol (Compatibility.swift, §3.2, §4.6 rule 1), and a later generation raises
+    both it and the ALPN (`sill/2`).
 
 ---
 

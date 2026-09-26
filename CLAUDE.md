@@ -2206,8 +2206,9 @@ device keeps working with Macs from the first public build on, or each says why
   knows.
 - A device is refused, never served wrong. A host that can no longer serve older devices raises
   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
-  before anything else. A device from 2026-09-25 on shows the host's message word for word, with
-  its App Store link, and does not reconnect; older development builds cannot.
+  before anything else. A device from 2026-09-25 on that receives it shows the host's message word
+  for word, with its App Store link, and does not reconnect; older development builds cannot. At
+  the TLS home door only devices from home pairing on receive it (Decided, below).
 - Every device says hello first (kind 23: its version, build, protocol and name), and every host's
   window list gives its version and protocol (`hostVersion`, nil from SillHost and from Macs
   before 2026-09-25). A later device facing an older Mac tells what it lacks from these and from
@@ -2218,10 +2219,13 @@ device keeps working with Macs from the first public build on, or each says why
 - Decided (Noah, 2026-09-25; the plan's open question 14): home pairing ships before 1.0, so the
   floor is the TLS home door with pairing, and no 1.0 device speaks plain TCP to Sill.app. The
   hello goes first inside TLS at both doors, through `serve`'s gate: whichever of this branch and
-  `home-pairing` lands second puts the gate in home-pairing's `Door`, one place for both doors.
-  Builds from before home pairing, this one included, dial plain TCP and say hello in plaintext:
-  at the TLS door they get a failed handshake and EOF, never kind 22 "update", and redial. Only
-  development and TestFlight builds are that old, so no plaintext path or sniffer answers them.
+  `home-pairing` lands second puts the gate in home-pairing's `Door`, one place for both doors,
+  and settles `SillProtocol` against home pairing's ALPN (`sill/1`; a later generation `sill/2`):
+  if 1.0's TLS home door is protocol 1, pairing on the home door leaves the examples of what
+  raises it (Compatibility.swift, the plan's §3.2 and §4.6). Builds from before home pairing,
+  this one included, dial plain TCP and say hello in plaintext: at the TLS door they get a failed
+  handshake and EOF, never kind 22 "update", and redial. Only development and TestFlight builds
+  are that old, so no plaintext path or sniffer answers them.
 
 ## Conventions
 
