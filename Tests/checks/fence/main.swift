@@ -8,6 +8,21 @@
 // tell its pong apart. The client reads both connections the way StreamClient does (SessionLink.reads,
 // fenceReturned on the old one, release when it closes).
 //
+// No step of a mode counts on the clock. On GitHub's runner (xcode-27-arm64, a shared virtual M1),
+// sleeps overran by 90 ms and more (2026-09-26), so a second hand-over meant to land inside the slow
+// connection's round trip landed after its pong, a new session meant to drop a hand-over's fence
+// found it already down, and modes failed where SessionLink had done right. Each step waits for what
+// it needs instead. The senders send only as many inputs as a step lets them (`send`), and the step
+// goes on once those are out; the rest are let go (`allow`) just before the step that ends a fence or
+// a hold, so they race it as a user's would. The slow connection's line stalls from just before a
+// hand-over (`slowLine.pause`) until the mode has taken every step that must come before that fence's
+// pong, as an AWDL link can stall: what it carries arrives afterwards, in order and with its spacing.
+// An end a mode expects is waited for (`settle`), for up to `patience`, before the caller's timeout
+// lets go of what is left (`timeout`). Right after each hand-over from the slow connection, a pong for
+// a regular ping sent before it comes back there (`stalePong`), as one can, and must end nothing. And
+// the results are read once the stand-in has read every connection to its end, each closed after the
+// last input, not after a fixed wait.
+//
 //   swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/StreamMessage.swift \
 //     Tests/checks/fence/main.swift -o .build/checks/fence/check && .build/checks/fence/check ok
 //
@@ -20,7 +35,7 @@
 // pulled cable delivers nothing more; the client holds, dials a second connection and adopts it: what
 // was sent from the hold on arrives, in order), holdclosed (the same, but the first connection is
 // closed at the hold, and its closing must not release the hold onto it), unhold (a hold, then the
-// path back after 200 ms: what waited goes out on the first connection, all of it, in order), and
+// path back: what waited goes out on the first connection, all of it, in order), and
 // adoptfence (a fenced hand-over to a second connection, then at once an adopt of a third, as a move
 // down right after a move up would: the fence stays up until the slow first connection's pong).
 // Its review fixes (2026-09-25), a fence or a hold while an earlier hand-over's fence is up:
@@ -33,15 +48,22 @@
 // takes nothing more from it, and a third adopts the session after the first fence is down, or before
 // it; before the fix the hold was refused while a fence stood), and twomoves (a hand-over, its fence down, then a
 // second one: each old connection is handed back for closing once, when what waited has gone out).
+// review-moves-b: newsession and newsessionhold (a new session while a hand-over's fence, or a hold,
+// stands: what waited for the old session never reaches the Mac; see the mode below).
 //   (the old SessionLink needs $SP/review/fencecheck/oldshim.swift, which gives Released its `waiting`)
 import Foundation
 import Network
 
+let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
+             "holdfence", "holdadopt", "newsession", "newsessionhold"]
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ok"
+if !modes.contains(mode) { print("unknown mode \(mode); modes: \(modes.joined(separator: " "))"); exit(2) }
 let slow = 0.12
 let total: UInt32 = 600
-let handOverAt = 0.3
-let releaseAfter = mode == "timeout" ? 0.6 : 1.5    // the caller's timeout (StreamClient: 3 s)
+let before: UInt32 = 100       // sent on the first connection before its hand-over or hold
+let releaseAfter = 0.6         // timeout: the caller's timeout (StreamClient: 3 s), which a fence with no pong ends by
+let patience = 5.0             // how long an end a mode expects may take (a pong, a close), well past any real round trip
+let deadline = 20.0            // the check's own waits, where SessionLink has no part: past it, the machine has stopped
 
 func message(_ kind: StreamMessageKind, _ payload: Data) -> Data {
     StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload).serialized()
@@ -50,14 +72,84 @@ func randomNonce() -> Data { withUnsafeBytes(of: UInt64.random(in: .min ... .max
 func be32(_ v: UInt32) -> Data { withUnsafeBytes(of: v.bigEndian) { Data($0) } }
 func now() -> Double { ProcessInfo.processInfo.systemUptime }
 
+/// Waits until `done`, looking every millisecond, for up to `seconds`; whether it came.
+func wait(_ seconds: Double, until done: () -> Bool) -> Bool {
+    let end = now() + seconds
+    while !done() {
+        if now() >= end { return false }
+        Thread.sleep(forTimeInterval: 0.001)
+    }
+    return true
+}
+
+/// One of the check's own waits (a connection, the senders, the stand-in reading to the end): past
+/// `deadline` the check stops and fails, saying so, instead of hanging.
+func require(_ what: String, _ done: () -> Bool) {
+    guard wait(deadline, until: done) else {
+        print("mode \(mode): the check stalled: \(what) took more than \(Int(deadline)) s")
+        print("FAIL")
+        exit(1)
+    }
+}
+
 // MARK: The stand-in for the Mac
+
+/// One connection's way into the stand-in: each message goes on in order, `delay` after it arrived.
+/// The check stalls it (`pause`) and lets it go on (`resume`) as an AWDL link stalls: nothing goes on
+/// meanwhile, and the line's clock stands still too, so what was sent before the stall keeps its
+/// spacing after it.
+final class Line {
+    private let queue: DispatchQueue
+    private let delay: Double
+    private let cond = NSCondition()
+    private var paused = false
+    private var pausedAt = 0.0
+    private var stood = 0.0        // how long the line has stood still, in all
+
+    init(_ label: String, delay: Double) {
+        queue = DispatchQueue(label: label)
+        self.delay = delay
+    }
+
+    /// The time, less every stall. Under `cond`.
+    private var clock: Double { (paused ? pausedAt : now()) - stood }
+
+    func pause() {
+        cond.lock()
+        if !paused { paused = true; pausedAt = now() }
+        cond.unlock()
+    }
+
+    func resume() {
+        cond.lock()
+        if paused { paused = false; stood += now() - pausedAt; cond.broadcast() }
+        cond.unlock()
+    }
+
+    /// Runs `deliver`, for what has just arrived, once the line has carried it for `delay`.
+    func carry(_ deliver: @escaping () -> Void) {
+        cond.lock()
+        let due = clock + delay
+        cond.unlock()
+        queue.async { [self] in
+            cond.lock()
+            while paused || clock < due {
+                if paused { cond.wait() } else { _ = cond.wait(until: Date(timeIntervalSinceNow: due - clock)) }
+            }
+            cond.unlock()
+            deliver()
+        }
+    }
+}
 
 final class Stub {
     let queue = DispatchQueue(label: "stub")      // StreamServer's one network queue
     let listener: NWListener
     var conns: [NWConnection] = []
+    var lines: [Line] = []
     var closed: Set<Int> = []
     var muted: Set<Int> = []
+    var finished: Set<Int> = []                   // read to their end, through their line
     var arrived: [UInt32] = []
     var ready = DispatchSemaphore(value: 0)
 
@@ -73,43 +165,36 @@ final class Stub {
         let i = conns.count
         conns.append(c)
         c.start(queue: queue)
-        // Each connection's messages go through its own delay line, in order, then to `queue`.
-        let line = DispatchQueue(label: "line\(i)")
-        let delay = i == 0 ? slow : 0
-        read(c, i, line, delay)
+        // Each connection's messages go through its own line, in order, then to `queue`.
+        let line = Line("line\(i)", delay: i == 0 ? slow : 0)
+        lines.append(line)
+        read(c, i, line)
         // Frames, so a pong sits behind other traffic as on the real link: 20 KB every 10 ms.
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + 0.01, repeating: 0.01)
         t.setEventHandler { [weak self] in
-            guard let self, !self.closed.contains(i) else { return }
+            guard let self, !self.closed.contains(i), !self.finished.contains(i) else { return }
             c.send(content: message(.frame, Data(count: 20_000)), completion: .contentProcessed { _ in })
         }
         t.resume()
         timers.append(t)
-        if i == 1 {
-            if mode == "timeout" { muted.insert(0) }
-            if mode == "oldcloses" {
-                queue.asyncAfter(deadline: .now() + 0.03) { [self] in closed.insert(0); conns[0].cancel() }
-            }
-        }
     }
     var timers: [DispatchSourceTimer] = []
 
-    private func read(_ c: NWConnection, _ i: Int, _ line: DispatchQueue, _ delay: Double) {
-        c.receive(minimumIncompleteLength: 14, maximumLength: 14) { [weak self] data, _, isComplete, error in
-            guard let self, let data, let h = StreamMessage.parseHeader(data) else { return }
+    private func read(_ c: NWConnection, _ i: Int, _ line: Line) {
+        c.receive(minimumIncompleteLength: 14, maximumLength: 14) { [weak self] data, _, _, _ in
+            guard let self else { return }
+            // The connection's end (the client closed it, or the stand-in did): through the line too,
+            // so it comes after everything that arrived before it.
+            let end = { line.carry { self.queue.async { _ = self.finished.insert(i) } } }
+            guard let data, let h = StreamMessage.parseHeader(data) else { end(); return }
             let got = { (payload: Data) in
-                let due = now() + delay
-                line.async {
-                    let wait = due - now()
-                    if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-                    self.queue.async { self.process(h, payload, c, i) }
-                }
-                self.read(c, i, line, delay)
+                line.carry { self.queue.async { self.process(h, payload, c, i) } }
+                self.read(c, i, line)
             }
             if h.payloadLength == 0 { got(Data()); return }
             c.receive(minimumIncompleteLength: h.payloadLength, maximumLength: h.payloadLength) { data, _, _, _ in
-                guard let data else { return }
+                guard let data, data.count == h.payloadLength else { end(); return }
                 got(data)
             }
         }
@@ -123,6 +208,15 @@ final class Stub {
         default: break
         }
     }
+
+    // What a mode does to the stand-in, each on its queue.
+    /// It takes nothing more from connection `i` (its path is gone): what it reads of it from now on, it drops.
+    func mute(_ i: Int) { queue.sync { _ = muted.insert(i) } }
+    /// It closes connection `i`.
+    func close(_ i: Int) { queue.sync { _ = closed.insert(i); conns[i].cancel() } }
+    /// It sends `data` on connection `i`, behind the frames already sent there.
+    func send(_ data: Data, on i: Int) { queue.sync { conns[i].send(content: data, completion: .contentProcessed { _ in }) } }
+    func line(_ i: Int) -> Line { queue.sync { lines[i] } }
 }
 
 // MARK: The client, as StreamClient drives the link
@@ -130,24 +224,35 @@ final class Stub {
 let link = SessionLink()
 let clientQueue = DispatchQueue(label: "sill.net")
 let stub = try Stub()
-stub.ready.wait()
+if stub.ready.wait(timeout: .now() + deadline) == .timedOut { print("mode \(mode): the stand-in never listened"); print("FAIL"); exit(1) }
 
+typealias End = (how: String, held: Int, waiting: Int, clear: Bool, closed: Int)
 let stateLock = NSLock()
 var nextSeq: UInt32 = 1
+var budget: UInt32 = 0          // the senders send inputs up to this number, then wait for a step to let them go on
 var seqAtHandOver: UInt32 = 0
 var fence: (how: String, held: Int, seconds: Double)?
-var ends: [(how: String, held: Int, waiting: Int, clear: Bool, closed: Int)] = []   // every fence or hold that ended, in order
-var handOverTime = 0.0
+var ends: [End] = []            // every fence or hold that ended, in order
 var seqAtDrop: UInt32 = 0
 var droppedCount = -1
 var readsOldAfterDrop = true
+var connections: [NWConnection] = []          // the client's, in the order made (the stand-in numbers them the same)
+var sawEnd: Set<ObjectIdentifier> = []        // connections whose read loop met their end
+/// A regular ping's payload, stamped before any hand-over: its pong comes back on the first
+/// connection after the hand-over (`stalePong`), where it must end nothing.
+let stalePayload = withUnsafeBytes(of: (now() - 1).bitPattern.bigEndian) { Data($0) }
+var staleRead = false
+var staleEnded: Int?            // the ends that came with the stale pong (none), once it has been read
 
 func connect() -> NWConnection {
     let c = NWConnection(host: "127.0.0.1", port: stub.port, using: .tcp)
     let ready = DispatchSemaphore(value: 0)
     c.stateUpdateHandler = { s in if case .ready = s { ready.signal() } }
     c.start(queue: clientQueue)
-    ready.wait()
+    connections.append(c)
+    let n = connections.count
+    if ready.wait(timeout: .now() + deadline) == .timedOut { print("mode \(mode): connection \(n) never became ready"); print("FAIL"); exit(1) }
+    require("the stand-in accepting connection \(n)") { stub.queue.sync { stub.conns.count >= n } }
     return c
 }
 
@@ -160,18 +265,19 @@ func readLoop(_ c: NWConnection) {
     c.receive(minimumIncompleteLength: 14, maximumLength: 14) { data, _, isComplete, error in
         guard link.reads(c) else { return }
         guard let data, let h = StreamMessage.parseHeader(data) else {
-            if isComplete || error != nil, let r = link.release(c) { fenceEnded("closed", r) }
+            if isComplete || error != nil { ended(c) }
             return
         }
         let deliver = { (payload: Data) in
             if c !== link.connection, h.kind == .pong, let r = link.fenceReturned(payload, on: c) { fenceEnded("pong", r) }
+            if h.kind == .pong, payload == stalePayload { stateLock.lock(); staleRead = true; stateLock.unlock() }
             readLoop(c)
         }
         if h.payloadLength == 0 { deliver(Data()); return }
         c.receive(minimumIncompleteLength: h.payloadLength, maximumLength: h.payloadLength) { data, _, isComplete, error in
             guard link.reads(c) else { return }
             guard let data else {
-                if isComplete || error != nil, let r = link.release(c) { fenceEnded("closed", r) }
+                if isComplete || error != nil { ended(c) }
                 return
             }
             deliver(data)
@@ -179,14 +285,21 @@ func readLoop(_ c: NWConnection) {
     }
 }
 
+/// `c`'s read loop met its end: as StreamClient does, that releases its fence. Noted only after, so a
+/// mode that waits for it (holdclosed) goes on once whatever the close did has been done.
+func ended(_ c: NWConnection) {
+    if let r = link.release(c) { fenceEnded("closed", r) }
+    stateLock.lock(); sawEnd.insert(ObjectIdentifier(c)); stateLock.unlock()
+}
+
 let old = connect()
 link.connection = old
 readLoop(old)
-let start = now()
+let slowLine = stub.line(0)
 
 func sendNext() -> Bool {
     stateLock.lock(); defer { stateLock.unlock() }
-    guard nextSeq <= total else { return false }
+    guard nextSeq <= total, nextSeq <= budget else { return false }
     link.send(message(.input, be32(nextSeq)))
     nextSeq += 1
     return true
@@ -207,90 +320,192 @@ pinger.setEventHandler {
 }
 pinger.resume()
 
-Thread.sleep(forTimeInterval: handOverAt)
-var adoptDuringFence: SessionLink.Released?? = nil
-var extra: [NWConnection] = []
-if ["hold", "holdclosed", "unhold"].contains(mode) {
+/// Lets the senders go on to `n` inputs past those sent so far (to the last one with `n` nil), and
+/// returns the number they stop at.
+@discardableResult
+func allow(_ n: UInt32? = nil) -> UInt32 {
+    stateLock.lock(); defer { stateLock.unlock() }
+    let upTo = n.map { min(total, nextSeq - 1 + $0) } ?? total
+    budget = max(budget, upTo)
+    return upTo
+}
+
+/// Lets the senders send `n` more inputs (the rest with `n` nil), and waits until they have.
+func send(_ n: UInt32? = nil) {
+    let upTo = allow(n)
+    require("sending input #\(upTo)") { stateLock.lock(); defer { stateLock.unlock() }; return nextSeq > upTo }
+}
+
+/// Waits until `n` fences or holds in all have ended, for up to `within` (a mode's own ends come in a
+/// round trip; a mutant's may never).
+func settle(_ n: Int, within seconds: Double = patience) {
+    _ = wait(seconds) { stateLock.lock(); defer { stateLock.unlock() }; return ends.count >= n }
+}
+
+/// The caller's timeout (StreamClient.fenceTimeout): lets go of the fences still up on `olds`, on the
+/// client's queue, once the ends the mode expects have come, or `settle` has given up on them.
+func timeout(_ olds: [NWConnection]) {
+    clientQueue.sync {
+        for c in olds { if let r = link.release(c) { fenceEnded("timeout", r) } }
+    }
+}
+
+/// A pong for a regular ping sent before the hand-over comes back on the first connection, behind
+/// its frames, as one can while the fence is up. Only the fence's own pong may end the fence.
+func stalePong() {
+    stateLock.lock(); let endsBefore = ends.count; stateLock.unlock()
+    stub.send(message(.pong, stalePayload), on: 0)
+    let read = wait(patience) { stateLock.lock(); defer { stateLock.unlock() }; return staleRead }
+    stateLock.lock(); staleEnded = read ? ends.count - endsBefore : nil; stateLock.unlock()
+}
+
+/// The hand-over the fenced modes begin with: the slow first connection's line stalls with what it
+/// carries still on its way, three more inputs go into it, and the session moves to `new` behind a
+/// fence whose ping goes last on the first connection. Then the stale pong.
+func handOverFromSlow(to new: NWConnection) {
+    slowLine.pause()
+    send(3)
     stateLock.lock()
     seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    if mode == "hold" { stub.queue.sync { _ = stub.muted.insert(0) } }
-    if mode == "holdclosed" { stub.queue.sync { _ = stub.closed.insert(0); stub.conns[0].cancel() } }
+    let nonce = randomNonce()
+    link.handOver(from: old, to: new, fencePing: message(.ping, nonce), nonce: nonce)
+    stateLock.unlock()
+    readLoop(new)
+    stalePong()
+}
+
+/// A second hand-over, from `from` (not slow) to `to`.
+func handOver(from: NWConnection, to: NWConnection) {
+    stateLock.lock()
+    let nonce = randomNonce()
+    link.handOver(from: from, to: to, fencePing: message(.ping, nonce), nonce: nonce)
+    stateLock.unlock()
+    readLoop(to)
+}
+
+send(before)                                    // inputs, pings and frames on the first connection
+var adoptDuringFence: SessionLink.Released?? = nil
+switch mode {
+case "ok":
+    let new = connect()
+    handOverFromSlow(to: new)
+    send(5)                                     // these wait behind the fence,
+    allow()                                     // the rest go on while it comes down
+    slowLine.resume()
+    settle(1)                                   // by its pong
+    timeout([old])
+case "nofence":
+    let new = connect()
+    slowLine.pause()
+    send(3)
+    stateLock.lock()
+    seqAtHandOver = nextSeq - 1
+    link.connection = new                       // the hand-over before the fix
+    stateLock.unlock()
+    readLoop(new)
+    send(3)
+    require("an input sent on the second connection arriving") { stub.queue.sync { stub.arrived.contains { $0 > seqAtHandOver } } }
+    allow()
+    slowLine.resume()                           // and the first connection's last inputs arrive after it
+    timeout([old])
+case "timeout":
+    let new = connect()
+    stub.mute(0)                                // nothing more of the first connection arrives: no pong
+    handOverFromSlow(to: new)
+    send(5)
+    allow()
+    slowLine.resume()
+    settle(1, within: releaseAfter)             // nothing ends the fence,
+    timeout([old])                              // so the caller's timeout does
+case "oldcloses":
+    let new = connect()
+    handOverFromSlow(to: new)
+    send(5)
+    allow()
+    stub.close(0)                               // the stand-in closes the first connection during the fence,
+    settle(1)                                   // which releases it at once
+    slowLine.resume()
+    timeout([old])
+case "hold", "holdclosed":
+    stateLock.lock()
+    seqAtHandOver = nextSeq - 1
+    if mode == "hold" { stub.mute(0) }          // a pulled cable delivers nothing more
     let holding = link.hold(old)
     stateLock.unlock()
     if !holding { print("hold refused"); exit(1) }
-    if mode == "unhold" {
-        Thread.sleep(forTimeInterval: 0.2)
-        if let r = link.unhold(old) { fenceEnded("unhold", r) }
-    } else {
-        let new = connect()                    // the move's dial, while the hold keeps what is sent
-        extra.append(new)
-        Thread.sleep(forTimeInterval: 0.05)
-        if let r = link.adopt(new) { fenceEnded("adopt", r) }
-        readLoop(new)
+    if mode == "holdclosed" {
+        stub.close(0)                           // and the connection closes, which must not release the hold onto it
+        _ = wait(patience) { stateLock.lock(); defer { stateLock.unlock() }; return sawEnd.contains(ObjectIdentifier(old)) }
     }
-} else if mode == "twofences" {
-    let new1 = connect(), new2 = connect()
-    extra += [new1, new2]
+    send(5)                                     // held
+    let new = connect()                         // the move's dial, while the hold keeps what is sent
+    allow()
+    if let r = link.adopt(new) { fenceEnded("adopt", r) }
+    readLoop(new)
+case "unhold":
     stateLock.lock()
     seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    let nonce1 = randomNonce()
-    link.handOver(from: old, to: new1, fencePing: message(.ping, nonce1), nonce: nonce1)
+    let holding = link.hold(old)
     stateLock.unlock()
-    readLoop(new1)
-    Thread.sleep(forTimeInterval: 0.03)        // well inside the slow first connection's round trip
-    stateLock.lock()
-    let nonce2 = randomNonce()
-    link.handOver(from: new1, to: new2, fencePing: message(.ping, nonce2), nonce: nonce2)
-    stateLock.unlock()
-    readLoop(new2)
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
-        if let r = link.release(new1) { fenceEnded("timeout", r) }
-    }
-} else if mode == "twomoves" {
+    if !holding { print("hold refused"); exit(1) }
+    send(5)                                     // held until the path comes back
+    allow()
+    if let r = link.unhold(old) { fenceEnded("unhold", r) }
+case "adoptfence":
     let new1 = connect(), new2 = connect()
-    extra += [new1, new2]
-    stateLock.lock()
-    seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    let nonce1 = randomNonce()
-    link.handOver(from: old, to: new1, fencePing: message(.ping, nonce1), nonce: nonce1)
-    stateLock.unlock()
-    readLoop(new1)
-    Thread.sleep(forTimeInterval: 0.5)         // the slow first connection's pong is back by now
-    stateLock.lock()
-    let nonce2 = randomNonce()
-    link.handOver(from: new1, to: new2, fencePing: message(.ping, nonce2), nonce: nonce2)
-    stateLock.unlock()
+    handOverFromSlow(to: new1)
+    send(3)
+    adoptDuringFence = .some(link.adopt(new2))  // while the first fence is up: it stays up
     readLoop(new2)
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
-        if let r = link.release(new1) { fenceEnded("timeout", r) }
-    }
-} else if mode == "holdfence" || mode == "holdadopt" {
+    send(3)
+    allow()
+    slowLine.resume()
+    settle(1)
+    timeout([old])
+case "twofences":
+    let new1 = connect(), new2 = connect()
+    handOverFromSlow(to: new1)
+    send(3)
+    handOver(from: new1, to: new2)              // while the first fence is up
+    send(3)
+    settle(1)                                   // the second fence's pong, quick: what waits stays for the first
+    allow()
+    slowLine.resume()
+    settle(2)
+    timeout([old, new1])
+case "twomoves":
+    let new1 = connect(), new2 = connect()
+    handOverFromSlow(to: new1)
+    send(3)
+    slowLine.resume()
+    settle(1)                                   // the first fence down, clear
+    send(3)                                     // on the second connection
+    allow()
+    handOver(from: new1, to: new2)
+    settle(2)
+    timeout([old, new1])
+case "holdfence", "holdadopt":
     let new1 = connect()
-    extra.append(new1)
-    stateLock.lock()
-    seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    let nonce = randomNonce()
-    link.handOver(from: old, to: new1, fencePing: message(.ping, nonce), nonce: nonce)
-    stateLock.unlock()
-    readLoop(new1)
-    Thread.sleep(forTimeInterval: 0.01)
-    stub.queue.sync { _ = stub.muted.insert(1) }   // the second connection's path is gone: nothing more of it arrives
+    handOverFromSlow(to: new1)
+    send(3)
+    stub.mute(1)                                // the second connection's path is gone: nothing more of it arrives
     if !link.hold(new1) { print("hold refused"); exit(1) }
-    if mode == "holdfence" { Thread.sleep(forTimeInterval: 0.4) }   // the first fence's pong comes back meanwhile
+    send(3)
+    if mode == "holdfence" {
+        slowLine.resume()
+        settle(1)                               // the first fence's pong: everything still waits for the hold
+        send(3)
+    }
     let new2 = connect()
-    extra.append(new2)
+    allow()
     if let r = link.adopt(new2) { fenceEnded("adopt", r) }
     readLoop(new2)
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
+    if mode == "holdadopt" {
+        slowLine.resume()
+        settle(2)                               // the first fence's pong, after the adopt, lets it all go
     }
-} else if mode == "newsession" || mode == "newsessionhold" {
+    timeout([old])
+case "newsession", "newsessionhold":
     // review-moves-b (the merge's lens): #13's session replacement while a hand-over's fence, or a hold,
     // stands, as StreamClient.adopt (a remote dial's winner) and connect do it: the session's connection
     // set to nil and cancelled, abandonMove's dropHandOver (its connections cancelled), then the new
@@ -298,21 +513,16 @@ if ["hold", "holdclosed", "unhold"].contains(mode) {
     // end: what waited for the old session must never reach the Mac, not even then; everything sent from
     // the new connection on arrives, in order; the old connection is no longer read.
     let new1 = connect()
-    extra.append(new1)
-    stateLock.lock()
-    seqAtHandOver = nextSeq - 1
-    handOverTime = now()
     if mode == "newsession" {
-        let nonce = randomNonce()
-        link.handOver(from: old, to: new1, fencePing: message(.ping, nonce), nonce: nonce)
+        handOverFromSlow(to: new1)              // the fence stands until the drop: the slow line stalls
     } else {
+        stateLock.lock()
+        seqAtHandOver = nextSeq - 1
         _ = link.hold(old)
+        stateLock.unlock()
     }
-    stateLock.unlock()
-    if mode == "newsession" { readLoop(new1) }
-    Thread.sleep(forTimeInterval: 0.05)            // inside the slow first connection's round trip
+    send(3)                                     // wait for the fence or the hold, and go with it
     let new2 = connect()
-    extra.append(new2)
     stateLock.lock()
     seqAtDrop = nextSeq - 1
     let session = link.connection
@@ -325,55 +535,32 @@ if ["hold", "holdclosed", "unhold"].contains(mode) {
     link.connection = new2
     stateLock.unlock()
     readLoop(new2)
-    Thread.sleep(forTimeInterval: 0.1)
+    send(3)                                     // the new session's, straight out
     if !link.hold(new2) { print("hold on the new session refused"); exit(1) }
-    Thread.sleep(forTimeInterval: 0.05)
+    send(3)
+    allow()
     if let r = link.unhold(new2) { fenceEnded("unhold", r) }
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
-        if let r = link.release(new1) { fenceEnded("timeout", r) }
-    }
-} else if mode == "adoptfence" {
-    let new1 = connect(), new2 = connect()
-    extra += [new1, new2]
-    stateLock.lock()
-    seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    let nonce = withUnsafeBytes(of: UInt64.random(in: .min ... .max)) { Data($0) }
-    link.handOver(from: old, to: new1, fencePing: message(.ping, nonce), nonce: nonce)
-    stateLock.unlock()
-    readLoop(new1)
-    Thread.sleep(forTimeInterval: 0.03)        // well inside the slow first connection's round trip
-    adoptDuringFence = .some(link.adopt(new2))
-    readLoop(new2)
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
-    }
-} else {
-    let new = connect()
-    extra.append(new)
-    stateLock.lock()
-    seqAtHandOver = nextSeq - 1
-    handOverTime = now()
-    if mode == "nofence" {
-        link.connection = new                      // the hand-over before the fix
-    } else {
-        let nonce = withUnsafeBytes(of: UInt64.random(in: .min ... .max)) { Data($0) }
-        link.handOver(from: old, to: new, fencePing: message(.ping, nonce), nonce: nonce)
-    }
-    stateLock.unlock()
-    readLoop(new)
-    clientQueue.asyncAfter(deadline: .now() + releaseAfter) {
-        if let r = link.release(old) { fenceEnded("timeout", r) }
-    }
+    slowLine.resume()
+    timeout([old, new1])
+default:
+    fatalError("a mode without a case")
 }
 
-while true { stateLock.lock(); let done = nextSeq > total; stateLock.unlock(); if done { break }; Thread.sleep(forTimeInterval: 0.05) }
-Thread.sleep(forTimeInterval: max(releaseAfter, 1.0) + 0.5)
-old.cancel(); for c in extra { c.cancel() }
-Thread.sleep(forTimeInterval: 0.2)
-
+// Every input sent, then every connection closed after the last of them: the results are read once
+// the stand-in has read each connection to its end, so nothing sent can still be on its way.
+send()
+senderA.cancel()
+senderB.cancel()
+pinger.cancel()
+slowLine.resume()
+clientQueue.sync {
+    for c in connections { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
+}
+require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
 let arrived = stub.queue.sync { stub.arrived }
+stateLock.lock()                                // held to the end: nothing ends after this
+for c in connections { c.cancel() }
+
 var inversions = 0
 for (a, b) in zip(arrived, arrived.dropFirst()) where b < a { inversions += 1 }
 let increasing = inversions == 0
@@ -388,6 +575,12 @@ if let f = fence {
     print("fence: none ended")
 }
 if ends.count > 1 { print("ends: " + ends.map { "\($0.how) (\($0.held) out, \($0.waiting) waiting\($0.clear ? ", clear" : "")\($0.closed > 0 ? ", \($0.closed) to close" : ""))" }.joined(separator: ", ")) }
+// The stale pong, in the modes that hand over from the slow connection: read there, and it ended nothing.
+let staleSent = ["ok", "timeout", "oldcloses", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession"].contains(mode)
+let staleOK = !staleSent || staleEnded == 0
+if staleSent {
+    print(staleEnded == nil ? "stale pong: never read on the first connection" : "stale pong: read on the first connection, \(staleEnded == 0 ? "ended nothing" : "ENDED \(staleEnded!) (only the fence's own pong may)")")
+}
 // Whatever the mode, the last end that let messages go says nothing stands any more (StreamClient closes the old
 // connections then), and every end before it that let none go while some waited says something still stands.
 let clearOK = ends.last.map { $0.clear } ?? true
@@ -406,14 +599,15 @@ if !clearOK { print("clear: wrong") }
 if !closeOK { print("close: wrong (\(ends.map(\.closed)) for \(fencesMade) fences)") }
 switch mode {
 case "ok":
+    // Its pong, a round trip of the slow connection at least after the hand-over, let out what waited.
     ok = increasing && missing.isEmpty && dupes == 0 && fence?.how == "pong" && (fence?.held ?? 0) > 0
-        && (fence?.seconds ?? 9) >= slow * 0.9 && (fence?.seconds ?? 9) < 1.0
+        && (fence?.seconds ?? 0) >= slow * 0.9
 case "nofence":
     ok = inversions > 0          // the hazard, reproduced: this check exists to catch it
 case "timeout":
     ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "timeout" && (fence?.held ?? 0) > 0
 case "oldcloses":
-    ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "closed" && (fence?.seconds ?? 9) < 0.5
+    ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "closed" && (fence?.held ?? 0) > 0
 case "hold", "holdclosed":
     ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "adopt" && (fence?.held ?? 0) > 0
 case "unhold":
@@ -450,6 +644,6 @@ case "adoptfence":
 default:
     ok = false
 }
-ok = ok && (clearOK || mode == "nofence") && closeOK
+ok = ok && (clearOK || mode == "nofence") && closeOK && staleOK
 print(ok ? "PASS" : "FAIL")
 exit(ok ? 0 : 1)
