@@ -132,7 +132,9 @@ do {   // on at once, cleared by its answer; the wire carries only the field
     var l = SettingsLedger(); _ = l.receive(st(base))
     let out = l.pick(HostSettingsChange(directWireless: true), token: 1, now: 0)
     check(out == HostSettingsChange(token: 1, directWireless: true), "a Direct Wireless pick sends exactly its field")
-    check(String(data: enc(out!), encoding: .utf8) == #"{"directWireless":true,"token":1}"# || String(data: enc(out!), encoding: .utf8) == #"{"token":1,"directWireless":true}"#,
+    // Encoded once: JSONEncoder's key order is not fixed, and can differ between two calls in one run.
+    let wire = String(data: enc(out!), encoding: .utf8)
+    check(wire == #"{"directWireless":true,"token":1}"# || wire == #"{"token":1,"directWireless":true}"#,
           "on the wire: {token, directWireless}")
     var h = base; h.directWireless = true
     check(l.receive(st(h, answering: 1)).isEmpty && l.pending.isEmpty && l.displayed?.directWireless == true, "its answer settles it on")
