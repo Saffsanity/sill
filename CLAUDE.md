@@ -9,9 +9,9 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Update check and device notice (2026-09-25, branch `update-notice` from
-`remote-access` at cb0ec55, PR #13, with main at 1f3072a merged in, not
-rebased; the plan, its open questions with the defaults taken, and the
-results are in `docs/update-notice-plan.md`).** Noah's
+`remote-access` at cb0ec55, PR #13, with main merged in at 1f3072a and again
+at 32d532b, not rebased; the plan, its open questions with the defaults taken,
+and the results are in `docs/update-notice-plan.md`).** Noah's
 request: an update check in Sill.app with Apple frameworks only (GitHub's
 releases feed, not Sparkle), and a host-to-device notice so a later Mac can tell
 an old device to update instead of failing silently. The first public builds
@@ -171,6 +171,30 @@ set the compatibility floor for good (the section before Conventions).
   d4abceb's fail 40) and `publish_release` against a fake GitHub API; the
   simulator against Python stand-ins, before and after; the site's cut gate;
   every pure check with its mutants, H7 (42) and the stale-result check (11).
+- Merged with main again (2026-09-26; merge c01610b of main at 32d532b: PR
+  #16, the best path's follow-ups, and PR #17, GitHub Actions; the plan's
+  "Merged with main again"). No host source changed on main since 1f3072a.
+  Where they met: `sessionEnded` keeps GoodbyePolicy's rule and passes #16's
+  `afterQuit` after goodbye "quit" (a notice never sets it); release.sh keeps
+  both sides' checks, main's `SILL_RELEASE_TAG`, `--check-tag`, icon check and
+  `gh api` preflight (`gh auth status`, which the Actions token can't answer,
+  is gone) and this branch's tag rule, and the release workflow
+  (`GITHUB_ACTIONS` with `SILL_RELEASE_TAG`) does not ask origin for the tag
+  (`in_release_workflow`: its checkout is origin's tag and keeps no
+  credentials); the checklist says a pushed tag starts the release workflow,
+  which publishes when `SILL_SIGN_IN_CI` is on, so `--publish` by hand then
+  does not. `Tests/checks`: protocol's kind 23 case is the hello, and this
+  branch's four pure checks moved in (662a70e): `compatibility` 74,
+  `device-gate` 58, `goodbye` 42 and `update-policy` 124, with 61 mutants, in
+  CI's mutants matrix too. Verified: a clean release build and the three iOS
+  builds (only the known warnings); CI's CLI step; `Tests/checks/run-all.sh`,
+  all 13, and `--mutants`, all 279 mutants caught; the hello first on the
+  merged SessionLink and StreamClient; release.sh and make-app.sh in scratch
+  repositories with a stub gh (101 checks, 20 of 20 mutants; the scripts
+  before the merge fail 26 and 50 of them) and `publish_release` against a
+  fake GitHub API; the simulator against this head's CLI (floor 99: the
+  notice, no reconnect; floor 0.1: admitted and streaming, and a move's own
+  connection with its hello; a goodbye "quit": its words and one connection).
 - **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
   this Sill.app yourself; within a minute "Update check failed: GitHub has no
   release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t

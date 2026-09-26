@@ -9,8 +9,8 @@
 #
 # Cost: GitHub-hosted runners are free for a public repository. For a private one, macOS minutes
 # count against the account's included minutes and are then billed per minute ($0.062 on
-# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about an hour and a half
-# of macOS time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
+# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about two hours of macOS
+# time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
 name: CI
 
 # A change that touches only documents, the website or design files starts no run. (Should this

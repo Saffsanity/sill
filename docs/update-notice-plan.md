@@ -1681,3 +1681,88 @@ privacy sentence the Remote Access cut missed, and docs the merge left stale. Fi
   sent). The checker alone against sillfeed.py: H7's 42 and the stale-result check's 11.
 - **Not verified here:** a real Mac refusing a device mid-session (no build raises the floor), and a
   real `gh release create` (no test contacts GitHub).
+
+### Merged with main again (2026-09-26)
+
+Main moved while the merge's review ran: PRs #16 (the best path's follow-ups: after goodbye "quit"
+the reconnect leaves the Mac's old row alone for 3 s, and `-SillMoveTest to:` reads its address as
+`-SillConnect` does) and #17 (GitHub Actions: CI on every pull request, the release workflow, the
+pure checks in `Tests/checks`, release.sh's `SILL_RELEASE_TAG` and gh preflight) merged at 32d532b.
+It came in by one merge, c01610b, not a rebase, and this branch's four pure checks followed it into
+`Tests/checks` (662a70e). No host source changed on main since 1f3072a, so Sources/, Package.swift
+and Packaging/ are this branch's byte for byte, and the CLI's stdout is the first merge's
+(identical to origin/main's, masked and sorted).
+
+**Where they met, and how:**
+- **`sessionEnded`**: GoodbyePolicy's rule stays, and `lostReconnect` passes #16's `afterQuit` for
+  goodbye "quit". A notice (`endWithNotice`) never sets it.
+- **`release.sh`**: both sides' checks in one preflight. Main's `SILL_RELEASE_TAG` (`tag_problems`),
+  `--check-tag`, the icon check and the gh preflight (`publish_problems`: `gh api repos/<repo>`,
+  which the Actions token can answer) stay, and `publish_release` asks `publish_problems` instead of
+  this branch's `gh auth status`, which that token can't answer. This branch's rules stay too: HEAD
+  tagged v‹version›, origin's tag naming HEAD for `--publish`, `--verify-tag` in the feed's
+  repository, the feed warning, a dry run's `SILL_RELEASE_DRY_RUN` and a failed `gh release create`
+  ending the run. One new rule where they meet: the release workflow (`GITHUB_ACTIONS` with
+  `SILL_RELEASE_TAG`) does not ask origin for the tag (`in_release_workflow`). Its checkout is
+  origin's tag with every tag fetched, so the local tag is origin's, which `tag_problems` and
+  `head_is_release_tag` check, and `git ls-remote` would need the credentials that checkout does not
+  keep (`persist-credentials: false`) while the repository is private.
+- **The checklist's Publish step**: a pushed tag or the release workflow publishes; `--publish`
+  checks origin's tag before it builds; sill-site while sill is private, and what to do once it is
+  public. Main's "a local `--publish` has gh create the tag" no longer holds: pushing the tag, which
+  `--publish` needs first, starts the release workflow, which publishes when `SILL_SIGN_IN_CI` is
+  `true`, so `--publish` by hand then does not (whichever comes second stops at "already exists").
+- **`Tests/checks`**: the protocol check's case "kind 23 is unknown (skipped)" became "kind 23 is
+  hello (update-notice), 24 unknown (skipped)", as main's `Tests/checks/README.md` asked of this
+  merge, and that note left its list of open branches. This branch's four checks moved in as main's
+  nine did, each `main.swift` as it was (only `compatibility`'s header names its compile line) and
+  each JSON list of mutants, the same mutants, as a `mutants.py`: `compatibility` (H3's protocol
+  part), `device-gate`, `goodbye` and `update-policy`. CI's mutants matrix names them, and the
+  checklist's and ci.yml's estimates of a mutants run count twelve jobs.
+- **CLAUDE.md, DEVELOPMENT.md and the harness contract**: both sides' lines kept; DEVELOPMENT.md's
+  Releasing says how the release workflow meets the tag rule.
+
+**Verified** (scratch: `…/scratchpad/integrate-update/publish-merge/`):
+- Builds: a clean `swift build -c release` of 662a70e (a `git archive` copy), only the CaptureProbe
+  warning; iOS Debug for the simulator with CI's command, Release for the simulator and Debug for a
+  device (`CODE_SIGNING_ALLOWED=NO`), each from fresh derived data, only the `StreamClient` capture
+  warning; `make-app.sh` without `--install`: 0.3.0 (178, at 662a70e), Apple Development, sdk 27.0.
+  CI's CLI step: `SillHost --internet` alone exits 2 with its message, and `--print-reachability`
+  prints.
+- `Tests/checks/run-all.sh`: all 13 pass (addresses 41, clientlink 89, compatibility 74, device-gate
+  58, the fence's 14 modes, goodbye 42, the ledger 90 with 5,000 random runs, origin 66,
+  pairing-address 80, policy 286, protocol 188 with the cross-check's 8, remote-rules 64,
+  update-policy 124; about 140 s). `run-all.sh --mutants`: every mutant caught, 279 of 279
+  (addresses 15, clientlink 14, compatibility 13, device-gate 14, fence 19, goodbye 16, origin 10,
+  pairing-address 35, policy 70, protocol 20, remote-rules 35, update-policy 18), about 52 minutes
+  of mutants here. The four new checks and their mutants again from the `git archive` copy, as CI's
+  jobs run them from a checkout: all pass, 61 of 61 mutants.
+- The hello first, against the merged SessionLink and StreamClient: the review's check (first on a
+  send right after start, after a hop to the network queue and 200 ms into a Bonjour dial still
+  resolving; the old order caught) and #12's moves (held and fenced, the move's connection says
+  hello first with the three held inputs right after it; one without a hello caught); the source
+  makes two connections and sends three hellos.
+- `release.sh` and `make-app.sh`: the apply-review rig, extended for the merge (a stub gh that logs
+  every call, and main's `SILL_RELEASE_TAG`, `--check-tag` and gh preflight with the release
+  workflow's rule), 101 checks against scratch repositories with a local bare origin, passed; the
+  stub saw only `api repos/…` and `release view`. 20 of 20 mutants caught (the branch's 13, their
+  patterns where the merge moved them, and 7 for what the merge joined). The branch's scripts before
+  the merge fail 26 of the 101, main's 50. `publish_release` against the fake GitHub API (every
+  CONNECT refused; the repository `o/r` on `GH_HOST`, so `gh api repos/o/r` reaches the fake): the
+  feed's repository without the tag refused by `--verify-tag`, with it published, another
+  repository warned about and published, an existing release refused by `publish_problems` before
+  anything is made, an unreachable repository refused.
+- The simulator: a Debug build of this head's iOS sources on a simulator of this stage's own ("iPad
+  publish-merge", deleted after), against this head's `SillHost --synthetic` by `-SillConnect`, one
+  host at a time, each start and every 10 s under the encoder rule (Noah's Sill.app idle
+  throughout). Floor 99: "Update Sill on your iPad to keep using Noah’s MacBook Pro. It needs
+  version 99.0 or later." as the status line, one Refused line with the simulator's name and "Sill
+  0.1", no "Client connected", "not reconnecting", no second connection in 60 s (photo). Floor 0.1:
+  one "Client connected" and one "Client hello" line, the catalog, streaming, "host: no version,
+  protocol 1". Floor 0.1 with `-SillMoveTest 1`: two connections, each with its hello, "the session
+  moved to the network", the direct one left. `SILL_TEST_GOODBYE` `{"reason":"quit"}` at floor 99:
+  "127.0.0.1:P quit Sill. This iPad reconnects when it’s back.", no notice, one connection in 30 s
+  (the merged `sessionEnded` with #16's `afterQuit`; a session by address has no row to go back to).
+  An earlier stage's leftover `sillfeed.py` (from 23:31) was found and stopped.
+- **Not verified here:** CI and the release workflow on GitHub's runners (the first CI run is this
+  branch's pull request).

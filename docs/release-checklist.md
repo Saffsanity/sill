@@ -328,9 +328,9 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   runs on Free. Each push to a pull request (drafts too) is a run, so a busy day of pushes can
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same. A signed release also waits for Apple's notary service, usually 15 to 30
-  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about an hour and a
-  half of macOS time across their eight jobs: some 900 included minutes, nearly half of Free's
-  month, or about $5.50.
+  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about two hours of
+  macOS time across their twelve jobs: some 1,200 included minutes, more than half of Free's
+  month, or about $7.50.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip of about 2 MB for 14 days, the notary log for 30) within the 500 MB of
   artifact storage on GitHub Free.

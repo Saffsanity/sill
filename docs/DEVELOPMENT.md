@@ -503,7 +503,10 @@ The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
 `v<version>`: it checks and builds, and with the repository variable
 `SILL_SIGN_IN_CI` set to `true` it also signs, notarizes and publishes with
 `release.sh --publish` (docs/release-checklist.md, "Releasing from GitHub
-Actions").
+Actions"). Its checkout is that tag, so there `--publish` checks the local
+tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
+`--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
+on, let that run publish instead.
 
 ## Known limitations
 
