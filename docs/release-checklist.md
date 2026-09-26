@@ -82,17 +82,17 @@ shell.
 
 Preview it with `python3 -m http.server 8000 --directory site` and http://localhost:8000.
 
-Before it goes public:
+Before it goes public (Saffsanity/sill went public on 2026-09-26, after the sweep of PR #24; the
+unchecked items below were done that day or record what was decided):
 
 - [x] Done 2026-09-25: `support@getsill.app` reaches Noah's mailbox (Cloudflare Email Routing,
       below). Apple wants real contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
-- [ ] Open source: the site doesn't say it while Saffsanity/sill is private. Once the repository is
-      public with its LICENSE (Apache-2.0, since PR #15), follow the comments in
-      `index.html` and `support.html`: put "open source" back on the home page and turn the
-      commented GitHub links into real ones. Sill for Mac already says "free and open source"
+- [x] Done 2026-09-26: the repository is public with its LICENSE (Apache-2.0, since PR #15), and
+      `index.html` says "Free and open source" with the GitHub link, `support.html` links the
+      issues, and the README shows its CI badge. Sill for Mac already says "free and open source"
       (`NSHumanReadableCopyright` in `Packaging/Info.plist`, and the footnote in Settings,
       `SettingsPanes.swift`). If the repository is still private at the first Developer ID
       release, decide whether those wait too.
@@ -456,16 +456,16 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 › Release › Run workflow) with such a tag. Both use no secret until you turn signing on. A third,
 `.github/workflows/testflight.yml`, runs only by hand: TestFlight from GitHub Actions, above.
 
-### Why the download link doesn't work yet
+### Why the download link did not work before 2026-09-26
 
 - There was no release until v0.3.0, published on 2026-09-26. The site's button links
   `releases/latest/download/Sill.zip`, which GitHub redirects to the newest release's file of that
   name.
-- The repository is private, and GitHub serves a private repository's release files only to people
-  signed in with access to it. Everyone else gets a 404 even once a release exists. Either make
-  Saffsanity/sill public (the plan at launch), or publish in the public Saffsanity/sill-site: the
-  variable `SILL_RELEASE_REPO` and the secret `SILL_RELEASE_TOKEN` below, and `download.html`'s
-  three links changed to point there.
+- Until 2026-09-26 the repository was private, and GitHub serves a private repository's release
+  files only to people signed in with access to it, so everyone else got a 404 even once v0.3.0
+  existed. Saffsanity/sill is public now (the decision at launch: the history stays as it is), so
+  the link works; the alternative, publishing in the public Saffsanity/sill-site with
+  `SILL_RELEASE_REPO` and `SILL_RELEASE_TOKEN`, was not needed.
 
 ### What a tag does
 
