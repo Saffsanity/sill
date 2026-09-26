@@ -83,9 +83,10 @@ struct ContentView: View {
 ///   same name: another synthetic host there is refused at its first window list (another launch)
 ///   and not tried again while it stays listed; the first host's own port, with `-SillConnect`
 ///   going through a proxy that delays each direction, moves once the fence has waited out the
-///   proxy's round trip. `to:HOST:PORT` lists that address under the same name: the same host
-///   reached another way, so the Settings panel's route word changes at the hand-over (from
-///   `127.0.0.1`, none, to this Mac's `fe80::…%en0`, "Wi-Fi"). The console says what happened
+///   proxy's round trip. `to:HOST:PORT` lists that address under the same name, read as
+///   `-SillConnect`'s is (`to:[::1]:P` works too): the same host reached another way, so the
+///   Settings panel's route word changes at the hand-over (from `127.0.0.1`, none, to this Mac's
+///   `fe80::…%en0`, "Wi-Fi"). The console says what happened
 ///   ("discovery: …", "move to the network …", "session: …" for the route;
 ///   `xcrun simctl launch --console-pty`).
 /// * `-SillWiredTest HOST:PORT` — a "Wired" row's dial goes to the cable first and falls back to

@@ -1623,9 +1623,10 @@ final class StreamClient: ObservableObject {
     /// there is another launch (one try, refused at its first list, none again while it stays
     /// listed); the same host's own port, with `-SillConnect` through a proxy that delays each
     /// direction, is the same launch behind a slow direct link (moved once the fence has waited out
-    /// the proxy's round trip). `to:HOST:PORT` lists that address: the same host reached another
-    /// way, so the route can change at the hand-over (from 127.0.0.1, no word, to this Mac's
-    /// fe80::…%en0 address, "Wi-Fi"). Main thread.
+    /// the proxy's round trip). `to:HOST:PORT` lists that address, read as `-SillConnect`'s is
+    /// (`address(_:)`, so `to:[::1]:P` lists ::1 rather than the name "[::1]", which never
+    /// connected): the same host reached another way, so the route can change at the hand-over
+    /// (from 127.0.0.1, no word, to this Mac's fe80::…%en0 address, "Wi-Fi"). Main thread.
     private func beginMoveTest(endpoint: NWEndpoint, name: String, mode: String) {
         guard case .hostPort(let host, _) = endpoint, testNetworkRows.isEmpty else { return }
         let listed: NWEndpoint
@@ -1635,9 +1636,8 @@ final class StreamClient: ObservableObject {
             listed = .hostPort(host: host, port: 1)
         } else if mode.hasPrefix("other:"), let number = UInt16(mode.dropFirst(6)), let port = NWEndpoint.Port(rawValue: number) {
             listed = .hostPort(host: host, port: port)
-        } else if mode.hasPrefix("to:"), let colon = mode.lastIndex(of: ":"), mode.distance(from: mode.startIndex, to: colon) > 3,
-                  let number = UInt16(mode[mode.index(after: colon)...]), let port = NWEndpoint.Port(rawValue: number) {
-            listed = .hostPort(host: NWEndpoint.Host(String(mode[mode.index(mode.startIndex, offsetBy: 3)..<colon])), port: port)
+        } else if mode.hasPrefix("to:"), let address = Self.address(String(mode.dropFirst(3))) {
+            listed = address
         } else {
             return
         }
@@ -2575,11 +2575,11 @@ extension StreamClient {
         UserDefaults.standard.string(forKey: key).flatMap(address(_:))
     }
 
-    /// `host:port` as an address (a launch argument's, `-SillPathTest`'s `wifi=` and `cable=`): by
-    /// the strict address parser, so `[::1]:P` works (a split at the last colon broke IPv6), else,
-    /// for what the parser refuses, split at the last colon as before, so a scoped link-local
-    /// address works too (`fe80::…%en0:P`: a zone means nothing to a saved address, which the
-    /// parser is for, and everything to a test on this Mac's own link).
+    /// `host:port` as an address (a launch argument's, `-SillPathTest`'s `wifi=` and `cable=`,
+    /// `-SillMoveTest`'s `to:`): by the strict address parser, so `[::1]:P` works (a split at the
+    /// last colon broke IPv6), else, for what the parser refuses, split at the last colon as
+    /// before, so a scoped link-local address works too (`fe80::…%en0:P`: a zone means nothing to a
+    /// saved address, which the parser is for, and everything to a test on this Mac's own link).
     private static func address(_ raw: String) -> NWEndpoint? {
         if case .success(let address) = AddressParser.parse(raw), let number = address.port,
            let port = NWEndpoint.Port(rawValue: UInt16(number)) {

@@ -105,7 +105,23 @@ says; remote access works as its entries say. Where the two meet:
   glue) and the rule's 10 mutants; iOS Debug for the simulator, only the old
   `StreamClient` capture warning. No simulator scenario can show it: the
   synthetic hosts do not advertise, so no row lingers after their goodbye,
-  and a session by address has no Bonjour name to reconnect by.
+  and a session by address has no Bonjour name to reconnect by. DEBUG:
+  `-SillMoveTest to:HOST:PORT` split HOST:PORT at its last colon itself, so
+  `to:[::1]:P` listed the name "[::1]", which never connected (each try given
+  up after 5 s); it now reads it as `-SillConnect` does (`address(_:)`: the
+  address parser, then the split), and Build and run below names `other:PORT`
+  and `-SillWiredTest` too. Verified on a simulator of its own against
+  `SillHost --synthetic` built from the same tree (b50e224's host code), one
+  host at a time (9 hosts, the longest 18 s;
+  `scratchpad/integrate-12/apply-fixes/sim/simapply.py`): `to:[::1]:P`,
+  `to:::1:P` and `to:fe80::…%en0:P` from 127.0.0.1 each list the address and
+  move (the host sees the second connection; the scoped one reads its route
+  again at the hand-over), and, as before, `-SillMoveTest 1`, a move's wired
+  test, a plain session, close-slow (#13's words) and remote access's host
+  gone and back (the session's end and the remote redial, which the quit fix
+  runs through): 32 of 32 checks. The runner's app is signed to run locally:
+  unsigned, the simulator gives it no keychain, and pairing stops at the
+  device key (-34018) before it prints anything.
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
@@ -1821,13 +1837,20 @@ Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the
-off-Bonjour synthetic hosts from the simulator), `-SillMoveTest 1|refused|to:HOST:PORT`
-(with `-SillConnect`: that session counts as direct and a second later the same
-address, or its port 1, or HOST:PORT, is listed as the Mac's network row, so the
-move to the network runs against a synthetic host; `to:` this Mac's
-`fe80::…%en0` address from `127.0.0.1` shows the panel's route word change at
-the hand-over; the console's "discovery: …" and "session: …" lines,
-`xcrun simctl launch --console-pty`, say what happened), `-SillPathTest
+off-Bonjour synthetic hosts from the simulator), `-SillMoveTest
+1|refused|other:PORT|to:HOST:PORT` (with `-SillConnect`: that session counts as
+direct and a second later the same address, or its port 1, or its port PORT, or
+HOST:PORT, is listed as the Mac's network row, so the move to the network runs
+against a synthetic host; `other:` with a second synthetic host on PORT is
+another launch, refused at its first window list and not tried again, and with
+`-SillConnect` through a delay proxy to the first host's own PORT the fence
+waits out the proxy's round trip; `to:` reads HOST:PORT as `-SillConnect` does,
+`[::1]:P` too, and this Mac's `fe80::…%en0` address from `127.0.0.1` shows the
+panel's route word change at the hand-over; the console's "discovery: …" and
+"session: …" lines, `xcrun simctl launch --console-pty`, say what happened),
+`-SillWiredTest HOST:PORT` (a wired dial's fallback under test:
+`-SillConnect`'s dial, a network row's and a move's go to HOST:PORT first,
+`192.0.2.1:9` giving way after 2.5 s and `127.0.0.1:1` at once), `-SillPathTest
 '<spec>'` (with `-SillConnect`: the session's Mac listed as a network row whose
 cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say
