@@ -8,31 +8,32 @@ typealias S = AddressList.Service
 typealias V6 = AddressList.IPv6Entry
 func hosts(_ list: [MacAddress]) -> [String] { list.map { "\($0.host)\($0.port.map { ":\($0)" } ?? "")/\($0.kind)/\($0.via)" } }
 
-// Noah's store, as the probe and scutil showed it: utun0–3 link-local and nameless, Tailscale on
-// utun4, the CoreDevice tunnel's ULA on utun5 (nameless), en0 private plus a deprecated ULA.
+// Noah's store, as the probe and scutil showed it, Tailscale's name and addresses made up: utun0–3
+// link-local and nameless, Tailscale on utun4, the CoreDevice tunnel's ULA on utun5 (nameless), en0
+// private plus a deprecated ULA.
 let noah: [S] = [
     S(id: "u0", name: "", interface: "utun0", ipv4: [], ipv6: [V6(address: "fe80::a1", flags: 0)]),
     S(id: "u1", name: "", interface: "utun1", ipv4: [], ipv6: [V6(address: "fe80::a2", flags: 0)]),
     S(id: "u2", name: "", interface: "utun2", ipv4: [], ipv6: [V6(address: "fe80::a3", flags: 0)]),
     S(id: "u3", name: "", interface: "utun3", ipv4: [], ipv6: [V6(address: "fe80::a4", flags: 0)]),
-    S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.65.142.55"],
-      ipv6: [V6(address: "fd7a:115c:a1e0::453a:8e38", flags: 0), V6(address: "fe80::dc68:1", flags: 0)], matchDomains: ["", "tailc94091.ts.net."]),
+    S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.88.123.45"],
+      ipv6: [V6(address: "fd7a:115c:a1e0::abcd:ef01", flags: 0), V6(address: "fe80::dc68:1", flags: 0)], matchDomains: ["", "tail5678.ts.net."]),
     S(id: "cd", name: "", interface: "utun5", ipv4: [], ipv6: [V6(address: "fdab:cdef:1234::1", flags: 0)]),
     S(id: "wifi", name: "Wi-Fi", interface: "en0", ipv4: ["10.128.0.34"],
       ipv6: [V6(address: "fe80::869:a388:779d:7833", flags: 1024), V6(address: "fd4e:4f6b:37dc:4a0f:1083:aa29:4357:c7a9", flags: 1104)]),
 ]
 var input = AddressList.Input(services: noah, primaryInterface: "en0", tunnels: [], magicDNS: [:])
 check("Noah's store: exactly Tailscale v4, Tailscale v6, Wi-Fi v4 (\(hosts(AddressList.build(input))))",
-      hosts(AddressList.build(input)) == ["100.65.142.55/vpn/Tailscale", "fd7a:115c:a1e0::453a:8e38/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
+      hosts(AddressList.build(input)) == ["100.88.123.45/vpn/Tailscale", "fd7a:115c:a1e0::abcd:ef01/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
 check("MagicDNS candidate from LocalHostName and the ts.net match domain",
-      AddressList.magicDNSCandidate(localHostName: "Noahs-MacBook-Pro", service: noah[4]) == "noahs-macbook-pro.tailc94091.ts.net")
+      AddressList.magicDNSCandidate(localHostName: "Lab-MacBook-Pro", service: noah[4]) == "lab-macbook-pro.tail5678.ts.net")
 check("no MagicDNS candidate without a ts.net domain, or on a LAN service",
       AddressList.magicDNSCandidate(localHostName: "Mac", service: noah[6]) == nil
       && AddressList.magicDNSCandidate(localHostName: "Mac", service: S(id: "x", name: "VPN", interface: "utun9", ipv4: [], ipv6: [], matchDomains: ["corp.example."])) == nil)
-input.magicDNS = ["ts": "noahs-macbook-pro.tailc94091.ts.net"]
+input.magicDNS = ["ts": "lab-macbook-pro.tail5678.ts.net"]
 check("with the resolver's answer: the MagicDNS name first",
-      hosts(AddressList.build(input)) == ["noahs-macbook-pro.tailc94091.ts.net/vpn/Tailscale", "100.65.142.55/vpn/Tailscale",
-                                          "fd7a:115c:a1e0::453a:8e38/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
+      hosts(AddressList.build(input)) == ["lab-macbook-pro.tail5678.ts.net/vpn/Tailscale", "100.88.123.45/vpn/Tailscale",
+                                          "fd7a:115c:a1e0::abcd:ef01/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
 var t = input; t.testLoopback = true
 check("a test host lists 127.0.0.1 first (This Mac)", hosts(AddressList.build(t)).first == "127.0.0.1/lan/This Mac")
 // A WireGuard service, a non-NE point-to-point tunnel, Ethernet beside Wi-Fi.
@@ -40,11 +41,11 @@ var more = noah
 more.append(S(id: "wg", name: "Home WireGuard", interface: "utun7", ipv4: ["10.99.0.2"], ipv6: [V6(address: "fd99::2", flags: 0)]))
 more.append(S(id: "eth", name: "Ethernet", interface: "en7", ipv4: ["192.168.1.30"], ipv6: []))
 var input2 = AddressList.Input(services: more, primaryInterface: "en0", tunnels: [AddressList.Tunnel(interface: "utun9", ipv4: ["10.8.0.6"]),
-                                                                                AddressList.Tunnel(interface: "utun4", ipv4: ["100.65.142.55"])])
+                                                                                AddressList.Tunnel(interface: "utun4", ipv4: ["100.88.123.45"])])
 let l2 = hosts(AddressList.build(input2))
 check("WireGuard (its own name) and a point-to-point tunnel (VPN (utun9)); a service's tunnel not twice (\(l2))",
-      l2 == ["10.99.0.2/vpn/Home WireGuard", "100.65.142.55/vpn/Tailscale", "10.8.0.6/vpn/VPN (utun9)",
-             "fd99::2/vpn/Home WireGuard", "fd7a:115c:a1e0::453a:8e38/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
+      l2 == ["10.99.0.2/vpn/Home WireGuard", "100.88.123.45/vpn/Tailscale", "10.8.0.6/vpn/VPN (utun9)",
+             "fd99::2/vpn/Home WireGuard", "fd7a:115c:a1e0::abcd:ef01/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
 input2.primaryInterface = "en7"
 check("Wi-Fi and Ethernet: only the primary one's IPv4 (Ethernet primary)", hosts(AddressList.build(input2)).last == "192.168.1.30/lan/Ethernet")
 input2.primaryInterface = "utun4"
