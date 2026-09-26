@@ -1,5 +1,28 @@
 # Pairing at home: Wi‑Fi, Direct and the cable — the plan
 
+## Status and hand-off (2026-09-26 05:20)
+
+Stopped by Noah at 99 % of the week's usage, at the end of build step 5 of 5 (§12), before the
+review phase. Branch `home-pairing` (worktree `/Users/noah/Downloads/winstream-pairing`, main merged
+in at 1f3072a) holds: the plan and its review (0f50d14, c3fbb8c), H0's probes (8ce57ab), step 1 the
+protocol (21b5789), step 2 the host door (c0b22d7), step 3 Sill.app (47bbbb8), step 4 iOS (41caa8f),
+and the commit after this one: step 5 as the interrupted agent left it, mid-verification (it had
+rerun the pure checks and the home and device mutants and was building iOS Release and a device
+build and sheeting the Settings cases at phone sizes; results in the session scratchpad,
+home-pairing/5/, if it survives a reboot). Unreviewed.
+
+Next agent, in order: (1) verify step 5 (§11's gates for it; the mutants; iOS Debug, Release and
+device builds; the sheets); (2) merge main (bd46192 or later: PRs #16–#26; the update notice's
+`DeviceGate` and hello meet this branch at the door and in `SessionLink`/`StreamClient`; the
+update-notice plan says the gate moves into this branch's `Door`, one place for both doors) and
+rerun every check; (3) the security review the workflow planned (three lenses: the wire and TLS,
+pairing's rules and limits, the device UI), fixes; (4) the PR with Noah's device tests (§11) and
+the install order: the iPad build first, then Sill.app. Quote Noah's authorization in the prompt:
+"Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy to do but still
+secure, similar to how Tailscale is being paired. Wired should still pair automatically." (2026-09-25)
+and this resumption.
+
+
 2026-09-25. It stands alone: the implementer needs no other design document, though it builds on
 `docs/remote-access-plan.md` (PR #13) and names its sections as "the remote plan §…". Written from
 a read-only survey of origin/main `ba91136` ("Merge pull request #13", remote access) in the
