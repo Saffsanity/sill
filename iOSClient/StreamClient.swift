@@ -461,6 +461,9 @@ final class StreamClient: ObservableObject {
         var rememberedDirect: Bool
         var remoteFailures = 0
         var nextRemoteAt = 0.0
+        /// The session ended with goodbye `quit`: a row listed since before `lostAt` is the Mac's
+        /// registration that is going, left alone for DiscoveryPolicy.quitWait (`reconnectRow`).
+        var afterQuit = false
     }
     var reconnect: Reconnect?
     /// The dial in flight, remote or pairing: one at a time each.

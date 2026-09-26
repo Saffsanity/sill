@@ -25,8 +25,9 @@ says; remote access works as its entries say. Where the two meet:
   words, `reconnect` by Mac ID or Bonjour name, the remote dial), which
   replaced `reconnectTo`. `connectionLost` first lets a move carry the session
   on (`rescue`: the stream screen stays), except after a goodbye (kind 22,
-  "quit" at home: the session ends at once with its words, not after a dial
-  to a Mac that is going) and when this device closed the connection itself
+  "quit" at home: the session ends at once with its words, not after a
+  rescue's dial to a Mac that is going; the reconnect waits too, see the
+  review fixes below) and when this device closed the connection itself
   (`end`: a message no Sill sends). #13's `reconnectIfListed` never runs
   beside a move (`moveUnderWay`: a move, or a session one carries on, which
   stays `connected` until the move takes over or ends it). #13's liveness (no
@@ -85,11 +86,33 @@ says; remote access works as its entries say. Where the two meet:
   fence check's modes and 19 of 19 mutants. Not run on it: Release and device
   builds, and the simulator scenarios against its `SillHost --synthetic`,
   which now has b50e224's encoder recovery (the 21 hosts above ran ba91136's).
+- Review fixes after the merges. After goodbye "quit" the reconnect no longer
+  dials the Mac's row at once. The row outlives the goodbye by about a second
+  (a receiver keeps a record 1 s past its goodbye, RFC 6762 §10.1; a stand-in
+  for Sill.app's Quit, browsed on this Mac: gone 1.05–1.22 s after the
+  connection ended, 11 of 11), and `sessionEnded` ran `reconnectIfListed` in
+  the same main-queue turn, which took it (over the cable for a Wired row):
+  "Reconnecting to ‹Mac›…" replaced "‹Mac› quit Sill." before it was drawn,
+  and the dial waited on a Mac that was going (#13 alone did the same at
+  home). Now a row listed since before the goodbye is left alone for 3 s
+  (`DiscoveryPolicy.quitWait`; `reconnectRow`'s `quitAt` and `networkSince`,
+  from `Reconnect.afterQuit` and `sightings`): the words stay; the row listed
+  again (Sill is back) is taken at once by the usual rules (a Direct row after
+  its own 6 s), and one still listed at 3 s (Sill relaunched within that
+  second, a lost goodbye packet) is taken then. Any other end is as before.
+  Verified: the policy check 310 of 310 (the merge's 286, and 24 for the
+  rule: its cases, a grid of 17,820 against the old rule, a model of the
+  glue) and the rule's 10 mutants; iOS Debug for the simulator, only the old
+  `StreamClient` capture warning. No simulator scenario can show it: the
+  synthetic hosts do not advertise, so no row lingers after their goodbye,
+  and a session by address has no Bonjour name to reconnect by.
 - **Untested, for Noah:** the entries below on the merged build, and: a remote
   session at home with the cable plugged in stays remote (the console's "path:
   kept: a remote session…", the card's "through Tailscale"); Sill.app's Quit
-  while the iPad streams over the cable gives "‹Mac› quit Sill." at once, with
-  no dial over the cable first, and it reconnects when Sill is back.
+  while the iPad streams over the cable gives "‹Mac› quit Sill." at once and
+  keeps it, with no "dialing ‹Mac› on anpi0 (wired)" on the console before
+  the row is listed again or 3 s have passed, and reopening Sill reconnects
+  over the cable.
 
 **The session follows the best path (2026-09-25, branch `follow-best-path` from
 main at 76366e8, after PRs #9 and #10).** Noah's tests: plugging the cable in

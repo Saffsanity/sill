@@ -431,7 +431,8 @@ extension StreamClient {
             reconnect = Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
                                   lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
                                   remoteAllowed: remoteAllowed,
-                                  rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false)
+                                  rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
+                                  afterQuit: goodbye == Goodbye.quit)
         } else {
             reconnect = nil
         }
@@ -454,7 +455,11 @@ extension StreamClient {
     /// ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one.
     /// Never while a move is under way (`moveUnderWay`): a session at home whose connection went is
     /// carried on by one (StreamClient.rescue) and stays connected until it takes over, or until it
-    /// fails and the session's end brings the reconnect here.
+    /// fails and the session's end brings the reconnect here. After goodbye `quit`, a row listed
+    /// since before the loss is the registration that is going (it outlives the goodbye by about a
+    /// second): it is left alone for DiscoveryPolicy.quitWait, and the words "‹Mac› quit Sill…"
+    /// stay meanwhile; the row listed again (Sill is back), or still listed after that, is taken as
+    /// above.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
@@ -472,9 +477,10 @@ extension StreamClient {
         // The network's sightings are by the name it lists: the Direct row's, else the name last
         // used with the Mac.
         let listedName = direct?.name ?? r.bonjourName
-        let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] },
-                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] }, now: now)
+        let choice = DiscoveryPolicy.reconnectRow(network: network, networkSince: network.flatMap { sightings.since[$0.name] },
+                                                  direct: direct, directSince: direct.flatMap { directSince[$0.name] },
+                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] },
+                                                  quitAt: r.afterQuit ? r.lostAt : nil, now: now)
         if let mac = choice.take, mac.endpoint != nil {
             if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
             cancelRemoteDial()
