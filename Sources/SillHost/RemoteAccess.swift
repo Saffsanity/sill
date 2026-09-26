@@ -41,8 +41,9 @@ package final class RemoteAccess {
         package let port: Int
         /// This window's offer shown again (a second request while it is open).
         package let again: Bool
-        /// A device opened this window by asking at a TLS home door: the app shows it in front
-        /// without taking the keyboard, and its link carries no address.
+        /// A device opened this window by asking at a TLS home door, and it is still the home
+        /// door's alone: the app shows it in front without taking the keyboard, and its link
+        /// carries no address. False again once the Mac's user opens a window over it.
         package let byDevice: Bool
         /// Where that device asked from, as the window says it: "on this network", "nearby" (over
         /// peer-to-peer Wi-Fi) or "on this Mac" (test hosts only); nil when opened on the Mac.
@@ -320,8 +321,9 @@ package final class RemoteAccess {
             // becomes the remote door's too, and its offer goes out again once the addresses are
             // known, so a device away can pair with it.
             if byDevice == nil, homeTLS, userWindowsOpenRemoteDoor, window.makeRemote() {
-                if case .open(let r, let e, let t, let l, let d) = pairingState {
-                    pairingState = .open(requestedBy: r, expiresAt: e, triesLeft: t, lastWrongFrom: l, byDevice: d)
+                // Now the Mac's user's window as much as the device's (its offer says so too).
+                if case .open(let r, let e, let t, let l, _) = pairingState {
+                    pairingState = .open(requestedBy: r, expiresAt: e, triesLeft: t, lastWrongFrom: l, byDevice: false)
                 }
                 publishTrust()
                 updateDoor()
@@ -762,9 +764,12 @@ package final class RemoteAccess {
         offerPending = nil
         offerDeadline?.cancel()
         let link = PairLink(fingerprint: identity.fingerprint, secret: w.secret, name: macName, port: port, addresses: links)
+        // A device-opened window the Mac's user has since opened over (`makeRemote`) is offered as
+        // theirs: its link has addresses now, and the app shows it as it shows its own.
         onPairingOffer?(PairingOffer(url: link.url, code: w.code, expiresAt: Date(timeIntervalSince1970: w.expiresAt),
                                      requestedBy: pendingOffer.requestedBy, port: port, again: pendingOffer.again,
-                                     byDevice: w.byDevice != nil, askedFrom: w.byDevice?.from, askedBy: pendingOffer.askedBy))
+                                     byDevice: w.byDevice != nil && !w.forRemote, askedFrom: w.byDevice?.from,
+                                     askedBy: pendingOffer.askedBy))
     }
 
     // MARK: The door, the watchers, the status

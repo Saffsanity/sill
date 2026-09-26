@@ -15,21 +15,40 @@ import StreamProtocol
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              remoteAccess, remotePort, internetAccess,
-///                                              remoteAddressName=host[:port]). Saved like any
-///                                              change: run it on the bare binary, whose defaults
-///                                              domain is "SillMenuBar", not on Sill.app.
+///                                              remoteAddressName=host[:port], requirePairing=0|1).
+///                                              Saved like any change (requirePairing in the
+///                                              identity store: memory, or SILL_TEST_REMOTE_DIR)
+///     -requirePairing YES|NO                   Require pairing at launch, saved in the identity
+///                                              store as the Devices pane saves it
 ///     -SillPairAfter <s>                       open a pairing window (Pair iPhone or iPad…) s
 ///                                              seconds after launch. With --synthetic and
 ///                                              SILL_TEST_REMOTE_DIR the link and the code are
 ///                                              also left there as pairing.url and pairing.code
 ///                                              (0600), never printed (the log copies stdout)
+///     -SillCancelPairingAfter '<s>[; <s> …]'   close the pairing window as its Cancel does (a
+///                                              window a device opened quiets its asker), s
+///                                              seconds after launch
 ///     -SillUnpairAfter <s>                     remove every paired device s seconds after launch
+///     -SillCableNoticeAfter <s>                show the notice for a device paired over the USB
+///                                              cable (a sample one) s seconds after launch
+///     -SillMenuAfter '<s>[; <s> …]'            print the status menu as menu.txt shows it, one
+///                                              "SillMenuAfter <s> s: " line per line, s seconds
+///                                              after launch (the "‹device› Wants to Pair",
+///                                              older-device and "Devices Can’t Connect" items)
 ///     -SillQuitAfter <s>                       Quit (NSApp.terminate) s seconds after launch
-///     -SillRenderPreviews <dir>                write the Settings panes (the Remote Access pane in
-///                                              each of its states), the pairing window's states,
+///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
+///                                              Access panes in each of their states), the
+///                                              pairing window's states and the cable notice,
 ///                                              status cards, glyphs and menu.txt to <dir>, then
 ///                                              exit (no Screen Recording needed: views render
-///                                              offscreen; no identity is loaded)
+///                                              offscreen; no identity is loaded, no listener)
+///
+/// These are the bare SillMenuBar binary's (defaults domain "SillMenuBar"; delete it after). Sill.app
+/// itself, an app bundle's executable, ignores every `-Sill…After` hook and `-requirePairing`, each
+/// with one line (docs/home-pairing-plan.md §6.6): they open, answer or remove pairings, or change
+/// what the doors admit, and any process of this user can start Sill.app with arguments, which then
+/// runs with Sill's Screen Recording and Accessibility grants. `--synthetic`, `-SillLogFile` and
+/// `-SillRenderPreviews` stay.
 ///
 /// The bare binary (and any --synthetic run) never touches the login keychain: its identity lives
 /// in SILL_TEST_REMOTE_DIR or in memory (AppModel.makeRemoteAccess).
@@ -48,9 +67,19 @@ enum DebugHooks {
         return library.appendingPathComponent("Logs/Sill/Sill.log")
     }
 
-    /// -SillSetAfter and -SillQuitAfter, counted from now (launch).
+    /// The timed hooks, which Sill.app itself ignores.
+    static let timedHooks = ["SillSetAfter", "SillPairAfter", "SillCancelPairingAfter", "SillUnpairAfter",
+                             "SillCableNoticeAfter", "SillMenuAfter", "SillQuitAfter"]
+
+    /// The timed hooks, counted from now (launch). In Sill.app, one line for each that was given.
     static func schedule(model: AppModel) {
         let defaults = UserDefaults.standard
+        if AppModel.bundled {
+            for name in timedHooks where defaults.object(forKey: name) != nil {
+                print("-\(name) ignored: Sill.app itself takes no test hook (use the bare SillMenuBar binary).")
+            }
+            return
+        }
         if let spec = defaults.string(forKey: "SillSetAfter") {
             for step in spec.split(separator: ";") {
                 let parts = step.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1)
@@ -59,53 +88,90 @@ enum DebugHooks {
                     continue
                 }
                 let changes = parts[1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                let timer = Timer(timeInterval: delay, repeats: false) { _ in
-                    MainActor.assumeIsolated {
-                        var config = model.settings.config
-                        var addressName: String?
-                        for change in changes { apply(change, to: &config, addressName: &addressName) }
-                        print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
-                        model.settings.config = config    // one assignment: several keys, one apply
-                        if let addressName { model.settings.remoteAddressName = addressName }
-                    }
+                after(delay) {
+                    var config = model.settings.config
+                    var addressName: String?
+                    var requirePairing: Bool?
+                    for change in changes { apply(change, to: &config, addressName: &addressName, requirePairing: &requirePairing) }
+                    print("SillSetAfter \(parts[0]) s: \(changes.joined(separator: ", "))")
+                    model.settings.config = config    // one assignment: several keys, one apply
+                    if let addressName { model.settings.remoteAddressName = addressName }
+                    // Through the identity store first, as the Devices pane's switch goes.
+                    if let requirePairing { model.setRequirePairing(requirePairing) }
                 }
-                RunLoop.main.add(timer, forMode: .common)
             }
         }
         let pairAfter = defaults.double(forKey: "SillPairAfter")
         if pairAfter > 0 {
-            let timer = Timer(timeInterval: pairAfter, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    print("SillPairAfter \(pairAfter) s: opening a pairing window")
-                    model.pairDevice()
-                }
+            after(pairAfter) {
+                print("SillPairAfter \(pairAfter) s: opening a pairing window")
+                model.pairDevice()
             }
-            RunLoop.main.add(timer, forMode: .common)
+        }
+        for delay in times(defaults.string(forKey: "SillCancelPairingAfter")) {
+            after(delay) {
+                let wasShown = model.closePairingWindow?() ?? false
+                if !wasShown { model.cancelPairing() }
+                print("SillCancelPairingAfter \(delay) s: \(wasShown ? "closed the pairing window" : "no pairing window on screen; cancelled")")
+            }
         }
         let unpairAfter = defaults.double(forKey: "SillUnpairAfter")
         if unpairAfter > 0 {
-            let timer = Timer(timeInterval: unpairAfter, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    let ids = model.coordinator?.status.snapshot.remote?.paired.map(\.id) ?? []
-                    print("SillUnpairAfter \(unpairAfter) s: removing \(ids.count) paired device\(ids.count == 1 ? "" : "s")")
-                    for id in ids { model.removeDevice(id) }
+            after(unpairAfter) {
+                let ids = model.coordinator?.status.snapshot.remote?.paired.map(\.id) ?? []
+                print("SillUnpairAfter \(unpairAfter) s: removing \(ids.count) paired device\(ids.count == 1 ? "" : "s")")
+                for id in ids { model.removeDevice(id) }
+            }
+        }
+        let noticeAfter = defaults.double(forKey: "SillCableNoticeAfter")
+        if noticeAfter > 0 {
+            after(noticeAfter) {
+                print("SillCableNoticeAfter \(noticeAfter) s: showing the cable notice for a sample device")
+                model.showCableNotice?(CableNotice(name: "iPad (iPad14,1)", fingerprint: "sample"))
+            }
+        }
+        for delay in times(defaults.string(forKey: "SillMenuAfter")) {
+            after(delay) {
+                model.permissions.refresh()
+                let login = LoginState(available: model.loginItem.available, on: model.loginItem.isOn,
+                                       needsApproval: model.loginItem.needsApproval, error: model.loginItem.error)
+                let permissions = PermissionState(screenRecording: model.permissions.screenRecording,
+                                                  accessibility: model.permissions.accessibility)
+                let p = model.presentation
+                let entries = MenuBuilder.entries(presentation: p, config: model.settings.config, login: login, permissions: permissions)
+                for line in MenuBuilder.dump(entries, card: p).split(separator: "\n") {
+                    print("SillMenuAfter \(delay) s: \(line)")
                 }
             }
-            RunLoop.main.add(timer, forMode: .common)
         }
         let quitAfter = defaults.double(forKey: "SillQuitAfter")
         if quitAfter > 0 {
-            let timer = Timer(timeInterval: quitAfter, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    print("SillQuitAfter \(quitAfter) s: quitting")
-                    NSApp.terminate(nil)
-                }
+            after(quitAfter) {
+                print("SillQuitAfter \(quitAfter) s: quitting")
+                NSApp.terminate(nil)
             }
-            RunLoop.main.add(timer, forMode: .common)
         }
     }
 
-    private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?) {
+    /// A run-loop Timer `delay` seconds from now (the modal-loop rule: never a Task).
+    private static func after(_ delay: Double, _ body: @escaping @MainActor () -> Void) {
+        let timer = Timer(timeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated { body() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// "3; 9.5; 15" (or "3, 9.5"): the times a hook fires; a bad entry is skipped with a line.
+    private static func times(_ spec: String?) -> [Double] {
+        guard let spec else { return [] }
+        return spec.split(whereSeparator: { $0 == ";" || $0 == "," }).compactMap { part in
+            let text = part.trimmingCharacters(in: .whitespaces)
+            guard let t = Double(text), t > 0 else { print("Debug hook: can’t read “\(text)” as seconds"); return nil }
+            return t
+        }
+    }
+
+    private static func apply(_ change: String, to config: inout HostConfig, addressName: inout String?, requirePairing: inout Bool?) {
         let kv = change.split(separator: "=", maxSplits: 1).map(String.init)
         guard kv.count == 2 else { print("SillSetAfter: can’t read “\(change)”"); return }
         let (key, value) = (kv[0], kv[1])
@@ -121,6 +187,7 @@ enum DebugHooks {
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
         case "remoteAddressName": addressName = value
+        case "requirePairing": requirePairing = flag
         default: print("SillSetAfter: no setting called \(key)")
         }
     }
@@ -134,18 +201,28 @@ enum DebugHooks {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let appearances: [(String, NSAppearance.Name)] = [("light", .aqua), ("dark", .darkAqua)]
 
-        // The Remote Access pane is drawn in each of its states below instead of live (the model
-        // has no host here, so it would only ever show "off").
-        for tab in SettingsTab.allCases where tab != .remoteAccess {
+        // The Devices and Remote Access panes are drawn in each of their states below instead of
+        // live (the model has no host here, so they would only ever show "off" and nothing paired).
+        for tab in SettingsTab.allCases where tab != .remoteAccess && tab != .devices {
             for (name, appearance) in appearances {
                 render(SettingsPane(tab: tab, model: model).background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("pane-\(tab.rawValue)-\(name).png"))
             }
         }
+        for sample in devicesPaneSamples() {
+            let pane = DevicesPane(status: sample.status, requirePairing: .constant(sample.requirePairing),
+                                   requirePairingProblem: nil, actions: DevicesPane.Actions(), now: previewNow)
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
+            }
+        }
         for sample in remotePaneSamples() {
             let pane = RemoteAccessPane(status: sample.status, remoteAccess: .constant(sample.status.remoteAccess),
                                         internetAccess: .constant(sample.status.internetAccess), port: 7455,
-                                        addressName: sample.status.addressName, actions: RemoteAccessPane.Actions(), now: previewNow)
+                                        addressName: sample.status.addressName, actions: RemoteAccessPane.Actions())
                 .formStyle(.grouped)
                 .frame(width: 520)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -164,12 +241,17 @@ enum DebugHooks {
                 render(view, appearance: appearance, to: out.appendingPathComponent("pairing-\(sample.name)-\(name).png"))
             }
         }
+        let notice = CableNoticeView(name: "iPad (iPad14,1)", actions: CableNoticeView.Actions(), still: true)
+            .background(Color(nsColor: .windowBackgroundColor))
+        for (name, appearance) in appearances {
+            render(notice, appearance: appearance, to: out.appendingPathComponent("pairing-cablenotice-\(name).png"))
+        }
 
         var menuText = ""
         let login = LoginState(available: true, on: false, needsApproval: false, error: nil)
         for sample in samples() {
             let p = StatusText.present(snapshot: sample.snapshot, permissions: sample.permissions,
-                                       startupError: sample.startupError, hasCoordinator: true)
+                                       startupError: sample.startupError, hasCoordinator: true, now: previewNow)
             for (name, appearance) in appearances {
                 render(StatusCard(presentation: p).padding(.vertical, 4).background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
@@ -271,6 +353,34 @@ enum DebugHooks {
         taken.remote = RemoteStatus(remoteAccess: true, listener: .portInUse(7455), lanAddress: "192.168.1.20")
         list.append(Sample(name: "remote-device", snapshot: remote))
         list.append(Sample(name: "remote-port-in-use", snapshot: taken))
+        // Pairing at home (docs/home-pairing-plan.md §6.4): a device's ask while its window shows
+        // the code, while the limits kept one from opening, and while this Mac was locked; an older
+        // device refused at the home door; the keychain unusable, so no home door at all.
+        let idle = list.first { $0.name == "idle" }?.snapshot ?? HostStatusSnapshot()
+        func home(_ change: (inout RemoteStatus) -> Void) -> HostStatusSnapshot {
+            var snapshot = idle
+            var r = RemoteStatus(homeDoor: .pairingRequired)
+            change(&r)
+            snapshot.remote = r
+            return snapshot
+        }
+        let asked = previewNow.addingTimeInterval(-20)
+        list.append(Sample(name: "wants-to-pair", snapshot: home {
+            $0.pairingRequest = RemoteStatus.PairingRequest(name: "iPad (iPad14,1)", at: asked, reason: "showing")
+            $0.pairing = .open(requestedBy: "iPad (iPad14,1)", expiresAt: previewNow.addingTimeInterval(280), triesLeft: 5,
+                               lastWrongFrom: nil, byDevice: true)
+        }))
+        list.append(Sample(name: "wants-to-pair-limit", snapshot: home {
+            $0.pairingRequest = RemoteStatus.PairingRequest(name: "iPhone (iPhone17,1)", at: asked, reason: "limit")
+        }))
+        list.append(Sample(name: "wants-to-pair-locked", snapshot: home {
+            $0.pairingRequest = RemoteStatus.PairingRequest(name: "iPad (iPad14,1)", at: asked, reason: "locked")
+        }))
+        list.append(Sample(name: "older-device", snapshot: home { $0.olderDeviceAt = previewNow.addingTimeInterval(-90) }))
+        var closed = HostStatusSnapshot()
+        closed.remote = RemoteStatus(identityProblem: keychainProblem,
+                                     homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))
+        list.append(Sample(name: "devices-cant-connect", snapshot: closed))
         return list
     }
 
@@ -369,6 +479,39 @@ extension DebugHooks {
         MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi"),
     ]
 
+    /// The keychain's refusal the unusable samples show.
+    static let keychainProblem = "the key couldn’t be read: The user name or passphrase you entered is not correct."
+
+    struct DevicesPaneSample {
+        var name: String
+        var status: RemoteStatus
+        var requirePairing = true
+    }
+
+    /// pane-devices-{required,off,empty,unavailable}: three devices, one paired over the USB cable
+    /// and seen over Wi-Fi at home, one by QR code and seen through Tailscale yesterday, one by
+    /// code and never connected; Require pairing off (its warning); nothing paired yet; the
+    /// keychain unusable (no home door).
+    static func devicesPaneSamples() -> [DevicesPaneSample] {
+        let now = previewNow
+        let ipad = PairedDeviceSummary(id: "ipad", keyPrefix: "5KD2Q7", name: "iPad (iPad14,1)", model: "iPad14,1",
+                                       pairedAt: now.addingTimeInterval(-2 * 86_400), method: PairResult.cable,
+                                       lastSeen: now.addingTimeInterval(-120), lastRoute: "over Wi\u{2011}Fi")
+        let iphone = PairedDeviceSummary(id: "iphone", keyPrefix: "9XQ3M1", name: "iPhone (iPhone17,1)", model: "iPhone17,1",
+                                         pairedAt: now.addingTimeInterval(-3 * 86_400), method: PairRequest.qr,
+                                         lastSeen: now.addingTimeInterval(-86_400), lastRoute: "through Tailscale")
+        let pro = PairedDeviceSummary(id: "ipadpro", keyPrefix: "H4MZ8T", name: "iPad (iPad17,4)", model: "iPad17,4",
+                                      pairedAt: now.addingTimeInterval(-3_600), method: PairRequest.code)
+        return [
+            DevicesPaneSample(name: "required", status: RemoteStatus(paired: [ipad, iphone, pro], homeDoor: .pairingRequired)),
+            DevicesPaneSample(name: "off", status: RemoteStatus(paired: [ipad, iphone], homeDoor: .open), requirePairing: false),
+            DevicesPaneSample(name: "empty", status: RemoteStatus(homeDoor: .pairingRequired)),
+            DevicesPaneSample(name: "unavailable",
+                              status: RemoteStatus(identityProblem: keychainProblem,
+                                                   homeDoor: .unavailable("Sill couldn’t use its key in the keychain (\(keychainProblem))"))),
+        ]
+    }
+
     struct RemotePaneSample {
         var name: String
         var status: RemoteStatus
@@ -421,13 +564,15 @@ extension DebugHooks {
         var remoteAccess = true
     }
 
-    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,othervpn,longname}. A
-    /// stand-in Mac key (the plan's SHA-256("mac") vector) and the plan's example code: nothing here
-    /// pairs anything. The address to type is Tailscale's name with its IPv4 under it; `novpn` has
-    /// no VPN, so this network's address; `othervpn` has a VPN that is not Tailscale, so this
-    /// network's address with that VPN's IPv4 under it; `longname` has a long MagicDNS name, 40
-    /// characters, on a port other than 7455. Not the longest there can be: LocalHostName allows 63
-    /// characters, and from about 46 with a port (52 without) a name wraps after a hyphen, never cut.
+    /// pairing-{waiting,requested,wrong,paired,stopped,expired,remoteoff,novpn,othervpn,longname,asked,
+    /// askednearby} (pairing-cablenotice is drawn on its own). A stand-in Mac key (the plan's
+    /// SHA-256("mac") vector) and the plan's example code: nothing here pairs anything. The address to
+    /// type is Tailscale's name with its IPv4 under it; `novpn` has no VPN, so this network's address;
+    /// `othervpn` has a VPN that is not Tailscale, so this network's address with that VPN's IPv4
+    /// under it; `longname` has a long MagicDNS name, 40 characters, on a port other than 7455. Not the
+    /// longest there can be: LocalHostName allows 63 characters, and from about 46 with a port (52
+    /// without) a name wraps after a hyphen, never cut. `asked` and `askednearby` are windows a device
+    /// opened by asking at the home door.
     static func pairingSamples() -> [PairingSample] {
         let fingerprint = Data((0..<32).map { UInt8(truncatingIfNeeded: $0 &* 37 &+ 11) })
         func makeLink(port: Int, _ addresses: [String]) -> PairLink {
@@ -454,6 +599,17 @@ extension DebugHooks {
         let longName = "christinas-macbook-pro.tailc94091.ts.net"
         let long = [MacAddress(host: longName, kind: MacAddress.vpn, via: "Tailscale")] + tailscaleAddresses.dropFirst()
         let longLink = makeLink(port: 17455, [longName, "100.101.102.103", "fd7a:115c:a1e0::1234", "192.168.1.20"])
+        // A window a device opened by asking at the home door: its link names no address.
+        func askedOffer(_ who: String, from: String) -> RemoteAccess.PairingOffer {
+            let link = makeLink(port: 7455, [])
+            return RemoteAccess.PairingOffer(url: link.url, code: "482913557208", expiresAt: expires, requestedBy: who,
+                                             port: link.port, again: false, byDevice: true, askedFrom: from)
+        }
+        func askedStatus(_ who: String) -> RemoteStatus {
+            RemoteStatus(lanAddress: "192.168.1.20",
+                         pairing: .open(requestedBy: who, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil, byDevice: true),
+                         homeDoor: .pairingRequired)
+        }
         return [
             PairingSample(name: "waiting", offer: offer(), status: status(open)),
             PairingSample(name: "requested", offer: offer("iPad (iPad14,1)"),
@@ -468,6 +624,14 @@ extension DebugHooks {
             PairingSample(name: "othervpn", offer: offer(link: makeLink(port: 7455, ["10.8.0.6", "192.168.1.20"])),
                           status: status(open, addresses: otherVPN)),
             PairingSample(name: "longname", offer: offer(link: longLink), status: status(open, addresses: long, port: 17455)),
+            // Windows a device opened by asking at the home door: its link has no address, the
+            // window no Address row and no Remote Access line (Remote Access off here, as it is at
+            // most homes); over this network, and nearby (peer-to-peer Wi-Fi).
+            PairingSample(name: "asked", offer: askedOffer("iPad (iPad14,1)", from: "on this network"),
+                          status: askedStatus("iPad (iPad14,1)"), remoteAccess: false),
+            PairingSample(name: "askednearby", offer: askedOffer("iPhone (iPhone17,1)", from: "nearby"),
+                          status: askedStatus("iPhone (iPhone17,1)"), remoteAccess: false),
         ]
+
     }
 }

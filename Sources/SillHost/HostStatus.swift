@@ -208,6 +208,9 @@ package struct PairedDeviceSummary: Equatable, Identifiable {
     package var pairedAt: Date
     /// "qr", "code" or "cable".
     package var method: String
+    /// "with the QR code", "with a code", "over the USB cable"; nil for a method this build does
+    /// not know (PairedDevice.displayMethod).
+    package var displayMethod: String? { PairedDevice.displayMethod(method) }
     /// When it last connected, and how: from away ("through Tailscale") or at home ("over the USB
     /// cable", "over Wi‑Fi", "directly"…); nil when it never has (the app keeps these across
     /// launches).

@@ -12,10 +12,15 @@ final class PairingWindowState {
     var offer: RemoteAccess.PairingOffer?
 }
 
-/// "Pair iPhone or iPad" (docs/remote-access-plan.md §6.2): a standalone window, not a sheet,
-/// because a device near the Mac can open it (Pair This iPad…) while Settings is closed. One
-/// instance: opening it again brings it forward with the same code. Closing it cancels the
-/// pairing window, and the code dies with it.
+/// "Pair iPhone or iPad" (docs/remote-access-plan.md §6.2, docs/home-pairing-plan.md §6.3): a
+/// standalone window, not a sheet, because a device near the Mac can open it (its ask, or Pair This
+/// iPad…) while Settings is closed. One instance: opening it again brings it forward with the same
+/// code. Closing it cancels the pairing window, and the code dies with it.
+///
+/// A window the Mac's user opened (the menu, a pane, New Code) comes forward as any window they ask
+/// for, activating Sill. One a device opened by asking comes to the front without activating Sill or
+/// taking the keyboard (`WindowPlacement.showInFront`), over a full-screen app too, so a request
+/// can never swallow a password being typed in another app.
 ///
 /// `sharingType = .none` is a best effort only (ScreenCaptureKit is reported to ignore it from
 /// macOS 15); what keeps the code off every device is the Desktop stream leaving Sill's own
@@ -31,7 +36,7 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
                               backing: .buffered, defer: true)
         window.title = "Pair iPhone or iPad"
         window.isReleasedWhenClosed = false
-        window.collectionBehavior.insert(.moveToActiveSpace)
+        window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         window.sharingType = .none
         super.init(window: window)
         let host = NSHostingController(rootView: LivePairDeviceView(model: model, state: state, close: { [weak self] in self?.close() }))
@@ -43,13 +48,28 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not from a nib") }
 
-    /// Shows `offer`, centred the first time, and brings the window forward (a device's request
-    /// arrives on a main-actor hop: this shows a window and runs no modal loop).
+    /// Shows `offer`, centred the first time: forward and key for a window the Mac's user opened,
+    /// in front without the keyboard for one a device opened (a device's request arrives on a
+    /// main-actor hop: this shows a window and runs no modal loop).
     func show(_ offer: RemoteAccess.PairingOffer) {
         guard let window else { return }
         let wasVisible = window.isVisible
         state.offer = offer
         if !wasVisible { window.center() }
+        if offer.byDevice {
+            WindowPlacement.showInFront(window)
+        } else {
+            WindowPlacement.bringForward(window)
+        }
+    }
+
+    /// The window shows a code or a pairing's outcome.
+    var isShowing: Bool { window?.isVisible == true && state.offer != nil }
+
+    /// The menu's "‹device› Wants to Pair" while its window is up: forward and key (a click in the
+    /// menu, so activating Sill is what the user asked for).
+    func bringForward() {
+        guard let window else { return }
         WindowPlacement.bringForward(window)
     }
 
@@ -82,7 +102,9 @@ private struct LivePairDeviceView: View {
 }
 
 /// The QR code, the typed path's address and code, and the state of this pairing. Values in,
-/// actions out, so the previews can draw every state.
+/// actions out, so the previews can draw every state. A window a device opened (`offer.byDevice`)
+/// says who asked and from where, and has no Address row and no Remote Access line: the device
+/// pairs at the door it asked on, and the window is the home door's alone.
 struct PairDeviceView: View {
     struct Actions {
         var turnOn: () -> Void = {}
@@ -111,6 +133,8 @@ struct PairDeviceView: View {
     var phase: Phase {
         switch status.pairing {
         case .open(_, _, let triesLeft, let wrongFrom, _):
+            // A device-opened window is the home door's: the remote door's state is not its own.
+            if offer.byDevice { return .waiting(triesLeft: triesLeft, wrongFrom: wrongFrom) }
             switch status.listener {
             case .portInUse(let p): return .doorDown("Can’t pair while port \(p) is in use.")
             case .failed: return .doorDown("Can’t pair: remote access couldn’t start. Sill tries again every 30 seconds.")
@@ -137,17 +161,27 @@ struct PairDeviceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let who = offer.requestedBy {
-                Text("\(who) on this network asked to pair.")
+            if offer.byDevice {
+                // The name went through SafeText in the host, as every device-supplied name does.
+                Text("\(offer.requestedBy ?? "A device") \(offer.askedFrom ?? "on this network") asked to pair.")
                     .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Point it at this code, or tap Enter Code Instead and type the code.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                if let who = offer.requestedBy {
+                    Text("\(who) asked to pair.")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("In Sill on your iPhone or iPad, tap this Mac, or tap Add a Mac… when you’re away, then point it at this code.")
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("In Sill on your iPhone or iPad, tap Add a Mac…, then point it at this code.")
-                .fixedSize(horizontal: false, vertical: true)
             QRCodeView(text: offer.url, spent: isSpent)
                 .opacity(isWaiting || isSpent ? 1 : 0.2)
                 .frame(maxWidth: .infinity)
             lower
-            if !remoteAccess {
+            if !remoteAccess, !offer.byDevice {
                 Text("Remote Access is off. Paired devices can connect away from home once you turn it on.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -157,8 +191,9 @@ struct PairDeviceView: View {
         .padding(20)
         .frame(width: 440)
         .task(id: phase) {
-            // Paired: closes itself after 3 s, unless the Turn On line still has something to say.
-            guard case .paired = phase, remoteAccess, now == nil else { return }
+            // Paired: closes itself after 3 s, unless the Turn On line still has something to say
+            // (never on a window a device opened, which has no such line).
+            guard case .paired = phase, remoteAccess || offer.byDevice, now == nil else { return }
             try? await Task.sleep(for: .seconds(3))
             if !Task.isCancelled { actions.close() }
         }
@@ -168,6 +203,27 @@ struct PairDeviceView: View {
 
     @ViewBuilder private var lower: some View {
         switch phase {
+        case .waiting(let triesLeft, let wrongFrom) where offer.byDevice:
+            VStack(alignment: .leading, spacing: 10) {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 6) {
+                    GridRow {
+                        Text("Code").foregroundStyle(.secondary)
+                        Text(offer.groupedCode)
+                            .font(.system(size: 22, weight: .medium, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+                countdown
+                if let wrongFrom {
+                    Label("A wrong code came from \(wrongFrom). \(triesLeft) tr\(triesLeft == 1 ? "y" : "ies") left.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("A paired device can see and control this Mac.")
+                    .foregroundStyle(.secondary)
+                Text("Didn’t ask for this? Click Cancel.")
+                    .foregroundStyle(.secondary)
+            }
         case .waiting(let triesLeft, let wrongFrom):
             VStack(alignment: .leading, spacing: 10) {
                 Text("Can’t scan? Tap Enter Code Instead, and type:")
@@ -248,7 +304,7 @@ struct PairDeviceView: View {
     private var buttons: some View {
         HStack {
             Spacer()
-            if !remoteAccess {
+            if !remoteAccess, !offer.byDevice {
                 Button("Turn On Remote Access", action: actions.turnOn)
             }
             switch phase {
@@ -268,6 +324,148 @@ struct PairDeviceView: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Change Port…", action: actions.changePort)
             }
+        }
+    }
+}
+
+// MARK: The cable notice
+
+/// One device that paired by itself over the USB cable, for the notice.
+struct CableNotice: Equatable {
+    /// Its paired name: "iPad (iPad14,1)".
+    var name: String
+    /// Its key's fingerprint (base64url): what Remove names.
+    var fingerprint: String
+    /// A notice of its own: the auto-close starts again for each one.
+    var id = UUID()
+}
+
+@MainActor @Observable
+final class CableNoticeState {
+    var notice: CableNotice?
+}
+
+/// "Paired over the USB Cable" (docs/home-pairing-plan.md §6.3): after a device paired by itself
+/// over the cable, once per pairing (never per connection). Shown like a window a device opened,
+/// in front without activating Sill or taking the keyboard, and closes by itself after 10 s.
+/// Remove is the Devices pane's Remove, with its keychain rule. VoiceOver announces its first line.
+///
+/// A window of its own beside the pairing window, not the pairing window in a new phase: a
+/// pairing over the cable can happen while that window shows a code (the ask rule pairs a cable
+/// ask before it looks at an open window), and the notice must not take that code off the screen.
+@MainActor
+final class CableNoticeWindowController: NSWindowController, NSWindowDelegate {
+    private let model: AppModel
+    private let state = CableNoticeState()
+
+    init(model: AppModel) {
+        self.model = model
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 160), styleMask: [.titled, .closable],
+                              backing: .buffered, defer: true)
+        window.title = "Paired over the USB Cable"
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
+        super.init(window: window)
+        let host = NSHostingController(rootView: LiveCableNoticeView(model: model, state: state, close: { [weak self] in self?.close() }))
+        host.sizingOptions = [.preferredContentSize]
+        window.contentViewController = host
+        window.delegate = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    /// Shows the notice for this device (a second pairing while one shows takes its place).
+    func show(_ notice: CableNotice) {
+        guard let window else { return }
+        let wasVisible = window.isVisible
+        state.notice = notice
+        if !wasVisible { window.center() }
+        WindowPlacement.showInFront(window)
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: CableNoticeView.firstLine(notice.name),
+                                        .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        state.notice = nil
+    }
+}
+
+private struct LiveCableNoticeView: View {
+    let model: AppModel
+    let state: CableNoticeState
+    let close: () -> Void
+
+    var body: some View {
+        if let notice = state.notice {
+            CableNoticeView(name: notice.name,
+                            actions: CableNoticeView.Actions(remove: { model.removeDevice(notice.fingerprint) }, close: close))
+                .id(notice.id)          // a new notice starts afresh: its own state and its own 10 s
+        }
+    }
+}
+
+/// The notice's content. Values in, actions out, so the previews can draw it.
+struct CableNoticeView: View {
+    struct Actions {
+        /// Nil when the device was removed; otherwise why it is still paired.
+        var remove: () -> String? = { nil }
+        var close: () -> Void = {}
+    }
+
+    let name: String
+    let actions: Actions
+    /// The previews: no closing by itself.
+    var still = false
+
+    @State private var removed = false
+    @State private var removeProblem: String?
+    /// Remove clicks so far: each starts the 10 s again, so what it says stays long enough to read.
+    @State private var clicks = 0
+
+    static let showsFor: Duration = .seconds(10)
+
+    static func firstLine(_ name: String) -> String { "\(name) is paired with this Mac." }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if removed {
+                Label("\(name) can no longer connect.", systemImage: "minus.circle.fill")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Plugged in, it pairs again by itself when it asks. Unplug it to keep it out.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label(Self.firstLine(name), systemImage: "checkmark.circle.fill")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("It paired by itself over the USB cable, and can connect over Wi\u{2011}Fi and nearby from now on too.")
+                    .fixedSize(horizontal: false, vertical: true)
+                if let removeProblem {
+                    Warning("\(name) is still paired: Sill couldn’t update the keychain (\(withoutFullStop(removeProblem))). Try again.")
+                }
+            }
+            HStack {
+                Spacer()
+                if !removed {
+                    Button("Remove") {
+                        // Said only once the keychain kept it, as in the Devices pane.
+                        if let reason = actions.remove() { removeProblem = reason } else { removed = true; removeProblem = nil }
+                        clicks += 1
+                    }
+                }
+                Button("OK", action: actions.close)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+        .task(id: clicks) {
+            // 10 s from when it appeared, and again from each Remove.
+            guard !still else { return }
+            try? await Task.sleep(for: Self.showsFor)
+            if !Task.isCancelled { actions.close() }
         }
     }
 }

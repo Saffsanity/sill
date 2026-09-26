@@ -19,8 +19,10 @@ import SillHostCore
 /// is its source of truth (LoginItem.swift).
 ///
 /// Remote Access, its port and the internet switch are the Mac's alone: they come from here (the
-/// menu, the Remote Access pane, -SillSetAfter), never from a device. The trust list and the keys
-/// never live here: any process of the same user can write these defaults (KeychainIdentityStore).
+/// menu, the Remote Access pane, -SillSetAfter), never from a device. The trust list, the keys and
+/// Require pairing never live here: any process of the same user can write these defaults
+/// (KeychainIdentityStore; docs/home-pairing-plan.md §6.5). `config.requirePairing` only carries
+/// the stored value to the host (AppModel.setRequirePairing), and `save(changedFrom:)` never writes it.
 @MainActor @Observable
 final class HostSettings {
     enum Key {
@@ -94,7 +96,8 @@ final class HostSettings {
                             remotePort: defaults.integer(forKey: Key.remotePort),
                             internetAccess: defaults.bool(forKey: Key.internetAccess),
                             // Never a default or a launch argument: it lives with the trust list
-                            // (the identity store), and this build's home door is still plain.
+                            // (the identity store), from which AppModel reads it at launch, before
+                            // the host starts, and to which the Devices pane saves it.
                             requirePairing: HostConfig.standard.requirePairing).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general

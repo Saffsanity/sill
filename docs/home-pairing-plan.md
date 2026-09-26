@@ -955,7 +955,10 @@ while Remote Access is on." Everything else is unchanged.
 this code." (was "…tap Add a Mac…, then point it at this code."). The Address row and the Remote
 Access line stay: they are for pairing from away.
 
-**The cable notice** (the same window, a new phase):
+**The cable notice** (a window of its own in the pairing window's style; as built in step 3, not
+the pairing window in a new phase: a pairing over the cable can happen while that window shows a
+code, since the ask rule pairs a cable ask before it looks at an open window, and the notice must
+not take the code off the screen):
 
 ```
 ┌─ Paired over the USB Cable ──────────────────────────┐
@@ -1008,13 +1011,17 @@ New attention items (first group, orange):
 #### 6.6 DebugHooks and previews
 
 - `-SillSetAfter` learns `requirePairing=0|1` (the bare binary only, like every hook below).
-- **In the bundle** `-SillSetAfter`, `-SillPairAfter`, `-SillUnpairAfter`, `-SillCancelPairingAfter`
-  and `-SillCableNoticeAfter` are ignored with one line: they open, answer or remove pairings, or
-  change what the doors admit, and any process can pass them (§4.3, "Which hosts honour test
-  hooks"). `-SillRenderPreviews` (no identity, no listener), `-SillLogFile` and `-SillQuitAfter`
-  stay.
-- `-SillCancelPairingAfter <s>` closes the pairing window as Cancel does (the quiet rule).
+- **In the bundle** every `-Sill…After` hook (`-SillSetAfter`, `-SillPairAfter`, `-SillUnpairAfter`,
+  `-SillCancelPairingAfter`, `-SillCableNoticeAfter`, `-SillMenuAfter` and, as built in step 3,
+  `-SillQuitAfter` too), `-requirePairing` and `SILL_TEST_REMOTE_DIR` are ignored with one line
+  each: they open, answer or remove pairings, or change what the doors admit, and any process can
+  pass them (§4.3, "Which hosts honour test hooks"). `-SillRenderPreviews` (no identity, no
+  listener) and `-SillLogFile` stay.
+- `-SillCancelPairingAfter '<s>[; <s> …]'` closes the pairing window as Cancel does (the quiet rule).
 - `-SillCableNoticeAfter <s>` shows the notice for a sample device.
+- `-SillMenuAfter '<s>[; <s> …]'` (added in step 3) prints the status menu as menu.txt shows it, one
+  "SillMenuAfter ‹s› s: " line per line: the gates' view of the status (the request, the older
+  device, the closed door).
 - `-SillRenderPreviews` adds `pane-devices-{required,off,empty,unavailable}-{light,dark}.png`,
   `pairing-{asked,askednearby,cablenotice}-{light,dark}.png`, the Remote Access pane's samples with
   the list replaced by its line, and menu.txt's three attention items.
@@ -1389,7 +1396,7 @@ stand-ins.
 | H12 | **Direct Wireless over TLS:** `SILL_TEST_PEER_TO_PEER_INTERFACE=en0`, a paired TLS client and a pending pairing connection (`--pair-hold=8`) from the Mac's `fe80::…%en0` | Direct Wireless off: the client disconnected with the existing line and the pending pairing connection cancelled; `p` still in the TXT record after the replacement; the same port |
 | H13 | **Fail closed:** the bare app with `SILL_TEST_REMOTE_DIR` holding a damaged `paired.json` (an unreadable directory is only ignored: AppModel falls back to an in-memory identity, and FileIdentityStore sets 0700 again) | No listener; `homeDoor` unavailable in the status; its log line |
 | H14 | **The remote door, again:** the remote plan's H6–H13, H15 and H17 against this build (Remote Access on; the bare app with `-remotePort 0`) | As before; with a window the Mac's user opened, an `ask` there is answered `closed` with no try counted (without one the remote door refuses every pairing connection in its handshake, as today) |
-| H15 | **Previews,** before and after | Only the Devices pane's samples, the Remote Access pane's line, the three pairing window samples and menu.txt's three items differ; look at each |
+| H15 | **Previews,** before and after | Only the Devices pane's samples, the Remote Access pane's line, the three pairing window samples and menu.txt's three items differ (and the samples of a window the Mac's user opened, by §6.3's new first line); look at each |
 | H16 | **Hard rules** (grep and diff) | `requirePairing` in none of StreamSettings, HostSettingsChange, DeviceSettings, nor among HostSettings' UserDefaults keys; every door and pairing `SILL_TEST_` read behind `isTestHost`; no `print` of a code or secret in Sources/SillHost; no `assumeIsolated` or `updateConfiguration` there; StreamServer's plain `accept` untouched |
 | H17 | **Regression:** the policy, ledger, fence, remote-rules and ClientLink checks; the Direct Wireless swap fallbacks (`SILL_TEST_SWAP_FAIL`) on a TLS host | As before |
 | H18 | **The bundle takes no door or pairing hook:** a copy of `.build/Sill.app` whose Info.plist names `me.saffer.sill.h18`, signed ad hoc (so it shares neither the `me.saffer.sill.mac` defaults nor Noah's grants), its executable started from Python with `--synthetic -SillLogFile $T/log -SillQuitAfter 6 -SillPairAfter 1 -SillSetAfter '1 requirePairing=0' -requirePairing NO` and `SILL_TEST_REMOTE_DIR=$T/dir`, `SILL_TEST_CABLE_INTERFACE=en0`, `SILL_TEST_ASK_FROM_THIS_MAC=1` and `SILL_TEST_SOFTWARE_ENCODER=1` (an encoder hook, still honoured) in its environment; `--pair-ask=cable` from this Mac's `fe80::…%en0` to the port in its log meanwhile; `defaults delete me.saffer.sill.h18` afterwards | One "ignored" line per door or pairing variable and per hook; the software encoder in use; nothing written in `$T/dir`; no pairing window; `requirePairing` on in the status; the ask answered `openOnMac` (`locked` while the Mac is locked), never ok |
@@ -2002,3 +2009,169 @@ swap's fallbacks on the final code: all pass. Run ahead of step 3's bare-app gat
   unchanged until step 3 passes them; `SessionLock.watchNotifications()` is there for step 3 to call.
 
 **What step 2 changed in this plan:** §4.3 and §4.5 (6) (no cable cache).
+
+### Step 3: Sill.app
+
+`$SP` here is `scratchpad/home-pairing/3`: the gates (`gates3.py`: H6, H7, H8, H10, H11, H13 and two
+more on the bare app; `h18.py`; `h2.py`, step 2's; `hostlib.py`, step 2's with an `AppHost` for the
+bare binary), their logs (`logs/`), the previews (`previews/`), a window probe (`winprobe/`: a
+process's on-screen windows and the frontmost app), a pixel diff (`pixdiff/`), the toolbar check
+(`toolbar/`) and the pure checks (`checks-full/`). Every bare-app and bundle host ran with
+`SILL_TEST_SOFTWARE_ENCODER=1`, one at a time, stopped by its PID; `defaults delete SillMenuBar` and
+`defaults delete me.saffer.sill.h18` afterwards. The bare app shows its windows on this Mac's screen
+(a device-opened pairing window, the notice; `-SillPairAfter`'s window activates it).
+
+**What landed.**
+- Sill.app's home door speaks TLS: `StreamCoordinator(…, homePairing: true, testHooks: !bundled)`.
+  Require pairing comes from the identity store at launch (`storedRequirePairing`, before the
+  coordinator, so the first TXT record and the startup line carry it) and goes back to it from the
+  Devices pane (`AppModel.setRequirePairing`: saved first; off only once saved, on always; the
+  keychain line in the pane when a save fails). The lock notifications are watched
+  (`SessionLock.watchNotifications`).
+- Settings › Devices (`DevicesPane.swift`, after General, `ipad.and.iphone`): Require pairing, its
+  two footers and the keychain line; the paired devices, moved from Remote Access, each with how it
+  paired and how it last connected (at home too); Remove, rename, Pair iPhone or iPad…. Remote
+  Access's section is one row: the count and Show Devices….
+- The pairing window: one a device opened (`offer.byDevice`) says who asked and from where, has no
+  Address row and no Remote Access line, never shows the remote door's port trouble, closes itself
+  3 s after a pairing, and comes to the front without activating Sill (`WindowPlacement.showInFront`:
+  `orderFrontRegardless`, off the virtual display; `.fullScreenAuxiliary` on both windows); one the
+  Mac's user opened activates Sill as before, with §6.3's first line, and "‹device› asked to pair."
+  when a device's request led to it. The core offers a device-opened window the Mac's user has since
+  opened over as theirs (`byDevice` false once it is the remote door's), so it then shows the
+  Address row; Pair iPhone or iPad… brings a window that is up forward at once.
+- The cable notice ("Paired over the USB Cable", Remove and OK, 10 s, VoiceOver's announcement of
+  its first line).
+- The menu: "‹device› Wants to Pair" (Showing a code · Show a Code… · Unlock this Mac, then tap it on
+  the ‹device› again; the window forward, or one opened on the Mac asked by that device), "An iPhone
+  or iPad Needs Sill Updated" (10 minutes, information only), "Devices Can’t Connect" (Settings ›
+  Devices); the attention glyph for the first and the third; while the home door is closed the card
+  says "Not Visible on the Network" with the keychain line.
+- Hooks: `-SillSetAfter requirePairing=0|1`, `-requirePairing YES|NO`, `-SillCancelPairingAfter`,
+  `-SillCableNoticeAfter` and `-SillMenuAfter` on the bare binary; Sill.app itself ignores every
+  `-Sill…After` hook, `-requirePairing` and `SILL_TEST_REMOTE_DIR`, one line each.
+- Previews: `pane-devices-{required,off,empty,unavailable}`, `pairing-{asked,askednearby,cablenotice}`
+  and five menu samples (`wants-to-pair`, `-limit`, `-locked`, `older-device`,
+  `devices-cant-connect`: their cards and menu.txt).
+
+**H1.** `swift build -c release` into an empty scratch path: only the CaptureProbe warning. No iOS or
+StreamProtocol file changed in this step (`git diff c0b22d7 -- iOSClient Sources/StreamProtocol` is
+empty), so the iOS builds were not run again.
+
+**H6** (the bare app, `-remotePort 0`, Remote Access off). With `SILL_TEST_ASK_FROM_THIS_MAC=1`: the
+ask → `shown`; still one listener for the PID; `pairing.code` written 0.055 s after the ask and
+`pairing.url` with no `a`; the window (440×508) on screen while the frontmost app stayed the same;
+`-SillMenuAfter`: "⚠ H6 iPad Wants to Pair — Showing a code". `-SillPairAfter` over it: the remote
+door's listener appeared for the PID, `pairing.url` was written again with the same `s` and five
+`a`, and `--pair-url` over the remote door paired. The lines "Pairing: H6 iPad (sillclient) at
+127.0.0.1 asked to pair; showing the code." and "Pairing window open for 5 minutes (asked by …)";
+neither the code nor the secret in the log. Without the variable: `openOnMac`, no "Wants to Pair" in
+the menu, no window, "… not shown (it asked from this Mac)."; `-SillPairAfter`'s window then added the
+remote door.
+
+**H7** (`SILL_TEST_CABLE_INTERFACE=en0`, `SILL_TEST_ASK_FROM_THIS_MAC=1`, the client on this Mac's
+`fe80::…%en0`). The first key → ok, `method` "cable", `paired.json` with its `cableDevice`; the notice
+on screen ("Paired over the USB Cable", 440×164) with the frontmost app unchanged; a second key →
+`shown` ("another key of this iPad is paired"); `-SillUnpairAfter` removed the first; the second key
+then → ok over the cable.
+
+**H8** (`-SillCancelPairingAfter '5; 10; 13'`, `SILL_TEST_ASK_FROM_THIS_MAC=1`, quiet and span 14 s,
+not 5: slack between the app's timers and the script's asks). K1 from 127.0.0.1 opened a window;
+after the cancel, K1 from there, K2 from there and K1 from `fe80::…%en0` all got `openOnMac`; K3 from
+`fe80::…%en0` a window; K4 from `::1` a third; then K5 from this Mac's LAN address `openOnMac`, "not
+shown (3 windows in 14 s)", and the menu "⚠ K5 Wants to Pair — Show a Code…". Each cancel closed
+the window on screen; one line per address (four lines for seven asks). A second run (quiet 40 s):
+five wrong codes from three other sources stopped K1's window (4, 3, 2, 1 tries left, then
+`stopped`, with the window's `busy` spacing between), after which K1 from 127.0.0.1 and K2 from
+`fe80::…%en0` got `openOnMac` and K3 from `::1` a window.
+
+**H10** (`SILL_TEST_SERVICE_TYPE`, `-SillSetAfter '8 requirePairing=0; 16 requirePairing=1'`, at 8
+and 16 s rather than 3 and 10, to pair a key with `-SillPairAfter`'s code first). `p` 1 → 0 → 1 in
+`dns-sd -L` (the last answer of each lookup: one lookup that began within a second of a change read
+the cached record first), the same port, no "(2)"; the test directory's `require-pairing` "0", then
+"1"; an unpaired session admitted while off, goodbye `pairingRequired` and EOF 0.09 to 0.14 s after
+16 s; the paired session streamed throughout; "Settings: require pairing on → off" and "… off → on"
+once each, and one "Require pairing: disconnecting Stranger at 127.0.0.1:…, which isn’t paired.".
+
+**H11** (`-remoteAccess YES -remotePort 0`). Goodbye `removed` on the home and the remote session,
+0.11 s after `-SillUnpairAfter`, then EOF; "Removed Both (sillclient); closed 2 connections."; the
+next `sill/1` refused in the handshake.
+
+**H13** (a damaged `paired.json`). No listener for the PID and the app still running; "Home door
+unavailable: Sill couldn’t use its key in the test directory … (… is damaged)."; the menu: the card
+"Not Visible on the Network" and "⚠ Devices Can’t Connect".
+
+**Beyond the list.** The older-device item on the bare app: shown after a plain Sill message, not
+after an HTTP request. `-SillCableNoticeAfter`: the notice in front with the frontmost app
+unchanged, still up 9 s after it appeared, gone by 11.5 s. The toolbar: a scratch tab controller
+with the six tabs at 520 pt, built with this SDK, keeps all six visible.
+
+**H15.** The base (step 0's copies of `1f3072a`'s bare binary and bundle) rendered again from this
+step's fixed paths (`$SP/previews/bin/SillMenuBar` and `$SP/previews/Sill-h0.app`, the bundle as
+before: CFBundleIdentifier `me.saffer.sill.h0previews`, CFBundleVersion `H0`, signed ad hoc) equals
+step 0's but for pane-general, which shows the path. This build's, from the same paths: 80 → 104
+files for each. 41 identical; 24 new (the four Devices samples, the three pairing samples and the
+five new cards, each light and dark); 39 differ: the 18 Remote Access samples (the list replaced by
+its row), the 20 samples of a window the Mac's user opened (the pixel diff bounds every difference
+to the rows of the first line, y 43–103 of 2×, and `requested` also to its headline, to y 163) and
+menu.txt (180 lines added, none changed; the bare and the bundle's are identical). Looked at: every
+Devices sample, `asked`, `askednearby`, the notice, `requested`, the Remote Access samples and the
+new cards.
+
+**Hard rules** (grep). `requirePairing` is no UserDefaults key of HostSettings and in no wire type;
+only the bare binary takes it from its arguments (Sill.app looks only to say it ignores it); the
+app's one `SILL_TEST_` read (`SILL_TEST_REMOTE_DIR`) is honoured only by a test host; no code, link or
+secret printed; no `assumeIsolated` or `updateConfiguration` added to Sources/SillHost.
+
+**H17.** Step 1's checks and mutants (DoorPolicy 104, CableLink 40, AskLimits 27, the records 20,
+the device 61, the protocol's values 39; 136 of 136 mutants caught), the wire probe's 50 lines byte
+for byte, step 0's checks (the policy 286, the ledger 90, the fence 14 of 14 modes, remote-rules 64,
+addresses 41, the pairing address 80, origin 66, ClientLink 89, the protocol 188 and its 8
+cross-checks) and step 2's (SessionLock 15, the stored Require pairing 19): all pass.
+
+**H2, again** (step 2's `h2.py`: this step touched the core's pairing offers). The CLI's runs on the
+hardware encoder while Noah's Sill.log said idle (re-read every 2 s): idle and with a client, plain,
+with `--direct-wireless` and with `--remote`, identical to step 0's base logs masked and sorted
+without the `[1s]` lines (in full too but for client-dw's last partial second, as before);
+`--pairing` adds exactly its two lines.
+
+**H18.** `.build/Sill.app` (make-app.sh, not installed) copied with CFBundleIdentifier
+`me.saffer.sill.h18`, signed ad hoc, started with `--synthetic -SillLogFile … -SillQuitAfter 6
+-SillPairAfter 1 -SillSetAfter '1 requirePairing=0' -requirePairing NO` and `SILL_TEST_REMOTE_DIR`,
+`SILL_TEST_CABLE_INTERFACE=en0`, `SILL_TEST_ASK_FROM_THIS_MAC=1`, `SILL_TEST_SOFTWARE_ENCODER=1`: one
+"ignored" line for each of the three hooks, the three variables and `requirePairing`; "Test encoder:
+software only"; nothing in the test directory; no window, no hook ran; "Home door: TLS, pairing
+required (0 paired)." and no Settings line; the ask claiming the cable from `fe80::…%en0` answered
+`openOnMac`, "… not shown (it asked from this Mac)."; still running at 8 s (its `-SillQuitAfter`
+ignored too), stopped by its PID (143). The window probe found no system prompt on screen after it
+(TCC attributed the copy to the process that started it).
+
+**Not verified.** The real Sill.app (Noah's, in /Applications) and its keychain store's
+`require-pairing` item under Sill's own signature; the live menu and Settings window clicked through
+(no UI automation here: the previews and `-SillMenuAfter` stand in), so "‹device› Wants to Pair"'s
+action, the Devices pane's switch and Remove, and the notice's Remove ran only as code paths the
+gates reach otherwise; VoiceOver's announcement; a device-opened window over a full-screen app;
+Noah's devices (P1–P16).
+
+**Deviations from the plan's sketches.**
+- The cable notice is a window of its own, not the pairing window in a new phase (§6.3 now says so).
+- Sill.app ignores `-SillQuitAfter` too, where §6.6 kept it: this step's brief made every `-Sill…After`
+  argument a hard rule for the bundle (§6.6 now says so; H18 stops the bundle by its PID).
+- `-SillMenuAfter` is new (the bare binary only): the gates' "in the status" is the menu it prints.
+- The card's header while the home door is closed: "Not Visible on the Network" and the keychain
+  line (step 2 left the network state to this step).
+- A window the Mac's user opened for a device's request says "‹device› asked to pair." without "on
+  this network": the request does not say where the device was, and it may have been nearby.
+- The core's `PairingOffer.byDevice` (and the status's `Pairing.open(byDevice:)`) is true only while
+  the window is the home door's alone, so the window a device opened and the Mac's user then opened
+  over shows as theirs.
+- The Devices pane with the keychain unusable says "Your paired devices show here once Sill can use
+  its key again." instead of "No paired devices yet." (the list is unread, not empty).
+- H8's quiet and span were 14 s (and 40 s for the stop), not 5; H10's changes at 8 and 16 s, not 3
+  and 10.
+- H15's list left out the samples of a window the Mac's user opened, which §6.3's first line changes
+  (H15 now says so).
+- Commits end with this session's attribution line, as steps 0 to 2 did.
+
+**What step 3 changed in this plan:** §6.3 (the notice's own window), §6.6 (the bundle ignores
+`-SillQuitAfter` too; `-SillMenuAfter`) and H15.

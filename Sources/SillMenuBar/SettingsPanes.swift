@@ -14,6 +14,7 @@ struct SettingsPane: View {
         Group {
             switch tab {
             case .general: GeneralPane(model: model, settings: model.settings)
+            case .devices: LiveDevicesPane(model: model, settings: model.settings)
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
             case .permissions: PermissionsPane(model: model)
@@ -24,10 +25,10 @@ struct SettingsPane: View {
         .frame(width: 520)
         // Permissions and the login item change behind Sill's back, in System Settings. Re-read
         // them once a second, only while this tab is on screen, and when Sill becomes active; an
-        // idle Sill with Settings closed wakes for nothing. The Remote Access pane follows the
-        // host's status, which is pushed, so it polls nothing.
+        // idle Sill with Settings closed wakes for nothing. The Devices and Remote Access panes
+        // follow the host's status, which is pushed, so they poll nothing.
         .task(id: model.visibleSettingsTab == tab) {
-            guard model.visibleSettingsTab == tab, tab != .streaming, tab != .remoteAccess else { return }
+            guard model.visibleSettingsTab == tab, tab != .streaming, tab != .devices, tab != .remoteAccess else { return }
             while !Task.isCancelled {
                 model.permissions.refresh()
                 model.loginItem.refresh()
@@ -52,6 +53,22 @@ struct Footnote: View {
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// An orange problem line with its sign.
+struct Warning: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A system error message inside a sentence of ours: without its own full stop.
+func withoutFullStop(_ text: String) -> String {
+    text.hasSuffix(".") ? String(text.dropLast()) : text
 }
 
 // MARK: General
