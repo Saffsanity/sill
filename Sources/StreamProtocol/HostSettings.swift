@@ -4,8 +4,11 @@ import Foundation
 // five for the stream, and one (Direct Wireless) for how devices reach the Mac. Rules for every
 // later change, because older builds of either side must keep decoding what newer ones send:
 //
-// • A device knows the host supports settings when a `.hostSettings` arrives on this connection;
-//   there is no version number.
+// • A device knows the host supports settings when a `.hostSettings` arrives on this connection,
+//   never by a version: `WindowList.hostVersion` is nil from SillHost, and it and `protocol`
+//   (Switcher.swift) are nil from hosts before 2026-09-25.
+// • Kind numbers are never reused: a new kind takes the next free number, and an older reader maps
+//   a kind it does not know to `.unknown` and skips it (StreamMessage.swift).
 // • Fields added later must be optional: a missing required key fails the whole decode, and the
 //   device would then treat the Mac as an older one.
 // • Never remove, rename or retype a field (Swift property names are the JSON keys).
@@ -14,6 +17,9 @@ import Foundation
 // • A field a host did not report (nil in its state: an older host) is never sent to it. The
 //   device's ledger enforces it (its rule 9), so an older host is never asked for what it cannot
 //   show.
+//
+// Compatibility.swift adds three rules for every session: the device's hello (kind 23) first, a
+// `Goodbye.reason` always sent, and a refusal as kind 22 "update" with `"reconnect":false`.
 //
 // A new setting has to be added everywhere the others are listed by hand, and the compiler points
 // at few of those places. Missing the host's whitelist is silent: a device's change is dropped with

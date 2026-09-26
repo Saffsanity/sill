@@ -27,8 +27,8 @@ public enum StreamMessageKind: UInt8 {
                              // shows them and what this host allows; on connect (right after the window list), whenever it
                              // changes, and with `answering` set as the reply to one device's changeSettings
     case changeSettings = 17 // client → host: JSON HostSettingsChange — only the fields one control changed, plus a token.
-                             // No ack kind, no "send me the state" kind, no version handshake: the answer is a hostSettings
-                             // sent to that device alone
+                             // No ack kind, no "send me the state" kind, no version check for settings (a kind 16 on the
+                             // connection says the host has them): the answer is a hostSettings sent to that device alone
     // Remote access (Remote.swift, Pairing.swift). Older readers map all five to `.unknown` and skip them.
     case macInfo = 18        // host → device: JSON SignedMacInfo — who this Mac is and how to reach it from afar, signed
                              // with its identity key. In the catalog right after kind 16, on both doors, and again whenever

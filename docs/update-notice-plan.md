@@ -383,6 +383,12 @@ The swiftc check asserts that the shipped constant parses.
   calls once the gate admits: at once with floor "0", so the line comes where it does today.
 - A remote device refused by the gate gets the update goodbye and the Refused line, never "Remote
   client connected".
+- (Review fix.) While the gate reads, the session is neither pending nor a client, so
+  `closeSessions` and the session count cannot see it: `serve` takes a `recheck`, and the door
+  answers it from the trust snapshot as the gate admits (`stillAdmits`: removed, Remote Access or
+  internet access off, the limit; the goodbye, closeSessions' line). The home door does the same
+  for Direct Wireless turned off meanwhile. The door's own refusals at admission (remoteOff, busy)
+  close like the gate's (`closeWithGoodbye`).
 - Pairing (:320-359) is not gated: a device too old for this Mac's sessions can still pair, and it
   hears the notice when it connects (open question 5).
 
@@ -658,7 +664,7 @@ A section before the Log section (:119-127):
 | State | Line |
 |---|---|
 | A check is running | Checking… |
-| After Check Now in this run | Its result (§6.4): "Sill is up to date.", "Sill 0.4 is available.", or "Couldn’t check: …" in orange |
+| After Check Now in this run, until GitHub answers an automatic check | Its result (§6.4): "Sill is up to date.", "Sill 0.4 is available.", or "Couldn’t check: …" in orange |
 | An update is offered | Sill 0.4 is available. |
 | Checked before | Last checked ‹the date abbreviated, the time short›. |
 | Never checked | Not checked yet. |
@@ -1143,9 +1149,10 @@ Commit messages end with the session's attribution lines.
   public build, it reads `hostVersion` and `protocol` (or the kinds that never come), and says
   "Update Sill on ‹Mac› to use it with this ‹iPad›. It needs version ‹v› or later." on the connect
   screen, with the Mac download page's link, without dialing again.
-- **Pairing on the home door (M5; the audit's finding 3).** The host that brings it raises the floor
-  to the first device version that pairs there, and `SillProtocol.current` to 2. Devices from the
-  first public build on then read the notice instead of looping.
+- **Pairing on the home door (M5; the audit's finding 3; open question 14).** The host that brings
+  it raises the floor to the first device version that pairs there, and `SillProtocol.current` to
+  2. Devices from the first public build on then read the notice instead of looping, as long as
+  that host still reads their plaintext hello (open question 14).
 - **The Mac's version on the device** (the Settings panel's footer), for support.
 - **"Skip This Version"**, release notes in Settings, and Sparkle, if BRIEF.md ever allows it (§6.1).
 
@@ -1182,6 +1189,15 @@ Commit messages end with the session's attribution lines.
 13. **Devices from before this change loop against a refusing host** (they cannot read the notice).
     Default: **accept**: only development and TestFlight builds are that old; the host slows them
     and sums them up in its log.
+14. **Home pairing before or after 1.0?** (Review, 2026-09-25; no default: Noah's call before either
+    branch merges.) The compatibility floor (CLAUDE.md) keeps the plain-TCP `_sill._tcp` home door,
+    and §14 assumes pairing comes after the first public build; docs/home-pairing-plan.md (branch
+    `home-pairing`) makes Sill.app's home door TLS-only for 1.0 and rejects a plain listener or a
+    sniffer for older builds. A device from this build at a TLS-only door gets a failed handshake and
+    EOF, never kind 22 "update", and redials. Pairing in 1.0: the floor reads "the home door as 1.0
+    ships it (TLS)", and the hello goes first inside TLS, through `serve`'s gate. After 1.0: the home
+    door keeps a plaintext path that reads the hello and answers kind 22 "update" (a first byte of
+    0x16 is a TLS handshake record; a device never sends kind 22).
 
 ---
 
@@ -1228,8 +1244,12 @@ stacked on #13; 0–30 minutes of jitter; older development builds loop against 
   ECONNRESET 20 times in 20 in a loopback A/B), and on a real link a reset can reach the device
   before it has read the notice. Now the goodbye goes with this side's FIN, what the device still
   sends is read and dropped until it closes (at most `DeviceGate.closeWait`, 1 s), and then the
-  connection is cancelled: 0 resets in 20. Only the gate's connections, never registered, close this
-  way; the five older goodbyes keep `sayGoodbye`.
+  connection is cancelled: 0 resets in 20. Only connections that were never registered close this
+  way: the gate's, and (review fix) a held session the recheck refuses and the remote door's
+  refusals at admission (remoteOff, busy); a registered client's goodbye (closeSessions', Quit's)
+  keeps `sayGoodbye`. Over TLS the close_notify and FIN go only at the cancel: the device sees the
+  end, and shows the notice, up to `closeWait` after the goodbye (1,050 ms measured, the goodbye
+  itself in under 1 ms).
 - **Test rig:** the bare binary ran as a copy named `SillMenuBarUN`, so its defaults domain is
   `SillMenuBarUN` and no other worktree's run shares it; the simulator runs used a simulator of this
   stage's own ("iPad update-notice", iPad Pro 13-inch (M5), iOS 27.0; the simulator's app reports
@@ -1380,6 +1400,80 @@ stacked on #13; 0–30 minutes of jitter; older development builds loop against 
   gate's 2 s); S5 (floor 99): "Update Sill on your iPad to keep using Noah’s MacBook Pro. It needs
   version 99.0 or later." with the saved Mac's Remote row kept, no dial failure, one session
   connection in 120 s, never "Remote client connected" (photo `s5-remote-refusal`).
+
+### Review fixes (after a85118d)
+
+A review of the branch (wire and app lenses, each finding verified by a second pass) found five
+defects, wire rules out of date in HostSettings.swift, and a conflict with the home-pairing plan.
+Fixed in dc8b3ec (iOS), 58d957a (host) and
+1378385 (Sill.app), then these docs; not pushed. Every host run checked Noah's Sill.log first (his
+Sill.app had no device from 19:47 to the end), and the runs that stream were guarded.
+
+- **The hello first on a home dial** (dc8b3ec). `connect(to:)` made its connection the session's
+  before `.ready` and sent the hello only at `.ready`, so what the session sent through the link in
+  between went first: a coast's end (the momentum's `onEnd` as the stream screen goes, with the
+  reconnect already dialling) or the pointer's viewport re-send 200 ms after a tear-down, which
+  never cleared `lastViewport`. Under a raised floor the gate would refuse an up-to-date device as
+  "an older Sill", and it would stop reconnecting. The hello is now written to the connection as it
+  is made (Network.framework sends what was sent before `.ready` in order once it is), and a
+  tear-down forgets the viewport and a pending re-send (`forgetViewport`). A stand-in with the real
+  SessionLink.swift, connect(to:)'s order and a listener that logs kinds: the hello first in 5 of 5
+  each for a send right after start, after a hop to the network queue, and 200 ms into a Bonjour
+  dial still resolving (a `_silltest._tcp` service registered 0.7 s in; ready at 1.65 s); the old
+  order put the hello second in all three (5, 5 and 1 runs); a source check (the hello before
+  `connection = c` and `start`, none at `.ready`). The simulator against fakehost.py: the stage's
+  thirteen checks, and "hello: sent" now with "Connecting…"; S2 and S3 against real hosts pass.
+- **A session the gate held is judged again** (58d957a). While the gate reads (up to 2 s) a session
+  is neither pending nor a client: `closeSessions` (Remove, Remote Access off, internet access off)
+  and the session count missed it, and admitting it read nothing again; at home, Direct Wireless
+  off missed a connection on peer-to-peer Wi-Fi the same way. `serve` takes a `recheck`, answered
+  by `RemoteServer.stillAdmits` from the trust snapshot as the gate admits (RemoteAccess changes the
+  snapshot before it queues `closeSessions`, so an admission before the change is a client when
+  that runs, and one after is refused); the home door disconnects a connection its peer-to-peer
+  listener accepted once the replacement without peer-to-peer is up. On a rig of StreamServer and
+  RemoteAccess alone (no coordinator, no encoder; the floor 1.2): a paired session holding its hello
+  through Remove, Remote Access off and internet access off gets `removed`, `remoteOff` and
+  `internetOff`, with "Removed …: disconnecting it at …", "Remote access off: disconnecting …" and
+  "Internet access off: disconnecting …" (a85118d served all three); 12 sessions held, then 12 hellos:
+  8 served and 4 `busy` (a85118d: 12); the controls (a hello at once, then the change) and floor 0 as
+  before. The real CLI (`--direct-wireless`, the en0 stand-in, a loopback client turning it off
+  through kind 17, the held client's hello 1.8 s in): "Direct wireless off: disconnecting clientB
+  at fe80::…%en0…" and no "Client connected" for it (a85118d registered it and sent it the catalog
+  after the off); at floor 0 it is registered and then disconnected as always.
+- **The remote door's refusals close with a FIN** (58d957a). `admitSession`'s `remoteOff` and `busy`
+  went through `sayGoodbye`, which cancels once the goodbye is processed: a device of this build
+  sends its hello as soon as it is ready, and a cancel with it unread answered with a reset. They
+  now use `closeWithGoodbye` (internal now). On the rig with the door's own TLS, a client sending
+  its hello 0.5 ms after its handshake: `remoteOff` (Remote Access off, a pairing window keeping the
+  door up) 30 of 30 goodbye, close_notify and FIN (a85118d: 8 of 30 ended in a reset), `busy` (8
+  sessions held) 30 of 30 (a85118d: 21 of 30 resets). Over TLS the close_notify and FIN go only at
+  the cancel: the goodbye arrives in under 1 ms, the end at 1,050 ms, so the device shows the notice
+  about a second later than it did (the gate's update notice through the remote door already did).
+- **Settings › General follows a later check** (1378385). `result` (this run's Check Now) outranked
+  the offer and the last check until Sill.app quit, and Sill.app runs from login for weeks. An
+  automatic check that GitHub answers now clears it; one with no answer leaves it; VoiceOver still
+  hears Check Now's results only (`resultCount`). §6.7's row says so. The checker alone against
+  sillfeed.py: Check Now up to date, HTTP 500 or offline, then an automatic answer offering 0.4; 0.4
+  then withdrawn (404); 0.4 then 0.5; up to date then a timeout (kept): 12 of 12, where a85118d's
+  checker failed 5; the stage's H7, 42 of 42; UpdatePolicy 124 of 124.
+- **The switch works from launch** (1378385). `onUpdateCheckChange` was set only once the host had
+  started, so a change before that (Settings… is in the menu from launch; `-SillSetAfter` counts
+  from launch) was saved but not applied. It is set in `AppModel.init`; `setAutomatic` before
+  `start()` only records the value. The bare app (`--synthetic`, a loopback feed,
+  `-SillUpdateInterval 4`): `-SillSetAfter '0 updateCheck=0'` sends no request in 12 s (a85118d:
+  2), `'0 updateCheck=1'` from a saved off asks (a85118d: none in 12 s), `'2 updateCheck=0'` none (as H8
+  run 3), and with Check Now at launch up to date and 0.4 published 3 s later the pane and the
+  menu offer 0.4 at 9 s (a85118d: "Sill is up to date."); H8's seven runs pass.
+- **Docs.** HostSettings.swift's rules: settings support is known by kind 16, never by a version;
+  kind numbers are never reused (the rule CLAUDE.md's floor credits it with); Compatibility.swift's
+  three rules. StreamMessage.swift's kind 17 note. Open question 14 and CLAUDE.md's floor: home
+  pairing before or after 1.0 (a review finding with no fix here: Noah's call).
+- **Gates rerun:** `swift build -c release` and iOS Debug and Release for the simulator and Debug for
+  a device, only the known warnings; H2, the CLI's stdout idle 35 s and with a Desktop pick, masked
+  and sorted, equal to cb0ec55's (the `[1s]` keys lack `enc.mailboxDrop` only because this run's
+  encoder kept up, 60 of 60 fps against the base run's ~37 with drops); H4–H6 on the CLI, all 30
+  checks; H9, the previews byte for byte the build before's when rendered from the same path (against
+  a85118d's own render only General's "Running from" path differs).
 
 ### Not verified here
 

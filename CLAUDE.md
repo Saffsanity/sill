@@ -37,7 +37,17 @@ set the compatibility floor for good (the section before Conventions).
   minute, then a count line; a source refused 5 times in 60 s hears it 2 s late.
   `SILL_TEST_GOODBYE` sends another kind 22 instead. A hello is logged ("Client
   hello: iPad (iPad14,1), Sill 1.0 (42), protocol 1 (…)") and names the Mac
-  card's row before its stats. Pairing is never refused for age.
+  card's row before its stats. Pairing is never refused for age. What changed
+  while the gate held a connection is judged again as it admits it: the remote
+  door re-reads its trust snapshot (`serve`'s recheck, `RemoteServer.stillAdmits`:
+  removed, Remote Access or internet access off, the 8-session limit, each with
+  its goodbye and closeSessions' line), and at home a connection on peer-to-peer
+  Wi-Fi that the peer-to-peer listener accepted is disconnected if Direct
+  Wireless went off meanwhile. The remote door's refusals at admission
+  (remoteOff, busy) close like the
+  gate's (`closeWithGoodbye`); over TLS the close_notify and FIN go only at the
+  cancel, so the device sees the end, and the notice, up to 1 s after the
+  goodbye.
 - Device: `GoodbyePolicy` is the one rule for how a session ends. Today's five
   reasons keep their words; "update" and any reason this build does not know
   are notices: the Mac's message (SafeText, at most 300 characters) as the status
@@ -47,7 +57,10 @@ set the compatibility floor for good (the section before Conventions).
   "Update Sill in the App Store" under it once `SillLinks.appStoreText` holds
   the App Store address (a placeholder now; DEBUG `-SillAppStoreURL`). The
   hello goes out first on a tap's, a reconnect's, a wired dial's and its
-  fallback's, a move's and a remote winner's connection (`-SillHelloVersion`);
+  fallback's, a move's and a remote winner's connection (`-SillHelloVersion`),
+  written to a home dial's connection as it is made, before it is the
+  session's (a send made before `.ready` then follows it), and a tear-down
+  forgets the session's viewport and a pointer re-send still waiting;
   `hostVersion`/`hostProtocol` are kept, shown nowhere. A refused home session
   shows the stream screen for a frame or two first (connected at `.ready`;
   accepted, open question 10).
@@ -61,8 +74,10 @@ set the compatibility floor for good (the section before Conventions).
   (not a draft or prerelease, its page on github.com) whose tag is newer than
   CFBundleShortVersionString is offered as "Sill 0.4 Is Available…" after the
   card (the glyph stays) and in Settings › General ("Check for updates
-  automatically", on by default; the last result or check; Open Release Page…;
-  Check Now); both open the page in the browser, nothing is downloaded. A 404
+  automatically", on by default, wired to the checker from launch; Check Now's
+  result until GitHub answers an automatic check, else the offer or the last
+  check; Open Release Page…; Check Now); both open the page in the browser,
+  nothing is downloaded. A 404
   (the repository is private today) is one log line a day and nothing else.
   `make-app.sh --release` builds only a commit tagged `v‹version›`.
 - Verified (the plan's Results has every number): clean builds (only the
@@ -80,6 +95,27 @@ set the compatibility floor for good (the section before Conventions).
   resets); the simulator against real hosts: the notice at home and through
   the remote door, no reconnect, redials only when asked, an older host, and
   photos at eight sizes.
+- Review fixes (2026-09-25, after a85118d; the plan's "Review fixes"), in the
+  bullets above: the hello written as a home dial is made, the gate's second
+  look, the door's refusals with a FIN, the pane after a later check, the switch
+  from launch. Checked: a stand-in with
+  the real SessionLink.swift and a listener logging kinds: the hello first in 5
+  of 5 each for a send right after start, after a hop to the network queue and
+  200 ms into a Bonjour dial still resolving (the old order lost it in all
+  three); the device against a stand-in Mac. A rig of StreamServer and
+  RemoteAccess alone (no encoder): a hello held through Remove, Remote Access
+  off and internet access off gets removed, remoteOff and internetOff with their
+  lines (the build before served all three); 12 held sessions: 8 served, 4 busy
+  (12 before); remoteOff and busy at admission with the hello 0.5 ms after the
+  handshake: 30 of 30 end in a FIN (8 and 21 resets in 30 before). The real CLI
+  with the en0 stand-in: a held connection is disconnected once Direct Wireless
+  is off (the build before registered and served it). The checker alone: Check
+  Now's result, then an automatic answer, 12 of 12 (5 failures before); the
+  bare app: off at 0 s sends nothing, on at 0 s from a saved off asks (the build
+  before did the reverse), the pane follows a release found after Check Now.
+  H4–H6, H7 (42), UpdatePolicy (124) and H8's seven runs pass; the CLI's stdout,
+  masked and sorted, equals cb0ec55's; previews equal the build before's; iOS
+  Debug, Release and device builds with only the old warning.
 - **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
   this Sill.app yourself; within a minute "Update check failed: GitHub has no
   release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t
@@ -1490,6 +1526,15 @@ device keeps working with Macs from the first public build on, or each says why
   does for a Mac without kind 16.
 - `SillProtocol.current` (1) rises only with a change an older peer cannot skip, and the floor
   rises with it.
+- **Open, for Noah** (review, 2026-09-25; the plan's open question 14): the first bullet keeps the
+  plain-TCP home door, while docs/home-pairing-plan.md (branch `home-pairing`) makes Sill.app's
+  home door TLS-only for 1.0 and rejects a plain listener or a sniffer beside it. A device from
+  this build dials plain TCP and says hello in plaintext: at a TLS-only door it gets a failed
+  handshake and EOF, never kind 22 "update", and redials. Settle the order before either branch
+  merges. Home pairing in 1.0: the first bullet then reads "the home door as 1.0 ships it (TLS)", and
+  the hello goes first inside TLS, through `serve`'s gate. After 1.0: the home door keeps a
+  plaintext path that reads the hello and answers kind 22 "update" (a first byte of 0x16 is a TLS
+  handshake record; a device never sends kind 22).
 
 ## Conventions
 
