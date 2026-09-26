@@ -29,8 +29,10 @@ import StreamProtocol
 ///
 /// The device gate (DeviceGate): with the floor above "0", a ready connection on either door is
 /// held unregistered until its first message, which must be a hello the floor admits; any other
-/// device gets kind 22 "update" and is closed, never registered. With the floor at "0" (every build
-/// that ships so far) nothing waits, and a device's hello is only logged.
+/// device gets kind 22 "update" and is closed, never registered. What changed while it was held is
+/// judged again as it is admitted: Direct Wireless turned off (home), and the remote door's trust,
+/// Remote Access, internet access and session limit (`serve`'s recheck). With the floor at "0"
+/// (every build that ships so far) nothing waits, and a device's hello is only logged.
 ///
 /// The remote door (RemoteServer, on this queue) hands its admitted sessions here (`serve`), so
 /// both doors share the framing, the catalog and the stream; remote clients get their own
@@ -72,6 +74,9 @@ final class StreamServer {
         var lastSentAt: TimeInterval = 0
         /// The device gate is reading its first message (floor above "0"): not registered yet.
         var judging = false
+        /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless
+        /// on), so it may run over AWDL; the gate checks again as it admits one.
+        var acceptedPeerToPeer = false
         /// A hello (kind 23) came on this connection: only the first counts.
         var helloSeen = false
         init(_ c: NWConnection) { connection = c }
@@ -437,7 +442,8 @@ final class StreamServer {
         }
         // A connection no longer depends on the listener that accepted it, so it is served
         // whichever listener it came from.
-        l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        let acceptsPeerToPeer = l.parameters.includePeerToPeer
+        l.newConnectionHandler = { [weak self] c in self?.accept(c, peerToPeer: acceptsPeerToPeer) }
     }
 
     /// Direct Wireless Connection, from the coordinator. Before `start()` the listener is built with
@@ -526,14 +532,22 @@ final class StreamServer {
     /// a minute later, as it did when no socket held it); one that shares none cannot, which is
     /// what off means. Clients on any other interface are untouched, and so is every remote
     /// session: the remote door never listens on peer-to-peer Wi-Fi (RemoteTLS), and who reaches it
-    /// is Remote Access's to say, not Direct Wireless's.
+    /// is Remote Access's to say, not Direct Wireless's. A home connection the device gate still
+    /// reads (the floor above "0") is not a client yet: the gate judges it the same way as it
+    /// admits it (`accept`).
     private func disconnectPeerToPeerClients() {
         for client in clients.values where !client.route.isRemote && runsPeerToPeer(client.connection) {
-            let endpoint = "\(client.connection.endpoint)"
-            let who = client.device.map { "\($0) at \(endpoint)" } ?? endpoint
-            print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
-            client.connection.cancel()   // its state handler prints "Client left" and forgets it
+            disconnectOverPeerToPeer(client.connection, device: client.device)
         }
+    }
+
+    /// One line, then the close: a client's state handler then prints "Client left" and forgets
+    /// it; a connection the gate held was never registered and prints nothing more. On `queue`.
+    private func disconnectOverPeerToPeer(_ c: NWConnection, device: String?) {
+        let endpoint = "\(c.endpoint)"
+        let who = device.map { "\($0) at \(endpoint)" } ?? endpoint
+        print("Direct wireless off: disconnecting \(who), which was connected over peer-to-peer Wi-Fi; it can reconnect over the network.")
+        c.cancel()
     }
 
     /// Whether a client reaches this Mac over peer-to-peer Wi-Fi (ClientLink), with the TEST ONLY
@@ -631,8 +645,10 @@ final class StreamServer {
 
     /// The home door. A connection is registered only once it is ready and its origin is one the
     /// home door admits: until then it gets nothing, counts for nothing, and prints nothing.
-    private func accept(_ connection: NWConnection) {
+    /// `peerToPeer`: the accepting listener included peer-to-peer Wi-Fi.
+    private func accept(_ connection: NWConnection, peerToPeer: Bool) {
         let client = Client(connection)
+        client.acceptedPeerToPeer = peerToPeer
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
@@ -661,7 +677,17 @@ final class StreamServer {
                     admit(nil)
                 } else {
                     client.judging = true
-                    self.gate(connection, admit: admit)
+                    self.gate(connection) { hello in
+                        // Direct Wireless turned off while the gate read the hello (up to 2 s): the
+                        // replacement, once advertised, disconnected the clients on peer-to-peer
+                        // Wi-Fi without this one, so it goes now, as it would have gone then.
+                        if client.acceptedPeerToPeer, self.swap == .idle, !self.peerToPeer, self.runsPeerToPeer(connection) {
+                            let name = SafeText.label(hello.device ?? "")
+                            self.disconnectOverPeerToPeer(connection, device: name.isEmpty ? nil : name)
+                            return
+                        }
+                        admit(hello)
+                    }
                 }
             case .failed:
                 // Cancelled at once: a failed connection that is only forgotten keeps its socket.
@@ -699,8 +725,12 @@ final class StreamServer {
     /// The remote door's admitted session, already `.ready` and pinned: registered like a home
     /// client, with its own route, and no link (its card names the route, "through Tailscale"), then
     /// `admitted` (the door's "Remote client connected" line). With the device floor above "0" the
-    /// gate judges it first, as at home: a refused device never gets `admitted`. On `queue`.
-    func serve(_ connection: NWConnection, route: ClientRoute, admitted: @escaping () -> Void = {}) {
+    /// gate judges it first, as at home: a refused device never gets `admitted`. The gate reads for
+    /// up to 2 s, and meanwhile the session is no client, so `RemoteServer.closeSessions` and the
+    /// session count miss it: `recheck` judges it again as the gate admits it, and a goodbye it
+    /// returns is sent instead (`closeWithGoodbye`), never registered, never `admitted`. On `queue`.
+    func serve(_ connection: NWConnection, route: ClientRoute, recheck: @escaping () -> Goodbye? = { nil },
+               admitted: @escaping () -> Void = {}) {
         let client = Client(connection)
         client.route = route
         let id = ObjectIdentifier(connection)
@@ -726,7 +756,13 @@ final class StreamServer {
             admit(nil)
         } else {
             client.judging = true
-            gate(connection, admit: admit)
+            gate(connection) { [queue] hello in
+                if let goodbye = recheck() {
+                    Self.closeWithGoodbye(goodbye, on: connection, queue: queue)
+                    return
+                }
+                admit(hello)
+            }
         }
     }
 
@@ -741,15 +777,11 @@ final class StreamServer {
     // MARK: Goodbye (kind 22)
 
     /// Tells one admitted client why it is about to be closed, then closes it once the message is
-    /// handed to the network or `within` has passed, whichever comes first. On `queue`.
+    /// handed to the network or `within` has passed, whichever comes first: a registered client,
+    /// whose connection the stream and the catalog share. A connection that was never registered
+    /// closes with `closeWithGoodbye`. On `queue`.
     func goodbye(_ goodbye: Goodbye, to connection: NWConnection, within: TimeInterval = 0.25) {
-        Self.sayGoodbye(goodbye, on: connection, queue: queue, within: within)
-    }
-
-    /// The same for any ready connection, registered or not (the remote door's refusals, the device
-    /// gate's). On `queue`.
-    static func sayGoodbye(_ goodbye: Goodbye, on connection: NWConnection, queue: DispatchQueue, within: TimeInterval = 0.25) {
-        sayGoodbye(payload: Wire.encode(goodbye), on: connection, queue: queue, within: within)
+        Self.sayGoodbye(payload: Wire.encode(goodbye), on: connection, queue: queue, within: within)
     }
 
     /// A kind 22 with this payload, then the close. On `queue`.
@@ -859,13 +891,21 @@ final class StreamServer {
         }
     }
 
-    /// The gate's goodbye and close: the message, then this side's FIN, then whatever the device
-    /// still sends read and dropped until it closes too (at most `DeviceGate.closeWait`), then the
-    /// connection cancelled. Cancelling at once, with messages the device sent after its first still
-    /// unread, makes TCP answer with a reset, which can reach the device before it has read the
-    /// goodbye (sillclient, sending on after its hello, got the goodbye and then ECONNRESET); a
-    /// device that loses the notice redials. Only for connections nothing else sends to: the gate's,
-    /// never registered. On `queue`.
+    /// The goodbye and close of a connection that was never registered, so nothing else sends to
+    /// it: the gate's refusals, a session the gate held and `serve`'s recheck refused, and the
+    /// remote door's refusals at admission (Remote Access off, the session limit). The message,
+    /// then this side's end (FIN; over TLS its close_notify first), then whatever the device still
+    /// sends read and dropped until it closes too (at most `DeviceGate.closeWait`), then the
+    /// connection cancelled. Cancelling at once, with what the device sent still unread, makes TCP
+    /// answer with a reset, which can reach the device before it has read the goodbye (sillclient,
+    /// sending on after its hello, got the goodbye and then ECONNRESET), and a device from
+    /// 2026-09-25 on sends its hello as soon as its connection is ready; a device that loses the
+    /// goodbye reads the reset instead and redials. On `queue`.
+    static func closeWithGoodbye(_ goodbye: Goodbye, on c: NWConnection, queue: DispatchQueue) {
+        closeWithGoodbye(Wire.encode(goodbye), on: c, queue: queue)
+    }
+
+    /// The same with this kind 22 payload (the gate's refusal, or SILL_TEST_GOODBYE's). On `queue`.
     private static func closeWithGoodbye(_ payload: Data, on c: NWConnection, queue: DispatchQueue) {
         let data = StreamMessage(kind: .goodbye, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                  payload: payload).serialized()
