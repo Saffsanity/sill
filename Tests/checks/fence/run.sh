@@ -3,7 +3,9 @@
 # stand-in Mac on loopback: the moves' fenced hand-overs, the hold of a move off a lost path, adopt,
 # unhold, and a new session dropping a hand-over. Each mode sends 600 numbered inputs from two
 # threads and checks that they arrive complete and in order; nofence reproduces the hazard the fence
-# is for (inversions), so the stand-in is known to catch it. About 3 s a mode.
+# is for (inversions), so the stand-in is known to catch it. About a second a mode on an M-series Mac;
+# no mode's result depends on how fast the machine runs it, so a slower or busier one only takes
+# longer (main.swift's header).
 #   Tests/checks/fence/run.sh [MODE...]   compile, then run every mode (or the ones named)
 #   Tests/checks/fence/run.sh --mutants   one-line mutants of SessionLink.swift; each must fail a mode
 here="$(cd "$(dirname "$0")" && pwd)"
