@@ -52,7 +52,9 @@ final class UpdateChecker {
     private(set) var phase = Phase.idle
     /// What the defaults keep (UpdatePolicy.Stored).
     private(set) var stored: UpdatePolicy.Stored
-    /// This run's last Check Now result, and how many there were (VoiceOver hears each).
+    /// This run's last Check Now result, until an automatic check that GitHub answers replaces it
+    /// with what is known then (Sill.app runs from login for weeks: a release out since Check Now
+    /// must show), and how many Check Now results there were (VoiceOver hears each).
     private(set) var result: UpdatePolicy.Outcome?
     private(set) var resultCount = 0
     /// Automatic checks: HostSettings' `updateCheck`, set through `setAutomatic`.
@@ -227,6 +229,12 @@ final class UpdateChecker {
         if manual {
             result = outcome
             resultCount += 1
+        } else if outcome.answered {
+            // GitHub answered an automatic check since Check Now: the pane goes back to what is
+            // known now (the offer, or when it last checked) instead of an older result. A check
+            // with no answer leaves it: nothing it learned is newer. VoiceOver hears Check Now's
+            // results only (`resultCount`).
+            result = nil
         }
         if outcome.answered {
             retryAt = nil

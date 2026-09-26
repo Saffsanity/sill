@@ -300,9 +300,9 @@ enum UpdatePolicy {
     static let noVersionLine = "This build of Sill has no version number, so it can’t check."
     static let testPatternLine = "Sill doesn’t check for updates in test pattern mode."
 
-    /// The pane's line, first match wins: a check running; this run's Check Now result; why Sill
-    /// cannot check (no version, test pattern mode without a test feed); a newer release offered;
-    /// when it last checked; never.
+    /// The pane's line, first match wins: a check running; this run's Check Now result (kept until
+    /// GitHub answers an automatic check, UpdateChecker); why Sill cannot check (no version, test
+    /// pattern mode without a test feed); a newer release offered; when it last checked; never.
     static func pane(checking: Bool, result: Outcome?, resultID: Int, offer: Offer?, lastCheck: Date?,
                      hasVersion: Bool, testPatternOnly: Bool, time: (Date) -> String, date: (Date) -> String) -> Pane {
         let canCheck = hasVersion && !testPatternOnly
