@@ -1209,9 +1209,10 @@ final class StreamClient: ObservableObject {
     /// On `queue`, once the network connection is ready: reads it up to its first window list,
     /// keeping every message for the session's read loop to replay should it take over, and hands
     /// the list's host to `moveProbed`. Ticks, frames or a broadcast can come before the list: the
-    /// Mac adds a connection to its broadcasts before its catalog goes out. A read that fails, a
-    /// message cut short, or one bigger than the session's reader takes (`readHeader`), cancels
-    /// `c`, which ends the move (`moveEnded`).
+    /// Mac adds a connection to its broadcasts before its catalog goes out. A goodbye (kind 22)
+    /// before the list goes to `moveSaidGoodbye`, and the reading goes on to the Mac's close. A read
+    /// that fails, a message cut short, or one bigger than the session's reader takes
+    /// (`readHeader`), cancels `c`, which ends the move (`moveEnded`).
     private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -1230,6 +1231,13 @@ final class StreamClient: ObservableObject {
             }
             let next = { (payload: Data) in
                 let kept = kept + [(header, payload)]
+                if header.kind == .goodbye {
+                    // Queued on main before the `.cancelled` that the Mac's close brings (read on
+                    // below), so `moveEnded` finds what it said. One that does not decode is a
+                    // reason this build does not know, as in `handle`.
+                    let goodbye = Wire.decode(Goodbye.self, from: payload) ?? Goodbye(reason: "")
+                    DispatchQueue.main.async { self.moveSaidGoodbye(c, goodbye) }
+                }
                 guard header.kind == .windowList else { self.probeMove(c, kept: kept); return }
                 guard let list = Wire.decode(WindowList.self, from: payload) else { c.cancel(); return }
                 DispatchQueue.main.async { self.moveProbed(c, kept: kept, host: list.launchID) }
@@ -1271,6 +1279,34 @@ final class StreamClient: ObservableObject {
             return
         }
         finishMove(c, kind: move.kind, kept: kept)
+    }
+
+    /// The Mac said goodbye on the move's connection before its first window list: it closes that
+    /// connection unserved (a device floor above this build refused it, "update", or Sill is
+    /// quitting), and its close ends the move (`moveEnded`) right after this. A session whose own
+    /// connection has gone (`sessionDead`: a rescue's reconnect, or a move to Wi-Fi that carries
+    /// it) then ends as a refusal on any connection ends (StreamClient+Remote's `sessionEnded`): with
+    /// the Mac's words, and without dialling that Mac again unless the goodbye asks for it. A
+    /// session still running stays where it is, and a move up does not try the listing that
+    /// refused it again while that lasts, as with another Mac (`moveProbed`). Main thread.
+    private func moveSaidGoodbye(_ c: NWConnection, _ goodbye: Goodbye) {
+        guard let move = moving, move.connection === c else { return }   // given up meanwhile
+        let reason = goodbye.reason.isEmpty ? "unreadable" : goodbye.reason
+        if sessionDead {
+            print("path: the Mac said goodbye (\(reason)) on the new connection: the session ends with its words")
+            self.goodbye = goodbye
+            return
+        }
+        switch move.kind {
+        case .fromDirect:
+            print("move to the network refused: \(hostName) on the network said goodbye (\(reason))")
+            refusedListing = sightings.since[hostName]
+        case .toCable:
+            print("path: move refused: \(hostName) on the cable said goodbye (\(reason))")
+            refusedCable = upListing
+        case .toWifi:
+            print("path: move refused: \(hostName) on Wi\u{2011}Fi said goodbye (\(reason))")
+        }
     }
 
     /// The move's connection reaches this session's host: it takes the session over and the old one
