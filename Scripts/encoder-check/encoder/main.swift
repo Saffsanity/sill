@@ -396,7 +396,9 @@ if !onlyE7 {
 // holding nothing; the watchdog, onHung and the counters see nothing of it, and one line says how
 // it went. A new session that hangs is a hang like any other. A waiting new session is dropped
 // when the stream's session dies, when the encoder goes, or when it is made after the encoder went.
-// Probes and the software encoder keep their session. With the switch off, every stream does.
+// The old session's last frame reaches onEncoded before the new session's keyframe, however long
+// its callback thread is held. Probes and the software encoder keep their session. With the
+// switch off, every stream does.
 do {
     struct Run {
         var printed = ""
@@ -545,6 +547,70 @@ do {
                "a new session made after the encoder went: sessions \(g.last - g.first + 1), its calls \(FakeVT.callsOf(gNew).count), invalidated \(FakeVT.invalidated[gNew] != nil)")
         print("a new session never used: dropped when the session is given up on, when the encoder goes, and when made after it went: " +
               "\([eDropped, fDropped, gDropped].map { $0 ? "yes" : "no" }.joined(separator: ", "))")
+
+        // (h) The old session's last frame reaches onEncoded before the new session's first. That
+        // frame's output handler lets the next frame in (`frameReturned`, which queues it for the new
+        // session) before it hands its own output on, and each session calls back on a queue of its
+        // own. Here every handler of the old session from when the new one exists is held 20 or 40 ms
+        // right after `frameReturned` releases the lock, as a descheduled callback thread would be:
+        // `submit` completes the old session before the new one's first frame goes in, and without
+        // that the new keyframe reached onEncoded first at both holds.
+        final class Delivered {
+            private let lock = UnfairLock()
+            private var items: [(session: Int, call: Int)] = []
+            func add(_ x: (session: Int, call: Int)) { lock.run { items.append(x) } }
+            var all: [(session: Int, call: Int)] { lock.run { items } }
+        }
+        for hold in [0.020, 0.040] {
+            let firstBox = Shared(0)
+            FakeVT.reset(plan: { session, call, _, _ in
+                if session == firstBox.value { return call <= 20 ? .returnAfter(0.009) : .returnAfter(0.030) }
+                return .returnAfter(0.009)
+            }, serial: true)
+            let held = Shared(0)
+            let delivered = Delivered()
+            let base = 680_000 + Int(hold * 1000) * 1000
+            var first = 0
+            let printed = capturingStdout {
+                var enc: HEVCEncoder? = makeEncoder()
+                first = FakeVT.lastSession
+                firstBox.value = first
+                let old = first
+                FakeVT.lock.run {
+                    FakeVT.beforeHandler = { session in
+                        if session == old, FakeVT.lastSession > old { Inject.arm(sleepOn: 1, delay: hold) }
+                    }
+                    FakeVT.afterHandler = { _ in if Inject.disarm() >= 1 { held.value += 1 } }
+                }
+                enc!.onEncoded = { data, _, _ in if let o = FakeVT.origin(data) { delivered.add(o) } }
+                let capture = DispatchQueue(label: "capture.e7h", qos: .userInteractive)
+                let t0 = CACurrentMediaTime()
+                for i in 0..<Int(3.2 * 60) {
+                    sleepUntil(t0 + Double(i) / 60)
+                    let e = enc!
+                    autoreleasepool { capture.sync { e.encode(makeFrame(seq: base + i), pts: CMTime(value: CMTimeValue(i), timescale: 60)) } }
+                }
+                Thread.sleep(forTimeInterval: 0.3)
+                enc = nil
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+            FakeVT.lock.run { FakeVT.beforeHandler = nil; FakeVT.afterHandler = nil }
+            let d = delivered.all
+            let k = d.firstIndex { $0.session == first + 1 }
+            let lateOld = k.map { d[($0 + 1)...].filter { $0.session == first } } ?? []
+            let around = k.map { d[max(0, $0 - 2)..<min(d.count, $0 + 3)].map { "s\($0.session - first + 1).\($0.call)" }.joined(separator: " ") } ?? "no swap"
+            print("the old session's handlers held \(Int(hold * 1000)) ms once the new session exists: \(held.value) held; onEncoded around the swap: " +
+                  "\(around); old frames after the new keyframe: \(lateOld.isEmpty ? "none" : lateOld.map { "\($0.call)" }.joined(separator: ", "))")
+            expect(FakeVT.lastSession == first + 1 && k != nil, "held \(Int(hold * 1000)) ms: \(FakeVT.lastSession - first + 1) sessions, no output of a new one")
+            expect(held.value >= 1, "held \(Int(hold * 1000)) ms: no old handler was held once the new session existed")
+            expect(lateOld.isEmpty, "held \(Int(hold * 1000)) ms: the old session's frame(s) \(lateOld.map(\.call)) reached onEncoded after the new session's keyframe")
+            expect(k.map { d[$0].call == 1 } == true, "held \(Int(hold * 1000)) ms: the new session's first output delivered is not its first frame")
+            for s in [first, first + 1] {
+                let calls = d.filter { $0.session == s }.map(\.call)
+                expect(zip(calls, calls.dropFirst()).allSatisfy { $0 < $1 }, "held \(Int(hold * 1000)) ms: session \(s - first + 1)'s outputs delivered out of order")
+            }
+            expect(lines(printed, "returned nothing").isEmpty, "held \(Int(hold * 1000)) ms: a hang line")
+        }
     }
 }
 

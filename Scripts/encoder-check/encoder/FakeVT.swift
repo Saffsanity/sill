@@ -103,13 +103,26 @@ enum FakeVT {
     /// How long VTCompressionSessionCreate takes (a new session for the slow state is made off every
     /// queue of the encoder's, so this delays only its taking over).
     static var createDelay: Double = 0
+    /// Called on a session's callback queue just before and just after it runs an output handler,
+    /// with the session's number (the delivery-order case of E7 holds a handler with `Inject`).
+    static var beforeHandler: ((Int) -> Void)?
+    static var afterHandler: ((Int) -> Void)?
     private static var sessionCount = 0
 
     static func reset(plan p: @escaping (_ session: Int, _ call: Int, _ seq: Int, _ software: Bool) -> Behavior = { _, _, _, _ in .returnAfter(0.009) },
                       serial: Bool = false) {
-        lock.run { plan = p; serialEngine = serial; calls = []; outputs = []; maxHeld = [:]; invalidated = [:]; createDelay = 0 }
+        lock.run {
+            plan = p; serialEngine = serial; calls = []; outputs = []; maxHeld = [:]; invalidated = [:]; createDelay = 0
+            beforeHandler = nil; afterHandler = nil
+        }
     }
     static func newSession() -> Int { lock.run { sessionCount += 1; return sessionCount } }
+    /// The session and call an encoded frame (`onEncoded`'s data) came from.
+    static func origin(_ data: Data) -> (session: Int, call: Int)? {
+        guard data.count == 8 else { return nil }
+        let v = data.withUnsafeBytes { $0.loadUnaligned(as: Int64.self) }
+        return (Int(v / 1_000_000), Int(v % 1_000_000))
+    }
     static var lastSession: Int { lock.run { sessionCount } }
     static func callsOf(_ session: Int) -> [Call] { lock.run { calls.filter { $0.session == session } } }
     static func outputsOf(_ session: Int) -> [Output] { lock.run { outputs.filter { $0.session == session } } }
@@ -179,8 +192,13 @@ final class VTCompressionSession {
                 let wait = due - CACurrentMediaTime()
                 if wait > 0 { Thread.sleep(forTimeInterval: wait) }
                 lock.run { _ = held.removeValue(forKey: n) }
-                FakeVT.lock.run { FakeVT.outputs.append(Output(session: session, n: n, at: CACurrentMediaTime())) }
-                handler(noErr, [], Self.sample(call: n, pts: pts, key: key))
+                let (before, after) = FakeVT.lock.run { () -> (((Int) -> Void)?, ((Int) -> Void)?) in
+                    FakeVT.outputs.append(Output(session: session, n: n, at: CACurrentMediaTime()))
+                    return (FakeVT.beforeHandler, FakeVT.afterHandler)
+                }
+                before?(session)
+                handler(noErr, [], Self.sample(session: session, call: n, pts: pts, key: key))
+                after?(session)
             }
             return noErr
         }
@@ -195,14 +213,15 @@ final class VTCompressionSession {
         FakeVT.lock.run { FakeVT.invalidated[index] = (CACurrentMediaTime(), count) }
     }
 
-    /// 8 bytes: the call number, so the check knows which call an output belongs to.
-    static func sample(call: Int, pts: CMTime, key: Bool) -> CMSampleBuffer? {
+    /// 8 bytes: session × 1,000,000 + the call number, so the check knows which call of which session
+    /// an output belongs to (`FakeVT.origin`).
+    static func sample(session: Int, call: Int, pts: CMTime, key: Bool) -> CMSampleBuffer? {
         var block: CMBlockBuffer?
         guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: 8, blockAllocator: nil,
                                                  customBlockSource: nil, offsetToData: 0, dataLength: 8,
                                                  flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block) == noErr,
               let block else { return nil }
-        var v = Int64(call)
+        var v = Int64(session) * 1_000_000 + Int64(call)
         _ = withUnsafeBytes(of: &v) { raw in
             CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: 8)
         }

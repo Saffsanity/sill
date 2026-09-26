@@ -692,7 +692,13 @@ whose session has settled in it gets a new session in place, on by default
   on a queue of its own while the old one goes on (the kernel opened it 39–42
   ms before it took over); `submit` hands it the next frame with a forced
   keyframe, whose parameter sets go out with it; the old one holds no frame by
-  then (one inside at a time) and is completed and invalidated off the queue.
+  then (one inside at a time). `submit` completes it before the new session's
+  first frame goes in, which waits for its last output handler to return, so
+  that frame reaches `onEncoded` before the new keyframe (each session calls
+  back on its own queue, and that handler lets the next frame in before it
+  hands its own frame on: a callback thread descheduled for longer than the
+  keyframe takes would put an old delta after it on the device), then
+  invalidates it off the queue.
   The mailbox, its ids, the watchdog and the capture carry on. One line once
   the new session's first frames are back, e.g. "Encoder (hardware HEVC
   3024×1964): frames took 29 ms each (31 fps out of 51 captured); a new

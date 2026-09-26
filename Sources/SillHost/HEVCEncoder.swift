@@ -39,7 +39,9 @@ import StreamProtocol
 ///   that follows (34 fps out of 57 captured at 3024×1964). When a stream's session does
 ///   (`EncoderSlowState`), the stream gets a new one in place (`replacesSlowSessions`): made on a
 ///   queue of its own while the old one goes on, taken at the next hand-over with a forced keyframe
-///   (whose parameter sets go out with it), and the old one, holding no frame by then, invalidated.
+///   (whose parameter sets go out with it), and the old one, holding no frame by then, completed
+///   first (so its last output reaches `onEncoded` before the new session's keyframe) and
+///   invalidated.
 ///   The mailbox, its frame ids, the watchdog and the capture carry on: a new session never counts
 ///   against a frame's clock, and one that hangs is a hang like any other.
 final class HEVCEncoder {
@@ -341,7 +343,19 @@ final class HEVCEncoder {
         }
         lock.unlock()
         guard let handOver else { return }   // a frame queued just before the watchdog gave up
-        if let retired { Self.retire(retired) }
+        if let retired {
+            // The old session's last output may not have reached `onEncoded` yet: its handler let
+            // this frame in (`frameReturned`) before handing its own frame on (`handle`), and the new
+            // session calls back on a thread of its own. Should that handler be descheduled for longer
+            // than the new keyframe takes (22–30 ms at 3024×1964), the device would get the old
+            // delta after the keyframe that flushed its references, and show nothing new until the
+            // next keyframe (up to 4 s). Completing the old session first waits for that handler to
+            // return (it holds no frame: measured on this Mac's hardware, 0.07–0.13 ms after the
+            // handler ends). Never under `lock`, which the handler takes. Were this ever to block
+            // for good, this frame's clock, started at its hand-over, still fires the watchdog.
+            VTCompressionSessionCompleteFrames(retired, untilPresentationTimeStamp: .invalid)
+            Self.retire(retired)
+        }
         if handOver.ptsFixed { bump("enc.ptsFixed") }
         // A new session starts with a keyframe anyway; forcing it keeps the retry below for it.
         let forced = handOver.keyframe || retired != nil
