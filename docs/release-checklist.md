@@ -89,7 +89,7 @@ Before it goes public:
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
       print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
 - [ ] Open source: the site doesn't say it while Saffsanity/sill is private. Once the repository is
-      public with a LICENSE (Apache-2.0 or MPL-2.0, docs/BRIEF.md), follow the comments in
+      public with its LICENSE (Apache-2.0, since PR #15), follow the comments in
       `index.html` and `support.html`: put "open source" back on the home page and turn the
       commented GitHub links into real ones. Sill for Mac already says "free and open source"
       (`NSHumanReadableCopyright` in `Packaging/Info.plist`, and the footnote in Settings,
