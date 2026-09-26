@@ -1,0 +1,74 @@
+# Used by .github/workflows/ci.yml and release.yml after the checkout. CI only: never run this on
+# your own Mac (it runs `sudo xcode-select`).
+name: Select Xcode
+description: >-
+  Selects the newest Xcode on the runner that is not a beta and has the version asked for, prints
+  `xcodebuild -version` and `swift --version`, and outputs a key naming that toolchain.
+inputs:
+  version:
+    description: >-
+      The Xcode wanted: a version or its start, such as 27 (any 27.x) or 27.0. Empty: the newest
+      Xcode on the runner that is not a beta.
+    required: false
+    default: ''
+  fallback:
+    description: >-
+      When the runner has no such Xcode: true selects the newest one there that is not a beta
+      (or keeps the image's default) with a warning; false fails the job, as a release must.
+    required: false
+    default: 'true'
+outputs:
+  toolchain:
+    description: Xcode's build and the Swift compiler's version, such as 27A266a-6.4.0.34.1
+    value: ${{ steps.select.outputs.toolchain }}
+runs:
+  using: composite
+  steps:
+    - id: select
+      shell: bash
+      env:
+        WANT: ${{ inputs.version }}
+        FALLBACK: ${{ inputs.fallback }}
+      run: |
+        # Every Xcode on a GitHub macOS image is a folder /Applications/Xcode_<version>.app (a beta's
+        # name says beta), and symlinks such as Xcode.app and Xcode_27.0.app point at them. Lists
+        # the real folders that are not betas, "<version><tab><path>", oldest first. A function, not
+        # a loop inside "$( )": the runner's bash is 3.2, which ends a "$(" at a case pattern's ")".
+        list_releases() {
+          local app version
+          for app in /Applications/Xcode_*.app; do
+            if [ -L "$app" ] || [ ! -d "$app" ]; then continue; fi
+            case "$app" in *[Bb]eta*|*_RC*|*Release_Candidate*) continue ;; esac
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
+            if [ -n "$version" ]; then printf '%s\t%s\n' "$version" "$app"; fi
+          done | sort -V
+        }
+        releases="$(list_releases)"
+        echo "Xcode on this runner: $(ls -d /Applications/Xcode*.app 2>/dev/null | xargs -n 1 basename | tr '\n' ' ')"
+        echo "Not betas, by version: $(printf '%s\n' "$releases" | cut -f 1 | tr '\n' ' ')"
+        # The newest whose version is $WANT or starts with "$WANT." (27 takes 27.0 and 27.1, not 270),
+        # compared as text: awk alone would find 27.10 equal to 27.1.
+        newest="$(printf '%s\n' "$releases" | awk -F '\t' -v want="$WANT" \
+          'NF == 2 && (want == "" || $1 "" == want "" || index($1, want ".") == 1) { app = $2 } END { print app }')"
+        if [ -z "$newest" ]; then
+          wanted="Xcode ${WANT:+$WANT }that is not a beta"
+          if [ "$FALLBACK" != true ]; then
+            echo "::error::This runner has no $wanted. Move runs-on to an image that has one (github.com/actions/runner-images lists them), or change the version this workflow asks for."
+            exit 1
+          fi
+          newest="$(printf '%s\n' "$releases" | awk -F '\t' 'NF == 2 { app = $2 } END { print app }')"
+          if [ -n "$newest" ]; then
+            echo "::warning::This runner has no $wanted; building with $(basename "$newest") instead."
+          else
+            echo "::warning::This runner has no $wanted, and no other Xcode that is not a beta; keeping the image's default, $(xcode-select -p)."
+          fi
+        fi
+        if [ -n "$newest" ]; then
+          echo "Selecting $newest"
+          sudo xcode-select --switch "$newest"
+        fi
+        xcodebuild -version
+        swift --version
+        build="$(xcodebuild -version | awk '/Build version/ { print $3 }')"
+        swift_version="$(swift --version 2>&1 | sed -n 's/.*(swiftlang-\([^ )]*\).*/\1/p')"
+        echo "toolchain=$build-$swift_version" >> "$GITHUB_OUTPUT"

@@ -16,6 +16,11 @@ server in between.
 [Support](https://getsill.app/support) ·
 [Privacy](https://getsill.app/privacy)
 
+<!-- CI badge: uncomment once the repository is public (a private repository's badge shows
+     visitors nothing).
+[![CI](https://github.com/Saffsanity/sill/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Saffsanity/sill/actions/workflows/ci.yml)
+-->
+
 <!-- App Store: once the iPhone and iPad app is listed, put Apple's "Download on
      the App Store" badge here, linked to the listing. Edit the sentence below
      as the App Store listing and the first notarized build of Sill for Mac come
@@ -114,6 +119,8 @@ Issues are welcome: bug reports, questions and ideas. For a pull request, keep
 to the conventions and decisions in [CLAUDE.md](CLAUDE.md): Swift and Apple
 frameworks only, no third-party dependencies, nothing that needs a server, and
 latency before picture quality. Open an issue before starting anything large.
+Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
+CI, in about two minutes and with no device.
 Contributions are accepted under the project's license. Please report a
 security problem by email to support@getsill.app, not in a public issue.
 
