@@ -3,16 +3,25 @@
 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of origin/main at 8b0d418 ("Merge pull request #18", update-notice), of the
 `remote-pacing` branch at 3126821 ("remote pacing counts bytes") and of the plans that hold message
-kinds (pointer-visibility-plan.md holds 26; the Mac menu bar sketch 24, 25 and 27). Line numbers
-are at 8b0d418. Nothing was started: no host, no app, no ScreenCaptureKit call, no sound captured,
-and never the Mac's video encoder. Two read-only probes ran, both in memory on a synthetic signal:
-AudioToolbox's encoders and decoders on this Mac (macOS 27.0 26A428, Xcode 27.0), and the same
-program inside the iOS 27.0 simulator runtime (`simctl spawn` of a command-line binary; nothing
-installed). They and their output are in the session's scratch folder
-`…/scratchpad/audio-plan/probe/` (`formats.swift`, `realtime.swift`, `run-realtime.txt`,
+kinds (menu-bar-plan.md holds 24, 25 and 27; pointer-visibility-plan.md 26;
+trackpad-gestures-plan.md 28). Line numbers are at 8b0d418. Nothing was started: no host, no app,
+no ScreenCaptureKit call, no sound captured, and never the Mac's video encoder. Two read-only probes
+ran, both in memory on a synthetic signal: AudioToolbox's encoders and decoders on this Mac (macOS
+27.0 26A428, Xcode 27.0), and the same program inside the iOS 27.0 simulator runtime (`simctl spawn`
+of a command-line binary; nothing installed). They and their output are in the session's scratch
+folder `…/scratchpad/audio-plan/probe/` (`formats.swift`, `realtime.swift`, `run-realtime.txt`,
 `run-realtime-sim.txt`). Apple's own account of ScreenCaptureKit's audio is WWDC22 session 10155,
 "Take ScreenCaptureKit to the next level"; availability comes from the SDK headers (SCStream.h,
 CATapDescription.h, AudioHardwareTapping.h, AVAudioSourceNode.h).
+
+**Critiqued the same day** against Apple's documentation (SCStreamConfiguration's audio properties,
+SCContentFilter, WWDC22 sessions 10155 and 10156, AVAudioSession, AVAudioPlayerNode and AVAudioNode,
+the engine's configuration-change notification, kAudioFormatOpus), against main at 150f781 (PRs #20
+and #21 since 8b0d418) and every other branch and worktree, and with a third in-memory probe of the
+same kind: AAC-ELD across an `AudioConverterReset`, and a decoder that joins mid-stream
+(`…/scratchpad/audio-plan/critique/`, `reset.swift`, `reset2.swift`, `join.swift`). The plan below is
+written as fixed; the last section, "Critique", says what changed and why. Scratch folders do not
+survive a restart: each probe is one AudioToolbox file, and H0 rebuilds them from their descriptions.
 
 **Noah's request (2026-09-25, as relayed to this session):** "Another idea for the future is to
 have Sill send audio back with the video." On 2026-09-26 he put it on the list to work on.
@@ -20,8 +29,8 @@ have Sill send audio back with the video." On 2026-09-26 he put it on the list t
 **Reading of it.**
 - **What the device hears.** The sound of what streams: the picked window's app, or every app for
   the Desktop. Not a microphone, and not the device's own sounds.
-- **In step with the picture.** The sound never leads the picture, and trails it by as little as
-  the sound's own path allows.
+- **In step with the picture.** The sound is never noticeably ahead of the picture, and trails it
+  by as little as the sound's own path allows.
 - **At no cost to the picture.** No frame waits for sound, nothing restarts for it, no new
   permission, and the CLI prints nothing new unless asked.
 - **v2.** BRIEF.md keeps audio out of v1 ("Out: … audio"). This is the design for after v1; nothing
@@ -46,7 +55,13 @@ have Sill send audio back with the video." On 2026-09-26 he put it on the list t
   its whole app. So there is no "just this window" sound. It also means window capture does carry
   sound: `SCContentFilter(desktopIndependentWindow:)`, today's window filter
   (StreamCoordinator.swift:934), would bring the app's. The plan takes the sound from a stream of
-  its own anyway (next point), so nothing depends on either reading.
+  its own anyway (next point), so nothing depends on either reading. WWDC22 session 10156 says the
+  same ("audio capture can only be filtered at an application level"); neither session nor the
+  documentation says whether a display filter hears an app none of whose windows is on that
+  display (the virtual display, a minimized app, a second display). P5 checks; if it does not, the
+  app's sound stream takes `SCContentFilter(desktopIndependentWindow:)` of the streamed window
+  instead (all of the app's sound, per 10155) and starts again when that window closes or another
+  window of the app is picked.
 - **A stream of its own.** The sound comes from a second, audio-only SCStream, not from
   `capturesAudio` on the picture's stream:
 
@@ -66,11 +81,13 @@ have Sill send audio back with the video." On 2026-09-26 he put it on the list t
   (Sill plays none today; a future alert would otherwise loop back), and the Desktop's filter
   excludes Sill's app as the picture's does.
 - **The format.** `sampleRate = 48_000` and `channelCount = 2`, ScreenCaptureKit's defaults, set
-  explicitly. Each buffer is a `CMSampleBuffer` wrapping an audio buffer list in that format
-  (SCStream.h). The host reads each buffer's `AudioStreamBasicDescription` and never assumes its
-  sample format or layout. That format, how many frames a buffer holds and how long after its time
-  stamp it arrives are not documented: the first buffer's log line says all three (§4.10), and P2
-  records them.
+  explicitly (it takes only 8, 16, 24 and 48 kHz and 1 or 2 channels; anything else silently
+  becomes 48 kHz stereo: SCStreamConfiguration's documentation). Each buffer is a `CMSampleBuffer`
+  wrapping an audio buffer list in that format (SCStream.h); Apple's sample code reads it as the
+  standard format, 32-bit float with a buffer per channel. The host reads each buffer's
+  `AudioStreamBasicDescription` and never assumes its sample format or layout. That format, how
+  many frames a buffer holds and how long after its time stamp it arrives are not documented: the
+  first buffer's log line says all three (§4.10), and P2 records them.
 - **What ScreenCaptureKit does not hear.** Sound played by system daemons rather than by an app,
   such as a FaceTime or phone call relayed from an iPhone (third-party reports), and possibly the
   system's alert sounds. Apps that play through helper processes are attributed to their app in
@@ -82,7 +99,9 @@ The probe fed 6 s of a busy signal (noise at −24 dBFS under three tones, 48 kH
 through each AudioToolbox encoder in capture-sized chunks, decoded every packet as soon as it
 existed, and found a 4 ms burst in the output. "End to end" runs from the burst entering the
 encoder to leaving the decoder, with the smallest constant playout offset that never runs dry. It
-counts packetizing, the codec's own delay and the chunks' misalignment; no network, no buffer.
+counts the chunk's own length (the encoder gets whole chunks: ELD 512 with 1024-frame chunks is
+1024 + 256 frames, 26.7 ms), packetizing, the codec's own delay and the chunks' misalignment; no
+network, no buffer.
 
 | AudioToolbox codec | Frames a packet | Codec delay (priming) | End to end, 480-frame chunks (10 ms) | End to end, 1024-frame chunks (21.3 ms) | kbps at a 128k target | at 96k | Encode / decode CPU, of one core |
 |---|---|---|---|---|---|---|---|
@@ -101,13 +120,22 @@ counts packetizing, the codec's own delay and the chunks' misalignment; no netwo
   `aacl` and `opus` among them) and gave the same packets, delays, latencies and bitrates.
 - **CPU.** Upper bounds on an M-series core: the probe copies Swift arrays around every call.
 - **Not checked here:** Opus on macOS 14 or iOS 17, Sill's floors; this Mac has no such runtime.
-  AAC-ELD has been in AudioToolbox on both systems for many releases, and AirPlay screen mirroring
+  `kAudioFormatOpus` is documented from macOS 10.13 and iOS 11, but that is the constant, not an
+  encoder at 10 ms that follows a bitrate: Apple's own forum example of AVAudioConverter encoding
+  Opus (an Apple engineer, developer forums thread 763362) uses 960-frame (20 ms) packets.
+  `kAudioFormatMPEG4AAC_ELD` is documented from macOS 10.7 and iOS 4, and AirPlay screen mirroring
   carries its sound as AAC-ELD (the unofficial AirPlay specification; the open receivers RPiPlay
   and WinAirPlay decode it as such).
+- **Across a reset, and joining late** (the critique's probe). After `AudioConverterReset` the
+  encoder starts again with the same priming (240 frames for ELD 480, 256 for 512), and a reset
+  decoder, or a fresh one, finds each burst at its input frame + P again; what the encoder still
+  held (at most F − 1 + P frames) is dropped. A decoder that starts in the middle of a stream gives
+  noise for its first packet (−5 to −6 dB against the signal), −41 to −43 dB for the second, −64 dB
+  for the third and the exact signal from the fourth (ELD's filterbank overlaps four frames).
 
 **Chosen: AAC-ELD at 128 kbps, 48 kHz stereo,** 480 frames a packet (10 ms), or 512 when the Mac's
 capture buffers come in multiples of 512 frames. The packet that divides the capture chunk evenly
-is 10–20 ms faster end to end (the two bold cells); the host decides from the first buffer (§4.3)
+is 9–10 ms faster end to end (the two bold cells); the host decides from the first buffer (§4.3)
 and says which in the format message.
 - **Why ELD, not Opus:** the same latency, about half the encode CPU and a fifth of the decode,
   certain on both floors, and Apple's own choice for the same job. Opus stays one field away
@@ -116,25 +144,32 @@ and says which in the format message.
 
 ### Where the time goes
 
-At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
+At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel. Each row counts once: the codec's
+measured "end to end" already holds the capture buffer's length, and the need (§7.2, rule 2) holds
+the device's own delays.
 
 | Stage | Picture | Sound |
 |---|---|---|
-| Capture | ≤ 1 refresh (≤ 16.7 ms) | ScreenCaptureKit's buffer: not documented; P2 records it (10–25 ms assumed) |
-| Encode | a few ms (hardware HEVC) | 15.0 ms (480-frame chunks) or 26.7 ms (1024-frame chunks, 512-frame packets), measured |
-| The link | frame age 8–10 ms, encode included (measured 2026-09-22) | The same connection: the same few ms, plus 15–40 ms when it sits behind a keyframe |
-| On the device | shown on arrival, decoded in 1–2 refreshes | the jitter buffer (20–60 ms at home: it covers the keyframe every 4 s), decode under 0.1 ms, the IO buffer (5 ms) and the speaker's own latency (5–15 ms) |
-| **In all** | **40–60 ms** (estimated) | **70–140 ms** (estimated) |
+| Capture and encode | ≤ 1 refresh (≤ 16.7 ms), then a few ms of hardware HEVC | 15.0 ms (480-frame buffers, ELD 480) or 26.7 ms (1024-frame buffers, ELD 512): the buffer and the codec, measured; plus the buffer's delivery after its last frame, not documented (P2; 0–10 ms assumed) |
+| The link | frame age 8–10 ms (measured 2026-09-22, from the stamp at encode-out) | the same connection: 2–5 ms at the floor |
+| The worst of the link | none: a frame is shown when it arrives, late or not | the jitter cover, 20–80 ms: the 4 s safety keyframe (1–2 MB) goes out ahead of the next packets, 30–80 ms at 200–400 Mbps and more on slower Wi-Fi (this project measured 50–100 ms frame-age spikes from it, with AWDL on) |
+| On the device | decoded and shown in 1–2 refreshes (17–33 ms) | one packet held (10.0–10.7 ms), the IO buffer (5.3 ms), the speaker's output latency (5–15 ms), 2 ms of margin; decode under 0.1 ms |
+| **In all** | **40–60 ms** (estimated) | **60–155 ms** (estimated: 15–27 + 0–10 + 2–5 + 20–80 + 10–11 + 5 + 5–15 + 2) |
 
-- **So the sound trails.** By construction it never leads (§7.2, rule 4). In practice its own path
-  is the longer one, so it trails by 30–80 ms at home, 2–5 frames at 60 fps. That is under the
-  ~125 ms at which late sound is noticed (ITU-R BT.1359: detectable at 45 ms early or 125 ms late).
+- **So the sound trails,** by 20–115 ms at home, typically about 50 ms (3 frames at 60 fps): its own
+  path is the longer, and the guard (§7.2, rule 4) keeps it at least a frame behind the picture's
+  arrival. That is under the ~125 ms at which late sound is noticed (ITU-R BT.1359: detectable at
+  45 ms early or 125 ms late; acceptable to 90 ms early and 185 ms late). Early sound: "What the
+  guard cannot see", below.
 - **"1–2 frames behind" is the rule, not the measure.** When the sound is ready in time, the device
   plays it one frame of the stream's rate after the picture. It rarely is: the 4 s safety keyframe
-  (HEVCEncoder.swift:117, `fps * 4`) puts 1–2 MB in front of the next packets every 4 s, and a
-  buffer that does not cover it clicks every 4 s. A glitch is worse than 30 ms.
-- **Bluetooth.** AirPods add their own 150–250 ms, which AVAudioSession's `outputLatency` reports.
-  The picture is not delayed to match: latency beats quality (Q7).
+  (HEVCEncoder.swift:168 on main, `fps * 4`; :117 at 8b0d418) puts 1–2 MB in front of the next
+  packets every 4 s, and a buffer that does not cover it clicks every 4 s. A glitch is worse than
+  30 ms.
+- **Bluetooth and AirPlay.** AirPods add 150–250 ms, which AVAudioSession's `outputLatency` reports;
+  the need takes it (rule 2), so the sound trails by that much more, 170–360 ms, past BT.1359's
+  185 ms for the slower ones. On AirPlay, Apple's `outputLatency` documentation warns of 2 s. The
+  picture is not delayed to match: latency beats quality (Q7).
 
 ### How the device keeps time
 
@@ -144,8 +179,8 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
   `Date().timeIntervalSince1970` at encode, StreamCoordinator.swift:1025).
 - **No clock sync, no new round trip.** The device never needs the offset between the Mac's clock
   and its own. It needs a stable reference: **the floor**, the smallest (arrival − time stamp) among
-  the audio packets of the last 10 s. A packet stamped T is due at `T + floor + delay` on the
-  device's monotonic clock.
+  the audio packets of the last 10 s. A packet stamped T is due at the ear at `T + floor + delay`
+  on the device's monotonic clock.
 - **Drift.** The two clocks drift apart by tens of ppm. The sliding minimum follows the drift, and
   the playout follows the floor by adding or dropping single frames, never by a jump (§7.2).
 - **Why not the ping pairs.** The pong carries no host time: the host echoes the ping's header time
@@ -158,9 +193,19 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
   - The ping pairs keep one job: their round trip tells a host clock step from network jitter
     (§7.2, rule 13).
 - **The picture's lag, from the frames.** Each frame's (arrival − time stamp) against the same
-  floor, the median of 2 s, plus the display's own delay (decode and the next vsync). The sound's
-  delay is at least that plus one frame. A frame's stamp is its encode-out time, a few ms after
-  capture, so at worst the guard keeps the sound (1 frame − ~5 ms) behind: still behind at 120 fps.
+  floor, the median of 2 s, plus the display's own delay (decode and the next vsync). It can be
+  negative, since the floor is the sound's and the sound's own path (buffer, codec) is the longer;
+  it is never clamped. The sound's delay is at least that plus one frame (the guard).
+- **What the guard cannot see.** A frame's stamp is taken when its encoding comes out
+  (StreamCoordinator.swift:1025), the sound's at capture. So the picture's own time on the Mac, V
+  (the capture's delivery, a wait in the encoder's mailbox, the encode), is invisible to the device,
+  and where the guard decides, the sound can lead the glass by V − 1 frame: V is a few ms to about
+  20 ms on the hardware encoder (no lead at 60 fps; up to ~15 ms at 120 fps, where a Retina frame
+  takes about a refresh to encode and may wait for the one before) and one or two frames' time on
+  the software encoder (up to ~30 ms of lead at its 60 fps). Both are under the 45 ms at which
+  early sound is detected, and at home the guard rarely decides: the need, which covers the
+  keyframe, keeps the sound 20–115 ms behind. P6 measures it; §14 has the fix (the host sends V)
+  should the sound ever be early.
 
 ### How sound shares the link
 
@@ -173,10 +218,13 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
   carries them. `paceRemote` drops frames, never sound: on a link that cannot carry both, the
   picture loses frames and waits for keyframes while the sound keeps its 16 KB/s.
 - **The limit.** Sound cannot overtake video already handed to the connection: one TCP stream, in
-  order. Behind a remote backlog (256 KB, 512 KB behind a keyframe: 0.5–1 s at 4 Mbps) the sound
-  waits as long as the picture does. They stay together, and the device's buffer follows the
-  picture (§7.2, rule 4). Jumping the queue needs Sill to hold frames back from the kernel, a send
-  queue with priorities that the remote bundle left out too (§14).
+  order. At home that is the keyframe in front (the jitter cover above). Away, remote pacing lets
+  256 KB queue (`remoteBacklogBudget`), and behind a keyframe the link is still taking, that
+  keyframe and up to 512 KB more (`remoteHoldCap`): at 4 Mbps 0.5 s, and 1–4 s behind a keyframe
+  (a 300 KB one and a full hold is 1.6 s). The sound waits as long as the picture does. They stay
+  together, and the device's buffer follows the picture (§7.2, rule 4). A send queue with
+  priorities (§14) would let sound pass frames Sill has not yet handed over, never a keyframe
+  already on its way; only a connection of its own could.
 - **Never a delay for frames.** Audio is encoded on its own queue and handed to the network queue
   as one small message (about 190 bytes) the moment it exists. A frame never waits for sound, and
   sound never waits for a frame.
@@ -185,7 +233,7 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
 
 - **Send Audio: a host setting, off by default in the first release with sound.**
   - The Mac keeps playing its own sound (ScreenCaptureKit does not silence the source). A device
-    beside the Mac, the common case, would double every sound 70–140 ms late until someone mutes
+    beside the Mac, the common case, would double every sound 60–155 ms late until someone mutes
     one of them.
   - The CLI's output stays byte for byte without `--audio`.
   - The pattern the virtual display and Direct Wireless set: off until Noah has tried it, then his
@@ -204,8 +252,9 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
 - One window's sound alone (ScreenCaptureKit's policy is per app).
 - Opus, other bitrates, any codec or bitrate choice in a UI (Q2, Q3).
 - Delaying the picture for Bluetooth headphones (Q7).
-- Priority for sound in the remote send path (§14).
-- Silence suppression on the host (silent packets cost 3 KB/s with their headers).
+- A path of its own for the sound, past a keyframe on the wire (§14).
+- Silence suppression on the host (silent packets cost 8–12 KB/s with their headers on a still
+  link, §8).
 - Sound while the app is in the background (no `UIBackgroundModes`).
 
 ---
@@ -215,7 +264,7 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
 ### 1. Scope
 
 **In this step:**
-1. **The wire.** Kind 28 carries a format (JSON) and packets (binary) of the sound (§3). The hello
+1. **The wire.** Kind 29 carries a format (JSON) and packets (binary) of the sound (§3). The hello
    lists what the device plays; kinds 16 and 17 gain `sendAudio`; ClientStats gains two optional
    fields.
 2. **The host.** An audio-only ScreenCaptureKit stream that follows the streamed app (or a test
@@ -237,16 +286,16 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
  ┌──────────────────────────── Mac (Sill.app / SillHost) ─────────────────────────────────┐
  │ main actor  StreamCoordinator.select(…) ─▶ picture pipeline (unchanged)                │
  │             its defer ─▶ AudioPipeline.follow(app | desktop | test | none)             │
- │                          the same app as now → nothing                                 │
+ │                          the same app, running → nothing                               │
  │ sill.audio  AudioCapture (SCStream, sound only; its 2×2, 1 fps picture thrown away)    │
  │             or SyntheticAudio (--synthetic) ─▶ PCM + host time                         │
  │             AudioPacketizer: 480/512-frame blocks, stamps, gaps → segments (pure)      │
  │             AudioEncoder: AAC-ELD, 128 kbps (AudioToolbox) ─▶ packet, wall-clock stamp │
  │ sill.net    StreamServer.broadcastAudio: devices whose hello plays "aac-eld";          │
- │             the format first; not in `inflight`; in `pendingBytes` away; a cap ────────┼─▶ kind 28
+ │             the format first; not in `inflight`; in `pendingBytes` away; a cap ────────┼─▶ kind 29
  └────────────────────────────────────────────────────────────────────────────────────────┘
  ┌──────────────────────────────── device ────────────────────────────────────────────────┐
- │ network q.  kind 28 parsed, frames' stamps: both stamped on arrival, handed on         │
+ │ network q.  kind 29 parsed, frames' stamps: both stamped on arrival, handed on         │
  │ sill.audio  AudioPlayout (pure): floor, need, picture's lag, dedupe → late? place?     │
  │             a frame more or less? a jump?                                              │
  │             AudioDecoder (AAC-ELD → float) ─▶ fades, ±1 frame ─▶ AVAudioPlayerNode     │
@@ -257,13 +306,13 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
 
 ### 3. Wire protocol
 
-#### 3.1 Kind 28 (`Sources/StreamProtocol/StreamMessage.swift`, continuing the enum)
+#### 3.1 Kind 29 (`Sources/StreamProtocol/StreamMessage.swift`, continuing the enum)
 
 ```swift
     // 23 is the device's hello (update-notice). 24, 25 and 27 are held for the Mac menu bar
-    // (sketched 2026-09-25, not built) and 26 for the Mac's pointer (pointer-visibility-plan.md),
-    // so the sound takes 28.
-    case audio = 28          // host → device: AudioMessage (Audio.swift) — the sound of what streams: a format (JSON
+    // (menu-bar-plan.md), 26 for the Mac's pointer (pointer-visibility-plan.md) and 28 for the
+    // trackpad's Tier 2 gestures (trackpad-gestures-plan.md §4.2), so the sound takes 29.
+    case audio = 29          // host → device: AudioMessage (Audio.swift) — the sound of what streams: a format (JSON
                              // AudioFormat), then packets (binary). Only to a device whose hello lists the codec, and only
                              // while Send Audio is on. Older readers map it to `.unknown` and skip it
 ```
@@ -273,12 +322,13 @@ At home, the iPad on Wi-Fi, its own speaker, a 60 Hz panel:
   (StreamClient.swift:2444-2445). A device from before this step is never sent one anyway (§3.5).
 - **Its size.** A format is under 1 KB and a packets message under 1 KB at 128 kbps, far under
   `maxOtherHostPayload` (4 MB); §3.2's parser caps them at 4 KB and 16 KB.
-- **Nothing else changes** in kinds 0–27. If a branch has taken 28 by the time this starts, the next
-  free number, and this section follows it (H0, Q12).
+- **Nothing else changes** in kinds 0–28. If a branch has taken 29 by the time this starts, the next
+  free number, and this section follows it (H0, Q12). On 2026-09-26 the menu bar's 24, 25 and 27
+  existed only uncommitted in its worktree, and the trackpad's 28 only in its plan: H0 reads both.
 
 #### 3.2 The payloads (`Sources/StreamProtocol/Audio.swift`, new; the iOS app gets it through the package, no pbxproj entry)
 
-A kind 28 payload's first byte says what follows. A type this build does not know is skipped.
+A kind 29 payload's first byte says what follows. A type this build does not know is skipped.
 
 ```
 type 1  format:   JSON AudioFormat
@@ -288,7 +338,7 @@ type 2  packets:  epoch UInt16 · seq UInt32 · flags UInt8 · count UInt8 · co
 ```
 
 ```swift
-/// Host → device (kind 28, type 1): how to decode what follows. Sent to each device before its first
+/// Host → device (kind 29, type 1): how to decode what follows. Sent to each device before its first
 /// packet of an epoch, and again for every new epoch (a new encoder: the app changed, Send Audio
 /// came on, the capture restarted). JSON; every field optional (HostSettings.swift's rules).
 public struct AudioFormat: Codable, Hashable, Sendable {
@@ -306,7 +356,7 @@ public struct AudioFormat: Codable, Hashable, Sendable {
     public var app: String?              // "Safari": SafeText.label, at most 64 characters
 }
 
-/// Host → device (kind 28, type 2): one or more codec packets of one epoch, back to back.
+/// Host → device (kind 29, type 2): one or more codec packets of one epoch, back to back.
 public struct AudioPackets: Hashable, Sendable {
     public var epoch: Int                // UInt16 on the wire, wraps
     public var seq: UInt32               // the first packet's number in its epoch, from 0
@@ -346,29 +396,29 @@ public enum AudioMessage: Hashable, Sendable {
   from the capture buffers' own times (the packetizer keeps an anchor per buffer, §4.3).
 - **The start of a segment.** Its first P decoded frames come before its first captured frame: the
   device drops them (§7.2, rule 9).
-- **Checked end to end** by H4 and H5: a click at a known host time lands at its stamp ±1 ms after
-  the whole path.
+- **Checked end to end** by H4 and H5: a click at a known time lands at its stamp ±1 ms after the
+  whole path.
 
 #### 3.4 Fields added elsewhere (all optional, all additive)
 
 | Where | Field | Meaning |
 |---|---|---|
-| `Hello` (Compatibility.swift:93-107) | `audio: [String]?` | The codecs this device plays, best first: `["aac-eld"]`. Nil: an older device, which gets no kind 28 |
+| `Hello` (Compatibility.swift:93-107) | `audio: [String]?` | The codecs this device plays, best first: `["aac-eld"]`. Nil: an older device, which gets no kind 29 |
 | `StreamSettings` (HostSettings.swift:49-71) | `sendAudio: Bool?` | Send Audio. Nil: a host without sound, so the device shows no row and never sends it (the ledger's rule 9) |
 | `HostSettingsChange` (HostSettings.swift:126-164) | `sendAudio: Bool?` | A device turns it on or off; `isEmpty` and `applied(to:)` include it |
 | `HostSettingsState` (HostSettings.swift:92-120) | `audioNote: String?` | Why no sound comes although Send Audio is on ("couldn't capture the sound of Safari"); nil when all is well |
-| `ClientStats` (Viewport.swift:38-53) | `audioBehindMs: Int?`, `audioLate: Int?` | That second's median of how far the sound trailed the picture, -1 for a second with no sound played; the packets that came too late to play. Nil from a device that has played none this session |
+| `ClientStats` (Viewport.swift:38-53) | `audioBehindMs: Int?`, `audioLate: Int?` | That second's median of how far the sound trailed the picture as the device sees it (without the picture's time on the Mac, V: §Decision), -1 for a second with no sound played; the packets that came too late to play. Nil from a device that has played none this session |
 
 #### 3.5 Compatibility
 
 | Device | Host | Result |
 |---|---|---|
-| Older (any build since b67f87d) | This host, Send Audio on | Its hello has no `audio`, so it is sent no kind 28 (it would skip one). It ignores `sendAudio` and `audioNote` in kind 16. Nothing changes for it |
-| This device | Older host (8b0d418's Sill.app, any CLI before this) | No kind 28; `sendAudio` nil: no row, no Sound button |
-| This device | This host, Send Audio off | The row shows off; no button; no kind 28 |
+| Older (any build since b67f87d) | This host, Send Audio on | Its hello has no `audio`, so it is sent no kind 29 (it would skip one). It ignores `sendAudio` and `audioNote` in kind 16. Nothing changes for it |
+| This device | Older host (8b0d418's Sill.app, any CLI before this) | No kind 29; `sendAudio` nil: no row, no Sound button |
+| This device | This host, Send Audio off | The row shows off; no button; no kind 29 |
 | This device | This host, Send Audio on | This plan |
-| `sillclient.py` at 8b0d418 | This host | No hello, or one without `audio`: no kind 28. Kind 16 carries two more keys |
-| A test client whose hello lists `audio` but that does not decode | This host | Gets kind 28 and may skip it |
+| `sillclient.py` at 8b0d418 | This host | No hello, or one without `audio`: no kind 29. Kind 16 carries two more keys |
+| A test client whose hello lists `audio` but that does not decode | This host | Gets kind 29 and may skip it |
 
 #### 3.6 Rules for later changes
 
@@ -380,9 +430,14 @@ public enum AudioMessage: Hashable, Sendable {
 
 ### 4. Host (`SillHostCore`, folder `Sources/SillHost`), file by file
 
-**Base.** main, after the remote-pacing branch (3126821) has merged: §4.6 builds on its
-`pendingBytes`. If it has not merged, merge it first. The pointer (kind 26) and menu-bar-mirror
-branches touch the same enum and the harness comment, nothing else of this.
+**Base.** main after the remote-pacing branch has merged: §4.6 builds on its `pendingBytes`
+(3126821) and H6 on its harness (`Scripts/pacing`, b4b315e; its MessageReader.swift was still
+uncommitted in its worktree on 2026-09-26). If it has not merged, merge it first. main was 150f781
+on 2026-09-26: since 8b0d418, PR #20 rewrote HEVCEncoder.swift (the safety keyframe interval is now
+at :168) and moved StreamCoordinator.swift's lines after :228 down by one; StreamServer, StreamClient
+and the protocol did not change. The pointer (kind 26), menu-bar-mirror (24, 25, 27) and
+trackpad-gestures (28, reserved) branches touch the same enum and the harness comment, nothing else
+of this; home-pairing restructures StreamServer's doors (§12).
 
 #### 4.1 `HostConfig.swift` and `DeviceSettings.swift`
 
@@ -431,13 +486,21 @@ protocol AudioSource: AnyObject {
   host clock: logged once and replaced by the arrival time minus the buffer's duration.
 - **Bounded.** `startCapture` and `stopCapture` each get 2 s, as the other ScreenCaptureKit calls
   are bounded (WindowCatalog.swift:163). A start that runs out is a failure (`audioNote`).
-- **`didStopWithError`** (a window closing, the permission revoked) → `onStopped`.
+- **`didStopWithError`** → `onStopped`: the permission revoked, the sound failing to start or stop
+  (`SCStreamErrorFailedToStartAudioCapture` −3818, `…FailedToStopAudioCapture` −3819), the system
+  stopping the stream (`SCStreamErrorSystemStoppedStream` −3821, macOS 15). A window closing ends
+  nothing: the filter is the app's. The pipeline starts it again at the picture's next select
+  (§4.5).
+- **A minute in,** one line on the buffers' time stamps and silence (§4.10), for P2.
 
 **`SyntheticAudio`** (Foundation only; `--synthetic`):
-- A 10 ms `DispatchSourceTimer` on `sill.audio` makes 480 frames of 440 Hz at −30 dBFS, stereo
-  float, stamped with `mach_absolute_time`.
-- A 4 ms windowed 2 kHz click at −6 dBFS starts at each whole second of host time, so a test client
-  can check the stamps end to end.
+- A 10 ms `DispatchSourceTimer` on `sill.audio` paces 480-frame chunks of 440 Hz at −30 dBFS,
+  stereo float. A chunk's host time is the first chunk's plus the frames made before it ÷ 48 kHz,
+  never the timer's firing time: a late timer makes two chunks at once, never a gap, so the tone is
+  gapless unless a test pauses it (§4.11).
+- A 4 ms windowed 2 kHz click at −6 dBFS starts at each whole second of the wall clock, as the
+  stamps will carry it (the host time ↔ wall clock mapping taken when the tone starts), so a
+  checker needs only the stamps to check them end to end.
 - The chunk goes the same way as ScreenCaptureKit's.
 - TEST ONLY: `SILL_TEST_AUDIO_CHUNK=1024` makes 1024-frame chunks every 21.3 ms, so the 512-frame
   packets are tested headless too (§4.11).
@@ -450,18 +513,25 @@ Turns chunks into blocks of F frames with their host time, and decides the segme
 - **A FIFO** of planar float frames, and for each chunk an anchor: the segment frame number of its
   first frame, and its host time.
 - **Continuity.** A chunk is expected at the previous chunk's end (its time + frames / rate):
-  - within ±2 ms: appended as it is (clock jitter);
-  - later by up to 100 ms: the gap filled with zeros, then appended (a short pause keeps the
-    decoder's state);
-  - later by more, or earlier by more than 2 ms: the segment ends (its last block padded with
-    zeros and flushed), and a new one starts at this chunk (`segmentStart`);
+  - within a quarter of a chunk (2.5 ms for 480 frames, 5.3 ms for 1024): appended as it is (time
+    stamp jitter: the stamps follow the anchors, the samples never move). A lost buffer is a whole
+    chunk late, so none hides in the tolerance; the minute's line (§4.10) says how close
+    ScreenCaptureKit keeps to it;
+  - anything else, later or earlier: the segment ends where it is, and a new one starts at this
+    chunk (`segmentStart`; the encoder's `reset()`). What the encoder still holds, the partial
+    block and the codec's lookahead (at most F − 1 + P frames, 15 ms), is dropped: never flushed
+    and never padded or filled with zeros, since a packet made then is stamped a gap ago, would
+    reach the device late by the gap and raise its need for 10 s as if the link had jittered
+    (§7.2, rule 6). The device fades the segment's last packet out (rule 10) and places the next
+    segment by its stamp (rule 5);
   - a new format (rate, channels) ends the epoch: the pipeline makes a new encoder (§4.5).
 - **The stamp of block n:** the host time of segment frame `n·F − P`, interpolated between the
   anchors (or extrapolated before the first). The pipeline turns it into wall time as it sends
   (§3.3).
 - **`AudioSourceRule`** (same file, pure): what `follow` does with the current and the wanted source
-  (§4.5). The same app (by pid) → keep. Another app, the Desktop, the test tone → a new stream and a
-  new epoch. None → stop.
+  (§4.5). The same app (by pid) with its stream running → keep. The same app whose stream ended by
+  itself → start it again, at most once every 10 s. Another app, the Desktop, the test tone → a new
+  stream and a new epoch. None → stop.
 
 #### 4.4 `AudioEncoder.swift` (new; AudioToolbox only, so the harness links it: no CoreMedia, no AVFoundation)
 
@@ -472,7 +542,8 @@ Turns chunks into blocks of F frames with their host time, and decides the segme
   `kAudioConverterPrimeInfo.leadingFrames` (P), `kAudioConverterCompressionMagicCookie` (the
   cookie), `kAudioConverterPropertyMaximumOutputPacketSize`.
 - **Use.** `encode(block) -> Data` per block, on `sill.audio`; `reset()` (`AudioConverterReset`) at
-  a segment start.
+  a segment start, which drops what the converter holds and starts the next packets with the same
+  priming P (the critique's probe).
 - **A failure to create it:** "Audio encoder: AAC-ELD unavailable: <status>", and no sound this run
   (`audioNote`).
 
@@ -485,8 +556,8 @@ epoch counter, and what the coordinator and the server see of them.
   `AudioKey` is `.app(pid, name)`, `.desktop`, `.test` or `.none`. `make` builds the source: the
   coordinator's closure makes an `AudioCapture` with its filter, or a `SyntheticAudio`. So
   AudioPipeline never imports ScreenCaptureKit, and the harness compiles it.
-  - The same app (by pid) as the running stream: nothing (a resize, a rotation, another window of
-    it).
+  - The same app (by pid) as a running stream: nothing (a resize, a rotation, another window of
+    it). As a stream that ended by itself: start it again (`AudioSourceRule`'s 10 s).
   - Otherwise: the running stream stops, one for the wanted source starts, with a new epoch.
   - `.none`: stop.
 - **When it runs:** Send Audio on, a source live, at least one connected device that plays
@@ -498,8 +569,9 @@ epoch counter, and what the coordinator and the server see of them.
 - **Each block:** encoded, stamped (§3.3), and handed to `server.broadcastAudio(packets:)` as one
   packet. Stats `aud.out`.
 - **Failures never touch the picture.** A source that fails to start, or stops by itself, sets
-  `audioNote` and logs one line. The next `follow` for another source, or Send Audio off and on,
-  tries again. No retry loop.
+  `audioNote` and logs one line. The next `follow` tries again: the picture's next select (a pick, a
+  rotation, a restart), another source, or Send Audio off and on; the same app at most once every
+  10 s. No retry loop.
 - **Status:** `HostStatus.audio` (§4.8), and `audioNote` for kind 16.
 
 #### 4.6 `StreamServer.swift`
@@ -565,6 +637,7 @@ Mac", "Test Tone"), `devices` (how many get it), `problem: String?`.
 | … for the Desktop | `Audio: capturing the whole Mac's sound (every app but Sill).` |
 | … on a synthetic host | `Audio: a test tone (440 Hz at -30 dBFS, a click at each second).` |
 | Its first buffer | `Audio: first buffer 1024 frames, 48000 Hz, 2 channels, 32-bit float, non-interleaved, 9 ms after its time stamp.` |
+| A minute after it | `Audio: first minute: 2812 buffers, time stamps at most 0.3 ms from contiguous, 0 gaps, 1406 silent.` ("silent": every sample zero) |
 | The encoder, each epoch | `Audio encoder: AAC-ELD 48 kHz stereo, 512 frames a packet (10.7 ms), 128 kbps, codec delay 256 frames.` |
 | It stops | `Audio stopped: nothing streams.` · `Audio stopped: no connected device plays sound.` · `Audio stopped: Send Audio is off.` · `Audio stopped: Sill is quitting.` |
 | A start fails | `Audio: could not capture Safari's sound: <error>. The picture is unaffected.` |
@@ -578,7 +651,9 @@ gap).
 
 #### 4.11 TEST ONLY hooks (honoured only by synthetic hosts, which do not advertise)
 
-`SILL_TEST_AUDIO_CHUNK=1024` (§4.2). Nothing else: the test tone is the test source.
+`SILL_TEST_AUDIO_CHUNK=1024` (§4.2), and `SILL_TEST_AUDIO_PAUSE=S@T[,S@T…]`: the tone makes
+nothing for S seconds from T seconds after it starts, then goes on from where the clock is (H8).
+Nothing else: the test tone is the test source.
 
 ### 5. CLI (`Sources/SillHostCLI/main.swift`)
 
@@ -617,15 +692,21 @@ gap).
 
 #### 7.1 Files
 
-Each new file needs its four pbxproj entries by hand. main has used A01E/F01E (GoodbyePolicy); the
-open plans name A01E–A020; so A021/F021, A022/F022 and A023/F023, re-checked at H0.
+Each new file needs its four pbxproj entries by hand, in a block of their own: A401/F401,
+A402/F402 and A403/F403, re-checked at H0. On 2026-09-26 main has A01E/F01E (GoodbyePolicy),
+A101/F101 and A201/F201; trackpad-gestures names A01F/F01F, remote-pacing's MessageReader.swift has
+A020/F020 (uncommitted), the pointer's PointerPresence.swift A301/F301 and the menu bar plan
+A040–A044/F040–F044; and home-pairing's StreamClient+Home.swift has A01E/F01E, GoodbyePolicy's, so
+it takes a free pair when it lands, most likely A021: hence a block apart. The privacy manifest
+needs nothing new: the playout reads the host clock (`CACurrentMediaTime`, AVAudioTime's host
+time), and a direct `mach_absolute_time` is covered by its System boot time reason, 35F9.1.
 
 | File | What | Imports |
 |---|---|---|
 | `AudioPlayout.swift` (new) | The playout model: floor, need, the picture's lag and the guard, dedupe, placement, frames added or dropped, fades. Pure: checked with swiftc (`audio-playout`) | Foundation |
 | `AudioDecoder.swift` (new) | AAC-ELD → 48 kHz stereo float, from the format's cookie | AudioToolbox |
 | `AudioOutput.swift` (new) | AVAudioEngine, the player node, a buffer pool, the session and its notifications | AVFAudio, UIKit |
-| `StreamClient.swift` | Kind 28, the hello's `audio`, frames' stamps to the model, stats, resets | |
+| `StreamClient.swift` | Kind 29, the hello's `audio`, frames' stamps to the model, stats, resets | |
 | `StreamScreen.swift`, `PortraitStreamScreen.swift` | The Sound button | |
 | `HostSettingsPanel.swift`, `HostSettingsLedger.swift`, `MockCatalog.swift`, `ContentView.swift`, `DiagnosticsHUD.swift` | The row, the field, the harness, the HUD | |
 
@@ -639,7 +720,7 @@ Sill's runs on ordinary queues, and the real-time code is Apple's.
 
 - **Clocks.** Device times are seconds of the monotonic clock (`CACurrentMediaTime`, the host clock
   whose ticks AVAudioTime's `hostTime` counts); host stamps are wall-clock seconds.
-- **Queue.** It runs on `sill.audio`. The network queue stamps each frame and each kind 28 with its
+- **Queue.** It runs on `sill.audio`. The network queue stamps each frame and each kind 29 with its
   arrival as it reads them, and hands them over.
 
 **Inputs:**
@@ -648,49 +729,71 @@ Sill's runs on ordinary queues, and the real-time code is Apple's.
 - `packet(epoch:seq:stamp:arrival:segmentStart:)` → a decision (the rules below).
 - `played(sampleTime:at:)`: the player's progress (`lastRenderTime`, `playerTime(forNodeTime:)`),
   read at each schedule.
-- `latency(output:io:refresh:streamFPS:)`: from the session and the viewport.
+- `latency(output:presentation:io:refresh:streamFPS:)`: the session's `outputLatency` and
+  `ioBufferDuration` as read back once it is active (Apple: the preferred duration is only a
+  request; the minimum is about 5 ms, 256 frames, the typical maximum 93 ms), the player node's
+  `outputPresentationLatency`
+  (the engine's own latency after the player), the panel's refresh and the stream's rate.
 - `rtt(median:)`: from the pings, once a second (rule 13).
-- `reset(_:)`: a new connection (a move, a reconnect), a route change, unmuting, the engine
-  restarted.
+- `reset(_:)`: a reconnect (a new session connection after the old one ended), a route change,
+  unmuting, the engine restarted. A move's hand-over is not one (rule 7).
 
 **The rules:**
 1. **The floor** is the smallest (arrival − stamp) of the audio packets in the last 10 s, kept in
    1 s buckets. With no packet for 10 s it keeps its last value.
-2. **The need** is the largest (arrival − stamp − floor) of those packets in the last 10 s, plus one
-   packet (F / rate), plus the IO buffer: what covers the link's jitter, a keyframe in front
-   included.
-   - It starts at 40 ms at home and 150 ms away, until 2 s of packets have come.
-   - Bounds: home 20–150 ms; away 60–600 ms.
+2. **The need** is what a packet needs between arriving and being heard: the jitter cover, the
+   largest (arrival − stamp − floor) of those packets in the last 10 s (the link's jitter, a
+   keyframe in front included); plus one packet (F / rate, rule 10's wait); plus the IO buffer (the
+   render runs that far ahead of the output); plus the output latency (the session's
+   `outputLatency` and the player's `outputPresentationLatency`: a few ms on the speaker, 150–250 ms
+   on AirPods, up to 2 s on AirPlay); plus 2 ms.
+   - The jitter cover starts at 40 ms at home and 150 ms away, until 2 s of packets have come; its
+     window leaves those 2 s out (a connection's catalog and first keyframe go ahead of its first
+     packets, and would hold the cover at its bound for 10 s).
+   - Its bounds: home 20–150 ms; away 60–600 ms. The rest has none: it is what the route costs.
    - It rises at once (rule 6). It falls when the window forgets its maximum, and the error that
      leaves is closed by rules 11 and 12.
 3. **The picture's lag** is the median (arrival − stamp − floor) of the frames of the last 2 s, plus
    1.5 refreshes and 4 ms: decode and the next vsync, since frames are shown on arrival
-   (HEVCDisplayView.swift:276-279). No frames (a still window): its last value.
+   (HEVCDisplayView.swift:276-279). No frames (a still window): its last value. It can be negative
+   (the floor is the sound's, and the sound's own path is the longer); it is never clamped.
 4. **The delay** is max(need, the picture's lag + one frame of the stream's rate). A packet stamped
-   T is due at the speaker at `T + floor + delay`, and is scheduled for `due − outputLatency`. The
-   guard has no bound: on a link where the picture runs a second late, so does the sound.
+   T is due at the ear at `T + floor + delay`, and is rendered the output latency (rule 2's)
+   earlier: scheduled for `due − output latency` on the player's timeline. The guard has no bound:
+   on a link where the picture runs a second late, so does the sound.
 5. **Placement.** The first packet of a segment, and the first after an underrun or a jump, is
-   scheduled at its due time (`AVAudioTime(sampleTime:atRate:)` in the player's timeline, mapped
-   from `played`). Every later packet of the segment follows the one before it, contiguous.
-6. **Late.** A packet whose scheduled time is less than 2 ms away when it is decoded is dropped, and
-   the need rises to cover it at once. The segment's next packet is placed by time (rule 5).
+   placed by time (`AVAudioTime(sampleTime:atRate:)` in the player's timeline, mapped from `played`;
+   Apple: a host time counts only when there is no sample time): its first frame played goes where
+   its stamp says, which for a segment's first packet is the frame after the P it drops,
+   `T + P / rate`. Every later packet of the segment follows the one before it, contiguous (`at:
+   nil`).
+6. **Late.** A packet whose scheduled time is less than the IO buffer + 2 ms away when it is decoded
+   (the render thread has already rendered that far ahead) is decoded, for the decoder's state, and
+   not played; the jitter cover rises to cover it at once, unless the lateness was not the link's
+   (the engine still starting, before its first render; a packet the decoder was catching up on
+   after a reset). The segment's next packet is placed by time (rule 5).
 7. **Duplicates.** A packet whose (epoch, seq) is among the last 256 is dropped: a move's two
-   connections both carry the stream for a moment.
-8. **Missing.** A seq that skips (the host's `aud.drop`) makes a new segment on the device: the
-   decoder resets, and the next packet fades in.
-9. **A new segment** (the flag, a new epoch, a device's first packet, a reset): the decoder resets,
-   its first P decoded frames are dropped (the codec's start), and the next 5 ms fade in. A first
-   packet in the middle of a segment (a device that joined late) is decoded and dropped whole, and
-   the next one fades in.
+   connections both carry the stream for a moment. A move's hand-over resets nothing, neither this
+   list nor the decoder nor the floor (a faster or slower path is rule 13's floor change), and a
+   format for the epoch already playing, with the same cookie, is ignored.
+8. **Missing.** A seq that skips (the host's `aud.drop`): the decoder resets, and the packet after
+   the gap is a late join (rule 9).
+9. **A clean start** only where the Mac's encoder started clean, a packet with the flag (a new
+   segment or epoch): the decoder resets, its first P decoded frames are dropped (the codec's
+   start), and the next 5 ms fade in. **Any other first packet on a reset decoder** (a device's
+   first packet in the middle of a segment, the packet after a seq gap, the first after unmuting or
+   any other reset) is decoded and dropped whole, and the next one fades in: decoded without its
+   predecessors the first is noise (−5 dB against the signal), the second within −41 dB, the fourth
+   exact (the critique's probe).
 10. **The newest packet stays in hand** until the next arrives or its deadline (its scheduled time −
-    2 ms) passes. Then it goes out, faded over its last 5 ms if nothing followed it. An underrun
-    ends in a fade, never a click. The need's extra packet (rule 2) pays for the wait.
+    the IO buffer − 2 ms) passes. Then it goes out, faded over its last 5 ms if nothing followed it.
+    An underrun ends in a fade, never a click. The need's extra packet (rule 2) pays for the wait.
 11. **Drift and small changes: single frames.** Once a second the model compares where the stream
-    plays with where it is due: `error = (the stamp of the sample playing at t) + floor + delay − t
-    − outputLatency`. It evens it out one frame at a time. Each packet scheduled may gain a frame (a
-    copy at its quietest point, blended into its neighbours) when the sound runs ahead, or lose one
-    when it runs behind. At most one a packet: about 2 ms a second, far more than two clocks drift
-    (tens of ppm is 0.1 ms a second), and inaudible.
+    plays with where it is due: `error = (the stamp of the sample rendered at t) + floor + delay − t
+    − the output latency`. It evens it out one frame at a time. Each packet scheduled may gain a
+    frame (a copy at its quietest point, blended into its neighbours) when the sound runs ahead, or
+    lose one when it runs behind. At most one a packet: about 2 ms a second, far more than two
+    clocks drift (tens of ppm is 0.1 ms a second), and inaudible.
 12. **Jumps: over 40 ms.** An error beyond 40 ms (a stall, a clock step, a route change, the engine
     restarting, the picture's lag moving fast) is closed at once, at the next packet boundary:
     packets dropped, or the next one placed later (silence), with 5 ms fades.
@@ -710,11 +813,11 @@ and dropped, jumps.
 | What | Value |
 |---|---|
 | Floor window | 10 s, in 1 s buckets |
-| Need | the window's largest excess + 1 packet + the IO buffer; first 40 ms at home, 150 ms away |
-| Need bounds | home 20–150 ms; away 60–600 ms |
+| Need | the jitter cover (the window's largest excess; first 40 ms at home, 150 ms away) + 1 packet + the IO buffer + the output latency + 2 ms |
+| Jitter cover bounds | home 20–150 ms; away 60–600 ms; the rest has none |
 | The picture's lag | the median of 2 s of frames + 1.5 refreshes + 4 ms |
 | The guard | the picture's lag + 1 frame of the stream's rate; no bound |
-| Late | scheduled less than 2 ms ahead when decoded |
+| Late | scheduled less than the IO buffer + 2 ms ahead when decoded |
 | Frames added or dropped | at most 1 a packet |
 | Jump | an error over 40 ms |
 | Step | a second of packets above the floor by max(50 ms, 2 × rtt), or a floor 20 ms lower |
@@ -727,7 +830,8 @@ and dropped, jumps.
 - `AudioConverterNew` from the format's codec (AAC-ELD, F frames, 48 kHz, 2 channels), with
   `kAudioConverterDecompressionMagicCookie` set to the cookie, to 48 kHz stereo float,
   non-interleaved.
-- `decode(_ packet: Data)` one packet at a time (the probe's loop), into pooled arrays; `reset()`.
+- `decode(_ packet: Data)` one packet at a time (the probe's loop), into pooled arrays; `reset()`
+  (`AudioConverterReset`: the next packet decodes as on a fresh decoder, the critique's probe).
 - An unknown codec or a cookie it refuses: `audio: cannot play <codec>` in the DEBUG console, and
   no sound this epoch. The Sound button stays: the Mac says sound is on.
 
@@ -735,12 +839,18 @@ and dropped, jumps.
 
 - **The graph:** `AVAudioPlayerNode` → `mainMixerNode` → output. The player's format is 48 kHz
   stereo float; the mixer converts to the route's rate.
-- **Buffers:** a pool of 64 `AVAudioPCMBuffer`s of F + 1 frames (a gained frame fits); each comes
-  back to the pool in its `scheduleBuffer` completion.
+- **Buffers:** a pool of `AVAudioPCMBuffer`s of F + 1 frames (a gained frame fits), 32 to start,
+  grown on `sill.audio` when empty: the guard has no bound, and a picture a second late holds 100
+  buffers in the player. Each comes back to the pool in its `scheduleBuffer` completion, which runs
+  on an AVFAudio queue, not `sill.audio` (the pool takes a lock).
 - **The session:** `.playback`, mode `.default`, options `[.mixWithOthers]` (Q4). It never stops the
   user's music or podcast, and it plays with the Ring/Silent switch on silent, as a video app does.
-  `setPreferredSampleRate(48_000)`, `setPreferredIOBufferDuration(0.005)`. Active only while the
-  engine runs; `setActive(false, options: .notifyOthersOnDeactivation)` when it stops.
+  `setPreferredSampleRate(48_000)`, `setPreferredIOBufferDuration(0.005)`, then `ioBufferDuration`
+  and `outputLatency` read back once active (the preference is a request). Active only while the
+  engine runs; when it stops, the engine first, then `setActive(false, options:
+  .notifyOthersOnDeactivation)` (deactivating with the engine running fails as busy). Activation can
+  fail, as during a phone call: no sound, one console line, and the interruption's end or the next
+  `didBecomeActive` tries again.
 - **When the engine runs:** the app in the foreground, the session carrying sound (a format has
   come), not muted, a packet within 10 s. It stops, after a 5 ms fade, on mute, on
   `didEnterBackground`, at the end of the session and after 10 s without a packet;
@@ -750,24 +860,34 @@ and dropped, jumps.
   it: at the next `didBecomeActive`.
 - **Route changes.** `.oldDeviceUnavailable` (headphones out, AirPods taken off): mute, as a video
   app pauses, and announce **"Sound muted: headphones disconnected."** Any other reason (AirPods in,
-  a speaker): read `outputLatency` and `ioBufferDuration` again and reset the model (one jump,
-  rule 12).
+  a speaker, AirPlay): read `outputLatency` and `ioBufferDuration` again and reset the model (one
+  jump, rule 12). The need follows the route's latency, whatever it is (AirPlay's can be 2 s): the
+  sound trails by that much more (Q7), and the console says so.
 - **`mediaServicesWereResetNotification`:** rebuild the engine and the session.
-  **`AVAudioEngineConfigurationChange`:** start again and reset.
+  **`AVAudioEngineConfigurationChange`:** the engine has stopped and uninitialized itself, its
+  nodes keep their old formats, and it must not be torn down in the handler (Apple: it can
+  deadlock there). On `sill.audio`: connect the mixer to the output in the output's new format,
+  start, read the latencies again and reset.
 - **No `UIBackgroundModes`:** in the background the app is not heard.
+- **DEBUG `-SillSoundVolume 0`:** the player node's volume 0: the whole path runs, and the
+  simulator's gates make no sound from the Mac's speakers (§11).
 
 #### 7.5 `StreamClient`
 
 - **The hello** (`helloPayload`, StreamClient.swift:1015-1022) gains `audio: ["aac-eld"]`.
-- **Kind 28** in `handle` (:2302): `AudioMessage.parse`, stamped with its arrival, handed to
-  `sill.audio`. A format gets a new decoder; packets get the model's decision, then decode, fades,
-  a frame more or less, and the schedule. Muted or in the background, the model still takes each
-  packet's arrival (its floor and need stay right, so unmuting is quick) and nothing is decoded.
+- **Kind 29** in `handle` (:2302): `AudioMessage.parse`, stamped with its arrival, handed to
+  `sill.audio`. A format for a new epoch gets a new decoder (one for the epoch already playing,
+  with the same cookie, as a move's new connection sends, is ignored); packets get the model's
+  decision, then decode, fades, a frame more or less, and the schedule. Muted or in the background,
+  the model still takes each packet's arrival (its floor and need stay right, so unmuting is quick)
+  and nothing is decoded.
 - **Frames** (kind 1): `frame(stamp:arrival:)` before `onFrame`.
 - **Stats.** `closeWindow` (:2491) adds the model's second to `LinkStats` (`audioBehindMs`,
   `audioLate`), and `ClientStatsReporter` sends them.
-- **Resets.** A new session connection (a connect, a move's hand-over, a reconnect) resets the model
-  and the decoder.
+- **Resets.** A new session connection after the old one ended (a connect, a reconnect) resets the
+  model and the decoder. A move's hand-over does not: the stream is the same epoch, the dedupe
+  drops what both connections carry, and a faster or slower path is a floor change (rule 13), one
+  jump at most.
 - **State.** `soundMuted` (published; `UserDefaults` `Sill.soundMuted`, default false), and
   `soundAvailable` (the host's `settings.displayed?.sendAudio == true`).
 
@@ -802,16 +922,17 @@ and dropped, jumps.
 
 - **Arguments** (the contract comment in ContentView.swift, and CLAUDE.md): `-SillSound on|muted`
   (the button in that state, no sound), `-SillSettingsCase sound|soundnote` (the row on; on with a
-  note). The mock answers `sendAudio` as it answers the others.
+  note), `-SillSoundVolume 0` (§7.4). The mock answers `sendAudio` as it answers the others.
 - **DEBUG console lines:**
   - `audio: format aac-eld 48000 Hz 2 ch, 480 frames (priming 240), epoch 3, Safari`
-  - `audio: engine on, Speaker, output 11 ms + IO 5 ms, delay 46 ms (need 46, picture 27 + 1 frame 17)`
-  - once a second while playing: `audio: 38 ms behind the picture; need 44 ms; late 0; error +3 ms;
-    frames +1 -0; jumps 0`
+  - `audio: engine on, Speaker, output 11 ms, IO 5 ms, delay 68 ms (need 68: jitter 40, packet 10,
+    IO 5, output 11, margin 2; picture -4 + 1 frame 17)`
+  - once a second while playing: `audio: 62 ms behind the picture; need 58 ms (jitter 30); late 0;
+    error +3 ms; frames +1 -0; jumps 0`
   - `audio: jump +52 ms (clock step)` · `audio: interrupted` · `audio: resumed` ·
     `audio: route Speaker → AirPods (+187 ms)` · `audio: muted (headphones disconnected)` ·
     `audio: idle, engine off`
-- **The HUD** (`-SillHUD 1`) gains ` · sound 38` while sound plays.
+- **The HUD** (`-SillHUD 1`) gains ` · sound 62` while sound plays.
 
 ### 8. Cost
 
@@ -823,9 +944,10 @@ and dropped, jumps.
 | The device's CPU | Decode | 0.07 % of an M-series core (the probe); a few times that on an A15 |
 | | AVAudioEngine | what playing any sound costs |
 | The link | Sound | about 16 KB/s (128 kbps) |
-| | Framing | 25 bytes a packet (the 14-byte header and 11), 2.5 KB/s |
-| | Silence | about 3 KB/s |
-| | Against the picture | 1 % of Balanced (15 Mbps), 4 % of Low (4 Mbps) |
+| | Framing | 25 bytes a packet of Sill's own (the 14-byte header and 11), 2.5 KB/s. On a link with nothing else to carry, a still window's, each packet is also a TCP segment of its own: 52–72 bytes of TCP/IP headers, and a 22-byte TLS record at the remote door (at home too once home pairing lands). About 25 KB/s in all then, some 200 kbps |
+| | Silence | about 3 KB/s of Sill's own, 8–12 KB/s with those headers |
+| | Against the picture | 1–1.5 % of Balanced (15 Mbps), 4–5 % of Low (4 Mbps) |
+| | The device's radio | 100 more small transmissions a second and about 50 acknowledgements back: it never dozes while sound flows, as the ticks already keep it while a source is live |
 | Battery | The device's audio hardware while sound plays; the engine stops after 10 s of no packets | |
 
 ### 9. Timeouts and limits
@@ -835,8 +957,8 @@ and dropped, jumps.
 | The sound's stream, start and stop | 2 s each, then a failure (`audioNote`) |
 | Following the source | after the picture's select; the same app keeps its stream |
 | Packets | 480 or 512 frames (10 or 10.7 ms), one to a message (the wire allows 255) |
-| A gap filled with zeros | up to 100 ms; beyond it, a new segment |
-| Clock jitter accepted between chunks | ±2 ms |
+| A gap in the capture | any gap beyond the tolerance ends the segment; nothing is filled or flushed |
+| Time stamp jitter accepted between chunks | a quarter of a chunk (2.5 ms for 480 frames, 5.3 ms for 1024) |
 | Sound a device has not taken | 100 messages at home, 300 away, then packets are skipped (`aud.drop`) |
 | Payloads | a format up to 4 KB, a packets message up to 16 KB |
 | The device's playout | §7.2's constants |
@@ -849,29 +971,30 @@ and dropped, jumps.
 | Rotation, Aa, a rate or quality change, the encoder fallback | The picture restarts; the sound's stream is the same app's and goes on |
 | Another window of the same app | No change to the sound |
 | A window of another app | The sound's stream restarts with a new epoch: about 0.1–0.3 s of silence, then a fade in |
-| The streamed window closes | The sound's stream ends ("Audio capture ended: …"); the device asks for the Desktop 2 s later (today's rule) and the sound follows |
+| The streamed window closes | The app's sound goes on (the filter is the app's, not the window's); the device asks for the Desktop 2 s later (today's rule) and the sound follows it, a new epoch |
 | The app has no window on screen (minimized) | Still captured: the filter is the app's (P5) |
 | A window on the virtual display | The same app filter on the main display (P5) |
 | Two displays, the Desktop | Every app's sound, whatever the display (per app; P5) |
-| The app goes quiet | Silent packets (3 KB/s) if ScreenCaptureKit keeps delivering; if it stops, the device plays out and fades, and a chunk after 100 ms starts a new segment |
-| The Mac's output device changes | ScreenCaptureKit's behaviour is not documented (P12). If the stream ends: one line and `audioNote`; Send Audio off and on starts it again |
+| The app goes quiet | Silent packets (8–12 KB/s with their headers) if ScreenCaptureKit keeps delivering (P2's minute line says); if it stops, the device plays out and fades, and the next chunk starts a new segment, placed by its stamp |
+| The Mac's output device changes | ScreenCaptureKit's behaviour is not documented (P12). If the stream ends: one line and `audioNote`; the picture's next select, or Send Audio off and on, starts it again (§4.5) |
+| The Mac locks its screen, sleeps its display or switches user | Not documented for sound (P12). If the stream ends: as above |
 | The Mac's volume muted | Not documented whether capture comes before the volume (P11) |
 | FaceTime or a phone call on the Mac | Not heard: daemon sound (P4) |
 | A keyframe in front of the sound | The need covers it (rule 2); the first one of a session may make one packet late (dropped, faded) |
 | The picture drops frames and waits for a keyframe (a slow link), or restarts | The sound goes on; while no frames come, the picture's lag keeps its last value (rule 3) |
 | The link stalls 2 s, then bursts | Packets past their time are dropped; playback returns to the delay by a jump (rule 12) |
 | The Mac's wall clock steps | Rule 13: one jump |
-| A move (AWDL → network, away → home) | Two connections for a moment: duplicates dropped (rule 7); the new connection resets the model, one jump at most |
+| A move (AWDL → network, to or from the cable) | Two connections for a moment: duplicates dropped (rule 7); nothing resets; a faster or slower path is one floor change, one jump at most (rule 13) |
 | A device joins while sound runs | The format, then the next packet; its first packet is decoded and dropped, the next fades in |
 | Two devices | Both get it; each mutes alone |
-| A device muted | The Mac keeps sending; the device decodes nothing; unmuting places the next packet by time |
+| A device muted | The Mac keeps sending; the device decodes nothing; unmuting resets the decoder: the first packet is decoded and dropped, the next placed by time and faded in (rule 9) |
 | Headphones pulled out of the device | Muted, and said (§7.4) |
-| AirPods | The sound trails by their latency more; the console and the HUD say how much (Q7) |
+| AirPods, AirPlay | The sound trails by the route's latency more (AirPods 150–250 ms, AirPlay up to 2 s); the console and the HUD say how much (Q7) |
 | A call to the device | Interrupted, resumed after (§7.4) |
 | The app goes to the background | The engine stops; back in front, the next packet starts it |
 | Send Audio turned off (on the Mac or a device) | The stream stops; kind 16 says so; the button goes; the device plays out and idles |
 | A device away | Its need starts at 150 ms and follows the link; frames drop first (§Decision) |
-| A kind 28 of an unknown type or codec | Skipped |
+| A kind 29 of an unknown type or codec | Skipped |
 | An older device, or an older host | §3.5 |
 
 ### 11. Test gates
@@ -882,12 +1005,13 @@ and dropped, jumps.
   `Sill.app` or a host that is not synthetic.
 - **Synthetic hosts and the harness only,** from `.build/release`, started from Python with
   `start_new_session=True`, killed by PID, none left running.
-- **The Mac's video encoder.** The sound's gates run in the encoder-free harness (H5–H8). H2's
+- **The Mac's video encoder.** The sound's gates run in the encoder-free harness (H5–H8), and S2
+  and S3 connect to it too, never to `SillHost`, whose picture goes through the Mac's encoder. H2's
   parity runs use `SillHost --synthetic`, as every parity run has, and only while Sill.app has no
   device connected (`~/Library/Logs/Sill/Sill.log`, read only, has no `client ` line in the last
   minute); with `SILL_TEST_SOFTWARE_ENCODER=1` if the pointer branch has brought it.
-- **The simulator plays sound on the Mac's speakers.** The test tone is quiet (−30 dBFS), and a gate
-  plays at most 10 s of it. A simulator of its own, never the shared iPad Pro 13"; no `simctl io
+- **The simulator plays through the Mac's speakers,** so every S gate runs with `-SillSoundVolume 0`
+  (the whole path, no sound). A simulator of its own, never the shared iPad Pro 13"; no `simctl io
   recordVideo`; no iOS Simulator control `attach`; screenshots with `xcrun simctl io <udid>
   screenshot`.
 - **Never touch** `/Applications/Sill.app`, the `me.saffer.sill.mac` domain or Noah's iPad. App
@@ -897,16 +1021,16 @@ and dropped, jumps.
 
 | # | Check | Pass when |
 |---|---|---|
-| H0 | **Preflight** (no commit). Record the base. Kind 28 still free on every branch and worktree (`git grep` over every ref, and the plans' reservations); the pbxproj pairs free; the codec probe again on the build Mac | Recorded; ELD 480 and 512 give §Decision's F, P and end-to-end numbers within 1 ms |
+| H0 | **Preflight** (no commit). Record the base. The sound's number still free and 24–28 still held as §3.1 says: `git grep` over every ref, and every worktree's working tree and docs/, committed or not; the pbxproj block A401–A403 free the same way; the codec probe, and the critique's reset and join probe, again on the build Mac | Recorded; ELD 480 and 512 give §Decision's F, P and end-to-end numbers within 1 ms, the same P after a reset, and a late join's first packet unusable, its fourth exact |
 | H1 | **Builds.** `swift build -c release`; iOS Debug and Release for the simulator | Only the known warnings |
-| H2 | **The CLI byte for byte.** Base and new `SillHost --synthetic`: idle 35 s; with `sillclient.py PORT 8 desktop`; with `sillclient.py … --hello=0.6 --audio` (a hello that lists "aac-eld"); all again with `--direct-wireless`; digits masked, sorted | Identical; no `Audio` line and no `aud.` key; no kind 28 in the client's `kinds=` |
-| H3 | **Pure checks, each with its mutants caught.** `audio-packetizer` (Sources/SillHost/AudioPacketizer.swift), at least 30 cases: F from the first chunk (480, 1024, 441 and 960 frames), stamps against the anchors (±1 µs), the gap rules at 1.9, 2.1, 99 and 101 ms and backwards, a format change, the flush, `AudioSourceRule`'s table; at least 10 mutants (`>` for `≥` at 100 ms, the priming's sign, a gap that starts no segment, the same pid restarting). `audio-playout` (iOSClient/AudioPlayout.swift), at least 40 scenarios on a simulated clock (a steady home link; a 40 ms burst every 4 s; ±100 ppm for an hour; host clock steps of ±1 s; a 2 s stall, then a burst; duplicates; a seq gap; a join mid-segment; a still window; a link away at 80 ± 50 ms; a picture 1 s late; AirPods +180 ms; mute and unmute) and 5,000 random runs, with the invariants: nothing plays before it arrives; no two packets overlap; the sound never leads the picture; after a disturbance under 40 ms the error falls at 1.9 ms a second or better until under 5 ms; at most one frame added or dropped a packet; at least 12 mutants (max for min in the floor, no dedupe, no guard, the late test's sign, the jump at 400 ms, no step test, no fades, the need not rising at once). Wire cases: `compatibility` (AudioFormat and the new fields round trip; `{}` decodes; unknown keys ignored; the old `Hello`, `StreamSettings` and `ClientStats` decode the new JSON) and `protocol` (type 2 serialized and parsed; every malformed payload gives nil and never traps; 1,000 random byte strings) | All pass; every mutant caught |
+| H2 | **The CLI byte for byte.** Base and new `SillHost --synthetic`: idle 35 s; with `sillclient.py PORT 8 desktop`; with `sillclient.py … --hello=0.6 --audio` (a hello that lists "aac-eld"); all again with `--direct-wireless`; digits masked, sorted | Identical; no `Audio` line and no `aud.` key; no kind 29 in the client's `kinds=` |
+| H3 | **Pure checks, each with its mutants caught.** `audio-packetizer` (Sources/SillHost/AudioPacketizer.swift), at least 30 cases: F from the first chunk (480, 1024, 441 and 960 frames), stamps against the anchors (±1 µs), the continuity tolerance at a quarter chunk ± 0.1 ms, a whole chunk missing, a chunk early, a format change, a segment ended with nothing flushed, `AudioSourceRule`'s table (a running stream kept, an ended one restarted after 10 s and not before); a gap emits nothing, and each block goes out with the chunk that completes it; at least 10 mutants (`>` for `≥` at the tolerance, the priming's sign, a gap that starts no segment, zeros filled into a gap, the tail flushed, an ended stream never restarted, a running one restarted). `audio-playout` (iOSClient/AudioPlayout.swift), at least 40 scenarios on a simulated clock (a steady home link; a 40 ms burst every 4 s; ±100 ppm for an hour; host clock steps of ±1 s; a 2 s stall, then a burst; duplicates; a seq gap; a join mid-segment; a still window; a link away at 80 ± 50 ms; a picture 1 s late; output latencies of 10 ms, 180 ms (AirPods) and 2 s (AirPlay) at home; IO buffers of 5 and 23 ms; a move's hand-over, both connections carrying the same packets and the new one 30 ms faster; mute and unmute) and 5,000 random runs, with the invariants: nothing plays before it arrives; no two packets overlap; the sound never leads the picture as the model sees it; nothing is scheduled less than the IO buffer + 2 ms before its render; with any output latency up to 2 s and any IO buffer, a steady link loses no packet as late after its first 2 s; a packet decoded on a reset decoder in the middle of a segment is never played; a hand-over plays no packet twice and resets nothing; after a disturbance under 40 ms the error falls at 1.9 ms a second or better until under 5 ms; at most one frame added or dropped a packet; at least 17 mutants (max for min in the floor, no dedupe, no guard, the late test's sign, the jump at 400 ms, no step test, no fades, the need not rising at once, and the critique's: the output latency left out of the need, the late test without the IO buffer, a segment's first packet placed without its P, the packet after a seq gap played, a hand-over resetting the dedupe). Wire cases: `compatibility` (AudioFormat and the new fields round trip; `{}` decodes; unknown keys ignored; the old `Hello`, `StreamSettings` and `ClientStats` decode the new JSON) and `protocol` (type 2 serialized and parsed; every malformed payload gives nil and never traps; 1,000 random byte strings) | All pass; every mutant caught |
 | H4 | **`audio-codec`** (a new check): Sources/SillHost/AudioEncoder.swift and iOSClient/AudioDecoder.swift in memory; the test tone through the encoder at F 480 and 512, each packet decoded at once | F and P as §3.2; with the first P frames dropped, each click lands at its stamp's sample ±2 frames; 5 s of the busy signal at 120–140 kbps; nothing but AudioToolbox linked |
-| H5 | **The harness at home** (`Scripts/audio/`, step 4: the real StreamServer and sound files with the test tone and fake frames; no VideoToolbox, ScreenCaptureKit or CoreMedia). 60 s of Balanced-sized fake frames at 60 fps; `Scripts/audiocheck.swift` on the home door (a hello with "aac-eld"; it decodes and finds the clicks); the same run with Send Audio off | 100 ± 1 packets a second; no gap in seq; 60 clicks at whole host seconds ±1 ms; `net.dropped`, `net.sent` and the frames' age the same with and without sound, within run-to-run noise |
+| H5 | **The harness at home** (`Scripts/audio/`, step 4: the real StreamServer and sound files with the test tone and fake frames; no VideoToolbox, ScreenCaptureKit or CoreMedia). 60 s of Balanced-sized fake frames at 60 fps; `Scripts/audiocheck.swift` on the home door (a hello with "aac-eld"; it decodes and finds the clicks); the same run with Send Audio off | 100 ± 1 packets a second (93.75 with `SILL_TEST_AUDIO_CHUNK=1024`); no gap in seq; 60 clicks at whole seconds of their stamps ±1 ms; `net.dropped`, `net.sent` and the frames' age the same with and without sound, within run-to-run noise |
 | H6 | **The harness away:** Scripts/pacing's `bottleneck.py` at 8 and 4 Mbps with 1.5 MB keyframes, and a 12 s dip to 0.5 Mbps | `aud.drop` 0 at 8 and 4 Mbps while `net.dropped` > 0 in the keyframe case; every packet's age at most the frames' age + 20 ms; in the dip, sound and frames arrive late together, and 2 s after it ends the packets' age is back |
 | H7 | **Send Audio over the wire.** `sillclient.py --audio --set=sendAudio=1@3 --set=sendAudio=0@8 --expect=sendAudio=0` against a synthetic host started without `--audio` | The answers carry it; the first packet within 300 ms of the first answer, the last within 100 ms of the second; "Settings from sillclient: send audio off → on" and "… on → off"; no "Streaming …" line (the picture never restarted) |
-| H8 | **Epochs and segments** in the harness: the tone paused for 50 ms, then for 500 ms (`SIGUSR1`), and a source change | 50 ms: the same segment, 5 packets of zeros; 500 ms: a segment start; the source change: a new epoch, its format before its first packet on every client |
-| H9 | **Compatibility.** The base's `sillclient.py` against an `--audio` host; the base's StreamProtocol (swiftc) against a kind 28 header and the new kind 16; the new device decoder against the base host's messages | No kind 28 to the old client; `.unknown`; the old kind 16 decode ignores the keys; nothing new decoded |
+| H8 | **Epochs and segments** in the harness: the tone paused for 50 ms, then for 500 ms (`SILL_TEST_AUDIO_PAUSE=0.05@3,0.5@6`), and a source change | Each pause: nothing sent for the gap, a segment start at the resumed chunk placed at its stamp ±1 ms, no packet sent more than 40 ms after its stamp, and audiocheck's model keeps its jitter cover; the source change: a new epoch, its format before its first packet on every client |
+| H9 | **Compatibility.** The base's `sillclient.py` against an `--audio` host; the base's StreamProtocol (swiftc) against a kind 29 header and the new kind 16; the new device decoder against the base host's messages | No kind 29 to the old client; `.unknown`; the old kind 16 decode ignores the keys; nothing new decoded |
 | H10 | **Previews.** The bare app's `-SillRenderPreviews` before and after | Only the Streaming and Permissions panes, menu.txt's Send Audio and the new `sound` card sample differ |
 | H11 | **Hard rules** (grep) | No `captureMicrophone`, `AudioHardwareCreateProcessTap`, `updateConfiguration` or `assumeIsolated` in Sources/SillHost; no `UIBackgroundModes` in the iOS Info.plist; `HostConfig.standard` has `sendAudio: false`; the sound's send path never calls the counting `send(_:to:isFrame:)`; no AVFoundation or CoreMedia import in AudioEncoder, AudioPacketizer, AudioPipeline or SyntheticAudio; no render block in iOSClient |
 | H12 | **Cost.** The harness host's CPU (`ps`, 60 s) with and without sound | At most 1.5 percentage points more |
@@ -916,16 +1040,17 @@ a throwaway package under `.build/audio` with StreamServer.swift and its neighbo
 host files (AudioPipeline, AudioPacketizer, AudioEncoder, SyntheticAudio) and a `main.swift` that
 feeds fake frames and runs the test tone, both doors. Like the pacing harness, it refuses a binary
 that links VideoToolbox, ScreenCaptureKit, CoreMedia or AVFoundation. `Scripts/audiocheck.swift`
-is its device: StreamProtocol and iOSClient/AudioDecoder.swift, a hello with "aac-eld", every
-kind 28 decoded, the clicks found, one line a second and a summary at the end.
+is its device: StreamProtocol, iOSClient/AudioDecoder.swift and iOSClient/AudioPlayout.swift (the
+model without a player: its floor, need and late decisions on real arrivals), a hello with
+"aac-eld", every kind 29 decoded, the clicks found, one line a second and a summary at the end.
 
 **Simulator (S):**
 
 | # | Check |
 |---|---|
 | S1 | **Photos.** `-SillSound on` and `muted` at 1000x710, 710x1000, 500x710 and 710x500, and at xxLarge text; `-SillSettingsCase sound` and `soundnote` at the four sizes. The button in every bar, the strip one button narrower, the row after the closing footnote. Send Noah the sheet |
-| S2 | **Live.** `-SillLive 1 -SillConnect 127.0.0.1:P` against the harness's home door: the console's format and engine lines; within 3 s "late 0" and a steady "behind the picture". A headless tap on Sound: "engine off"; again: on, one jump. `sillclient.py --set=sendAudio=0@…` as a second client: the button goes, and "idle, engine off" 10 s later. At most 10 s of tone |
-| S3 | **A move.** `-SillMoveTest 1` with sound: no double packets (the console's dedupe count), at most one jump at the hand-over |
+| S2 | **Live.** `-SillLive 1 -SillConnect 127.0.0.1:P` against the harness's home door: the console's format and engine lines; within 3 s "late 0" and a steady "behind the picture". A headless tap on Sound: "engine off"; again: on, one jump. `sillclient.py --set=sendAudio=0@…` as a second client: the button goes, and "idle, engine off" 10 s later. With `-SillSoundVolume 0` |
+| S3 | **A move.** `-SillMoveTest 1` with sound, against the harness, with `-SillSoundVolume 0`: no double packets (the console's dedupe count), nothing reset, at most one jump at the hand-over |
 
 **Noah's devices (P), handed over at the end:** the iPad mini, the Mac, headphones, an iPhone for
 P6 and P14.
@@ -933,17 +1058,17 @@ P6 and P14.
 | # | Check |
 |---|---|
 | P1 | **On.** Send Audio from the Mac's menu; Music playing, its window streamed: the iPad plays it, and so does the Mac (the menu's subtitle says so). After a relaunch `defaults read me.saffer.sill.mac sendAudio` is 1 |
-| P2 | **The first buffer.** Send the log's "first buffer … frames … ms after its time stamp" line and the encoder's line (480 or 512), and say whether the 2×2 picture was taken |
+| P2 | **The first buffer.** Send the log's "first buffer … frames … ms after its time stamp" line, the encoder's line (480 or 512) and the "first minute" line (pause Music for 20 s in that minute: do silent buffers keep coming?), and say whether the 2×2 picture was taken |
 | P3 | **Per app.** Two Safari windows, a video playing in one; stream the other: the video's sound plays. The Desktop: every app's sound |
-| P4 | **Helpers and daemons.** A YouTube video in Safari and in Chrome, Spotify, a FaceTime call (expected silent), Mail's new-mail sound: which are heard |
-| P5 | **Off screen.** Music minimized while the Desktop streams; a window on the virtual display; a second display |
-| P6 | **Sync.** A clapper or lip-sync test video on the Mac, streamed; film the iPad at 240 fps with the iPhone and count the frames between the flash and the click. The speaker, then AirPods; the console's "behind the picture" at the same time |
+| P4 | **Helpers and daemons.** A YouTube video in Safari and in Chrome, Spotify, a FaceTime call (expected silent), Mail's new-mail sound: which are heard. An app whose sound comes from a helper process and is not heard (a browser's audio service, an Electron app) gets a build that adds its helpers to the filter (the running applications whose bundle identifier begins with the app's and a dot), and P4 again |
+| P5 | **Off screen.** Music minimized while the Desktop streams; Music's window on the virtual display; a second display. A window on the virtual display streaming in silence moves the app's filter to `desktopIndependentWindow` (§Decision), and P5 again |
+| P6 | **Sync.** A clapper or lip-sync test video on the Mac, streamed; film the iPad at 240 fps with the iPhone and count the frames between the flash and the click. The speaker, then AirPods; the console's "behind the picture" at the same time. The film minus the console is what the model cannot see (the picture's time on the Mac, the display's own): once on the hardware encoder and, if convenient, once on the software one (the CLI with `SILL_TEST_ENCODER_HANG=1` and `--audio` falls back at its first hang for about 30 s). Sound ever ahead of the flash: §14's V |
 | P7 | **Restarts keep the sound.** With music: rotate, cycle Aa, switch 60 and 120 fps, change Quality, turn the virtual display on and off: no gap. Another Music window: no gap. Another app's window: a short gap and a fade in |
 | P8 | **Mute.** The bar's Sound: muted at once, the Mac still playing; relaunch: still muted; unmute: sound within about 0.1 s. VoiceOver reads "Sound from ‹Mac›, On" |
-| P9 | **Interruptions and routes.** A FaceTime call to the iPad, Siri, AirPods in and out (out mutes and says so), wired headphones |
+| P9 | **Interruptions and routes.** A FaceTime call to the iPad, Siri, AirPods in and out (out mutes and says so), wired headphones, AirPlay to a speaker (the console's output latency, and the sound trailing by it), and a stream started during a call (no sound and one line; sound once the call ends) |
 | P10 | **Away.** Tailscale over the iPhone's hotspot at Low: the sound goes on while `net.dropped` counts; the `client …` line's "sound … behind" |
 | P11 | **The Mac muted** (its volume): does the iPad still hear it? |
-| P12 | **The Mac's output changed** mid-stream (headphones into the Mac, AirPods on the Mac): the sound goes on, or one "Audio capture ended" line, and Send Audio off and on brings it back |
+| P12 | **The Mac's output changed** mid-stream (headphones into the Mac, AirPods on the Mac): the sound goes on, or one "Audio capture ended" line, and the next pick, or Send Audio off and on, brings it back. The same for the Mac's lock screen and a fast user switch |
 | P13 | **An hour** of music: no drift (the console's error within ±5 ms and no jump after the first minute); Sill.app's CPU in Activity Monitor with sound on and off |
 | P14 | **Two devices** (the iPad and the iPhone): both play; muting one leaves the other |
 | P15 | **Mixed builds.** This iPad with 8b0d418's Sill.app: no row, no button, no sound. 8b0d418's iPad with this Sill.app and Send Audio on: nothing changes for it |
@@ -956,14 +1081,14 @@ Commit messages end with the session's attribution lines.
 | Step | Commit | Files | Gates | Size |
 |---|---|---|---|---|
 | 0 | Preflight (no commit) | — | H0 | 1 h |
-| 1 | "Protocol: kind 28, the Mac's sound" | StreamMessage.swift, Audio.swift (new), Compatibility.swift, HostSettings.swift, Viewport.swift; the `compatibility` and `protocol` cases | H1, H3 (wire), H9 (decode) | ½ day |
+| 1 | "Protocol: kind 29, the Mac's sound" | StreamMessage.swift, Audio.swift (new), Compatibility.swift, HostSettings.swift, Viewport.swift; the `compatibility` and `protocol` cases | H1, H3 (wire), H9 (decode) | ½ day |
 | 2 | "Host: the sound's blocks and stamps" | AudioPacketizer.swift (new) with `AudioSourceRule`; `Tests/checks/audio-packetizer` | H3 | ½ day |
 | 3 | "Host and device: the AAC-ELD encoder and decoder" | AudioEncoder.swift (new); iOSClient/AudioDecoder.swift (new, not yet in the Xcode project); `Tests/checks/audio-codec` | H4 | ½ day |
 | 4 | "Host: Send Audio, the sound's stream and its send path" | AudioCapture, SyntheticAudio, AudioPipeline (new); StreamServer, StreamCoordinator, HostConfig, DeviceSettings, HostStatus; the CLI's `--audio`; `sillclient.py --audio` and `sendAudio`; `Scripts/audio/` and `Scripts/audiocheck.swift` | H1, H2, H5–H9, H11, H12 | 2 days |
 | 5 | "Sill.app: Send Audio" | HostSettings, DebugHooks, StatusItemController, SettingsPanes, StatusText, the previews | H1, H10 | ½ day |
 | 6 | "iOS: the playout model" | AudioPlayout.swift (new); `Tests/checks/audio-playout` | H3 | 1½ days |
 | 7 | "iOS: the Mac's sound" | AudioOutput.swift (new) and the three pbxproj pairs; StreamClient, the bars, the panel, the ledger, MockCatalog, ContentView, DiagnosticsHUD | H1, S1–S3 | 2 days |
-| 8 | "docs: the Mac's sound on the device" | This plan's Results; CLAUDE.md (the current step, Layout, Build and run, Untested for Noah: P1–P16); README (Send Audio); Tests/checks/README.md's table; `ci.yml`'s mutants matrix; BRIEF.md (audio in v2) | — | ¼ day |
+| 8 | "docs: the Mac's sound on the device" | This plan's Results; CLAUDE.md (the current step, Layout, Build and run, Untested for Noah: P1–P16); docs/DEVELOPMENT.md (Send Audio); Tests/checks/README.md's table; `ci.yml`'s mutants matrix; BRIEF.md (audio in v2). For the release that carries sound, and said so in the commit: README.md's Good to know ("does not play sound from your Mac"), docs/app-store-metadata.md's description ("Sill doesn't play sound from your Mac.") and site/privacy.html (what the Mac sends, and what Screen Recording is for) | — | ¼ day |
 | 9 | Review and hand-over | Three lenses: the sync model and its constants; the host's threads and the picture's isolation (nothing of the sound on the picture's queues or counters); the device's session, lifecycle and UI. A "Review fixes" commit if needed, then H5–H8 and S2 again; hand P1–P16 to Noah. **Stop there** | — | ½–1 day |
 
 - **In all:** about 8–9 days of focused work, most of it the two pure models and their checks.
@@ -972,9 +1097,12 @@ Commit messages end with the session's attribution lines.
   the capture 150, the tone 80, the pipeline 250, about 150 in existing files); Sill.app about 80;
   the device about 1,000 (the playout 400, the decoder 120, the output 350, about 150 in existing
   files); checks and harness about 1,500.
-- **Rebases.** The pointer branch (kind 26, StreamServer's tick, StreamClient) and menu-bar-mirror
-  (24, 25, 27) touch the enum, StreamClient and ContentView's comment. If the remote bundle's
-  `MessageReader` lands first, kind 28 arrives through it; nothing else changes.
+- **Rebases.** The pointer branch (kind 26, StreamServer's tick, StreamClient), menu-bar-mirror
+  (24, 25, 27) and trackpad-gestures (28, a comment only; A01F/F01F) touch the enum, StreamClient
+  and ContentView's comment. If remote-pacing's `MessageReader` lands first, kind 29 arrives through
+  it; nothing else changes. home-pairing (its worktree on 2026-09-26) puts the home door behind TLS
+  and a `Door` both doors share: the sound's home rules stay keyed on `route.isRemote`, as its
+  pacing is, and each packet costs a TLS record at home too (§8).
 
 ### 13. Hard rules (for every step)
 
@@ -988,7 +1116,7 @@ Commit messages end with the session's attribution lines.
 - **Never `MainActor.assumeIsolated`** in core code. ScreenCaptureKit calls bounded (2 s).
 - **The CLI's stdout byte for byte** without `--audio`, idle and streaming, whatever the devices'
   hellos.
-- **Kinds 0–27 untouched.** 28 is the sound's (or the next free, H0).
+- **Kinds 0–28 untouched.** 29 is the sound's (or the next free, H0).
 - **No Swift on a real-time audio thread:** the player node schedules; Sill writes no render block.
 - **Tests never capture the Mac's sound,** never touch `/Applications/Sill.app`,
   `me.saffer.sill.mac` or Noah's iPad, and never use the hardware encoder while Noah streams.
@@ -1000,8 +1128,15 @@ Commit messages end with the session's attribution lines.
 - **A quiet Mac.** A Core Audio process tap (macOS 14.2 and later) with `CATapMutedWhenTapped` in
   place of ScreenCaptureKit's sound, so the Mac goes silent while a device plays; it needs its own
   permission ("System Audio Recording Only"). Then Send Audio could be on by default (Q1, Q6).
-- **Sound first away, for real.** Sill holds frames back and hands the connection only a bounded
-  amount, so sound overtakes queued video: the send queue the remote bundle left out too.
+- **A path of its own for the sound.** A send queue with priorities (Sill hands the connection only
+  a bounded amount) lets sound pass frames not yet handed over, never a keyframe already on the
+  wire; a second connection for the sound (or datagrams) passes that too, at home and away, and can
+  take the voice service class. It needs its own admission (pairing, the gate, a hello), so it is a
+  step of its own.
+- **The picture's own delay, V,** if P6 ever finds the sound ahead: HEVCEncoder passes each output's
+  capture time (nil for a re-encode of a still frame, which carries its last capture's), the
+  coordinator keeps the smallest (encode-out − capture) of the last second, a kind 29 type 3 carries
+  it once a second (older devices skip the type), and the device adds it to the picture's lag.
 - **Opus** (Q2) and a lower bitrate away (Q3).
 - **The picture delayed for Bluetooth** (Q7), if anyone asks.
 
@@ -1014,17 +1149,20 @@ Commit messages end with the session's attribution lines.
    on by default doubles every sound for a device beside the Mac.
 2. **The codec.** Default: **AAC-ELD** (10 ms, 128 kbps). Opus at 10 ms is as fast and royalty-free,
    costs about twice the encode CPU and five times the decode, and was not verified on macOS 14 or
-   iOS 17 here. A later switch is one `codec` string.
-3. **The bitrate.** Default: **128 kbps** everywhere (4 % of Low). The alternative: 96 kbps away
-   from home.
+   iOS 17 here (Apple documents the constant from macOS 10.13 and iOS 11; its own forum example
+   encodes 20 ms packets). A later switch is one `codec` string.
+3. **The bitrate.** Default: **128 kbps** everywhere (4–5 % of Low with the headers). The
+   alternative: 96 kbps away from home.
 4. **The session.** Default: **`.playback` with `.mixWithOthers`**: it never stops the iPad's own
    music, and plays on silent like a video app. Alternatives: `.playback` alone (Sill's sound
    pauses other audio, like a video app); `.ambient` (obeys the silent switch, like a game).
 5. **Mute.** Default: **per device, local, remembered.** The alternative: per Mac.
 6. **The Mac keeps playing.** Default: **say so** (the menu's subtitle, the footers), and a device
    beside the Mac is muted by its user. The alternative is §14's tap, with a permission of its own.
-7. **Bluetooth headphones.** Default: **the sound trails by their latency** (150–250 ms). The
-   alternative delays the picture to match, against "latency beats quality".
+7. **Bluetooth headphones and AirPlay.** Default: **the sound trails by the route's latency**
+   (AirPods 150–250 ms; AirPlay up to 2 s, Apple says), and the console and the HUD say how much.
+   The alternative delays the picture to match, against "latency beats quality"; for AirPlay,
+   another is to mute past 0.5 s and say why.
 8. **Devices turning it on.** Default: **yes**, like the other stream settings: saved on the Mac,
    from home or away. The alternative: only the Mac's own menu and Settings.
 9. **"· sound" on the Mac's card.** Default: **shown** in the source row while a device gets sound.
@@ -1033,11 +1171,115 @@ Commit messages end with the session's attribution lines.
     fewer). The alternative: every other bar, and a row in the panel there.
 11. **Headphones unplugged.** Default: **mute and say so**, iOS's pause for a live feed. The
     alternative: keep playing on the speaker.
-12. **The kind number.** Default: **28**, leaving 24, 25 and 27 to the Mac menu bar sketch and 26 to
-    the pointer. If another branch takes it first, the next free.
+12. **The kind number.** Default: **29**, leaving 24, 25 and 27 to the Mac menu bar, 26 to the
+    pointer and 28 to the trackpad's Tier 2 gestures. If another branch takes it first, the next
+    free.
 13. **When.** Default: **after v1 ships** (BRIEF.md keeps audio out of v1). The alternative: now.
 14. **One stream or two.** Default: **a stream of its own for the sound**, so rotation, Aa and
     settings never cut it. The alternative, `capturesAudio` on the picture's stream, is less code
     and drops the sound at every restart.
 15. **Idle.** Default: **the device's engine stops after 10 s without a packet.** The alternative
-    keeps it running while connected: no ~50 ms start after a long silence, more battery.
+    keeps it running while connected: no ~50 ms start after a long silence, more battery. If P2
+    finds ScreenCaptureKit sends silent buffers while the app is quiet, the Mac never stops sending
+    and the engine never idles while Send Audio is on; then the other alternative is idling after
+    10 s of silent packets, at the cost of the next sound's first ~0.1 s while the engine starts.
+
+---
+
+## Critique (2026-09-26)
+
+Checked against Apple's documentation, the SDK headers, the code (main at 150f781, remote-pacing at
+b4b315e) and every other branch and worktree, with the in-memory probe named at the top. Fixed in
+place:
+
+1. **Kind 29, not 28.** trackpad-gestures-plan.md (branch `trackpad-gestures`, 8dd3539, a local
+   branch) reserves 28 for its Tier 2 gestures (§4.2: "reserve it in the comment only"); the survey
+   missed it. 29 is free on every ref and worktree. The menu bar's 24, 25 and 27 exist only
+   uncommitted in its worktree, so H0 now reads working trees too.
+2. **The pbxproj IDs.** A021–A023 sat next to remote-pacing's A020 and to the pair home-pairing
+   must take when it lands (its StreamClient+Home.swift has A01E, GoodbyePolicy's on main): a block
+   apart, A401–A403.
+3. **The need left out the output latency** (§7.2, rules 2 and 4). A packet was due at the speaker
+   at `T + floor + delay` and scheduled `outputLatency` earlier, but the need covered only jitter,
+   a packet and the IO buffer. On AirPods (150–250 ms) every packet was late, and the 150 ms cap at
+   home kept it so: no sound at all over Bluetooth at home, and late drops on the speaker until
+   rule 6 had grown the need. The need now adds the output latency (the session's `outputLatency`
+   and the player's `outputPresentationLatency`, which Apple defines as the render latency
+   downstream of a node), unbounded; the bounds are the jitter cover's alone.
+4. **"Late" ignored the render's reach** (rules 6 and 10). The render thread renders an IO buffer
+   ahead, so "less than 2 ms away" let packets through that were already too late whenever the IO
+   buffer passed 2 ms, and the deadline for the packet in hand had the same gap. Both now count the
+   IO buffer, read back after activation: Apple documents the preferred duration as a request, with
+   a minimum of about 5 ms (256 frames) and a typical maximum of 93 ms. Lateness that is not the
+   link's (the engine starting, a connection's catalog burst) no longer raises the jitter cover.
+5. **A packet on a reset decoder was played** (rules 8 and 9). After a seq gap the packet was faded
+   in, and after any reset the first P frames were dropped as if the Mac's encoder had restarted.
+   Decoded without its predecessors, such a packet is noise (the probe: −5 to −6 dB against the
+   signal; the second −41 dB, the fourth exact). Only the Mac's segment flag starts clean now; any
+   other first packet is decoded and dropped. A segment's first packet is placed by its first kept
+   frame, `T + P / rate`, not by T.
+6. **Gaps filled with zeros reached the device late** (§4.3). Zeros and a flushed tail were made
+   when the late chunk arrived, stamped a gap ago, so they arrived late by the gap and raised the
+   need for 10 s as if the link had jittered. A gap now ends the segment where it is, nothing made
+   for it; the probe checked that `AudioConverterReset` restarts the encoder with the same priming
+   (240, 256) and drops what it held (at most F − 1 + P frames). The tolerance is a quarter chunk:
+   a lost buffer is a whole one, and ScreenCaptureKit's stamp jitter is unknown (P2's minute line).
+7. **A move's hand-over reset the model and the decoder.** That cost a dropped packet a move and,
+   if the dedupe went with it, let the slower connection's copies back in, late, raising the need.
+   Now a hand-over resets nothing; a faster or slower path is rule 13's floor change.
+8. **Edge cases.** A closing window ends nothing (the filter is the app's). A stream that ended by
+   itself now comes back at the picture's next select (at most every 10 s), not only when Send
+   Audio is toggled; the Mac's lock screen and user switch are listed. AirPlay (Apple: up to 2 s)
+   joins Bluetooth. The engine's configuration change follows Apple's note (stopped, uninitialized,
+   old formats kept; never torn down in the handler). The buffer pool grows (the guard has no
+   bound; 64 buffers held 0.64 s). Session activation can fail during a call.
+9. **The latency budget.** The probe's "end to end" includes the capture chunk (26.7 ms is 1024 +
+   256 frames), so the table counted the capture buffer twice; the device row counted the IO buffer
+   twice; the keyframe's cover, 15–40 ms, was below the 50–100 ms spikes this project measured from
+   1–2 MB keyframes. Recomputed: the sound 60–155 ms, 20–115 ms behind the picture at home. The
+   codec note's "10–20 ms faster" is 9–10 ms (15.0 against 25.3, 26.7 against 35.7).
+10. **"Never leads" was more than the design gives.** A frame's stamp is its encode-out time
+    (StreamCoordinator.swift:1025), the sound's its capture time, so the guard cannot see the
+    picture's time on the Mac: the sound can lead the glass by that less a frame (up to ~30 ms on
+    the software encoder), under BT.1359's 45 ms, and at home the need decides anyway. Said so; P6
+    measures it; §14 has the fix.
+11. **Remote numbers.** Behind a keyframe the link is still taking, remote pacing's 512 KB hold
+    comes on top of the keyframe itself: 1–4 s at 4 Mbps, not 0.5–1 s.
+12. **The cost of 100 small messages.** On a still link each packet is its own TCP segment (and a
+    TLS record away): about 25 KB/s, and silence 8–12 KB/s, not 3.
+13. **Tests.** Every S gate runs silent (`-SillSoundVolume 0`) and against the harness, never
+    `SillHost` and its encoder; the tone is stamped by its sample count and clicks on whole seconds
+    of the stamps' clock; `SILL_TEST_AUDIO_PAUSE` replaces an undefined signal; audiocheck runs the
+    playout model on real arrivals; H3 gains the invariants and five mutants for 3–7; H8 checks that
+    a gap sends nothing late; P2, P4, P5, P6, P9 and P12 gain what the docs leave open.
+14. **Public text.** The README, the App Store description and the privacy policy each say today
+    that Sill plays no sound, or list what the Mac sends without it: step 8 changes them with the
+    release that carries sound.
+15. **Base.** main is 150f781 (PR #20 moved the keyframe interval to HEVCEncoder.swift:168);
+    remote-pacing is b4b315e, with its harness, and MessageReader still uncommitted.
+
+**Confirmed as written.** ScreenCaptureKit filters sound per application: WWDC22 10155 says a
+single-window filter captures all of the owning app's sound, even from windows not in the video,
+and 10156 that audio is filtered only per application. `capturesAudio`, `sampleRate`, `channelCount` and
+`excludesCurrentProcessAudio` date from macOS 13; 48 kHz stereo is the default, and an audio buffer
+wraps an audio buffer list in that format (SCStream.h). The sound needs no permission beyond Screen
+Recording; the process tap and `CATapMutedWhenTapped` need macOS 14.2 and their own.
+AVAudioSourceNode's real-time block is unavailable from Swift (AVAudioSourceNode.h:48).
+AVAudioPlayerNode reads `when` as a sample time on the player's timeline, a host time only without
+one, and `nil` as right after the last buffer. `.mixWithOthers` with `.playback` interrupts no
+other audio. AAC-ELD is documented from macOS 10.7 and iOS 4. In the code: the header's wall-clock
+stamp (StreamMessage.swift:53), the pong's echoed and unread stamp, the fence's nonce compare
+(SessionLink.swift:119), the tick's uncounted send, `inflight` counting every message but ticks
+(pongs included), `noDelay` and the interactive-video service class, remote pacing's four
+constants, and the hello as each session connection's first message.
+
+**Sources** (developer.apple.com): SCStreamConfiguration `capturesAudio`, `sampleRate`,
+`channelCount`, `excludesCurrentProcessAudio`; SCContentFilter and its initializers; "Capturing
+screen content in macOS"; WWDC22 sessions 10155 and 10156; AVAudioSession
+`setPreferredIOBufferDuration(_:)`, `ioBufferDuration`, `outputLatency`, `mixWithOthers`,
+`InterruptionReason`; "Handling audio interruptions"; AVAudioPlayerNode ("Scheduling Playback
+Time") and `scheduleBuffer(_:at:options:completionHandler:)`; AVAudioNode `lastRenderTime` and
+`outputPresentationLatency`; `AVAudioEngineConfigurationChange`; `kAudioFormatOpus`;
+`kAudioFormatMPEG4AAC_ELD`; developer forums thread 763362. The SDK headers of Xcode 27.0:
+ScreenCaptureKit's SCStream.h and SCError.h, AVFAudio's AVAudioSourceNode.h, CoreAudio's
+CATapDescription.h and AudioHardwareTapping.h.
