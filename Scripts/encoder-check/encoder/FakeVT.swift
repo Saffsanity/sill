@@ -98,11 +98,16 @@ enum FakeVT {
     static var outputs: [Output] = []
     /// The most frames each session held at once, by session number.
     static var maxHeld: [Int: Int] = [:]
+    /// Sessions invalidated: when, and how many frames each still held then.
+    static var invalidated: [Int: (at: CFTimeInterval, held: Int)] = [:]
+    /// How long VTCompressionSessionCreate takes (a new session for the slow state is made off every
+    /// queue of the encoder's, so this delays only its taking over).
+    static var createDelay: Double = 0
     private static var sessionCount = 0
 
     static func reset(plan p: @escaping (_ session: Int, _ call: Int, _ seq: Int, _ software: Bool) -> Behavior = { _, _, _, _ in .returnAfter(0.009) },
                       serial: Bool = false) {
-        lock.run { plan = p; serialEngine = serial; calls = []; outputs = []; maxHeld = [:] }
+        lock.run { plan = p; serialEngine = serial; calls = []; outputs = []; maxHeld = [:]; invalidated = [:]; createDelay = 0 }
     }
     static func newSession() -> Int { lock.run { sessionCount += 1; return sessionCount } }
     static var lastSession: Int { lock.run { sessionCount } }
@@ -186,7 +191,8 @@ final class VTCompressionSession {
 
     func invalidate() {
         callbacks.sync {}
-        lock.run { invalid = true; held.removeAll() }
+        let count = lock.run { () -> Int in let n = held.count; invalid = true; held.removeAll(); return n }
+        FakeVT.lock.run { FakeVT.invalidated[index] = (CACurrentMediaTime(), count) }
     }
 
     /// 8 bytes: the call number, so the check knows which call an output belongs to.
@@ -228,6 +234,8 @@ func VTCompressionSessionCreate(allocator: CFAllocator?, width: Int32, height: I
                                 compressionSessionOut: UnsafeMutablePointer<VTCompressionSession?>) -> OSStatus {
     let spec = encoderSpecification as NSDictionary?
     let software = (spec?[kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String] as? Bool) == false
+    let delay = FakeVT.lock.run { FakeVT.createDelay }
+    if delay > 0 { Thread.sleep(forTimeInterval: delay) }
     compressionSessionOut.pointee = VTCompressionSession(software: software)
     return noErr
 }

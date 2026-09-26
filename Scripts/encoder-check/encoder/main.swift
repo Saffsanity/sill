@@ -2,9 +2,11 @@
 // EncoderProbe.swift) against the stand-in VideoToolbox in FakeVT.swift, in real time: capture,
 // network and callback threads as the host has them. What EncoderMailbox's own check cannot see:
 // the glue's threads, locks and queues, the frames a stuck encoder keeps, the keyframe's second
-// look on the watchdog's queue.
+// look on the watchdog's queue, a new session for the slow state (E7).
 //
 //   Scripts/encoder-check/run.sh encoder
+// E7 checks whatever `HEVCEncoder.replacingSlowSessions` is for the run: run.sh runs the check with
+// SILL_TEST_ENCODER_RECYCLE=1 (E1–E7) and =0 (E7 alone, `encoder-check E7`).
 import Foundation
 import CoreMedia
 import CoreVideo
@@ -12,6 +14,11 @@ import QuartzCore
 
 setvbuf(stdout, nil, _IOLBF, 0)
 Inject.install()
+let onlyE7 = CommandLine.arguments.dropFirst().first == "E7"
+// Read before any encoder is made, so a TEST line from SILL_TEST_ENCODER_RECYCLE prints here, not
+// inside E1's "prints nothing when made".
+let replacing = HEVCEncoder.replacingSlowSessions
+print("new sessions for the slow state: \(replacing ? "on" : "off")")
 
 var checks = 0, failures = 0
 func expect(_ ok: Bool, _ what: @autoclosure () -> String) {
@@ -69,7 +76,7 @@ func feed(_ enc: HEVCEncoder, count: Int, fps: Double = 60, from: Int = 0, captu
 
 // E1: every kind of session (a stream's on the hardware, a probe's, the software encoder's) lets
 // one frame in at a time, and none prints anything when it is made.
-do {
+if !onlyE7 {
     var held: [String: Int] = [:]
     var printed = ""
     for (name, software, quiet) in [("hardware", false, false), ("probe", false, true), ("software", true, false)] {
@@ -90,7 +97,7 @@ do {
 
 // E2: a stream at 60 fps against frames that each take 30 ms, then 9 ms (outputs in decode
 // order): one over the turnaround (~33 fps), then the capture rate.
-for (turnaround, low, high) in [(0.030, 25.0, 34.0), (0.009, 55.0, 61.0)] {
+for (turnaround, low, high) in [(0.030, 25.0, 34.0), (0.009, 55.0, 61.0)] where !onlyE7 {
     FakeVT.reset(plan: { _, _, _, _ in .returnAfter(turnaround) })
     let enc = makeEncoder()
     let session = FakeVT.lastSession
@@ -156,7 +163,7 @@ func probesThenSettle(_ n: Int, settle: Double) -> (ok: [Bool], alive: [Int]) {
 // E3: what a stuck encoder keeps for good: the one frame inside it, whether it stuck on its first
 // frame (every session and probe through the 2026-09-22 wedge) or mid-stream. A busy encoder
 // hands everything back.
-do {
+if !onlyE7 {
     FakeVT.reset(plan: { _, call, _, software in call == 1 && !software ? .stuck : .returnAfter(0.005) })
     let r = streamThenRelease(base: 10_000, seconds: 3, settle: 0.5)
     print("stream stuck on its first frame: hung at \(r.hungAt.map { String(format: "%.2f s", $0) } ?? "never"), frames kept \(r.alive)")
@@ -192,7 +199,7 @@ do {
 
 // E4: one engine doing one frame at a time, 0.9 s each: slow, not hung, so the watchdog stays
 // quiet.
-do {
+if !onlyE7 {
     FakeVT.reset(plan: { _, _, _, _ in .returnAfter(0.9) }, serial: true)
     let hungAt = Shared<Double?>(nil)
     let enc = makeEncoder()
@@ -218,7 +225,7 @@ func inversions(_ calls: [Call]) -> Int {
 
 // E5: frames reach VideoToolbox in the order they were let in, whichever thread let each in.
 // Deschedules are stood in for by `Inject`: the thread sleeps right after its Nth NSLock unlock.
-do {
+if !onlyE7 {
     let capture = DispatchQueue(label: "sill.capture", qos: .userInteractive)
     let network = DispatchQueue(label: "sill.net", qos: .userInteractive)
     // (a) A still window: a keyframe request on the network queue re-encodes the last frame, and a
@@ -318,7 +325,7 @@ do {
 // queue) and the last frame re-encoded; before, nothing went in until the window next repainted.
 // While repaints go on, the next one carries the flag and nothing is re-encoded, and a last
 // repaint still waiting in the mailbox at the second look carries it itself.
-do {
+if !onlyE7 {
     let capture = DispatchQueue(label: "sill.capture.e6", qos: .userInteractive)
     let network = DispatchQueue(label: "sill.net.e6", qos: .userInteractive)
     /// Twelve repaints at 60 fps numbered from `base`, a keyframe request from the network queue
@@ -380,6 +387,164 @@ do {
         print("a keyframe 5 ms after a repaint while repaints go on: \(r.forced.count) forced (picture \(r.forced.map { "\($0.seq - base)" }.joined(separator: ", "))), \(seqs.count - Set(seqs).count) re-encodes")
         expect(r.forced.count == 1 && (r.forced.first?.seq ?? 0) > base + 11, "while repaints go on: forced \(r.forced.map { $0.seq - base }), not one later repaint")
         expect(Set(seqs).count == seqs.count, "while repaints go on: a picture went in twice (a re-encode)")
+    }
+}
+
+// E7: a stream whose session settles in the slow state gets a new session in place
+// (EncoderSlowState; `HEVCEncoder.replacesSlowSessions`, or SILL_TEST_ENCODER_RECYCLE): made while
+// the old one goes on, taken at the next hand-over with a forced keyframe, the old one invalidated
+// holding nothing; the watchdog, onHung and the counters see nothing of it, and one line says how
+// it went. A new session that hangs is a hang like any other. A waiting new session is dropped
+// when the stream's session dies, when the encoder goes, or when it is made after the encoder went.
+// Probes and the software encoder keep their session. With the switch off, every stream does.
+do {
+    struct Run {
+        var printed = ""
+        var first = 0, last = 0
+        var hungAt: Double?
+        var dead = false
+        var outs: [CFTimeInterval] = []
+        var t0: CFTimeInterval = 0
+        var counts: [String: Int] = [:]
+        var alive: [Int] = []
+    }
+    /// A stream at 60 fps on one engine: the first session's first `fastCalls` frames take 9 ms and
+    /// the rest `slow`; each later session's frames go by `newPlan(call)`. Feeding stops after
+    /// `seconds`, or when `during` says so; the encoder is let go `settle` seconds later.
+    func run(seconds: Double, fastCalls: Int = 20, slow: Double = 0.030,
+             newPlan: @escaping (Int) -> Behavior = { _ in .returnAfter(0.009) },
+             software: Bool = false, quiet: Bool = false, createDelay: Double = 0, settle: Double = 0.2, after: Double = 0.4,
+             base: Int, during: ((HEVCEncoder, Double) -> Bool)? = nil) -> Run {
+        var r = Run()
+        _ = Stats.shared.take()
+        let firstBox = Shared(0)
+        FakeVT.reset(plan: { session, call, _, _ in
+            if session == firstBox.value { return call <= fastCalls ? .returnAfter(0.009) : .returnAfter(slow) }
+            return newPlan(call)
+        }, serial: true)
+        FakeVT.lock.run { FakeVT.createDelay = createDelay }
+        let hungAt = Shared<Double?>(nil)
+        let outs = Outputs()
+        r.printed = capturingStdout {
+            var enc: HEVCEncoder? = makeEncoder(software: software, quiet: quiet)
+            firstBox.value = FakeVT.lastSession
+            let t0 = CACurrentMediaTime()
+            r.t0 = t0
+            enc!.onHung = { hungAt.value = CACurrentMediaTime() - t0 }
+            enc!.onEncoded = { _, key, _ in outs.add(key: key) }
+            let capture = DispatchQueue(label: "capture.e7", qos: .userInteractive)
+            for i in 0..<Int(seconds * 60) {
+                sleepUntil(t0 + Double(i) / 60)
+                if let during, !during(enc!, CACurrentMediaTime() - t0) { break }
+                let e = enc!
+                autoreleasepool { capture.sync { e.encode(makeFrame(seq: base + i), pts: CMTime(value: CMTimeValue(i), timescale: 60)) } }
+            }
+            Thread.sleep(forTimeInterval: settle)
+            r.dead = enc!.isDead
+            enc = nil
+            Thread.sleep(forTimeInterval: after)
+        }
+        r.first = firstBox.value
+        r.last = FakeVT.lastSession
+        r.hungAt = hungAt.value
+        r.outs = outs.all
+        r.counts = Stats.shared.take()
+        r.alive = Tracker.alive.filter { $0 >= base && $0 < base + 100_000 }
+        return r
+    }
+    func lines(_ printed: String, _ marker: String) -> [String] { printed.split(separator: "\n").map(String.init).filter { $0.contains(marker) } }
+    let verdict = "Encoder (hardware HEVC 16×16): frames took"
+
+    // (a) Slow after 20 frames; a new session at 9 ms.
+    let a = run(seconds: 3.5, base: 600_000)
+    let newCalls = FakeVT.callsOf(a.first + 1)
+    let oldOuts = FakeVT.outputsOf(a.first)
+    let late = Double(a.outs.filter { $0 >= a.t0 + 2.5 && $0 < a.t0 + 3.5 }.count)
+    let allCalls = FakeVT.lock.run { FakeVT.calls }.filter { $0.session >= a.first }.sorted { $0.at < $1.at }
+    let pts = allCalls.map(\.pts)
+    let said = lines(a.printed, verdict)
+    if replacing {
+        let swapAt = newCalls.first.map { $0.at - a.t0 }
+        print("slow after 20 frames, a new session at 9 ms: \(a.last - a.first + 1) sessions, the new one's first frame at " +
+              "\(swapAt.map { String(format: "%.2f s", $0) } ?? "never") (forced: \(newCalls.first?.forced ?? false)), old one invalidated holding " +
+              "\(FakeVT.invalidated[a.first].map { "\($0.held)" } ?? "?"), \(Int(late)) fps in the last second; said: \(said.first ?? "nothing")")
+        expect(a.last == a.first + 1, "slow session: \(a.last - a.first + 1) sessions, not 2")
+        expect(newCalls.first?.forced == true, "the new session's first frame was not forced")
+        expect(FakeVT.invalidated[a.first]?.held == 0, "the old session was invalidated holding \(FakeVT.invalidated[a.first].map { "\($0.held)" } ?? "never invalidated")")
+        if let n = newCalls.first, let o = oldOuts.last { expect(o.at <= n.at, "the old session's last output came after the new one's first frame went in") }
+        if let n = newCalls.first, let inv = FakeVT.invalidated[a.first] { expect(inv.at >= n.at - 0.05, "the old session invalidated before the swap") }
+        expect(swapAt.map { $0 > 1.9 && $0 < 2.4 } == true, "the swap at \(swapAt ?? -1) s, not about 2 s in")
+        expect(late >= 50, "\(late) fps in the last second after the swap, not about 60")
+        expect(said.count == 1 && !said[0].contains("no faster"), "the line: \(said)")
+    } else {
+        print("slow after 20 frames, switch off: \(a.last - a.first + 1) session, \(Int(late)) fps in the last second, said: \(said.first ?? "nothing")")
+        expect(a.last == a.first, "switch off: \(a.last - a.first + 1) sessions")
+        expect(said.isEmpty, "switch off: \(said)")
+        expect(late <= 36, "switch off: \(late) fps in the last second")
+    }
+    expect(zip(pts, pts.dropFirst()).allSatisfy { CMTimeCompare($0, $1) < 0 }, "timestamps went backwards across the sessions")
+    expect(a.hungAt == nil && !a.dead && a.counts["enc.hung"] == nil, "a new session counted as a hang: onHung \(a.hungAt ?? -1), dead \(a.dead), enc.hung \(a.counts["enc.hung"] ?? 0)")
+    expect(lines(a.printed, "returned nothing").isEmpty && lines(a.printed, "stalled frame").isEmpty, "a hang or stalled line: \(a.printed.debugDescription)")
+    expect(a.alive.isEmpty, "frames kept after the encoder went: \(a.alive.prefix(5))")
+
+    // (b) The new session no faster.
+    let b = run(seconds: 4, newPlan: { _ in .returnAfter(0.030) }, base: 610_000)
+    let saidB = lines(b.printed, verdict)
+    if replacing {
+        print("a new session no faster: \(b.last - b.first + 1) sessions; said: \(saidB.first ?? "nothing")")
+        expect(b.last == b.first + 1 && saidB.count == 1 && saidB[0].contains("no faster"), "no faster: \(b.last - b.first + 1) sessions, said \(saidB)")
+    } else {
+        expect(b.last == b.first && saidB.isEmpty, "switch off, no faster: \(b.last - b.first + 1) sessions, said \(saidB)")
+    }
+    expect(b.hungAt == nil, "no faster: onHung")
+
+    // (c) The new session hangs on its first frame: the watchdog gives up on it like on any session,
+    // and the old one, invalidated holding nothing, is not reported stalled.
+    let c = run(seconds: 4.5, newPlan: { call in call == 1 ? .stuck : .returnAfter(0.009) }, base: 620_000)
+    if replacing {
+        let swapAt = FakeVT.callsOf(c.first + 1).first.map { $0.at - c.t0 }
+        print("a new session stuck on its first frame: hung at \(c.hungAt.map { String(format: "%.2f s", $0) } ?? "never") (swap at \(swapAt.map { String(format: "%.2f s", $0) } ?? "never")), " +
+              "old one invalidated holding \(FakeVT.invalidated[c.first].map { "\($0.held)" } ?? "?")")
+        expect(c.hungAt != nil && swapAt != nil && abs((c.hungAt ?? 0) - (swapAt ?? 0) - 1.75) < 0.3, "stuck new session: hung at \(c.hungAt ?? -1), swap at \(swapAt ?? -1)")
+        expect(FakeVT.invalidated[c.first]?.held == 0 && lines(c.printed, "stalled frame").isEmpty, "stuck new session: the old one held \(FakeVT.invalidated[c.first].map { "\($0.held)" } ?? "?") or was reported stalled")
+        expect(lines(c.printed, "returned nothing").count == 1 && c.counts["enc.hung"] == 1 && lines(c.printed, verdict).isEmpty,
+               "stuck new session: \(lines(c.printed, "returned nothing").count) hang lines, enc.hung \(c.counts["enc.hung"] ?? 0)")
+    } else {
+        expect(c.hungAt == nil && c.last == c.first, "switch off: a new session or a hang")
+    }
+
+    // (d) A probe and the software encoder keep their session.
+    for (name, software, quiet) in [("probe", false, true), ("software", true, false)] {
+        let d = run(seconds: 3, software: software, quiet: quiet, base: software ? 630_000 : 640_000)
+        expect(d.last == d.first && lines(d.printed, "frames took").isEmpty, "\(name): \(d.last - d.first + 1) sessions")
+    }
+
+    if replacing {
+        // (e) The session given up on (`abandon`) while its successor is made: the successor, made
+        // after, is invalidated and never used.
+        var abandoned = false
+        let e = run(seconds: 3, createDelay: 0.3, base: 650_000, during: { enc, t in
+            if t >= 2.15, !abandoned { abandoned = true; enc.abandon() }
+            return true
+        })
+        let eNew = e.first + 1
+        let eDropped = e.last == eNew && FakeVT.callsOf(eNew).isEmpty && FakeVT.invalidated[eNew] != nil
+        expect(eDropped,
+               "abandoned while the new session was made: sessions \(e.last - e.first + 1), its calls \(FakeVT.callsOf(eNew).count), invalidated \(FakeVT.invalidated[eNew] != nil)")
+        // (f) No frame comes after the new session is made: it waits, and goes with the encoder.
+        let f = run(seconds: 2.1, createDelay: 0.25, settle: 0.5, base: 660_000)
+        let fNew = f.first + 1
+        let fDropped = f.last == fNew && FakeVT.callsOf(fNew).isEmpty && FakeVT.invalidated[fNew] != nil
+        expect(fDropped,
+               "a new session never used: sessions \(f.last - f.first + 1), its calls \(FakeVT.callsOf(fNew).count), invalidated \(FakeVT.invalidated[fNew] != nil)")
+        // (g) The encoder goes before its new session is made: made, then invalidated.
+        let g = run(seconds: 2.1, createDelay: 0.6, settle: 0.2, after: 0.8, base: 670_000)
+        let gNew = g.first + 1
+        let gDropped = g.last == gNew && FakeVT.callsOf(gNew).isEmpty && FakeVT.invalidated[gNew] != nil
+        expect(gDropped,
+               "a new session made after the encoder went: sessions \(g.last - g.first + 1), its calls \(FakeVT.callsOf(gNew).count), invalidated \(FakeVT.invalidated[gNew] != nil)")
+        print("a new session never used: dropped when the session is given up on, when the encoder goes, and when made after it went: " +
+              "\([eDropped, fDropped, gDropped].map { $0 ? "yes" : "no" }.joined(separator: ", "))")
     }
 }
 

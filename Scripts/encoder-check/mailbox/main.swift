@@ -7,7 +7,8 @@ import CoreMedia
 // from the output handler or a refusal, the watchdog every 0.5 s, requestKeyframe and its second
 // look, abandon, the deinit's teardown) around a stand-in for VideoToolbox that returns each frame
 // after a programmable delay, in virtual time. One frame is inside at a time, as in HEVCEncoder.
-// Nothing here links VideoToolbox.
+// A new session for the slow state (EncoderSlowState) makes no call on the mailbox of its own; it
+// is the slow-state check's and the encoder check's (E7). Nothing here links VideoToolbox.
 //
 //   Scripts/encoder-check/run.sh mailbox mutants      (from the repository's root)
 // or by hand:

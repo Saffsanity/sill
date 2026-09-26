@@ -4,9 +4,14 @@
 #   mutants   the same check against one-line mutants of EncoderMailbox: each must fail it
 #   probe     EncoderProbe.throughput's loop (the real file) against a stand-in HEVCEncoder, in real
 #             time, and SILL_TEST_PROBE_HOLD=0.08 through it
-#   encoder   the real HEVCEncoder.swift (with EncoderMailbox.swift and EncoderProbe.swift) against a
-#             stand-in VideoToolbox (encoder/FakeVT.swift), in real time
-# usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe] [encoder]   (no argument: all)
+#   encoder   the real HEVCEncoder.swift (with EncoderMailbox.swift, EncoderSlowState.swift and
+#             EncoderProbe.swift) against a stand-in VideoToolbox (encoder/FakeVT.swift), in real
+#             time: with a new session for the slow state on (all of it), then off (E7 alone)
+#   slowstate EncoderSlowState (the real file): when a stream's session is replaced for the slow
+#             state, by hand at its edges and in streams in virtual time
+#   mutants-slowstate   the same check against one-line mutants of EncoderSlowState: each must fail
+# usage: Scripts/encoder-check/run.sh [mailbox] [mutants] [probe] [encoder] [slowstate]
+#        [mutants-slowstate]   (no argument: all)
 # Builds under .build/encoder-check/. Every binary is checked with otool before it runs: one that
 # links VideoToolbox is refused, so nothing here can open an encoder session, and these checks are
 # safe while Sill.app streams. The hardware runs are verify-hardware.sh's, under its own rules.
@@ -14,7 +19,7 @@ set -u
 ROOT=${0:A:h:h:h}
 OUT=$ROOT/.build/encoder-check
 mkdir -p $OUT
-steps=("$@"); (( ${#steps} )) || steps=(mailbox mutants probe encoder)
+steps=("$@"); (( ${#steps} )) || steps=(mailbox mutants probe encoder slowstate mutants-slowstate)
 failed=0
 
 encoder_free() {   # BINARY: refuse it if it links VideoToolbox
@@ -55,7 +60,19 @@ encoder)
     $ROOT/Scripts/encoder-check/encoder/main.swift -o $OUT/encoder-check || { failed=1; continue }
   encoder_free $OUT/encoder-check || { failed=1; continue }
   if nm -u $OUT/encoder-check | grep -q '_VT'; then echo "REFUSED: encoder-check imports a VideoToolbox symbol"; failed=1; continue; fi
-  $OUT/encoder-check || failed=1
+  SILL_TEST_ENCODER_RECYCLE=1 $OUT/encoder-check || failed=1
+  SILL_TEST_ENCODER_RECYCLE=0 $OUT/encoder-check E7 || failed=1
+  ;;
+slowstate)
+  echo "== slow-state check"
+  swiftc -O $ROOT/Sources/SillHost/EncoderSlowState.swift $ROOT/Scripts/encoder-check/slowstate/main.swift -o $OUT/slowstate-check || { failed=1; continue }
+  encoder_free $OUT/slowstate-check || { failed=1; continue }
+  $OUT/slowstate-check || failed=1
+  ;;
+mutants-slowstate)
+  echo "== mutants of EncoderSlowState"
+  python3 $ROOT/Scripts/encoder-check/slowstate/mutants.py || failed=1
+  for b in $OUT/mutants-slowstate/*/check(N); do encoder_free $b || failed=1; done
   ;;
 *) echo "unknown step $step"; failed=1 ;;
 esac
