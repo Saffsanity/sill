@@ -24,6 +24,8 @@ MUTANTS = {
     "AC14 the running footnote names the away quality as home": [("let home = whole(title(a.homeBitrate, a.homeCaptureScale))", "let home = whole(title(a.awayBitrate, a.awayCaptureScale))")],
     "AC16 the footnote's qualities that may wrap": [("let home = whole(title(a.homeBitrate, a.homeCaptureScale))", "let home = title(a.homeBitrate, a.homeCaptureScale)")],
     "AC15 titles that may wrap": [('text.replacingOccurrences(of: " ", with: "\\u{00A0}")', "text")],
+    # The review of 2026-09-27: the linger is for a line on screen only.
+    "AC17 a line off screen lingers (Done after the callout's button brings the cleared line up)": [("if now >= since + Self.linger || !allowed {", "if now >= since + Self.linger {")],
 }
 caught = 0
 for name, edits in MUTANTS.items():

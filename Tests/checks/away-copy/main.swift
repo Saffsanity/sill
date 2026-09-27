@@ -8,7 +8,8 @@
 // the link's callout, first match wins, its button's title, spoken label and change; that stalled
 // shows nothing; the old round-trip callout only for a Mac without `away`; the stream screen's line;
 // and LinkLine: shown on arrival, gone 2 s after the report clears, kept through a quick flip, hidden
-// while something is open over the stream, announced once a spell.
+// while something is open over the stream, gone at once when its report clears (or it is covered) off
+// screen, announced once a spell.
 import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -158,6 +159,24 @@ do {
     _ = gone.update(report: nil, allowed: false, now: 1)
     _ = gone.update(report: nil, allowed: true, now: 3)
     check(!gone.visible, "a spell that ended while hidden never shows")
+}
+do {
+    // The review of 2026-09-27: the callout's button in the open panel clears the report at the
+    // Mac's answer, and Done a second later must not bring up, or speak, a line that has gone.
+    var l = LinkLine()
+    eq(l.update(report: "A", allowed: false, now: 0), nil, "a report while the panel is open: not announced")
+    eq(l.update(report: nil, allowed: false, now: 0.4), nil, "…cleared while the panel is open (its button)")
+    eq(l.update(report: nil, allowed: true, now: 1.0), nil, "…the panel closed within the linger: nothing announced")
+    check(!l.visible && l.text == nil, "…and no line: its spell ended as it cleared off screen")
+    check(l.recheckAt == nil, "…nothing to look at again")
+    eq(l.update(report: "B", allowed: true, now: 5), "B", "a later report is a new spell, announced")
+    var covered = LinkLine()
+    _ = covered.update(report: "A", allowed: true, now: 0)
+    _ = covered.update(report: nil, allowed: true, now: 1)
+    check(covered.visible, "a line on screen lingers after its report clears")
+    _ = covered.update(report: nil, allowed: false, now: 1.5)
+    _ = covered.update(report: nil, allowed: true, now: 2)
+    check(!covered.visible && covered.text == nil, "…and something opened over it ends the linger: closed again, no line")
 }
 
 print(failures == 0 ? "away-copy: all passed" : "away-copy: \(failures) FAILED")

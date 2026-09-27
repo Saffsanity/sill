@@ -123,7 +123,11 @@ enum AwayCopy {
 /// The stream screen's line over time (docs/remote-bundle-plan.md §6.7): it shows as soon as a
 /// report of behind arrives, while the Settings panel, the drawer and the pairing overlay are closed
 /// (`allowed`); it goes 2 s after the report clears, so a quick flip back does not flicker; and
-/// VoiceOver hears it once a spell, as it first shows (a spell ends when the line goes).
+/// VoiceOver hears it once a spell, as it first shows (a spell ends when the line goes). The linger
+/// is for a line on screen only: a report that clears while something is open over the stream, or a
+/// lingering line that something covers, ends its spell at once, so closing the panel right after
+/// its callout's button never brings up, or speaks, a report that has gone (the review of
+/// 2026-09-27).
 struct LinkLine: Equatable {
     static let linger = 2.0
     /// The line's text through its spell, the linger included; nil once it has gone.
@@ -143,7 +147,9 @@ struct LinkLine: Equatable {
         } else if text != nil {
             let since = clearedAt ?? now
             clearedAt = since
-            if now >= since + Self.linger {
+            // Gone at the linger's end, or at once while nothing shows it: the linger keeps a line on
+            // screen from flickering, and a line off screen has nothing to keep.
+            if now >= since + Self.linger || !allowed {
                 text = nil
                 clearedAt = nil
                 announced = false
