@@ -117,6 +117,7 @@ swift run -c release SillHost --remote --internet    # also admit paired devices
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
 swift run -c release SillHost --encoder-selftest     # is the hardware encoder alive? 5 s, then it exits
 swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it
+swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device would get for an app (a pid, or its name), read once
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
@@ -223,6 +224,30 @@ device, and a streaming setting restarts the stream for a moment. To put one
 setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 `prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
+
+## The Mac's menus on the device
+
+The app a device streams keeps its menu bar on the Mac, and the device shows
+it: on an iPad with iPadOS 26 or later in the iPad's own menu bar (move the
+pointer to the top edge, or swipe down from it), and on every device behind the
+Menus button in Sill's bar, between the window thumbnails and Aa. With the
+Desktop streaming, the menus are the frontmost app's, as the Mac's own menu bar
+shows. Each menu is read from the Mac as it opens, so what is checked, dimmed
+or listed (Open Recent, the Window menu) is what the Mac shows then; an item
+chosen on the device is chosen on the Mac, as if clicked there. The Mac's
+keyboard shortcuts show under the items, as text: typed on a hardware keyboard
+they reach the Mac as keys, as before, never the device's menus. The Apple menu
+and Sill's own are never shown.
+
+It needs Accessibility for Sill on the Mac, as the device's clicks do; without
+it the button shows where to allow it. Opening a menu of a window streamed on
+its own makes its app active on the Mac, as a click from the device does, since
+an app's menus read differently while it is in the background (Copy, Close and
+Minimize dimmed). A Mac from before this change sends no menus, and the device
+then shows no Menus button; a device from before it never asks, and the Mac
+reads nothing for it. An app that draws its menus in its own window (Blender's
+File and Edit) has there only what its menu bar lists; tap the rest in the
+picture.
 
 ## Direct Wireless Connection
 
@@ -339,7 +364,8 @@ tests of Direct Wireless Connection and remote access.
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
 encoder session, the device floor, how a session ends, the update check, the
-disk image's window) on their own with a check each, and runs them: about two
+disk image's window, the Mac's menus on both ends) on their own with a check
+each, and runs them: about two
 minutes, no device, permission or encoder. `--mutants` also checks that each
 check fails when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
@@ -357,7 +383,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 ```
 
 Its docstring lists every flag: timed changes and picks, stats as a named
-device, the remote door with pairing, and more. It checks every argument
+device, the remote door with pairing, the Mac's menus (`--menus`, `--fetch`,
+`--press`), and more. It checks every argument
 before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
@@ -365,6 +392,19 @@ how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
 slows or cuts the link. TLS passes through.
+
+### The menus' test app
+
+`Scripts/menufixture.swift` is a small AppKit app with menus of known contents
+(marks, shortcuts, a dimmed item, one retitled at every look, a slow action,
+submenus three deep, 300 and 600 items) that can never come to the front, and
+whose one window is off every display. A synthetic host started with
+`SILL_TEST_MENU_PID=<its pid>` streams the test pattern with the fixture's
+menus, so the menus are read and chosen without touching a real app; the
+fetches and choices of `sillclient.py` refuse to run without that variable.
+`Scripts/menu-check/run.sh` runs the host's menu reader and mirror against the
+fixture without a host (it needs Accessibility for whatever runs it). The
+file's header says how to build and run it.
 
 ### Test arguments for the bare app
 
@@ -400,6 +440,13 @@ simulator:
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
 - `-SillConnect 127.0.0.1:PORT`: connect by address, also in the normal app.
+- `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
+  mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
+  `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
+  `-SillMenuPress 'File/Save'` chooses that item (both also live, against a
+  real host's menus). On an iPad, `-SillMenuDump 1` prints the main menu after
+  each build and `-SillMenuBarLayout perMenu|replace|one` moves the Mac's
+  menus in it.
 
 ## Measuring latency
 
@@ -592,8 +639,9 @@ record field by field.
   disk image, and the tool that lays out its window), `release-ios.sh` (the
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
-  link, for tests) and `sillfeed.py` (a stand-in for GitHub's releases feed,
-  for the update check's tests).
+  link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
+  for the update check's tests), and `menufixture.swift` and `menu-check/`
+  (the menus' test app, and the menu reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
