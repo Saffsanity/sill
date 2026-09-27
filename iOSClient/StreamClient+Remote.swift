@@ -49,12 +49,16 @@ enum PairingProblem: Equatable {
     /// it knows the code; nothing answered the pairing connection.
     case proofFailedOverStream(String)
     case noAnswerOverStream(String)
+    /// The Mac refused for a reason this build does not know, and said why in its own words
+    /// (PairResult.unknownReasonMessage): shown as they are.
+    case macSaid(String)
 
     var field: Field {
         switch self {
         case .address, .zone, .nothingAnswered, .notSill, .localNetwork: return .address
         case .codeLength, .codeTypo, .wrongCode, .expired, .stopped, .homeStopped, .homeUsed: return .code
-        case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer, .proofFailedOverStream, .noAnswerOverStream:
+        case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer, .proofFailedOverStream, .noAnswerOverStream,
+             .macSaid:
             return .card
         }
     }
@@ -85,6 +89,7 @@ enum PairingProblem: Equatable {
         case .homeNoAnswer(let mac): return DiscoveryPolicy.HomeCopy.noAnswer(mac: mac)
         case .proofFailedOverStream(let mac): return DiscoveryPolicy.HomeCopy.proofFailedOverStream(mac: mac)
         case .noAnswerOverStream(let mac): return DiscoveryPolicy.HomeCopy.noAnswerOverStream(mac: mac)
+        case .macSaid(let words): return words
         }
     }
 }
@@ -877,6 +882,8 @@ extension StreamClient {
     /// A refused pairing's words, as the remote path says them; also Pair This iPad…'s over a
     /// stream at home (StreamClient+Home's `homeProblem`), which has no row to tap.
     static func problem(for r: PairResult, mac: String) -> PairingProblem {
+        // A reason this build does not know, with the Mac's own words for it: those, not a guess.
+        if let words = r.unknownReasonMessage { return .macSaid(words) }
         switch r.reason {
         case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
         case PairResult.expired?: return .expired

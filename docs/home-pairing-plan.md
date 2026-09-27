@@ -366,6 +366,12 @@ their string values grow, and every new field is optional.
   - New reasons: `"shown"` (the window shows a code now: scan it or type it), `"openOnMac"` (the
     Mac did not show one by itself: choose Pair iPhone or iPad… on the Mac), `"locked"` (the Mac is
     locked).
+  - A new optional field `message` (the security review, 2026-09-27): the Mac's own words for a
+    reason the device does not know, which it shows as they are (SafeText, one line, at most 300
+    characters), as a goodbye's. This build sends none (every kind 20 here is byte for byte as
+    before); a later host adds a reason only with one. The reasons a device words itself are
+    `PairResult.knownReasons`: `code`, `closed`, `expired`, `stopped`, `busy`, `shown`,
+    `openOnMac`, `locked`.
 - **Kind 22 `Goodbye.reason`** gains `"pairingRequired"`: Require pairing was turned on while this
   unpaired device was connected.
 - **Kind 21** (`pairingWanted`) is unchanged; only an unpaired session (Require pairing off) still
@@ -503,9 +509,15 @@ in them.
 
 HostSettings.swift's rules, as for every payload since PR #13: JSON only; new fields optional; no
 enums on the wire (strings; an unknown value is skipped or, for `p`, read as "1"); never rename or
-retype a field. A later generation goes in the ALPN (`sill/2`), `PairRequest.v` and `MacInfo.v`,
-with `SillProtocol.current` (Compatibility.swift, main's since the update notice): protocol 1 is
-this door's `sill/1`, settled at the merge with main (Results, "The merge with main").
+retype a field. A later generation goes in the ALPN (`sill/2`, beside `sill/1` and `sill-pair/1`,
+which every host offers for good), with `SillProtocol.current` (Compatibility.swift, main's since the
+update notice): protocol 1 is this door's `sill/1`, settled at the merge with main (Results, "The
+merge with main"). Pairing's own generation is `PairRequest.v`: a host answers any other than 1
+`closed` without counting a try (`DoorPolicy.pairing`), so a later method or proof format comes with
+a later `v`, never as a new method at 1, which a first-build host would judge as a wrong code and use
+up a try. `MacInfo.v` stays 1 and no device reads it: kind 18 changes additively. What the first
+public build freezes of all this is CLAUDE.md's Compatibility floor, "Pairing as 1.0 does it" (the
+security review, 2026-09-27).
 
 ---
 

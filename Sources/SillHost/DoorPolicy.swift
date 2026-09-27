@@ -84,7 +84,7 @@ enum DoorPolicy {
         /// A session: registered with its route.
         case session
         /// A pairing connection: read exactly one kind 19 (at most 4 KiB, within the admission
-        /// deadline), then treat it as `pairing(_:method:)` says.
+        /// deadline), then treat it as `pairing(_:method:version:)` says.
         case pairing
         /// A paired key the door does not serve now: this goodbye ("remoteOff", "busy"), then close.
         case goodbye(String)
@@ -150,11 +150,16 @@ enum DoorPolicy {
         /// window counts as a wrong proof, as the remote door always has.
         case window
         /// Answered `closed` at once with no try counted: an ask at the remote door, which never
-        /// opens a window or pairs by itself. The window never sees it.
+        /// opens a window or pairs by itself, and at either door a request of another generation
+        /// than this build's (`PairRequest.v` not 1). The window never sees it.
         case closed
     }
 
-    static func pairing(_ door: Door, method: String) -> Pairing {
+    /// `version`: the request's `v`. Any other than `PairRequest.version` is a later generation's
+    /// method or proof format, which this host cannot judge: answered `closed` without a try, never
+    /// counted as one of the window's five wrong codes (the compatibility floor).
+    static func pairing(_ door: Door, method: String, version: Int) -> Pairing {
+        guard version == PairRequest.version else { return .closed }
         guard method == PairRequest.ask else { return .window }
         return door == .home ? .ask : .closed
     }

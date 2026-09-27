@@ -3,12 +3,15 @@ import Security
 import CryptoKit
 
 // Remote access payloads (kinds 18–22, docs/remote-access-plan.md §3.2), which pairing at home
-// uses too (docs/home-pairing-plan.md §3.1: no new kinds, only new string values and two optional
-// fields, `PairRequest.cable` and `PairResult.method`). The rules of HostSettings.swift apply to
-// every one of them: JSON only; fields added later are optional; no enums on the wire (strings, so
-// an unknown value is skipped instead of failing the whole decode); never rename or retype a field.
-// The generation is in the ALPN (`sill/1`), `MacInfo.v`, `PairRequest.v` and the pairing link's
-// `v`.
+// uses too (docs/home-pairing-plan.md §3.1: no new kinds, only new string values and optional
+// fields, `PairRequest.cable`, `PairResult.method` and `PairResult.message`). The rules of
+// HostSettings.swift apply to every one of them: JSON only; fields added later are optional; no
+// enums on the wire (strings, so an unknown value is skipped instead of failing the whole decode);
+// never rename or retype a field. The generation is in the ALPN (`sill/1`, `sill-pair/1`, which
+// every host offers for good: RemoteTLS.serverALPNs), `PairRequest.v` (a host answers any other
+// than 1 `closed` without counting a try, so a later pairing method or proof comes with a later
+// `v`, never as a new method at 1, which a first-build host would count as a wrong code) and the
+// pairing link's `v`. `MacInfo.v` is 1 and no device reads it: kind 18 changes only additively.
 
 /// One way to reach the Mac from afar. Plain values, never enums: an unknown case would fail an
 /// older reader.
@@ -107,7 +110,8 @@ public struct SignedMacInfo: Codable, Sendable {
 
 /// Kind 19: the device's one message on a pairing connection.
 public struct PairRequest: Codable, Sendable {
-    /// 1.
+    /// 1 (`PairRequest.version`). A host answers a request with any other `closed`, with no try
+    /// counted (DoorPolicy.pairing): the generation marker for a later method or proof format.
     public var v: Int
     /// "qr" or "code": a proof for the pairing window. "ask", at the home door only: "pair me, now
     /// if you can, else show me your code" (docs/home-pairing-plan.md §3.1); the remote door
@@ -125,11 +129,13 @@ public struct PairRequest: Codable, Sendable {
     /// (CableLink) agrees as well, so the claim can only narrow what the Mac does.
     public var cable: Bool?
 
-    public init(v: Int = 1, method: String, proof: String, name: String, model: String?, cable: Bool? = nil) {
+    public init(v: Int = PairRequest.version, method: String, proof: String, name: String, model: String?, cable: Bool? = nil) {
         self.v = v; self.method = method; self.proof = proof; self.name = name; self.model = model; self.cable = cable
     }
 
     public static let qr = "qr", code = "code", ask = "ask"
+    /// The one generation of kind 19 there is: the first public build's, frozen with it.
+    public static let version = 1
 }
 
 /// Kind 20: the Mac's answer to kind 19. The Mac closes the connection after sending it.
@@ -157,17 +163,39 @@ public struct PairResult: Codable, Sendable {
     /// before. A device accepts such an ok only as the answer to its own ask that said
     /// `cable: true` (docs/home-pairing-plan.md §7.5).
     public var method: String?
+    /// Not ok: the Mac's own words, for a device that does not know `reason`, which shows them as
+    /// they are (`unknownReasonMessage`: SafeText, one line, at most 300 characters) where it would
+    /// otherwise have only a guess. Nil, and left out of the JSON, for every reason of the first
+    /// public build (`knownReasons`, which its devices word themselves): a later host sends one
+    /// with any reason it adds, as a new goodbye carries its `message`.
+    public var message: String?
 
     public init(ok: Bool, proof: String? = nil, macID: String? = nil, name: String? = nil, recognitionKey: String? = nil,
-                reason: String? = nil, triesLeft: Int? = nil, retryAfter: Double? = nil, method: String? = nil) {
+                reason: String? = nil, triesLeft: Int? = nil, retryAfter: Double? = nil, method: String? = nil,
+                message: String? = nil) {
         self.ok = ok; self.proof = proof; self.macID = macID; self.name = name; self.recognitionKey = recognitionKey
         self.reason = reason; self.triesLeft = triesLeft; self.retryAfter = retryAfter; self.method = method
+        self.message = message
     }
 
     public static let code = "code", closed = "closed", expired = "expired", stopped = "stopped", busy = "busy"
     public static let shown = "shown", openOnMac = "openOnMac", locked = "locked"
     /// `method`'s one value: paired by itself over the USB cable.
     public static let cable = "cable"
+
+    /// The refusals a device from the first public build words itself, after an ask or a proof: the
+    /// reasons above. Frozen with that build (the compatibility floor): a later host adds a reason
+    /// only with a `message` for these devices.
+    public static let knownReasons: Set<String> = [code, closed, expired, stopped, busy, shown, openOnMac, locked]
+
+    /// The Mac's own words for a refusal whose reason this build does not know: `message`, cleaned
+    /// as a goodbye's is (SafeText, one line, at most 300 characters, shown as plain text); nil for
+    /// an ok, a reason in `knownReasons`, or a message with nothing printable.
+    public var unknownReasonMessage: String? {
+        guard !ok, !(reason.map { Self.knownReasons.contains($0) } ?? false) else { return nil }
+        let text = SafeText.label(message ?? "", limit: 300)
+        return text.isEmpty ? nil : text
+    }
 }
 
 /// Kind 22: why the host is about to close this session, and what the device should do then

@@ -4,6 +4,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "Sources/SillHost/DoorPolicy.swift"
 M = [
+    ("kind 19 of a later generation judged as this one's", F, "        guard version == PairRequest.version else { return .closed }\n", ""),
+    ("kind 19: only a higher generation is closed", F, "        guard version == PairRequest.version else { return .closed }", "        guard version <= PairRequest.version else { return .closed }"),
     ("remote door ignores Require pairing too", F, "return door == .home ? t.paired || !t.requirePairing : t.paired", "return t.paired || !t.requirePairing"),
     ("home sill/1 needs a paired key even with Require pairing off", F, "return door == .home ? t.paired || !t.requirePairing : t.paired", "return t.paired"),
     ("remote pairing takes any window, as before this change", F, "return door == .home ? true : t.remotePairingOpen", "return door == .home ? true : t.pairingOpen"),

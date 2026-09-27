@@ -326,8 +326,9 @@ final class Door {
 
     /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, then
     /// DoorPolicy.pairing says how it is treated: judged on the main actor (an ask at home, or a
-    /// proof for the pairing window), or, for an ask at the remote door, answered `closed` here
-    /// with no try counted. One kind 20 back, then closed once that is sent (or after 250 ms). A
+    /// proof for the pairing window), or, for an ask at the remote door and for a request of a
+    /// later generation (`v` not 1) at either, answered `closed` here with no try counted. One
+    /// kind 20 back, then closed once that is sent (or after 250 ms). A
     /// device that goes away before its kind 19 is not refused, only closed. Pairing is never
     /// refused for the device's age (DeviceGate judges sessions only): a device too old for this
     /// Mac's sessions can still pair, and hears the update notice when it connects.
@@ -362,7 +363,7 @@ final class Door {
                         queue.asyncAfter(deadline: .now() + 0.25) { c.cancel() }
                     }
                 }
-                if DoorPolicy.pairing(self.kind, method: request.method) == .closed {
+                if DoorPolicy.pairing(self.kind, method: request.method, version: request.v) == .closed {
                     reply(PairResult(ok: false, reason: PairResult.closed))
                     return
                 }

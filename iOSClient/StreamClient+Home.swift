@@ -511,7 +511,9 @@ extension StreamClient {
             #endif
         case .openOnMac, .refused:
             homeAsk = nil
-            status = DiscoveryPolicy.HomeCopy.openOnMac(mac: ask.name)
+            // A refusal this build does not know shows the Mac's own words when it sent some
+            // (PairResult.message); else, as `openOnMac`, the way that always works: the Mac's menu.
+            status = (answer == .refused ? r.unknownReasonMessage : nil) ?? DiscoveryPolicy.HomeCopy.openOnMac(mac: ask.name)
         case .locked:
             homeAsk = nil
             status = DiscoveryPolicy.HomeCopy.locked(mac: ask.name)
@@ -778,6 +780,8 @@ extension StreamClient {
     /// where there is no row, the remote path's, which send them to the Sill menu on the Mac.
     static func homeProblem(for r: PairResult, mac: String, overStream: Bool = false) -> PairingProblem {
         if overStream { return problem(for: r, mac: mac) }
+        // A reason this build does not know, with the Mac's own words for it: those, not a guess.
+        if let words = r.unknownReasonMessage { return .macSaid(words) }
         switch r.reason {
         case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
         case PairResult.stopped?: return .homeStopped(mac)

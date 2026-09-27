@@ -188,14 +188,26 @@ check("after the gate: \(agSameOK) of \(agSame) admit exactly what `.ready` and 
 
 // MARK: The one kind 19
 
-check("kind 19 at home: ask → the ask rule", D.pairing(.home, method: "ask") == .ask)
-check("kind 19 at home: qr and code → the window", D.pairing(.home, method: "qr") == .window && D.pairing(.home, method: "code") == .window)
+check("kind 19 at home: ask → the ask rule", D.pairing(.home, method: "ask", version: 1) == .ask)
+check("kind 19 at home: qr and code → the window", D.pairing(.home, method: "qr", version: 1) == .window && D.pairing(.home, method: "code", version: 1) == .window)
 check("kind 19 at home: an unknown method → the window, which counts it as a wrong proof (the remote door's rule)",
-      ["icloud", "", "ASK", "Ask", "ask "].allSatisfy { D.pairing(.home, method: $0) == .window })
-check("kind 19 at the remote door: ask → closed, never the window and never the ask rule", D.pairing(.remote, method: "ask") == .closed)
+      ["icloud", "", "ASK", "Ask", "ask "].allSatisfy { D.pairing(.home, method: $0, version: 1) == .window })
+check("kind 19 at the remote door: ask → closed, never the window and never the ask rule", D.pairing(.remote, method: "ask", version: 1) == .closed)
 check("kind 19 at the remote door: qr, code and unknown methods → the window, as before",
-      ["qr", "code", "icloud", "", "ASK"].allSatisfy { D.pairing(.remote, method: $0) == .window })
+      ["qr", "code", "icloud", "", "ASK"].allSatisfy { D.pairing(.remote, method: $0, version: 1) == .window })
 check("PairRequest.ask is the method the door looks for", PairRequest.ask == "ask")
+// The floor: kind 19's generation is `v` (1). A later one (another method, another proof format)
+// is answered `closed` without a try at either door, never judged by the window, which would count
+// it as a wrong code and use up one of its five.
+var laterAll = 0, laterClosed = 0
+for d in [D.Door.home, .remote] { for m in ["ask", "qr", "code", "icloud", ""] { for v in [0, 2, 3, -1, Int.max] {
+    laterAll += 1
+    if D.pairing(d, method: m, version: v) == .closed { laterClosed += 1 }
+} } }
+check("kind 19 of another generation (v 0, 2, 3, -1, max; every method; both doors): closed, no try (\(laterClosed) of \(laterAll))",
+      laterAll == laterClosed)
+check("kind 19's generation is 1, and a request made here says so", PairRequest.version == 1
+      && PairRequest(method: "qr", proof: "", name: "iPad", model: nil).v == 1)
 
 // MARK: A handshake that failed
 

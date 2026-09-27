@@ -83,7 +83,36 @@ check("decode kind 20: no method is nil (every ok until now)", Wire.decode(PairR
 check("decode kind 20: an unknown method is a string, not a failure", Wire.decode(PairResult.self, from: Data(#"{"ok":true,"method":"icloud"}"#.utf8))?.method == "icloud")
 check("decode kind 22: pairingRequired", Wire.decode(Goodbye.self, from: Data(#"{"reason":"pairingRequired"}"#.utf8))?.reason == Goodbye.pairingRequired)
 check("the old inits compile and leave the new fields nil", PairRequest(method: "qr", proof: "", name: "iPad", model: nil).cable == nil
-      && PairResult(ok: false, reason: PairResult.code, triesLeft: 4).method == nil)
+      && PairResult(ok: false, reason: PairResult.code, triesLeft: 4).method == nil
+      && PairResult(ok: false, reason: PairResult.code, triesLeft: 4).message == nil)
+
+// MARK: What the first public build freezes of pairing (the compatibility floor, CLAUDE.md)
+
+// A later host adds a reason only with its own words (`message`); every kind 20 of this build
+// carries none, so each is byte for byte what it was.
+check("kind 20 without a message has no message key: shown, stopped, code",
+      !json(PairResult(ok: false, reason: PairResult.shown)).contains("message")
+      && !json(PairResult(ok: false, reason: PairResult.stopped)).contains("message")
+      && same(json(PairResult(ok: false, reason: PairResult.code, triesLeft: 4)), #"{"ok":false,"reason":"code","triesLeft":4}"#))
+let later = PairResult(ok: false, reason: "approvalNeeded", message: "Approve this iPad on Mac mini, then tap it again.")
+check("kind 20 with a message: " + json(later),
+      same(json(later), #"{"ok":false,"reason":"approvalNeeded","message":"Approve this iPad on Mac mini, then tap it again."}"#))
+check("decode kind 20: a message is kept; none is nil",
+      Wire.decode(PairResult.self, from: Data(#"{"ok":false,"reason":"approvalNeeded","message":"Approve it."}"#.utf8))?.message == "Approve it."
+      && Wire.decode(PairResult.self, from: Data(#"{"ok":false,"reason":"shown"}"#.utf8))?.message == nil)
+check("the reasons this build words itself: code, closed, expired, stopped, busy, shown, openOnMac, locked",
+      PairResult.knownReasons == ["code", "closed", "expired", "stopped", "busy", "shown", "openOnMac", "locked"])
+check("a reason this build does not know: the Mac's words, as they are", later.unknownReasonMessage == "Approve this iPad on Mac mini, then tap it again.")
+check("a known reason never shows the Mac's message, whatever it says",
+      PairResult.knownReasons.allSatisfy { PairResult(ok: false, reason: $0, message: "Something else.").unknownReasonMessage == nil })
+check("an unknown reason without a message, or with nothing printable: nil (the device's own words)",
+      PairResult(ok: false, reason: "approvalNeeded").unknownReasonMessage == nil
+      && PairResult(ok: false, reason: "approvalNeeded", message: " \u{202E}\u{0007}\n ").unknownReasonMessage == nil)
+check("no reason at all is unknown too", PairResult(ok: false, message: "Try again later.").unknownReasonMessage == "Try again later.")
+check("an ok never shows a message", PairResult(ok: true, method: PairResult.cable, message: "Hi.").unknownReasonMessage == nil)
+check("the Mac's words are cleaned as a goodbye's: one line, no controls or bidi overrides, at most 300 characters",
+      PairResult(ok: false, reason: "later", message: "Line one\nline\u{202E} two\u{0007}.").unknownReasonMessage == "Line one line two."
+      && PairResult(ok: false, reason: "later", message: String(repeating: "a", count: 400)).unknownReasonMessage?.count == 300)
 
 // MARK: RemoteTLS parameters for the home door
 

@@ -30,5 +30,12 @@ M = [
      "    public static func parameters(tls: NWProtocolTLS.Options, tcp: NWProtocolTCP.Options, peerToPeer: Bool) -> NWParameters {\n        let p = NWParameters(tls: tls, tcp: tcp)\n"),
     ("the remote door becomes peer-to-peer", T, "parameters(tls: tls, tcp: tcpOptions(dialing: dialing), peerToPeer: false)", "parameters(tls: tls, tcp: tcpOptions(dialing: dialing), peerToPeer: true)"),
     ("the overload takes the remote door's TCP", T, "        let p = NWParameters(tls: tls, tcp: tcp)\n", "        let p = NWParameters(tls: tls, tcp: tcpOptions(dialing: false))\n"),
+    ("message not kept by the init", R, "        self.message = message\n    }", "    }"),
+    ("a known reason shows the Mac's message", R, "guard !ok, !(reason.map { Self.knownReasons.contains($0) } ?? false) else { return nil }",
+     "guard !ok else { return nil }"),
+    ("an ok shows its message", R, "guard !ok, !(reason.map { Self.knownReasons.contains($0) } ?? false) else { return nil }",
+     "guard !(reason.map { Self.knownReasons.contains($0) } ?? false) else { return nil }"),
+    ("the Mac's words shown uncleaned", R, "        let text = SafeText.label(message ?? \"\", limit: 300)", "        let text = message ?? \"\""),
+    ("a reason missing from the known ones", R, "[code, closed, expired, stopped, busy, shown, openOnMac, locked]", "[code, closed, expired, stopped, busy, shown, openOnMac]"),
 ]
 sys.exit(0 if module.mutate("home-txt", M, sys.argv[1]) else 1)

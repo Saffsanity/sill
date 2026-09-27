@@ -3065,6 +3065,17 @@ device keeps working with Macs from the first public build on, or each says why
   header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of Switcher, Input,
   Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16 within 2 s of the
   first window list; kind 22's `reason`, `message` and `reconnect`.
+- Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
+  tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
+  a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions
+  only), and one kind 20, then the Mac closes it; kind 19's methods `qr`, `code` and, at the home
+  door, `ask` (the remote door answers it `closed`), at `v` 1: a host answers any other `v`
+  `closed` without counting a try, so a later method or proof format comes with a later `v`, never
+  as a new method at 1, which a 1.0 host counts as a wrong code; kind 20's reasons `code`,
+  `closed`, `expired`, `stopped`, `busy` and, after an ask, `shown`, `openOnMac` and `locked`, with
+  their meanings (`PairResult.knownReasons`: a later reason comes with its `message`, which 1.0
+  devices show as it is); an ok without a proof only as `method` "cable", to an ask that claimed
+  the cable; and pairing is never refused for the device's age.
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new

@@ -52,6 +52,8 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
                      the link after "shown"
   --pair-hold=S      open a pairing connection (ALPN sill-pair/1) that sends nothing for S seconds, then
                      print whether the host closed it first (HOLD closed at T s, or HOLD open); nothing else
+  --pair-v=N         the kind 19's v (1 unless given): a host answers any other closed, with no try
+                     counted (the compatibility floor: a later method or proof comes with a later v)
   --expect-pair=R    the pairing's last kind 20 must be R: ok (a proof checked), cable, shown, openOnMac,
                      locked, closed, code, busy, expired or stopped; prints EXPECT-PAIR ok or EXPECT-PAIR
                      FAIL (exit 1). A match that is not a pairing ends the run with exit 0
@@ -81,7 +83,7 @@ SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisp
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair")
+          "pair-hold", "expect-pair", "pair-v")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 
 def msg(kind, payload=b"", key=False):
@@ -241,7 +243,7 @@ def pair(url=None, code=None, pin=None):
         k = hashlib.pbkdf2_hmac("sha256", code.encode(), b"sill-pair-v1" + fp_mac, 600_000, 32); method = "code"
         print(f"  code key derived in {1000 * (time.time() - t0):.0f} ms")
     proof = hmac.new(k, b"sill-pair-v1 device\x00" + fp_dev + fp_mac, hashlib.sha256).digest()
-    req = {"v": 1, "method": method, "proof": b64u(proof), "name": device, "model": "sillclient"}
+    req = {"v": pair_v, "method": method, "proof": b64u(proof), "name": device, "model": "sillclient"}
     s.sendall(msg(19, json.dumps(req).encode()))
     try:
         m = read_message(s, 15)
@@ -266,7 +268,7 @@ def ask(cable, pin=None):
     the key this connection saw and a 32-byte recognition key; then the Mac is saved."""
     ensure_identity(identity_dir)
     s, fp_mac = tls_connect("sill-pair/1", pin)
-    req = {"v": 1, "method": "ask", "proof": "", "name": device, "model": "sillclient"}
+    req = {"v": pair_v, "method": "ask", "proof": "", "name": device, "model": "sillclient"}
     if cable: req["cable"] = True
     s.sendall(msg(19, json.dumps(req).encode()))
     try:
@@ -355,6 +357,7 @@ try:
     pair_ask = "--pair-ask" in flags or "--pair-ask=cable" in flags
     ask_cable = "--pair-ask=cable" in flags
     then_code = valued("then-code"); expect_pair = valued("expect-pair")
+    pair_v = number(valued("pair-v"), "--pair-v") if valued("pair-v") is not None else 1
     pair_hold = number(valued("pair-hold"), "--pair-hold", float) if valued("pair-hold") else None
     tls = ("--tls" in flags or valued("pair-url") is not None or valued("pair-code") is not None or pair_ask
            or pair_hold is not None)
