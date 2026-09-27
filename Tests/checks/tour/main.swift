@@ -463,7 +463,7 @@ check(words(.touch, L, mac: "").subtitle == "What you do here happens on your Ma
 let barL = words(.bar, L)
 check(barL.title == "Windows and Text Size" && barL.subtitle == nil, "bar: title, no subtitle")
 check(texts(barL) == ["Touch and hold a window to close, minimize or go full screen. Keep holding and drag to move it.",
-                      "Aa: touch it and slide to make text larger or smaller.",
+                      "Aa: touch it and slide to make a window’s text larger or smaller.",
                       "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "bar sideways: \(texts(barL))")
 check(barL.rows.map(\.symbol) == ["hand.point.up.left", "textformat.size", "keyboard"], "bar's symbols")
 check(texts(words(.bar, P)) == Array(texts(barL).prefix(2)), "bar upright: no Keyboard row (it is a cap)")
@@ -492,7 +492,7 @@ check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spo
 // Under VoiceOver: no touch card, no trackpad rows, and no gesture VoiceOver cannot make.
 let barVO = words(.bar, L, voiceOver: true)
 check(texts(barVO) == ["Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them.",
-                       "Text size makes the text on Mac mini larger or smaller. Swipe up or down on it.",
+                       "Text size makes a window’s text on Mac mini larger or smaller. Swipe up or down on it.",
                        "Keyboard types on Mac mini, on screen or with a hardware keyboard."], "bar under VoiceOver: \(texts(barVO))")
 let laptopVO = words(.laptop, P, voiceOver: true, first: true)
 check(laptopVO.rows.count == 2 && laptopVO.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key: Command, then C, copies."

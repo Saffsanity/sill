@@ -43,6 +43,7 @@ MUTANTS = [
     ("the trackpad's rows under VoiceOver", "if !voiceOver {\n                rows.append(row(\"cursorarrow.click.2\"", "if true {\n                rows.append(row(\"cursorarrow.click.2\""),
     ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? \"Upright, Sill adds keys and a trackpad.\" : nil", "subtitle: \"Upright, Sill adds keys and a trackpad.\""),
     ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
+    ("Aa not said to be a window's", "plain(\": touch it and slide to make a window’s text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
     ("the caps not spoken by name", "spoken: \"Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.\")", "spoken: nil)"),
 ]
 caught = 0
