@@ -9,10 +9,10 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The Mac download in a disk image (2026-09-27, branch `mac-dmg` from main at
-cf05a78).** Noah: "Sill should open in a .dmg and be draggable into applications
-folder like regular apps". `Scripts/release.sh` now makes `Sill.dmg` beside
-`Sill.zip`, from the same notarized, stapled app. Nothing was notarized,
-published or tagged, and the download page still links the zip.
+cf05a78, PR #29).** Noah: "Sill should open in a .dmg and be draggable into
+applications folder like regular apps". `Scripts/release.sh` now makes
+`Sill.dmg` beside `Sill.zip`, from the same notarized, stapled app. Nothing was
+notarized, published or tagged, and the download page still links the zip.
 - The image (`Scripts/make-dmg.sh`, Layout): Sill.app, a link to
   /Applications, a white background with an arrow from one to the other
   (`design/DMGBackground.svg`, 660 x 400 points, the arrow in the app icon's
