@@ -8,69 +8,128 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
-**Pairing at home (2026-09-25 to 27, branch `home-pairing`; the plan, each
-step's results and the hand-off are in `docs/home-pairing-plan.md`).** Noah:
-"Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy
-to do but still secure, similar to how Tailscale is being paired. Wired should
-still pair automatically." The home door speaks TLS 1.3 with both keys pinned
-in Sill.app (and SillHost --pairing): a device pairs once, with the pairing
-window's QR code or code, or over the USB cable by itself, and one trust list
-serves Wi-Fi, Direct, the cable and remote access (Settings › Devices, Require
-pairing, Remove). Steps 0 to 5 of the plan's §12 are done and verified, and
-so are the security review's fixes (below); the step-6 docs, the PR and Noah's
-device tests (§11) are next.
-- Merged with main (2026-09-27, d11aa60 of main at cf05a78: PRs #16 to #28),
-  not rebased. As the Compatibility floor below says, the device gate went
-  into `Door` (home pairing landed second): `Door.admitSession` runs
-  `StreamServer.gate` for both TLS doors, the hello first inside TLS, then
-  `serve(_:route:hello:admitted:)`; a session the gate held is judged again by
-  `DoorPolicy.afterGate` (remote: removed, remoteOff, internetOff, busy, as
-  main's stillAdmits; home: removed, pairingRequired; and Direct Wireless off),
-  with the lines of each change's own close. `Goodbye` has main's fields and
-  "update" beside "pairingRequired", which GoodbyePolicy knows. The device
-  sends its hello first on every session connection (a tap's, a reconnect's,
-  a move's, a remote winner's), over TLS at a TLS door. Both sides had taken
-  A01E/F01E in project.pbxproj: StreamClient+Home.swift is A601/F601 now
-  (A301/F301 at the merge, which branch pointer-visibility's own file has).
-  `SillProtocol` 1 is 1.0's TLS home door with ALPN `sill/1`. This branch's
-  pure checks moved into `Tests/checks` (`door-policy`, `cable-link`,
-  `ask-limits`, `home-records`, `home-device`, `home-txt`, `home-model`, and
-  `home.swift` in `policy` and `remote-rules`), and into CI's mutants matrix.
-  Verified: the plan's Results, "The merge with main".
+**Pairing at home (2026-09-25 to 27, branch `home-pairing` from main at
+1f3072a, with main merged in at cf05a78 and again at 2b38179, not rebased;
+the plan and every step's results are in `docs/home-pairing-plan.md`).**
+Noah: "Yes please lets add a pairing process for Wi-Fi/Direct connect,
+something easy to do but still secure, similar to how Tailscale is being
+paired. Wired should still pair automatically." He also decided it ships
+before 1.0 (the Compatibility floor below).
+- The Mac: Sill.app's home door, the Bonjour port, speaks the remote door's
+  TLS 1.3 with both keys pinned (the same identities, the ALPNs `sill/1` and
+  `sill-pair/1`, the trust list and the pairing window), and so does
+  `SillHost --pairing`; admission is one `Door` behind both listeners, its
+  rules `DoorPolicy`'s. An unpaired device's tap sends one "pair me" request
+  (kind 19 `ask`). Over the USB cable to an iPhone or iPad, while the Mac is
+  unlocked and both ends agree the connection is the cable (the Mac: an IPv6
+  link-local source under an Apple iPhone's or iPad's NCM interface in IOKit,
+  never one of the Mac's own addresses; the device: its end carries only
+  link-local addresses), the Mac pairs it on the spot, one key per device by
+  a hash of its USB serial, with a 10 s notice that has Remove. Anywhere else
+  the Mac opens its pairing window by itself, in front but without activating
+  Sill or taking the keyboard, never for an ask from this Mac itself, at most
+  one at a time, three in 10 minutes, and none for 10 minutes to a device
+  after the Mac's Cancel or five wrong codes; the device scans the QR code or
+  types the 12 digits, as it pairs for remote access, over the home door. One
+  trust list serves Wi-Fi, Direct, the cable and remote access. Settings ›
+  Devices (a new tab after General): Require pairing (on by default; off, any
+  device at home connects without pairing, still over TLS; kept beside the
+  trust list in the login keychain, its "off" signed by the Mac's key, never
+  in UserDefaults), the paired devices moved from Remote Access (how each
+  paired and last connected, Remove, rename) and Pair iPhone or iPad…. The
+  menu: "‹device› Wants to Pair", "An iPhone or iPad Needs Sill Updated" (a
+  source's third plain try in a minute) and "Devices Can’t Connect" (the
+  keychain unusable: the home door stays closed). Sill.app takes no TEST ONLY
+  hook that bears on the doors or pairing (TestHooks: one "ignored" line
+  each). The CLI's default door stays plain (the parity baseline): `--pairing`
+  opts in, `--print-cable` prints what the cable rule reads.
+- The device: every connection to a Mac goes through one TLS builder
+  (`DeviceTLS`), taps, reconnects, the wired dial and PR #12's moves
+  included, and a session at home counts as connected at its first window
+  list. Rows: a saved Mac's method word; "Not paired" (not saved, removed, or
+  a Mac that lets any device in); "Wired" for an unpaired Mac over the cable,
+  which pairs by itself; "Update Sill" for a plain door in Release, and for a
+  Mac seen over TLS whose row lost its `p` (no downgrade). A tap on "Not
+  paired" asks, then the home card (the scanner, or Enter Code Instead). A
+  goodbye `removed` or `pairingRequired` ends the session with its words
+  ("‹Mac› removed this ‹iPad›. Tap it to pair again.", "‹Mac› now asks
+  devices to pair. Tap it to pair this ‹iPad›.") and no reconnect. A DEBUG
+  build still dials a plain door (the CLI's, a Sill.app from before this
+  branch) until it has seen that Mac over TLS (`-SillForgetHomeTLS 1`
+  forgets); a device from before this branch can no longer connect to this
+  Sill.app at home.
+- Merged with main twice, not rebased. d11aa60 (cf05a78, PRs #16 to #28):
+  the device gate in `Door` for both TLS doors, the hello first inside TLS,
+  `DoorPolicy.afterGate`, `SillProtocol` 1 as this door's `sill/1`, the pure
+  checks into `Tests/checks` and CI. 691b93e (2b38179, PRs #29 to #33): the
+  tick keeps both rules (a kind 26 stands in for a device's tick; a TLS
+  client skips one right after a send, and one on the cable gets none);
+  main's `SILL_TEST_LOOPBACK` binds both TLS doors (`makeListener` takes the
+  TLS options and the loopback flag) and is among TestHooks' door hooks; one
+  `SILL_TEST_SOFTWARE_ENCODER`, main's (`PointerTestHooks`), this branch's
+  copy gone; the checks' lists united (27, 26 with mutants).
 - Review fixes (2026-09-27, ae2e228 to 1d95c6d, one commit per theme; the
-  plan's Results, "The review fixes"). Three lenses on da6cd66 confirmed 13
-  findings; a fourth, pairing's security, came back empty and was read again
-  from the code (one more). The floor: a host offers `sill/1` and `sill-pair/1`
-  for good and refuses a 1.0 device inside `sill/1` with "update"; it freezes
-  the TXT keys, the pairing exchange, kind 19's `v` (another `v` is answered
-  `closed`, no try) and kind 20's reasons, with an optional `message` for a
-  reason a device does not know. The Mac: the Mac's Cancel and a stop keep an
-  asker quiet, an expiry and a withdrawal (kind 19 "cancel", the device's
-  Cancel) do not; "An iPhone or iPad Needs Sill Updated" only after three plain
-  tries from one source in a minute; "‹device› Wants to Pair" ends when that
-  key pairs; its subtitles are sentences; a device-opened window announces its
-  first line; Require pairing's stored "off" is "0." and a signature by the
-  Mac's key (`RequirePairingValue`: a record another app made first reads on),
-  and the keychain store makes the trust list, empty, at the first launch. The
-  device: a tap on a tagless row under a saved Mac's Bonjour name dials that
-  Mac pinned, as the reconnect always did (`DiscoveryPolicy.rowMac`); an open
-  door's row reads "Not paired"; kind 18 names the session's Mac only when the
-  connection's own key signed it, and "removed" revokes only from a session
-  pinned to that Mac; the reconnect ends at a door that now asks devices to
-  pair; Pair This iPad… asks on its own `sill-pair/1` connection and says what
-  the Mac answered; "Paired with ‹Mac› over the cable." stays until the session
-  comes. Harness: `-SillNoAutoDesktop 1`, `-SillScanOverlay 1` over a live
-  session, `-SillOverlayLine`. Verified: every pure check (22), the touched
-  checks' mutants, the builds, the rig's live gates and a private simulator's
-  before and after (the cable's words, the overlay's line); main has moved on
-  since cf05a78 (PRs #29 to #33, not merged here).
-- **Untested, for Noah:** the plan's §11 device tests (P1 to P16), with the
-  install order: the iPad build first, then Sill.app. Also: Sill.app's first
-  launch of this build makes the trust list in the login keychain when it has
-  none, and Settings › Devices' Require pairing off then on again works (the
-  keychain store's own writes ran nowhere else); Pair This iPad… over an open
-  door says "…is showing a code now." only when the Mac shows one, and its
-  Cancel closes that window.
+  plan's Results, "The review fixes"). Three lenses confirmed 13 findings; a
+  fourth, pairing's security, was read again from the code (one more). The
+  floor: a host offers `sill/1` and `sill-pair/1` for good and refuses a 1.0
+  device inside `sill/1` with "update"; it freezes the TXT keys, the pairing
+  exchange, kind 19's `v` and kind 20's reasons, with an optional `message`
+  for a reason a device does not know. The Mac: an expiry and a device's own
+  Cancel (kind 19 "cancel") quiet nobody; "‹device› Wants to Pair" ends when
+  that key pairs; "An iPhone or iPad Needs Sill Updated" waits for the third
+  plain try; a device-opened window announces its first line; Require
+  pairing's stored "off" is "0." and a signature by the Mac's key
+  (`RequirePairingValue`), and the trust list exists from the first launch.
+  The device: a tap on a tagless row under a saved Mac's Bonjour name dials
+  that Mac pinned (`DiscoveryPolicy.rowMac`); an open door's row reads "Not
+  paired"; kind 18 names the session's Mac only when the connection's own
+  key signed it, and "removed" revokes only from a session pinned to that
+  Mac; the reconnect ends at a door that now asks devices to pair; Pair This
+  iPad… asks on its own `sill-pair/1` connection and says what the Mac
+  answered; "Paired with ‹Mac› over the cable." stays until the session
+  comes; `StreamClient+Home.swift` is A601/F601 in the project file.
+- Verified (the plan's Results, step by step: H0 to H18, S1 to S7, the
+  merges' and the review's gates). At the second merge:
+  `Tests/checks/run-all.sh`, all 27; the mutants of the 16 checks whose
+  sources it changed from both parents (StreamProtocol's), 419 of 419 caught;
+  `swift build -c release` clean from `git archive`, only the CaptureProbe
+  warning; iOS Debug and Release for the simulator and Debug for a device,
+  only the old `StreamClient` capture warning (StreamClient.swift:2861),
+  Release's Info.plist with `_sill._tcp` alone and none of the harness's
+  arguments in its binary; live on the merged CLI, 23 of 23: both TLS doors
+  and Direct Wireless's rebuilt listener on 127.0.0.1 alone under
+  `SILL_TEST_LOOPBACK`, one software-encoder line, pairing by the link and by
+  an ask and the code, the hello inside TLS, the remote door serving the key
+  paired at home, input's ticks over TLS (33 a second) and on the plain door
+  (34), a plain device refused; a private simulator against it, 6 of 6: an
+  unsaved Mac's ask answered `shown`, the link scanned in the home card, a
+  pinned session with its hello, and after a relaunch the saved Mac dialed
+  pinned with no ask. Every host on the software encoder, nothing streamed.
+- **Untested, for Noah:** the plan's §11, P1 to P16, on his devices, the iPad
+  build first (Debug, the usual route), then Sill.app: P1 the upgrade (the
+  iPad, paired for remote access on 2026-09-25, connects at home with no
+  step; the log's "Home door: TLS, pairing required (1 paired)."); P2 the QR
+  code over Wi-Fi (Remove it first; the window comes up in front while typing
+  goes on; under 20 s); P3 the typed code; P4 the cable (Remove, plug in, tap
+  the "Wired" row: no code, the Mac's notice, "over the USB cable" in
+  Devices; pull and plug while streaming); P5 locked (⌃⌘Q: "Unlock Mac mini,
+  then tap it again."); P6 Direct at the café (the hotspot, `%awdl0`); P7 an
+  older build ("An iPhone or iPad Needs Sill Updated"; it retries, the known
+  limit); P8 Remove while streaming; P9 the moves, each hop over TLS; P10 a
+  stranger's taps (the Mac's Cancel, then 10 minutes of "didn’t show a
+  code"); P11 the cost (rtt maxima on Wi-Fi, the cable without ticks,
+  Extreme at 120 fps, Sill.app's CPU); P12 remote after a home pairing; P13
+  Require pairing off, then on again; P14 VoiceOver (the rows, the card, the
+  Mac's window); P15 a USB Ethernet adapter reads "Not paired"; P16 the
+  iPhone's hotspot over USB gets the code window. Also: Sill.app's first
+  launch makes the trust list in the login keychain when it has none, and
+  Require pairing off then on again saves (the keychain store's own writes
+  ran nowhere else); Pair This iPad… over an open door says "…is showing a
+  code now." only when the Mac shows one, and its Cancel closes that window.
+  When this ships: the site's words (privacy.html says connections at home
+  are not encrypted, as Sill for Mac 0.3.1's are; index.html and support.html
+  pair only for Remote Access), and the README's sentence on 0.3.1.
+
 **The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
 from main at 8b0d418, merged with main at cf05a78 in b6f57d0, at 676b362 in
 e7307e6 and at 5c6a850 (PR #30, the iPhone's portrait layout) in e21ce1c, not
@@ -3037,11 +3096,15 @@ good.
   `HostSettingsChange`, `SettingsChoices` (the Mac menu's values) and
   `QualityPreset` (Low, Efficient, Balanced, High, Pro, Ultra, Extreme). Remote access:
   `Remote.swift` (kinds 18–22's payloads: `MacAddress`, `MacInfo`,
-  `SignedMacInfo`, `PairRequest`, `PairResult`, `Goodbye`), `RemoteTLS.swift`
-  (the one TLS 1.3 builder for both doors' ends and the tests),
+  `SignedMacInfo`, `PairRequest` (with pairing at home's methods `ask` and
+  `cancel`, `cable` and `v`), `PairResult` (its `method`, the ask's reasons
+  `shown`, `openOnMac` and `locked`, and `message`), `Goodbye` (with
+  `pairingRequired`)), `RemoteTLS.swift` (the one TLS 1.3 builder for both
+  doors' ends and the tests; `serverALPNs`, the two a host offers for good),
   `RemoteIdentity.swift` (SPKI fingerprints, the Mac ID, the hand-built
   certificate, keys), `Pairing.swift` (`PairingCode`, `PairingProof`,
-  `RecognitionTag`, `PairLink`), `AddressParser.swift`, `SafeText.swift`.
+  `RecognitionTag`, `PairLink`, and `HomeDoorTXT`, the home door's TXT key
+  `p`), `AddressParser.swift`, `SafeText.swift`.
   `Compatibility.swift` — `SillProtocol.current` (1), `SillVersion` (tags,
   bundles and the wire's versions, compared part by part) and `Hello` (kind 23,
   the device's first message); `Goodbye` (Remote.swift) carries `message`,
@@ -3109,7 +3172,26 @@ good.
   the door reads on the network queue), `KeychainIdentityStore` (Sill.app's),
   `PairingWindow` (pure), `RemoteServer` (the remote door), `Reachability`,
   `AddressList` (pure) and `RouterAddress` (read-only NAT-PMP/PCP),
-  `RemoteAccess` (main actor; ties them together, signs kind 18).
+  `RemoteAccess` (main actor; ties them together, signs kind 18; owns
+  pairing for both doors: the ask, the cable's devices, Require pairing,
+  Remove at both doors). Pairing at home (docs/home-pairing-plan.md): `Door`
+  (admission at a TLS door, one class behind both listeners: the pending
+  caps, the backoff, the verify block, the device gate, one pairing request
+  per `sill-pair/1` connection; `RemoteServer` keeps the remote door's
+  listener), `DoorPolicy` (who each door admits, the ask rule's six steps,
+  `afterGate`, `isTestHost`: a host that does not advertise and is not
+  Sill.app's own executable; pure, `Tests/checks/door-policy`), `CableLink`
+  (whether a connection came over the USB cable to an iPhone or iPad, from
+  InterfaceSnapshot's IOKit reading, and the device's ID; pure,
+  `Tests/checks/cable-link`), `CableReport` (`--print-cable`), `SessionLock`
+  (an unlocked console), `TestHooks` (the door and pairing hooks a host that
+  is not a test host ignores, one line each), `AskLimits` (PairingWindow.swift:
+  one device-opened window at a time, three in 10 minutes, the quiet after
+  the Mac's Cancel or a stop; `Tests/checks/ask-limits`) and
+  `RequirePairingValue` (HostIdentity.swift: Require pairing's record, off
+  only with the Mac's own signature). StreamServer's home door is plain (the
+  CLI without --pairing), TLS (`Door(.home)`, `p` in its TXT record) or
+  closed (no identity: fail closed), `HomeDoorMode`.
   `DeviceGate` (the device floor, "0" in every build so far, and a refusal's
   words and log lines; pure, checked with swiftc; the gate itself, which runs
   only above "0", is StreamServer's, with the TEST ONLY
@@ -3126,7 +3208,9 @@ good.
   to every device not moving it; InputInjector notes each pointer and scroll
   post just before it and, on a synthetic host, posts nothing (`in.dry`).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
-  `NSApplication.run`, the Terminal permission hint.
+  `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
+  door's TLS with pairing required, a throwaway identity, the code and link
+  on its own stdout) and `--print-cable`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding),
@@ -3134,9 +3218,11 @@ good.
   `QualityPreset`), `StatusItemController` (+ `MenuBuilder`), `StatusText`
   (all status copy), `StatusCard`, `StatusGlyph`, `SettingsWindow` +
   `SettingsPanes`, `Permissions`, `LoginItem`, `LogWindow`, `MainMenu` (key
-  equivalents), `DebugHooks`, `AppLog` (its print shadow), `RemoteAccessPane`
-  (Settings › Remote Access), `PairDeviceWindow` (the QR code and the typed
-  code), `PairingWindowAddress` (the address that window gives to type:
+  equivalents), `DebugHooks`, `AppLog` (its print shadow), `DevicesPane`
+  (Settings › Devices: Require pairing, the paired devices, Remove and
+  rename), `RemoteAccessPane` (Settings › Remote Access), `PairDeviceWindow`
+  (the QR code and the typed code; the window a device's ask opens, and the
+  cable notice), `PairingWindowAddress` (the address that window gives to type:
   Tailscale's name and IPv4 first, another VPN's IP only under this network's
   address; pure, checked with swiftc), `UpdatePolicy` (the update check's rules
   and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
@@ -3215,7 +3301,9 @@ good.
   `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
   `--stop-read@T`, `--pairing-wanted@T`; the remote door with `--tls
   --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
-  `--expect-tls-fail`, printing kinds 18, 20 and 22; the Mac's pointer with
+  `--expect-tls-fail`, printing kinds 18, 20 and 22; pairing at home with
+  `--pair-ask[=cable]`, `--then-code=FILE`, `--pair-hold=S`, `--pair-cancel`,
+  `--pair-v=N` and `--expect-pair=R`; the Mac's pointer with
   `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE@T`
   and `--input=JSON@T` (a literal kind 8), the input flags only to a
   `--synthetic` host on this Mac (lsof and ps); every argument is checked
@@ -3275,7 +3363,10 @@ good.
   the network, when a live session at home moves to the cable or to Wi-Fi or is
   made again (`pathPlan`, `upWait`; never a remote one), the memory of Macs with
   Direct Wireless on, the Remote rows and when a lost saved Mac is dialed away
-  from home; pure, checked with swiftc), `StreamScreen`
+  from home; pairing at home's rows and words, a tap's dial, the device's
+  cable check and how a session at home ends: `rowWord`, `homeDial`,
+  `onCable`, `rowMac`, `reconnectEnd`, `macInfoNamesSession`,
+  `removalRevokes`; pure, checked with swiftc), `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display, and `DuoLayout.phoneArrangement`,
   the idiom: which arrangement `.outerPortrait` draws; `DuoLayout.isPortrait`,
@@ -3317,9 +3408,14 @@ good.
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
   from home, the slow-link callout). Remote access: `DeviceIdentity`,
-  `SavedMacs` (pure), `RemoteDialPolicy` (pure), `RemoteConnector`,
-  `StreamClient+Remote` (pairing, remote dials, the reconnect order, links),
-  `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
+  `SavedMacs` (pure; `homeTLS` and `revoked` for pairing at home),
+  `RemoteDialPolicy` (pure), `RemoteConnector`, `StreamClient+Remote`
+  (pairing, remote dials, the reconnect order, links), `StreamClient+Home`
+  (pairing at home: `DeviceTLS`, the one TLS builder for every connection to
+  a Mac, the session gate at the first window list, the ask, the cable's
+  proof-less ok, the proofs sent to a row, how a session at home ends;
+  pbxproj A601/F601), `AddMacCard` (the card, the fields, `EscapeKey`; the
+  home card for a row), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
   swiftc), `PointerPresence` (the rules of the one pointer sprite: the Mac's
@@ -3327,6 +3423,9 @@ good.
   for the portrait trackpad; a kind 26's freshness; the network queue's feed
   with a hand-over's carry-over; the key row keeping what shows; the portrait
   pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301).
+  `Info-Debug.plist` is the Debug configuration's Info.plist: Info.plist's
+  keys, with `_silltest._tcp` beside `_sill._tcp` for the harness's
+  `-SillServiceType` (Release declares `_sill._tcp` alone).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -3338,7 +3437,8 @@ good.
   README's developer material until 2026-09-25, so a plan's "README" means a
   section there: the toolchain, make-app.sh, Sill.app's menu and Quality, the
   CLI's flags, the iOS project, Permissions (the TCC reset), settings from a
-  device, Direct Wireless, remote access (setup, troubleshooting, reset), the
+  device, Direct Wireless, pairing at home (the cable, Require pairing, older
+  builds, starting over), remote access (setup, troubleshooting, reset), the
   test tools in brief (Build and run below has them all), measuring latency,
   troubleshooting (slow, frozen, the encoder), releasing, known limitations.
 - `README.md` — the public front page: the site's lede, links to getsill.app
@@ -3418,10 +3518,13 @@ swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
+swift run -c release SillHost --pairing     # the home door speaks TLS, pairing required, a throwaway identity; the code and link print here (with --remote, one pairing for both doors)
+swift run -c release SillHost --print-cable # what the cable rule reads on each interface, and whether the console is unlocked; read-only, then exit
+python3 Scripts/sillclient.py PORT 5 none --pair-ask --then-code=$T/code --identity=$T/a   # a device's ask at a TLS home door, then the code the host printed (saved in $T/code)
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
-Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
+Tests/checks/run-all.sh                 # every pure check, as CI runs them (~4 min; --mutants adds the mutants, well over an hour)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
@@ -3513,6 +3616,38 @@ of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is
 ignored with one line), and `SILL_TEST_GOODBYE='<JSON Goodbye>'` makes its
 refusals send that payload instead (a reason the device does not know).
+Pairing at home, headless: `SillHost --synthetic --pairing` (the bare app's
+home door always speaks TLS, as Sill.app's does) with `SILL_TEST_REMOTE_DIR`,
+`SILL_TEST_NO_ROUTER=1`, `SILL_TEST_SOFTWARE_ENCODER=1` and
+`SILL_TEST_LOOPBACK=1`; the CLI prints its code and link, and again after each
+ask. The door and pairing hooks are TEST ONLY and honoured only by a test host
+(DoorPolicy.isTestHost: one that does not advertise and is not Sill.app's own
+executable; anywhere else TestHooks prints one "ignored" line for each set),
+and so are the ones above (SILL_TEST_SERVICE_TYPE and the rest):
+`SILL_TEST_CABLE_INTERFACE=<if>` counts a client scoped to that interface as
+one on the cable to an "iPad" (serial TEST) and lets this Mac's own address
+there through, so a client at this Mac's link-local address on it
+(`sillclient.py --host=fe80::…%<if> --pair-ask=cable`) stands in for a device
+on the cable, and the simulator's `-SillCableTest 1` for the device's side
+(lo0's `fe80::1%lo0` keeps such a test on this Mac; it needs a listener there,
+which SILL_TEST_LOOPBACK's 127.0.0.1 alone is not); `SILL_TEST_LOCKED=1` makes
+the Mac locked; `SILL_TEST_ASK_QUIET=<s>` shortens the 10 minutes of quiet
+after the Mac's Cancel or a stop; `SILL_TEST_ASK_FROM_THIS_MAC=1` skips the
+ask rule's step for an ask from this Mac itself (answered `openOnMac` unless a
+window is open, and lighting no menu item), so a test client on this Mac opens
+windows. The bare app takes `-requirePairing NO`, `-SillSetAfter '<s>
+requirePairing=0|1'`, `-SillCancelPairingAfter '<s>[; <s> …]'` (the window
+closed as its Cancel does), `-SillCableNoticeAfter <s>` (the cable notice for
+a sample device) and `-SillMenuAfter '<s>[; <s> …]'` (the status menu in the
+log, line by line). Sill.app itself ignores every `-Sill…After` hook,
+`-requirePairing` and `SILL_TEST_REMOTE_DIR` with one line each (any process
+can start it with arguments and its grants); `-SillRenderPreviews`,
+`-SillLogFile` and the encoder's variables still work there. Require pairing
+and the trust list live in the login keychain (service
+`me.saffer.sill.remote`, accounts `paired-devices` and `require-pairing`,
+beside the key "Sill Remote Access"), never in UserDefaults; Settings ›
+Devices' Remove forgets one device, and deleting those items makes this Mac
+new to every device.
 The bare app takes `-remoteAccess 1 -remotePort P`, `-SillSetAfter '3
 remotePort=P2'`, `-SillPairAfter <s>` and `-SillUnpairAfter <s>`; its
 `-SillRenderPreviews` adds the Remote Access pane's states and the pairing
@@ -3546,7 +3681,12 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay),
+scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay;
+`-SillOverlayLine asking|shown|openonmac|locked|noanswer` the line its ask's
+answer sets; under `-SillLive 1` it opens over the live session and asks),
+pairing at home's connect cases `homerows|homeasking|homecard|homecode|
+homecodeerror|homelocked|homeopenonmac|homerevoked|homecabledone|homeolder|
+pairingrequired` and settings cases `paired|pairedoff|openpair`,
 `-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
 draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip), and in
@@ -3556,9 +3696,23 @@ at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:po
 `'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
 that route), `-SillHelloVersion <v>` (the version the hello gives, against a
 host's floor), `-SillScreenFPS 120` (a 120 Hz screen) and `-SillDeviceKeySE 1`
-(a Secure Enclave device key, R0-a); `xcrun simctl openurl <udid>
-'sill://pair…'` shows the link's confirmation after the system's "Open in
-Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
+(a Secure Enclave device key, R0-a); for pairing at home (the normal app and
+`-SillLive 1`), `-SillServiceType _silltest._tcp` (the browsers look for the
+test type, so a test host registered with SILL_TEST_SERVICE_TYPE is a real
+row with its TXT record and no real Mac is; only the Debug build's
+Info-Debug.plist declares it), `-SillHomeDoor paired|open|plain` (what a
+`-SillConnect` address counts as, since an address has no TXT record:
+`plain`, the default, dials it plainly as before; `paired` pins the one saved
+Mac, else asks; `open` an open door), `-SillCableTest 1` (this device's path
+counts as the cable), `-SillForgetHomeTLS 1` (forget which Macs were seen over
+TLS, to dial another branch's older Sill.app plainly), `-SillTapRow <name
+prefix>` (tap that row once it is listed), `-SillHomeCode <digits>` and
+`-SillHomeLink <sill://pair…>` (the home card's code or scan once the Mac
+answers `shown`), `-SillOverlayCode <digits>` (Pair This iPad…'s ask, then
+that code, on a TLS session at home) and `-SillNoAutoDesktop 1` (the device
+never picks the Desktop by itself: a live gate streams nothing); `xcrun
+simctl openurl <udid> 'sill://pair…'` shows the link's confirmation after the
+system's "Open in Sill?". `-Sill.directWirelessMacs '("Mac mini")'` (seeds the
 device's memory of Macs with Direct Wireless on for one run; `'()'` empties it),
 `-SillConnect 127.0.0.1:PORT`
 (connect by address, also in the normal app: the only way to reach the

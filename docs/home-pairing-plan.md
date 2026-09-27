@@ -1,51 +1,5 @@
 # Pairing at home: Wi‑Fi, Direct and the cable — the plan
 
-## Status and hand-off (2026-09-27 06:40)
-
-Stopped by Noah at 99 % of the week's usage, at the end of build step 5 of 5 (§12), before the
-review phase. Branch `home-pairing` (worktree `/Users/noah/Downloads/winstream-pairing`, main merged
-in at 1f3072a) holds: the plan and its review (0f50d14, c3fbb8c), H0's probes (8ce57ab), step 1 the
-protocol (21b5789), step 2 the host door (c0b22d7), step 3 Sill.app (47bbbb8), step 4 iOS (41caa8f),
-and the commit after this one: step 5 as the interrupted agent left it, mid-verification (it had
-rerun the pure checks and the home and device mutants and was building iOS Release and a device
-build and sheeting the Settings cases at phone sizes; results in the session scratchpad,
-home-pairing/5/, if it survives a reboot). Unreviewed.
-
-2026-09-27 01:15: step 5 verified as 1b8de5f left it, with nothing to fix (Results, Step 5, "Verified
-again"), by two sessions, the first interrupted at 00:22 with this written but not committed: the
-builds, every pure check with its mutants, S1's photos and the Settings cases at the Duo and phone
-sizes, S7, and S2 with S5's end live, 18 of 18, every test listener on loopback (the first session's
-run; the second's found Noah's iPad streaming from Sill.app throughout).
-
-2026-09-27 02:38: main merged in at cf05a78 (PRs #16–#28; d11aa60, one merge commit, not a rebase),
-with the device gate in `Door` for both TLS doors and `DoorPolicy.afterGate`, `SillProtocol` 1
-settled as this door's `sill/1`, and this branch's pure checks moved into `Tests/checks` and CI
-(Results, "The merge with main"). Every check passes and every mutant of the checks the merge
-touched is caught; the host gates of both plans that the merge could break pass live, on the
-software encoder with every listener on loopback. Not pushed.
-
-2026-09-27 06:40: the security review's fixes (Results, "The review fixes"). Its three lenses
-confirmed 13 findings; the pairing-security lens came back empty, cut short by a usage limit, and
-was read again from the code here, which found one more (Require pairing's keychain record, and
-the trust list before the first pairing). All 14 are fixed, one commit per theme (ae2e228 to
-1d95c6d), each with a check or a live run that fails before and passes after where one can; every
-pure check passes, every mutant of the checks the fixes touched is caught, and the builds are
-clean. Not pushed.
-
-Next agent, in order: (1) verify step 5: done, above; (2) merge main and rerun every check: done,
-above; (3) the security review the workflow planned (three lenses: the wire and TLS, pairing's rules
-and limits, the device UI), fixes: done, above; (4) the docs of §12's step 6 that are still to write
-(CLAUDE.md's Layout and Build and run for pairing at home's files, flags and TEST ONLY variables,
-and the README's Pairing section; the merge wrote only CLAUDE.md's Current step entry, its
-Compatibility floor and its Tests/checks and sillclient lines; the review fixes' harness arguments,
-`-SillNoAutoDesktop`, `-SillOverlayLine` and a live `-SillScanOverlay`, are in ContentView's
-contract and §7.9, and main has moved on since cf05a78: PRs #29 to #33, origin/main at 2b38179, to
-merge first); (5) the PR with Noah's device tests (§11) and the install order: the iPad build first,
-then Sill.app. Quote Noah's authorization in the prompt: "Yes please lets add a pairing process for
-Wi-Fi/Direct connect, something easy to do but still secure, similar to how Tailscale is being
-paired. Wired should still pair automatically." (2026-09-25) and this resumption.
-
-
 2026-09-25. It stands alone: the implementer needs no other design document, though it builds on
 `docs/remote-access-plan.md` (PR #13) and names its sections as "the remote plan §…". Written from
 a read-only survey of origin/main `ba91136` ("Merge pull request #13", remote access) in the
@@ -2955,3 +2909,93 @@ stand-in, checked with `lsof` by PID), and the simulator gates' app picked nothi
   Cancel's withdrawal ran live in 3); 9's reconnect and 8's replayed kind 18 live (the first needs
   Bonjour rows, the second a Mac replaying another's kind 18: pure checks with real signatures
   only); main's commits since cf05a78 (PRs #29–#33, origin/main at 2b38179), not merged.
+
+### The merge with main again, and the pull request (2026-09-27)
+
+`$SP` here is `scratchpad/home-pairing-finish/publish` in the session's scratchpad: the merge's
+host gates (`gates.py`, their logs in `gates/`), the simulator's smoke test (`sim/simsmoke.py`, its
+run in `sim/run/`) and the builds', checks' and mutants' logs (`logs/`). The two `git archive`
+copies of the merge (one for the mutants, one for the builds and gates), every DerivedData and the
+private simulator ("Sill home-pairing") were deleted after.
+
+Main was at 2b38179: PRs #29 (the Mac download in a disk image), #30 (the iPhone's portrait
+layout), #31 (the Mac's pointer on the device: kind 26, `PointerWatch`, `PointerControl`,
+`PointerPresence`, `SILL_TEST_LOOPBACK`, its own `SILL_TEST_SOFTWARE_ENCODER`), #32 (Sill for Mac
+0.3.1) and #33 (the site's disk image). One merge commit (691b93e), not a rebase; git stopped in
+nine files, each resolved by reading both sides.
+
+**What landed.**
+- The tick (`StreamServer.tick`) keeps both rules: a kind 26 just sent to a device stands in for
+  its tick (main), and a TLS client skips a tick right after anything else went out while one on
+  the USB cable gets none (§8; this rule, `client.encrypted`, already covered main's remote-door
+  case). The pointer's sampling runs at every door as main has it.
+- `SILL_TEST_LOOPBACK` (main's: a test host's doors on 127.0.0.1 alone):
+  `makeListener(peerToPeer:port:tls:loopback:)` takes both the TLS home door's options and the
+  loopback flag, so the first listener, a Direct Wireless replacement and the rebuild at start
+  with Direct Wireless on stay on 127.0.0.1 over TLS as over plain TCP; the remote door's listener
+  kept main's binding. It follows this branch's test host (`DoorPolicy.isTestHost`) and is among
+  `TestHooks.doorAndPairing`, so any other host says once that it ignores it.
+- `SILL_TEST_SOFTWARE_ENCODER`: step 2 added it, and so did the pointer plan, with the same line and
+  meaning; main's (`PointerTestHooks.softwareEncoder`, which the pointer-watch check covers) stays,
+  and this branch's copy is gone.
+- `sillclient.py`, ContentView's harness contract and MockCatalog: both sides' flags, arguments and
+  seeds. CI's mutants matrix and `Tests/checks/README.md`: the union, 27 checks (26 with mutants).
+  CLAUDE.md: both sides' Current step entries and the checks' list. `project.pbxproj` merged by
+  itself: PointerPresence.swift is A301/F301, PhonePortraitLayout.swift A501/F501 and
+  StreamClient+Home.swift A601/F601.
+
+**The docs of §12's step 6**, written here: CLAUDE.md's Current step entry, its Layout (`Door`,
+`DoorPolicy`, `CableLink`, `CableReport`, `SessionLock`, `TestHooks`, `AskLimits`,
+`RequirePairingValue`, `DevicesPane`, `StreamClient+Home`, `Info-Debug.plist`, the wire's new
+values, sillclient's flags) and its Build and run (`--pairing`, `--print-cable`, the TEST ONLY
+variables and the bare app's hooks, none of which Sill.app takes, the keychain items, the
+harness's arguments); docs/DEVELOPMENT.md's "Pairing at home" (at home, over the cable, Settings ›
+Devices and Require pairing, older builds, the CLI's plain door, starting over) and the sections
+it touches; README.md's How it works and Good to know (pairing and the encrypted home connection,
+with Sill for Mac 0.3.1 named as the download that came before it). The site still describes
+0.3.1's plain home door (privacy.html) and pairs only for Remote Access (index.html,
+support.html): its words change when a build with pairing at home ships.
+
+**Verified** (2026-09-27, 07:30–09:15). Nothing here used the hardware encoder: every host
+ran with `SILL_TEST_SOFTWARE_ENCODER=1` and streamed nothing, and every listener was on 127.0.0.1
+(`SILL_TEST_LOOPBACK=1`, checked with `lsof` by the host's PID); `no-device.sh` found no device on
+Noah's Sill.app at each run.
+- `Tests/checks/run-all.sh` on the merge: all 27 pass (228 s): addresses 41, ask-limits 34,
+  cable-link 40, clientlink 89, compatibility 75, device-gate 58, dmg-layout 70, door-policy 128,
+  encoder-mailbox 38,256, encoder-slowstate 1,207, fence 15 modes, goodbye 45, home-device 164,
+  home-model 51, home-records 39, home-txt 49, ledger 90, origin 66, pairing-address 80,
+  phone-portrait 149, pointer-control 152, pointer-presence 165, pointer-watch 132, policy 336,
+  protocol 190 and its 8 cross-checks, remote-rules 107, update-policy 124.
+- The mutants of the 16 checks that compile StreamProtocol, whose sources the merge changed on both
+  sides (this branch's Remote, Pairing, RemoteTLS, Compatibility and HostSettings; main's Pointer
+  and StreamMessage), on a `git archive` of 691b93e: addresses 15, ask-limits 20, cable-link 20,
+  compatibility 13, device-gate 14, door-policy 58, goodbye 18, home-model 15, home-records 21,
+  home-txt 24, pairing-address 35, pointer-control 33, pointer-watch 40, protocol 23, remote-rules
+  52 and update-policy 18, 419 of 419 caught (1 h 24 min). The other 11 checks compile files equal
+  to one parent's, where their mutants ran (the ledger has none).
+- Builds: `swift build -c release` from `git archive`, clean, only the old CaptureProbe warning;
+  iOS Debug and Release for the simulator (signed ad hoc) and Debug for `generic/platform=iOS`
+  (`CODE_SIGNING_ALLOWED=NO`), each with fresh DerivedData, only the old `StreamClient` capture
+  warning (`StreamClient.swift:2861` now). Release's Info.plist declares `_sill._tcp` alone, the
+  Debug ones `_silltest._tcp` too; all three `ITSAppUsesNonExemptEncryption` false, version 0.5
+  (1), with `PrivacyInfo.xcprivacy`; none of the harness's arguments is in the Release binary.
+- Live, the merged CLI (`gates.py`, 23 of 23). M1, `--pairing --remote`: both doors on 127.0.0.1
+  alone; the loopback and software-encoder lines once each and no "ignored" line; pairing by the
+  link over the home door, then a pinned session with its hello after "Client connected"; input
+  (`--move`) starting the ticks over TLS, 33 a second, with no kind 26 to the device moving the
+  pointer; the key paired at home served at the remote door; an ask, the code the CLI then
+  printed, and a session; a plain device given no window list and no goodbye. M2, the plain door:
+  a plain session with its hello, and input's ticks, 34 a second. M3, `--pairing
+  --direct-wireless`: the listener rebuilt at start with the peer-to-peer flag still on 127.0.0.1
+  alone (no Bonjour service, so AWDL stays off), with pairing and a session through it.
+- Live, a private simulator (iPad Air 11-inch (M4), iOS 27.0) with the Debug build against the
+  merged CLI (`sim/simsmoke.py`, 6 of 6): `-SillConnect 127.0.0.1:P -SillHomeDoor paired` with
+  nothing saved asked; the CLI's open window answered `shown`; `-SillHomeLink` scanned its link in
+  the home card ("paired … at the home door, proof_M checked, pin saved"); then "connected … over
+  TLS, a saved Mac", with the ask, "Paired … with the QR code.", "Client connected" and the hello in
+  the host's log. Relaunched, the saved Mac was dialed pinned and connected with no ask.
+  `-SillNoAutoDesktop 1`: nothing streamed.
+- Not run: Noah's devices (P1–P16); S1's photos and the other S gates again (the merge brought
+  main's pointer and portrait code into StreamClient, StreamScreen, HostSettingsPanel, ContentView
+  and MockCatalog beside this branch's; the smoke test covers a pairing and a session, not the
+  photos); the rest of the H list on the merge.

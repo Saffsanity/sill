@@ -14,7 +14,7 @@ the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pu
 pushes to `main`.
 
 ```
-Tests/checks/run-all.sh                   # every check, about three minutes on an M-series Mac
+Tests/checks/run-all.sh                   # every check, about four minutes on an M-series Mac
 Tests/checks/run-all.sh policy fence      # only these
 Tests/checks/policy/run.sh                # one check, with its whole output
 Tests/checks/run-all.sh --mutants         # also the mutants: well over an hour
@@ -56,7 +56,14 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`), with `main.swift` and `home.swift` | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs; pairing at home's model, a look-alike under a saved Mac's name among it, and the saved Macs' home fields (`home.swift`) | 107 | 52 |
 | `update-policy` | `Sources/SillMenuBar/UpdatePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | Sill.app's update check: what each answer from GitHub's releases feed means, the offer, the schedule, the feeds and pages it accepts, every text | 124 | 18 |
 
-COUNTS-PARAGRAPH-TO-WRITE
+The counts are those of the `home-pairing` branch after its merge with main at 2b38179
+(2026-09-27), where every check passes. The mutants of the 16 checks that compile StreamProtocol,
+which that merge changed on both sides, were run again there, every one caught
+(docs/home-pairing-plan.md, Results, "The merge with main again"); the others' are as their
+branches last ran them: `home-device` and `policy` after pairing at home's security review,
+`dmg-layout` and `phone-portrait` on the `mac-dmg` and `iphone-portrait` branches, `fence` and
+`pointer-presence` on `pointer-visibility` after its review, the two encoder checks on
+`encoder-two-in-flight`, `clientlink` and `origin` on theirs.
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.

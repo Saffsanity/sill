@@ -44,10 +44,10 @@ the App Store yet; until it is, you can build it from source (below).
   the whole desktop, Sill captures it with ScreenCaptureKit and encodes it as
   HEVC with VideoToolbox, on the hardware video encoder in your Mac (or, while
   that is busy, in software). It captures nothing while no device is connected.
-- **The picture** goes over a TCP connection straight to the Sill app on your
-  iPhone or iPad, which decodes and shows it. When the encoder or the link
-  falls behind, Sill drops frames rather than queue them, so the picture stays
-  current.
+- **The picture** goes over an encrypted connection (TLS 1.3) straight to the
+  Sill app on your iPhone or iPad, which decodes and shows it. When the
+  encoder or the link falls behind, Sill drops frames rather than queue them,
+  so the picture stays current.
 - **Your input** goes back the same way: taps and clicks, scrolls with
   momentum, the on-screen trackpad, keys and typed text, and Apple Pencil as
   the pointer. Sill for Mac turns it into mouse and keyboard events, which
@@ -56,19 +56,28 @@ the App Store yet; until it is, you can build it from source (below).
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
   over peer-to-peer Wi-Fi, the way AirDrop does.
-- **Away from home**, Remote Access (off by default) lets in only the devices
-  you pair, through your own VPN or a port you forward on your router. Those
-  connections use TLS 1.3, with each end pinned to the other's key.
+- **Pairing**: you pair each iPhone or iPad with your Mac once. Tap your Mac on
+  the device, and your Mac shows a code: scan it, or type its 12 digits. Over
+  a USB cable the device pairs by itself. From then on each end knows the
+  other's key, and every connection, nearby or away, is pinned to those keys.
+  In Sill's Settings on your Mac, Devices lists the devices you paired, and
+  you can remove any of them there.
+- **Away from home**, Remote Access (off by default) lets the devices you
+  paired reach your Mac through your own VPN or a port you forward on your
+  router.
 - **The virtual display** (off by default) moves a window you stream onto a
   display of its own on your Mac, so it keeps updating when other windows
   cover it. It uses a private macOS API, which is one reason Sill for Mac comes
   from the website and not from the Mac App Store.
 
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
-does not play sound from your Mac. On your local network, over the cable and
-over Direct Wireless Connection, the connection is not encrypted. While Sill
-runs, any iPhone or iPad with Sill on the same network can connect to your
-Mac, and so can one nearby while Direct Wireless Connection is on. Use it on
+does not play sound from your Mac. Only the iPhones and iPads you paired can
+connect, unless you turn off Require pairing in Settings › Devices; then any
+device on your network can, still encrypted. Sill for Mac 0.3.1, the download
+today, came before pairing at home: with it, connections on your local
+network, over the cable and over Direct Wireless Connection are not
+encrypted, and any iPhone or iPad with Sill on the same network, or nearby
+while Direct Wireless Connection is on, can connect to your Mac. Use it on
 networks you trust.
 
 ## Tips
@@ -103,7 +112,8 @@ The iPhone and iPad app:
 2. In the Sill target's Signing & Capabilities, pick your team, and change the
    bundle identifier `me.saffer.sill` to one of your own.
 3. Run it on an iPhone or iPad on the same network as your Mac, and tap your
-   Mac.
+   Mac. The first time, a Sill for Mac built from this repository asks you to
+   pair: scan the code it shows, or connect the device with a USB cable.
 
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest: every command-line
 flag, the test tools and the simulator harness, permissions and how to reset
@@ -116,7 +126,7 @@ to the conventions and decisions in [CLAUDE.md](CLAUDE.md): Swift and Apple
 frameworks only, no third-party dependencies, nothing that needs a server, and
 latency before picture quality. Open an issue before starting anything large.
 Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
-CI, in about two minutes and with no device.
+CI, in about four minutes and with no device.
 Contributions are accepted under the project's license. Please report a
 security problem privately, as [SECURITY.md](SECURITY.md) says, not in a
 public issue.
