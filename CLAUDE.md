@@ -8,6 +8,87 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The Mac download in a disk image (2026-09-27, branch `mac-dmg` from main at
+cf05a78).** Noah: "Sill should open in a .dmg and be draggable into applications
+folder like regular apps". `Scripts/release.sh` now makes `Sill.dmg` beside
+`Sill.zip`, from the same notarized, stapled app. Nothing was notarized,
+published or tagged, and the download page still links the zip.
+- The image (`Scripts/make-dmg.sh`, Layout): Sill.app, a link to
+  /Applications, a background with an arrow from one to the other
+  (`design/DMGBackground.svg`, 660 x 400 points in the app icon's greys, with
+  "To install Sill, drag it to Applications." under them), and the app's icon
+  as the volume's. Its window: 660 x 400 points (428 with the title bar) at
+  (200, 120), icon view, no toolbar, sidebar, path or status bar, 128-point
+  icons at (170, 180) and (490, 180). HFS+ and ULFO (LZFSE, read-only): the
+  script's header says why, and why not APFS. The window is a `.DS_Store` that
+  `Scripts/dmg-layout` (Swift: Foundation, ImageIO) writes with no Finder and
+  no AppleScript, in Finder's own layout: re-encoding the records of a
+  Finder-made installer image's `.DS_Store` (2023) gives its allocated bytes
+  exactly (only the stale bytes Finder leaves in free blocks differ), and
+  Claude's image of September 2026 has the same blocks, free lists and header.
+  The background's alias is Finder's form (tags 0, 16, 17, 1, 2, 14, 15, 18
+  and 19; tag 20, the build folder's image, left out), and CoreFoundation
+  resolves it to the picture on the mounted image.
+- release.sh: `make-dmg.sh --prepare` right after the build (the layout tool
+  and the background, so a problem with either stops the run before anything
+  goes to Apple); a real run, after the zip's checks, makes the image of the
+  stapled app, signs it with the same identity, sends it to Apple on its own
+  (`notarize`, the zip's code as a function; its answer and log
+  `.build/Sill-<version>-dmg-notary*`), staples it and checks it
+  (`check_disk_image`: hdiutil verify, stapler validate, spctl's open context
+  as "Notarized Developer ID", mounted `-nobrowse` in `$TMPDIR` with the
+  Sill.app inside through `check_gatekeeper`, detached on failure too); it
+  prints both SHA-256s, and `--publish` uploads Sill.dmg, Sill.dmg.sha256,
+  Sill.zip and Sill.zip.sha256, the notes naming both hashes. A dry run makes
+  the image from the app before stapling, signed with the identity.
+- The zip stays in every release for now; the download page moves to the
+  image only once a release carries it: docs/release-checklist.md, part 2
+  (the release first, the link checked, then the page, then the site
+  republished), and the page's new lines wait in a comment above its card in
+  `site/download.html`. The release workflow's verify job makes
+  `Sill-<version>-adhoc.dmg` (`make-dmg.sh --sign -`) and keeps it as a second
+  artifact; the publish job's notary-log artifact takes both submissions'.
+- Verified: the rehearsal, `SILL_SIGN_IDENTITY='Developer ID Application:
+  NOAH WILLIAM SAFFER (9B2KKVM937)' Scripts/release.sh --dry-run`, in 46 s with
+  the build and no keychain prompt: Sill-0.3.0.dmg 3.2 MB (the zip 2.8 MB, the
+  app 6.0 MB), UDIF read-only compressed (lzfse), its CRC32 valid, signed by
+  that identity with a timestamp, identifier me.saffer.sill.dmg; `spctl -a -vv
+  -t open --context context:primary-signature` rejects it as "Unnotarized
+  Developer ID", which notarization changes. Mounted: an HFS+ volume "Sill",
+  22.0 MB with 7.0 MB used, exactly the five items, Applications a link to
+  /Applications, the custom-icon flag, .VolumeIcon.icns the app's, the TIFF
+  660x400 at 72 dpi and 1320x800 at 144, the `.DS_Store` read back by the tool
+  and by a decoder of its own (bounds {{200, 120}, {660, 428}}, the icons'
+  places, the alias's IDs the folder's and the file's, its local dates four
+  hours from its UTC ones), and Sill.app byte for byte `.build/Sill.app`,
+  passing codesign --deep --strict. Offline, in the session's scratchpad
+  (`mac-dmg/tests`): release.sh against stand-ins, 169 checks (PR #18's 101 and
+  68 for the image: every step's order, the image made once from the stapled
+  app, both submissions, the four assets with their checksum files, every
+  failure stopping before anything is published, the mount detached, also
+  when it holds no HFS+ volume, a busy attach tried again) and 38 of 38
+  mutants (the 20 and 18 new); make-dmg.sh for real (hdiutil, codesign ad
+  hoc) against a fake app, read back with a decoder of its own, 97 checks and
+  24 of 24 mutants with no image left attached (APFS, zlib, the link, a mount
+  under the home folder, which puts `.fseventsd` on the image, the icons, the
+  title bar, the alias's dates and mount point, the free lists, among them;
+  the APFS one first left its image attached, which b6cd0df fixed in both
+  scripts); publish_release with the real gh against a stand-in GitHub API
+  (the four uploads with their names and sizes, the notes), 13 checks; the
+  workflow's YAML, its pinned actions, and the new step run under bash 3.2.
+- **Untested, for Noah:** a real release (two notarizations, the image's
+  staple, spctl's "Notarized Developer ID" for it, `--publish`'s four assets);
+  the window in the Finder (the whole picture in view under macOS 27's title
+  bar, the names under the icons readable in Dark Mode on the light picture,
+  the volume icon): the checklist's part 1 §2 has the look; the image on
+  another Mac (downloaded, so quarantined: it opens, the drag, Sill opens,
+  also offline); the verify job on GitHub (hdiutil and Quick Look on the
+  runner); the page's move.
+- Known: files written from a Claude session carry `com.apple.provenance`,
+  which `xattr -d` can't remove, so the rehearsal image's files carry it
+  (Claude.dmg's have none); the zip has always carried the same attributes in
+  its AppleDouble entries. Not changed here.
+
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and
@@ -2676,13 +2757,20 @@ good.
   `SillLinks.swift` that isn't one, and sourced it only defines its
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
   builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
-  (M6) makes the download from it:
-  `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
-  service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
-  the ticket stapled, the zip made again with the ticket inside, and a copy
-  unpacked from it checked with `stapler validate` and `spctl` ("Notarized
-  Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
-  `site/download.html`. It refuses to start, before building, without a
+  (M6) makes the downloads from it:
+  `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
+  background, before anything goes to Apple), a zip (`ditto -c -k
+  --keepParent`), Apple's notary service (`notarytool submit --wait`, the
+  profile in `SILL_NOTARY_PROFILE`), the ticket stapled, the zip made again
+  with the ticket inside, and a copy unpacked from it checked with `stapler
+  validate` and `spctl` ("Notarized Developer ID"); then the disk image of the
+  stapled app (`make-dmg.sh --sign`), notarized on its own, stapled, and
+  checked (`hdiutil verify`, `stapler validate`, `spctl -t open --context
+  context:primary-signature` as "Notarized Developer ID", mounted `-nobrowse`
+  in `$TMPDIR` and the Sill.app inside checked as the zip's copy); it prints
+  `.build/Sill-<version>.dmg` and `.zip` with their SHA-256. A dry run makes
+  the image too, from the app before stapling, signed with the same identity.
+  It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
   update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
@@ -2698,7 +2786,25 @@ good.
   missing tag from the default branch's tip; not asked in the release
   workflow, whose checkout is that tag and keeps no credentials); in
   Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
-  Sill.app will offer the release. Sourced, it only defines its functions.
+  Sill.app will offer the release. It uploads `Sill.dmg`, `Sill.dmg.sha256`,
+  `Sill.zip` and `Sill.zip.sha256` (the zip kept for now: the site's links name
+  it until a release carries the image). Sourced, it only defines its functions.
+  `Scripts/make-dmg.sh --sign IDENTITY APP DMG` (`-` for ad hoc) makes the
+  image: an HFS+ volume "Sill" (not APFS: Finder names the background by an
+  HFS+ alias record, and Finder-made and current third-party images are
+  HFS+) with the app (`ditto`), a link to /Applications, `.background/`
+  (design/DMGBackground.svg rendered by Quick Look at 1x and 2x, cropped,
+  joined by tiffutil into one TIFF; cached in `.build/dmg`) and
+  `.VolumeIcon.icns` (the app's AppIcon.icns, with the root's custom-icon
+  flag); its window laid out by a `.DS_Store` that `Scripts/dmg-layout`
+  (Swift, compiled into `.build/dmg`; DSStore.swift, FinderAlias.swift,
+  DMGLayout.swift) writes without Finder and reads back (`check`); converted
+  to ULFO (LZFSE, read-only), signed (identifier `me.saffer.sill.dmg`, a
+  timestamp unless ad hoc) and checked mounted (exactly five items at the
+  root, the link, the layout, the app byte for byte). Mounts are `-nobrowse`
+  in a new folder in `$TMPDIR`: mounted under the home folder, fseventsd
+  writes `.fseventsd` onto the image as it unmounts. `--prepare` only builds
+  the tool and the background. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
@@ -2826,7 +2932,8 @@ good.
   host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
   with "mutants", each check's mutants in a job of its own. `release.yml`: a
   pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
-  `make-app.sh` signed ad hoc, zipped as an artifact) unless the repository
+  `make-app.sh` signed ad hoc, zipped, and `make-dmg.sh`'s image of it, ad hoc
+  too, as two artifacts) unless the repository
   variable `SILL_SIGN_IN_CI` is `true`, then the Developer ID .p12 into a
   temporary keychain, the notary key stored as a profile in it, `release.sh
   --publish`, and the keychain deleted in an always() step. Secrets,
@@ -2882,6 +2989,7 @@ SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
 Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (docs/release-checklist.md, TestFlight; --privacy-report, --print-version)
+Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's disk image of any build, ad hoc (release.sh makes the real one)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
