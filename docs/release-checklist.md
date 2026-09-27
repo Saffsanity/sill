@@ -179,43 +179,69 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
 
 ### 5. The keychain provisioning profile (for the hardened identity keychain)
 
-Optional, but recommended before the first public build (docs/keychain-plan.md): it moves Sill's
-remote‑access identity (the Mac's key, the trust list, Require pairing) from the legacy login
-keychain to the data‑protection keychain, which no other process can pre‑create or read. Without it,
-a release still builds and runs — it keeps the identity in the login keychain, and `make-app.sh
---release` and `release.sh` say so in the log. Landing it before the first public build means new
-installs write straight to the strong keychain and only your own dev Macs need the reset below.
+Recommended before the first public build (docs/keychain-plan.md): it moves Sill's remote‑access
+identity (the Mac's key, the trust list, Require pairing) from the legacy login keychain to the
+data‑protection keychain, which no other process can pre‑create or read. Without it, a release
+still builds and runs — it keeps the identity in the login keychain, and `make-app.sh --release`
+and `release.sh` say so in the log. Landing it before the first public build means new installs
+write straight to the strong keychain and only your own dev Macs need the reset below.
 
-Team **9B2KKVM937** (Developer ID), access group **9B2KKVM937.me.saffer.sill.mac**. There is no
-Xcode project for the Mac app, so mint the profile with a one‑off target:
-
-- [ ] In a throwaway Xcode macOS App target, set the bundle identifier to `me.saffer.sill.mac`, the
-      team to 9B2KKVM937, Signing to Automatic, and add the **Keychain Sharing** capability with the
-      group `me.saffer.sill.mac`. Then, once (it registers the App ID's Keychain Sharing capability
-      and downloads a **Developer ID** provisioning profile that authorises the access group):
-      `xcodebuild -allowProvisioningUpdates -scheme <that target> -destination 'generic/platform=macOS' -configuration Release archive`
-      (the same `-allowProvisioningUpdates` mechanism the App Store profile used). This registers a
-      new App ID and capability on your Apple Account and may prompt for it — it is a deliberate
-      step, so a background/CI run must not do it.
-- [ ] The profile lands in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` (a
-      `.provisionprofile`; `security cms -D -i <file>` prints its plist — check `Entitlements ›
-      application-identifier` is `9B2KKVM937.me.saffer.sill.mac`). Copy it to
-      `Packaging/embedded.provisionprofile` (git‑ignored; keep a backup outside the repo), or point
-      `SILL_PROVISION_PROFILE` at it.
-- [ ] Check: `make-app.sh --release` prints `identity keychain: data-protection keychain (access
-      group 9B2KKVM937.me.saffer.sill.mac)`. A profile that is for the wrong app‑id, expired, or
-      undecodable is refused before it builds an app that macOS would kill at launch.
-- Two teams: your Apple Development identity is team **HG877AGTQ7**, the Developer ID is
-      **9B2KKVM937**. Only the Developer ID build carries the profile and the access group; a
-      development build (make-app.sh's default) must **not** — it keeps `SillDebug.entitlements` and
-      the login keychain, or macOS would kill it at launch.
-- Profile validity: a Developer ID provisioning profile is issued valid for years (Apple issues
-      them well beyond the signing certificate's own life), but Gatekeeper checks it at **every
-      launch**, so an expired one stops the app launching. `make-app.sh` refuses an expired profile
-      and warns within 30 days; renew with the same `-allowProvisioningUpdates` run and replace
-      `Packaging/embedded.provisionprofile`. A **missing** profile is the safe fallback — the release
-      builds on the login keychain with a log line — but an **expired** one is an error, not a
-      fallback, because it would already be embedded.
+- [x] **Made 2026-09-27** on developer.apple.com (Certificates, Identifiers & Profiles): the App ID
+      "Sill for Mac", `me.saffer.sill.mac`, and the Developer ID provisioning profile **"Sill
+      Developer ID"**, UUID `18e9509f-5498-4533-ba59-293461a61a0d`, platform macOS, team
+      9B2KKVM937, all Macs, for the Developer ID Application certificate (SHA‑1 `42424F38…71D8D6`).
+      It grants `com.apple.application-identifier` `9B2KKVM937.me.saffer.sill.mac`,
+      `com.apple.developer.team-identifier` 9B2KKVM937 and `keychain-access-groups`
+      `9B2KKVM937.*`, which covers the group `9B2KKVM937.me.saffer.sill.mac`. It expires
+      **2044‑09‑22** (Apple issues them for 18 years).
+- Where it lives: `Packaging/embedded.provisionprofile` (git‑ignored; the copy make-app.sh embeds),
+      backed up as `~/Library/Developer/Xcode/UserData/Provisioning Profiles/18e9509f-5498-4533-ba59-293461a61a0d.provisionprofile`
+      and as the download, `~/Downloads/Sill_Developer_ID.provisionprofile`; all three byte for
+      byte the same (SHA‑256 `4f9f99b0…d996ed65`). It holds no secret (Apple's signature, the
+      public certificate, the entitlements), and the developer site downloads it again at any time.
+      `SILL_PROVISION_PROFILE` points make-app.sh at another copy.
+- Check: `security cms -D -i Packaging/embedded.provisionprofile` prints its plist; a Mac profile
+      names the app `Entitlements › com.apple.application-identifier` (`application-identifier` is
+      the iOS key, and an app signed with it is killed at launch: docs/keychain-plan.md §9b).
+      `make-app.sh --release` prints `identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)`. It refuses, before it writes an app that macOS would kill
+      at launch, a profile that doesn't grant what `Packaging/SillRelease.entitlements` asks for
+      (the application identifier, the team, the keychain group), doesn't list the certificate
+      that signed the build, has expired, or doesn't decode. Proved with this profile on
+      2026‑09‑27 (docs/keychain-plan.md §9b): the build launches, and only an entitled build reads
+      the group.
+- [ ] **By 2027‑02‑01: the certificate, then the profile.** The profile outlives the certificate it
+      lists: the Developer ID Application certificate ends on 2027‑02‑01, with the Apple CA that
+      issued it ("Developer ID Certification Authority", 2012–2027). Apple says a build signed with a
+      secure timestamp before then keeps launching (not something this Mac can test yet); a build
+      after it needs a new Developer ID certificate (§1) and then the profile with it: on the
+      developer site, edit "Sill Developer ID" to use the new certificate (or make a new Developer ID
+      profile for `me.saffer.sill.mac`), download it, and replace
+      `Packaging/embedded.provisionprofile` and the backups. Until then make-app.sh refuses: "lists
+      the certificates […], not the one that signed this build".
+- To make one again from nothing (another team, a lost account): on developer.apple.com register
+      the explicit App ID `me.saffer.sill.mac`, then a provisioning profile of type Developer ID
+      for macOS with that App ID and the Developer ID Application certificate, and download it. (The
+      plan's other way, `xcodebuild -allowProvisioningUpdates` from a throwaway macOS target with
+      Keychain Sharing, registers the same things from Xcode and may prompt for your Apple Account;
+      a background or CI run must not do either.)
+- One team, two certificates: both identities on this Mac are team **9B2KKVM937** (the
+      Apple Development certificate's name ends in HG877AGTQ7, your own member ID, not a team). The
+      profile lists only the Developer ID certificate, so only the Developer ID build carries the
+      profile and the access group; a development build (make-app.sh's default) must **not** — it
+      keeps `SillDebug.entitlements` and the login keychain. Signed with the Apple Development
+      certificate, the same entitlements and this profile, a build is killed at launch (measured
+      2026‑09‑27).
+- Profile validity: Gatekeeper checks the profile at **every launch**, so an expired one stops the
+      app launching. `make-app.sh` refuses an expired profile and warns within 30 days. A
+      **missing** profile is the safe fallback — the release builds on the login keychain with a log
+      line — but an **expired** one is an error, not a fallback, because it would already be
+      embedded.
+- Releases from GitHub Actions: the runner has no `Packaging/embedded.provisionprofile` (it is
+      git‑ignored), so a release the release workflow makes ships on the login keychain, and its log
+      says so. To harden those too, the workflow needs the profile (a secret written to that path
+      before `release.sh`, or the file committed, which holds no secret): not done yet
+      (docs/keychain-plan.md §10).
 - No auto‑migration (the security review, docs/keychain-plan.md §9a): an entitled build never reads
       the login keychain, so a dev Mac that used remote access on the legacy store gets a **fresh**
       key and Mac ID on its first hardened launch (any device paired to it re‑pairs). Remote access

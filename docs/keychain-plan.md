@@ -1,13 +1,15 @@
 # The keychain hardening question
 
-**Branch `keychain-hardening` from `home-pairing` (PR #37), 2026-09-27.** Noah asked, before
+**Branch `keychain-hardening` (PR #42, a draft) from `home-pairing` (PR #37), 2026-09-27.** Noah asked, before
 1.0: should Sill's keys move from the legacy login keychain to the stronger (data‑protection)
 keychain, which the home‑pairing security review flagged, given that that needs a provisioning
 profile for Sill.app? This document assesses the risk against the threat model, compares the
 fixes, settles whether the profile can be made from this Mac without Noah, and recommends one
 path. §1–§8 assessed the question and recommended the move; §9 is now what the branch implemented
-(the pure rule, the store, make-app.sh and release.sh, the migration, the checks), and §10 is what
-is left for Noah (chiefly the provisioning profile and the on-device verification).
+(the pure rule, the store, make-app.sh and release.sh, the checks), §9a its review, §9b the proof with
+the real provisioning profile once Noah had made it (2026-09-27: two fixes, then the build, its
+launch and the keychain itself), and §10 is what is left for Noah (the checks only his devices and
+a notarized build can make).
 
 Short answer: **yes, move to the data‑protection keychain, but do it as its own well‑tested change
 that lands in or right after home pairing, before the first public build writes any keys — so
@@ -127,20 +129,23 @@ only sound fix.
 What it takes, and what it breaks — all measured on this Mac (scratch `keychain/dpkc.swift`,
 `signtest.sh`), signing local throwaway binaries with the certs already present:
 
-- **A provisioning profile is mandatory, and getting it wrong bricks the app.** `application-identifier`
-  and `keychain-access-groups` are profile‑restricted entitlements on macOS. A binary signed with
-  the Developer ID cert **and** those entitlements but **no** provisioning profile has a valid
-  signature (`codesign -v --strict` passes) yet is **killed by AMFI at launch** (exit 137,
-  `Killed: 9`) — worse than a keychain error, the whole app won't start. Ad‑hoc without the
-  entitlements just returns `-34018` from the keychain. So the release path must embed a
-  `Contents/embedded.provisionprofile` that authorises the access group and sign with a matching
-  release entitlements file; there is no "just add the entitlement" shortcut.
-- **Two teams.** The Apple Development identity on this Mac is team **HG877AGTQ7**
-  (`noah@apple.saffer.me`); the Developer ID is team **9B2KKVM937** (NOAH WILLIAM SAFFER).
-  `make-app.sh` signs dev builds with Apple Development (HG877AGTQ7) and release builds with
-  Developer ID (9B2KKVM937), so their access groups would differ (`HG877AGTQ7.…` vs `9B2KKVM937.…`)
-  and never share items. Only the Developer ID build is what users run; the release group is
-  `9B2KKVM937.me.saffer.sill.mac`.
+- **A provisioning profile is mandatory, and getting it wrong bricks the app.** The application
+  identifier (on macOS the key is `com.apple.application-identifier`; iOS's `application-identifier`
+  is one a Mac profile never grants, §9b) and `keychain-access-groups` are profile‑restricted
+  entitlements on macOS. A binary signed with the Developer ID cert **and** those entitlements but
+  **no** provisioning profile has a valid signature (`codesign -v --strict` passes) yet is **killed
+  by AMFI at launch** (exit 137, `Killed: 9`) — worse than a keychain error, the whole app won't
+  start. Ad‑hoc without the entitlements just returns `-34018` from the keychain. So the release
+  path must embed a `Contents/embedded.provisionprofile` that authorises the access group and sign
+  with a matching release entitlements file; there is no "just add the entitlement" shortcut.
+- **One team, two certificates (corrected in §9b).** This bullet first called them two teams: the
+  Apple Development certificate's name ends in (HG877AGTQ7), but that is the member's own ID, and
+  its team (the certificate's OU) is **9B2KKVM937**, as docs/menu-bar-app-plan.md says; the
+  Developer ID certificate is NOAH WILLIAM SAFFER (9B2KKVM937). `make-app.sh` signs dev builds with
+  Apple Development and release builds with Developer ID. What separates them is the certificate:
+  the Developer ID provisioning profile lists only the Developer ID certificate, so a development
+  build that carried the entitlements would be killed at launch (measured, §9b). Only the Developer
+  ID build is what users run; the group is `9B2KKVM937.me.saffer.sill.mac`.
 - **Dev builds and the bare binary must stay entitlement‑free.** An Apple Development or ad‑hoc
   build given the restricted entitlements without its own profile is AMFI‑killed too. So dev builds
   (`make-app.sh` default) and the bare `SillMenuBar` test binary must **not** carry them and must
@@ -263,18 +268,23 @@ attributes, and one code path is easier to keep sound than two.
   (the same posture as the iOS device key). The default keychain accessibility is `WhenUnlocked`,
   which would have made the identity unreadable exactly when remote access needs it (§9a).
 - **make-app.sh / release.sh, with a safe fallback.** `Packaging/SillRelease.entitlements`
-  (`application-identifier`, `keychain-access-groups` `[9B2KKVM937.me.saffer.sill.mac]`,
-  `com.apple.developer.team-identifier`, **no XML comments** — codesign's AMFI entitlement parser
-  rejects a comment in a file that carries restricted entitlements; §9a). `make-app.sh --release`:
-  **with** a profile at `Packaging/embedded.provisionprofile` (or `SILL_PROVISION_PROFILE`) it
-  verifies the profile authorises the access group **and is not expired** (refusing either, which
-  would leave an app that AMFI kills at launch), embeds it, signs with the release entitlements, and
-  verifies the signed app carries the group; **without** a profile it signs as before (no keychain
+  (`com.apple.application-identifier` — the macOS key since §9b —, `keychain-access-groups`
+  `[9B2KKVM937.me.saffer.sill.mac]`, `com.apple.developer.team-identifier`, **no XML comments** —
+  codesign's AMFI entitlement parser rejects a comment in a file that carries restricted
+  entitlements; §9a). `make-app.sh --release`: **with** a profile at
+  `Packaging/embedded.provisionprofile` (or `SILL_PROVISION_PROFILE`) it checks what macOS checks at
+  every launch (§9b): the profile grants each of those entitlements (the application identifier and
+  the team the same, the group by its name or a pattern such as `9B2KKVM937.*`), lists the
+  certificate that signed the build, and **has not expired**; a profile that fails any of them is
+  refused before an app macOS would kill is written. It embeds the profile (without the download's
+  extended attributes), signs with the release entitlements, and verifies the signed app carries the
+  group and the application identifier; **without** a profile it signs as before (no keychain
   entitlements — a valid, notarizable Developer ID app on the login keychain) and says so in the
   log. Every build's last line names the identity keychain. `release.sh`'s `check_signature`
-  confirms the state (an embedded profile ⇒ keychain‑access‑groups present, else the login‑keychain
-  note). The default (Apple Development) and ad‑hoc paths keep `SillDebug.entitlements` (no keychain
-  groups), so a dev build is never AMFI‑killed and always takes the legacy store.
+  confirms the state (an embedded profile ⇒ `keychain-access-groups` and
+  `com.apple.application-identifier` present, else the login‑keychain note). The default (Apple
+  Development) and ad‑hoc paths keep `SillDebug.entitlements` (no keychain groups), so a dev build is
+  never AMFI‑killed and always takes the legacy store.
 - **The CLI** is unchanged (`MemoryIdentityStore`), and the bare `SillMenuBar` test binary stays on
   memory / the test directory — neither carries the entitlement, both are safe.
 
@@ -301,8 +311,9 @@ runs with throwaway CMS profiles and test binaries only — and fixed:
   re‑imported key set `kSecAttrAccessible`, so the data‑protection keychain's default,
   `WhenUnlocked`, applied — and remote access, used while the Mac is locked and its owner is away,
   would have failed exactly then. The store now creates every item
-  `AfterFirstUnlockThisDeviceOnly`. (Set consciously; the data‑protection keychain is unreachable
-  without the profile, so its runtime behaviour is on Noah's device — §10.)
+  `AfterFirstUnlockThisDeviceOnly`. (Set consciously; the data‑protection keychain was unreachable
+  without the profile. Since §9b the items are proved to carry it — `pdmn` `cku` — and what is left,
+  reading them while the Mac is locked, is on Noah's devices, §10.)
 - **The release path could not build the hardened app at all (fixed).** `Packaging/SillRelease.entitlements`
   carried an explanatory XML comment. codesign feeds a restricted‑entitlement file to AMFI's
   `AMFIUnserializeXML`, which rejects comments ("syntax error near line 5"), so `make-app.sh --release`
@@ -328,49 +339,142 @@ embeds the profile, carries the three entitlements, verifies strict, and prints 
 note; a garbage, wrong‑app‑id, or expired profile is refused (exit 1) before any AMFI‑killable app
 is written.
 
-Left for the follow‑up (it needs the profile and a device): `docs/release-checklist.md` carries the
-one‑time `-allowProvisioningUpdates` command, profile renewal, the two‑team note and the dev‑Mac
-reset (§10).
+Left for the follow‑up (it needed the profile and a device): the profile's proof is §9b; what still
+needs Noah's devices is §10, and `docs/release-checklist.md` Part 1 §5 has the profile, its
+renewal and the dev‑Mac reset.
+
+## 9b. Proved with the real profile (2026-09-27)
+
+Noah registered the App ID `me.saffer.sill.mac` ("Sill for Mac") and made the Developer ID
+provisioning profile **"Sill Developer ID"** on the developer site: UUID
+`18e9509f-5498-4533-ba59-293461a61a0d`, macOS, team 9B2KKVM937, all Macs; it grants
+`com.apple.application-identifier` `9B2KKVM937.me.saffer.sill.mac`,
+`com.apple.developer.team-identifier` 9B2KKVM937 and `keychain-access-groups` `9B2KKVM937.*`, lists
+one certificate (the Developer ID Application certificate, SHA-1 `42424F38…71D8D6`), and expires
+2044-09-22. With it at `Packaging/embedded.provisionprofile` the hardened path was run for real,
+headless: nothing installed, opened as an app or notarized, and only test names in the keychain
+(scratch `keychain/proof`).
+
+**Two findings, either of which would have stopped the hardened release, fixed.** One root: the
+draft wrote the application identifier under iOS's key, `application-identifier`, and the earlier
+rehearsal's throwaway profiles did the same, so nothing caught it before a real Mac profile, which
+names it `com.apple.application-identifier`.
+- **make-app.sh refused the real profile.** It read `Entitlements:application-identifier`, found
+  nothing, and stopped: "the provisioning profile … is for 'nothing', not
+  '9B2KKVM937.me.saffer.sill.mac'".
+- **The app would have been killed at every launch.** A probe bundle signed as the release is (the
+  draft's `SillRelease.entitlements`, this profile, Developer ID, the hardened runtime, a timestamp)
+  exited 137 at once: taskgated-helper logged "me.saffer.sill.mac: Unsatisfied entitlements:
+  application-identifier" and "Disallowing", amfid "No matching profile found" (-413). The same
+  probe with `com.apple.application-identifier` launched: "allowing entitlement(s) for
+  me.saffer.sill.mac due to provisioning profile". Fixing make-app.sh's read alone would have
+  shipped an app that never starts.
+- Fixed: `SillRelease.entitlements` uses `com.apple.application-identifier`. make-app.sh checks what
+  taskgated checks: that the profile grants each of the file's entitlements (the application
+  identifier and the team the same, each keychain group by its name or a pattern such as
+  `9B2KKVM937.*`), that it lists the certificate that signed the build (right after signing: an
+  Apple Development-signed probe with the same profile and entitlements was killed at launch,
+  "Unsatisfied entitlements: com.apple.developer.team-identifier, keychain-access-groups", so a
+  profile covers only the certificates it names, and the Developer ID certificate ends on
+  2027-02-01), and, as before, that it has not expired. It copies the profile with `cp -X`, so the
+  download's kMDItemWhereFroms (the developer site's download address) and com.apple.macl stay out
+  of the app (macOS puts the quarantine flag back on any copy of a quarantined file; inside a
+  bundle that is not quarantined it stopped nothing). `release.sh`'s `check_signature` also
+  requires `com.apple.application-identifier` (the draft's probe fails it, the fixed one passes).
+  Each refusal checked with throwaway CMS profiles (only the iOS key, another application
+  identifier, another team, another team's group, another certificate, no certificate, an entry
+  that is not a certificate, expired, undecodable): exit 1, the stage removed, no app written; the
+  draft's entitlements file against the real profile refused ("grants application-identifier
+  'nothing'"); an exact group accepted; a profile within 30 days of its end warned. The development
+  build and the profile-free release are as before (the login keychain, no keychain groups).
+- Also corrected: §4's "two teams". Both certificates on this Mac are team 9B2KKVM937.
+
+**Proven, on the fixed branch with the real profile:**
+- **The build.** `SILL_RELEASE_DRY_RUN=1 SILL_SIGN_IDENTITY='Developer ID Application: NOAH WILLIAM
+  SAFFER (9B2KKVM937)' Scripts/make-app.sh --release`: exit 0 and "identity keychain:
+  data-protection keychain (access group 9B2KKVM937.me.saffer.sill.mac)";
+  `Contents/embedded.provisionprofile` byte for byte the installed one (SHA-256 `4f9f99b0…`);
+  `codesign -d --entitlements` exactly `com.apple.application-identifier`
+  `9B2KKVM937.me.saffer.sill.mac`, `com.apple.developer.team-identifier` `9B2KKVM937` and
+  `keychain-access-groups` `[9B2KKVM937.me.saffer.sill.mac]`; the `runtime` flag, a secure
+  timestamp, Developer ID Application; `codesign --verify --deep --strict` valid.
+  `Scripts/release.sh --dry-run` end to end, exit 0 in 19 s: `check_signature`'s "Identity keychain:
+  data-protection (…)", the zip, and the signed disk image with the app byte for byte. Gatekeeper:
+  "Unnotarized Developer ID" (notarization's part).
+- **The launch.** The built Sill.app's executable run only as `-SillRenderPreviews <dir>` (with
+  `-SillLogFile` in scratch, so Sill.log was untouched), which exits before the identity store, the
+  listeners and Bonjour start: exit 0, 124 previews; taskgated-helper "allowing entitlement(s) for
+  me.saffer.sill.mac due to provisioning profile (isUPP: 1)", the kernel's AppleSystemPolicy "exec,
+  allowed", no AMFI or taskgated denial, and no keychain call in the process's log. The bundle was
+  then unregistered from LaunchServices and removed, with the rehearsal's zip and image: an
+  entitled copy that LaunchServices opened would make a real identity.
+- **The keychain.** A probe app in scratch with `CFBundleIdentifier` `me.saffer.sill.mac`, this
+  profile and these entitlements, Developer ID with the hardened runtime and a timestamp:
+  - reads its own `keychain-access-groups` as `[9B2KKVM937.me.saffer.sill.mac]`
+    (`SecTaskCopyValueForEntitlement`, as `AppModel.entitledKeychainAccessGroup()` does);
+  - a generic password (service `me.saffer.silltest.probe`) and a permanent P-256 key (tag
+    `me.saffer.silltest.probekey`), made exactly as `KeychainIdentityStore` makes them (the update,
+    then the add with the label and `AfterFirstUnlockThisDeviceOnly`; `SecKeyCreateRandomKey` with
+    the data-protection flag, the group and the accessibility inside `kSecPrivateKeyAttrs`), land in
+    the data-protection keychain with `agrp` `9B2KKVM937.me.saffer.sill.mac`, `pdmn` `cku`
+    (AfterFirstUnlockThisDeviceOnly) and `sync` 0, the key permanent and 256 bits; both read back;
+  - `KeychainIdentityStore` itself: its names are `static let` constants, so it cannot take test
+    names without a code change. A scratch copy with only those three constants changed (service
+    `me.saffer.silltest.remote`, its key tag, its label), every query as the branch has it, made
+    its key, recognition key, trust list (empty, then one device) and Require pairing, all four
+    `cku` in the group; a second process of a rebuilt probe (another binary, another cdhash) found
+    the same key (the same public key, so the same Mac ID), recognition key, list and record, so a
+    rebuild keeps the identity;
+  - unentitled processes get nothing and plant nothing: the same probe signed ad hoc with no
+    entitlements, and signed Developer ID with the hardened runtime and no entitlements (the
+    profile-free release's shape), get -34018 (errSecMissingEntitlement) naming the group, and
+    -25300 through the data-protection keychain without a group or through the login keychain;
+    their `SecItemAdd` and `SecKeyCreateRandomKey` into the group fail with -34018; the store in
+    such a process throws "couldn't be read: A required entitlement is not present." and makes no
+    key;
+  - everything was deleted after, and is gone from both keychains (the probe's reads; the
+    `security` tool finds no test name in the login keychain). Nothing touched service
+    `me.saffer.sill.remote` or home pairing's items, and no keychain or Apple Account prompt
+    appeared.
+  - Seen on macOS 27: an entitled process's query without `kSecUseDataProtectionKeychain` finds the
+    data-protection items too. The store sets the flag on every query, so nothing changes for it.
+- **Not proven here:** the screen was unlocked throughout (`CGSessionCopyCurrentDictionary`), so
+  reading the `cku` items while the Mac is locked is still Noah's (§10), as are a notarized
+  download's first launch and a real Sill.app's first hardened launch, which would make the real
+  identity and so was never run here.
 
 ## 10. For Noah
 
-The code is in place (§9, §9a): an entitled Developer ID build uses the data‑protection keychain and
-**never** the login keychain (no auto‑migration — §9a); every other build safely uses the login
-keychain and says so. What is left needs your account and a device:
+The code is in place (§9, §9a) and proven with the real profile (§9b): the release builds hardened,
+launches, and only it reads and writes the group. What is left needs your devices, a notarized
+build or your decision:
 
-- **Mint the provisioning profile** for `me.saffer.sill.mac` (team 9B2KKVM937, Keychain Sharing,
-  Developer ID): one `xcodebuild -allowProvisioningUpdates` run from a throwaway macOS target, the
-  exact recipe in docs/release-checklist.md, Part 1 §5. It registers a new App ID and capability on
-  your Apple Account and may prompt for it, so this branch did not run it (a background run must stop
-  on that prompt, and the profile should land with the code that uses it). Drop it at
-  `Packaging/embedded.provisionprofile` and rebuild; `make-app.sh --release` then says
-  "data-protection keychain". Without it, a release still ships on the login keychain (a log line
-  says so) — safe, just not hardened.
-- **Reset your own dev Macs once (no auto‑migration).** On the first entitled build, a Mac that used
-  remote access on the legacy store gets a **fresh** key and Mac ID (the store does not read the
-  login keychain — §9a explains why auto‑migration is unsafe), so any device paired to that Mac
-  re‑pairs. Since remote access is off by default and home pairing has not shipped publicly, this is
-  near zero. To start clean, delete the legacy items by hand and re‑pair: `for a in recognition-key
-  paired-devices require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a
-  $a; done` (and the "Sill Remote Access" key in Keychain Access) — on a Mac you own, never in CI.
-- **Decide the sequencing:** land the hardened build with home pairing, before the first public
-  build, so new installs write straight to the strong keychain and only your own dev Macs need the
-  reset above. It is off the wire, so it does not touch the 1.0 compatibility floor; slipping it to
-  1.x still works, with the same one‑time reset for anyone who had legacy items.
-- **Verify on a device (an "untested, for Noah" pass):** only a Developer‑ID‑signed,
-  profile‑embedded, notarised build can prove it. Check that the app **launches** (not AMFI‑killed —
-  the profile and entitlements are right), reads and writes its data‑protection items, and **keeps
-  them across a rebuild** (same Mac ID on the second launch, no `-34018`). Because the items are
-  `AfterFirstUnlockThisDeviceOnly`, confirm remote access still works **with the screen locked and
-  you away** (pair a device, lock the Mac, connect from away): if the identity is unreadable while
-  locked, reconsider the accessibility. And confirm the update story: from a legacy‑store build,
-  the first hardened launch mints a fresh key (a new Mac ID, so re‑pair once) — this is expected, not
-  a bug — and after that the identity is stable. The rule and the fallbacks are checked here; the
-  data‑protection keychain itself cannot be reached without the profile (an unentitled binary gets
-  `-34018`).
-- **If the profile slips:** ship on the legacy store (not a floor blocker); optionally take the
-  Secure Enclave interim (§5, no profile, removes key exfiltration); the full move is already coded
-  and waits only for the profile.
+- **Remote access with the Mac locked and you away.** The identity items are
+  `AfterFirstUnlockThisDeviceOnly` (proved: `pdmn` `cku`), which should stay readable after the
+  first unlock. Pair a device to a hardened build, lock the Mac, and connect from away (the
+  iPhone's hotspot, through Tailscale), and leave it locked a while before you do. If the identity
+  is unreadable while locked (Sill.log's "Remote access unavailable: …", or the device refused),
+  reconsider the accessibility.
+- **The first hardened launch: a fresh Mac ID, then re-pairing.** The store never reads the login
+  keychain (no auto-migration, §9a), so a Mac that ran a legacy-store build gets a new key and Mac
+  ID on its first hardened launch, and the log says "Remote access: the identity is in the
+  data-protection keychain (access group 9B2KKVM937.me.saffer.sill.mac)". Re-pair each device once;
+  then relaunch, and install a rebuild: the Mac ID stays (the probe showed a rebuild keeps the
+  items). To start clean first, the one-time reset in release-checklist.md Part 1 §5.
+- **A notarized download on a second Mac.** `Scripts/release.sh` for real (notarization with the
+  profile embedded), then on a Mac that never had Sill: the downloaded image opens, Sill launches
+  from quarantine (Gatekeeper and the profile at first launch), Remote Access on makes the identity
+  (the log line above), a device pairs, and a relaunch keeps the Mac ID.
+- **By 2027-02-01:** a new Developer ID certificate, and the profile made again with it
+  (release-checklist.md Part 1 §5); make-app.sh refuses the old profile with a new certificate.
+- **Releases from GitHub Actions** have no profile (it is git-ignored), so they ship on the login
+  keychain, which their log says. If releases are to be made there, give the release workflow the
+  profile: a secret written to `Packaging/embedded.provisionprofile` before `release.sh`, or the
+  file committed (it holds no secret).
+- **Sequencing:** land it with home pairing, before the first public build, so new installs write
+  straight to the strong keychain. It is off the wire, so it does not touch the 1.0 compatibility
+  floor; slipping it to 1.x still works, with the same one-time reset for anyone who had legacy
+  items.
 
 ## Appendix — the reproduction (scratch, not committed)
 
@@ -384,3 +488,11 @@ all‑apps ACL (no authenticated maker).
 `-34018`. Developer ID **and** `application-identifier`/`keychain-access-groups` but **no** profile →
 valid signature, **AMFI kill at launch** (exit 137). Apple Development + entitlements, no profile →
 same kill. This is the evidence that the data‑protection path is profile‑or‑nothing.
+
+`keychain/proof` (2026-09-27, §9b): `kcprobe.swift` (the probe: its entitlements, the items made as
+`KeychainIdentityStore` makes them, a plant, the deletes, and the store itself through
+`KeychainIdentityStore-testnames.swift`, the branch's file with only its three name constants
+changed, and `StoreShim.swift`, its protocol and types copied from HostIdentity.swift),
+`make-bundle.sh` (the probe app: bundle ID, profile, entitlements, signature), the throwaway
+profiles in `profiles/`, and every run's log. With the draft's `application-identifier` the probe
+was killed at launch; with `com.apple.application-identifier` it ran.

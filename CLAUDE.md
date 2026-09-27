@@ -9,23 +9,23 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Keychain hardening (2026-09-27, branch `keychain-hardening` from
-`home-pairing` (PR #37, not yet merged), not pushed; the assessment, the
-decision and what was implemented are in `docs/keychain-plan.md`).** Noah's
-pre-1.0 question: move Sill.app's remote-access identity (the Mac's key,
-recognition key, trust list and Require pairing) from the legacy login
-keychain, which does not authenticate who made an item (a process running
-before Sill's first launch can pre-create every item and Sill adopts it — the
-home-pairing security review), to the data-protection keychain, which no other
-process can pre-create or read. Reproduced the risk and settled the cost with
-test items of own names in throwaway keychains only (never the login keychain,
-never Sill's real items): the legacy keychain's creator and ACL are
-attacker-set, so Sill's verbatim lookups adopt a planted key (and a planted key
-signs a verifying require-pairing-off record); and the data-protection path
-needs a `keychain-access-groups` entitlement — a Developer ID binary that
-carries it without a provisioning profile is AMFI-killed at launch (exit 137,
-codesign still valid), while an ad-hoc build without it gets `-34018`. So the
-strong keychain is profile-or-the-app-won't-launch, and only Sill.app is
-affected (the CLI is memory, iOS is already data-protection).
+`home-pairing` (PR #37, not yet merged), PR #42 (a draft); the assessment, the
+decision, what was implemented and its proof with the real profile are in
+`docs/keychain-plan.md`).** Noah's pre-1.0 question: move Sill.app's
+remote-access identity (the Mac's key, recognition key, trust list and Require
+pairing) from the legacy login keychain, which does not authenticate who made
+an item (a process running before Sill's first launch can pre-create every item
+and Sill adopts it — the home-pairing security review), to the data-protection
+keychain, which no other process can pre-create or read. Reproduced the risk
+and settled the cost with test items of own names in throwaway keychains only
+(never the login keychain, never Sill's real items): the legacy keychain's
+creator and ACL are attacker-set, so Sill's verbatim lookups adopt a planted
+key (and a planted key signs a verifying require-pairing-off record); and the
+data-protection path needs a `keychain-access-groups` entitlement — a Developer
+ID binary that carries it without a provisioning profile is AMFI-killed at
+launch (exit 137, codesign still valid), while an ad-hoc build without it gets
+`-34018`. So the strong keychain is profile-or-the-app-won't-launch, and only
+Sill.app is affected (the CLI is memory, iOS is already data-protection).
 - Implemented (the recommended path): `IdentityStorePlan` (pure,
   `Tests/checks/keychain`, 13 cases, 7 mutants, in CI's matrix) chooses the
   store from four launch facts — an entitled real Sill.app uses the
@@ -71,7 +71,7 @@ affected (the CLI is memory, iOS is already data-protection).
   profile's expiry — fixed:** Gatekeeper checks a Developer ID profile at every
   launch, so an expired embedded profile stops the app launching; make-app.sh
   now refuses an expired profile (and warns within 30 days) before signing.
-- Verified (no notarization, no device, no profile minted; every keychain touch
+- Verified before the profile existed (no notarization, no device; every keychain touch
   used throwaway keychains and test service names, never the login keychain or
   Sill's real items): `swift build` clean; `Tests/checks/run-all.sh` all 28
   pass, keychain's 7 mutants caught. The four `make-app.sh` paths, driven with
@@ -85,20 +85,60 @@ affected (the CLI is memory, iOS is already data-protection).
   AMFI-killable app is written. Confirmed with a throwaway-signed test binary
   that the entitlements comment broke codesign and that stripping it signs and
   reads the entitlements back.
-- **For Noah (docs/keychain-plan.md §10, release-checklist.md Part 1 §5):**
-  mint the Developer ID provisioning profile for `me.saffer.sill.mac` (team
-  9B2KKVM937, Keychain Sharing) with one `xcodebuild -allowProvisioningUpdates`
-  run from a throwaway macOS target — it touches your Apple Account, so this
-  branch did not run it — drop it at `Packaging/embedded.provisionprofile` and
-  rebuild; then the on-device pass (the strong keychain is unreachable without
-  the profile): the app launches un-AMFI-killed, reads and writes its items, a
-  rebuild keeps them (same Mac ID), and — since the items are
-  `AfterFirstUnlockThisDeviceOnly` — remote access works with the Mac's screen
-  locked and you away. There is **no** auto-migration: a dev Mac that used the
-  legacy store gets a fresh Mac ID on the first hardened launch (re-pair once);
-  the one-time reset command is in release-checklist.md Part 1 §5. Land it with
-  home pairing, before the first public build, so new installs go straight to
-  the strong keychain (off the wire, so not a floor blocker). The base is
+- **Proved with the real profile (2026-09-27, `docs/keychain-plan.md` §9b).**
+  Noah registered the App ID `me.saffer.sill.mac` and made the Developer ID
+  profile "Sill Developer ID" (UUID 18e9509f-5498-4533-ba59-293461a61a0d,
+  macOS, team 9B2KKVM937, `keychain-access-groups` `9B2KKVM937.*`, only the
+  Developer ID certificate 42424F38…, until 2044-09-22), at
+  `Packaging/embedded.provisionprofile` (git-ignored; copies in
+  ~/Library/Developer/Xcode/UserData/Provisioning Profiles/ and ~/Downloads).
+  Two findings with it, either of which stopped the hardened release, fixed: the
+  draft keyed the application identifier as iOS's `application-identifier`, so
+  make-app.sh refused the real profile (a Mac profile says
+  `com.apple.application-identifier`) and, worse, `SillRelease.entitlements`
+  with that key had the app killed at every launch (a probe signed so: exit
+  137, taskgated "Unsatisfied entitlements: application-identifier", AMFI "No
+  matching profile found"). Now the entitlements use
+  `com.apple.application-identifier`; make-app.sh checks what taskgated checks
+  (each entitlement granted by the profile, the group by name or `TEAM.*`, the
+  signing certificate among the profile's — an Apple Development-signed probe
+  with this profile was killed too — and not expired) and copies the profile
+  with `cp -X`; `check_signature` requires `com.apple.application-identifier`.
+  Proven: `make-app.sh --release` prints the data-protection line, embeds the
+  profile byte for byte, carries exactly the three entitlements, the hardened
+  runtime and a timestamp, and verifies `--deep --strict`; `release.sh
+  --dry-run` exit 0 (check_signature, the zip, the signed image); the built
+  app's executable run only with `-SillRenderPreviews` exits 0 with 124
+  previews, taskgated "allowing entitlement(s) … due to provisioning profile",
+  no AMFI denial and no keychain call (then unregistered from LaunchServices and
+  removed); a probe app (bundle ID `me.saffer.sill.mac`, the same profile and
+  entitlements, Developer ID, hardened) reads its group, makes a generic
+  password and a P-256 key exactly as `KeychainIdentityStore` does (the group,
+  `pdmn` `cku`, `sync` 0), a scratch copy of `KeychainIdentityStore` with only
+  its three name constants changed makes all four items, and a rebuilt probe
+  finds the same key (a rebuild keeps the Mac ID); the same probe ad hoc, or
+  Developer ID without entitlements, gets -34018 and can plant nothing; every
+  test item deleted and confirmed gone, nothing of Sill's own touched, no
+  prompt. Refusals checked with throwaway profiles (the iOS key, another app
+  ID, team, group or certificate, none, a malformed one, expired, garbage) and
+  the draft's entitlements against the real profile; the development build and
+  the profile-free release as before; `Tests/checks/run-all.sh` all 28.
+  Also corrected: "two teams" (both certificates are team 9B2KKVM937;
+  HG877AGTQ7 is the Apple Development certificate's member ID).
+- **For Noah (still device work, `docs/keychain-plan.md` §10,
+  release-checklist.md Part 1 §5):** remote access with the Mac locked and you
+  away (the items are `AfterFirstUnlockThisDeviceOnly`, proved `cku`, but never
+  read while locked here); the first hardened launch on a Mac that ran a
+  legacy-store build makes a fresh Mac ID (re-pair once; the one-time reset is
+  in the checklist), then the same Mac ID across relaunches and rebuilds; a
+  notarized download on a second Mac (notarization with the profile embedded,
+  the first launch from quarantine, Remote Access making the identity). Also:
+  by 2027-02-01 a new Developer ID certificate and the profile made again with
+  it (make-app.sh refuses a profile that doesn't list the signing certificate);
+  releases from GitHub Actions have no profile (git-ignored), so they ship on
+  the login keychain until the release workflow gets one (a secret, or the file
+  committed: it holds no secret). Land it with home pairing, before the first
+  public build (off the wire, so not a floor blocker). The base is
   `home-pairing` until #37 merges; then merge main in.
 
 **Pairing at home (2026-09-25 to 27, branch `home-pairing` from main at
@@ -3322,8 +3362,11 @@ good.
   and words; pure, checked with swiftc) and `UpdateChecker` (main actor; asks
   GitHub's releases feed and times the checks; compiles on its own with swiftc).
 - `Packaging/` — Sill.app's `Info.plist` and the development entitlements
-  (get-task-allow only), and `ExportOptions-appstore.plist`, how the iOS
-  app's archive is exported for App Store Connect. `Scripts/release-ios.sh`
+  (get-task-allow only), the release's (`SillRelease.entitlements`:
+  `com.apple.application-identifier`, the team and the keychain group, signed
+  in only with `embedded.provisionprofile`, the Developer ID profile, which is
+  git-ignored; docs/keychain-plan.md), and `ExportOptions-appstore.plist`, how
+  the iOS app's archive is exported for App Store Connect. `Scripts/release-ios.sh`
   makes the iOS app's build: the Release archive (automatic signing on team
   9B2KKVM937, or none with `--sign-at-export` and `--unsigned`), the export
   (destination export; `--upload` adds a second one whose destination is

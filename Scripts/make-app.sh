@@ -139,30 +139,69 @@ if [ "$release" = 1 ]; then
     # and said in the log so the softer keychain is never a silent surprise.
     #
     # SillRelease.entitlements holds exactly three profile-restricted entitlements —
-    # application-identifier and team-identifier 9B2KKVM937, and keychain-access-groups
+    # com.apple.application-identifier 9B2KKVM937.me.saffer.sill.mac,
+    # com.apple.developer.team-identifier 9B2KKVM937 and keychain-access-groups
     # [9B2KKVM937.me.saffer.sill.mac] — and NO XML comments: codesign feeds it to AMFI's entitlement
     # parser (AMFIUnserializeXML), which rejects a comment with "syntax error", so a commented file
-    # fails the sign. A development or Apple Development (team HG877AGTQ7) build must never carry
-    # these — it would be AMFI-killed too — so the default path below keeps SillDebug.entitlements.
+    # fails the sign. The application identifier goes under the macOS key: a Mac profile grants
+    # com.apple.application-identifier, never iOS's application-identifier, and an app signed with
+    # the iOS key is refused at every launch ("Unsatisfied entitlements: application-identifier",
+    # then AMFI's kill; measured with the real profile, 2026-09-27). A development build must never
+    # carry these either: it is signed with the Apple Development certificate, which the Developer
+    # ID profile does not list, so it would be killed at launch too (measured the same day); the
+    # default path below keeps SillDebug.entitlements.
+    ents=Packaging/SillRelease.entitlements
     profile="${SILL_PROVISION_PROFILE:-Packaging/embedded.provisionprofile}"
-    group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' Packaging/SillRelease.entitlements)"
+    group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' "$ents")"
     if [ -f "$profile" ]; then
-        # The profile must authorise this access group, or the signed app is AMFI-killed at launch.
+        # What macOS checks at every launch of an app with a profile (taskgated, then AMFI), checked
+        # here instead, so a build it would kill is never written: every entitlement the app is signed
+        # with is one the profile grants (the same value, or for a keychain group a pattern that covers
+        # it: a Developer ID profile grants "9B2KKVM937.*"), the certificate that signs it is one the
+        # profile lists, and the profile has not expired. Each refusal takes the stage with it.
         prof_dir="$(mktemp -d)"; trap 'rm -rf "$prof_dir"' EXIT
-        if ! security cms -D -i "$profile" -o "$prof_dir/prof.plist" 2>/dev/null; then
-            rm -rf "$stage"; echo "error: --release could not decode the provisioning profile '$profile'." >&2; exit 1
-        fi
-        prof_appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$prof_dir/prof.plist" 2>/dev/null || true)"
-        if [ "$prof_appid" != "$group" ]; then
+        refuse_profile() {
             rm -rf "$stage"
-            echo "error: the provisioning profile '$profile' is for '${prof_appid:-nothing}', not '$group'; it would AMFI-kill the app. Mint one for me.saffer.sill.mac (docs/release-checklist.md)." >&2
+            echo "error: the provisioning profile '$profile' $1 (docs/release-checklist.md, Part 1 §5)." >&2
             exit 1
+        }
+        # Whether the profile's keychain group $2 covers the group $1: the same name, or a pattern
+        # ending in * whose prefix $1 starts with.
+        group_covered() {
+            case "$2" in
+                *\*) [ -z "${2%\*}" ] || [ "${1#"${2%\*}"}" != "$1" ] ;;
+                *) [ "$1" = "$2" ] ;;
+            esac
+        }
+        if ! security cms -D -i "$profile" -o "$prof_dir/prof.plist" 2>/dev/null; then
+            refuse_profile "could not be decoded"
         fi
+        for key in com.apple.application-identifier application-identifier com.apple.developer.team-identifier; do
+            # PlistBuddy prints a missing key's error on stdout: its output counts only when it succeeds.
+            if wanted="$(/usr/libexec/PlistBuddy -c "Print :$key" "$ents" 2>/dev/null)"; then
+                granted="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:$key" "$prof_dir/prof.plist" 2>/dev/null)" || granted=""
+                if [ "$granted" != "$wanted" ]; then
+                    refuse_profile "grants $key '${granted:-nothing}', not the '$wanted' $ents asks for; an app signed with it would be killed at launch"
+                fi
+            fi
+        done
+        i=0
+        while wanted="$(/usr/libexec/PlistBuddy -c "Print :keychain-access-groups:$i" "$ents" 2>/dev/null)"; do
+            covered=0; j=0; patterns=""
+            while pattern="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:keychain-access-groups:$j" "$prof_dir/prof.plist" 2>/dev/null)"; do
+                if group_covered "$wanted" "$pattern"; then covered=1; fi
+                patterns="$patterns ${pattern}"; j=$((j + 1))
+            done
+            if [ "$covered" != 1 ]; then
+                refuse_profile "grants the keychain groups [${patterns# }], none of them '$wanted'; an app signed with it would be killed at launch"
+            fi
+            i=$((i + 1))
+        done
         # The profile must not be expired. Gatekeeper evaluates a Developer ID profile's validity at
         # every launch (developer.apple.com/support/developer-id), so an app that embeds an expired
         # one will not launch — and there is no login-keychain fallback once it is embedded, unlike
-        # the no-profile path above. Refuse it here (renewing is the same -allowProvisioningUpdates
-        # run, docs/release-checklist.md), and warn when it is within 30 days.
+        # the no-profile path above. Refuse it here (renewing: download it again from the developer
+        # site, docs/release-checklist.md), and warn when it is within 30 days.
         prof_exp_iso="$(plutil -extract ExpirationDate raw -o - "$prof_dir/prof.plist" 2>/dev/null || true)"
         prof_exp="$(TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%SZ' "${prof_exp_iso:-}" +%s 2>/dev/null || true)"
         now="$(date +%s)"
@@ -175,11 +214,34 @@ if [ "$release" = 1 ]; then
         elif [ "$prof_exp" -lt "$(( now + 2592000 ))" ]; then
             echo "warning: the provisioning profile '$profile' expires on ${prof_exp_iso} (UTC), within 30 days; renew it soon (docs/release-checklist.md)." >&2
         fi
-        cp "$profile" "$stage/Contents/embedded.provisionprofile"
-        codesign --force --options runtime --timestamp --entitlements Packaging/SillRelease.entitlements --sign "$identity" "$stage"
-        # After signing: the app must actually carry the access group, or it would be AMFI-killed.
-        if ! codesign -d --entitlements - --xml "$stage" 2>/dev/null | grep -q "$group"; then
-            rm -rf "$stage"; echo "error: the signed app does not carry the keychain access group '$group'." >&2; exit 1
+        # -X: the profile's bytes without the download's extended attributes (the developer site's
+        # address in kMDItemWhereFroms, com.apple.macl), which would otherwise ship in the app. macOS
+        # puts the quarantine flag back on any copy of a quarantined file; on this file inside a
+        # bundle that is not quarantined it stops nothing (the app launched with it, 2026-09-27).
+        cp -X "$profile" "$stage/Contents/embedded.provisionprofile"
+        codesign --force --options runtime --timestamp --entitlements "$ents" --sign "$identity" "$stage"
+        # After signing: the certificate that signed it must be one the profile lists. A profile
+        # names the certificates it covers, so a renewed Developer ID certificate needs the profile
+        # made again with it (an app signed by any other is killed at launch, measured 2026-09-27).
+        codesign -d --extract-certificates="$prof_dir/signer" "$stage" 2>/dev/null || true
+        signer=none
+        if [ -f "$prof_dir/signer0" ]; then signer="$(shasum -a 1 "$prof_dir/signer0" | awk '{ print toupper($1) }')"; fi
+        listed=""; j=0
+        while cert="$(plutil -extract "DeveloperCertificates.$j" raw -o - "$prof_dir/prof.plist" 2>/dev/null)"; do
+            # (|| true: an entry that isn't a certificate hashes to something no signer matches.)
+            listed="$listed $( { printf '%s' "$cert" | base64 --decode | shasum -a 1 | awk '{ print toupper($1) }'; } 2>/dev/null || true)"
+            j=$((j + 1))
+        done
+        case " $listed " in
+            *" $signer "*) ;;
+            *) refuse_profile "lists the certificates [${listed# }], not the one that signed this build ($signer); make the profile again with that certificate" ;;
+        esac
+        # And the app must carry the application identifier and the access group, or it would be
+        # killed at launch too.
+        codesign -d --entitlements "$prof_dir/signed.plist" --xml "$stage" >/dev/null 2>&1 || true
+        if [ "$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' "$prof_dir/signed.plist" 2>/dev/null)" != "$group" ] \
+            || ! /usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' "$prof_dir/signed.plist" >/dev/null 2>&1; then
+            rm -rf "$stage"; echo "error: the signed app does not carry the keychain access group '$group' and its application identifier." >&2; exit 1
         fi
         keychain_note="data-protection keychain (access group $group)"
     else
