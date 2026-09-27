@@ -20,6 +20,13 @@
   tile. The result is cached in `.build/icon`. A layered
   `Packaging/AppIcon.icon` made in Icon Composer from the SVG's four groups
   replaces the generated one as soon as it exists.
+- `DMGBackground.svg` — the window of Sill.dmg, the Mac download: 660 x 400
+  points, an arrow from where Sill.app sits (170, 180) to Applications (490,
+  180) in the app icon's greys, and "To install Sill, drag it to
+  Applications." under them. `Scripts/make-dmg.sh` renders it with Quick Look
+  at 1x and 2x into one TIFF and puts the icons on it with a `.DS_Store`;
+  moving either icon means changing the SVG's arrow and the script's `--item`
+  lines together.
 - The menu bar glyph is drawn in code from the same geometry
   (`Sources/SillMenuBar/StatusGlyph.swift`): the iMac outline with the tilted
   iPad, as a template image. `SillMenuBar -SillRenderPreviews <dir>` writes
