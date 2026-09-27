@@ -9,8 +9,8 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The iPhone's portrait layout (2026-09-27, branch `iphone-portrait` from main
-at cf05a78; the plan, its open questions with the defaults taken, its gates and
-the review's fixes are in `docs/iphone-portrait-plan.md`).** Noah: on an iPhone
+at cf05a78, PR #30; the plan, its open questions with the defaults taken, its
+gates and the review's fixes are in `docs/iphone-portrait-plan.md`).** Noah: on an iPhone
 held upright the software keyboard covered the key row's keyboard cap, so
 nothing on screen could take it down, and the picture's half left black bars
 around a 16:9 or 16:10 window. Approved (2026-09-27): the picture in a fixed
