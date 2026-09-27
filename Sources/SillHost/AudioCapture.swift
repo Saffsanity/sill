@@ -22,7 +22,7 @@ final class AudioCapture: NSObject, AudioSource, SCStreamOutput, SCStreamDelegat
     var onPCM: ((PCMChunk) -> Void)?
     var onStopped: ((String) -> Void)?
 
-    struct Failure: Error, CustomStringConvertible {
+    struct Failure: AudioSourceFailure {
         let description: String
     }
 

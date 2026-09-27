@@ -13,6 +13,10 @@ protocol AudioSource: AnyObject {
     func stop() async
 }
 
+/// A source's own failure, in its own words (AudioCapture's timeouts); any other error is the system's
+/// and is shown with its domain and code.
+protocol AudioSourceFailure: Error, CustomStringConvertible {}
+
 /// Seconds of the host clock: mach absolute time, the clock ScreenCaptureKit stamps its buffers with
 /// (CMClockGetHostTimeClock counts the same ticks).
 enum HostClock {
@@ -210,7 +214,7 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
             s.onPCM = nil
             s.onStopped = nil
             await s.stop()
-            failed(key, "\(error)")
+            failed(key, Self.describe(error))
             return
         }
         guard g == generation else { return }   // it ended by itself meanwhile (`ended` has said so)
@@ -241,6 +245,14 @@ final class AudioPipeline: @unchecked Sendable {   // main-actor state, and stat
         queue.async { self.live = next; self.packetizer = nil; self.encoder = nil }
     }
 
+
+    /// An error in one line: its own words for Sill's errors, else the system's with its domain and
+    /// code (ScreenCaptureKit's −3801 for a missing permission, −3818 for sound that failed to start).
+    static func describe(_ error: Error) -> String {
+        if let e = error as? AudioSourceFailure { return e.description }
+        let e = error as NSError
+        return "\(e.localizedDescription) (\(e.domain) \(e.code))"
+    }
 
     /// The Mac's status: "Safari", "Whole Mac", "Test Tone".
     static func shown(_ key: AudioKey) -> String {
