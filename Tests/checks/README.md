@@ -1,14 +1,15 @@
 # Pure checks
 
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
-takes, the settings ledger, the wire format, pairing, who may use which door, which device versions a
-Mac serves, how a session ends, how the device reads the Mac's messages, what the update check makes
-of GitHub's answer, how frames go into the video encoder and when a stream gets a new encoder
-session) are plain Swift files that compile on their own. Each folder here compiles one or a few of
-those files, exactly as they are in `Sources/` and `iOSClient/`, together with its own `main.swift`,
-and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the video encoder
-or any network but loopback, so the checks run anywhere Xcode does, and in CI
-(`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
+takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
+video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
+session ends, how the device reads the Mac's messages, what the update check makes of GitHub's
+answer, how the Mac download's disk image lays out its window) are plain Swift files that compile on
+their own. Each folder here compiles one or a few of those files, exactly as they are in `Sources/`,
+`iOSClient/` and `Scripts/`, together with its own `main.swift`, and runs the result. Nothing here
+needs a device, Screen Recording, Accessibility, the video encoder or any network but loopback, so
+the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and
+pushes to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about two minutes on an M-series Mac
@@ -27,6 +28,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 |---|---|---|---|---|
 | `addresses` | `Sources/SillHost/AddressList.swift`, `PairingWindow.swift` and `OriginPolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | the addresses the Mac offers for remote access, from its services and tunnels; the pairing window's proofs, tries and back-off | 41 | 15 |
 | `clientlink` | `Sources/SillHost/ClientLink.swift` (`-package-name sill`) | which route a device came by, from its endpoint's scope and path, and the menu card's word for it | 89 | 14 |
+| `dmg-layout` | `Scripts/dmg-layout/DSStore.swift`, `FinderAlias.swift`, `DMGLayout.swift` (with make-dmg.sh's layout arguments and `design/DMGBackground.svg`) | the `.DS_Store` of Sill.dmg's window byte by byte against Finder's own layout of the file (blocks, free lists, header), the window's bounds (the picture and macOS 27's 32-point title bar), view options and icon places; the background's alias field by field; the encoder and decoder, a two-level tree among them; the volume icon's flag; an alias for a real file where it runs; that make-dmg.sh and the SVG still give that window | 70 | 43 |
 | `encoder-mailbox` | `Sources/SillHost/EncoderMailbox.swift` | HEVCEncoder's frames on their way into VideoToolbox (one inside, the one-slot mailbox, the watchdog's clock, timestamps, keyframe requests, `abandon`, the teardown) through a copy of HEVCEncoder's glue around a stand-in for VideoToolbox, in virtual time; a binary that links VideoToolbox is refused | 38,256 | 27 |
 | `encoder-slowstate` | `Sources/SillHost/EncoderSlowState.swift` | when a hardware stream's session has settled in the encoder's slow state and gets a new one, and how the new one is judged: the rule at its edges, and streams in virtual time against a scripted engine; a binary that links VideoToolbox is refused | 1,207 | 29 |
 | `compatibility` | `Sources/StreamProtocol/*.swift` | `SillVersion` (tags, bundles and the wire's versions, and their order), `SillProtocol`, and the update notice's payloads: kind 23's hello, kind 22's new fields with the five older goodbyes byte for byte, the window list's `hostVersion` and `protocol` | 74 | 13 |
@@ -42,11 +44,11 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
 | `update-policy` | `Sources/SillMenuBar/UpdatePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | Sill.app's update check: what each answer from GitHub's releases feed means, the offer, the schedule, the feeds and pages it accepts, every text | 124 | 18 |
 
-The counts are those of main at 1f3072a, where every check passes and every mutant is caught; for
-the four the `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`,
-`update-policy`), those of its merge with main at 32d532b; the two encoder checks', those of the
-encoder-two-in-flight branch that brought them; and `message-reader`'s, the `remote-pacing`
-branch's (docs/remote-bundle-plan.md, H5).
+The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
+two encoder checks' are those of the encoder-two-in-flight branch that brought them, the four the
+`update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`, `update-policy`) those of
+its merge with main at 32d532b, `dmg-layout`'s those of the `mac-dmg` branch that brought it, and
+`message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -68,11 +70,13 @@ and `encoder-slowstate` came with encoder-two-in-flight, which had them as
 `Scripts/encoder-check/mailbox` and `slowstate`; its two real-time encoder checks (`probe`, the
 re-check's loop against a stand-in encoder, and `encoder`, the real HEVCEncoder against a stand-in
 VideoToolbox) stay in `Scripts/encoder-check/run.sh`, which runs these two as well: their timing
-bounds are tight for a shared runner.
-it. `ledger`'s old mutants were whole copies of an older ledger, so it has none. The `update-notice`
-branch's four came the same way at its merge: each `main.swift` as it was (the plan's H3; only
-`compatibility`'s header comment names its compile line now), and each list of mutants, a JSON file
-beside it there, the same mutants in a `mutants.py`.
+bounds are tight for a shared runner. The `update-notice` branch's four came the same way at its
+merge: each `main.swift` as it was (the plan's H3; only `compatibility`'s header comment names its
+compile line now), and each list of mutants, a JSON file beside it there, the same mutants in a
+`mutants.py`. `dmg-layout` was written for the `mac-dmg` branch, after its review: its allocator
+expectations are those of a Finder-made image's `.DS_Store` (an installer image of 2023, which is
+not in the repository), and its run reads make-dmg.sh's layout by sourcing the script, which then
+only defines its functions.
 
 ## Adding a check
 
