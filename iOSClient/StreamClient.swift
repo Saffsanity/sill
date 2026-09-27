@@ -673,6 +673,15 @@ final class StreamClient: ObservableObject {
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         }
+        // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
+        // the argument domain dropped goes into the registration domain (this run's memory, never
+        // saved), where every reader of UserDefaults finds it. Its readers are this client's
+        // methods, and statics first touched once it exists, so this runs before any of them.
+        for key in ["SillConnect", "SillWiredTest", "SillPairAddress"] {
+            guard UserDefaults.standard.object(forKey: key) == nil,
+                  let i = arguments.firstIndex(of: "-" + key), i + 1 < arguments.count else { continue }
+            UserDefaults.standard.register(defaults: [key: arguments[i + 1]])
+        }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif

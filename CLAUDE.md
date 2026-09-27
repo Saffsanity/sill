@@ -4228,9 +4228,10 @@ happened; it runs only when the session was dialled by `-SillConnect` to a
 loopback address, `127.0.0.1:P`, `::1:P` or `localhost:P`, and the host's first
 window list has no version: Sill.app's always has, and would post the input to
 this Mac, so the console says "input script: refused: …" and nothing is sent;
-point it only at `--synthetic` hosts. `[::1]:P` never reaches the app:
-UserDefaults reads a launch argument that starts with `[` as a property list
-and drops it). The first-run tour, in the mock, under `-SillLive 1` and in
+point it only at `--synthetic` hosts; `[::1]:P` works too: the argument domain
+drops a launch argument that starts with `[`, and StreamClient.init registers
+`-SillConnect`'s, `-SillWiredTest`'s and `-SillPairAddress`'s from the command
+line). The first-run tour, in the mock, under `-SillLive 1` and in
 the normal app: `-SillTourState fresh|landscape|done|skipped|saved` turns the
 automatic tour on (a Debug build never shows it by itself otherwise; `saved`
 reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, the others last one

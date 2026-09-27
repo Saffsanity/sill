@@ -676,7 +676,8 @@ enum InputTest {
     static let enabled: Bool = {
         guard UserDefaults.standard.bool(forKey: "SillInputTest") else { return false }
         let host = (UserDefaults.standard.string(forKey: "SillConnect") ?? "").lowercased()
-        guard host.hasPrefix("127.0.0.1:") || host.hasPrefix("[::1]:") || host.hasPrefix("localhost:") else {
+        guard host.hasPrefix("127.0.0.1:") || host.hasPrefix("[::1]:") || host.hasPrefix("::1:")
+                || host.hasPrefix("localhost:") else {
             print("input test: not run: -SillInputTest needs a session -SillConnect dials on this Mac's loopback")
             return false
         }
