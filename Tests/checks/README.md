@@ -36,6 +36,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
 | `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries; kind 26 itself (MacPointer's JSON, the kind table), with 5,000 random runs | 147 | 30 |
 | `pointer-presence` | `iOSClient/PointerPresence.swift` | what the device's pointer sprite shows, row by row of the plan's table (the Mac's, the portrait trackpad's, the Pencil's, both flips), a report's freshness, the network queue's feed (the anchor, takeovers, a hand-over's carry-over and restatements), the portrait pad's cursor and its mid-stroke re-seed | 141 | 36 |
+| `pointer-watch` | `Sources/SillHost/PointerWatch.swift` with `PointerControl.swift`, `Stats.swift` and `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's sampling of the Mac's pointer around PointerControl: nothing read without a geometry, and a synthetic host never reading the real pointer; the fraction and inside per geometry; the kind 26 each device is sent (nothing to the one driving); a regular-mode window's bounds and on-screen flag re-read on a queue of its own (after a move at most every 0.1 s, every 2 s anyway), never waited for, a stale answer dropped and an owed one run; Sill's own motion; the frame interval (the frame-rate sampling); the TEST ONLY scripted pointer (its file, its clock, a dry run's move against its steps) and the software-encoder hook, with their lines | 112 | 33 |
 | `policy` | `iOSClient/DiscoveryPolicy.swift` | when the device looks nearby, its rows and their words, the route word, the wired dial, reconnects, the move off AWDL, a session following the best path (the cable, Wi-Fi, Direct) and the remote rule | 286 | 70 |
 | `protocol` | `Sources/StreamProtocol/*.swift`, then `crosscheck.py` | the address parser, SafeText, pairing codes and proofs, tags, the Mac ID, the certificate, kind 18's signature, framing, and TLS 1.3 with pinned keys on loopback; the cross-check repeats the certificate and signature with Python and `/usr/bin/openssl` | 188 + 8 | 20 |
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
@@ -43,8 +44,9 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 
 The counts are those of main at 1f3072a, where every check passes and every mutant is caught, and
 for the four the `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`,
-`update-policy`), those of its merge with main at 32d532b; `pointer-control`, `pointer-presence` and
-`fence`'s count came with the `pointer-visibility` branch (docs/pointer-visibility-plan.md, H3).
+`update-policy`), those of its merge with main at 32d532b; `pointer-control`, `pointer-presence`,
+`pointer-watch` and `fence`'s count came with the `pointer-visibility` branch
+(docs/pointer-visibility-plan.md, H3).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
