@@ -232,8 +232,8 @@ final class StreamClient: ObservableObject {
     /// streams (`active`).
     private(set) var presence = PointerPresence()
     /// The network queue's half: who moved the pointer last as this device knows it (its own input,
-    /// the Mac's fresh reports), where the Mac's pointer is, the anchor and the takeovers. Written on
-    /// `queue` (and reset on main), read on main; lock-protected.
+    /// the Mac's fresh reports), where the Mac's pointer is, the anchor and the pad's re-seeds.
+    /// Written on `queue` (and reset on main), read on main; lock-protected.
     private let pointerFeed = PointerFeed()
     /// Where the sprite's tip goes, a fraction of the video frame, or nil to hide it: the display
     /// view's `setPointer`, set by `StreamView.wirePointer`. Up to 120 times a second. Main thread.
@@ -2320,9 +2320,9 @@ final class StreamClient: ObservableObject {
 
     /// The feed, from one look, for the pad (§7.3): its anchor, where a trackpad stroke carries on from
     /// (the newer of the Mac's last position over the stream and this device's last pointer event),
-    /// and its takeovers, how many times the Mac or another device took the pointer from this device,
-    /// which the pad compares with its own count to re-seed from the anchor mid-stroke
-    /// (PadCursor.catchUp). Any thread.
+    /// and its re-seeds, how many times the Mac or another device took the pointer from this device
+    /// or moved it on, which the pad compares with its own count to re-seed from the anchor
+    /// mid-stroke (PadCursor.catchUp). Any thread.
     var pointerFeedState: PointerFeedState { pointerFeed.current }
 
     /// The laptop layout (inner or outer portrait), where the trackpad's pointer shows. Main thread.

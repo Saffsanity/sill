@@ -13,10 +13,10 @@ struct Trackpad: View {
     /// Writes this device's own pointer, the pad's cursor (`StreamClient.setOwnPointer`, from the
     /// trackpad): a fraction of the frame.
     let setPointer: (CGPoint) -> Void
-    /// The feed's anchor and takeovers, from one look (`StreamClient.pointerFeedState`), so the pad
+    /// The feed's anchor and re-seeds, from one look (`StreamClient.pointerFeedState`), so the pad
     /// carries on from wherever the pointer is: where the Mac's arrow shows, or where something else
     /// on this device left it.
-    let feed: () -> (anchor: CGPoint?, takeovers: Int)
+    let feed: () -> (anchor: CGPoint?, reseeds: Int)
     /// Fingers on the pad (`StreamClient.trackpadFingers`); only Q1's flip reads them.
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
@@ -73,7 +73,7 @@ private struct DotGrid: View {
 struct TrackpadView: UIViewRepresentable {
     let send: (InputEvent) -> Void
     let setPointer: (CGPoint) -> Void
-    let feed: () -> (anchor: CGPoint?, takeovers: Int)
+    let feed: () -> (anchor: CGPoint?, reseeds: Int)
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
@@ -108,8 +108,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// cleared when the pad leaves the screen: the pointer outlives a rotation (in landscape it
     /// hides, and comes back in portrait).
     var setPointer: (CGPoint) -> Void = { _ in }
-    /// The feed's anchor and takeovers (`StreamClient.pointerFeedState`). See `pad`.
-    var feed: () -> (anchor: CGPoint?, takeovers: Int) = { (nil, 0) }
+    /// The feed's anchor and re-seeds (`StreamClient.pointerFeedState`). See `pad`.
+    var feed: () -> (anchor: CGPoint?, reseeds: Int) = { (nil, 0) }
     /// Fingers on the pad, whenever the count changes (`StreamClient.trackpadFingers`).
     var onFingers: (Int) -> Void = { _ in }
     /// Modifiers the key row is holding for the next click. Cleared here when one is spent.
@@ -120,10 +120,11 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// past an edge parks the pointer there instead of losing it (PadCursor, pure, checked in
     /// Tests/checks/pointer-presence). The source of truth for where a click lands. The feed only
     /// re-seeds it: a stroke's first finger, and the pad joining a window, carry on from the anchor
-    /// (`adoptAnchor`), where the Mac's arrow is or where something else on this device (a Pencil, a
-    /// tap, the pad this one replaced across a rotation) left the pointer; and a move, a scroll or a
-    /// drag first catches up (`catchUp`), so after the Mac took the pointer under a resting finger
-    /// the next move carries on from the Mac's pointer instead of pulling it back.
+    /// (`adoptAnchor`), where the Mac's arrow is or where something else on this device (a Pencil,
+    /// a tap, the pad this one replaced across a rotation) left the pointer; and a move, a click, a
+    /// scroll or a drag first catches up (`catchUp`), so after the Mac took the pointer, or moved
+    /// it on, under a resting finger the next move carries on from the Mac's pointer instead of
+    /// pulling it back.
     private var pad = PadCursor()
     private var cursor: CGPoint { pad.cursor }
     /// Counts the fingers on the pad for `onFingers`, whatever the other recognizers take.
@@ -247,14 +248,15 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// click where the pointer is seen. No anchor yet (nothing known this session): it stays.
     private func adoptAnchor() {
         let f = feed()
-        pad.adopt(anchor: f.anchor, takeovers: f.takeovers)
+        pad.adopt(anchor: f.anchor, reseeds: f.reseeds)
     }
 
-    /// Before a move, a scroll or a drag reads the cursor: when the Mac or another device took the
-    /// pointer since the pad last looked, the cursor carries on from the anchor (the Mac's pointer).
+    /// Before a move, a click, a scroll or a drag reads the cursor: when the Mac or another device
+    /// took the pointer, or moved it on, since the pad last looked, the cursor carries on from the
+    /// anchor (the Mac's pointer).
     private func catchUp() {
         let f = feed()
-        pad.catchUp(anchor: f.anchor, takeovers: f.takeovers)
+        pad.catchUp(anchor: f.anchor, reseeds: f.reseeds)
     }
 
     /// True while the tracker owns one-finger motion: its finger is down, and the stroke has not

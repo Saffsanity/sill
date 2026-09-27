@@ -215,7 +215,7 @@ check(!P.isRestatement(x: 0.6, y: 0.1, inside: true, anchor: pt(0.25, 0.75), rec
 
 do {
     var f = F()
-    check(f.control == .elsewhere && f.mac == nil && !f.macInside && f.anchor == nil && f.takeovers == 0 && !f.carrying && f.recent.isEmpty,
+    check(f.control == .elsewhere && f.mac == nil && !f.macInside && f.anchor == nil && f.reseeds == 0 && !f.carrying && f.recent.isEmpty,
           "a new feed: the Mac's, nothing known")
     check(f.sent(.pointer(pt(0.1, 0.2)), now: 1), "the first input brings the pointer here")
     check(f.control == .here && f.anchor == pt(0.1, 0.2) && f.recentPoints(now: 1) == [pt(0.1, 0.2)], "a pointer event: the anchor and the last 3 s")
@@ -226,14 +226,15 @@ do {
     // The Mac's news takes it.
     check(f.report(at: pt(0.5, 0.5), seen: 4, sentOnSession: 4, movePending: false, now: 2) == .news(tookOver: true, changed: true),
           "a fresh report while here: news that takes the pointer")
-    check(f.control == .elsewhere && f.mac == pt(0.5, 0.5) && f.macInside && f.anchor == pt(0.5, 0.5) && f.takeovers == 1,
-          "…elsewhere, the Mac's position, the anchor there, one takeover")
+    check(f.control == .elsewhere && f.mac == pt(0.5, 0.5) && f.macInside && f.anchor == pt(0.5, 0.5) && f.reseeds == 1,
+          "…elsewhere, the Mac's position, the anchor there, one re-seed")
     check(f.report(at: pt(0.6, 0.5), seen: 4, sentOnSession: 4, movePending: false, now: 2.03) == .news(tookOver: false, changed: true)
-          && f.takeovers == 1, "the Mac's pointer moving: news, no takeover")
-    check(f.report(at: pt(0.6, 0.5), seen: 4, sentOnSession: 4, movePending: false, now: 2.06) == .news(tookOver: false, changed: false),
-          "the same position again: nothing changed")
+          && f.reseeds == 2, "the Mac's pointer moving: news, no takeover, but a re-seed (the anchor moved)")
+    check(f.report(at: pt(0.6, 0.5), seen: 4, sentOnSession: 4, movePending: false, now: 2.06) == .news(tookOver: false, changed: false)
+          && f.reseeds == 2, "the same position again: nothing changed, no re-seed")
     check(f.report(at: nil, seen: 4, sentOnSession: 4, movePending: false, now: 2.09) == .news(tookOver: false, changed: true)
-          && !f.macInside && f.mac == pt(0.6, 0.5) && f.anchor == pt(0.6, 0.5), "off the stream: hidden; the last position and the anchor stay")
+          && !f.macInside && f.mac == pt(0.6, 0.5) && f.anchor == pt(0.6, 0.5) && f.reseeds == 2,
+          "off the stream: hidden; the last position and the anchor stay, no re-seed")
     // Stale reports change nothing.
     _ = f.sent(.pointer(pt(0.2, 0.2)), now: 3)
     let before = f
@@ -242,7 +243,7 @@ do {
     check(f.report(at: pt(0.9, 0.9), seen: 5, sentOnSession: 5, movePending: true, now: 3.02) == .stale && f == before,
           "a report while a move waits to go out: stale")
     check(f.report(at: pt(0.9, 0.9), seen: 5, sentOnSession: 5, movePending: false, now: 3.03) == .news(tookOver: true, changed: true)
-          && f.takeovers == 2, "once the Mac has read it all: news, a takeover")
+          && f.reseeds == 3, "once the Mac has read it all: news, a takeover, a re-seed")
 }
 // The anchor: the newer of this device's last pointer event and the Mac's last position over the stream.
 do {
@@ -260,18 +261,30 @@ do {
     _ = f.report(at: pt(0.5, 0.5), seen: 3, sentOnSession: 4, movePending: false, now: 7)
     check(f.anchor == pt(0.3, 0.3), "a stale report leaves it")
 }
-// Takeovers count only the pointer leaving this device.
+// Re-seeds: news that takes the pointer from this device, or moves the anchor while the Mac has it
+// (the review, 2026-09-27: a finger that landed while the Mac had the pointer carried on from where it
+// landed after the Mac's mouse moved it on). This device's own input never re-seeds.
 do {
     var f = F()
     _ = f.report(at: pt(0.2, 0.2), seen: 0, sentOnSession: 0, movePending: false, now: 1)
+    check(f.reseeds == 1, "the session's first report moves the anchor: a re-seed")
     _ = f.report(at: pt(0.3, 0.2), seen: 0, sentOnSession: 0, movePending: false, now: 1.1)
-    check(f.takeovers == 0, "reports while the Mac has it: no takeover")
-    _ = f.sent(.other, now: 2)
-    _ = f.report(at: nil, seen: 1, sentOnSession: 1, movePending: false, now: 2.1)
-    check(f.takeovers == 1, "a report off the stream takes it too")
+    check(f.reseeds == 2 && f.anchor == pt(0.3, 0.2), "the Mac moving it on while it has it: a re-seed")
+    _ = f.report(at: pt(0.3, 0.2), seen: 0, sentOnSession: 0, movePending: false, now: 1.15)
+    _ = f.report(at: nil, seen: 0, sentOnSession: 0, movePending: false, now: 1.2)
+    check(f.reseeds == 2, "the same place again, or off the stream while the Mac has it: none (the anchor stays)")
+    _ = f.sent(.pointer(pt(0.4, 0.4)), now: 1.5)
+    _ = f.sent(.scroll(pt(0.6, 0.6)), now: 1.6)
+    _ = f.sent(.other, now: 1.7)
+    check(f.reseeds == 2, "this device's own input: none")
+    _ = f.report(at: nil, seen: 3, sentOnSession: 3, movePending: false, now: 2.1)
+    check(f.reseeds == 3 && f.anchor == pt(0.4, 0.4), "a report off the stream that takes the pointer: a re-seed, the anchor where it was")
     _ = f.sent(.other, now: 3)
-    _ = f.report(at: pt(0.5, 0.5), seen: 1, sentOnSession: 2, movePending: false, now: 3.1)
-    check(f.takeovers == 1 && f.control == .here, "a stale report takes nothing")
+    _ = f.report(at: pt(0.5, 0.5), seen: 3, sentOnSession: 4, movePending: false, now: 3.1)
+    check(f.reseeds == 3 && f.control == .here, "a stale report: none, and it takes nothing")
+    _ = f.handedOver()
+    _ = f.report(at: pt(0.4, 0.4), seen: 0, sentOnSession: 0, movePending: false, now: 3.2)
+    check(f.reseeds == 3 && f.control == .here, "a restatement during a carry-over: none")
 }
 // A hand-over's carry-over.
 do {
@@ -286,7 +299,7 @@ do {
           "within 0.002 of it")
     check(f.report(at: pt(0.70, 0.20), seen: 0, sentOnSession: 0, movePending: false, now: 13.9) == .restatement,
           "a scroll's location from 2.9 s ago")
-    check(f.control == .here && f.takeovers == 0 && f.mac == nil && f.carrying, "…none of them changed anything")
+    check(f.control == .here && f.reseeds == 0 && f.mac == nil && f.carrying, "…none of them changed anything")
     check(f.report(at: pt(0.30, 0.40), seen: 0, sentOnSession: 1, movePending: false, now: 13.95) == .stale && f.carrying,
           "a stale one is stale first")
     var old = f
@@ -300,7 +313,7 @@ do {
           && off.control == .elsewhere && !off.carrying, "off the stream during a carry-over: news, it takes the pointer")
     var far = f
     check(far.report(at: pt(0.9, 0.9), seen: 0, sentOnSession: 0, movePending: false, now: 12.2) == .news(tookOver: true, changed: true)
-          && far.takeovers == 1 && !far.carrying, "a position of nobody's here: news, a takeover, the carry-over ends")
+          && far.reseeds == 1 && !far.carrying, "a position of nobody's here: news, a takeover, the carry-over ends")
     check(far.report(at: pt(0.9 + tiny, 0.9), seen: 0, sentOnSession: 0, movePending: false, now: 12.23) == .news(tookOver: false, changed: true),
           "after news, a report near the new anchor is news too")
     // The first input on the new connection ends it.
@@ -333,7 +346,7 @@ do {
     f.reset()
     check(f.control == .elsewhere && f.mac == nil && !f.macInside && f.anchor == nil && !f.carrying && f.recent.isEmpty,
           "tearDown: the Mac's, nothing known")
-    check(f.takeovers == 1, "…but takeovers only grow")
+    check(f.reseeds == 1, "…but re-seeds only grow")
 }
 // The last 3 s, bounded.
 do {
@@ -371,7 +384,7 @@ do {
     }
     group.wait()
     let state = feed.current
-    check(state.takeovers <= news && news > 0, "20,000 sends against 20,000 reports: \(news) news, \(state.takeovers) takeovers")
+    check(state.reseeds <= news && news > 0, "20,000 sends against 20,000 reports: \(news) news, \(state.reseeds) re-seeds")
     feed.reset()
     check(feed.current.control == .elsewhere && feed.current.anchor == nil && !feed.handedOver(), "the feed's reset and hand-over")
 }
@@ -380,26 +393,26 @@ do {
 
 do {
     var pad = PadCursor()
-    check(pad.cursor == pt(0.5, 0.5) && pad.takeoversSeen == 0, "the pad starts in the middle")
-    pad.adopt(anchor: nil, takeovers: 3)
-    check(pad.cursor == pt(0.5, 0.5) && pad.takeoversSeen == 3, "no anchor: the cursor stays; the count is seen")
-    pad.adopt(anchor: pt(0.2, 0.9), takeovers: 3)
+    check(pad.cursor == pt(0.5, 0.5) && pad.reseedsSeen == 0, "the pad starts in the middle")
+    pad.adopt(anchor: nil, reseeds: 3)
+    check(pad.cursor == pt(0.5, 0.5) && pad.reseedsSeen == 3, "no anchor: the cursor stays; the count is seen")
+    pad.adopt(anchor: pt(0.2, 0.9), reseeds: 3)
     check(pad.cursor == pt(0.2, 0.9), "a stroke's first finger carries on from the anchor")
-    pad.adopt(anchor: pt(1.4, -0.2), takeovers: 3)
+    pad.adopt(anchor: pt(1.4, -0.2), reseeds: 3)
     check(pad.cursor == pt(1, 0), "an anchor out of range is clamped")
     pad.move(dx: -0.25, dy: 0.5)
     check(pad.cursor == pt(0.75, 0.5), "a move: travel added")
     pad.move(dx: 2, dy: -2)
     check(pad.cursor == pt(1, 0), "pushed past the edges: parked there")
-    pad.catchUp(anchor: pt(0.1, 0.1), takeovers: 3)
-    check(pad.cursor == pt(1, 0), "no takeover since the pad last looked: it keeps its own cursor")
-    pad.catchUp(anchor: pt(0.1, 0.1), takeovers: 4)
-    check(pad.cursor == pt(0.1, 0.1) && pad.takeoversSeen == 4, "the Mac took over mid-stroke: carry on from the anchor")
+    pad.catchUp(anchor: pt(0.1, 0.1), reseeds: 3)
+    check(pad.cursor == pt(1, 0), "no re-seed since the pad last looked: it keeps its own cursor")
+    pad.catchUp(anchor: pt(0.1, 0.1), reseeds: 4)
+    check(pad.cursor == pt(0.1, 0.1) && pad.reseedsSeen == 4, "the Mac took over, or moved it on, mid-stroke: carry on from the anchor")
     pad.move(dx: 0.05, dy: 0)
-    pad.catchUp(anchor: pt(0.1, 0.1), takeovers: 4)
+    pad.catchUp(anchor: pt(0.1, 0.1), reseeds: 4)
     check(abs(pad.cursor.x - 0.15) < 1e-12 && pad.cursor.y == 0.1, "…once: the next move goes on from there")
-    pad.catchUp(anchor: nil, takeovers: 5)
-    check(abs(pad.cursor.x - 0.15) < 1e-12 && pad.takeoversSeen == 5, "a takeover with no anchor leaves the cursor")
+    pad.catchUp(anchor: nil, reseeds: 5)
+    check(abs(pad.cursor.x - 0.15) < 1e-12 && pad.reseedsSeen == 5, "a re-seed with no anchor leaves the cursor")
 }
 
 // MARK: The plan's rows as a session (the feed, the presence and the pad together)
@@ -416,8 +429,8 @@ do {
     _ = feed.report(at: pt(0.40, 0.30), seen: 0, sentOnSession: sent, movePending: false, now: 1)
     check(render() == pt(0.40, 0.30), "session: the Mac's arrow at connect")
     // A stroke on the pad starts where the Mac's arrow is, and the first move lands there plus the travel.
-    pad.adopt(anchor: feed.anchor, takeovers: feed.takeovers)
-    pad.catchUp(anchor: feed.anchor, takeovers: feed.takeovers)
+    pad.adopt(anchor: feed.anchor, reseeds: feed.reseeds)
+    pad.catchUp(anchor: feed.anchor, reseeds: feed.reseeds)
     pad.move(dx: 0.01, dy: 0)
     shown.setOwn(pad.cursor, from: .trackpad)
     _ = feed.sent(.pointer(pad.cursor), now: 2); sent += 1
@@ -429,7 +442,7 @@ do {
     _ = feed.report(at: pt(0.70, 0.60), seen: sent, sentOnSession: sent, movePending: false, now: 3)
     check(render() == pt(0.70, 0.60), "session: the Mac takes over, the arrow jumps")
     // The resting finger moves again: the pad re-seeds from the Mac's pointer, no jump back.
-    pad.catchUp(anchor: feed.anchor, takeovers: feed.takeovers)
+    pad.catchUp(anchor: feed.anchor, reseeds: feed.reseeds)
     pad.move(dx: 0.01, dy: 0.01)
     check(abs(pad.cursor.x - 0.71) < 1e-12 && abs(pad.cursor.y - 0.61) < 1e-12, "session: the pad goes on from the Mac's pointer")
     shown.setOwn(pad.cursor, from: .trackpad)
@@ -454,6 +467,40 @@ do {
     // Nothing streams any more: hidden.
     shown.streaming = false
     check(render() == nil, "session: nothing streams, nothing shows")
+}
+
+// The review's case (2026-09-27), in the order TrackpadSurface calls it: a finger lands on the pad
+// while the Mac has the pointer (touchesBegan's adopt), rests while the Mac's mouse moves it on, then
+// moves (moveCursor's catchUp, then the travel), or taps (click's catchUp). Before the fix the pad
+// went on from where the finger landed and pulled the Mac's pointer back across the frame.
+do {
+    var feed = F()
+    var pad = PadCursor()
+    _ = feed.report(at: pt(0.20, 0.20), seen: 0, sentOnSession: 0, movePending: false, now: 1)   // connect: the Mac's, at M1
+    pad.adopt(anchor: feed.anchor, reseeds: feed.reseeds)                                        // the finger lands
+    check(pad.cursor == pt(0.20, 0.20), "rest: the finger lands where the Mac's arrow is")
+    _ = feed.report(at: pt(0.70, 0.70), seen: 0, sentOnSession: 0, movePending: false, now: 3)   // the Mac's mouse: M2
+    pad.catchUp(anchor: feed.anchor, reseeds: feed.reseeds)
+    pad.move(dx: 0.0184, dy: 0)
+    check(abs(pad.cursor.x - 0.7184) < 1e-12 && pad.cursor.y == 0.70,
+          "rest: the finger's first move after the Mac moved it on goes on from M2 (\(pad.cursor)), not from where it landed")
+    // A tap after the same rest clicks where the pointer went, not where the finger landed.
+    var feed2 = F()
+    var tap = PadCursor()
+    _ = feed2.report(at: pt(0.30, 0.60), seen: 0, sentOnSession: 0, movePending: false, now: 1)
+    tap.adopt(anchor: feed2.anchor, reseeds: feed2.reseeds)
+    _ = feed2.report(at: pt(0.55, 0.25), seen: 0, sentOnSession: 0, movePending: false, now: 2)
+    tap.catchUp(anchor: feed2.anchor, reseeds: feed2.reseeds)
+    check(tap.cursor == pt(0.55, 0.25), "rest: a tap clicks where the Mac's pointer went")
+    // Another device drives while this one's finger rests: its reports re-seed the same way.
+    var feed3 = F()
+    var pad3 = PadCursor()
+    _ = feed3.sent(.pointer(pt(0.5, 0.5)), now: 1)                                                // this device drove
+    _ = feed3.report(at: pt(0.40, 0.40), seen: 1, sentOnSession: 1, movePending: false, now: 2)  // the other device took it
+    pad3.adopt(anchor: feed3.anchor, reseeds: feed3.reseeds)                                     // the finger lands
+    for i in 1...10 { _ = feed3.report(at: pt(0.40 + 0.01 * CGFloat(i), 0.40), seen: 1, sentOnSession: 1, movePending: false, now: 2 + 0.03 * Double(i)) }
+    pad3.catchUp(anchor: feed3.anchor, reseeds: feed3.reseeds)
+    check(pad3.cursor == pt(0.50, 0.40), "rest: another device driving on, the finger's move goes on from its latest position")
 }
 
 print("\(checks) checks, \(failures) failed")

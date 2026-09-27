@@ -244,7 +244,7 @@ struct PortraitStreamScreen: View {
                    showSpotlight: client.active == .desktop)
             Trackpad(send: { client.sendInput($0) },
                      setPointer: { client.setOwnPointer($0, from: .trackpad) },
-                     feed: { let f = client.pointerFeedState; return (f.anchor, f.takeovers) },
+                     feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
                      onFingers: { client.trackpadFingers($0) },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })

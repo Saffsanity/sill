@@ -16,7 +16,8 @@ import Foundation
 // • PointerFeedState (the network queue): who moved the pointer last as this device knows it, where
 //   the Mac's pointer is, the anchor, what this device sent in the last 3 s, and a hand-over's
 //   carry-over; PointerFeed keeps it under a lock for main to read.
-// • PadCursor (the portrait pad): where a stroke, and a move after the Mac took over, carry on from.
+// • PadCursor (the portrait pad): where a stroke, and a move after the Mac moved the pointer,
+//   carry on from.
 
 /// What the device's one pointer sprite shows (§7.2):
 ///
@@ -42,7 +43,7 @@ struct PointerPresence: Equatable {
     /// frame), and whether the last fresh report was.
     var mac: CGPoint?
     var macInside = false
-    /// This device's own pointer (StreamClient.localPointer), and what drew it.
+    /// This device's own pointer (written only by StreamClient.setOwnPointer), and what drew it.
     var own: CGPoint?
     var origin: Origin = .none
     /// The laptop layout: inner or outer portrait.
@@ -162,8 +163,9 @@ struct PointerPresence: Equatable {
 /// own input (every kind 8 it sends, coalesced moves included) makes it `.here`; a fresh report from
 /// the Mac (kind 26) makes it `.elsewhere`, with where the Mac's pointer is. The anchor, where a
 /// trackpad stroke carries on from, is the newer of this device's last pointer event and the Mac's
-/// last position over the stream. `takeovers` counts the reports that took the pointer from this
-/// device, and only grows.
+/// last position over the stream. `reseeds` counts the reports after which the pad carries on from
+/// the anchor (PadCursor): each that took the pointer from this device, and each that moved the
+/// anchor while the Mac, or another device, had it. It only grows.
 ///
 /// A hand-over (the session moving to a new connection: from AWDL to the network, to the cable and
 /// back) is a new device to the Mac, which reports the pointer to it at once, having read nothing on
@@ -197,7 +199,7 @@ struct PointerFeedState: Equatable {
     private(set) var mac: CGPoint?
     private(set) var macInside = false
     private(set) var anchor: CGPoint?
-    private(set) var takeovers = 0
+    private(set) var reseeds = 0
     private(set) var carrying = false
     private(set) var recent: [Recent] = []
 
@@ -227,7 +229,12 @@ struct PointerFeedState: Equatable {
     /// A report (kind 26): `position` is where the Mac's pointer is over the stream (MacPointer's
     /// `position`), nil when it is off it; `seen` is the report's, `sentOnSession` what SessionLink
     /// counted, `movePending` whether a coalesced move still waits to go out. Judged by freshness,
-    /// then by the carry-over; news takes the pointer.
+    /// then by the carry-over; news takes the pointer. News that takes the pointer from this
+    /// device, or moves the anchor, is a re-seed for the pad: a finger that landed while the Mac
+    /// had the pointer, and rests while the Mac's mouse moves it on, carries on from where it went
+    /// (the review, 2026-09-27). The Mac never reports to the device moving the pointer, and a
+    /// report built before it read this device's input is stale, so news always means someone else
+    /// moved it.
     mutating func report(at position: CGPoint?, seen: Int?, sentOnSession: Int, movePending: Bool, now: Double) -> Report {
         guard PointerPresence.isFresh(seen: seen, sentOnSession: sentOnSession, movePending: movePending) else { return .stale }
         if carrying, let p = position,
@@ -237,13 +244,14 @@ struct PointerFeedState: Equatable {
         carrying = false
         let tookOver = control == .here
         let before = (control, mac, macInside)
+        let anchorBefore = anchor
         control = .elsewhere
         macInside = position != nil
         if let position {
             mac = position
             anchor = position
         }
-        if tookOver { takeovers += 1 }
+        if tookOver || anchor != anchorBefore { reseeds += 1 }
         return .news(tookOver: tookOver, changed: before != (control, mac, macInside))
     }
 
@@ -254,8 +262,9 @@ struct PointerFeedState: Equatable {
         return carrying
     }
 
-    /// The session ended (tearDown): the Mac has the pointer, nowhere yet, with no anchor and nothing
-    /// sent. `takeovers` stays: a pad that saw an older count never takes a new session's for its own.
+    /// The session ended (tearDown): the Mac has the pointer, nowhere yet, with no anchor and
+    /// nothing sent. `reseeds` stays: a pad that saw an older count never takes a new session's for
+    /// its own.
     mutating func reset() {
         control = .elsewhere
         mac = nil
@@ -279,7 +288,7 @@ struct PointerFeedState: Equatable {
 
 /// PointerFeedState under a lock: written on the network queue (StreamClient's sendInput block, its
 /// kind 26 handler and a move's hand-over), read by main (the presence, the anchor, the pad's
-/// takeovers).
+/// re-seeds).
 final class PointerFeed {
     private let lock = NSLock()
     private var state = PointerFeedState()
@@ -310,29 +319,29 @@ final class PointerFeed {
     }
 }
 
-/// The portrait pad's virtual cursor (TrackpadView), a fraction of the frame clamped to 0…1, and the
-/// feed's `takeovers` it last saw (§7.3, §7.5). A stroke's first finger, and the pad joining a window,
-/// carry on from the anchor (`adopt`). A move, a scroll or a drag first catches up (`catchUp`): when
-/// the Mac or another device took the pointer since the pad last looked, it carries on from the
-/// anchor too, so a finger resting on the pad while the Mac took over carries on from the Mac's
-/// pointer instead of pulling it back to where the finger stopped. The pad's moves are absolute, so
-/// its first after either lands at the anchor plus the finger's travel: a still Mac pointer does not
-/// jump.
+/// The portrait pad's virtual cursor (TrackpadView), a fraction of the frame clamped to 0…1, and
+/// the feed's `reseeds` it last saw (§7.3, §7.5). A stroke's first finger, and the pad joining a
+/// window, carry on from the anchor (`adopt`). A move, a click, a scroll or a drag first catches up
+/// (`catchUp`): when the Mac or another device took the pointer, or moved it on, since the pad last
+/// looked, it carries on from the anchor too, so a finger resting on the pad while the Mac's mouse
+/// moved the pointer carries on from the Mac's pointer instead of pulling it back to where the
+/// finger stopped or landed. The pad's moves are absolute, so its first after either lands at the
+/// anchor plus the finger's travel: a still Mac pointer does not jump.
 struct PadCursor: Equatable {
     private(set) var cursor = CGPoint(x: 0.5, y: 0.5)
-    private(set) var takeoversSeen = 0
+    private(set) var reseedsSeen = 0
 
     /// A stroke's first finger, or the pad joining a window: from the anchor when there is one.
-    mutating func adopt(anchor: CGPoint?, takeovers: Int) {
+    mutating func adopt(anchor: CGPoint?, reseeds: Int) {
         if let anchor { cursor = Self.clamped(anchor) }
-        takeoversSeen = takeovers
+        reseedsSeen = reseeds
     }
 
-    /// Before a move, a scroll or a drag reads the cursor: from the anchor when the pointer was taken
-    /// since the pad last looked.
-    mutating func catchUp(anchor: CGPoint?, takeovers: Int) {
-        guard takeovers != takeoversSeen else { return }
-        adopt(anchor: anchor, takeovers: takeovers)
+    /// Before a move, a click, a scroll or a drag reads the cursor: from the anchor when the
+    /// pointer was taken, or moved on by the Mac or another device, since the pad last looked.
+    mutating func catchUp(anchor: CGPoint?, reseeds: Int) {
+        guard reseeds != reseedsSeen else { return }
+        adopt(anchor: anchor, reseeds: reseeds)
     }
 
     /// A finger's travel, as fractions of the frame; the cursor stops at the edges.
