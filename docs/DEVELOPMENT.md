@@ -230,10 +230,12 @@ panel (the gear, the last button of its bar): Quality, Resolution, Frame Rate,
 Prioritize Encoding Speed, Virtual Display and Direct Wireless Connection, with
 exactly the Mac's choices. Sill.app saves a device's change like a menu click,
 and its Settings window and menu show it; the change applies to every connected
-device, and a streaming setting restarts the stream for a moment. To put one
+device, and a streaming setting restarts the stream for a moment. A device away
+from home sets the away quality instead (Remote access, below). To put one
 setting back to its default, quit Sill, run `defaults delete
-me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
-`prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
+me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`, `awayBitrate`,
+`awayCaptureScale`, `prioritizeSpeed`, `virtualDisplay` or `directWireless`)
+and open Sill again.
 
 ## Direct Wireless Connection
 
@@ -314,12 +316,31 @@ If it doesn't connect:
 - "no longer accepts this iPad": the device was removed on the Mac (Settings ›
   Remote Access › Paired Devices); pair it again.
 
-Quality follows you home: the Quality setting belongs to the Mac, and Sill.app
-saves it, so picking Low (4 Mbps, for a slow link) away from home leaves it at
-Low at home until you change it back. Away from home through a VPN or the
-internet, a device asks for 60 fps even if its screen shows 120, which halves
-what the Mac sends; the panel suggests Low or Standard resolution when the
-round trip stays over 250 ms.
+Away from home has its own quality (docs/remote-bundle-plan.md). While every
+connected device is away, through a VPN or over the internet, the Mac streams
+at the away quality, Low at Standard resolution until you change it, and its
+log says "Away from home: …"; a device at home connected at the same time
+brings the home quality back for every device ("Home quality again: …"). A
+device away that picks a Quality or Resolution sets the away pair, never the
+home one; Sill.app saves both (`awayBitrate` and `awayCaptureScale` beside
+`bitrate` and `captureScale`), Settings › Streaming shows both, and the menu's
+Quality says "Away from home now: …" while the away pair runs. The device's
+Settings panel says which runs ("Away: Low · Standard"). A device away also
+asks for 60 fps even if its screen shows 120, which halves what the Mac sends.
+
+When the link cannot carry the quality (the Mac held frames back in three
+seconds of five), the Mac says so in its log ("Link to iPad …: cannot carry Pro
+…") and on the device's row in its menu, and tells the device, whose Settings
+panel offers a quality that fits in 70 % of what the link carried, with a
+button; a line over the picture says the same while the panel is closed. Every
+device is judged, at home too. From a Mac too old to judge the link, the panel
+suggests Low or Standard resolution when the round trip stays over 250 ms, as
+before.
+
+Coming home: a session through the remote door moves to the home network by
+itself about 2 s after the network lists the Mac, by the same make-before-break
+hand-over as a move off Direct Wireless, and the Mac goes back to the home
+quality in one restart. A session made with Connect Remotely stays remote.
 
 The command-line host: `swift run -c release SillHost --remote` opens the
 remote door for one run on any free port (`--remote=PORT` for a fixed one, but
@@ -386,9 +407,11 @@ another), with no encoder, Screen Recording or device: the host fed fake frames
 of chosen sizes, a shaped path (a rate, a delay, a queue, a dip, a dead path)
 and a stand-in device that reads, pings and judges liveness as the app does,
 all on 127.0.0.1. It prints each case against its gate
-(docs/remote-bundle-plan.md §11): about 18 minutes, `--full` about 40, and it
-waits while the Mac is busy (a load average of 20 or more), since a busy Mac
-makes a stalled path of any link. `--list` shows the cases.
+(docs/remote-bundle-plan.md §11), and the link's gates from what this tree's
+host judged of each device's link ("Link: behind …" in its log): about 25
+minutes, `--full` about 45, and it waits while the Mac is busy (a load average
+of 20 or more), since a busy Mac makes a stalled path of any link. `--list`
+shows the cases.
 
 ### Test arguments for the bare app
 
@@ -447,6 +470,18 @@ simulator:
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
   round.
+- Away from home and the link: `-SillSettingsCase away`, `awaymixed`,
+  `awayhome`, `linkbehind`, `linkmixed`, `linklow` or `linkstalled` (the
+  Settings panel's header, callout and footnote in each case), and
+  `-SillLinkLine behind` (the line over the stream). In a live session,
+  `-SillSettingsScript '3 set bitrate=15000000; 20 suggestion'` changes a
+  setting, or takes the link callout's button, at those seconds after the
+  first window list, only against a synthetic host on this Mac's loopback;
+  `-SillMoveHomeTest to:HOST:PORT` (with `-SillDialSaved 1`) lists the saved
+  Mac on the network a second into a remote session, so the move home runs
+  against a synthetic host, and `-SillDialSaved remotely` dials it as Connect
+  Remotely does. `CLAUDE.md`, Build and run, has the host side
+  (`SILL_TEST_REMOTE_ORIGIN`, `SILL_TEST_PATTERN=noise`).
 
 ## Measuring latency
 

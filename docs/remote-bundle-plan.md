@@ -1372,6 +1372,10 @@ after PR A or with PR A's commits first. Cherry-pick this plan's commit.
     silent too. The device's count would be exact where `.contentProcessed` sees only whole
     messages, and would tell a path down only towards the device from a slow one; it is a wire
     field (optional, compatible both ways) and more device code.
+14. **A link only a little too slow** (found building PR B; "Results: PR B" has the runs). Behind
+    needs 3 short seconds of 5, and under PR A's pacing such a link loses frames in rounds, which
+    can leave fewer than 3 short in any 5. Default: **the rule as planned.** The alternative adds
+    "or a fifth of the last 5 seconds' frames withheld".
 
 ---
 
@@ -1383,7 +1387,7 @@ fix e3a49ef), a comment (911202e), then main at cf05a78 merged in (7e577c5) and 
 (b0fd105), main at 676b362 merged in (07fe32f, no source of the host or the device changed), the
 review's two cases (a81a58f) and fixes (24dee3c, a933a4f), and main at 2b38179 merged in (dc471fa:
 PRs #30–#33, the Mac's pointer among them, whose reports go out like ticks, outside `send`). Items
-2–4 (PR B) are not started.
+2–4 are PR B's, whose Results follow these.
 
 ### Defaults taken
 
@@ -1584,3 +1588,218 @@ too: a scroll that stops settles on where it stopped within a few seconds, and a
 while it scrolls keeps moving from the new stream's first picture. Nothing here ran on a device,
 the hardware encoder or a real path: the harness sends over loopback, whose kernel buffers take
 0.7–1 MB the pacing never sees, and a real path's send buffer may stay smaller (§3.2).
+
+---
+
+## Results: PR B (away from home)
+
+Built on `remote-away`, from `remote-pacing` at c564142 (PR A, #34, open) on 2026-09-27, one
+commit per step: the wire (340f98b), the host's away quality and per-connection states (934f997),
+each device's link (98290b6), Sill.app (0e5d4ce), the device's panel, callout and line (6222d7c),
+the move home (2e40673) and these docs, then the review (below). It stacks on PR A: its
+pull request is against `remote-pacing`, and GitHub moves it to main once PR A merges.
+
+### Defaults taken
+
+Open questions 1–10 and 13 at their defaults: no rtt exception (the move home covers 14:02), no
+automatic step-down (the callout and its button), the home quality while a device at home is
+connected, only Quality and Resolution split, the away pair in Settings › Streaming and never in
+the menu, a VPN into the router counts at home ("by address"), every device's link judged (at home
+the button lowers the home quality), 70 % headroom, a line that takes no touch, the move home's
+kind 18 check, and the host's view of the link (no device-side byte count).
+
+### Where the build departs from the plan, and why
+
+- **SILL_TEST_REMOTE_ORIGIN=vpn|internet** (new, TEST ONLY, a host that does not advertise): the
+  remote door alone counts loopback as that origin, the home door keeps it at home. A test host
+  listens on loopback only (SILL_TEST_LOOPBACK), so SILL_TEST_ORIGIN, which applies to both doors,
+  could not give one host a device at home beside one away. H8's home client and S4's home door are
+  127.0.0.1 through the home door, not this Mac's `fe80::…%en0`, which a loopback-only host
+  refuses; the readout after S4's move therefore has no route word (lo0), where the plan expected
+  "Wi‑Fi".
+- **SILL_TEST_PATTERN=noise** (new, TEST ONLY, a synthetic host): a square of random pixels, a third
+  of the frame's height on a side, new every frame. The plan set H12's relay at half the synthetic
+  stream's rate, but the sweeping bar compresses to about 56 kbit/s whatever the quality, and a
+  relay at 28 kbit/s would take minutes to carry the catalog. With the square the software encoder
+  keeps about 14 frames a second at 1512×948, about 3.6 Mbit/s at Low and 10.6 at Balanced, so a
+  lower quality makes a smaller stream (H12, S3). An earlier try, 8-pixel blocks over the whole
+  frame, left the encoder at 8 frames a second and the stream at its own size whatever the quality.
+- **H2 on the software encoder** on both builds (SILL_TEST_SOFTWARE_ENCODER, with
+  SILL_TEST_LOOPBACK): this session kept off the hardware encoder altogether, which Noah's Sill.app
+  shares. The kind 16 lines and their count are the ones H2 compares, and they do not depend on the
+  encoder.
+- **The link's reports.** LinkJudge reports the carried rate again during a spell once it has moved
+  by a quarter (`carriedMove`): the harness showed the first measure reading high while the buffers
+  between the host and the link filled (12 Mbit/s on an 8 Mbit/s path), and a suggestion made from
+  it stood for the whole spell. The coordinator publishes a report only when its state or its
+  suggestion changes, so the device and the card see no report that only moved the rate. A report
+  judged at a quality that is no longer the target (a pick has just changed it, and the restart's
+  reset follows within milliseconds) is left out of kind 16, so the answer to the pick that lowers
+  the quality already carries none (H12 found the answer carrying the old report).
+- **H11's gates for a slower path, restated.** The host judges only what it withholds, and it
+  withholds nothing while the buffers between it and the slower link fill: the dip's 1 MB queue and
+  the loopback's socket buffers took 5.9 s, the stopped downlink's 256 KB queue 2.9 s. Behind comes
+  at the third short second after that, so the dip and the downlink's stop are gated at "behind
+  within 3 s of the end of the host's first second withholding frames" (2.2 s both), not "within
+  5 s of the change" (8.0 and 5.0 s); the dead path at "stalled within 8 s" (5.0 s), not 4. The
+  harness prints how long the buffers took beside each.
+- **H12's rate.** At the plan's half of the stream (5 Mbit/s against Balanced's 10.6) the report
+  came 4.8 s after the pick's answer, inside the 6 s gate. At 6 Mbit/s (1.8 times over) it took 8.1
+  and 8.6 s in two runs: PR A's pacing drops, waits for the backlog to drain, then sends a keyframe
+  and a second or two of deltas the buffers absorb, so clean seconds fall between the short ones and
+  the third short second of five comes in the next round. A link only a little too slow for the
+  quality may never show three short seconds in five (open question 14, below). In every H12 run
+  the carried rate went unmeasured (seconds rarely end with 16 KB waiting while the pacing drains
+  the queue before each keyframe), so the suggestion was one step down (Efficient from Balanced).
+- **The move home refuses another launch at its window list,** before its kind 18: a host without a
+  remote door sends none, and the move waited out its 5 s and counted as a failure (S4's `other:`).
+  Its test row (`-SillMoveHomeTest`) is named "‹Mac› (home test)": on this Mac the simulator's
+  browser also lists Sill.app under the Mac's name, and a row of the same name hid it.
+- **The fence check** gains two modes, `remotehome` (the fenced hand-over from a TLS connection to a
+  plain one, the old one closed once what waited went out) and `remotedead` (the remote connection
+  gone mid-move: held, adopted, delivered): 17 modes.
+- **Headless taps:** `-SillSettingsScript '<t> set K=V | suggestion; …'` (DEBUG, under
+  `-SillInputScript`'s guard: a loopback session to a host with no version) takes the panel's
+  controls, and the callout's button, for S3. The device's console prints "link: behind (cannot
+  carry Pro; suggesting Low · Standard)", "link: keeping up" and "link: the stream's line “…”
+  (announced)" (§6.8).
+- **S1's phone sizes** on the iPad simulator with `-SillIdiom phone` (the harness's way to draw a
+  phone's layout on a larger simulator): 440x894 upright and 956x440 on its side.
+- **H16 from the bare binary,** with the SDK recorded by vtool as make-app.sh does and signed ad hoc,
+  base and new at one path, instead of the bundle: the bundle's defaults domain is
+  me.saffer.sill.mac, and make-app.sh signs with the login keychain's identity.
+- **The footnote's qualities are kept whole** (no-break spaces) like the header's: S1 at 1000x710
+  wrapped "Low" and "· Standard." onto two lines.
+
+### Verified
+
+On this Mac (an M2 Pro), 2026-09-27; no device, no hardware encoder, no Sill.app; every host on
+loopback alone, on the software encoder, killed by PID.
+
+- **H0.** H2's and H3's base is origin/main at 2b38179 (its StreamServer.swift is PR A's base), built
+  from `git archive`; H16's is c564142 (`remote-pacing`), the branch point.
+- **H1, the builds:** `swift build -c release` of each step's tree from clean, only the CaptureProbe
+  warning; the iOS app for the simulator, Debug (signed ad hoc, for the keychain) and Release, only
+  the old `StreamClient` capture warning; step 8's sources, which leave out the move home, also
+  typechecked on their own for Debug and Release.
+- **H2** (the step 6 host against origin/main's CLI, idle 35 s and with `sillclient.py PORT 5
+  desktop`, with and without `--direct-wireless`): every line but the stats lines identical, masked
+  and sorted; the stats lines' count within one; the client's kind 16 lines, their count (2) and
+  its first kinds identical: 14 of 14.
+- **H3, the harness** (`Scripts/pacing/run.sh --full --base origin/main`, the step 6 tree; each run
+  started with the load under 20, four ran again after other work lifted it past 75): every pacing
+  gate passes, and the new build's figures are PR A's: real24 56.4, 60.0, 36.4 → 59.3 ×3 fps (no
+  drops); kf25m32 1.5 ×3 → 60.1 ×3; bigkf8 35.2, 19.0, 7.3 → 59.8 ×3; slowkfB 0.5 → 64.8; ext120
+  120.0 → 120.0 (base 2.9 drops a minute, new none); ext60 59.8 → 60.0; fastbig 59.9 → 60.1; dip
+  50.5 → 52.8, the frame age back at 45 ms 6.0 s after it; relay2 61.4 → 62.4 with no loss; the
+  blackhole dropped for its silence on both; stillend 3 of 3 still spells; restartkf 1.6 → 60.1;
+  over8 1.8 → 4.9; low, switch and home no worse (60.1, 60.1, 60.1).
+- **H6:** `Tests/checks/away-wire`, 47 checks, 9 of 9 mutants (step 4).
+- **H7** (away): 12 of 12, on step 5 and on the final build: "Away from home: …" once, the stream at
+  4 Mbps, the pick of Balanced answered in the away pair and restarting once at 15, the home
+  bitrate untouched. **H8 and H13** (mixed): 24 of 24: the home client joining brings "Home quality
+  again" and one restart (0.01 s after its viewport, 1.01 s without one), the away one back when it
+  leaves, each client its own pair.
+- **H9** (the bare app, domain `SillMenuBar`, its own log file, `-remoteAccess 1` for the run): 12 of
+  12: away at Low · Standard; a device's Balanced saved as `awayBitrate`, with `bitrate` and
+  `remoteAccess` never written; after a relaunch away at Balanced; a SetAfter of the away pair one
+  "Settings: away bitrate 15 → 8 Mbps per 60 fps, away points → Retina" and one restart; the domain
+  emptied after.
+- **H10:** `Tests/checks/link-judge`, 74 checks (the plan asked for 34), 22 of 22 mutants (its ten
+  among them).
+- **H11, the link in the harness** (the new build's Link lines): real24 (three runs), slowkfB,
+  linkstill and home never behind or stalled; over8 behind 3.0 s after its first keyframe, the
+  carried rate 7.1 Mbit/s on 8 (the median of 27 reports), Low suggested for Pro; the dip behind
+  2.2 s after the host's first second withholding frames (5.9 s into the dip) and fine 6.0 s after
+  its end; the downlink's stop behind 2.2 s after the host's first such second (2.9 s after the
+  stop), never stalled; the dead path stalled 5.0 s after the blackhole.
+- **H12** (end to end, a noise host away, sillrelay.py at 5 Mbit/s and 40 ms): 14 of 14: behind 4.8 s
+  after the pick of Balanced was answered, "Link to sillclient (sillclient): cannot carry Balanced
+  (withheld 3 of 13 frames in the last second); suggesting Efficient.", one line for the spell,
+  never stalled; the pick of Low one restart, its answer without a report, no "keeping up again",
+  and at Low 4.3 Mbit/s through the relay with nothing behind. At 6 Mbit/s (two runs) 13 of 14:
+  behind 8.1 and 8.6 s after the pick.
+- **H14:** the ledger check, 90 with its 5,000 random runs; the policy check, 286 before and 303
+  after (the move home's 17).
+- **H15:** `moveHome` in the policy check (1.9 s no, 2.0 s yes, a blink restarting the count, retries
+  at 10, 20, 40, 60 and 60 s, a refused listing never, a new listing afresh, a model of the glue),
+  and 76 of 76 mutants, its six among them (the first run missed "upWait(0) with no failure": a case
+  for a listing that begins a moment after a try catches it).
+- **H16:** previews from c564142 and this branch, each bare binary with the SDK recorded by vtool and
+  signed ad hoc, at one path: only `pane-streaming` (light and dark) and `menu.txt` (the
+  `remote-away` sample) differ, and six cards are new (`remote-away`, `link-behind`,
+  `link-stalled`); each looked at.
+- **H17:** no new Stats key; no new `assumeIsolated` or `updateConfiguration` in Sources/SillHost
+  (HostShutdown's one is older); StreamMessage.swift and `HostSettingsChange` unchanged since
+  c564142; `standard`'s away pair Low · Standard; DeviceSettings still refuses Direct Wireless
+  from afar.
+- **The fence check:** 17 modes (remotehome and remotedead new), and 32 of 32 mutants over them.
+- **The pure checks** (`Tests/checks/run-all.sh`): all 25 pass (the four new ones among them).
+- **S1:** 144 photos of the harness's mock on a private iPad Pro 13-inch simulator (iOS 27.0): the
+  seven cases and both lines at the Duo's four sizes, the iPad's two and an iPhone's two, at the
+  default and accessibility-extra-large text (the sheets went to Noah). The header's lines wrap and
+  never truncate; the button is 44 pt (88 px at 2×, measured); the line sits inside the stream
+  panel, clear of the bar; at 710x1000 nothing crosses the fold.
+- **S3** (the noise host away through sillrelay.py at 3 Mbit/s; paired by the typed path through the
+  relay): 18 of 18. With the panel closed the report came 10 s after the pick of Balanced (the
+  software encoder kept 6 to 12 frames a second beside the simulator), the line showed and was
+  announced once; the callout's button ("Use Low") restarted the stream once, the report cleared
+  at once and the line 2 s later; at Low the link was behind again 5 s on ("The link to ‹Mac›
+  can’t keep up.", its own spell and announcement). With the panel open the callout showed, its
+  button ("Use Efficient") restarted once, and the callout went at once.
+- **S4** (the move home; a host whose remote door counts loopback as a VPN): the listing 1.9 s into
+  the session, the move 2.1 s after it by the row as listed, the fence down by its pong after 1 ms;
+  the host: the home connection, "Home quality again", one restart at 15 Mbps, then the remote
+  connection left; the panel's route line and away line gone, the Quality Balanced · Retina.
+  `refused`: tries 2.0, 12.2, 32.2 and 72.2 s after the listing, the session staying remote;
+  `other:`: refused once at its window list, no second try in 30 s. **S5:** `-SillDialSaved
+  remotely`: no move in 30 s.
+- **S6:** the spoken labels ("…, away quality, Low, Standard", "Use Low, Standard") in the away-copy
+  check; one announcement a spell in S3.
+
+### Where home pairing meets this (branch `home-pairing`, PR #37)
+
+When both have landed, whichever merges second:
+- **The routes.** home-pairing's `ClientRoute.home(origin, peer:)` carries the TLS key; AwayPolicy
+  reads only `isRemote` and `origin`, so `ClientRoute.isAway` (StreamCoordinator.swift's last lines)
+  stands as it is: a TLS home session is at home.
+- **The move home dials a TLS home door.** `startMove` makes its connection with
+  `moveParameters()`, the session's home trust, and a remote session has none (`Session.home` is
+  nil for it, so plain), which a TLS home door refuses. The move home takes
+  `HomeTrust.saved(pin:)` with the saved Mac's key (the one the remote door pins too), says its
+  hello inside TLS, and sets `session.home` at the hand-over; with TLS a connection is ready before
+  the Mac has judged the key, so the probe's window list is still what admits it. The pinned
+  handshake then proves the Mac, and the kind 18 check (§7.3) says it a second time: keep it (a
+  millisecond) or drop it.
+- **`receiveMacInfo`** was restructured there (`macInfoNamesSession`, `connectionKey`): the away
+  branch's two lines (a remote session's newest `issuedAt`, the first one starting the move home)
+  go after its `macInfoSaved = true`.
+- **Kind 16 per connection and the flip.** home-pairing's serve gate admits a TLS home session only
+  after its hello; the flip's wait for the new connection's first viewport (§5.4) counts from its
+  registration, so it is unchanged. Its `HostStatus` and `StatusText` changes meet this branch's
+  `Device.link`, `LinkStatus` and `linkWords` in the same structs: keep both.
+- **The Settings panel.** home-pairing edits HostSettingsPanel's header and footers (37 lines),
+  MockCatalog's cases and ContentView's harness docs, the places this branch adds the away line,
+  the callout, the footnote and seven cases: a textual merge, both kept.
+- **Connect Remotely at home** stays remote on both (`DialReason.connectRemotely`); home pairing's
+  cable pairing and asks never go through the remote door, so no move home starts from them.
+
+### Open question for Noah
+
+14. **A link only a little too slow.** Behind needs 3 short seconds of 5, and under PR A's pacing
+    a link that carries most of the stream loses frames in rounds (drop, drain, keyframe, a second
+    or two of deltas), which can leave fewer than 3 short seconds in any 5: the picture stutters
+    and no callout comes. Default: **the plan's rule, as built.** The alternative adds "or at least
+    a fifth of the last 5 seconds' frames withheld", which would have reported H12's 6 Mbit/s runs
+    at about 4 s.
+
+### Not verified here, for Noah
+
+On Noah's devices, the plan's P4–P13 (P1–P3 and P14, PR A's, are still open): away starting at Low ·
+Standard with the home bitrate untouched (P4); the away choice kept (P5); mixed home and away, one
+restart each way, the iPad's header (P6); Settings › Streaming's section and the menu's subtitle
+(P7); the link at Extreme away: the callout, the line, one announcement, the card's row, the
+button's one restart (P8); a dip (P9); coming home on Wi‑Fi and by the cable, dragging and typing
+through the move (P10, P11); Connect Remotely at home staying remote (P12); mixed builds (P13).
+Nothing here ran on a device, a real path or the hardware encoder: the link's timing on a hotspot,
+the move's on a real network, and VoiceOver on a device are all untested.
