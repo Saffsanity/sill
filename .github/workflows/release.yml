@@ -233,7 +233,10 @@ jobs:
         run: Scripts/release.sh --publish
 
       # Both submissions' answers and logs: the zip's (Sill-<version>-notary*) and the disk image's
-      # (Sill-<version>-dmg-notary*).
+      # (Sill-<version>-dmg-notary*). include-hidden-files: upload-artifact skips every file and folder
+      # whose name starts with a dot, the search's root included, so without it these patterns found
+      # nothing under .build and the step passed without an artifact (it never kept one). No files
+      # is a warning: a run that stopped before Apple answered has none.
       - name: Keep Apple's notary logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -242,8 +245,9 @@ jobs:
           path: |
             .build/Sill-*-notary.plist
             .build/Sill-*-notary-log.json
+          include-hidden-files: true
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Delete the keychain and the key files
         if: always()
