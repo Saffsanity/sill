@@ -82,6 +82,20 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
+        // `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: Pair This iPad…'s line over a
+        // session at home that speaks TLS, as the Mac's answer to its ask sets it (the mock never
+        // asks: over it the overlay reads "…is showing a code now." as over a plain door).
+        if let line = UserDefaults.standard.string(forKey: "SillOverlayLine") {
+            let device = StreamClient.deviceWord
+            switch line {
+            case "asking": client.overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: "Mac mini")
+            case "shown": client.overlayAskLine = DiscoveryPolicy.overlayLine(.shown, mac: "Mac mini", device: device)
+            case "openonmac": client.overlayAskLine = DiscoveryPolicy.overlayLine(.openOnMac, mac: "Mac mini", device: device)
+            case "locked": client.overlayAskLine = DiscoveryPolicy.overlayLine(.locked, mac: "Mac mini", device: device)
+            case "noanswer": client.overlayAskLine = DiscoveryPolicy.overlayLine(nil, mac: "Mac mini", device: device)
+            default: break
+            }
+        }
         return client
     }
 

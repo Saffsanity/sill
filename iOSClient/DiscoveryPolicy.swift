@@ -1024,6 +1024,22 @@ enum DiscoveryPolicy {
         return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\.id)
     }
 
+    /// Pair This iPad…'s line over a session at home that speaks TLS (§7.5), from the Mac's answer to
+    /// the ask the overlay makes on its own pairing connection (`answer`; nil when nothing answered):
+    /// a code is showing only when the Mac says so ("shown"). Kind 21 on the session asked the same,
+    /// but its answer never came back, and the overlay said a code was showing when the ask rule had
+    /// opened none (the security review, 2026-09-27). Any other answer, a second "busy" and an ok
+    /// this device does not take (it never claims the cable here) included, sends the person to the
+    /// Mac's menu, as `openOnMac` does; "locked" says to unlock the Mac first.
+    static func overlayLine(_ answer: AskAnswer?, mac: String, device: String) -> String {
+        switch answer {
+        case .shown?: return HomeCopy.overlayShowing(mac: mac)
+        case .locked?: return HomeCopy.overlayLocked(mac: mac, device: device)
+        case nil: return HomeCopy.noAnswerOverStream(mac: mac)
+        case .openOnMac?, .refused?, .busy?, .invalid?, .pairedOverCable?: return HomeCopy.overlayOpenOnMac(mac: mac)
+        }
+    }
+
     /// Whether a kind 18 whose signature checked, signed by `signer`, speaks for this session's Mac
     /// (§7.6): only when that is the key the connection it came on showed in its TLS handshake
     /// (`connectionKey`; nil on a plain connection). Only then may it name the session's Mac, make
@@ -1109,6 +1125,17 @@ enum DiscoveryPolicy {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code."
         }
         static func noAnswerOverStream(mac: String) -> String { "\(mac) didn\u{2019}t answer. Try again." }
+        /// Pair This iPad…'s line under its title over a session at home that speaks TLS, from the
+        /// Mac's answer to its ask (`overlayLine`): asking; a code showing; none shown by itself;
+        /// the Mac locked. Never "Tap": over a stream there is no row.
+        static func overlayAsking(mac: String) -> String { "Asking \(mac) for a code\u{2026}" }
+        static func overlayShowing(mac: String) -> String { "\(mac) is showing a code now." }
+        static func overlayOpenOnMac(mac: String) -> String {
+            "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+        }
+        static func overlayLocked(mac: String, device: String) -> String {
+            "Unlock \(mac), then choose Pair This \(device)\u{2026} again."
+        }
         static func openOnMac(mac: String) -> String {
             "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
         }

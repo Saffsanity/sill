@@ -140,6 +140,18 @@ M = [
      "            \"That code no longer works. Tap \\(mac) for a new one.\""),
     ("copy: an expired code sends to the menu", F, "static func expired(mac: String) -> String { \"That code expired. Tap \\(mac) for a new one.\" }",
      "static func expired(mac: String) -> String { \"That code expired. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\" }"),
+    # Pair This iPad…'s line from the Mac's answer (the security review, 2026-09-27).
+    ("overlayLine: a code said to show whatever the Mac answered (as before the review)", F,
+     "        switch answer {\n        case .shown?: return HomeCopy.overlayShowing(mac: mac)\n",
+     "        if !mac.isEmpty { return HomeCopy.overlayShowing(mac: mac) }\n        switch answer {\n        case .shown?: return HomeCopy.overlayShowing(mac: mac)\n"),
+    ("overlayLine: locked read as openOnMac", F, "        case .locked?: return HomeCopy.overlayLocked(mac: mac, device: device)\n",
+     "        case .locked?: return HomeCopy.overlayOpenOnMac(mac: mac)\n"),
+    ("overlayLine: nothing answered read as showing", F, "        case nil: return HomeCopy.noAnswerOverStream(mac: mac)\n",
+     "        case nil: return HomeCopy.overlayShowing(mac: mac)\n"),
+    ("overlayLine: openOnMac read as showing", F, "        case .openOnMac?, .refused?, .busy?, .invalid?, .pairedOverCable?: return HomeCopy.overlayOpenOnMac(mac: mac)",
+     "        case .openOnMac?: return HomeCopy.overlayShowing(mac: mac)\n        case .refused?, .busy?, .invalid?, .pairedOverCable?: return HomeCopy.overlayOpenOnMac(mac: mac)"),
+    ("copy: the overlay's locked line says tap", F, "\"Unlock \\(mac), then choose Pair This \\(device)\\u{2026} again.\"",
+     "\"Unlock \\(mac), then tap it again.\""),
     # The reconnect at a row that waits for a tap (the security review, 2026-09-27).
     ("reconnectEnd: never ends (waits for a tap for ever, as before the review)", F,
      "        guard dial == .waitForTap else { return nil }\n        return saved ? .removed : .pairingRequired\n", "        return nil\n"),

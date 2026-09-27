@@ -475,6 +475,23 @@ check("copy: the card's own errors (under the field) end at the row, the overlay
       C.stopped(mac: mini).hasSuffix("tap Mac mini again.") && C.closed(mac: mini).hasSuffix("tap Mac mini again.")
       && C.expired(mac: mini).contains("Tap Mac mini") && C.proofFailed(mac: mini).contains("Tap it"))
 
+// MARK: Pair This iPad…'s line over a session at home that speaks TLS (the security review, 2026-09-27)
+
+let everyAnswer: [P.AskAnswer?] = [nil, .shown, .openOnMac, .locked, .busy(1), .refused, .invalid, .pairedOverCable]
+check("overlay: a code is said to show only when the Mac answered shown",
+      everyAnswer.allSatisfy { a in (P.overlayLine(a, mac: mini, device: "iPad") == C.overlayShowing(mac: mini)) == (a == .shown) })
+check("overlay: \"Mac mini is showing a code now.\" for shown", P.overlayLine(.shown, mac: mini, device: "iPad") == "Mac mini is showing a code now.")
+check("overlay: no code by itself (openOnMac, refused, a second busy, an ok it does not take): the Mac's menu",
+      [P.AskAnswer.openOnMac, .refused, .busy(2), .invalid, .pairedOverCable].allSatisfy {
+          P.overlayLine($0, mac: mini, device: "iPad") == "Mac mini didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+      })
+check("overlay: locked: \"Unlock Mac mini, then choose Pair This iPad… again.\"",
+      P.overlayLine(.locked, mac: mini, device: "iPad") == "Unlock Mac mini, then choose Pair This iPad\u{2026} again.")
+check("overlay: nothing answered: \"Mac mini didn’t answer. Try again.\"", P.overlayLine(nil, mac: mini, device: "iPad") == C.noAnswerOverStream(mac: mini))
+check("overlay: while asking, \"Asking Mac mini for a code…\"", C.overlayAsking(mac: mini) == "Asking Mac mini for a code\u{2026}")
+check("overlay: no line of it says Tap (over a stream there is no row)",
+      (everyAnswer.map { P.overlayLine($0, mac: mini, device: "iPad") } + [C.overlayAsking(mac: mini)]).allSatisfy { !$0.contains("Tap") && !$0.contains("tap") })
+
 // MARK: The reconnect at a row that waits for a tap (the security review, 2026-09-27)
 
 check("reconnectEnd: an unsaved Mac whose door requires pairing ends the reconnect with pairingRequired",

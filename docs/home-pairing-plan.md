@@ -1245,8 +1245,18 @@ New attention items (first group, orange):
 - **An outside link** (`onOpenURL`, after its confirmation) goes the same way: to the row whose
   asked key it names, else the home rows pinned to its key, then its addresses, as today.
 - **Pair This ‹iPad›…** (the panel's overlay; now only in an unpaired session while Require
-  pairing is off): kind 21, then scan or type, dialed on the session's row as above, never through
-  kind 18's addresses (a device-opened window does not start the remote door).
+  pairing is off): the ask on a `sill-pair/1` connection of its own to the session's endpoint,
+  pinned to the key the session saw, never claiming the cable (`askOverStream`), and the line under
+  the overlay's title says what the Mac answered (`DiscoveryPolicy.overlayLine`): "Asking Mac mini
+  for a code…", then "Mac mini is showing a code now." only for `shown`, else "Mac mini didn’t show
+  a code by itself. On the Mac, choose Pair iPhone or iPad… in the Sill menu.", "Unlock Mac mini,
+  then choose Pair This ‹iPad›… again." or "Mac mini didn’t answer. Try again.", each spoken. Its
+  Cancel withdraws a code the Mac showed for it (kind 19 "cancel"). Then scan or type, dialed on the
+  session's row as above, never through kind 18's addresses (a device-opened window does not start
+  the remote door). As built until the security review (2026-09-27) it sent kind 21 on the session,
+  which went through the same ask rule but whose verdict never came back, while the overlay said a
+  code was showing whether or not one was; kind 21 stays for a plain door, which always opens a
+  window for it, and the host still judges one from an unpaired TLS session by the ask rule.
 - **Add a Mac…** (pairing from away) is unchanged.
 
 #### 7.6 How a session at home ends
@@ -1367,8 +1377,9 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
   for a device permission a headless session cannot give): `-SillTapRow <name prefix>` taps the
   first network or Direct row so named, once, as soon as it is listed; `-SillHomeCode <digits>` and
   `-SillHomeLink <sill://pair…>` type the code into, or scan the link with, the home card once the
-  Mac answers the ask `shown`; `-SillOverlayCode <digits>` runs Pair This ‹iPad›… (kind 21, then
-  the code typed) once, on a session at home over TLS. The move and path tests' rows count as the
+  Mac answers the ask `shown`; `-SillOverlayCode <digits>` runs Pair This ‹iPad›… (its ask, then
+  the code typed) once, on a session at home over TLS. The harness's `-SillScanOverlay 1` takes
+  `-SillOverlayLine asking|shown|openonmac|locked|noanswer` (the line the ask's answer sets). The move and path tests' rows count as the
   one saved Mac under `-SillHomeDoor` (they carry no TXT tag).
 
 ---

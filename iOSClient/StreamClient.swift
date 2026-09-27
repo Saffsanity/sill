@@ -188,6 +188,14 @@ final class StreamClient: ObservableObject {
     /// The Cancel of an ask the Mac answered "shown", on its way to the Mac (`withdrawAsk`): kept
     /// here until it is done, beside whatever the next tap dials.
     var homeWithdrawal: HomeDialer?
+    /// Pair This iPad…'s ask over a session at home that speaks TLS (`askOverStream`): the line the
+    /// overlay shows under its title, from what the Mac answered; nil over any other session, where
+    /// kind 21 asks as before (a plain door always opens a window for it).
+    @Published var overlayAskLine: String?
+    /// That ask's dial while it runs, and, once the Mac showed a code for it, where the overlay's
+    /// Cancel withdraws it (`endOverlayAsk`).
+    var overlayAskDialer: HomeDialer?
+    var overlayAskShown: (target: HomeDialer.Target, key: Data)?
     /// Rows taken by their Bonjour name alone (a tap's or the automatic reconnect's) whose key was
     /// another's (-9808): the reconnect skips them until a session connects (docs/home-pairing-plan.md §7.3).
     var pinRefusedRows = Set<String>()
@@ -2293,6 +2301,8 @@ final class StreamClient: ObservableObject {
         macInfoSaved = false
         macInfoVerified = nil
         macInfoAt = nil
+        // Pair This iPad…'s ask was this session's: its window, if the Mac showed one, runs out.
+        endOverlayAsk(withdraw: false)
         linkStats = nil
         recentRttMedians = []
         slowLink = false

@@ -128,6 +128,9 @@ struct ContentView: View {
 ///   (none, as a connection whose path says nothing), and `remote`, `remoteinternet` and
 ///   `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
+///   `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: the line under its title over a
+///   session at home that speaks TLS, as the Mac's answer to the overlay's ask sets it
+///   (DiscoveryPolicy.overlayLine; the mock never asks).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or

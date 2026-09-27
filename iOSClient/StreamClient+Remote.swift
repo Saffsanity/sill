@@ -657,8 +657,15 @@ extension StreamClient {
 
     // MARK: Pairing
 
-    /// "Pair This iPad…": asks the Mac this device is connected to at home to show its code.
-    func requestPairingCode() {
+    /// "Pair This iPad…": asks the Mac this device is connected to at home to show its code. Over a
+    /// session at home that speaks TLS, by the ask on a pairing connection of its own, whose answer
+    /// the overlay then says (StreamClient+Home's `askOverStream`); over a plain one, kind 21, for
+    /// which a plain door always opens a window. `mac`: what the overlay calls the Mac.
+    func requestPairingCode(mac: String? = nil) {
+        if let t = sessionPairingTarget {
+            askOverStream(t, mac: mac ?? (macName.isEmpty ? hostName : macName))
+            return
+        }
         send(.pairingWanted, payload: Data())
     }
 

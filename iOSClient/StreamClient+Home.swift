@@ -660,6 +660,89 @@ extension StreamClient {
         return sessionPairingTarget != nil
     }
 
+    /// Pair This iPad…'s ask over a session at home that speaks TLS (§7.5): kind 19 "ask" on a
+    /// `sill-pair/1` connection to the session's own endpoint, pinned to the key the session saw,
+    /// never claiming the cable, and the overlay's line says what the Mac answered
+    /// (DiscoveryPolicy.overlayLine): a code only when it shows one. Kind 21 on the session went
+    /// through the same ask rule, but its answer never came back, and the overlay said a code was
+    /// showing when none was (the security review, 2026-09-27). A "busy" is retried once, silently.
+    func askOverStream(_ t: (target: HomeDialer.Target, key: Data), mac: String, busyRetried: Bool = false) {
+        guard let identity = deviceIdentity() else { return }
+        overlayAskDialer?.cancel()
+        overlayAskShown = nil
+        overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac)
+        #if DEBUG
+        print("home: asking \(mac) for a code over this session's door (Pair This \(Self.deviceWord)…)")
+        #endif
+        let dialer = HomeDialer(targets: [t.target], pin: t.key, identity: identity, queue: queue)
+        overlayAskDialer = dialer
+        let deviceName = UIDevice.current.name
+        dialer.onWinner = { [weak self, weak dialer] w in
+            guard let self, let dialer else { w.connection.cancel(); return }
+            self.homeExchange(w, identity: identity, deviceName: deviceName, method: PairRequest.ask, cable: nil, key: nil) { outcome in
+                DispatchQueue.main.async {
+                    let shownAt = HomeDialer.Target(endpoint: w.endpoint, peerToPeer: w.target.peerToPeer, row: w.target.row,
+                                                    label: w.target.label)
+                    guard self.overlayAskDialer === dialer else {
+                        // The overlay closed while the ask was on its way, and the Mac showed a
+                        // code for it meanwhile: that code can go too.
+                        if case .answer(let r, _) = outcome, r.reason == PairResult.shown { self.withdrawAsk(at: shownAt, key: w.fingerprint) }
+                        return
+                    }
+                    self.overlayAskDialer = nil
+                    self.overlayAsked(outcome, winner: w, shownAt: shownAt, from: t, mac: mac, busyRetried: busyRetried)
+                }
+            }
+        }
+        dialer.onFailed = { [weak self, weak dialer] _ in
+            DispatchQueue.main.async {
+                guard let self, let dialer, self.overlayAskDialer === dialer else { return }
+                self.overlayAskDialer = nil
+                self.overlayAskLine = DiscoveryPolicy.overlayLine(nil, mac: mac, device: Self.deviceWord)
+            }
+        }
+        dialer.start()
+    }
+
+    /// The Mac's answer to Pair This iPad…'s ask, as the overlay's line says it. Main thread.
+    private func overlayAsked(_ outcome: HomeExchange, winner w: HomeDialer.Winner, shownAt: HomeDialer.Target,
+                              from t: (target: HomeDialer.Target, key: Data), mac: String, busyRetried: Bool) {
+        guard case .answer(let r, _) = outcome else {
+            overlayAskLine = DiscoveryPolicy.overlayLine(nil, mac: mac, device: Self.deviceWord)
+            return
+        }
+        let answer = DiscoveryPolicy.askAnswer(ok: r.ok, method: r.method, hasProof: r.proof != nil, reason: r.reason,
+                                               retryAfter: r.retryAfter, askedCable: false,
+                                               macIDMatches: r.macID == MacID.make(fingerprint: w.fingerprint),
+                                               recognitionKeyBytes: r.recognitionKey.flatMap(Base64URL.decode)?.count)
+        #if DEBUG
+        print("home: \(mac) answered the overlay's ask: \(answer)")
+        #endif
+        if case .busy(let after) = answer, !busyRetried {
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                guard let self, self.overlayAskLine != nil, self.overlayAskDialer == nil, self.overlayAskShown == nil,
+                      let now = self.sessionPairingTarget, now.key == t.key else { return }
+                self.askOverStream(now, mac: mac, busyRetried: true)
+            }
+            return
+        }
+        if answer == .shown { overlayAskShown = (shownAt, w.fingerprint) }
+        // A refusal this build does not know shows the Mac's own words when it sent some.
+        overlayAskLine = (answer == .refused ? r.unknownReasonMessage : nil)
+            ?? DiscoveryPolicy.overlayLine(answer, mac: mac, device: Self.deviceWord)
+    }
+
+    /// Pair This iPad… closed (`withdraw`: its Cancel; not after a pairing, whose window closed as
+    /// used, nor when the session ended), or its session ended: the ask stops, its line goes, and a
+    /// code the Mac showed for it is withdrawn rather than left up for its 5 minutes.
+    func endOverlayAsk(withdraw: Bool) {
+        overlayAskDialer?.cancel()
+        overlayAskDialer = nil
+        if withdraw, let shown = overlayAskShown { withdrawAsk(at: shown.target, key: shown.key) }
+        overlayAskShown = nil
+        if overlayAskLine != nil { overlayAskLine = nil }
+    }
+
     /// Pair This iPad…'s typed code: over a TLS session at home, on the session's row; over any
     /// other, through the connection's kind 18 address as before.
     func pairOverlayTyped(code text: String, mac: String) {

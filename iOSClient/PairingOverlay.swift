@@ -73,8 +73,14 @@ struct PairingOverlay: View {
         .background(EscapeKey(action: cancel))
         .onAppear {
             titleFocused = true
-            // "Show your pairing code": the Mac opens its pairing window by itself.
-            if !asked, client.pendingLink == nil, client.connected { asked = true; client.requestPairingCode() }
+            // "Show your pairing code": the Mac opens its pairing window by itself (a plain door), or
+            // its ask rule says whether it does (a door that speaks TLS: the line under the title).
+            if !asked, client.pendingLink == nil, client.connected { asked = true; client.requestPairingCode(mac: mac) }
+        }
+        // The Mac's answer to that ask, spoken: VoiceOver's focus is on the title, and a line that
+        // says no code is showing, or why, must be heard.
+        .onChange(of: client.overlayAskLine) { _, line in
+            if let line, line != DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac) { AccessibilityNotification.Announcement(line).post() }
         }
         .task(id: client.pairing) {
             // Paired: says so, then fades after a second; the stream never stopped.
@@ -83,15 +89,18 @@ struct PairingOverlay: View {
             if !Task.isCancelled {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { close() }
                 client.pairing = .idle
+                client.endOverlayAsk(withdraw: false)      // its window closed as used
             }
         }
     }
 
     /// Cancel, Esc and the escape gesture: a pairing still dialing stops (as the connect screen's
-    /// card does), and an outside link waiting here is dropped rather than shown again later.
+    /// card does), an outside link waiting here is dropped rather than shown again later, and a code
+    /// the Mac showed for this overlay's ask is withdrawn rather than left up for its 5 minutes.
     private func cancel() {
         client.cancelPendingLink()
         client.cancelPairing()
+        client.endOverlayAsk(withdraw: true)
         close()
     }
 
@@ -150,9 +159,12 @@ struct PairingOverlay: View {
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($titleFocused)
-            Text("\(mac) is showing a code now.")
+            // Over a door that speaks TLS, what the Mac answered this overlay's ask; over a plain
+            // one, which always opens a window for kind 21, that a code is showing.
+            Text(client.overlayAskLine ?? DiscoveryPolicy.HomeCopy.overlayShowing(mac: mac))
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
