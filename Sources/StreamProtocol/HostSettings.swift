@@ -38,6 +38,13 @@ import Foundation
 //   row, and the DEBUG mock's cases (MockCatalog.swift);
 // • Scripts/sillclient.py: the keys `--set` accepts, and `describe`.
 //
+// Away from home (docs/remote-bundle-plan.md §5) splits Quality and Resolution in two: the home
+// quality and the away quality. An away variant of a setting goes in HostConfig's away knobs
+// (`validated()`, `changes(to:)`, `effective(away:)`), `applyingAway` and `streamSettings(away:)` in
+// DeviceSettings.swift, `AwayQuality` below, and the app's away keys (HostSettings, DebugHooks, the
+// Streaming pane), and never in `HostSettingsChange`: where a pick lands is the host's decision, by
+// the connection's route, so every device, old or new, sets what its connection controls.
+//
 // A Mac-only listener knob (remote access, its port, internet access) goes in the host's
 // HostConfig, the app's HostSettings, DebugHooks, the Remote Access pane and the menu, and never in
 // StreamSettings, HostSettingsChange or DeviceSettings.accepted: only the Mac's own user widens
@@ -87,11 +94,79 @@ public struct RunningStream: Codable, Hashable, Sendable {
     }
 }
 
+/// Away from home (docs/remote-bundle-plan.md §5): the Mac's two qualities, which one runs, and
+/// which one this connection's controls set. From a host with a remote door (Sill.app; SillHost
+/// --remote); nil from any other host, which has one quality for every device. Every field is
+/// required: a host that sends it sends all of it.
+public struct AwayQuality: Codable, Hashable, Sendable {
+    /// What runs while any connected device is at home: the Mac menu's Quality and Resolution.
+    public var homeBitrate: Int
+    public var homeCaptureScale: Double
+    /// What runs while every connected device is away (through a VPN or over the internet): Low ·
+    /// Standard until a device away, or the Mac's Settings, chooses another.
+    public var awayBitrate: Int
+    public var awayCaptureScale: Double
+    /// The Mac counts this connection as away: its Quality and Resolution picks set the away
+    /// quality, and `settings.bitrate` and `settings.captureScale` show it.
+    public var thisConnectionAway: Bool
+    /// Every connected device is away, so the away quality is the target: the host's wish, never its
+    /// pipeline's (a restart may still be taking it, as `settings` can be ahead of `stream`).
+    public var awayRunning: Bool
+
+    public init(homeBitrate: Int, homeCaptureScale: Double, awayBitrate: Int, awayCaptureScale: Double,
+                thisConnectionAway: Bool, awayRunning: Bool) {
+        self.homeBitrate = homeBitrate; self.homeCaptureScale = homeCaptureScale
+        self.awayBitrate = awayBitrate; self.awayCaptureScale = awayCaptureScale
+        self.thisConnectionAway = thisConnectionAway; self.awayRunning = awayRunning
+    }
+}
+
+/// How the link to this device keeps up, as the Mac sees from what it withholds
+/// (docs/remote-bundle-plan.md §6). Sent only while it does not keep up.
+public struct LinkReport: Codable, Hashable, Sendable {
+    /// `state`'s values. A string, never an enum: a device reads any other value as keeping up.
+    public static let behind = "behind"
+    public static let stalled = "stalled"
+
+    /// "behind": the link cannot carry this quality (frames withheld in 3 of the last 5 seconds).
+    /// "stalled": for 3 s nothing taken while bytes waited, and nothing heard from the device; the
+    /// Mac's card shows it, a device never does (it can only arrive once the path is back).
+    public var state: String
+    /// Frames withheld from this device in the second the state was judged (dropped, or skipped
+    /// while it waited for a keyframe).
+    public var withheldPerSecond: Int
+    /// The quality the link could not carry: the running bitrate, per 60 fps.
+    public var bitrate: Int
+    /// What the link carried in the seconds it was the limit, kilobits per second; nil until three
+    /// such seconds were measured.
+    public var carriedKbps: Int?
+    /// What would fit: a lower preset's bitrate, with 1 (Standard) when that is Low and the stream
+    /// runs at Retina; or the same bitrate at Standard. Nil bitrate: nothing lower to offer. A nil
+    /// capture scale keeps the resolution.
+    public var suggestedBitrate: Int?
+    public var suggestedCaptureScale: Double?
+
+    public init(state: String, withheldPerSecond: Int, bitrate: Int, carriedKbps: Int? = nil,
+                suggestedBitrate: Int? = nil, suggestedCaptureScale: Double? = nil) {
+        self.state = state; self.withheldPerSecond = withheldPerSecond; self.bitrate = bitrate
+        self.carriedKbps = carriedKbps
+        self.suggestedBitrate = suggestedBitrate; self.suggestedCaptureScale = suggestedCaptureScale
+    }
+
+    /// The link cannot carry the quality: the one state a device shows.
+    public var isBehind: Bool { state == Self.behind }
+}
+
 /// Host → device (`.hostSettings`): on connect (right after the window list), whenever it changes,
-/// and, with `answering` set, as the reply to one device's `HostSettingsChange`.
+/// and, with `answering` set, as the reply to one device's `HostSettingsChange`. Each connection gets
+/// its own (`away` and `link` are the connection's, and so are `settings.bitrate` and
+/// `settings.captureScale` on a host with a remote door).
 public struct HostSettingsState: Codable, Hashable, Sendable {
     /// The target: a change still waiting for its restart is already reported, because the Mac's
-    /// menu checks it too.
+    /// menu checks it too. `bitrate` and `captureScale` are the quality this connection's controls
+    /// set: the away quality for a connection the Mac counts as away (`away.thisConnectionAway`),
+    /// the home quality for any other, so a pick is answered in the field it asked about, from an
+    /// older device too.
     public var settings: StreamSettings
     /// Sill.app saves changes; SillHost keeps them until it quits.
     public var persistent: Bool
@@ -109,13 +184,18 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     public var stream: RunningStream?
     /// Only in the reply to one device: the token of the change it answers.
     public var answering: Int?
+    /// Away from home: nil from a host without a remote door, and from older hosts.
+    public var away: AwayQuality?
+    /// This connection's link while it cannot keep up; nil while it does, and from older hosts.
+    public var link: LinkReport?
 
     public init(settings: StreamSettings, persistent: Bool, virtualDisplayAvailable: Bool,
                 virtualDisplayNote: String? = nil, softwareEncoder: Bool, stream: RunningStream? = nil,
-                answering: Int? = nil) {
+                answering: Int? = nil, away: AwayQuality? = nil, link: LinkReport? = nil) {
         self.settings = settings; self.persistent = persistent
         self.virtualDisplayAvailable = virtualDisplayAvailable; self.virtualDisplayNote = virtualDisplayNote
         self.softwareEncoder = softwareEncoder; self.stream = stream; self.answering = answering
+        self.away = away; self.link = link
     }
 }
 
@@ -211,6 +291,18 @@ public enum QualityPreset: Int, CaseIterable, Identifiable, Sendable {
     /// hand (`defaults write`, a launch argument).
     public static func title(forBitrate bitrate: Int) -> String {
         QualityPreset(rawValue: bitrate)?.title ?? "Custom — \(mbps(bitrate)) Mbps"
+    }
+
+    /// A quality in a sentence: a preset's name ("Pro"), or "12 Mbps" for a bitrate set by hand
+    /// (docs/remote-bundle-plan.md §4.1: the host's log, the Mac's card and the device's callouts).
+    public static func name(forBitrate bitrate: Int) -> String {
+        QualityPreset(rawValue: bitrate)?.name ?? "\(mbps(bitrate)) Mbps"
+    }
+
+    /// A quality with its resolution: "Low · Standard", "Pro · Retina", "12 Mbps · Retina". Plain
+    /// spaces: a view that must keep it whole on one line spells them no-break itself.
+    public static func shortTitle(bitrate: Int, captureScale: Double) -> String {
+        "\(name(forBitrate: bitrate)) · \(captureScale >= 1.5 ? "Retina" : "Standard")"
     }
 
     /// "15", or "8.5" for a bitrate that is not whole megabits. The same text as `HostConfig.mbps`

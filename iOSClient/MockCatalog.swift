@@ -123,6 +123,54 @@ enum MockCatalog {
         case remotepair      // at home, Remote Access on, not saved: Pair This iPad…
         case remoteoff       // at home, Remote Access off: the footnote only
         case noremote        // at home, an older Mac without kind 18: no Away from home group
+        // Away from home and the link (docs/remote-bundle-plan.md §5.8, §6.7), through Tailscale:
+        case away            // the away quality runs (Low · Standard; home Pro · Retina): "Away: Low · Standard"
+        case awaymixed       // away, while a device at home is connected: "Home quality: Pro · Retina (…)"
+        case awayhome        // at home over Wi‑Fi, Remote Access on: the footnote says what runs away from home
+        case linkbehind      // away at Pro · Retina on a link that cannot carry it: the callout and "Use Low · Standard"
+        case linkmixed       // behind while a device at home keeps Pro: the callout without a button
+        case linklow         // behind at Low · Standard: "even at Low", no button
+        case linkstalled     // stalled: the Mac's alone, so no callout
+    }
+
+    /// The away and link cases: the Mac's two qualities (home Pro · Retina, away Low · Standard unless
+    /// the case raises it), the settings this connection controls, what runs, and the link's report.
+    private static func seedAway(_ client: StreamClient, _ state: inout HostSettingsState, _ c: SettingsCase) {
+        let home = (bitrate: 40_000_000, scale: 2.0)
+        var awayPair = (bitrate: 4_000_000, scale: 1.0)
+        if c == .linkbehind || c == .linkstalled { awayPair = (40_000_000, 2) }
+        let atHome = c == .awayhome
+        let running = !(c == .awaymixed || c == .linkmixed || atHome)
+        state.away = AwayQuality(homeBitrate: home.bitrate, homeCaptureScale: home.scale, awayBitrate: awayPair.bitrate,
+                                 awayCaptureScale: awayPair.scale, thisConnectionAway: !atHome, awayRunning: running)
+        // The pair this connection's controls set: the away one away from home.
+        let controls = atHome ? home : awayPair
+        state.settings.bitrate = controls.bitrate
+        state.settings.captureScale = controls.scale
+        // What runs: the away pair while every device is away, else the home one.
+        let runs = running ? awayPair : home
+        state.stream = runs.scale >= 1.5 ? RunningStream(width: 2880, height: 1800, fps: 60, mbps: runs.bitrate / 1_000_000, onVirtualDisplay: false)
+                                         : RunningStream(width: 1440, height: 900, fps: 60, mbps: runs.bitrate / 1_000_000, onVirtualDisplay: false)
+        client.macInfo = macInfo()
+        client.macInfoSaved = true
+        if !atHome {
+            client.remoteRoute = .vpn("Tailscale")
+            client.showMockLinkStats(linkStats(rtt: c == .linkbehind || c == .linkmixed || c == .linklow || c == .linkstalled ? 180 : 48))
+        }
+        switch c {
+        case .linkbehind:
+            state.link = LinkReport(state: LinkReport.behind, withheldPerSecond: 52, bitrate: 40_000_000, carriedKbps: 6_400,
+                                    suggestedBitrate: 4_000_000, suggestedCaptureScale: 1)
+        case .linkmixed:
+            state.link = LinkReport(state: LinkReport.behind, withheldPerSecond: 44, bitrate: 40_000_000, carriedKbps: 9_100,
+                                    suggestedBitrate: 4_000_000, suggestedCaptureScale: 1)
+        case .linklow:
+            state.link = LinkReport(state: LinkReport.behind, withheldPerSecond: 20, bitrate: 4_000_000, carriedKbps: 2_100)
+        case .linkstalled:
+            state.link = LinkReport(state: LinkReport.stalled, withheldPerSecond: 60, bitrate: 40_000_000)
+        default:
+            break
+        }
     }
 
     /// The Mac's kind 18 in the remote cases: Tailscale's name and addresses, and Wi‑Fi.
@@ -150,7 +198,8 @@ enum MockCatalog {
         switch c {
         case .directlink: client.route = .direct
         case .wired: client.route = .wired
-        case .noroute, .remote, .remoteinternet, .remoteslow: client.route = nil
+        case .noroute, .remote, .remoteinternet, .remoteslow, .away, .awaymixed, .linkbehind, .linkmixed, .linklow, .linkstalled:
+            client.route = nil
         default: client.route = .wifi
         }
         guard c != .legacy else { return }
@@ -199,8 +248,20 @@ enum MockCatalog {
             client.macInfo = macInfo()
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+        case .away, .awaymixed, .awayhome, .linkbehind, .linkmixed, .linklow, .linkstalled:
+            seedAway(client, &state, c)
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
+        }
+        // `-SillLinkLine behind`: the Mac reports the link behind on this connection, whatever the
+        // case, so the stream screen shows its line (with the panel closed). Its suggestion is the
+        // host's for a slow link (LinkJudge.suggestion): Low, with Standard from Retina; at Low, the
+        // same bitrate at Standard from Retina, and nothing from Low · Standard.
+        if UserDefaults.standard.string(forKey: "SillLinkLine") == "behind", state.link == nil {
+            let bitrate = state.settings.bitrate, retina = state.settings.captureScale >= 1.5, low = QualityPreset.low.rawValue
+            let suggestion: (bitrate: Int, captureScale: Double?)? = bitrate > low ? (low, retina ? 1 : nil) : (retina ? (bitrate, 1) : nil)
+            state.link = LinkReport(state: LinkReport.behind, withheldPerSecond: 52, bitrate: bitrate, carriedKbps: 2_100,
+                                    suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
         }
         if client.macInfo != nil { client.macInfoAt = Date().addingTimeInterval(-59) }
         var ledger = SettingsLedger()

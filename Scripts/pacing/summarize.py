@@ -10,7 +10,9 @@ fpsK (the fps from the second after the first keyframe arrived), gap (the longes
 without a frame from then on), evict@ (seconds from the device's first connection to the host's
 first eviction), rec (seconds from the relay's last rate increase until the frame age's median
 is back at 45 ms or less) and still (the host's still spells, --still-at: how many ended with the
-device showing the last frame before the spell or a later one, and the longest it took)."""
+device showing the last frame before the spell or a later one, and the longest it took). Then the
+new build's Link lines (LinkJudge, docs/remote-bundle-plan.md §6, H11): each run's link changes,
+seconds from the device's first connection, and each case's link gate."""
 import os, re, statistics, sys
 from collections import defaultdict
 
@@ -36,6 +38,7 @@ def read(name, suffix):
 
 DEV = re.compile(r"(\d\d:\d\d:\d\d\.\d+) \S+:\s+(\d+) fps\s+age\s+(\S+)\s+rtt\s+(\S+)\s+in\s+(\d+) kB\s+keys (\d+)(?:\s+newest ([\d.]+))?")
 STILL = re.compile(r"\S+ (\d\d:\d\d:\d\d\.\d+) Still: for (\S+) s after the frame of ([\d.]+)")
+LINK = re.compile(r"\S+ (\d\d:\d\d:\d\d\.\d+) Link: (fine|behind|stalled)( \(reset\))? \((.*)\)")
 
 def one(name):
     dev, host, relay = read(name, "device.txt"), read(name, "host.log"), read(name, "relay.txt")
@@ -58,6 +61,7 @@ def one(name):
     lost = sum("silent" in l for l in dev)
     sent = drop = wait = wait_after_key = n = evict = 0
     evict_at = None
+    withheld_ends = []   # the end of each host second that withheld a frame (dropped, or waited for a keyframe)
     for l in host:
         if "silent for" in l or "not draining" in l:
             evict += 1
@@ -69,6 +73,7 @@ def one(name):
         kv = dict((k, int(v)) for k, v in re.findall(r"([a-zA-Z]+\.[a-zA-Z]+) (\d+)", m.group(2)))
         # A [1s] line counts the second before its stamp: one wholly after the first keyframe.
         if first_key is not None and t - 1 > first_key: wait_after_key += kv.get("net.waitKey", 0)
+        if kv.get("net.dropped", 0) + kv.get("net.waitKey", 0) > 0: withheld_ends.append(t - t0)
         if t < lo: continue
         sent += kv.get("net.sent", 0); drop += kv.get("net.dropped", 0); wait += kv.get("net.waitKey", 0); n += 1
     # The dip: from the relay's last rate increase, until a second's median frame age is ≤ 45 ms.
@@ -88,8 +93,19 @@ def one(name):
         if not newest or newest[-1][0] < start + length: continue       # the run ended first
         seen = [t for t, ts in newest if start - 1 < t <= start + length + 0.5 and ts >= last - 1e-6]
         fresh.append(max(0.0, seen[0] - start) if seen else None)
+    # The link's changes (the new build's Link lines) and the path's, from the device's first connection.
+    links = [(secs(m.group(1)) - t0, m.group(2), bool(m.group(3)), m.group(4)) for m in map(LINK.match, host) if m]
+    drop_at = next((t - t0 for (t, r), (_, prev) in zip(rates[1:], rates[:-1]) if r < prev), None)
+    rise_at = (ups[-1] - t0) if ups else None
+    dark_at = next((secs(m.group(1)) - t0 for m in (re.match(r"(\d\d:\d\d:\d\d\.\d+) relay: blackhole", l) for l in relay) if m), None)
     mins = max(n, 1) / 60
-    return {"fps": statistics.mean(fps) if fps else 0.0, "p10": pct(fps, 10), "fpsK": statistics.mean(after_key) if after_key else 0.0,
+    # The host sees a slower path only once the buffers in front of it are full (the bottleneck's
+    # queue, then the kernel's socket buffers): the end of its first second that withheld a frame after
+    # the rate fell.
+    withheld_at = next((u for u in withheld_ends if drop_at is not None and u > drop_at), None)
+    return {"links": links, "firstKey": None if first_key is None else first_key - t0, "dropAt": drop_at, "riseAt": rise_at, "darkAt": dark_at,
+            "withheldAt": withheld_at,
+            "fps": statistics.mean(fps) if fps else 0.0, "p10": pct(fps, 10), "fpsK": statistics.mean(after_key) if after_key else 0.0,
             "sent": sent / max(n, 1), "drop": drop / mins, "wait": wait / mins, "waitK": wait_after_key, "keys": keys / mins,
             "age50": pct(worst_age, 50), "age95": pct(worst_age, 95), "rtt50": pct(worst_rtt, 50), "rtt95": pct(worst_rtt, 95),
             "rttmax": max(worst_rtt) if worst_rtt else 0, "lost": lost, "evict": evict, "rec": rec, "drops": drop,
@@ -191,6 +207,77 @@ for case in sorted(cases, key=lambda c: (list(GATES).index(c) if c in GATES else
     print(f"{case:10} {len(n):4d}  {fpss(b):>9} {fpss(n):>9}  {f(mean(b, 'drop'), '11.1f'):>11} {f(mean(n, 'drop'), '10.1f'):>10}  "
           f"{recs(b):>8} {recs(n):>8}  {verdict}")
 print("\nbase: BASE's StreamServer.swift; new: the working tree's. fps: each run's mean (runs joined by /).")
+
+# The link (docs/remote-bundle-plan.md §6, H11): the new build's Link lines, and each case's gate.
+def after(r, t):
+    return [(u, st) for u, st, reset, _ in r["links"] if t is not None and u > t and not reset]
+def never(r, *states):
+    return not any(st in states for _, st in after(r, r["firstKey"]))
+def first(r, state, start):
+    return next((u - start for u, st in after(r, start) if st == state), None) if start is not None else None
+def carried(r):
+    """The first behind spell's reports: (carried rate, the line) each. LinkJudge reports the rate again
+    as it moves by a quarter: the first seconds read high while the path's buffers fill, and a stream
+    of whole keyframes taken in single seconds reads lumpy."""
+    out = []
+    for _, st, _, d in r["links"]:
+        if st == "fine" and out: break
+        m = re.search(r"carried ([\d.]+) Mbps", d) if st == "behind" else None
+        if m: out.append((float(m.group(1)), d))
+    return out
+def rate(r):
+    """The median of those rates."""
+    c = sorted(x for x, _ in carried(r))
+    return (c[len(c) // 2] if len(c) % 2 else (c[len(c) // 2 - 1] + c[len(c) // 2]) / 2) if c else None
+LINK_GATES = {
+    "real24": ("never behind or stalled after the first keyframe", lambda r: never(r, "behind", "stalled")),
+    "over8": ("behind within 5 s of the first keyframe; the median carried rate of its reports within 20 % of 8 Mbit/s; Low suggested for Pro in the last",
+              lambda r: (first(r, "behind", r["firstKey"]) or 99) <= 5 and rate(r) is not None and 6.4 <= rate(r) <= 9.6
+                        and "suggesting Low" in carried(r)[-1][1]),
+    # The plan asked for behind within 5 s of the dip. The host judges only what it withholds, and it
+    # withholds nothing until the buffers between it and the slower link are full; then behind comes
+    # at the third short second the sweep closes (the first may hold only part of its frames), within
+    # 3 s of the end of the host's first [1s] second that withheld one, whatever the two timers'
+    # phases. How long the buffers took is printed beside it: the dip's 1 MB queue and the loopback's
+    # socket buffers hold several seconds of Low's stream.
+    "dip": ("behind within 3 s of the end of the host's first second withholding frames, fine within 10 s of the dip's end",
+            lambda r: (first(r, "behind", r["withheldAt"]) or 99) <= 3 and (first(r, "fine", r["riseAt"]) or 99) <= 10),
+    "slowkfB": ("never behind or stalled after the first keyframe", lambda r: never(r, "behind", "stalled")),
+    "linkstill": ("never behind or stalled after the first keyframe", lambda r: never(r, "behind", "stalled")),
+    # The plan asked for 4 s. The host sees nothing taken only once the buffers between it and the dead
+    # path are full: on this loopback path 0.7–1 MB (the host's send buffer and the relay's receive
+    # buffer), a few seconds of Low's stream; then 3 s of nothing taken and nothing heard.
+    "linkdead": ("stalled within 8 s of the blackhole", lambda r: (first(r, "stalled", r["darkAt"]) or 99) <= 8),
+    "linkdown": ("behind within 3 s of the end of the host's first second withholding frames, never stalled",
+                 lambda r: (first(r, "behind", r["withheldAt"]) or 99) <= 3
+                           and not any(st == "stalled" for _, st, _, _ in r["links"])),
+    "home": ("never behind or stalled after the first keyframe", lambda r: never(r, "behind", "stalled")),
+}
+link_failed = []
+news = [(name, r) for name, r in runs.items() if name.endswith("-new")]
+if any(r["links"] for _, r in news) or any(re.match(r"(.+)-\d+-new$", n).group(1) in LINK_GATES for n, _ in news):
+    print("\nThe link (the new build's Link lines; seconds from the device's first connection):")
+    for name, r in news:
+        case = re.match(r"(.+)-\d+-new$", name).group(1)
+        changes, last = [], None
+        for u, st, reset, _ in r["links"]:
+            if st != last: changes.append(f"{st[0].upper()}{'r' if reset else ''}@{u:.1f}")
+            last = st
+        events = " ".join(changes) + (f" ({len(r['links'])} reports)" if len(r["links"]) > len(changes) else "") if changes else "no change"
+        verdict = ""
+        if case in LINK_GATES:
+            what, rule = LINK_GATES[case]
+            ok = rule(r)
+            verdict = ("pass" if ok else "FAIL") + f": {what}"
+            if not ok: link_failed.append(name)
+        c = rate(r)
+        held = (f"  withholding in the second to {r['withheldAt']:.1f} ({r['withheldAt'] - r['dropAt']:.1f} s after the rate fell)"
+                if case in ("dip", "linkdown") and r["withheldAt"] is not None and r["dropAt"] is not None else "")
+        print(f"  {name:22} {events}{f'  carried {c:g} Mbps' if c is not None else ''}{held}  {verdict}")
+    print("  B behind, S stalled, F fine (Fr: fine by a restart's reset)")
+if link_failed:
+    print(f"LINK FAILED: {' '.join(link_failed)}")
+    failed += link_failed
 if failed:
     print(f"FAILED: {' '.join(failed)}")
     sys.exit(1)

@@ -16,7 +16,9 @@ import StreamProtocol
 /// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
 /// client on en0 stands in for a device on awdl0, which no test can reach.
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
-/// gate can refuse a test client. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
+/// gate can refuse a test client; `SILL_TEST_REMOTE_ORIGIN=vpn|internet` does so at the remote door
+/// alone, so one loopback host serves a device away from home (the remote door) beside one at home
+/// (the home door, where loopback stays loopback): docs/remote-bundle-plan.md's H8 and S4. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
 /// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
 /// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
 /// tests). `SILL_TEST_LOOPBACK=1` makes both doors listen on 127.0.0.1 alone, so a test host takes
@@ -67,20 +69,22 @@ final class StreamServer {
         var link: ClientLink.Route?
         /// The last header received from it (remote clients: silence eviction).
         var lastHeardAt = Date().timeIntervalSince1970
-        /// Remote clients: no keyframe has reached it since it was admitted or the stream changed,
-        /// so the next one goes out whatever its queue holds.
+        /// No keyframe has reached it since it was admitted or the stream changed: a remote client's
+        /// next one goes out whatever its queue holds, and no client's skipped frames count against
+        /// its link meanwhile (LinkJudge: that wait is the connect or a restart, not the link).
         var awaitingFirstKeyframe = true
         /// Remote clients: a frame was dropped for it and a keyframe should be asked for, when
         /// `remoteKeyframeDue` (at most every 2 s across all remote clients, later beside a home one).
         var keyframeWanted = false
         /// When a message was last handed to it (remote clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
-        /// Remote clients: bytes handed to the connection that it has not taken yet
-        /// (`.contentProcessed`), every message `inflight` counts; and the keyframes among them it
-        /// is still taking (sequence number and size, oldest first), with their bytes. Usually
-        /// none or one; two when a keyframe comes while another is still being taken: a restarted
-        /// stream's first (a pick, a rotation, a settings change), or the next one on a link that
-        /// takes a keyframe longer than the time between two.
+        /// Bytes handed to the connection that it has not taken yet (`.contentProcessed`), every
+        /// message `inflight` counts: every client's, which its link judge reads (the home branch of
+        /// `broadcast` never does); and, remote clients only, the keyframes among them it is still
+        /// taking (sequence number and size, oldest first), with their bytes. Usually none or one;
+        /// two when a keyframe comes while another is still being taken: a restarted stream's first
+        /// (a pick, a rotation, a settings change), or the next one on a link that takes a keyframe
+        /// longer than the time between two.
         var pendingBytes = 0
         var keyframesInFlight: [(seq: Int, bytes: Int)] = []
         var keyframeBytesInFlight = 0
@@ -88,6 +92,13 @@ final class StreamServer {
         /// Remote clients: the smallest backlog since the keyframes it was taking were all taken,
         /// which starts at what they left behind them (the frames that queued while they were).
         var backlogFloor = 0
+        /// Its link (docs/remote-bundle-plan.md §6): this second's frames sent and withheld (not
+        /// those before its first keyframe) and the bytes its connection took, closed by the sweep
+        /// each second into the judge.
+        var sentThisSecond = 0
+        var withheldThisSecond = 0
+        var takenThisSecond = 0
+        var judge = LinkJudge()
         /// The device gate is reading its first message (floor above "0"): not registered yet.
         var judging = false
         /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless
@@ -141,6 +152,10 @@ final class StreamServer {
     /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
+    /// A device's link changed (LinkJudge, docs/remote-bundle-plan.md §6): behind, stalled, fine again,
+    /// fine because the stream restarted (`reset`), or the same state once its carried rate is first
+    /// measured. Called on the network queue, from the once-a-second sweep and `resetForNewStream`.
+    var onClientLinkChanged: ((NWConnection, LinkJudge.Verdict) -> Void)?
     /// The Mac's pointer (PointerWatch): who moves it, sampled at each tick and, while it moves over
     /// the source and a device is sent it, at the stream's frame rate; every device that is not
     /// moving it is sent where it is (kind 26). Set before `start()`.
@@ -436,20 +451,32 @@ final class StreamServer {
         return OriginPolicy.Origin(rawValue: value)
     }()
 
+    /// TEST ONLY: SILL_TEST_REMOTE_ORIGIN (see the type's doc comment), SILL_TEST_ORIGIN's twin for
+    /// the remote door alone. Read once, and only by a host that does not advertise.
+    static let testRemoteOrigin: OriginPolicy.Origin? = {
+        guard let value = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_ORIGIN"], !value.isEmpty else { return nil }
+        guard value == "vpn" || value == "internet" else {
+            print("SILL_TEST_REMOTE_ORIGIN=\(value) ignored: vpn or internet.")
+            return nil
+        }
+        return OriginPolicy.Origin(rawValue: value)
+    }()
+
     /// Where `c` comes from: its endpoint's address (and the interface a link-local one is scoped
     /// to), the local address it arrived at (`currentPath.localEndpoint`, which names the
     /// interface through `InterfaceSnapshot`; `availableInterfaces` listed en0 and lo0 for one
     /// loopback connection, so it is not used), classified by OriginPolicy. On a test host,
-    /// SILL_TEST_ORIGIN turns a loopback source into that origin. On `queue`, at `.preparing` or
-    /// later (the path exists from then on).
+    /// SILL_TEST_ORIGIN turns a loopback source into that origin (and SILL_TEST_REMOTE_ORIGIN, at the
+    /// remote door: `remoteDoor`). On `queue`, at `.preparing` or later (the path exists from then on).
     func origin(of c: NWConnection) -> OriginPolicy.Origin { arrival(of: c).origin }
 
     /// `origin(of:)` with the interface it arrived on (the scope, else the owner of the local
     /// address), which names a VPN route ("through Tailscale").
-    func arrival(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?) {
+    func arrival(of c: NWConnection, remoteDoor: Bool = false) -> (origin: OriginPolicy.Origin, interface: String?) {
         guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, scope) = Self.addressText(host)
-        return arrival(remote: remote, scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"), local: Self.pathLocal(c))
+        return arrival(remote: remote, scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"), local: Self.pathLocal(c),
+                       remoteDoor: remoteDoor)
     }
 
     /// The same before `c` starts: the remote door's check, because a started TLS connection
@@ -459,7 +486,7 @@ final class StreamServer {
     /// has its path already in `newConnectionHandler` (measured on loopback the same day); should
     /// one not, the local address is the one the kernel's route back to the peer sends from. Nil
     /// when neither is known: `.preparing` judges it then, as before.
-    func arrivalBeforeStart(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?)? {
+    func arrivalBeforeStart(of c: NWConnection, remoteDoor: Bool = false) -> (origin: OriginPolicy.Origin, interface: String?)? {
         guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, endpointScope) = Self.addressText(host)
         let scope = endpointScope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)")
@@ -468,7 +495,7 @@ final class StreamServer {
             guard let routed = InterfaceSnapshot.routeSource(to: source) else { return nil }
             local = IPBytes.text(routed)
         }
-        return arrival(remote: remote, scope: scope, local: local)
+        return arrival(remote: remote, scope: scope, local: local, remoteDoor: remoteDoor)
     }
 
     /// The local address of `c`'s path, where it arrived; nil while it has no path.
@@ -477,10 +504,10 @@ final class StreamServer {
         return addressText(host).text
     }
 
-    private func arrival(remote: String, scope: String?, local: String?) -> (origin: OriginPolicy.Origin, interface: String?) {
+    private func arrival(remote: String, scope: String?, local: String?, remoteDoor: Bool) -> (origin: OriginPolicy.Origin, interface: String?) {
         let interfaces = InterfaceSnapshot.shared.interfaces()
         var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: scope, interfaces: interfaces)
-        if testHost, o == .loopback, let t = Self.testOrigin { o = t }
+        if testHost, o == .loopback, let t = (remoteDoor ? Self.testRemoteOrigin : nil) ?? Self.testOrigin { o = t }
         return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: scope, interfaces: interfaces))
     }
 
@@ -852,7 +879,7 @@ final class StreamServer {
         clients[ObjectIdentifier(client.connection)] = client
         onClientCountChanged?(clients.count)
         updateTicking()
-        updateRemoteSweep()
+        updateSweep()
     }
 
     /// The remote door's admitted session, already `.ready` and pinned: registered like a home
@@ -1088,37 +1115,53 @@ final class StreamServer {
         onClientHello?(c, hello)
     }
 
-    // MARK: Remote clients: silence and a slow uplink
+    // MARK: The sweep: each device's link, and remote clients' silence and slow uplink
+    //
+    // Once a second while any client is registered, each client's second is closed into its link
+    // judge (LinkJudge; every client, at home too: the home branch only counts), and a change is
+    // reported (`onClientLinkChanged`).
     //
     // A home client that stops draining for 4 s is gone (8 s grace after connecting). A remote one
     // can legitimately take longer: on a 2 Mbps uplink a 1.5 MB keyframe needs 6 s to hand off. So a
     // remote client is dropped when it has sent nothing for 8 s (it pings every 0.25 s and reports
     // once a second, so silence means it is gone), once 8 s have passed since it was admitted, and
     // the drain backstop gives it 15 s after a 15 s grace. The same sweep asks for the keyframe a
-    // remote client waits for once the window has gone still (`sweepRemote`).
-    private var remoteSweepTimer: DispatchSourceTimer?
+    // remote client waits for once the window has gone still.
+    private var sweepTimer: DispatchSourceTimer?
+    /// When the sweep last closed the clients' seconds: a client heard since then was heard in it.
+    private var lastSweepAt: TimeInterval = 0
     static let remoteSilence: TimeInterval = 8
     static let remoteDeadAfter: TimeInterval = 15
     static let remoteGrace: TimeInterval = 15
 
-    /// On `queue`: a 1 s sweep while any remote client exists.
-    private func updateRemoteSweep() {
-        let wanted = clients.values.contains { $0.route.isRemote }
-        if wanted, remoteSweepTimer == nil {
+    /// On `queue`: a 1 s sweep while any client exists.
+    private func updateSweep() {
+        let wanted = !clients.isEmpty
+        if wanted, sweepTimer == nil {
+            lastSweepAt = Date().timeIntervalSince1970
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
-            t.setEventHandler { [weak self] in self?.sweepRemote() }
+            t.setEventHandler { [weak self] in self?.sweep() }
             t.resume()
-            remoteSweepTimer = t
-        } else if !wanted, let t = remoteSweepTimer {
-            t.cancel(); remoteSweepTimer = nil
+            sweepTimer = t
+        } else if !wanted, let t = sweepTimer {
+            t.cancel(); sweepTimer = nil
         }
     }
 
-    private func sweepRemote() {
+    private func sweep() {
         let now = Date().timeIntervalSince1970
+        let since = lastSweepAt
+        lastSweepAt = now
         var waiting: [Client] = []
-        for client in clients.values where client.route.isRemote {
+        for client in clients.values {
+            let second = LinkJudge.Second(sent: client.sentThisSecond, withheld: client.withheldThisSecond, taken: client.takenThisSecond,
+                                          waiting: client.pendingBytes, heard: client.lastHeardAt > since)
+            client.sentThisSecond = 0
+            client.withheldThisSecond = 0
+            client.takenThisSecond = 0
+            if let verdict = client.judge.close(second) { onClientLinkChanged?(client.connection, verdict) }
+            guard client.route.isRemote else { continue }
             let silent = now - client.lastHeardAt
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
                 print("Client silent for \(Int(silent)) s, dropping: \(client.connection.endpoint)")
@@ -1150,17 +1193,37 @@ final class StreamServer {
         onClientDisconnected?(client.connection)
         onClientCountChanged?(clients.count)
         updateTicking()
-        updateRemoteSweep()
+        updateSweep()
     }
 
     /// The source is changing: forget the old parameter sets and make every client wait for
-    /// the next keyframe, so nobody decodes frames of the new window with the old format.
+    /// the next keyframe, so nobody decodes frames of the new window with the old format. Each
+    /// client's link is judged afresh (LinkJudge.reset): one that was not fine is reported fine,
+    /// marked as a reset.
     func resetForNewStream() {
         queue.async { [self] in
             lastParameterSets = nil
             for client in clients.values {
                 client.needsKeyframe = true
                 client.awaitingFirstKeyframe = true
+                client.sentThisSecond = 0
+                client.withheldThisSecond = 0
+                if let verdict = client.judge.reset() { onClientLinkChanged?(client.connection, verdict) }
+            }
+        }
+    }
+
+    /// Each connection its own message (the devices' settings states, kind 16, one per connection):
+    /// a registered, ready connection gets its own; any other is skipped without a word, as
+    /// `broadcast` skips it, where `send(_:to:)` would print "send: no client for …" (a state can be
+    /// built for a connection the server has just forgotten, before the coordinator hears it left).
+    /// Thread-safe.
+    func send(each messages: [(NWConnection, StreamMessage)]) {
+        let items = messages.map { (ObjectIdentifier($0.0), $0.1.serialized()) }
+        queue.async { [self] in
+            for (id, data) in items {
+                guard let client = clients[id], client.connection.state == .ready else { continue }
+                send(data, to: client)
             }
         }
     }
@@ -1284,19 +1347,27 @@ final class StreamServer {
                     continue
                 }
                 if message.kind == .frame {
+                    // Its link only counts here (LinkJudge): what it sends and drops is as ever.
                     if client.needsKeyframe {
-                        guard message.isKeyframe, let ps = lastParameterSets else { Stats.shared.bump("net.waitKey"); continue }
+                        guard message.isKeyframe, let ps = lastParameterSets else {
+                            Stats.shared.bump("net.waitKey")
+                            if !client.awaitingFirstKeyframe { client.withheldThisSecond += 1 }
+                            continue
+                        }
                         send(ps, to: client)
                         client.needsKeyframe = false
+                        client.awaitingFirstKeyframe = false
                     } else if client.inflight > 2 && !message.isKeyframe {
                         // Drop the delta. Every later delta references it, so this client now waits for
                         // a keyframe (sending deltas anyway is what showed up as flicker on the iPad).
                         Stats.shared.bump("net.dropped")
+                        client.withheldThisSecond += 1
                         client.needsKeyframe = true
                         wantKeyframe = true
                         continue
                     }
                     Stats.shared.bump("net.sent")
+                    client.sentThisSecond += 1
                 }
                 send(data, to: client, isFrame: message.kind == .frame)
             }
@@ -1322,7 +1393,7 @@ final class StreamServer {
     ///   instead of queueing behind the backlog that caused the drop; at most every
     ///   `remoteKeyframeSpacing` for all remote clients together (later beside a home client:
     ///   `remoteKeyframeDue`). It asks when a later frame comes, or, once the window has gone
-    ///   still and none does, at the remote sweep (`sweepRemote`).
+    ///   still and none does, at the sweep (`sweep`).
     /// - The keyframe it waits for goes out when the backlog fits the budget, or at once when it
     ///   has had none since it was admitted or the stream changed (the first keyframe).
     /// Returns whether to ask for one now. On `queue`. No new Stats key: skipped frames count as
@@ -1333,6 +1404,7 @@ final class StreamServer {
         if client.needsKeyframe {
             guard message.isKeyframe else {
                 Stats.shared.bump("net.waitKey")
+                if !client.awaitingFirstKeyframe { client.withheldThisSecond += 1 }
                 let now = Date().timeIntervalSince1970
                 if client.keyframeWanted, client.pendingBytes <= Self.remoteIdleBytes, remoteKeyframeDue(now) {
                     lastRemoteKeyframeRequest = now
@@ -1345,6 +1417,7 @@ final class StreamServer {
                 // Its queue is still full: this keyframe is lost to it too. Ask again once it has
                 // drained (within the spacing) rather than wait for the encoder's own periodic one.
                 Stats.shared.bump("net.waitKey")
+                client.withheldThisSecond += 1
                 client.keyframeWanted = true
                 return false
             }
@@ -1360,12 +1433,14 @@ final class StreamServer {
             }
             if tooMuch {
                 Stats.shared.bump("net.dropped")
+                client.withheldThisSecond += 1
                 client.needsKeyframe = true
                 client.keyframeWanted = true
                 return false
             }
         }
         Stats.shared.bump("net.sent")
+        client.sentThisSecond += 1
         send(data, to: client, isFrame: true, isKeyframe: message.isKeyframe)
         return false
     }
@@ -1426,9 +1501,9 @@ final class StreamServer {
         }
         client.inflight += 1
         client.lastSentAt = now
+        client.pendingBytes += data.count
         var keyframeSeq: Int?
         if remote {
-            client.pendingBytes += data.count
             if isKeyframe {
                 client.keyframeSeq += 1
                 keyframeSeq = client.keyframeSeq
@@ -1443,8 +1518,9 @@ final class StreamServer {
         client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
             guard let client else { return }
             client.inflight -= 1
+            client.pendingBytes -= data.count
+            client.takenThisSecond += data.count
             if remote {
-                client.pendingBytes -= data.count
                 if let seq = keyframeSeq, let i = client.keyframesInFlight.firstIndex(where: { $0.seq == seq }) {
                     client.keyframeBytesInFlight -= client.keyframesInFlight.remove(at: i).bytes
                     // The last of them taken: what they left behind them.

@@ -1014,8 +1014,8 @@ check("model (review): a dial never ready, the cable out at 50 and in at 51: the
 
 // remote (the merge): a remote session (a saved Mac dialed through the remote door, StreamClient+Remote)
 // is not a candidate for the moves: pathPlan keeps it where it is, whatever its path and the browser say,
-// as it keeps a Direct session; only the remote reconnect moves one, and never home to the network (a
-// later step). StreamClient hands pathPlan `remote` from the session's route, and a nil route word (a
+// as it keeps a Direct session; only the move home moves one (moveHome, remote-bundle, below), and its
+// end is the remote reconnect's. StreamClient hands pathPlan `remote` from the session's route, and a nil route word (a
 // remote session never has one).
 func rpin(_ route: P.Method?, dead: Bool = false, reported: Bool = false, hinted: Bool = false, silent: Double = 0,
           wired: String? = nil, since: Double? = nil, wifi: String? = nil, up: Double? = nil, down: Double? = nil,
@@ -1044,7 +1044,7 @@ check("remote: with no word (a remote session's, as StreamClient hands it) or Di
       && plan(rpin(.direct, wired: "anpi0", since: 0, wifi: "en0")) == .stay(.remote, recheckAt: nil)
       && plan(rpin(nil, dead: true, wifi: "en0")) == .stay(.remote, recheckAt: nil))
 check("remote: the reason reads as the console prints it, and is none of the others",
-      P.Keep.remote.text == "a remote session moves only by the remote reconnect"
+      P.Keep.remote.text == "a remote session moves only home, once the network lists its Mac"
       && P.Keep.remote != .direct && P.Keep.remote != .routeUnknown && P.Keep.remote.text != P.Keep.direct.text)
 var remoteOK = true, remoteCount = 0
 for route in [nil, P.Method.wired, .wifi, .direct] { for dead in [false, true] { for reported in [false, true] { for hinted in [false, true] {
@@ -1077,6 +1077,74 @@ while true {
     if case .stay(.remote, nil) = P.pathPlan(i) {} else { remoteEvents.append(String(format: "%.2f %@", t, "\(P.pathPlan(i))")) }
 }
 check("model (remote): the cable in at 3 and out at 10, the connection dead at 12: never a move (\(remoteEvents))", remoteEvents.isEmpty)
+
+// moveHome (remote-bundle, docs/remote-bundle-plan.md §7.2, H15): a session through the remote door moves
+// home once the network has listed its saved Mac (by Mac ID) for moveAfter without a break; moves that did
+// not complete wait upWait (10, 20, 40, then 60 s) from the last one's start, counted for one listing; a
+// listing found to be another launch is never tried again while it lasts; a new listing is tried afresh.
+func home(_ since: Double?, last: Double? = nil, failures: Int = 0, refused: Double? = nil, _ now: Double) -> (Bool, Double?) {
+    let r = P.moveHome(listedSince: since, lastAttempt: last, failures: failures, refusedListing: refused, now: now); return (r.move, r.recheckAt)
+}
+check("home: not listed on the network, nothing to do", home(nil, 5) == (false, nil))
+check("home: listed at 10, look again at 12", home(10, 10) == (false, 12))
+check("home: not at 11.9", home(10, 11.9) == (false, 12))
+check("home: at exactly 12.0", home(10, 12) == (true, nil))
+check("home: listed afresh at 30 after a blink: counts from 30 (a blink restarts the count)", home(30, 31) == (false, 32) && home(30, 32) == (true, nil))
+check("home: one move that did not complete, from 12: the next at 22", home(10, last: 12, failures: 1, 13) == (false, 22)
+      && home(10, last: 12, failures: 1, 21.9) == (false, 22) && home(10, last: 12, failures: 1, 22) == (true, nil))
+check("home: retries 10, 20, 40, 60, 60 s after 1 to 5 moves that did not complete",
+      [1, 2, 3, 4, 5].map { home(10, last: 100, failures: $0, 100.5).1 } == [110, 120, 140, 160, 160])
+check("home: an earlier move with no failure counted (a new listing) holds nothing back", home(30, last: 20, failures: 0, 32) == (true, nil))
+check("home: ...even one that started a moment before the listing (a blink during a move): 2 s from the listing, not upWait(0)",
+      home(51, last: 49, failures: 0, 53) == (true, nil) && home(51, last: 49, failures: 0, 52) == (false, 53))
+check("home: a refused listing, never", home(10, refused: 10, 50) == (false, nil) && home(10, last: 12, failures: 3, refused: 10, 500) == (false, nil))
+check("home: a new listing after a refused one is tried afresh", home(60, refused: 10, 62) == (true, nil))
+check("home: the same rule as moveToNetwork's first look (moveAfter)", home(5, 7) == mv(5, nil, 7) && home(5, 6.999) == mv(5, nil, 6.999))
+
+// The model: the glue as StreamClient.moveHomeIfListed runs it. The saved Mac's network row by Mac ID
+// through P.sightings; failures kept by the listing they were to; a refused listing kept; a move to it
+// that takes `lasts` and ends as `end` (not completing, refused as another launch, or taking over).
+enum HomeEnd { case fails, refused, moves }
+func homeTries(_ end: HomeEnd, until: Double, blinkAt: Double? = nil, listedAt: Double = 10, lasts: Double = 5) -> (starts: [Double], home: Bool) {
+    var sight = P.NetworkSightings()
+    var starts: [Double] = [], failed: (listing: Double, count: Int)? = nil, refused: Double? = nil
+    var last: Double? = nil, busyUntil = -1.0, atHome = false
+    var t = 0.0
+    while t <= until, !atHome {
+        let listed = t >= listedAt && !(blinkAt.map { t >= $0 && t < $0 + 1 } ?? false)
+        sight = P.sightings(sight, listed: listed ? ["A3C5"] : [], now: t)
+        if t >= busyUntil, let started = starts.last, busyUntil > 0 {
+            busyUntil = -1
+            let listing = failed?.listing
+            switch end {
+            case .fails:
+                let l = sight.since["A3C5"] ?? started
+                failed = (l, (listing == l ? failed!.count : 0) + 1)
+            case .refused: refused = sight.since["A3C5"]
+            case .moves: atHome = true
+            }
+        }
+        if busyUntil < 0, !atHome {
+            let listing = sight.since["A3C5"]
+            let failures = failed.map { $0.listing == listing ? $0.count : 0 } ?? 0
+            if P.moveHome(listedSince: listing, lastAttempt: last, failures: failures, refusedListing: refused, now: t).move {
+                starts.append(t); last = t; busyUntil = t + lasts
+            }
+        }
+        t = (t * 100 + 5).rounded() / 100   // 0.05 s steps
+    }
+    return (starts, atHome)
+}
+var ht = homeTries(.moves, until: 60)
+check("model (home): listed at 10: one move at 12, home after it (\(ht.starts))", ht.starts == [12] && ht.home)
+ht = homeTries(.fails, until: 300)
+check("model (home): moves that never complete: 12, 22, 42, 82, 142, 202, 262 (\(ht.starts))", ht.starts == [12, 22, 42, 82, 142, 202, 262])
+ht = homeTries(.fails, until: 120, blinkAt: 50)
+check("model (home): the row gone at 50 and back at 51: tried afresh at 53, then 63, 83 (\(ht.starts))", ht.starts == [12, 22, 42, 53, 63, 83])
+ht = homeTries(.refused, until: 120)
+check("model (home): another launch: one try at 12, never again while it stays listed (\(ht.starts))", ht.starts == [12])
+ht = homeTries(.refused, until: 120, blinkAt: 40)
+check("model (home): ...listed afresh at 41: tried once more at 43, then never (\(ht.starts))", ht.starts == [12, 43])
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

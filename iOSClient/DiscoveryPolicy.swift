@@ -337,6 +337,22 @@ enum DiscoveryPolicy {
         return now >= due ? (true, nil) : (false, due)
     }
 
+    /// While this device's session runs through the remote door (docs/remote-bundle-plan.md §7): whether
+    /// to move it home now, to the saved Mac's network row listed since `listedSince` (nil: not
+    /// listed), or when to look again. Once the network has listed that Mac (by its Mac ID, never its
+    /// name) for `moveAfter` without a break; after `failures` moves in a row to this listing that did
+    /// not complete, not before `upWait(failures:)` from the last one's start (10, 20, 40, then 60 s);
+    /// never to a listing found to be another launch of Sill, or another Mac (`refusedListing`, the
+    /// `listedSince` it had). A new listing (the row went and came back) is tried afresh: the caller
+    /// counts `failures` for this listing only.
+    static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, refusedListing: Double?,
+                         now: Double) -> (move: Bool, recheckAt: Double?) {
+        guard let since = listedSince, since != refusedListing else { return (false, nil) }
+        var due = since + moveAfter
+        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }
+        return now >= due ? (true, nil) : (false, due)
+    }
+
     /// Whether the network connection a move opened reaches the host this session runs on: both
     /// window lists carry the same `WindowList.launchID`, a random ID a host picks at launch. The
     /// Bonjour name the move went by cannot tell: two Macs can share one when they share no link
@@ -358,8 +374,8 @@ enum DiscoveryPolicy {
     // cable once the network browser has listed the Mac on it for `cableSettle`, down to Wi-Fi at
     // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works
     // (a connection the Mac closed while the cable stays listed is made again over the cable),
-    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (only
-    // the remote reconnect moves one, and not home: remote access's merge left that for later), and
+    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (the
+    // plan keeps it where it is; `moveHome` brings it home once the network lists its Mac), and
     // at most one move per `pathHysteresis` each way; a cable listing that reaches another Mac is not
     // tried again, and one whose moves do not complete is tried less and less often (`upWait`).
 
@@ -477,8 +493,8 @@ enum DiscoveryPolicy {
         var upFailures = 0
         /// The session runs through the remote door (a saved Mac dialed away from home): it never
         /// moves here, whatever its path and the browser say, as a Direct session does not; it
-        /// moves only by the remote reconnect's rules (StreamClient+Remote), and never home to the
-        /// network (docs/remote-access-plan.md).
+        /// moves only home, once the network lists its Mac (`moveHome`, docs/remote-bundle-plan.md
+        /// §7), and its end is the remote reconnect's (StreamClient+Remote).
         var remote = false
     }
 
@@ -490,7 +506,7 @@ enum DiscoveryPolicy {
             switch self {
             case .routeUnknown: return "the session's path is not known"
             case .direct: return "over Direct, the session moves only to the network"
-            case .remote: return "a remote session moves only by the remote reconnect"
+            case .remote: return "a remote session moves only home, once the network lists its Mac"
             case .cable: return "on the cable"
             case .cableUnlisted: return "on the cable, which the network no longer lists; its pongs say it works"
             case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"

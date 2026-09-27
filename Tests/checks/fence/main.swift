@@ -23,7 +23,7 @@
 // the results are read once the stand-in has read every connection to its end, each closed after the
 // last input, not after a fixed wait.
 //
-//   swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/StreamMessage.swift \
+//   swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/*.swift \
 //     Tests/checks/fence/main.swift -o .build/checks/fence/check && .build/checks/fence/check ok
 //
 // Modes: ok (the fence comes back), nofence (the pre-fix hand-over: switch at once; the hazard
@@ -56,12 +56,21 @@
 // equal the inputs it read on the session's last connection; and count (a script of sends and connection
 // changes on one thread, no senders, pings or read loops, so each fence ends only where the script ends
 // it: the count after every step, then what each of eleven connections delivered, read to its end).
+// remote-bundle (2026-09-27, docs/remote-bundle-plan.md §7), the move home: a session through the remote
+// door handed to the home door. remotehome (the first connection is TLS 1.3, the remote door's own
+// parameters and keys (RemoteTLS, RemoteIdentity) with any key trusted both ways, the second plain TCP,
+// the home door's: as `ok`, the fence's ping and pong inside TLS) and remotedead (the remote connection
+// dies while the move home is under way, its home connection already made: the stand-in closes it, the
+// client sees its end and only then holds, as StreamClient.rescue does after the loss, and adopts the
+// home connection without a fence). The check compiles all of Sources/StreamProtocol for them.
 //   (the old SessionLink needs $SP/review/fencecheck/oldshim.swift, which gives Released its `waiting`)
 import Foundation
 import Network
 
 let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
-             "holdfence", "holdadopt", "newsession", "newsessionhold", "count"]
+             "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
+/// The modes whose first connection is the remote door's TLS.
+let remoteModes: Set<String> = ["remotehome", "remotedead"]
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ok"
 if !modes.contains(mode) { print("unknown mode \(mode); modes: \(modes.joined(separator: " "))"); exit(2) }
 let slow = 0.12
@@ -159,14 +168,32 @@ final class Stub {
     var arrived: [UInt32] = []
     var inputsOn: [Int: Int] = [:]                // the inputs (kind 8) read on each connection
     var ready = DispatchSemaphore(value: 0)
+    /// The remote door's stand-in (remotehome, remotedead): TLS 1.3 with the remote door's own
+    /// parameters, a key of its own and any client key trusted. Its connections join the same list.
+    var tlsListener: NWListener?
+    var tlsReady = DispatchSemaphore(value: 0)
 
-    init() throws {
+    init(tls: Bool) throws {
         listener = try NWListener(using: .tcp, on: .any)
         listener.stateUpdateHandler = { [weak self] s in if case .ready = s { self?.ready.signal() } }
         listener.newConnectionHandler = { [weak self] c in self?.accept(c) }
         listener.start(queue: queue)
+        if tls {
+            guard let key = RemoteKey.generate(), let identity = RemoteIdentity(privateKey: key) else {
+                print("mode \(mode): no identity for the TLS door"); print("FAIL"); exit(1)
+            }
+            let options = RemoteTLS.options(identity: identity.tls, role: .server, queue: queue) { _, _ in true }
+            let params = RemoteTLS.parameters(tls: options, dialing: false)
+            params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+            let l = try NWListener(using: params)
+            l.stateUpdateHandler = { [weak self] s in if case .ready = s { self?.tlsReady.signal() } }
+            l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+            l.start(queue: queue)
+            tlsListener = l
+        }
     }
     var port: NWEndpoint.Port { listener.port! }
+    var tlsPort: NWEndpoint.Port { tlsListener!.port! }
 
     private func accept(_ c: NWConnection) {
         let i = conns.count
@@ -232,8 +259,13 @@ final class Stub {
 
 let link = SessionLink()
 let clientQueue = DispatchQueue(label: "sill.net")
-let stub = try Stub()
+let stub = try Stub(tls: remoteModes.contains(mode))
 if stub.ready.wait(timeout: .now() + deadline) == .timedOut { print("mode \(mode): the stand-in never listened"); print("FAIL"); exit(1) }
+if stub.tlsListener != nil, stub.tlsReady.wait(timeout: .now() + deadline) == .timedOut {
+    print("mode \(mode): the stand-in's TLS door never listened"); print("FAIL"); exit(1)
+}
+/// The device's key for the TLS door (remotehome, remotedead).
+let deviceIdentity: RemoteIdentity? = remoteModes.contains(mode) ? RemoteKey.generate().flatMap { RemoteIdentity(privateKey: $0) } : nil
 
 typealias End = (how: String, held: Int, waiting: Int, clear: Bool, closed: Int)
 let stateLock = NSLock()
@@ -253,8 +285,16 @@ let stalePayload = withUnsafeBytes(of: (now() - 1).bitPattern.bigEndian) { Data(
 var staleRead = false
 var staleEnded: Int?            // the ends that came with the stale pong (none), once it has been read
 
-func connect() -> NWConnection {
-    let c = NWConnection(host: "127.0.0.1", port: stub.port, using: .tcp)
+/// A connection to the stand-in: plain TCP (the home door), or with `tls` its TLS door, as a device
+/// dials the remote door (any key trusted: this check is about order, not trust).
+func connect(tls: Bool = false) -> NWConnection {
+    let c: NWConnection
+    if tls, let identity = deviceIdentity {
+        let options = RemoteTLS.options(identity: identity.tls, role: .client(alpn: RemoteTLS.sessionALPN), verify: { _ in true }, queue: clientQueue)
+        c = NWConnection(host: "127.0.0.1", port: stub.tlsPort, using: RemoteTLS.parameters(tls: options, dialing: true))
+    } else {
+        c = NWConnection(host: "127.0.0.1", port: stub.port, using: .tcp)
+    }
     let ready = DispatchSemaphore(value: 0)
     c.stateUpdateHandler = { s in if case .ready = s { ready.signal() } }
     c.start(queue: clientQueue)
@@ -409,7 +449,7 @@ func countMode(_ c0: NWConnection) -> Never {
     exit(bad == 0 ? 0 : 1)
 }
 
-let old = connect()
+let old = connect(tls: remoteModes.contains(mode))
 link.connection = old
 if mode == "count" { countMode(old) }
 readLoop(old)
@@ -660,6 +700,31 @@ case "newsession", "newsessionhold":
     if let r = link.unhold(new2) { fenceEnded("unhold", r) }
     slowLine.resume()
     timeout([old, new1])
+case "remotehome":
+    // The move home: from the remote door's TLS connection (slow, like a VPN's) to the home door's.
+    let new = connect()
+    handOverFromSlow(to: new)
+    send(5)                                     // these wait behind the fence, which crosses TLS both ways,
+    allow()                                     // the rest go on while it comes down
+    slowLine.resume()
+    settle(1)                                   // by its pong
+    timeout([old])
+case "remotedead":
+    // The remote connection dies while the move home is under way: its home connection is made and
+    // ready, then the stand-in closes the remote one, the client sees the end and only then holds (the
+    // rescue), and adopts the home connection without a fence.
+    let new = connect()
+    stub.close(0)
+    _ = wait(patience) { stateLock.lock(); defer { stateLock.unlock() }; return sawEnd.contains(ObjectIdentifier(old)) }
+    stateLock.lock()
+    seqAtHandOver = nextSeq - 1
+    let holding = link.hold(old)
+    stateLock.unlock()
+    if !holding { print("hold refused after the remote connection's end"); exit(1) }
+    send(5)                                     // held
+    allow()
+    if let r = link.adopt(new) { fenceEnded("adopt", r) }
+    readLoop(new)
 default:
     fatalError("a mode without a case")
 }
@@ -677,6 +742,13 @@ let sessionCount = link.inputsOnSession
 slowLine.resume()
 clientQueue.sync {
     for c in connections { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
+}
+if remoteModes.contains(mode) {
+    // TLS's end does not reach the stand-in's reads while the device leaves the stand-in's frames on
+    // that connection unread (it stopped reading it at the fence): the device resets it instead, once
+    // the stand-in has read everything the fence let through (nothing is sent on it after the fence).
+    _ = wait(patience) { stub.queue.sync { stub.finished.count >= connections.count - 1 } }
+    clientQueue.sync { if old.state == .ready { old.forceCancel() } }
 }
 require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
 let arrived = stub.queue.sync { stub.arrived }
@@ -698,7 +770,7 @@ if let f = fence {
 }
 if ends.count > 1 { print("ends: " + ends.map { "\($0.how) (\($0.held) out, \($0.waiting) waiting\($0.clear ? ", clear" : "")\($0.closed > 0 ? ", \($0.closed) to close" : ""))" }.joined(separator: ", ")) }
 // The stale pong, in the modes that hand over from the slow connection: read there, and it ended nothing.
-let staleSent = ["ok", "timeout", "oldcloses", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession"].contains(mode)
+let staleSent = ["ok", "timeout", "oldcloses", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "remotehome"].contains(mode)
 let staleOK = !staleSent || staleEnded == 0
 if staleSent {
     print(staleEnded == nil ? "stale pong: never read on the first connection" : "stale pong: read on the first connection, \(staleEnded == 0 ? "ended nothing" : "ENDED \(staleEnded!) (only the fence's own pong may)")")
@@ -710,7 +782,8 @@ let clearOK = ends.last.map { $0.clear } ?? true
 // Each hand-over's old connection is handed back for closing exactly once, and only by an end that is clear
 // (what waited, its viewport first, has gone out).
 let fencesMade = ["ok": 1, "timeout": 1, "oldcloses": 1, "adoptfence": 1, "twofences": 2, "twomoves": 2, "holdfence": 1, "holdadopt": 1,
-                  "hold": 0, "holdclosed": 0, "unhold": 0, "nofence": 0, "newsession": 0, "newsessionhold": 0][mode] ?? -1
+                  "hold": 0, "holdclosed": 0, "unhold": 0, "nofence": 0, "newsession": 0, "newsessionhold": 0,
+                  "remotehome": 1, "remotedead": 0][mode] ?? -1
 #if OLD   // SessionLink before the review fixes knew nothing of it (its caller closed each old connection at its fence's end)
 let closeOK = true
 #else
@@ -720,7 +793,7 @@ var ok: Bool
 if !clearOK { print("clear: wrong") }
 if !closeOK { print("close: wrong (\(ends.map(\.closed)) for \(fencesMade) fences)") }
 switch mode {
-case "ok":
+case "ok", "remotehome":
     // Its pong, a round trip of the slow connection at least after the hand-over, let out what waited.
     ok = increasing && missing.isEmpty && dupes == 0 && fence?.how == "pong" && (fence?.held ?? 0) > 0
         && (fence?.seconds ?? 0) >= slow * 0.9
@@ -730,7 +803,7 @@ case "timeout":
     ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "timeout" && (fence?.held ?? 0) > 0
 case "oldcloses":
     ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "closed" && (fence?.held ?? 0) > 0
-case "hold", "holdclosed":
+case "hold", "holdclosed", "remotedead":
     ok = increasing && dupes == 0 && afterHandOverMissing.isEmpty && fence?.how == "adopt" && (fence?.held ?? 0) > 0
 case "unhold":
     ok = increasing && missing.isEmpty && dupes == 0 && fence?.how == "unhold" && (fence?.held ?? 0) > 0

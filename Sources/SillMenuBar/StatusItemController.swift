@@ -88,8 +88,12 @@ enum MenuBuilder {
         if QualityPreset(rawValue: config.bitrate) == nil {
             quality.append(MenuEntry(kind: .item, title: QualityPreset.title(forBitrate: config.bitrate), checked: true, enabled: false))
         }
-        menu.append(MenuEntry(kind: .item, title: "Quality", subtitle: "Per 60 fps; a 120 fps stream gets twice as much",
-                              children: quality))
+        // The home quality, as ever; while every connected device is away, the subtitle says which
+        // quality runs instead (the away one is set in Settings › Streaming, never here).
+        let qualityNote = p.away
+            ? "Away from home now: \(QualityPreset.shortTitle(bitrate: config.awayBitrate, captureScale: Double(config.awayCaptureScale)))"
+            : "Per 60 fps; a 120 fps stream gets twice as much"
+        menu.append(MenuEntry(kind: .item, title: "Quality", subtitle: qualityNote, children: quality))
         menu.append(MenuEntry(kind: .item, title: "Resolution", children: [
             MenuEntry(kind: .item, title: "Retina", checked: config.captureScale >= 1.5, action: .setCaptureScale(2)),
             MenuEntry(kind: .item, title: "Standard", subtitle: "A quarter of the pixels; much lighter to encode",

@@ -33,8 +33,10 @@ package final class StreamCoordinator {
     /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
     /// keeps its share of bits.
     private var streamBitrate: Int { bitrate * fps / 60 }
-    private var scale: CGFloat { config.captureScale }
-    private var bitrate: Int { config.bitrate }
+    /// The quality the pipeline runs: the away pair while it runs the away quality (`awayRunning`),
+    /// else the home pair (HostConfig.effective).
+    private var scale: CGFloat { config.effective(away: awayRunning).captureScale }
+    private var bitrate: Int { config.effective(away: awayRunning).bitrate }
     private var prioritizeSpeed: Bool { config.prioritizeSpeed }
 
     let server: StreamServer
@@ -192,6 +194,26 @@ package final class StreamCoordinator {
     package let remote: RemoteAccess?
     /// Each admitted connection's route (home and its origin, or the remote door's), from the server.
     private var routes: [ObjectIdentifier: ClientRoute] = [:]
+    /// Away from home (docs/remote-bundle-plan.md §5; AwayPolicy): every connected device is away,
+    /// so the away quality is the target. Kept while no device is connected; the next to register
+    /// decides (`routesChanged`). What the Mac's card, menu and every device are told.
+    private var awayWanted = false
+    /// The away quality runs: the value the last `select` (or `adopt`) took. The pipeline reads it.
+    private(set) var awayRunning = false
+    /// A device that joined and flipped `awayWanted` (`routesChanged`): its first viewport, which
+    /// carries its rate and which a device sends as soon as it is connected, takes the flip in the
+    /// same restart as the rate; without one within a second (a test client), the flip goes alone.
+    /// Nothing else applies the flip meanwhile but a `select` that runs anyway, which takes it.
+    private var flipWait: ObjectIdentifier?
+    private var flipWaitToken = 0
+    /// Each connection whose catalog went out (`sendCatalog`): the ones settings states reach.
+    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Each connection's link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6.5):
+    /// its kind 16's `link`, and the card's. A state leaves out a report whose bitrate (the running
+    /// one when it was judged) is no longer the target's, so the answer to the pick that lowers it
+    /// already carries none (the restart's reset follows). The bitrate alone: a change of the capture
+    /// scale alone may restart nothing (the software encoder runs at points).
+    private var linkReports: [ObjectIdentifier: LinkReport] = [:]
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
 
@@ -248,11 +270,18 @@ package final class StreamCoordinator {
                                                                 route: link, remoteRoute: route.label))
                 }
                 if let fp = route.fingerprint, let label = route.label { self.remote?.sessionStarted(fingerprint: fp, route: label) }
+                // Home or away before its catalog: its settings state says which quality it sets.
+                self.routesChanged(joined: id, endpoint: "\(connection.endpoint)")
                 // Catalog first: the client's UI needs it even if the keyframe is slow to come.
                 self.catalog.thumbnailsWanted = true
                 self.sendCatalog(to: connection)
                 self.encoder?.requestKeyframe()
             }
+        }
+        // Each device's link (LinkJudge): the report its kind 16 carries, the card's row, one line.
+        server.onClientLinkChanged = { [weak self] connection, verdict in
+            let id = ObjectIdentifier(connection)
+            Task { @MainActor in self?.linkChanged(id, verdict) }
         }
         server.onKeyframeNeeded = { [weak self] in
             // Network queue → encoder lock: the next repaint carries the keyframe, or the last frame is
@@ -265,11 +294,23 @@ package final class StreamCoordinator {
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
-                self.routes[ObjectIdentifier(connection)] = nil
-                self.lastPairingWanted[ObjectIdentifier(connection)] = nil
-                self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
-                // A 120 Hz device left a 60 Hz one behind: come down to its rate.
-                if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
+                let id = ObjectIdentifier(connection)
+                self.routes[id] = nil
+                self.lastPairingWanted[id] = nil
+                self.connections[id] = nil
+                self.lastPublished[id] = nil
+                self.linkReports[id] = nil
+                if self.flipWait == id { self.flipWait = nil }
+                self.status.update { $0.devices.removeAll { $0.id == id } }
+                // The last device at home left devices away behind: the away quality, at once.
+                let flipped = self.routesChanged(joined: nil, endpoint: nil)
+                // A 120 Hz device left a 60 Hz one behind: come down to its rate. The restart takes
+                // the flip too (select's commit), so a device that leaves costs one.
+                if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps {
+                    await self.select(self.active)
+                } else if flipped {
+                    await self.applyPending()
+                }
             }
         }
         server.onClientCountChanged = { [weak self] count in
@@ -476,9 +517,11 @@ package final class StreamCoordinator {
     private var target: HostConfig { pendingConfig ?? config }
 
     /// Who keeps the settings when a device changes one. Sill.app lays the change over its
-    /// HostSettings (saved, shown in its menu and Settings) and returns the result. Unset (the
-    /// CLI): the change lands on `target` and lasts until the process ends. Set it before `start`.
-    package var onDeviceSettingsChange: (@MainActor (HostSettingsChange) -> HostConfig)?
+    /// HostSettings (saved, shown in its menu and Settings) and returns the result: over the away
+    /// quality (`applyingAway`) for a device away from home (`away`), else over the home one
+    /// (`applying`). Unset (the CLI): the change lands on `target` the same way and lasts until the
+    /// process ends. Set it before `start`.
+    package var onDeviceSettingsChange: (@MainActor (HostSettingsChange, _ away: Bool) -> HostConfig)?
 
     /// New settings from the app or a device, applied live. Synchronous: validated, the virtual
     /// display kept off without the AppKit loop, compared with the target, told to every device.
@@ -504,18 +547,61 @@ package final class StreamCoordinator {
         return true
     }
 
+    /// Takes what waits for the pipeline: settings (`pendingConfig`), and a flip between the home and
+    /// the away quality (`awayWanted` against `awayRunning`) unless it waits for a joined device's
+    /// first viewport (`flipWait`), which then brings both in one restart. At once when nothing
+    /// streaming depends on it, else through one restart of the current source.
     private func applyPending() async {
-        guard let new = pendingConfig, !switching, !shuttingDown else { return }   // select's defer calls it again
-        guard restartNeeded(for: new) else { pendingConfig = nil; adopt(new); return }
+        let flip = awayWanted != awayRunning && flipWait == nil
+        guard pendingConfig != nil || flip, !switching, !shuttingDown else { return }   // select's defer calls it again
+        let new = pendingConfig ?? config
+        // A flip still waiting for its viewport stays out of a settings change that needs no restart;
+        // a restart takes it anyway (select's commit).
+        let away = flipWait == nil ? awayWanted : awayRunning
+        guard restartNeeded(for: new, away: away) else { pendingConfig = nil; adopt(new, away: away); return }
         // A restart, not a pick. Turning the virtual display off still brings the staged window
         // forward as it comes home: select's commit decides that, from the value it actually takes.
         await select(active)   // committed inside select
     }
 
-    /// Whether the running pipeline would come out different under `new`: its rate (the devices'
-    /// highest under the new limit, 60 at most on the software encoder), capture scale, bitrate,
-    /// encoder speed, or, for a window, the virtual display. The Desktop never uses the display.
-    /// Direct Wireless is deliberately absent: it is the listener's (`adopt` hands it over).
+    /// Home or away (docs/remote-bundle-plan.md §5.4): a device registered (`joined`, before its
+    /// catalog) or one left (nil). The away quality becomes the target once every connected device
+    /// is away, the home one once any is at home; with nobody connected the flag stays (AwayPolicy).
+    /// A flip prints its line; one from a device that joined waits for that device's first viewport
+    /// (`flipAwaits`), one from a device that left is the caller's to apply. Returns whether it
+    /// flipped.
+    @discardableResult
+    private func routesChanged(joined: ObjectIdentifier?, endpoint: String?) -> Bool {
+        let before = awayWanted
+        awayWanted = AwayPolicy.wanted(devicesAway: routes.values.map(\.isAway), current: awayWanted)
+        let flipped = awayWanted != before
+        if flipped {
+            print(awayWanted ? AwayPolicy.awayLine(target) : AwayPolicy.homeLine(target, endpoint: endpoint ?? "a device"))
+            if let joined { flipAwaits(joined) } else { flipWait = nil }
+        }
+        status.update { $0.away = awayWanted && !routes.isEmpty }   // publishes (status.onChange)
+        return flipped
+    }
+
+    /// The flip waits for `id`'s first viewport, which carries its rate, so the two go in one
+    /// restart; after a second without one (a test client) it goes alone.
+    private func flipAwaits(_ id: ObjectIdentifier) {
+        flipWaitToken += 1
+        let token = flipWaitToken
+        flipWait = id
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard self.flipWaitToken == token, self.flipWait == id else { return }
+            self.flipWait = nil
+            await self.applyPending()
+        }
+    }
+
+    /// Whether the running pipeline would come out different under `new` with the home or the away
+    /// quality (`away`): its rate (the devices' highest under the new limit, 60 at most on the
+    /// software encoder), capture scale and bitrate (the pair `away` picks), encoder speed, or, for a
+    /// window, the virtual display. The Desktop never uses the display. Direct Wireless is
+    /// deliberately absent: it is the listener's (`adopt` hands it over).
     ///
     /// A new bitrate needs a new encoder session. VideoToolbox accepts AverageBitRate on a live
     /// session and reads it back, but the hardware HEVC encoder's rate control does not follow it
@@ -523,20 +609,23 @@ package final class StreamCoordinator {
     /// stayed at 9.6 Mbps for 5 s and across a keyframe, against 28 Mbps for a session made at 40;
     /// lowered from 40 to 8 it dropped 41 of the next 60 frames). Only the software encoder and
     /// low-latency rate control follow a live change.
-    private func restartNeeded(for new: HostConfig) -> Bool {
+    private func restartNeeded(for new: HostConfig, away: Bool) -> Bool {
         guard active != .none else { return false }
         let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
         let newFPS = useSoftwareEncoder ? min(wanted, 60) : wanted
-        let newScale = useSoftwareEncoder ? min(new.captureScale, 1.0) : new.captureScale
+        let pair = new.effective(away: away)
+        let newScale = useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
         if newFPS != fps || newScale != captureScale { return true }
-        if new.bitrate != config.bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
+        if pair.bitrate != bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
         if new.virtualDisplay != config.virtualDisplay, case .window = active { return true }
         return false
     }
 
-    /// Makes `next` the running settings, inside `select` or at once when nothing running depends
-    /// on what changed. Logs one "Settings:" line.
-    private func adopt(_ next: HostConfig) {
+    /// Makes `next` the running settings, and `away` the quality the pipeline runs, inside `select`
+    /// or at once when nothing running depends on what changed. Logs one "Settings:" line when the
+    /// settings changed; a flip alone prints nothing here (`routesChanged` said it).
+    private func adopt(_ next: HostConfig, away: Bool) {
+        awayRunning = away
         let old = config
         guard next != old else { return }
         config = next
@@ -601,6 +690,53 @@ package final class StreamCoordinator {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
     }
 
+    // MARK: Each device's link (docs/remote-bundle-plan.md §6)
+
+    /// A device's link changed: behind or stalled becomes its report (the running quality, what was
+    /// withheld, the carried rate and what would fit at the running pair and the stream's rate), a
+    /// line when the state is new, and the card's row; a report that only moves the carried rate
+    /// prints nothing, and changes nothing unless it changes the suggestion; fine clears it, with
+    /// "keeping up again" only for a judged recovery, never for a restart's reset. The snapshot
+    /// change publishes, and each connection's state carries its own.
+    private func linkChanged(_ id: ObjectIdentifier, _ v: LinkJudge.Verdict) {
+        guard routes[id] != nil else { return }       // gone meanwhile
+        let device = status.snapshot.devices.first { $0.id == id }
+        let who = device?.name ?? device?.endpoint ?? "a device"
+        switch v.state {
+        case .fine:
+            let had = linkReports.removeValue(forKey: id) != nil
+            status.update {
+                guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                $0.devices[i].link = nil
+            }
+            if had, !v.reset { print(LinkJudge.fineLine(device: who)) }
+        case .behind, .stalled:
+            let behind = v.state == .behind
+            let fps = status.snapshot.stream?.fps ?? self.fps
+            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(captureScale))
+            let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
+                                    bitrate: bitrate, carriedKbps: v.carriedKbps,
+                                    suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
+            let previous = linkReports[id]
+            // The same state with the same suggestion (the judge reporting its rate as it moves): the
+            // device and the card have nothing new to show, so nothing is published.
+            if let previous, previous.state == report.state, previous.suggestedBitrate == report.suggestedBitrate,
+               previous.suggestedCaptureScale == report.suggestedCaptureScale { return }
+            linkReports[id] = report
+            let shown = HostStatusSnapshot.LinkStatus(state: behind ? .behind : .stalled, withheld: v.withheld, bitrate: bitrate,
+                                                      carriedKbps: v.carriedKbps, suggestedBitrate: suggestion?.bitrate,
+                                                      suggestedCaptureScale: suggestion?.captureScale)
+            status.update {
+                guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                $0.devices[i].link = shown
+            }
+            guard previous?.state != report.state else { return }
+            print(behind ? LinkJudge.behindLine(device: who, bitrate: bitrate, withheld: v.withheld, offered: v.offered,
+                                                carriedKbps: v.carriedKbps, suggestion: suggestion)
+                         : LinkJudge.stalledLine(device: who, waiting: v.waiting))
+        }
+    }
+
     // MARK: Client messages
 
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
@@ -646,9 +782,15 @@ package final class StreamCoordinator {
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
             viewport = v
-            clientFPS[ObjectIdentifier(connection)] = v.fps ?? 60
-            if switching { viewportArrivedWhileSwitching = true; return }
+            let id = ObjectIdentifier(connection)
+            clientFPS[id] = v.fps ?? 60
+            // The flip its connection made waited for this, its rate (`flipAwaits`): the restart the
+            // rate needs takes the flip too, and the flip alone restarts once when the rate needs none.
+            let flipWaited = flipWait == id
+            if flipWaited { flipWait = nil }
+            if switching { viewportArrivedWhileSwitching = true; return }   // select's defer applies both
             await applyViewportToActiveWindow()
+            if flipWaited { await applyPending() }
         case .pairingWanted:
             // "Show your pairing code" (Pair This iPad…): only from a device near the Mac (the home
             // door, from loopback, this network or peer-to-peer Wi-Fi), once per 30 s per connection.
@@ -677,7 +819,7 @@ package final class StreamCoordinator {
                     settingsIgnoredLineAt[id] = now
                     print("Settings from \(who) ignored: more than \(Self.settingsPerSecond) changes a second.")
                 }
-                server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
+                server.send(settingsMessage(settingsState(for: id, answering: change.token)), to: connection)
                 return
             }
             recent.append(now)
@@ -689,14 +831,16 @@ package final class StreamCoordinator {
             if !refused.isEmpty { print("Settings from \(who) refused: \(refused.joined(separator: ", "))") }
             if !ok.isEmpty, !shuttingDown {
                 let before = target
+                // A device away from home sets the away quality, never the home one (§5.1).
+                let away = routes[id]?.isAway ?? false
                 // The app: the hook assigns its settings, whose didSet has already set the target
                 // (this call then finds it equal). The CLI: the change lands on the target.
-                setTarget(onDeviceSettingsChange?(ok) ?? before.applying(ok))
+                setTarget(onDeviceSettingsChange?(ok, away) ?? (away ? before.applyingAway(ok) : before.applying(ok)))
                 if target != before { print("Settings from \(who): " + before.changes(to: target)) }
             }
             // Exactly one answer, to this device alone: the settings as they now stand, so a
             // refused or ignored field goes back to the Mac's value on the device.
-            server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
+            server.send(settingsMessage(settingsState(for: id, answering: change.token)), to: connection)
         default:
             break
         }
@@ -892,8 +1036,9 @@ package final class StreamCoordinator {
                 viewportArrivedWhileSwitching = false
                 Task { @MainActor in await self.applyViewportToActiveWindow() }
             }
-            // Settings that came in meanwhile; a no-op when the pick's select commits them first.
-            if pendingConfig != nil { Task { @MainActor in await self.applyPending() } }
+            // Settings, or a flip between the home and the away quality, that came in meanwhile; a
+            // no-op when the pick's select commits them first.
+            if pendingConfig != nil || (awayWanted != awayRunning && flipWait == nil) { Task { @MainActor in await self.applyPending() } }
         }
 
         await capture.stop()
@@ -925,7 +1070,10 @@ package final class StreamCoordinator {
             // The newest value: another may have arrived during those awaits.
             let next = pendingConfig ?? first
             pendingConfig = nil
-            adopt(next)
+            adopt(next, away: awayWanted)
+        } else if awayWanted != awayRunning {
+            // Home or away changed (a device joined or left): the pipeline takes the other pair.
+            adopt(config, away: awayWanted)
         }
         fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
         let comeForward = bringForward || cameHome
@@ -1648,8 +1796,14 @@ package final class StreamCoordinator {
         print("Catalog → \(connection.endpoint): \(catalog.infos.count) windows, \(catalog.allIcons.count) icons, \(catalog.installedApps.count) apps")
         server.send(listMessage(), to: connection)
         // What the settings are, silently (the line above is the only one printed on connect). An
-        // older device skips the kind.
-        server.send(settingsMessage(settingsState()), to: connection)
+        // older device skips the kind. Recorded as what this connection was last sent, and only
+        // then does it join the publishes: none goes out ahead of its window list, and the catalog
+        // keeps its order (2, 16, 18).
+        let id = ObjectIdentifier(connection)
+        let state = settingsState(for: id)
+        server.send(settingsMessage(state), to: connection)
+        lastPublished[id] = state
+        connections[id] = connection
         // Who this Mac is and how to reach it from afar (kind 18, signed), on both doors, only from
         // a host with an identity. An older device skips it too.
         if let info = remote?.macInfoMessage() { server.send(info, to: connection) }
@@ -1666,21 +1820,39 @@ package final class StreamCoordinator {
 
     // MARK: Settings to devices
 
-    /// The last broadcast state. Answers and the state sent on connect never touch it.
-    private var lastPublished: HostSettingsState?
+    /// The last state each connection was sent: at connect (`sendCatalog`) and by each publish.
+    /// Answers never touch it.
+    private var lastPublished: [ObjectIdentifier: HostSettingsState] = [:]
 
-    /// A pure function of the target, the status snapshot and two constants (appKitLoop, whether
-    /// the hook is set). The target changes only in `setTarget` and the snapshot only in
-    /// `HostStatus.update`, and both publish, so no change can be missed and none can stick.
-    private func settingsState(answering: Int? = nil) -> HostSettingsState {
+    /// Connection `id`'s state (docs/remote-bundle-plan.md §5.4): the pair its controls set (the
+    /// away quality for a device away), the home and away qualities with which one is the target
+    /// (`away`, from a host with a remote door), and the rest shared. A pure function of the target,
+    /// `awayWanted`, the connection's route, the status snapshot and two constants (appKitLoop,
+    /// whether the hook is set). The target changes only in `setTarget`, the snapshot only in
+    /// `HostStatus.update`, and `awayWanted` only in `routesChanged`, which updates the snapshot
+    /// with it; all three publish, so no change can be missed and none can stick. Never the
+    /// pipeline's `awayRunning`: it changes in `adopt`, which publishes only through a snapshot
+    /// change, and none comes while nothing streams.
+    private func settingsState(for id: ObjectIdentifier, answering: Int? = nil) -> HostSettingsState {
         let t = target, s = status.snapshot
-        return HostSettingsState(settings: t.streamSettings,
+        let thisAway = routes[id]?.isAway ?? false
+        // A report about the bitrate that runs while it is still the target's; one about a bitrate a
+        // pick has just replaced is stale (the restart's reset clears it a moment later).
+        let link = linkReports[id].flatMap { $0.bitrate == t.effective(away: awayWanted).bitrate ? $0 : nil }
+        let away = remote.map { _ in
+            AwayQuality(homeBitrate: t.bitrate, homeCaptureScale: Double(t.captureScale),
+                        awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),
+                        thisConnectionAway: thisAway, awayRunning: awayWanted)
+        }
+        return HostSettingsState(settings: t.streamSettings(away: thisAway),
                                  persistent: onDeviceSettingsChange != nil,
                                  virtualDisplayAvailable: appKitLoop,
                                  virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
                                  softwareEncoder: s.softwareEncoder,
                                  stream: s.stream?.wire,
-                                 answering: answering)
+                                 answering: answering,
+                                 away: away,
+                                 link: link)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the
@@ -1700,17 +1872,29 @@ package final class StreamCoordinator {
                       payload: Wire.encode(state))
     }
 
-    /// To every device, when the state differs from the last broadcast. Prints nothing, so the
-    /// CLI's output only changes when a device sends a change.
+    /// To every device whose catalog went out, its own state, when that differs from the last one
+    /// it was sent. Prints nothing, so the CLI's output only changes when a device sends a change.
     private func publishSettings() {
-        let state = settingsState()
-        guard state != lastPublished else { return }
-        lastPublished = state
-        server.broadcast(settingsMessage(state))
+        var messages: [(NWConnection, StreamMessage)] = []
+        for (id, connection) in connections {
+            let state = settingsState(for: id)
+            guard state != lastPublished[id] else { continue }
+            lastPublished[id] = state
+            messages.append((connection, settingsMessage(state)))
+        }
+        if !messages.isEmpty { server.send(each: messages) }
     }
 
     /// "iPad (iPad14,1)" once the device has sent its stats, its address until then.
     private func deviceName(_ connection: NWConnection) -> String {
         status.snapshot.devices.first { $0.id == ObjectIdentifier(connection) }?.name ?? "\(connection.endpoint)"
     }
+}
+
+extension ClientRoute {
+    /// Away from home: the remote door from a VPN or the internet (AwayPolicy.isAway). Its Quality and
+    /// Resolution picks set the away quality, which runs while every connected device is away. Here,
+    /// not beside ClientRoute in StreamServer.swift, which the pacing harness compiles without the
+    /// coordinator's files.
+    var isAway: Bool { AwayPolicy.isAway(remoteDoor: isRemote, origin: origin) }
 }

@@ -51,6 +51,17 @@
 #            0.1 s after a keyframe three times (a pick, a rotation or a settings change while a
 #            keyframe is still being taken): the new stream's deltas follow its keyframe, nothing
 #            dropped
+#   The link's own cases (docs/remote-bundle-plan.md §6, H11; the new build's Link lines):
+#   linkstill  slowkfB's sizes and liveness, the window still for 10 s from 31 s, while its second
+#            keyframe is still crossing: never behind or stalled after the first keyframe
+#   linkdead   Low's sizes on 8 Mbit/s, the path dead both ways from 20 s: stalled within 8 s (the
+#            loopback path's buffers first take 0.7–1 MB)
+#   linkdown   the same, the downlink alone at 0 from 20 s (the device's pings still arrive): behind
+#            within 3 s of the end of the host's first second withholding frames, never stalled
+#   and the link's gates on real24 (never behind), over8 (behind within 5 s, carried within 20 % of
+#   8 Mbit/s, Low suggested for Pro), dip (behind within 3 s of the end of the host's first second
+#   withholding frames, which waits for the dip's 1 MB queue to fill; fine within 10 s of its end),
+#   slowkfB (never behind or stalled after the first keyframe) and home (never behind)
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
 #   (the old device's liveness: whole messages) and home (a home client, plain TCP: unchanged).
@@ -66,7 +77,7 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
-        -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,65p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
     esac
 done
@@ -84,13 +95,16 @@ cases=(
   "blackhole|30|1|Remote|sillrelay|--kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 --blackhole-after 5 -- --reconnect --liveness-bytes"
   "stillend|55|1|Remote|bottleneck|--kf 1500000 --delta 60000 --still-at 12:8,27:8,42:8 -- --rate-mbps 16 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "restartkf|40|1|Remote|bottleneck|--kf 2500000 --delta 4000 --restart-at 10:0.1,20:0.1,30:0.1 -- --rate-mbps 32 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "linkstill|55|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 --still-at 31:10 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect --liveness-bytes"
+  "linkdead|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --blackhole-at 20 -- --reconnect --liveness-bytes"
+  "linkdown|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --rate-at 20:0 -- --reconnect --liveness-bytes"
 )
 full_cases=(
   "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
   "fastbig|40|1|Remote|bottleneck|--kf 1500000 --delta 150000 -- --rate-mbps 100 --delay-ms 20 --queue-bytes 1048576 -- --reconnect"
   "low|40|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "switch|50|1|Remote|bottleneck|--kf 1500000 --delta 30000 --sizes-at 30:150000:8000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "over8|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "over8|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 --bitrate 40000000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "slowkf|50|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "home|30|1|Home|bottleneck|--kf 150000 --delta 8000 --home -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
 )

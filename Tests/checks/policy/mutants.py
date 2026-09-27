@@ -104,11 +104,24 @@ MUTANTS = {
                                         "        if i.remote { return .stay(.remote, recheckAt: i.now + pathHysteresis) }\n"),
     "R6 the remote reason is Direct's": ("        if i.remote { return .stay(.remote, recheckAt: nil) }\n",
                                          "        if i.remote { return .stay(.direct, recheckAt: nil) }\n"),
-    "R7 the reason's words": ('            case .remote: return "a remote session moves only by the remote reconnect"\n',
+    "R7 the reason's words": ('            case .remote: return "a remote session moves only home, once the network lists its Mac"\n',
                               '            case .remote: return "over Direct, the session moves only to the network"\n'),
     "R8 every session remote by default": ("        var remote = false\n", "        var remote = true\n"),
     "R9 a remote session read as its route word (the flag ignored)": ("        if i.remote { return .stay(.remote, recheckAt: nil) }\n",
                                                                       "        if i.remote && i.route == .direct { return .stay(.remote, recheckAt: nil) }\n"),
+    # moveHome (remote-bundle, H15)
+    "H1 the move home tries a refused listing": ("        guard let since = listedSince, since != refusedListing else { return (false, nil) }\n        var due = since + moveAfter\n        if let last = lastAttempt, failures > 0 {",
+                                                 "        guard let since = listedSince else { return (false, nil) }\n        var due = since + moveAfter\n        if let last = lastAttempt, failures > 0 {"),
+    "H2 the move home waits upWait(0) with no failure": ("        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }",
+                                                         "        if let last = lastAttempt { due = max(due, last + upWait(failures: failures)) }"),
+    "H3 the move home at > for >=": ("        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }\n        return now >= due ? (true, nil) : (false, due)",
+                                     "        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }\n        return now > due ? (true, nil) : (false, due)"),
+    "H4 the move home ignores failures": ("        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }",
+                                          "        if let last = lastAttempt, failures > 0 { due = max(due, last + moveAfter) }"),
+    "H5 the move home at once, not after 2 s listed": ("        guard let since = listedSince, since != refusedListing else { return (false, nil) }\n        var due = since + moveAfter\n        if let last = lastAttempt, failures > 0 {",
+                                                       "        guard let since = listedSince, since != refusedListing else { return (false, nil) }\n        var due = since\n        if let last = lastAttempt, failures > 0 {"),
+    "H6 the move home backs off from the listing, not the last try": ("        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }",
+                                                                     "        if let last = lastAttempt, failures > 0 { due = max(due, since + upWait(failures: failures)) }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

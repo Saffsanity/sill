@@ -143,10 +143,17 @@ struct ContentView: View {
 ///   `noroute`; and for the Away from home group, away from home: `remote` (through Tailscale,
 ///   48 ms, saved), `remoteinternet` or `remoteslow` (the slow-link callout); at home:
 ///   `remotepair` (Pair This iPad…), `remoteoff` (the footnote only) or `noremote` (no kind 18: no
-///   group) (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's
-///   route, the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired),
-///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
-///   and `remoteslow` (none: the route line under it says how instead).
+///   group); away from home and the link (docs/remote-bundle-plan.md): `away` (the away quality
+///   runs: "Away: Low · Standard"), `awaymixed` (a device at home keeps the home quality),
+///   `awayhome` (at home: the footnote says what runs away), `linkbehind` (the callout and its
+///   button), `linkmixed` (the callout without one), `linklow` ("even at Low") and `linkstalled` (no
+///   callout: stalled is the Mac's alone) (see `MockCatalog.SettingsCase`). The mock answers a pick
+///   after 0.35 s. The session's route, the readout's last word: Wi-Fi, except `directlink`
+///   (Direct), `wired` (Wired), `noroute` (none, as a connection whose path says nothing), and
+///   `remote`, `remoteinternet`, `remoteslow` and the away and link cases but `awayhome` (none: the
+///   route line under it says how instead).
+/// * `-SillLinkLine behind` — the mock Mac reports this connection's link behind, whatever the
+///   settings case: the stream screen's line shows (the panel closed; with it open, the callout).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
 ///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
@@ -163,6 +170,18 @@ struct ContentView: View {
 ///   by `-SillConnect` to a loopback address and the host's first window list has no version
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
 ///   …" and nothing is sent. Point it only at `--synthetic` hosts.
+/// * `-SillSettingsScript '<t> <step>; …'` — the Settings panel's controls for the simulator gates,
+///   in the normal app too: `set K=V[,K=V]` (a control's change) or `suggestion` (the link
+///   callout's button), `t` seconds after the session's first window list, under `-SillInputScript`'s
+///   guard (a session dialled to a loopback address whose host sends no version: never Sill.app).
+///   The console says "settings script: …" (`SettingsScript`).
+/// * `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` — with `-SillDialSaved 1`: a second after the
+///   remote session's first window list, its saved Mac is listed as a network row with its Mac ID
+///   (named "‹Mac› (home test)", so Sill.app's own row on this Mac never hides it), so the move home
+///   runs for real against `SillHost --synthetic --remote` with SILL_TEST_REMOTE_ORIGIN=vpn: `to:`
+///   the host's home door, `refused` port 1 of the remote session's host (each try fails), `other:`
+///   another synthetic host (another launch). `-SillDialSaved remotely` dials the first saved Mac as
+///   Connect Remotely does (a session that never moves home). The console says "remote: …".
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -498,6 +517,68 @@ enum InputScript {
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
+    }
+}
+
+/// `-SillSettingsScript '<t> <step>; …'`: the Settings panel's controls for the simulator gates, which
+/// have no finger (docs/remote-bundle-plan.md S3): `t` is seconds since the session's first window
+/// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay:
+/// a control's change, through `changeSettings` as the panel sends it) or `suggestion` (the link
+/// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none). The
+/// console says "settings script: …" at each. It runs in the normal app too, under InputScript's
+/// guard: only a session dialled to a loopback address (a remote dial's winner through a relay
+/// counts) whose host's first window list has no version, so never Sill.app's settings.
+enum SettingsScript {
+    private static var started = false
+
+    static func sessionListed(_ client: StreamClient) {
+        guard !started, let text = UserDefaults.standard.string(forKey: "SillSettingsScript") else { return }
+        started = true
+        if let why = InputScript.refusal(endpoint: client.connection?.endpoint, hostVersion: client.hostVersion) {
+            print("settings script: refused: \(why)")
+            return
+        }
+        for item in text.split(separator: ";") {
+            let words = item.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard words.count >= 2, let at = Double(words[0]), at >= 0 else { print("settings script: cannot read \(item)"); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak client] in
+                guard let client else { return }
+                run(Array(words.dropFirst()), at: at, client: client)
+            }
+        }
+    }
+
+    private static func run(_ words: [String], at: Double, client: StreamClient) {
+        let when = String(format: "settings script: t=%.2f ", at)
+        switch words[0] {
+        case "suggestion":
+            let host = client.settings.host
+            guard let callout = AwayCopy.callout(link: host?.link, away: host?.away, mac: client.macName), let button = callout.button else {
+                print(when + "suggestion: the panel offers none now")
+                return
+            }
+            print(when + "suggestion: the callout's button, “\(button.title)”")
+            client.changeSettings(button.change)
+        case "set" where words.count == 2:
+            var change = HostSettingsChange()
+            for pair in words[1].split(separator: ",") {
+                let kv = pair.split(separator: "=", maxSplits: 1).map(String.init)
+                guard kv.count == 2 else { continue }
+                let on = ["1", "true", "on"].contains(kv[1])
+                switch kv[0] {
+                case "maxFPS": change.maxFPS = Int(kv[1])
+                case "bitrate": change.bitrate = Int(kv[1])
+                case "captureScale": change.captureScale = Double(kv[1])
+                case "prioritizeSpeed": change.prioritizeSpeed = on
+                case "virtualDisplay": change.virtualDisplay = on
+                default: print(when + "no setting \(kv[0])")
+                }
+            }
+            print(when + "set \(words[1])")
+            client.changeSettings(change)
+        default:
+            print(when + "cannot read \(words.joined(separator: " "))")
+        }
     }
 }
 #endif

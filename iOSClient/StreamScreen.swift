@@ -132,6 +132,10 @@ struct StreamScreen: View {
     @State private var panelSize: CGSize = .zero
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
+    /// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md
+    /// §6.7; AwayCopy's LinkLine), and its next look (the linger's end).
+    @State private var linkLine = LinkLine()
+    @State private var linkLineCheck: Task<Void, Never>? = nil
 
     #if DEBUG
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
@@ -238,7 +242,48 @@ struct StreamScreen: View {
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.modeDidChangeNotification).receive(on: RunLoop.main)) { _ in
             sendViewport(after: 0.25)
         }
+        // Away from home the stream rate follows the route (60 fps through a VPN or the internet): a
+        // session that stops being away (the move home) asks for its full rate whatever path it took
+        // (docs/remote-bundle-plan.md §7.3).
+        .onChange(of: client.remoteRoute) { _, _ in sendViewport() }
+        // The link's line over the stream (§6.7): a report arriving or clearing, or the panel, the
+        // drawer or the pairing overlay opening or closing over it.
+        .onChange(of: linkReportLine, initial: true) { _, _ in updateLinkLine() }
+        .onChange(of: linkLineAllowed) { _, _ in updateLinkLine() }
     }
+
+    // MARK: The link's line
+
+    /// What the Mac's report says for the line now: nil while the link keeps up.
+    private var linkReportLine: String? {
+        let host = client.settings.host
+        return AwayCopy.streamLine(link: host?.link, away: host?.away, mac: client.macName.isEmpty ? "the Mac" : client.macName)
+    }
+
+    /// Nothing open over the stream: the Settings panel (which has the callout), the drawer, the
+    /// pairing overlay.
+    private var linkLineAllowed: Bool { !settingsOpen && !drawerOpen && !overlayShown }
+
+    /// Runs LinkLine on the report and what is open, says the line once a spell, and looks again at
+    /// the linger's end.
+    private func updateLinkLine() {
+        if let words = linkLine.update(report: linkReportLine, allowed: linkLineAllowed, now: ProcessInfo.processInfo.systemUptime) {
+            AccessibilityNotification.Announcement(words).post()
+            #if DEBUG
+            print("link: the stream's line “\(words)” (announced)")
+            #endif
+        }
+        linkLineCheck?.cancel()
+        linkLineCheck = nil
+        guard let at = linkLine.recheckAt else { return }
+        linkLineCheck = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(0.01, at - ProcessInfo.processInfo.systemUptime)))
+            if !Task.isCancelled { updateLinkLine() }
+        }
+    }
+
+    /// The line as it shows over the stream now, or nil.
+    private var shownLinkLine: String? { linkLine.visible ? linkLine.text : nil }
 
     // MARK: Viewport
 
@@ -414,7 +459,8 @@ struct StreamScreen: View {
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
-                             pairThisDevice: openPairingOverlay)
+                             pairThisDevice: openPairingOverlay,
+                             linkLine: shownLinkLine)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -435,6 +481,7 @@ struct StreamScreen: View {
                              onModifiersConsumed: { latched = [] })
             }
             .background(Palette.panel)
+            .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
             .clipShape(streamShape)
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
@@ -479,6 +526,40 @@ struct StreamScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - The link's line
+
+/// The line over the stream while the link cannot carry the quality (docs/remote-bundle-plan.md §6.7):
+/// a capsule at the top centre of the stream panel, 8 pt inside its top edge and at most the panel's
+/// width less 32 pt, footnote text on the bar's colour; two lines at most, the text no larger than
+/// xxLarge. It never takes a touch meant for the Mac, and comes and goes with a fade (with Reduce
+/// Motion too). VoiceOver hears it once a spell (StreamScreen.updateLinkLine) and can read it here.
+struct LinkLineView: View {
+    let text: String?
+    var body: some View {
+        ZStack {
+            if let text {
+                Text(text)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.text)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Capsule(style: .continuous).fill(Palette.bar.opacity(0.92)))
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .transition(.opacity)
+                    .accessibilityAddTraits(.isStaticText)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.2), value: text)
     }
 }
 

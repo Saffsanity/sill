@@ -1,5 +1,5 @@
 #!/bin/bash
-# SessionLink (iOSClient/SessionLink.swift, with StreamProtocol's StreamMessage.swift) against a
+# SessionLink (iOSClient/SessionLink.swift, with StreamProtocol's sources) against a
 # stand-in Mac on loopback: the moves' fenced hand-overs, the hold of a move off a lost path, adopt,
 # unhold, and a new session dropping a hand-over. Each mode sends 600 numbered inputs from two
 # threads and checks that they arrive complete and in order; nofence reproduces the hazard the fence
@@ -13,8 +13,8 @@
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/../common.sh"
 if [ "${1:-}" = "--mutants" ]; then run_mutants python3 "$here/mutants.py"; exit; fi
-swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/StreamMessage.swift "$here/main.swift" -o "$out/check"
-modes=(ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count)
+swiftc -O iOSClient/SessionLink.swift Sources/StreamProtocol/*.swift "$here/main.swift" -o "$out/check"
+modes=(ok nofence timeout oldcloses hold holdclosed unhold adoptfence twofences twomoves holdfence holdadopt newsession newsessionhold count remotehome remotedead)
 if [ $# -gt 0 ]; then modes=("$@"); fi
 failed=()
 for mode in "${modes[@]}"; do

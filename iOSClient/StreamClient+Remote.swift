@@ -169,7 +169,8 @@ extension StreamClient {
     /// ThisDeviceOnly) are useless, and cleared, but only when the Keychain says the key is not
     /// there (DeviceIdentity.knownMissing). DEBUG: `-SillForgetMacs 1` clears them and the key;
     /// `-SillPairURL`, `-SillPairCode` with `-SillPairAddress`, and `-SillDialSaved 1` start a
-    /// pairing or a remote dial as the UI would, without the link's confirmation.
+    /// pairing or a remote dial as the UI would, without the link's confirmation; `-SillDialSaved
+    /// remotely` dials the first saved Mac as Connect Remotely does (a session that never moves home).
     func startRemote() {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SillForgetMacs") {
@@ -189,6 +190,9 @@ extension StreamClient {
             if case .success(let link) = PairLink.parse(url) { pair(link: link, overlay: false) } else { pairing = .failed(.notALink) }
         } else if let code = d.string(forKey: "SillPairCode"), let address = d.string(forKey: "SillPairAddress") {
             pairTyped(code: code, address: address, overlay: false)
+        } else if d.string(forKey: "SillDialSaved") == "remotely", let first = savedMacs.first {
+            // As Connect Remotely dials it: a session that never moves home (S5).
+            dialSaved(first.macID, why: .connectRemotely)
         } else if d.bool(forKey: "SillDialSaved"), let first = savedMacs.first {
             dialSaved(first.macID, why: .launchArgument)
         }
@@ -560,6 +564,13 @@ extension StreamClient {
         }
         macInfoSaved = true
         session?.macID = info.macID
+        // A remote session's newest verified kind 18: the move home's must be at least as new. The
+        // first one lets the move home start (a Mac the network lists already moves 2 s after).
+        if session?.route.isRemote == true {
+            let first = remoteInfoIssuedAt == nil
+            remoteInfoIssuedAt = max(remoteInfoIssuedAt ?? 0, info.issuedAt)
+            if first { moveHomeIfListed() }
+        }
         var mac = SavedMacs.refreshed(savedMacs[i], info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? savedMacs[i]
         // The Bonjour name of a network or Direct connection to it: how a host without the tag is
         // still recognised.

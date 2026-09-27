@@ -13,6 +13,7 @@ import StreamProtocol
 ///     -SillSetAfter '<s> key=value[,key=value][; <s> …]'
 ///                                              change settings s seconds after launch, exactly as
 ///                                              a control would (maxFPS, captureScale, bitrate,
+///                                              awayBitrate, awayCaptureScale,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
 ///                                              remoteAccess, remotePort, internetAccess,
 ///                                              remoteAddressName=host[:port], updateCheck). Saved
@@ -173,6 +174,8 @@ enum DebugHooks {
         case "maxFPS": if let v = Int(value) { config.maxFPS = v }
         case "captureScale": if let v = Double(value) { config.captureScale = CGFloat(v) }
         case "bitrate": if let v = Int(value) { config.bitrate = v }
+        case "awayBitrate": if let v = Int(value) { config.awayBitrate = v }
+        case "awayCaptureScale": if let v = Double(value) { config.awayCaptureScale = CGFloat(v) }
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
@@ -250,6 +253,15 @@ enum DebugHooks {
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
+        }
+        // A device's link that does not keep up (docs/remote-bundle-plan.md §6.6): cards only.
+        for sample in linkSamples() {
+            let p = StatusText.present(snapshot: sample.snapshot, permissions: sample.permissions,
+                                       startupError: sample.startupError, hasCoordinator: true)
+            for (name, appearance) in appearances {
+                render(StatusCard(presentation: p).padding(.vertical, 4).background(Color(nsColor: .windowBackgroundColor)),
+                       appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
+            }
         }
         // A newer release found (0.4 against 0.3): the idle menu with its item; the glyph stays.
         if let idle = samples().first(where: { $0.name == "idle" }) {
@@ -350,7 +362,48 @@ enum DebugHooks {
         taken.remote = RemoteStatus(remoteAccess: true, listener: .portInUse(7455), lanAddress: "192.168.1.20")
         list.append(Sample(name: "remote-device", snapshot: remote))
         list.append(Sample(name: "remote-port-in-use", snapshot: taken))
+        // The same device while the away quality runs (docs/remote-bundle-plan.md §5.7): the menu's
+        // Quality subtitle says so, and the stream runs at Low · Standard.
+        list.append(Sample(name: "remote-away", snapshot: remoteAway()))
         return list
+    }
+
+    /// The remote device of `remote-device`, every connected device away: the away quality runs.
+    private static func remoteAway() -> HostStatusSnapshot {
+        var s = samples_remoteBase()
+        s.away = true
+        s.stream = HostStatusSnapshot.Stream(kind: .desktop, title: "Whole Desktop", width: 1512, height: 982, fps: 60, mbps: 4,
+                                             onVirtualDisplay: false, softwareEncoder: false)
+        s.encodedFPS = 58
+        return s
+    }
+
+    /// `remote-device`'s snapshot: one device through Tailscale, streaming.
+    private static func samples_remoteBase() -> HostStatusSnapshot {
+        var s = localSamples().first { $0.name == "streaming" }?.snapshot ?? HostStatusSnapshot()
+        s.devices = [HostStatusSnapshot.Device(id: ObjectIdentifier(tokens[0]), endpoint: "100.84.3.2:61022",
+                                               name: "iPad (iPad14,1)", fps: 60, frameAgeMs: 41, rttMs: 48,
+                                               remoteRoute: "through Tailscale")]
+        s.remote = RemoteStatus(remoteAccess: true, listener: .listening(7455), addresses: tailscaleAddresses,
+                                lanAddress: "192.168.1.20")
+        return s
+    }
+
+    /// card-link-behind and card-link-stalled: the remote device at Pro on a link that cannot carry
+    /// it (3 fps, a 531 ms round trip), and on a path gone dead both ways.
+    private static func linkSamples() -> [Sample] {
+        var behind = samples_remoteBase()
+        behind.devices[0].fps = 3
+        behind.devices[0].frameAgeMs = 1_840
+        behind.devices[0].rttMs = 531
+        behind.devices[0].link = HostStatusSnapshot.LinkStatus(state: .behind, withheld: 52, bitrate: 40_000_000, carriedKbps: 6_400,
+                                                               suggestedBitrate: 4_000_000, suggestedCaptureScale: 1)
+        behind.stream?.mbps = 40
+        var stalled = behind
+        stalled.devices[0].fps = 0
+        stalled.devices[0].rttMs = -1
+        stalled.devices[0].link = HostStatusSnapshot.LinkStatus(state: .stalled, withheld: 60, bitrate: 40_000_000)
+        return [Sample(name: "link-behind", snapshot: behind), Sample(name: "link-stalled", snapshot: stalled)]
     }
 
     private static func localSamples() -> [Sample] {
