@@ -1,319 +1,5 @@
 # The Mac's menu bar on the device — the plan
 
-## Status and hand-off (2026-09-26 03:50; critiqued 2026-09-27; the host finished 2026-09-27; the device and the docs 2026-09-27)
-
-Stopped by Noah at about 95 % of the week's usage, in the middle of the host build ("Stop trackpad
-gestures and menu bar mirror for now. Mark down next steps for agents that will pick up the task.").
-Resumed 2026-09-26 23:38 ("Continue working where you left off with Opus 5.5 subagents").
-What the branch `menu-bar-mirror` holds (worktree `/Users/noah/Downloads/winstream-menubar`, from main
-at 150f781): 556f31a this plan; 42d3116 the protocol, kinds 24, 25 and 27 and
-`Sources/StreamProtocol/MacMenu.swift`; 4896088 the host side as the interrupted build agent left it:
-`MenuFormat.swift`, `MenuPolicy.swift`, `MenuReader.swift`, `MenuMirror.swift`, `MenuSelfTest.swift`,
-the hooks in `StreamCoordinator.swift`, `WindowCatalog.swift`, the CLI's `--menu-selftest[=APP]` and
-the app's main, `Scripts/menufixture.swift`, the new `sillclient.py` flags and `Tests/checks/menus`.
-It built clean on 2026-09-26 03:48, and the menus check passed 267 of 267 (run again 2026-09-27);
-its mutants and the H4 gate never finished, and none of it is reviewed. No iOS file has changed.
-The host step since (2026-09-27, "The host finished" below) fixed C1–C5 and merged main at cf05a78.
-
-**The critique (2026-09-27)** read §§3–4 against 4896088, §7 against the probe's iPadOS hazards (a
-mirrored `UIKeyCommand` firing with no first responder, a shortcut equal to one the root holds
-dropping the inserted menu, duplicates crashing), and §10's gates against both. The plan is fixed in
-place. Where 4896088 departs from the plan as it now stands:
-- **The code must change** (the verify step, 2 below; done, "The host finished"):
-  - C1. `servePress` presses any id that resolves: a bar item's ("2") and a submenu item's too.
-    AXPress there opens that menu on the Mac, and the app then sits in menu tracking. Now refused
-    before anything is pressed (§3.3, §4.3).
-  - C2. A kept element is pressed whatever its title now. Apps that fill a menu through its delegate
-    reuse their NSMenuItems, so the same element can stand for another command after the validation
-    the press's own read sets off. Now the current title must be the one shown, for the kept element
-    as for one found again, and an empty title never matches (§4.2). The menus check's "a kept
-    element is authoritative" cases and the mutant "the title checked for a kept element" invert.
-  - C3. `MenuReader.items` has no time budget: 500 items at Blender's 6 ms a call take seconds, and
-    every request waits behind it. Now it stops at 1.5 s, and the unread rest counts in `more`
-    (§4.3).
-  - C4. `MenuCache` waits out the second after a read made while the app was not frontmost even when
-    `prepare` finds it still not frontmost. AppKit would answer from that read, so the entry now
-    answers. The wait after such a read runs to 1.05 s, not 1.0: the probe's reads 0.83 s after a
-    validation got none, 1.03 s after did (§4.2).
-  - C5. A top-level read that fails with `failed` publishes `menus: []` for the new version, and
-    nothing but a new subscription reads it again. Now nothing is sent, and each catalog poll reads
-    it again. The same goes for a top level refused for Accessibility, so a grant shows the menus
-    without a pick (§4.4).
-- **The plan adopts the code:**
-  - A1. One request at a time, in arrival order (`enqueue`), in place of `waiting[id]`.
-  - A2. The same app (the same pid) keeps the version, the ids and the kept elements; only the cache
-    is cleared (`Target.window`). The old §4.4 moved the version at every change, against §9.
-  - A3. `WindowCatalog.onPolled`, after every poll, in place of `windowsChanged`'s end, which runs
-    only when the list changed. The Desktop's re-check and the retries need every poll.
-  - A4. The interface's extras: `onSubscribersChanged`, `who:`, `clientLeft(NWConnection)`,
-    `MenuRefusal`, `MenuLog`, `MenuFormat.topItem` and `displayTitle`, `MenuReader.Menu` and
-    `Pressed`, and `MenuPath.lineage`. Also: no leading zeros in an id, and a menu's children that
-    are not `AXMenuItem`s are skipped, though their indexes still count.
-  - A5. Three log lines: "… more than 4 choices a second.", "…: Accessibility refused it (‹error›)",
-    and a refusal for another version, which gives the id: the host no longer has that version's
-    titles.
-  - A6. The version starts at 1, and the first app the mirror takes makes it 2. Rate refusals are
-    answered at once, ahead of answers still queued.
-  - A7. `focusForMenus` makes the streamed window key on every uncached fetch and every press,
-    whether or not the app is frontmost: an AX window lookup and two writes on the main actor. §4.9
-    now says so; it said "whose app is not active".
-- **Beyond the host** (no code yet):
-  - §7.2–§7.4: the builder inserts once per build and checks its anchor. A bar menu is resolved by
-    its title when it opens, since UIKit rebuilds the bar lazily. "No items" shows only without a
-    note.
-  - `.replace`'s cost (Q1). The Apple menu's privacy reason (Q4).
-  - The gates: H4's cache timing was wrong (4.5 s is 1.5 s after the read at 3), and H4 takes two
-    runs, since the ids of Deep and its levels come from the first. H5's old version needs
-    `--raw25`. H5 also presses a bar item, a submenu item and a kept element under another title
-    (C1, C2). H6 gains Dynamic N, and H8 accepts either note, since a poll can land between the kill
-    and the fetch. H9 sends a title under the 1 MiB cap and a message over it. H12 reads only
-    TextEdit (the workflow's rule; H11 reads the fixture), and H13's greps are fixed. P8 checks the
-    lazy rebuild.
-
-**The host finished (2026-09-27).** On top of f5344e8, one commit each:
-- 4aeb7d1, C1 and C2. A press only for a leaf whose title now is the one shown: the mirror refuses
-  an id of one part before anything is activated or read; the reader reads the item's title,
-  description, enabled flag and children in one call, kept or found again; `PressDecision.decide`
-  takes the title now and `hasChildren` (title, then leaf, then enabled).
-- c6f75ec, the fixture. It ran `.accessory`, and an accessory app started from a shell took the
-  front at launch: `lsappinfo front` named it for a whole 20 s run (00:47, with Claude back once it
-  exited, while a device was on Sill.app). It runs `.prohibited` now, as the probe's fixture did.
-  SIGUSR1 and SIGUSR2 give Probe › Rebuilt a new NSMenu, since AppKit's item elements are
-  positional (§"Pressing").
-- d238710, C3: `MenuReader.readBudget` 1.5 s, `Menu.unread`, the answer's `more`.
-- 07fc56c, C4: `MenuCache.fresh(_:now:frontmostNow:)`, `MenuCache.revalidation` 1.05 s.
-- d392679, C5: `publishTop` sends nothing for a target whose top level is unread (unless stale);
-  each catalog poll reads it again, and a top level refused for Accessibility (`needsRetry`).
-- 53522ab, main at cf05a78 merged (PRs #22–#28), without a conflict; CLAUDE.md and ci.yml are
-  main's, as this branch has not edited them yet.
-- 8ea4882: whatever a fetch's top-level read finds goes out to the subscribers (a top level read
-  there for the first time in its version was answered but never published, and the polls stop
-  retrying once it is read).
-
-Checked, without the hardware encoder:
-- `Tests/checks/menus` 279 of 279 and 33 of 33 mutants (at d392679; the check's inputs are the
-  same files at 8ea4882); `Tests/checks/run-all.sh` 16 of 16 on the merge; `swift build -c
-  release` of 8ea4882 from `git archive`, only the CaptureProbe warning; the iOS app for the
-  simulator (Debug, arm64, the CI command) from the merge, only the StreamClient capture warning.
-- The reader alone against the fixture (a harness compiling MenuReader, MenuFormat, MenuPolicy
-  and StreamProtocol; no host, no encoder), 27 checks at 8ea4882's sources: the bar item and Deep
-  refused in 3–8 ms with no fixture callback naming Deep (reading a submenu item's children opens
-  nothing); 4.0 pressed; 4.1 kept under another title refused; 4.1 found again by its path
-  pressed; Unavailable refused as disabled; Dynamic N pressed 0.3 s after its read and refused
-  1.8 s after (the press's own read validated Probe and retitled it); Rebuilt found again after a
-  new NSMenu, and refused as Renamed Leaf; Deep Leaf pressed; 600 Items read 500 with 100 more in
-  62 ms. A build with a 5 ms budget read 1 of 600 Items (the walk alone took 25 ms) and counted 599
-  more. Slow Action: `AXPress` answered in 2–5 ms, before the action ran, and a read of Probe
-  during the action's 2 s sleep timed out at 1,000 ms (`notAnswering`), then the app answered
-  again. `lsappinfo front` sampled every 0.1 s never changed.
-- `Scripts/menu-check/run.sh` (e47df1d; the two harnesses above and below, from the repository): the
-  mirror harness drives the real MenuMirror, with the reader, as the coordinator does (fetch,
-  press, setTarget, catalogPolled, clientLeft), stubbing only the server's send, a connection,
-  Stats and print; 51 of 51: the subscription's v2 top level; File and Probe as §5's table; a fetch
-  0.4 s after a read from the cache (no fixture callback), 1.6 s after read again; Deep level by
-  level; 600 Items 500 and more 100; the presses and refusals above with the host's exact lines (the
-  bar item and Deep in 6–7 ms); an older version refused with the id; Dynamic N; Rebuilt; 50
-  fetches at once 20 served and 30 too many, ten presses 4 and 6, one ignored line each; Slow
-  Action, a fetch during it stale with "menufixture isn’t responding." and a stale top level of the
-  same version, a press refused, then a poll: "answering again" and a fresh top level; a second
-  subscriber; another window of the same app (the same version, nothing sent); no target (v+1, no
-  menus) and back (v+2); junk ids; C5: a `/bin/sleep`'s top level cannot be read (quick errors,
-  `failed`): v+3 and nothing sent, a poll reads again and still nothing, and once it is gone a poll
-  sends v+1 with no menus; the fixture killed: "menufixture is no longer open." and v+1 with no
-  menus; the last subscriber gone. A killed process its parent has not reaped still answers
-  kill(pid, 0), so the fixture's parent reaps it (real apps are reaped by launchd at once).
-- The fixture (H0): its label reads "none" over AX from another process; its window is off every
-  display; the host's read-only `--menu-selftest=<its pid>` reads its four menus (the top level
-  22 ms at first read, menus 0.6–11 ms: H11's times, within the probe's).
-- H9's first part: main's StreamMessage.swift at 150f781 and at cf05a78 reads kinds 24, 25 and 27 as
-  `.unknown` (23 as `.hello`).
-- H13's greps: no system-wide timeout, no AX call in MenuMirror, no `assumeIsolated` in the new
-  files, `SILL_TEST_MENU_PID` taken only when synthetic, `kAXPressAction` only in MenuReader (after
-  `PressDecision`) and WindowSizer's close button.
-
-Through a synthetic host (2026-09-27, 03:33–03:41, once the device had left Sill.app; one host at
-a time, each after `no-device.sh` and again after it; `lsappinfo front` sampled every 0.2 s), before
-the merge (d392679, against main at 150f781) and after it (8ea4882, against cf05a78):
-- H2: the CLI's stdout, digits masked and lines sorted, identical to main's, idle 35 s and with a
-  5 s client, each with and without `--direct-wireless`, at both points; the clients' kinds the same
-  counts (no 24), "first kinds" identical.
-- H4 (8ea4882): the "Test menus" line; the subscription answered at once (v1 with no menus, since it
-  came before the pick: §3.3), then the fixture's top level as v2; Probe as §5's table; the fetch at
-  3.4 s from the cache (`menu.cached 1`, Dynamic N unchanged, no validation), the one at 4.6 s read
-  again; Probe validated 3 times over both runs, none for run B's Deep fetches (they read through
-  the kept element); Deep level by level. Recorded: Edit, the fixture having no key window, reads
-  Undo, Redo, Cut, Copy, Paste and Start Dictation disabled, with AppKit's own AutoFill ▸, Start
-  Dictation 🎤 and Emoji & Symbols (fn E) added. Q12: no callback in the 2 s between the
-  subscription's top-level read and the first fetch. The 5 ms budget host: 600 Items, 1 item and
-  more=599.
-- H5, both builds: 4.0 and Deep Leaf pressed (the labels "A" and "Deep", the two ACTION lines, the
-  host's two "Menu from" lines); Unavailable refused as disabled; 4.1 under Set Label A's title
-  refused; the bar item and Deep refused in 0–1 ms, nothing opened; top levels v2, none v3, v4; an
-  older version refused, the line giving the id.
-- H6: Rebuilt found again by its path after a new NSMenu and pressed; Renamed Leaf refused, the
-  host's line naming it; Dynamic N pressed 0.3 s after its fetch, refused 1.5 s after.
-- H7: 50 fetches, 20 served and 30 too many; ten presses, 4 and 6; one ignored line each.
-- H8: the fixture v2, none at 3 s (v3), the fixture at 4 s (v4), none after the kill at 6 s (v5,
-  from the next poll), and the fetch at 7 s refused ("The menus changed…").
-- H9: main's StreamMessage.swift reads 24, 25 and 27 as `.unknown`; main's `sillclient.py` gets no
-  24; junk ids, a missing version or title, a bar item and 4.99 answered with the note; the
-  1,000,000-byte title refused and never printed; a message over the cap closed with
-  StreamServer's line; the host streams on; main's host with this branch's `--menus --fetch`: no 24,
-  nothing printed about menus.
-- H10: Slow Action pressed in 4–11 ms; the fetch during it stale ("menufixture isn’t responding."),
-  a stale top level, the not-answering line, then "answering again" and a fresh top level; the two
-  kind 16 answers 1–7 ms after their changes while `sill.menus` waited; a `[1s]` line each second.
-- H11: a subscribed client with nothing streaming, 35 s: no `menu.*` key, the host's CPU 0.0–0.6 %;
-  streaming the Desktop 20 s with nothing asked: `menu.top 1` for the subscription, nothing else.
-- The front never changed in 33 of 34 host runs. In one (main's host with this branch's client,
-  03:35:33–03:35:40, after the merge) Finder was sampled in front, and the Mac's last HID input was
-  at 03:35:43: someone at the Mac, not the run (the same run before the merge: unchanged). No device
-  connected during any run. Other agents' synthetic hosts ran in the same minutes.
-- The gate script first misjudged five checks (the fixture log's padded field hid its ACTION lines,
-  a subscription answered v1, Probe's count, H2's kinds compared as text); re-evaluated from the
-  saved logs (`reeval.py`), all pass.
-
-Not run in this step:
-- H12: TextEdit was not running, and none is started.
-- H13's previews: the bare SillMenuBar is an accessory app, which takes the front when started from
-  a shell, and Noah was at the Mac; the only app change is `--menu-selftest`'s branch in its main,
-  before NSApplication.
-
-Found, for the review (step 5):
-- A fetch by id does not check that the item at that id is still the one the device opened.
-  AppKit's elements and the paths are positional, so after an app rebuilds a menu's items in place
-  a submenu id can name another submenu, whose items the device then lists under the old title.
-  Presses stay safe (their title check); a fetch could compare the item's title with the kept one,
-  as C2 does for presses.
-- Q12: a top-level read alone made the fixture run no delegate or validation callback (the
-  interrupted build's H4 run of 2026-09-26: a subscription 2 s before any fetch, no callback; this
-  step's self-test and reader runs: callbacks only for the menus read). A read at each poll would
-  then cost the app nothing; Noah's call, H4 records it again.
-- `Tests/checks/README.md` on main repeats three paragraphs (a merge's leftovers); the menus row and
-  ci.yml's mutants matrix entry are step 4's.
-
-**The device, Sill.app and the docs (2026-09-27, 04:04–05:30).** On top of ad29791, one commit
-each:
-- 4c58246, `MacMenuState` (§7.2) and `Tests/checks/menu-state`: 118 cases and 5,000 random
-  sessions (296,935 events) in which every opened menu's completion is settled exactly once, a kind
-  27 goes out once per waiting menu and nothing outlives its timeout; 26 of 26 mutants (run again on
-  the final tree). Where it departs from §7.2: a submenu's fetch carries the version its row came
-  in, and a row of another version is settled at once ("The menus changed…") instead of being asked
-  with the current version, where its id could name another item; a choice carries its row's
-  version, for the Mac to refuse; a choice while stale is refused on the device with the note;
-  `connectionReplaced` settles what was asked on the connection a move left, whose answers the
-  session no longer reads, and keeps the top level; the top level keeps at most 32 menus with
-  unique one-part ids, since the bar makes an identifier of each.
-- 0f07340, the rest of §7: `MacMenuElements`, `MacMenuHub` with `KeyWindowObserver`,
-  `SillAppDelegate` with `MacMenuBar`, `MacMenuButton` with `MacMenuTrigger`, the adaptor in
-  `SillApp`, `StreamClient`'s part, the two bars, the harness (`-SillMacMenu`'s nine cases,
-  `-SillMenusOpen`, `-SillMenuDump`, `-SillMenuBarLayout`, `-SillMenuBuildTwice`,
-  `-SillMenuNoView`), and the five files' pbxproj entries (A040–A044, F040–F044). Beyond §7.8, for
-  a run that cannot tap: `-SillMenusOpen 'File/Open Recent'` opens the pull-down on that menu (each
-  level fetched on the way), `-SillMenuPress 'File/Save'` chooses an item, both in the mock and
-  live; and the harness prints where a tap on the button's centre would land. In the bar, a
-  disabled or stale Mac menu stays a menu (its deferred element then shows the note or the Mac's
-  dimmed items), so the bar never changes shape; in the pull-down it is a dimmed row, as §7.2 rule 7
-  says. The console's top-level line is "menus: none (version 5)" or "menus: Code, 10 menus
-  (version 3)"; a wait that ran out, "menus: File (2) after 4160 ms: ‹the words›".
-- 13a139d, found by the photos: UIKit's automatic order turned a pull-down that opens upward (the
-  portrait bars, low on the screen) upside down, Help first and File from Save As… to New; the
-  button asks for `.fixed` now. And a menu cuts a long title at its third line, which took "System
-  Settings › Privacy & Security › Accessibility" off the no-Accessibility note: a note that ends in
-  a parenthesis shows it as the row's subtitle.
-- ab0d876, main at 676b362 merged (PR #29, the disk image), without a conflict.
-- The docs: CLAUDE.md's Current step, Layout and Build and run; docs/DEVELOPMENT.md (the menus for
-  a user of a source build, the CLI's self-test, the test app, the harness); `Tests/checks/README.md`
-  (the two checks, and the kinds 26 and 28 of other branches); ci.yml's mutants matrix
-  (`menu-state`, `menus`).
-
-Checked:
-- H1: iOS Debug and Release for the simulator and Debug for a device, only the old
-  `StreamClient` capture warning (at 2415 now, 2383 on main); `swift build -c release`, and
-  `Scripts/make-app.sh` without `--install`. H3: `Tests/checks/run-all.sh`, all 18 on the merge
-  (156 s); `menus` 279 and 33 of 33 mutants, `menu-state` as above. H13's iOS greps: no
-  `UIKeyCommand(` or `UICommand(` in the new files, every `insertElements` and `remove(menu:)`
-  after a `menu(for:)`, no `assumeIsolated`.
-- In a private simulator set (an iPad Pro 13" named "Sill menubar", then an iPhone 15 Pro of the
-  same name; iOS 27.0, the only runtime installed), screenshots with `simctl io` only:
-  - S1: the button between the strip and Aa at 1000x710, 710x1000, 500x710 and 710x500; faded under
-    the Aa ruler at 1000x710 and 500x710; `-SillMacMenu none` pixel for pixel main's own build
-    (cf05a78, built from `git archive`) at all four. Also the iPad mini (744x1133, 1133x744), the
-    iPad Pro 13" (1032x1376, 1376x1032) and the iPhone 15 Pro (393x852, 852x393).
-  - S2: the pull-down at the four sizes, in the Mac's order; File (subtitles, sections, ✓, a dimmed
-    item), Open Recent, Code › Settings ▸ Themes three deep, View › Appearance (✓ and the mixed
-    "–"), Run (dimmed items, F-keys); `slow`: the placeholder at 1.6 s, the items at 4 s (the answer
-    1.58 s after the fetch); `timeout`: "Mac mini didn’t answer. Open the menu again." at 4.16 s;
-    `stale`: the note, then each menu dimmed, and File holding the note alone; `noaccess`: the note
-    whole, as a title and subtitle; `blender`; `long`: Window's 302 rows scroll, History 500 and "100
-    more on the Mac"; xxLarge text at 1000x710 and 500x710; a choice ("menus: chose Save (2.9)") and
-    a refused one (the console's refusal; the announcement is VoiceOver's, P11). `-SillMenuPress`
-    against `stale` finds nothing to choose (a stale menu shows no rows), so the device's own
-    refusal of a choice made before the app went stale is the pure check's (rule 8).
-  - S3, the main menu's root (`-SillMenuDump 1`), iPad: `code`, the ten after View as
-    `me.saffer.sill.macmenu.1`…`10`, each one deferred element, no key command or command in them;
-    `replace`: File, Edit and View gone (the root has no Format), the ten before Window; `one`: one
-    "Code" menu holding the ten; `-SillMenuBuildTwice 1`: "nothing inserted (already in this build)"
-    the second time, the ten once, no exception; `-SillMenuNoView 1`: the ten before Window;
-    `stale`: the ten, each still one deferred element; `none` and `noaccess`: nothing inserted. The
-    iPhone: "nothing inserted (not an iPad on iPadOS 26)" at every build. An iOS 17 or 18 runtime:
-    none installed, not run.
-  - S4, live against a synthetic host with the fixture (the rig of the host step: `no-device.sh`
-    before and after, `lsappinfo front` every 0.2 s, one host under 40 s), on the iPad at 1000x710:
-    the pull-down with menufixture, File, Edit and Probe; Probe's 18 items through the host (Set
-    Label A ⌥⌘A, Set Label B ⌃⇧B, ✓ Checked, – Mixed, Unavailable dimmed, F5, ⌘⌫, ⌃⌘↑, ⎋);
-    `-SillMenuPress 'Probe/Set Label A'`: "menus: chose Set Label A (4.0)", the host's "Menu from
-    Sill menubar (iPad17,4 simulator): menufixture › Probe › Set Label A", the fixture's label "A".
-    On the iPhone at 393x852: the same four, Probe, Probe › Deep (4.19) › Level 2 level by level, and
-    Set Label B pressed ("B"). The front never changed in either run.
-  - The dump, live: a top level that arrived after the window became key was not in the bar until a
-    focus change (no rebuild in the 6 s that followed; opening the pull-down rebuilt it, with the fixture's four menus
-    after View). §7.2 rule 11 is there for this; whether showing the bar rebuilds it stays P8's.
-  - S5: the host stopped under an open pull-down: "127.0.0.1:P disconnected…", the button gone, and
-    the next build "nothing inserted (the session has no menus)". `simctl openurl` with a well-formed
-    `sill://pair` link brought the system's "Open in “Sill”?" over the connect screen, as on main
-    (the Build and run note); the app's own confirmation is past a tap, which a headless run cannot
-    give.
-  - The harness's hit test: "a tap on the Menus button's centre reaches the button" in every run
-    that opened the pull-down (the Duo's four sizes, the iPad mini and iPad Pro upright, the iPhone
-    upright; the harness turns a landscape iPad, and UIKit's menus are not turned with it).
-- Sill.app (§6): `.build/Sill.app/Contents/MacOS/Sill --menu-selftest=<the fixture's pid>
-  -SillLogFile <scratch>` read the fixture's four menus (the top level in 23 ms) and exited 0, the
-  front unchanged, and the lines reached the log file that Show Log… reads. The NSWorkspace
-  observer runs only when an app is activated on the Mac, which no gate may do: P5.
-
-Not run in this step:
-- H13's previews: Sill.app's sources differ from main only in main.swift's `--menu-selftest`
-  branch, before NSApplication, and nothing the previews draw changed; the bare app takes the front
-  when started from a shell.
-- Taps (the rules allow only `simctl io` screenshots): a real tap on the button, the bar itself, a
-  choice's VoiceOver announcement.
-
-Found, for Noah and the review:
-- A phone held upright (393 pt, main's compact window bar): with the button, the strip keeps only a
-  sliver of its first thumbnail (one whole thumbnail without it). `iphone-portrait` gives phones a
-  row of their own for the strip, and its row 1 of five equal buttons then needs the Menus button:
-  whichever lands second.
-
-Next agent, in order:
-1. (Done) Merge main: cf05a78 at 53522ab. Main has not changed StreamCoordinator, StreamClient,
-   StreamMessage or the pbxproj since 150f781, so this plan's line numbers still hold there.
-2. (Done) Verify and fix the host. After any change to the menu files, run
-   `Scripts/menu-check/run.sh` (no host; safe while Sill.app streams), and H2 and H4–H11 once no
-   device is on Sill.app (the session scratchpad's `menubar-finish/tools/gates.py` and `h2.py`, or by
-   hand from §10).
-3. (Done) The iOS side, §7 (above).
-4. (Done) Sill.app, §6, and the docs (above).
-5. Review (wire and hard rules, the AX reader's queue and timeouts, the device UI and its hazards in
-   §7.3, the fetch finding above), then a PR against main with Noah's device tests.
-Rules the build must keep: the reader presses nothing in any test but the fixture; no XCUITest or
-`simctl io recordVideo` while Sill.app streams; the CLI's output unchanged unless a device uses the
-menus. The workflow prompt must quote Noah's authorization in his words: "For apps used in Window
-mode, how can we access the menu bar options? Is there a way we can add that menu and submenu?"
-(2026-09-25) and "Work on 5-12 as well please" (2026-09-26, item 10), plus this stop and its
-resumption, so a relayed message about another topic does not stop the agents again.
-
-
 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of main (the `menu-bar-mirror` worktree, `/Users/noah/Downloads/winstream-menubar`),
 begun at 8b0d418 and checked again at 150f781, after PRs #20 and #21 merged; line numbers are at
@@ -359,8 +45,8 @@ the iPad's menu bar.
 
 | Surface | Where | Content |
 |---|---|---|
-| **The iPadOS 26 menu bar** | An iPad (idiom `.pad`) on iPadOS 26 or later, while the key window's session streams an app with menus | One menu per Mac menu, in the Mac's order, the Apple menu left out (Q4). Inserted after the iPad's View menu, the HIG's place for an app's own menus (Q1) |
-| **The Menus button** | Every bar, in every layout, whenever the Mac sent menus (Q2) | A pull-down with the same menus as submenus |
+| **The iPadOS 26 menu bar** | An iPad (idiom `.pad`) on iPadOS 26 or later with one Sill window, while its session streams an app with menus | One menu per Mac menu, in the Mac's order, the Apple menu left out (Q4). Inserted after the iPad's View menu, the HIG's place for an app's own menus (Q1) |
+| **The Menus button** | Every bar that holds it, in every layout, whenever the Mac sent menus (Q2) | A pull-down with the same menus as submenus |
 | **Each menu** | Both surfaces | Loaded when it opens and fresh every time, from the Mac (kind 27, answered by a read of at most 1 s ago) |
 
 What each item shows:
@@ -379,7 +65,7 @@ What each item shows:
 - **The top level** is the titles of the bar's items. It is read:
   - when the streamed source is picked;
   - when the app behind it changes (a window of another app, or the Desktop's frontmost app);
-  - alongside every fetch.
+  - alongside a fetch, a second or more after the last read, when nothing waits behind it (§4.4).
   It costs 0.4–3.8 ms, 26 ms in Blender, and 15–50 ms the first time the host reads that app.
 - **A menu's items are read only when a device opens that menu** (kind 27), and are kept for 1 s.
   One menu costs 3–20 ms; Blender's 42-item Window menu took 290 ms.
@@ -542,7 +228,7 @@ rebuilds it is P8.
 3. **Device.**
    - `MacMenuState` (pure) and one element builder.
    - The iPadOS 26 bar through an app delegate adaptor.
-   - The Menus button in every bar.
+   - The Menus button in every bar that holds it.
    - Harness cases.
 4. **Tests.** Two pure checks (`Tests/checks/menus`, `Tests/checks/menu-state`), and gates H and S.
 
@@ -568,10 +254,10 @@ rebuilds it is P8.
  │ main: select; the Desktop's frontmost app changes ─▶ MenuMirror.setTarget(pid)             │
  │   └▶ sill.menus: MenuReader.topLevel(pid): the bar's titles, 0.4–50 ms                     │
  │        └▶ main: version += 1 when the app or its titles changed ─▶ each subscriber ────────┼─▶ kind 24 {version, app, menus}
- │ kind 27 {version, id, token} ─▶ main: MenuMirror.fetch (one request at a time, in order)   │◀─ kind 27
+ │ kind 27 {version, id, title, token} ─▶ main: MenuMirror.fetch (subscribers, one at a time) │◀─ kind 27
  │   a window source: its app activated, the window made key (as a click), up to 0.6 s        │
  │   read less than 1 s ago? answered from the cache                                          │
- │   else sill.menus: MenuReader.items(path): one menu, 3–20 ms, 1.5 s at most (validated)    │
+ │   else sill.menus: MenuReader.items(path, title): one menu if its title is the one shown   │
  │     └▶ main: cache, elements[id] ─▶ that device ───────────────────────────────────────────┼─▶ kind 24 {version, answering, menu, items}
  │ kind 25 {version, id, title, token} ─▶ main: MenuMirror.press                              │◀─ kind 25
  │   a leaf; the same activation; sill.menus: AXPress, if its title is still the one shown    │
@@ -579,9 +265,9 @@ rebuilds it is P8.
  └────────────────────────────────────────────────────────────────────────────────────────────┘
  ┌──────────────── device ────────────────────────────────────────────────────────────────────┐
  │ StreamClient: first window list ─▶ kind 27 without an id; kind 24 ─▶ main: MacMenuState    │
- │ iPadOS 26 iPad: MacMenuHub (the key window's client) ─▶ UIMenuSystem.main.setNeedsRebuild  │
+ │ iPadOS 26 iPad: MacMenuHub (the one window's client) ─▶ UIMenuSystem.main.setNeedsRebuild  │
  │   SillAppDelegate.buildMenu ─▶ one UIMenu per Mac menu, after View                         │
- │ every layout: the Menus button (a UIKit pull-down over the bar's BarButton)                │
+ │ every bar that holds it: the Menus button (a UIKit pull-down over the bar's BarButton)     │
  │ both from MacMenuElements: UIMenu ▸ UIDeferredMenuElement.uncached ▸ fetch (kind 27)       │
  │   leaves: UIAction(title, subtitle "⇧⌘S", disabled?, state) ─▶ press (kind 25)             │
  └────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -592,17 +278,19 @@ rebuilds it is P8.
 #### 3.1 The kinds (`Sources/StreamProtocol/StreamMessage.swift`, after `hello`)
 
 ```swift
-    // The Mac's menus (MacMenu.swift). Older readers map all three to `.unknown` and skip them. 26 is
-    // the Mac's pointer (docs/pointer-visibility-plan.md), so the fetch is 27.
+    // The Mac's menus (MacMenu.swift): 24, 25 and 27, around the pointer's 26. Older readers map all three
+    // to `.unknown` and skip them.
     case macMenu = 24        // host → device: JSON MacMenu — the streamed app's menu bar (the Desktop's: the frontmost
                              // app's), to a device that asked for it with a kind 27 without an id: its top level then, and
                              // again whenever the app or its titles change. With `answering` set: the reply to one of
                              // that device's kind 27s (one menu's items) or kind 25s
     case pressMenuItem = 25  // device → host: JSON PressMenuItem — choose one item, by the id and title the device was
                              // shown in that tree version. Answered to that device alone (a kind 24 with `pressed`)
-    case fetchMenu = 27      // device → host: JSON FetchMenu — one menu's current items, asked when the device opens it;
-                             // without an id, the top level, and a request for every later one on this connection.
-                             // Answered to that device alone, from a read of at most 1 s ago
+    case macPointer = 26     // (docs/pointer-visibility-plan.md; merged first)
+    case fetchMenu = 27      // device → host: JSON FetchMenu — one menu's current items, asked when the device opens it,
+                             // with the title it showed for that menu; without an id, the top level, and a request for
+                             // every later one on this connection. Answered to that device alone, from a read of at
+                             // most 1 s ago
 ```
 
 - **Who skips them.** Every device and test client since b67f87d (2026-09-23) skips an unknown
@@ -613,8 +301,7 @@ rebuilds it is P8.
   (`sendCatalog`, StreamCoordinator.swift:1582-1601). `SillProtocol.current` stays 1: these kinds
   are additive (Compatibility.swift:16-23). Its comment's "kinds 0–23" becomes "kinds 0–23, and any
   later kind an older peer can skip".
-- **Order in the enum.** 24, 25 and 27 are written in that order. If the pointer's 26 lands first,
-  it goes between them.
+- **Order in the enum.** 24, 25, 26 (the pointer's, which landed first: PR #31) and 27.
 
 #### 3.2 The payloads (`Sources/StreamProtocol/MacMenu.swift`, new; the app gets it through the package, no pbxproj entry)
 
@@ -672,6 +359,9 @@ public struct MacMenuItem: Codable, Hashable, Sendable {
 public struct FetchMenu: Codable, Hashable, Sendable {
     public var version: Int?
     public var id: String?
+    /// The title the device showed for that menu: the host reads the menu only while the item at `id`
+    /// still has it (the review's addition, before 1.0; §3.3). Required with an id.
+    public var title: String?
     public var token: Int?
 }
 
@@ -679,7 +369,7 @@ public struct FetchMenu: Codable, Hashable, Sendable {
 public struct PressMenuItem: Codable, Hashable, Sendable {
     public var version: Int?
     public var id: String?
-    /// The title the device showed: checked when the host has to find the item again by its path.
+    /// The title the device showed: the item is pressed only while its title is still this one.
     public var title: String?
     public var token: Int?
 }
@@ -696,8 +386,13 @@ Each type gets an explicit public memberwise `init`, as HostSettings.swift's typ
     exactly one id.
   - A request whose id starts at 0 (the Apple menu), has more levels, or does not parse is refused
     with a note.
-  - A path is stable while the menu's structure is. Where it is not (a Window list, Open Recent),
-    the kept element or the title check catches it (§4.3).
+  - A path is stable while the menu's structure is. Where it is not (a Window list, Open Recent,
+    an app that adds or removes items above a submenu in place, which moves no top-level title):
+    - **within one version an id names one item for every device.** The host records the submenus
+      it reads in a version with their titles, and a read that finds another one at a recorded place
+      (or none), or a walk from the bar that meets one, moves the version (§4.4);
+    - **a fetch and a press carry the title the device showed,** and nothing is read or pressed
+      where the item's title now is another (§4.2). A fetch without a title is refused unread.
 - **Presses are for leaves.** A kind 25's id has at least two parts, since one part names one of
   the bar's menus. It must also name an item without a submenu. Any other is refused with "The
   menus changed. Open the menu again.", and nothing is pressed: `AXPress` on a bar item or a
@@ -706,8 +401,10 @@ Each type gets an explicit public memberwise `init`, as HostSettings.swift's typ
   - It starts at 1 each launch, and the first app the mirror takes moves it. So on a fresh host
     the first app's top level is version 2, whether the subscription or the pick came first (a
     subscription before any app is answered `{version 1, menus: []}`). H5 relies on it.
-  - The host adds 1 when the target app changes (to none included, and when the app quits), or when
-    a re-read finds the top level's titles, count or enabled flags changed.
+  - The host adds 1 when the target app changes (to none included, and when the app quits), when
+    a re-read finds the top level's titles, count or enabled flags changed, when a read finds a
+    submenu changed at its place (above), and when the last subscriber leaves (what was read then
+    goes, so nothing would say what the old ids named).
   - Another window of the same app keeps the version, since it is the same menu bar. The cache is
     cleared: the key window, and with it the states, changed (§4.4).
   - A kind 25 or 27 with another version is answered in its turn and never read or pressed:
@@ -721,12 +418,17 @@ Each type gets an explicit public memberwise `init`, as HostSettings.swift's typ
   - Top levels go only to subscribers.
   - With no subscriber the host reads nothing, and the coordinator's target changes cost one
     comparison.
+  - Only a subscriber is served a menu or a press: any other connection's kind 25, or kind 27 with
+    an id, is answered at once with "The menus changed. Open the menu again.", nothing read or
+    pressed. A fetch whose connection left before its turn is dropped unread; a press accepted
+    before its connection left still runs (a move's hand-over counts on it, §7.2).
   - So an older device, `sillclient.py` without `--menus`, and every parity run are served exactly
     as before.
 - **Order.** Each connection is one TCP stream, and the host serves every request one at a time in
-  arrival order (§4.4), so answers follow requests. The one exception is a refusal over the rate
-  limit: it goes out at once, ahead of answers still queued. Tokens match answers to requests either
-  way, and no clock is compared anywhere.
+  arrival order (§4.4), so answers follow requests. The exceptions are a refusal over the rate limit
+  and a non-subscriber's refusal: they go out at once, ahead of answers still queued. Tokens match
+  answers to requests either way, and no clock is compared across the link: a request's wait for
+  its turn is timed by the host alone, against the device's wait as the host reckons it (§4.4).
 
 #### 3.4 Examples
 
@@ -738,7 +440,7 @@ Each type gets an explicit public memberwise `init`, as HostSettings.swift's typ
   {"id":"1","title":"Code","submenu":true},{"id":"2","title":"File","submenu":true},
   {"id":"3","title":"Edit","submenu":true}, … ,{"id":"10","title":"Help","submenu":true}]}
 // kind 27, File opened on the device
-{"version":3,"id":"2","token":2}
+{"version":3,"id":"2","title":"File","token":2}
 // kind 24, its items (2.2, the separator, still counts in the ids)
 {"version":3,"answering":2,"menu":"2","items":[
   {"id":"2.0","title":"New Text File","key":"⌘N"},{"id":"2.1","title":"New File…","key":"⌃⌥⌘N"},
@@ -887,13 +589,13 @@ The mirror's decisions as values, so they can be checked without Accessibility:
 package struct MenuCache {
     package static let lifetime = 1.0                    // answered from within this
     package static let revalidation = 1.05               // AppKit validates a menu again only after about a second
-    package struct Entry { package let items: [MacMenuItem]; package let more: Int; package let at: Double; package let appWasFrontmost: Bool }
+    package struct Entry { package let title: String; package let items: [MacMenuItem]; package let more: Int; package let at: Double; package let appWasFrontmost: Bool }
     package mutating func store(_ id: String, _ entry: Entry)
     /// An entry to answer from: read less than `lifetime` ago, while the app was frontmost; or while
     /// it was not, when `frontmostNow` is false too (AppKit would answer a read now from that
     /// validation). Asked with `frontmostNow: true` before `prepare`, and again after it with what
-    /// `prepare` found.
-    package func fresh(_ id: String, now: Double, frontmostNow: Bool) -> Entry?
+    /// `prepare` found. Only under `title`, the one the menu was read under.
+    package func fresh(_ id: String, title: String, now: Double, frontmostNow: Bool) -> Entry?
     /// How long to wait before reading `id` again, the app now frontmost: the rest of
     /// `revalidation` after a read made while it was not; else 0.
     package func wait(_ id: String, now: Double) -> Double
@@ -909,12 +611,34 @@ package struct RequestRate {
 
 package struct TopLevel: Equatable {
     package var titles: [String]; package var enabled: [Bool]
-    /// Only a change here moves the version (with the app's own change).
+    /// A change here moves the version (with the app's own change, and SubmenuRecord's).
+}
+
+/// The item at an id is still the one the device was shown: its title now is the one shown. An
+/// empty or missing title never matches.
+package enum ShownTitle { package static func matches(now: String?, shown: String?) -> Bool }
+
+/// The device's wait for a fetch, max(4 s, 4 × its worst recent round trip), from the connection's
+/// client stats; `answerBy` less one round trip and 0.1 s: how long after arriving an answer can
+/// still reach the device in time.
+package enum RequestDeadline {
+    package static func wait(rttMs: Int?) -> Double
+    package static func answerBy(rttMs: Int?) -> Double
+    package static func expired(waited: Double, rttMs: Int?) -> Bool
+}
+
+/// The submenus read in this version, each place's title (at most 20,000 places).
+package struct SubmenuRecord {
+    /// A read of `menu` found these among its first `examined` children. False when a submenu
+    /// recorded at one of those places is not there now, or not under its title: the tree changed.
+    package mutating func read(menu: String, found: [(index: Int, title: String, submenu: Bool)], examined: Int) -> Bool
+    package func title(of id: String) -> String?
+    package mutating func clear()
 }
 
 /// Why a fetch or a press was not served: its note (§7.7) and the end of its log line (§4.7).
 package enum MenuRefusal: Equatable {
-    case disabled, changed, gone, notAnswering, notTrusted, tooMany, failed(String)
+    case disabled, changed, gone, notAnswering, notTrusted, tooMany, late(Double), failed(String)
     package func note(app: String) -> String
     package func logReason(app: String) -> String
 }
@@ -943,6 +667,18 @@ The rules:
   id of one part before it reaches the reader.
 - **A disabled item is refused** with "It isn’t available right now." The title is checked first, so
   a retitled and disabled item reads as changed.
+- **A fetch's menu is read only under the title shown** (`ShownTitle`), as a press's item is pressed
+  only under it: an id is a place, and after an app added or removed items above a submenu in place
+  the same id names another item (the review's finding: the device's "600 Items" was answered with
+  300 Items' items, and a choice among them was made there). The cache answers only under the title
+  it was read under.
+- **One tree per version** (`SubmenuRecord`): the submenus a version's reads found are recorded at
+  their places; a later read that finds another title there, or no submenu, among the places it
+  examined, is a new tree, and the version moves. Leaves are not recorded: nothing is read below
+  them, and a press checks its own title.
+- **The deadline** (`RequestDeadline`): a fetch whose turn comes past `answerBy` is not read (its
+  device has settled it and drops a late answer), and a press that late is refused: a device never
+  gives up on a choice, and one made seconds after it was chosen can surprise.
 - **The cache** answers only where a read now would return the same thing: within the second
   AppKit repeats its last validation, whatever the app's state. So a read under a second old
   answers, unless it was made while the app was not frontmost and `prepare` has since brought it
@@ -970,12 +706,16 @@ final class MenuReader: @unchecked Sendable {
         case gone                        // the process exited (an error from a pid no longer alive)
         case notAnswering                // .cannotComplete after at least 0.9 × timeout
         case failed(String)              // any other error: WindowSizer.axErrorName (WindowSizer.swift:232)
+        case notShown(found: String)     // the item at the id has another title now: nothing below it read
+        case moved                       // a menu on the way is not the one recorded there: a new tree
+        case late                        // past `until`: the answer could not reach the device in time
     }
     func topLevel(pid: pid_t) -> Result<(titles: [Read], ms: Double), Failure>
-    func items(pid: pid_t, of parent: AXUIElement?, path: MenuPath) -> Result<Menu, Failure>
-    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?) -> Pressed
+    func items(pid: pid_t, of parent: AXUIElement?, path: MenuPath, shown: String, ancestors: [String]?,
+               until: Double = .infinity) -> Result<Menu, Failure>
+    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?, ancestors: [String]?) -> Pressed
 }
-struct Pressed { enum Outcome { case pressed, pressedNoAnswer, refused(MenuRefusal) }; let outcome: Outcome; let foundTitle: String? }
+struct Pressed { enum Outcome { case pressed, pressedNoAnswer, refused(MenuRefusal), moved }; let outcome: Outcome; let foundTitle: String? }
 ```
 
 **`topLevel`:**
@@ -985,10 +725,16 @@ struct Pressed { enum Outcome { case pressed, pressedNoAnswer, refused(MenuRefus
 - At most 32 menus.
 
 **`items`:**
-- The parent's element is the bar item or submenu item the host kept, or else the path walked from
-  the bar. A kept one that fails (`failed`: rebuilt, gone) gives way to the walk.
-- Its `AXChildren`: the first `AXMenu`, then that menu's `AXChildren`. This read makes the app
-  validate the menu.
+- The parent's element is the bar item (from the last top-level read) or submenu item the host
+  kept, or else the path walked from the bar. A kept one that fails (`failed`: rebuilt, gone) gives
+  way to the walk. **The walk** checks each menu on the way against `ancestors` (the titles the
+  host recorded there in this version; one per part but the last): another title, or no menu, is
+  `moved`; with no ancestors known it is not made (`moved` too).
+- The parent's `[AXTitle, AXDescription, AXEnabled, AXChildren]` in one call: its title must be
+  `shown` (`ShownTitle`), else `notShown` and nothing below it is read (reading an item's own
+  attributes opens nothing; AppKit may validate the menu the item is in, at most once a second).
+- Its `AXChildren`: the first `AXMenu` (none: `moved`), then that menu's `AXChildren`. This read
+  makes the app validate the menu.
 - Then one `AXUIElementCopyMultipleAttributeValues` per item, of `[AXRole, AXTitle, AXDescription,
   AXEnabled, AXMenuItemMarkChar, AXMenuItemCmdChar, AXMenuItemCmdModifiers,
   AXMenuItemCmdVirtualKey, AXMenuItemCmdGlyph, AXChildren]`. No action names: every
@@ -1002,7 +748,9 @@ struct Pressed { enum Outcome { case pressed, pressedNoAnswer, refused(MenuRefus
 - At most 500 items are read; `more` counts the rest from `AXChildren`'s count.
 - **At most `readBudget` (1.5 s) per menu.** Past it, the read stops after the item in hand, and the
   unread rest counts in `more` too (the device shows "‹n› more on the Mac"). One call may take up to
-  the 1 s timeout, so a read ends by about 2.5 s.
+  the 1 s timeout, so a read ends by about 2.5 s. **And by `until`** (when the answer must go out,
+  `RequestDeadline`): nothing is read past it (`late`), and the read stops before an item as slow as
+  the slowest so far would end past it.
   - Why: a menu costs a call per item, two for a submenu item, and every request queues behind it
     (§4.4). 500 items at Blender's 6 ms a call take 3 s or more, near or past the device's 4 s wait.
   - Blender's 42-item Window menu (290 ms) and every menu the probe timed stay far inside it.
@@ -1012,7 +760,8 @@ struct Pressed { enum Outcome { case pressed, pressedNoAnswer, refused(MenuRefus
    - A kept element: one `AXUIElementCopyMultipleAttributeValues` of `[AXTitle, AXDescription,
      AXEnabled, AXChildren]`. It is fresh within a second: the read validates the menu.
    - That read fails with `failed` (`.invalidUIElement`: rebuilt), or there is no kept element:
-     walk the path from the bar and read the same four of the item found.
+     walk the path from the bar (each menu on the way checked against `ancestors`: another is
+     `moved`, and the version moves) and read the same four of the item found.
    - Then `PressDecision.decide`: the title against the one shown (`displayTitle`, as the device
      was sent it), the children, the enabled flag.
 2. **`AXUIElementPerformAction(element, kAXPressAction)`.**
@@ -1049,6 +798,7 @@ final class MenuMirror {
     func setTarget(_ t: Target?)                                  // from the coordinator
     func fetch(_ r: FetchMenu, from c: NWConnection, who: String) // kind 27, with or without an id
     func press(_ r: PressMenuItem, from c: NWConnection, who: String)
+    func clientStats(_ c: NWConnection, rttMs: Int)               // the device's wait (RequestDeadline)
     func clientLeft(_ c: NWConnection)
     func catalogPolled()                                          // the retries (below)
     var hasSubscribers: Bool { get }
@@ -1060,16 +810,22 @@ final class MenuMirror {
 - the top level (items, whether this version's has been read, and `TopLevel` for comparing);
 - `stale` and `note`;
 - `elements[path] = (element, title)`: this version only, at most 5,000 entries, filled by reads;
+- `submenus: SubmenuRecord`: the submenus this version's reads found, at their places;
+- the last top-level read's time and its bar items' elements (a fetch within a second opens its
+  menu without reading the top level again);
 - `cache: MenuCache`;
 - the subscribers, by `ObjectIdentifier`, with their connections;
-- a `RequestRate` per connection;
+- a `RequestRate` per connection, and each subscriber's last round trip (its client stats);
 - the last top level broadcast, so an unchanged one is not sent again;
 - `chain`: the request being served. **One request at a time, in arrival order**: a fetch (its
   activation, its wait, its read), a press, a subscription's read, a target change's read, a
   retry. So a device's answers follow its requests, two reads of one app never overlap, and a
   fetch of a menu whose read is under way is answered from that read's cache entry when its turn
-  comes. The cost is that a slow request holds the rest back, which `readBudget` and the 1 s AX
-  timeout bound. A refusal over the rate limit is answered at once, outside the chain.
+  comes. The cost is that a slow request holds the rest back, which `readBudget`, the 1 s AX
+  timeout and the deadline bound: a request carries its arrival time, and one whose turn comes
+  past its device's wait (`RequestDeadline`) is answered unread (a fetch) or refused (a press).
+  A refusal over the rate limit, or to a connection that never subscribed, is answered at once,
+  outside the chain.
 
 **`setTarget`:**
 - **Equal to the current target:** nothing.
@@ -1098,18 +854,32 @@ final class MenuMirror {
 1. **Checks, in order:**
    - the rate (20 a second; the excess gets "Too many requests. Open the menu again." at once, and
      at most one "ignored" line a second);
-   - then, in its turn in the chain: the version; the path (§3.3); a target;
+   - a subscriber (any other connection gets "The menus changed…" at once, nothing read);
+   - then, in its turn in the chain: still a subscriber (a connection gone meanwhile: dropped,
+     nothing prepared or read); the version; the path (§3.3); a target; a title (none: refused);
    - stale: answered with the note, no read.
-2. **A cache entry `fresh(id, now, frontmostNow: true)`** → answered from it (`menu.cached`), with no
-   activation.
-3. **Otherwise:**
+2. **A cache entry `fresh(id, title, now, frontmostNow: true)`** → answered from it (`menu.cached`),
+   with no activation.
+3. **Past its device's wait** (`RequestDeadline.expired`) → "Too many requests. Open the menu
+   again.", nothing prepared or read.
+4. **Otherwise:**
    - `let frontmost = await prepare()`;
-   - `frontmost` false and `fresh(id, now, frontmostNow: false)` → answered from it (`menu.cached`);
-   - else wait `cache.wait(id, now)`;
-   - on `sill.menus`: re-read the top level, then read the menu.
-4. **Back on main:**
+   - `frontmost` false and `fresh(id, title, now, frontmostNow: false)` → answered from it
+     (`menu.cached`);
+   - else wait `cache.wait(id, now)`; then the subscriber and the deadline checked again;
+   - on `sill.menus`: re-read the top level (only a second or more after the last read, with no
+     request waiting behind this one and time for a top-level read and a whole menu before the
+     answer must go out: a sweep across the iPad's bar reads it once), then read the menu under
+     its title, walking from the bar past the recorded submenus if its element is gone, by `until`.
+5. **Back on main:**
    - A changed top level → `version += 1`, broadcast it, and answer this fetch "The menus changed.
      Open the menu again.".
+   - `notShown` → "The menus changed…"; for one of the bar's menus the top level is read again
+     first (it may have changed within the second), and for a submenu recorded under another title
+     the version moves (`treeChanged`: the same top level goes out with the new version).
+   - `moved`, or a read whose items contradict `submenus` → `treeChanged`, and "The menus
+     changed…".
+   - `late` → "Too many requests…".
    - `notAnswering` → stale with "‹App› isn’t responding.": the top level is sent again with
      `stale: true` and the same version.
    - `gone` → a nil target: the version moves, `menus: []`, and this fetch gets "‹App› is no
@@ -1118,10 +888,14 @@ final class MenuMirror {
    - Else: store the cache (`appWasFrontmost` as `prepare` found it) and the elements, then answer.
 
 **`press`:**
-- **Checks, in order:** the rate (4 a second), then in its turn the version, the path, **at least two
-  parts** (never one of the bar's menus), stale.
+- **Checks, in order:** the rate (4 a second), a subscriber (any other: refused at once, and
+  logged), then in its turn the version, the path, **at least two parts** (never one of the bar's
+  menus), stale, the deadline (past it: refused, "…: it waited 4.2 s behind other requests").
+  A press whose connection left meanwhile still runs.
 - `await prepare()`.
-- On `sill.menus`: `reader.press(…)`, which refuses an item with children or another title (§4.2).
+- On `sill.menus`: `reader.press(…)`, which refuses an item with children or another title (§4.2),
+  and, found again by walking, one past a menu that is not the one recorded there (`moved`: the
+  version moves too).
 - Back on main: log (§4.7), answer, and clear the cache: a press can change any state.
 
 **`catalogPolled`** (each catalog poll, every 2 s while a device is connected and someone
@@ -1132,8 +906,9 @@ subscribes), one read at a time:
   Accessibility, read it again. A grant of Accessibility then shows the menus within 2 s, without
   a pick.
 
-**`clientLeft`:** drop the subscriber and its rate. With the last one gone, let go of the kept
-elements and the cache; the next subscriber reads afresh.
+**`clientLeft`:** drop the subscriber, its rate and its round trip. With the last one gone, let go
+of the kept elements, the submenus' record, the top level's elements and the cache, and move the
+version: nothing records what the old ids named, and the next subscriber reads afresh.
 
 **Target and version are main-actor state.** Reads carry the version they were started for, and
 anything older is dropped when it comes back, so no read can answer for the wrong tree.
@@ -1181,7 +956,9 @@ anything older is dropped when it comes back, so no read can answer for the wron
     `NSWorkspace.didActivateApplicationNotification`, observed only while someone subscribes.
 - **`menusPolled()`**, the `onPolled` hook: with a subscriber, the Desktop's target check above,
   then `menus.catalogPolled()` (the retries of §4.4). Nothing without a subscriber.
-- **`onClientDisconnected` (StreamCoordinator.swift:235-247)** calls `menus.clientLeft(connection)`.
+- **`onClientDisconnected` (StreamCoordinator.swift:235-247)** calls `menus.clientLeft(connection)`,
+  and `onClientStats` `menus.clientStats(connection, rttMs:)` with the second's worst round trip
+  (the median from an older device).
 - **`focusForMenus() async -> Bool`**, new, next to `activateAndRaise`; true when the app is
   frontmost as it returns:
   - `.desktop` and `.none` → true at once. A switch in flight (`switching`: `active` still names
@@ -1227,6 +1004,7 @@ Menu from iPad (iPad14,1) refused: Code › File › Save: Code is not answering
 Menu from iPad (iPad14,1) refused: Code › File › Save: Accessibility refused it (failure)
 Menu from iPad (iPad14,1) refused: 2.9: the menus changed
 Menu from iPad (iPad14,1) refused: 2.9: no Accessibility permission
+Menu from iPad (iPad14,1) refused: Code › File › Save: it waited 4.6 s behind other requests
 Menus from iPad (iPad14,1) ignored: more than 20 requests a second.
 Menus from iPad (iPad14,1) ignored: more than 4 choices a second.
 Menus of Blender not answering (1.0 s); shown as unavailable until it answers.
@@ -1281,7 +1059,7 @@ Menus of Blender answering again.
 
 | What | Cost | How often |
 |---|---|---|
-| Top level | 0.4–3.8 ms (Blender 26 ms; 15–50 ms the first read of an app) | At a pick or app change, alongside each fetch, only with a subscriber |
+| Top level | 0.4–3.8 ms (Blender 26 ms; 15–50 ms the first read of an app) | At a pick or app change, and with a fetch at most once a second while nothing waits behind it; only with a subscriber |
 | One menu | 3–20 ms (Blender 290 ms for 42 items), on `sill.menus`; 1.5 s at most (`readBudget`) | When a device opens it, unless read less than 1 s ago |
 | A press | One read of the item (title, description, enabled, children) and one `AXPress`; up to 1 s when the action is modal | Per choice |
 | Activation | As a click's (StreamCoordinator.swift:1185-1199), at most one attempt per 2 s | Before a read or press of a window source whose app is not active |
@@ -1305,7 +1083,8 @@ Menus of Blender answering again.
   - `  menus v3 at 1.234s: menufixture ▸ | File ▸ | Edit ▸ | Probe ▸ (menufixture, stale=0)`;
   - `  menu 4 v3 (answering 2) at 1.456s: 4.0 Set Label A ⌥⌘A | 4.1 Set Label B ⌃⇧B | — | 4.3 Checked ✓ | …`;
   - `  press 4.0 v3 (answering 3) at 2.001s: pressed=1`, and `note=…` when there is one.
-- `--fetch=ID[xN]@T`: N kind 27s back to back (default 1), with the last top level's version.
+- `--fetch=ID[xN][,TITLE]@T`: N kind 27s back to back (default 1), with the last top level's version
+  and TITLE (default: the title the last top level or answer listed for that id).
 - `--press=ID[,TITLE]@T`: a kind 25. The title defaults to the one the last answer listed for that
   id. It always carries the last top level's version, so a press with an older one takes `--raw25`.
 - `--raw25=JSON@T`, `--raw27=JSON@T`: literal payloads, for the malformed cases.
@@ -1331,6 +1110,10 @@ Menus of Blender answering again.
     titled "Renamed Leaf". A new menu, not new items in the old one: AppKit's elements are
     positional, so only a new menu leaves the kept element invalid and makes the host find the item
     again by its path (Dynamic N shows the title check for an element that outlived its item).
+  - SIGHUP inserts a leaf "Inserted" at the top of Probe, in the same menu (every item of Probe,
+    its submenus included, moves down one place; the top level stays); SIGALRM gives Probe a new
+    menu holding the same items (every element read in Probe goes invalid, and the host walks).
+  - Each action also logs "PRESS '‹item›' in '‹its menu›'".
 - **Its window.** Borderless, 240×40, at (−20000, −20000): off every display.
   - `ignoresMouseEvents`, ordered in with `orderFrontRegardless()`, never key.
   - One `NSTextField` label, starting as "none".
@@ -1372,13 +1155,13 @@ is connected.
 |---|---|
 | `MacMenuState.swift` (new; pure: Foundation and StreamProtocol; checked with swiftc) | One connection's menus: the top level, waiting fetches, presses, their timeouts (§7.2) |
 | `MacMenuElements.swift` (new; UIKit) | The one builder of `UIMenuElement`s, for the bar and the button (§7.3) |
-| `MacMenuHub.swift` (new; UIKit) | Which client is the key window's; rebuilds (§7.4) |
+| `MacMenuHub.swift` (new; UIKit) | Which session the bar shows (the app's one window's); rebuilds (§7.4) |
 | `SillAppDelegate.swift` (new; UIKit) | `buildMenu(with:)` (§7.4) |
 | `MacMenuButton.swift` (new; SwiftUI and UIKit) | The bar's Menus button and its UIKit trigger (§7.5) |
 | `SillApp.swift` | `@UIApplicationDelegateAdaptor(SillAppDelegate.self) var appDelegate` |
 | `StreamClient.swift` | The subscription, kind 24, `fetchMenu`, `pressMenuItem`, the timeout, tear-down (§7.6) |
 | `StreamScreen.swift`, `PortraitStreamScreen.swift` | The button in `TopBar` and `windowBar` (§7.5) |
-| `ContentView.swift` | The key-window observer (§7.4); the harness contract (§7.8) |
+| `ContentView.swift` | The window's session observer (§7.4); the harness contract (§7.8) |
 | `MockCatalog.swift` | The menu cases (§7.8) |
 
 **The pbxproj.** The five new files need their four pbxproj entries each, by hand. They take a
@@ -1435,7 +1218,8 @@ The rules:
 2. **A top level replaces the one before.** A new version settles every waiting fetch of an older
    version with "The menus changed. Open the menu again.".
 3. **One fetch per menu.** Opening a menu whose fetch is waiting joins it. UIKit may ask a provider
-   more than once; one kind 27 goes out.
+   more than once; one kind 27 goes out. It carries the title the menu was shown under, which the
+   Mac checks (§3.3).
 4. **An answer settles only the fetch with its token.** An unknown token is dropped: a late answer
    after its timeout.
 5. **An answer whose version is not the fetch's** settles it with "The menus changed. Open the
@@ -1461,10 +1245,12 @@ The rules:
       carries its note and no items, and shows the note alone.
 11. **A bar menu asks by what it showed.** UIKit rebuilds the bar lazily (at the next key event or
     focus change, measured), so a bar menu can have been built from an older top level than the
-    current one.
-    - Built from the current version: its own id.
-    - Built from an older one: the id of the current top level's first menu with the same title
-      (the old app's File finds the new app's File), fetched with the current version.
+    current one, even another session's: versions start again at each launch of the Mac's host, so
+    a reconnect to a relaunched Sill.app, or another Mac, can reach the version the bar was built in
+    with other menus (the review's finding: "Selection" opened Safari's View).
+    - The current top level's menu at its own id has its title: its own id.
+    - Otherwise: the id of the current top level's first menu with the same title (the old app's
+      File finds the new app's File), fetched with the current version.
     - With no such menu: its completion gets "The menus changed. Open the menu again." at once,
       nothing is sent, and `MacMenuHub` asks for a rebuild again.
     - The Menus button needs none of this: its menu is replaced at every change (§7.5).
@@ -1559,15 +1345,20 @@ in with one call, in order:
   the Mac's menus. It goes after View, with the same fallbacks.
 
 **`MacMenuHub`** (main actor, one per process):
-- **`weak var focused: StreamClient?`:** the client of the window that is key. The bar is the key
-  window's (the app can have several, `UIApplicationSupportsMultipleScenes`).
-- **Set by `KeyWindowObserver`,** a zero-size `UIViewRepresentable` in `ContentView` (one per
-  scene, next to its `StreamClient`):
-  - it watches `UIWindow.didBecomeKeyNotification` for its own window;
-  - it also reports its window's `isKeyWindow` when it moves into it.
+- **`focused: StreamClient?`:** the session of the app's one window, while exactly one window scene
+  is connected; with two or more, none. The app can have several windows
+  (`UIApplicationSupportsMultipleScenes`), and the bar is one for the app: a window's key status
+  cannot say which session it acts on, since every window is key in its own scene (UIWindow.h, for
+  apps built against the iOS 15 SDK or later; the review's probe: two windows key at once, the hub
+  left on the background one's client). Each window's Menus button keeps its own session's menus.
+  A bar that follows the focused window (`UIDeferredMenuElement.usingFocus` answered through
+  `provider(for:)`, iPadOS 26) is left for later: it cannot be seen headless.
+- **Told by `WindowSessionObserver`,** a zero-size `UIViewRepresentable` in `ContentView` (one per
+  scene, next to its `StreamClient`), which reports the window its session is shown in when it
+  moves into one.
 - **`menusChanged(_ client:)`** is called by a client whose top level, version, stale flag or note
-  changed. A change of `focused` counts too. Either calls `UIMenuSystem.main.setNeedsRebuild()`
-  when it concerns the focused client.
+  changed. A window scene connecting, going or coming forward (UIScene's notifications) counts
+  too. Either calls `UIMenuSystem.main.setNeedsRebuild()` when it can change what the bar shows.
   - The rebuild is lazy (measured): it runs at the next key event or focus change, and perhaps
     when the bar is shown (P8). Until then the bar holds the menus it was built with, and §7.2 rule
     11 resolves each by its title when it opens.
@@ -1576,17 +1367,26 @@ in with one call, in order:
 - **Nothing is inserted** when:
   - the device is not an iPad;
   - it runs iOS before 26;
-  - no window is key;
-  - the key window's session has no menus;
+  - the app has no window, or more than one ("nothing inserted (2 windows: each one's Menus button
+    has its own session's)");
+  - the window's session has no menus;
   - the builder already holds them (a second call in one build).
 
 #### 7.5 The Menus button
 
 - **Where.** Right after the window strip, before Aa:
-  - in `TopBar` (StreamScreen.swift:439-450): Apps · strip · **Menus** · Aa · Keyboard · Desktop ·
+  - in `TopBar`: Apps · strip · **Menus** · Aa · Keyboard · Desktop · Settings;
+  - in the portrait halves' `windowBar` (an iPad upright): Apps · strip · **Menus** · Aa · Desktop ·
     Settings;
-  - in `windowBar` (PortraitStreamScreen.swift:267-276): Apps · strip · **Menus** · Aa · Desktop ·
-    Settings.
+  - in both only where the bar holds it and still one whole thumbnail (`MacMenuButton.fits`: 592 pt
+    and wider in the compact landscape bar, 632 in the regular one, 464 upright). A narrower window
+    (a 320 pt Slide Over, a 460 pt landscape window) leaves it out: it pushed Settings, the keys and
+    the trackpad off the window (the review's finding). There the iPad's own bar has the menus on
+    iPadOS 26; before 26 a window that narrow has none (Q2);
+  - on a phone held upright (main's arrangement since PR #30, the Duo's outer display too): at the
+    end of the thumbnails' row, under Settings and as wide (`PhonePortraitLayout.menus`), the strip
+    ending 8 pt before it (`stripBesideMenus`, two whole thumbnails and more from 320 pt up). Row 1
+    keeps its five (Q2).
   - It sits next to the thumbnails because its menus are the picked window's app's.
 - **When.** Only while `client.menus.hasMenus`. With nothing streaming the strip takes its room
   back, with the bar's own animation.
@@ -1609,10 +1409,14 @@ in with one call, in order:
   runs the same deferred elements as the bar, and the probe measured them there: the provider at
   5 ms, the placeholder until the answer.
 - **One thing open at a time.** Opening the menu closes the drawer, the Settings panel and a
-  thumbnail's lights, as `setSettings` does for the panel (StreamScreen.swift:264-279).
-- **The keyboard stays as it is.** A presented menu should take its own keys. If P finds that ↓
-  reaches the Mac while a menu is open, the fix is the Settings panel's: down on display, back up
-  on close (`InputOverlayProxy.setKeyboard`, InputOverlay.swift:403-417).
+  thumbnail's lights, as `setSettings` does for the panel (`StreamScreen.menusOpened`).
+- **The keyboard stays as it is.** A presented menu should take its own keys. The Settings panel
+  takes the keyboard down while it is open; a pull-down opened over it closes it without putting
+  the keyboard back at once (it would come up, and take key focus, under the open menu), and puts it
+  back when the pull-down goes (`menusClosed`; the review's finding: before, the keyboard stayed
+  down, keys stopped reaching the Mac, and ⌘W went to the iPad's own File › Close). If P finds that
+  ↓ reaches the Mac while a menu is open, the fix is the Settings panel's: down on display, back up
+  on close (`InputOverlayProxy.setKeyboard`).
 
 #### 7.6 `StreamClient`
 
@@ -1679,7 +1483,18 @@ in with one call, in order:
   - **`long`:** a Window menu of 300 windows, and 600 in another (the cap).
   - **`stale`, `noaccess`** (a note, no menus), **`none`** (no button).
   - **`slow`, `timeout`, `refuse`.**
-- **`-SillMenusOpen 1`** opens the pull-down after launch (`performPrimaryAction()`, iOS 17.4).
+- **`-SillMenusOpen 1`** opens the pull-down after launch (`performPrimaryAction()`, iOS 17.4), on
+  whichever Menus button shows by then (a layout change makes the bar anew); `-SillMenusOpen
+  'File/Open Recent'` opens it on that menu, each level fetched on the way; `-SillMenusAt <s>` opens
+  it `s` seconds after the button shows, and `-SillMenusCloseAfter <s>` dismisses it `s` seconds
+  later, as a tap outside would.
+- **`-SillMenuPress 'File/Save'`** chooses that item once the first top level is in, as a tap
+  would. It and the path form of `-SillMenusOpen` act only on the mock's menus or the test app's
+  through a test host (dialled to a loopback address, no host version, menufixture's top level:
+  `StreamClient.menuHarnessRefusal`, main's InputScript rule); anything else prints "refused" and
+  chooses nothing (the review's finding: on a real Mac they chose in whatever app it streams).
+- **`-SillSecondWindow 1`** opens a second window (scene) 2 s after launch: the bar then gets none
+  of the Mac's menus.
 - **`-SillMenuBarLayout perMenu|replace|one`:** Q1's flip for one run.
 - **`-SillMenuDump 1`:** the root after each build, on the console (S3).
 - **`-SillMenuBuildTwice 1`, `-SillMenuNoView 1`:** the insertion's guards under test (S3): the
@@ -1712,6 +1527,7 @@ menubar: Selection was built from version 3; version 5 has none
 | The host's cache of a menu | 1 s. A read made while the app was frontmost answers any fetch; one made while it was not answers only while `prepare` still finds it not frontmost. An app brought forward after such a read is read again once 1.05 s have passed |
 | One menu's read | 1.5 s (`readBudget`), then the rest counts in `more`; about 2.5 s at worst with a call's own timeout |
 | The device's wait for an answer | max(4 s, 4 × the worst recent round trip) |
+| The host's deadline for a request | The device's wait, as the connection's client stats give its worst round trip, less that round trip and 0.1 s, from the request's arrival: a fetch past it is answered unread ("Too many requests…"), a press refused; a read stops before an item as slow as the slowest so far would end past it |
 | Kind 27 | 20 a second per connection |
 | Kind 25 | 4 a second per connection |
 | Items per answer | 500 (`more` counts the rest, and what the budget left unread) |
@@ -1721,7 +1537,8 @@ menubar: Selection was built from version 3; version 5 has none
 | Shortcut text | 16 characters |
 | Kept elements | This version's only; 5,000 |
 | Stale, an unread top level, no Accessibility | Retried at each catalog poll (2 s), one read at a time |
-| Requests | One at a time per host, in arrival order; a rate refusal at once |
+| Requests | One at a time per host, in arrival order; a rate refusal, or a non-subscriber's, at once |
+| The top level with a fetch | Read again only a second or more after the last read, with nothing waiting behind the fetch and time for it and a whole menu |
 | Payloads | Kind 24 up to about 100 KB (500 items). The caps stay: `maxOtherHostPayload` 4 MiB, `maxClientPayload` 1 MiB (a larger kind 25 or 27 closes its connection, as any message does) |
 
 ### 9. Edge cases
@@ -1757,8 +1574,10 @@ menubar: Selection was built from version 3; version 5 has none
 | A pointer sweeping across the iPad's bar | Each menu that opens asks once; the host serves them in turn, and a second fetch of a menu just read is answered from that read; at most 20 a second |
 | The iPad's bar not rebuilt yet after the Mac's app changed (the rebuild waits for a key or focus event) | Each bar menu asks by its title: one the new app also has opens with the new app's items, and any other says "The menus changed. Open the menu again." (§7.3 rule 5; P8) |
 | What a device can do with the menus | What it can already do with a click: choose what the streamed app offers. Never the Apple menu (Restart, Shut Down, Log Out, Force Quit), and never Sill's own app. Titles (Open Recent's file names, History) travel on the session's connection, as window titles already do |
-| Several Sill windows on an iPad | The bar shows the key window's session's menus. The Menus button in each window shows its own |
-| iPhone, the Duo's outer display, iPadOS 17–25 | The Menus button only |
+| Several Sill windows on an iPad | The bar shows none of the Mac's menus while more than one window scene is connected: every window is key in its own scene, so nothing says which session its choices would reach. The Menus button in each window shows its own. With one window left, the bar has them again at its next rebuild |
+| iPhone, the Duo's outer display, iPadOS 17–25 | The Menus button only (on a phone upright, at the end of the thumbnails' row) |
+| A narrow iPad window (Slide Over, 320 pt; a 460 pt landscape window) | No Menus button: the bar would not hold it and a thumbnail. On iPadOS 26 the iPad's bar has the menus; before 26, none |
+| An app that adds or removes items above a submenu while its menus are open on a device | The first read that finds a submenu moved (or a walk that meets one) moves the version: every device's open menus say "The menus changed. Open the menu again.", and the menus opened again show the new items. A choice from before, by its kept element, still acts on the item that was shown; one that would have to be found again by its path is refused |
 | Keys while a menu is open | Unchanged; P checks that none reach the Mac |
 | ⌘W on the iPad with nothing first responder (the keyboard down, the Settings panel open) | Unchanged by this step: the iPad's File › Close closes Sill's window, as the probe measured for its scratch app (Q8) |
 | An older device, newer host (and the reverse) | §3.5 |
@@ -1815,6 +1634,8 @@ No Screen Recording is needed.
 | H10 | **The main actor stays free.** Press Slow Action (2 s); fetch Probe 0.3 s later; `--set=bitrate=25000000@…` 0.6 s and `--set=bitrate=15000000@…` 1.0 s after the press | The press answered `pressed=1` (at once where `AXPress` answers before the action runs, as on the fixture; else after about 1 s, with "did not answer within 1 s"). The fetch, made while the action holds the fixture's main thread, answered stale with "menufixture isn’t responding.", the host's not-answering line, a stale top level, then "answering again" and a fresh top level at a later poll. Both kind 16 answers within 100 ms while `sill.menus` waits; `[1s]` lines every second |
 | H11 | **Cost.** `--menu-selftest=menufixture` times. A subscribed client idle 35 s | Its times within the probe's ranges; no `menu.*` keys while nothing is asked; idle CPU 0.0 % |
 | H12 | **A real app, read-only.** `SillHost --menu-selftest=TextEdit`, only if TextEdit is already running (none is started; otherwise recorded as not run). No other app of Noah's: the workflow's rule of 2026-09-26 | It reads; the top-level titles equal the probe's `menubar/dumps/textedit.txt`; the times within twice the probe's |
+| H14 | **The tree changed in place** (the review's). `--fetch=4@1.5 --fetch=4.21@2.2`, SIGHUP at 3, `--press=4.21.5@4`, `--fetch=4.21,600 Items@5`, `--raw25` of 4.21.5 at the old version at 6, `--fetch=4@7`; and `Scripts/menu-check/run.sh mirror` (the same, SIGALRM's walks, the deadline behind a slow `prepare`, a sweep) | The choice at 4 pressed in 600 Items (the fixture's PRESS line); the fetch at 5 "The menus changed…" with 300 Items never read; the same top level sent again with the next version; the old version's choice refused; Probe at the new version with Inserted first and 600 Items at 4.22 |
+| H15 | **Only subscribers** (the review's). A client that never subscribes: `--raw27` of Probe, `--raw25` of 4.0; then its subscription and the same fetch | Both answered "The menus changed…" at once, the label "none", no fixture callback, the refusal logged with the id; after the subscription the fetch served |
 | H13 | **Hard rules** (grep), and previews | No `UIKeyCommand(` or `UICommand(` in the new iOS files. No `AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide`. No AX call in MenuMirror (the reader's only). No `assumeIsolated` in the new files (HostShutdown's and the app's are older). `SILL_TEST_MENU_PID` honoured only where `synthetic` (it is read on every host, for §4.8's "ignored" line). `kAXPressAction` only in MenuReader, after `PressDecision`, and WindowSizer's close button. Every `insertSibling`, `insertElements` and `remove(menu:)` in `MacMenuBar` after a `menu(for:)` check. The bare app's `-SillRenderPreviews` identical before and after |
 
 **Simulator (S):**
@@ -1826,6 +1647,7 @@ No Screen Recording is needed.
 | S3 | **The main menu's root,** on an iPad simulator with an iOS 26 or later runtime, `-SillMenuDump 1`. `code`: the 10 menus right after View, identifiers `me.saffer.sill.macmenu.1`…`10`, each holding one deferred element, and no key command or command inside any. `-SillMenuBarLayout replace`: File, Edit and View gone, the 10 before Window. `one`: one "Code" menu holding the 10. `none`: nothing inserted. An iPhone simulator: nothing inserted. An iOS 17 or 18 runtime, if one is installed: nothing inserted. The guards: DEBUG `-SillMenuBuildTwice 1` calls `MacMenuBar.insert` twice in one build (the dump shows the 10 once, no exception), and `-SillMenuNoView 1` removes View first (the 10 before Window). **The iPadOS 26 menu bar itself cannot be shown headless.** It appears only for a pointer at the top edge or a finger swiping down from it, which the harness cannot drive without the live panel. So everything up to it is checked here, and its drawing (subtitles, marks, deferred loading, its width) is P8's |
 | S4 | **Live.** A synthetic host with the fixture; `-SillLayout 1000x710 -SillLive 1 -SillConnect 127.0.0.1:P`. The Menus button shows the fixture's menus. Tap Probe: its items load. Tap Set Label A: `menufixture label PID` prints "A", and the host logs the press. `-SillMenuDump 1` shows the fixture's four menus after View |
 | S5 | **Tear-down and SwiftUI's own handling.** Disconnect from the Settings panel: the button goes; the next dump has nothing inserted. `xcrun simctl openurl <udid> 'sill://pair?…'` still reaches the link's confirmation, so the adaptor took nothing from SwiftUI |
+| S6 | **The review's (device).** `-SillSecondWindow 1 -SillMenuDump 1`: "nothing inserted (2 windows: …)". 320x700 and 460x400: no Menus button, the bars as main's. The phone's arrangement (`-SillIdiom phone`) at 320x548, 375x647, 393x793, 440x894 and 500x710: the button at the end of the thumbnails' row, two whole thumbnails and more. `stale`: the note a section of its own. `-SillSettings 1 -SillKeyboard 1 -SillMenusOpen 1 -SillMenusCloseAfter 1.5`: the keyboard back when the pull-down goes (the console). Live, against a copy of the fixture named `notfixture`: `-SillMenuPress` and `-SillMenusOpen 'Probe/Deep'` refused, nothing chosen |
 
 **Noah's Mac and devices (P), handed over at the end:** the iPad (iPadOS 26 or later for P8) and an
 iPhone for P13.
@@ -1874,7 +1696,7 @@ Commit messages end with the session's attribution lines.
    - The adaptor in SillApp.
    - StreamClient.
    - The two bars.
-   - The key-window observer.
+   - The window's session observer (the key-window observer, until the review).
    - The harness.
 
    Gates: H1 (iOS), H3 (`menu-state`), S1–S5.
@@ -1952,11 +1774,15 @@ encoder-two-in-flight (PR #20) is already in main at 150f781.
      Titled with a fixed word instead, it would need no rebuild at all, since its one deferred
      element would list the current top level each time it opens. That is the fallback if P8 finds
      that showing the bar does not rebuild it.
-2. **The Menus button.** Default: **in every bar, in every layout, whenever the Mac sent menus.**
-   The iPad's bar stays hidden until revealed, and the HIG asks that every function also be
-   reachable in the app's own interface. The bar also cannot be tried headless (S3), so the button
-   is the one path the gates can check. Alternative (the commissioning task's): only on iPhone,
-   the outer layouts, and iPadOS before 26 (`MacMenuButton.onlyWithoutMenuBar`).
+2. **The Menus button.** Default: **in every bar that holds it, in every layout, whenever the Mac
+   sent menus.** The iPad's bar stays hidden until revealed, and the HIG asks that every function
+   also be reachable in the app's own interface. The bar also cannot be tried headless (S3), so the
+   button is the one path the gates can check. Alternative (the commissioning task's): only on
+   iPhone, the outer layouts, and iPadOS before 26 (`MacMenuButton.onlyWithoutMenuBar`).
+   Two placements are the review's defaults, each Noah's to change: on a phone held upright the
+   button sits at the end of the thumbnails' row (row 1's five kept as approved; the other place is
+   the key row, whose caps stretch); and a window too narrow for it and a thumbnail (a Slide Over)
+   leaves it out, so there, before iPadOS 26, the menus are not reachable.
 3. **The Mac's shortcuts.** Default: **shown as the item's subtitle** ("⇧⌘S"), display only.
    Alternatives: none; appended to the title.
 4. **The Apple menu.** Default: **left out.** It is the system's (About This Mac, System Settings…,
@@ -1983,7 +1809,455 @@ encoder-two-in-flight (PR #20) is already in main at 150f781.
 10. **A setting.** Default: **none.** Alternative: "Show app menus on devices" in
     Settings › Streaming and the menu.
 11. **The kind numbers.** Default: **24, 25 and 27,** with 26 the pointer's.
-12. **When the top level is read.** Default: **at a pick, when the app changes, and alongside each
-    fetch; never on a timer.** H4 records whether a top-level read makes the app run its menu
-    delegates. If it does not, the alternative adds a read at each catalog poll (2 s), so a top
-    level that changes by itself (Xcode's editors) shows before the next fetch.
+12. **When the top level is read.** Default: **at a pick, when the app changes, and with a fetch
+    a second or more after the last read, when nothing waits behind it; never on a timer.** H4
+    records whether a top-level read makes the app run its menu delegates. If it does not, the
+    alternative adds a read at each catalog poll (2 s), so a top level that changes by itself
+    (Xcode's editors) shows before the next fetch.
+
+---
+
+## Results
+
+Built on the branch `menu-bar-mirror` (its worktree `winstream-menubar`), from main at 150f781 with
+main merged in at cf05a78, 676b362, ed7f8c6 and 2b38179 (never rebased): 556f31a this plan, 42d3116
+the protocol, 4896088 the host as a first build agent left it (it built and the menus check passed,
+nothing else run), then the critique's fixes and the host's gates, the device, Sill.app and the
+docs, the review and its fixes. Work stopped once, in the middle of the host (Noah, 2026-09-26:
+"Stop trackpad gestures and menu bar mirror for now. Mark down next steps for agents that will pick
+up the task."), and resumed at 23:38 that day ("Continue working where you left off with Opus 5.5
+subagents").
+
+### The critique (2026-09-27)
+
+It read §§3–4 against 4896088, §7 against the probe's iPadOS hazards (a mirrored `UIKeyCommand`
+firing with no first responder, a shortcut equal to one the root holds dropping the inserted menu,
+duplicates crashing), and §10's gates against both. The plan is fixed in place. Where 4896088
+departs from the plan as it now stands:
+- **The code must change** (done in the host's step, below):
+  - C1. `servePress` presses any id that resolves: a bar item's ("2") and a submenu item's too.
+    AXPress there opens that menu on the Mac, and the app then sits in menu tracking. Now refused
+    before anything is pressed (§3.3, §4.3).
+  - C2. A kept element is pressed whatever its title now. Apps that fill a menu through its delegate
+    reuse their NSMenuItems, so the same element can stand for another command after the validation
+    the press's own read sets off. Now the current title must be the one shown, for the kept element
+    as for one found again, and an empty title never matches (§4.2). The menus check's "a kept
+    element is authoritative" cases and the mutant "the title checked for a kept element" invert.
+  - C3. `MenuReader.items` has no time budget: 500 items at Blender's 6 ms a call take seconds, and
+    every request waits behind it. Now it stops at 1.5 s, and the unread rest counts in `more`
+    (§4.3).
+  - C4. `MenuCache` waits out the second after a read made while the app was not frontmost even when
+    `prepare` finds it still not frontmost. AppKit would answer from that read, so the entry now
+    answers. The wait after such a read runs to 1.05 s, not 1.0: the probe's reads 0.83 s after a
+    validation got none, 1.03 s after did (§4.2).
+  - C5. A top-level read that fails with `failed` publishes `menus: []` for the new version, and
+    nothing but a new subscription reads it again. Now nothing is sent, and each catalog poll reads
+    it again. The same goes for a top level refused for Accessibility, so a grant shows the menus
+    without a pick (§4.4).
+- **The plan adopts the code:**
+  - A1. One request at a time, in arrival order (`enqueue`), in place of `waiting[id]`.
+  - A2. The same app (the same pid) keeps the version, the ids and the kept elements; only the cache
+    is cleared (`Target.window`). The old §4.4 moved the version at every change, against §9.
+  - A3. `WindowCatalog.onPolled`, after every poll, in place of `windowsChanged`'s end, which runs
+    only when the list changed. The Desktop's re-check and the retries need every poll.
+  - A4. The interface's extras: `onSubscribersChanged`, `who:`, `clientLeft(NWConnection)`,
+    `MenuRefusal`, `MenuLog`, `MenuFormat.topItem` and `displayTitle`, `MenuReader.Menu` and
+    `Pressed`, and `MenuPath.lineage`. Also: no leading zeros in an id, and a menu's children that
+    are not `AXMenuItem`s are skipped, though their indexes still count.
+  - A5. Three log lines: "… more than 4 choices a second.", "…: Accessibility refused it (‹error›)",
+    and a refusal for another version, which gives the id: the host no longer has that version's
+    titles.
+  - A6. The version starts at 1, and the first app the mirror takes makes it 2. Rate refusals are
+    answered at once, ahead of answers still queued.
+  - A7. `focusForMenus` makes the streamed window key on every uncached fetch and every press,
+    whether or not the app is frontmost: an AX window lookup and two writes on the main actor. §4.9
+    now says so; it said "whose app is not active".
+- **Beyond the host** (no code yet):
+  - §7.2–§7.4: the builder inserts once per build and checks its anchor. A bar menu is resolved by
+    its title when it opens, since UIKit rebuilds the bar lazily. "No items" shows only without a
+    note.
+  - `.replace`'s cost (Q1). The Apple menu's privacy reason (Q4).
+  - The gates: H4's cache timing was wrong (4.5 s is 1.5 s after the read at 3), and H4 takes two
+    runs, since the ids of Deep and its levels come from the first. H5's old version needs
+    `--raw25`. H5 also presses a bar item, a submenu item and a kept element under another title
+    (C1, C2). H6 gains Dynamic N, and H8 accepts either note, since a poll can land between the kill
+    and the fetch. H9 sends a title under the 1 MiB cap and a message over it. H12 reads only
+    TextEdit (the workflow's rule; H11 reads the fixture), and H13's greps are fixed. P8 checks the
+    lazy rebuild.
+
+### The host (2026-09-27)
+
+On top of f5344e8, one commit each:
+- 4aeb7d1, C1 and C2. A press only for a leaf whose title now is the one shown: the mirror refuses
+  an id of one part before anything is activated or read; the reader reads the item's title,
+  description, enabled flag and children in one call, kept or found again; `PressDecision.decide`
+  takes the title now and `hasChildren` (title, then leaf, then enabled).
+- c6f75ec, the fixture. It ran `.accessory`, and an accessory app started from a shell took the
+  front at launch: `lsappinfo front` named it for a whole 20 s run (00:47, with Claude back once it
+  exited, while a device was on Sill.app). It runs `.prohibited` now, as the probe's fixture did.
+  SIGUSR1 and SIGUSR2 give Probe › Rebuilt a new NSMenu, since AppKit's item elements are
+  positional (§"Pressing").
+- d238710, C3: `MenuReader.readBudget` 1.5 s, `Menu.unread`, the answer's `more`.
+- 07fc56c, C4: `MenuCache.fresh(_:now:frontmostNow:)`, `MenuCache.revalidation` 1.05 s.
+- d392679, C5: `publishTop` sends nothing for a target whose top level is unread (unless stale);
+  each catalog poll reads it again, and a top level refused for Accessibility (`needsRetry`).
+- 53522ab, main at cf05a78 merged (PRs #22–#28), without a conflict; CLAUDE.md and ci.yml are
+  main's, as this branch has not edited them yet.
+- 8ea4882: whatever a fetch's top-level read finds goes out to the subscribers (a top level read
+  there for the first time in its version was answered but never published, and the polls stop
+  retrying once it is read).
+
+Checked, without the hardware encoder:
+- `Tests/checks/menus` 279 of 279 and 33 of 33 mutants (at d392679; the check's inputs are the
+  same files at 8ea4882); `Tests/checks/run-all.sh` 16 of 16 on the merge; `swift build -c
+  release` of 8ea4882 from `git archive`, only the CaptureProbe warning; the iOS app for the
+  simulator (Debug, arm64, the CI command) from the merge, only the StreamClient capture warning.
+- The reader alone against the fixture (a harness compiling MenuReader, MenuFormat, MenuPolicy
+  and StreamProtocol; no host, no encoder), 27 checks at 8ea4882's sources: the bar item and Deep
+  refused in 3–8 ms with no fixture callback naming Deep (reading a submenu item's children opens
+  nothing); 4.0 pressed; 4.1 kept under another title refused; 4.1 found again by its path
+  pressed; Unavailable refused as disabled; Dynamic N pressed 0.3 s after its read and refused
+  1.8 s after (the press's own read validated Probe and retitled it); Rebuilt found again after a
+  new NSMenu, and refused as Renamed Leaf; Deep Leaf pressed; 600 Items read 500 with 100 more in
+  62 ms. A build with a 5 ms budget read 1 of 600 Items (the walk alone took 25 ms) and counted 599
+  more. Slow Action: `AXPress` answered in 2–5 ms, before the action ran, and a read of Probe
+  during the action's 2 s sleep timed out at 1,000 ms (`notAnswering`), then the app answered
+  again. `lsappinfo front` sampled every 0.1 s never changed.
+- `Scripts/menu-check/run.sh` (e47df1d; the two harnesses above and below, from the repository): the
+  mirror harness drives the real MenuMirror, with the reader, as the coordinator does (fetch,
+  press, setTarget, catalogPolled, clientLeft), stubbing only the server's send, a connection,
+  Stats and print; 51 of 51: the subscription's v2 top level; File and Probe as §5's table; a fetch
+  0.4 s after a read from the cache (no fixture callback), 1.6 s after read again; Deep level by
+  level; 600 Items 500 and more 100; the presses and refusals above with the host's exact lines (the
+  bar item and Deep in 6–7 ms); an older version refused with the id; Dynamic N; Rebuilt; 50
+  fetches at once 20 served and 30 too many, ten presses 4 and 6, one ignored line each; Slow
+  Action, a fetch during it stale with "menufixture isn’t responding." and a stale top level of the
+  same version, a press refused, then a poll: "answering again" and a fresh top level; a second
+  subscriber; another window of the same app (the same version, nothing sent); no target (v+1, no
+  menus) and back (v+2); junk ids; C5: a `/bin/sleep`'s top level cannot be read (quick errors,
+  `failed`): v+3 and nothing sent, a poll reads again and still nothing, and once it is gone a poll
+  sends v+1 with no menus; the fixture killed: "menufixture is no longer open." and v+1 with no
+  menus; the last subscriber gone. A killed process its parent has not reaped still answers
+  kill(pid, 0), so the fixture's parent reaps it (real apps are reaped by launchd at once).
+- The fixture (H0): its label reads "none" over AX from another process; its window is off every
+  display; the host's read-only `--menu-selftest=<its pid>` reads its four menus (the top level
+  22 ms at first read, menus 0.6–11 ms: H11's times, within the probe's).
+- H9's first part: main's StreamMessage.swift at 150f781 and at cf05a78 reads kinds 24, 25 and 27 as
+  `.unknown` (23 as `.hello`).
+- H13's greps: no system-wide timeout, no AX call in MenuMirror, no `assumeIsolated` in the new
+  files, `SILL_TEST_MENU_PID` taken only when synthetic, `kAXPressAction` only in MenuReader (after
+  `PressDecision`) and WindowSizer's close button.
+
+Through a synthetic host (2026-09-27, 03:33–03:41, once the device had left Sill.app; one host at
+a time, each after `no-device.sh` and again after it; `lsappinfo front` sampled every 0.2 s), before
+the merge (d392679, against main at 150f781) and after it (8ea4882, against cf05a78):
+- H2: the CLI's stdout, digits masked and lines sorted, identical to main's, idle 35 s and with a
+  5 s client, each with and without `--direct-wireless`, at both points; the clients' kinds the same
+  counts (no 24), "first kinds" identical.
+- H4 (8ea4882): the "Test menus" line; the subscription answered at once (v1 with no menus, since it
+  came before the pick: §3.3), then the fixture's top level as v2; Probe as §5's table; the fetch at
+  3.4 s from the cache (`menu.cached 1`, Dynamic N unchanged, no validation), the one at 4.6 s read
+  again; Probe validated 3 times over both runs, none for run B's Deep fetches (they read through
+  the kept element); Deep level by level. Recorded: Edit, the fixture having no key window, reads
+  Undo, Redo, Cut, Copy, Paste and Start Dictation disabled, with AppKit's own AutoFill ▸, Start
+  Dictation 🎤 and Emoji & Symbols (fn E) added. Q12: no callback in the 2 s between the
+  subscription's top-level read and the first fetch. The 5 ms budget host: 600 Items, 1 item and
+  more=599.
+- H5, both builds: 4.0 and Deep Leaf pressed (the labels "A" and "Deep", the two ACTION lines, the
+  host's two "Menu from" lines); Unavailable refused as disabled; 4.1 under Set Label A's title
+  refused; the bar item and Deep refused in 0–1 ms, nothing opened; top levels v2, none v3, v4; an
+  older version refused, the line giving the id.
+- H6: Rebuilt found again by its path after a new NSMenu and pressed; Renamed Leaf refused, the
+  host's line naming it; Dynamic N pressed 0.3 s after its fetch, refused 1.5 s after.
+- H7: 50 fetches, 20 served and 30 too many; ten presses, 4 and 6; one ignored line each.
+- H8: the fixture v2, none at 3 s (v3), the fixture at 4 s (v4), none after the kill at 6 s (v5,
+  from the next poll), and the fetch at 7 s refused ("The menus changed…").
+- H9: main's StreamMessage.swift reads 24, 25 and 27 as `.unknown`; main's `sillclient.py` gets no
+  24; junk ids, a missing version or title, a bar item and 4.99 answered with the note; the
+  1,000,000-byte title refused and never printed; a message over the cap closed with
+  StreamServer's line; the host streams on; main's host with this branch's `--menus --fetch`: no 24,
+  nothing printed about menus.
+- H10: Slow Action pressed in 4–11 ms; the fetch during it stale ("menufixture isn’t responding."),
+  a stale top level, the not-answering line, then "answering again" and a fresh top level; the two
+  kind 16 answers 1–7 ms after their changes while `sill.menus` waited; a `[1s]` line each second.
+- H11: a subscribed client with nothing streaming, 35 s: no `menu.*` key, the host's CPU 0.0–0.6 %;
+  streaming the Desktop 20 s with nothing asked: `menu.top 1` for the subscription, nothing else.
+- The front never changed in 33 of 34 host runs. In one (main's host with this branch's client,
+  03:35:33–03:35:40, after the merge) Finder was sampled in front, and the Mac's last HID input was
+  at 03:35:43: someone at the Mac, not the run (the same run before the merge: unchanged). No device
+  connected during any run. Other agents' synthetic hosts ran in the same minutes.
+- The gate script first misjudged five checks (the fixture log's padded field hid its ACTION lines,
+  a subscription answered v1, Probe's count, H2's kinds compared as text); re-evaluated from the
+  saved logs (`reeval.py`), all pass.
+
+Not run in this step:
+- H12: TextEdit was not running, and none is started.
+- H13's previews: the bare SillMenuBar is an accessory app, which takes the front when started from
+  a shell, and Noah was at the Mac; the only app change is `--menu-selftest`'s branch in its main,
+  before NSApplication.
+
+Found, for the review:
+- A fetch by id does not check that the item at that id is still the one the device opened
+  (the review's first finding, below: fixed).
+- Q12: a top-level read alone made the fixture run no delegate or validation callback (the
+  interrupted build's H4 run of 2026-09-26: a subscription 2 s before any fetch, no callback; this
+  step's self-test and reader runs: callbacks only for the menus read). A read at each poll would
+  then cost the app nothing; Noah's call, H4 records it again.
+- `Tests/checks/README.md` on main repeated three paragraphs (a merge's leftovers; gone on main
+  since).
+
+### The device, Sill.app and the docs (2026-09-27, 04:04–05:30)
+
+On top of ad29791, one commit each:
+- 4c58246, `MacMenuState` (§7.2) and `Tests/checks/menu-state`: 118 cases and 5,000 random
+  sessions (296,935 events) in which every opened menu's completion is settled exactly once, a kind
+  27 goes out once per waiting menu and nothing outlives its timeout; 26 of 26 mutants (run again on
+  the final tree). Where it departs from §7.2: a submenu's fetch carries the version its row came
+  in, and a row of another version is settled at once ("The menus changed…") instead of being asked
+  with the current version, where its id could name another item; a choice carries its row's
+  version, for the Mac to refuse; a choice while stale is refused on the device with the note;
+  `connectionReplaced` settles what was asked on the connection a move left, whose answers the
+  session no longer reads, and keeps the top level; the top level keeps at most 32 menus with
+  unique one-part ids, since the bar makes an identifier of each.
+- 0f07340, the rest of §7: `MacMenuElements`, `MacMenuHub` with `KeyWindowObserver`,
+  `SillAppDelegate` with `MacMenuBar`, `MacMenuButton` with `MacMenuTrigger`, the adaptor in
+  `SillApp`, `StreamClient`'s part, the two bars, the harness (`-SillMacMenu`'s nine cases,
+  `-SillMenusOpen`, `-SillMenuDump`, `-SillMenuBarLayout`, `-SillMenuBuildTwice`,
+  `-SillMenuNoView`), and the five files' pbxproj entries (A040–A044, F040–F044). Beyond §7.8, for
+  a run that cannot tap: `-SillMenusOpen 'File/Open Recent'` opens the pull-down on that menu (each
+  level fetched on the way), `-SillMenuPress 'File/Save'` chooses an item, both in the mock and
+  live; and the harness prints where a tap on the button's centre would land. In the bar, a
+  disabled or stale Mac menu stays a menu (its deferred element then shows the note or the Mac's
+  dimmed items), so the bar never changes shape; in the pull-down it is a dimmed row, as §7.2 rule 7
+  says. The console's top-level line is "menus: none (version 5)" or "menus: Code, 10 menus
+  (version 3)"; a wait that ran out, "menus: File (2) after 4160 ms: ‹the words›".
+- 13a139d, found by the photos: UIKit's automatic order turned a pull-down that opens upward (the
+  portrait bars, low on the screen) upside down, Help first and File from Save As… to New; the
+  button asks for `.fixed` now. And a menu cuts a long title at its third line, which took "System
+  Settings › Privacy & Security › Accessibility" off the no-Accessibility note: a note that ends in
+  a parenthesis shows it as the row's subtitle.
+- ab0d876, main at 676b362 merged (PR #29, the disk image), without a conflict.
+- The docs: CLAUDE.md's Current step, Layout and Build and run; docs/DEVELOPMENT.md (the menus for a
+  user of a source build, the CLI's self-test, the test app, the harness); `Tests/checks/README.md`
+  (the two checks, and the kinds 26 and 28 of other branches); ci.yml's mutants matrix
+  (`menu-state`, `menus`).
+
+Checked:
+- H1: iOS Debug and Release for the simulator and Debug for a device, only the old
+  `StreamClient` capture warning (at 2415 now, 2383 on main); `swift build -c release`, and
+  `Scripts/make-app.sh` without `--install`. H3: `Tests/checks/run-all.sh`, all 18 on the merge
+  (156 s); `menus` 279 and 33 of 33 mutants, `menu-state` as above. H13's iOS greps: no
+  `UIKeyCommand(` or `UICommand(` in the new files, every `insertElements` and `remove(menu:)`
+  after a `menu(for:)`, no `assumeIsolated`.
+- In a private simulator set (an iPad Pro 13" named "Sill menubar", then an iPhone 15 Pro of the
+  same name; iOS 27.0, the only runtime installed), screenshots with `simctl io` only:
+  - S1: the button between the strip and Aa at 1000x710, 710x1000, 500x710 and 710x500; faded under
+    the Aa ruler at 1000x710 and 500x710; `-SillMacMenu none` pixel for pixel main's own build
+    (cf05a78, built from `git archive`) at all four. Also the iPad mini (744x1133, 1133x744), the
+    iPad Pro 13" (1032x1376, 1376x1032) and the iPhone 15 Pro (393x852, 852x393).
+  - S2: the pull-down at the four sizes, in the Mac's order; File (subtitles, sections, ✓, a dimmed
+    item), Open Recent, Code › Settings ▸ Themes three deep, View › Appearance (✓ and the mixed
+    "–"), Run (dimmed items, F-keys); `slow`: the placeholder at 1.6 s, the items at 4 s (the answer
+    1.58 s after the fetch); `timeout`: "Mac mini didn’t answer. Open the menu again." at 4.16 s;
+    `stale`: the note, then each menu dimmed, and File holding the note alone; `noaccess`: the note
+    whole, as a title and subtitle; `blender`; `long`: Window's 302 rows scroll, History 500 and
+    "100 more on the Mac"; xxLarge text at 1000x710 and 500x710; a choice ("menus: chose Save
+    (2.9)") and a refused one (the console's refusal; the announcement is VoiceOver's, P11).
+    `-SillMenuPress` against `stale` finds nothing to choose (a stale menu shows no rows), so the
+    device's own refusal of a choice made before the app went stale is the pure check's (rule 8).
+  - S3, the main menu's root (`-SillMenuDump 1`), iPad: `code`, the ten after View as
+    `me.saffer.sill.macmenu.1`…`10`, each one deferred element, no key command or command in them;
+    `replace`: File, Edit and View gone (the root has no Format), the ten before Window; `one`: one
+    "Code" menu holding the ten; `-SillMenuBuildTwice 1`: "nothing inserted (already in this build)"
+    the second time, the ten once, no exception; `-SillMenuNoView 1`: the ten before Window;
+    `stale`: the ten, each still one deferred element; `none` and `noaccess`: nothing inserted. The
+    iPhone: "nothing inserted (not an iPad on iPadOS 26)" at every build. An iOS 17 or 18 runtime:
+    none installed, not run.
+  - S4, live against a synthetic host with the fixture (the rig of the host step: `no-device.sh`
+    before and after, `lsappinfo front` every 0.2 s, one host under 40 s), on the iPad at 1000x710:
+    the pull-down with menufixture, File, Edit and Probe; Probe's 18 items through the host (Set
+    Label A ⌥⌘A, Set Label B ⌃⇧B, ✓ Checked, – Mixed, Unavailable dimmed, F5, ⌘⌫, ⌃⌘↑, ⎋);
+    `-SillMenuPress 'Probe/Set Label A'`: "menus: chose Set Label A (4.0)", the host's "Menu from
+    Sill menubar (iPad17,4 simulator): menufixture › Probe › Set Label A", the fixture's label "A".
+    On the iPhone at 393x852: the same four, Probe, Probe › Deep (4.19) › Level 2 level by level,
+    and Set Label B pressed ("B"). The front never changed in either run.
+  - The dump, live: a top level that arrived after the window became key was not in the bar until a
+    focus change (no rebuild in the 6 s that followed; opening the pull-down rebuilt it, with the
+    fixture's four menus after View). §7.2 rule 11 is there for this; whether showing the bar
+    rebuilds it stays P8's.
+  - S5: the host stopped under an open pull-down: "127.0.0.1:P disconnected…", the button gone, and
+    the next build "nothing inserted (the session has no menus)". `simctl openurl` with a
+    well-formed `sill://pair` link brought the system's "Open in “Sill”?" over the connect screen,
+    as on main (the Build and run note); the app's own confirmation is past a tap, which a headless
+    run cannot give.
+  - The harness's hit test: "a tap on the Menus button's centre reaches the button" in every run
+    that opened the pull-down (the Duo's four sizes, the iPad mini and iPad Pro upright, the iPhone
+    upright; the harness turns a landscape iPad, and UIKit's menus are not turned with it).
+- Sill.app (§6): `.build/Sill.app/Contents/MacOS/Sill --menu-selftest=<the fixture's pid>
+  -SillLogFile <scratch>` read the fixture's four menus (the top level in 23 ms) and exited 0, the
+  front unchanged, and the lines reached the log file that Show Log… reads. The NSWorkspace
+  observer runs only when an app is activated on the Mac, which no gate may do: P5.
+
+Not run in this step:
+- H13's previews: Sill.app's sources differ from main only in main.swift's `--menu-selftest`
+  branch, before NSApplication, and nothing the previews draw changed; the bare app takes the front
+  when started from a shell.
+- Taps (the rules allow only `simctl io` screenshots): a real tap on the button, the bar itself, a
+  choice's VoiceOver announcement.
+
+Found, for Noah and the review:
+- A phone held upright (393 pt, main's compact window bar then): with the button, the strip kept
+  only a sliver of its first thumbnail (the review's seventh finding, below: the button is in the
+  phone's thumbnails' row now).
+
+
+### The review and its fixes (2026-09-27)
+
+Two reviews after a1948b7 (the host: its threads, timeouts and activation, the wire, the hard rules;
+the device: the four layouts, the pull-down and the main menu's builder) found eleven things. Each
+was reproduced before it was fixed: the host's with the reviewers' own harnesses (the real
+MenuMirror, MenuReader, MenuPolicy, MenuFormat and StreamProtocol, built as
+`Scripts/menu-check/build.sh` builds them, `prepare` stubbed, against copies of the fixture), the
+device's in a private simulator, against the iOS 27 SDK's headers and with the real MacMenuState.
+Main moved meanwhile, and was merged first (below), so the device's fixes are on main's layouts.
+
+The host, 992229f:
+1. **A fetch was never checked against the menu the device opened.** AppKit's item elements are
+   positional and a change below the top level moved no version: after an item was inserted at the
+   top of Probe in place (the review's SIGHUP hook, now the fixture's), the device's "600 Items"
+   (4.21) was answered with 300 Items' 300 items, its "Deep" (4.19) with Rebuilt's leaf, the
+   fixture validating 300 Items and Rebuilt and never 600 Items or Deep, and a choice of "Item 6"
+   among those rows was made in 300 Items (reproduced on the merge). Now a fetch carries the title
+   the device showed (`FetchMenu.title`, the one wire change: optional, required with an id); the
+   item at the id is read with its children in one call, kept or found again, and its menu is read
+   only while the title is the one shown; the cache answers only under the title it was read under.
+   And within a version an id names one item for every device: the submenus a version's reads find
+   are recorded at their places (`SubmenuRecord`), a read that finds another there, or a walk from
+   the bar that meets one (the menus on the way checked against the record), moves the version, the
+   same top level going out with it; the last subscriber leaving moves it too. A choice from before
+   the change by its kept element (600 Items' own item 5, which did not move) is still made where it
+   was shown; after the version moved it is refused.
+2. **The request queue had no deadline, and each fetch read the whole top level again.** Four
+   fetches of a copy of the fixture busy 500 ms at a time, sent together as a pointer sweeping the
+   iPad's bar sends them, were answered 1.0, 1.5, 3.6 and 5.6 s after they were asked, the last past
+   the device's 4 s wait, with four top-level reads. Now a request carries its arrival time: a fetch
+   whose answer could no longer reach its device in time (`RequestDeadline`: max(4 s, 4 × the
+   connection's worst recent round trip, from its client stats), less a round trip and 0.1 s) is
+   answered "Too many requests…" unread, a choice that late is refused and logged ("…: it waited
+   4.2 s behind other requests"), a read stops before an item as slow as the slowest so far would
+   end past it, and the top level is read with a fetch only a second or more after the last read,
+   with nothing waiting behind and time for it and a whole menu: the same four were answered at 1.0,
+   1.0, 2.5 and 3.6 s with one top-level read, the last two cut short (6 and 4 items, 4 and 18 more
+   on the Mac); busy 250 ms at a time, at 0.5, 0.8, 1.6 and 2.6 s, whole. Busy 700 ms at a time the
+   fourth still came at 4.25 s (2 items, 20 more), after the device's 4 s: a single call slower than
+   the time left ends late whatever the reader decides after it, and the device has by then shown
+   that the Mac didn't answer.
+3. **CLAUDE.md's compatibility floor kept kinds 0–23 only.** It now keeps 24, 25 and 27 and
+   MacMenu's rules: the subscription, ids as paths within one version, the version check, the
+   titles a fetch and a choice carry, tokens, only subscribers served, and the fields.
+4. **The mirror served kinds 25 and 27 from connections that never subscribed**, against a target
+   left as the last subscriber saw it (a choice from such a connection was made), and still prepared
+   and read a departed device's queued fetch. Now only a subscriber is served; any other connection
+   gets "The menus changed…" at once, nothing read or pressed; a fetch whose connection left before
+   its turn is neither prepared nor read; a choice accepted before its connection left still runs (a
+   move's hand-over counts on it).
+
+The device, 9dfa45a:
+5. **With two Sill windows the bar could act on the other window's session.** Every window is key in
+   its own scene (UIWindow.h, apps built against the iOS 15 SDK or later), so the hub followed
+   whichever window reported last (the reviewer's probe: both key at once, the hub on the background
+   window's client). The bar now shows the menus of the app's one window while exactly one window
+   scene is connected, and none with two or more; each window's Menus button keeps its own; a scene
+   connecting, going or coming forward asks for a rebuild. A bar that follows the focused window
+   (`UIDeferredMenuElement.usingFocus`) is left for later: it cannot be seen headless.
+6. **The Menus button pushed the compact bars past narrow iPad windows** (320×700: Settings cut to
+   "Set", shift, the keyboard cap and the trackpad cut; 460×400 the same). It shows only where the
+   bar holds it and still one whole thumbnail (`MacMenuButton.fits`).
+7. **On a phone held upright the strip kept less than one thumbnail** (the Duo's outer display cut
+   the streamed window's). Main's phone arrangement (PR #30) gives the strip a row of its own; the
+   button now ends that row, under Settings and as wide (`PhonePortraitLayout.menus`,
+   `stripBesideMenus`), and row 1 keeps its approved five. The review left the place to Noah (Q2).
+8. **Opening Menus over the Settings panel left the keyboard down** (keys then stopped reaching the
+   Mac, and ⌘W went to the iPad's own File › Close). The keyboard the panel took down now comes back
+   when the pull-down goes.
+9. **Rule 11 compared versions across sessions.** Versions start again at each host launch, so after
+   a reconnect to a relaunched Sill.app, or another Mac, a bar menu built from the old session's
+   version 2 asked for its own id in the new version 2 (the reviewer's check: "Selection" opened
+   Safari's View). A bar menu keeps its id only while the current top level's menu there has its
+   title; the fetch's title check on the host backs it.
+10. **The pull-down's "not responding" note read as one more dimmed menu:** it is a section of its
+    own.
+11. **`-SillMenuPress` and `-SillMenusOpen` with a path chose and opened menus on any Mac**, unlike
+    sillclient's guarded `--press`: they act only on the mock's menus or the test app's through a
+    test host (a loopback address, no host version, menufixture's top level), and print "refused"
+    otherwise.
+Also: the harness opens its pull-down on whichever Menus button shows by then (a layout change made
+the bar anew and lost it: the keyboard turning the harness's fake screen upright), and
+`-SillMenusAt`, `-SillMenusCloseAfter` and `-SillSecondWindow` join the harness.
+
+Merged with main before the fixes: ed7f8c6 in aa11993 (PRs #30 the iPhone's portrait layout, #31 the
+Mac's pointer, #32 the 0.3.1 release) and 2b38179 in 4fd8131 (#33). Where they met: kind 26 sits
+between the menus' kinds; the checks that read the kind table follow (protocol's and menus' 26 is
+the pointer's, pointer-control's known kinds gain 24, 25 and 27), and three mutants that renumbered
+a kind onto one now taken, which could no longer compile, renumber onto 28 and 29; the portrait
+halves keep the button, and the phone's arrangement had none until finding 7; sillclient, the
+harness contract, MockCatalog, StreamClient's first window list, the coordinator's `active`, ci.yml,
+the checks' README, DEVELOPMENT.md and CLAUDE.md keep both sides.
+
+Checked (2026-09-27, 06:28–08:20):
+- The findings reproduced first: the reviewers' harnesses on the merge (the shift: 300 items and
+  Rebuilt Leaf under the old titles; a non-subscriber's press made; the busy sweep's 5.6 s), the
+  rule-11 harness with the real MacMenuState, the narrow windows' photos.
+- `Tests/checks/run-all.sh`, all 22 (192 s); mutants: menus 43 of 43 (the check 309), menu-state
+  29 of 29 (5,122), phone-portrait 31 of 31 (152), pointer-control 33 of 33 (155) and protocol
+  20 of 20.
+- `Scripts/menu-check/run.sh`: reader 40 of 40 (new: a kept element asked under another title, a
+  walk with a wrong or unknown menu on the way, the shift's 600 Items refused with nothing opened,
+  Deep's path through Rebuilt refused and its new path read, SIGALRM's walk), budget 4 of 4, mirror
+  69 of 69 (new: the shift end to end, a walk through a moved menu, SIGALRM, a non-subscriber, a
+  departed subscriber's fetch, the deadline behind a 4.2 s `prepare` and a 1.5 s round trip's
+  longer wait, a sweep's one top-level read, the version after the last subscriber); the reviewers'
+  queue harness again (above).
+- Through a synthetic host (loopback only, `SILL_TEST_LOOPBACK`; one host at a time, each after
+  `no-device.sh` and again after it; `lsappinfo front` every 0.2 s, never changed): H2 against main
+  at 2b38179 (the CLI's stdout, digits masked and lines sorted, identical idle and with a client,
+  with and without `--direct-wireless`; the clients' kinds the same, no 24), H4–H11 as in the host's
+  step, and the review's H14 (the tree changed in place) and H15 (only subscribers): 99 checks. The
+  gate script first misjudged two (a budget fetch sent with no title, which the host now refuses as
+  designed, and the subscribers' gate counting the read of the fetch served after the subscription):
+  run again with those fixed, 10 of 10. H2 first compared the clients' kinds as text: the same kinds
+  and counts, in another order.
+- iOS: Debug and Release for the simulator and Debug for a device, only the old `StreamClient`
+  capture warning (at StreamClient.swift:2663 now). `swift build -c release` of the committed tree
+  from `git archive`, only the CaptureProbe warning; `Scripts/make-app.sh` without `--install`; the
+  bundle's `--menu-selftest` against the fixture (its four menus, the top level in 23 ms; exit 0,
+  the front unchanged).
+- In a private simulator ("Sill menubar", an iPad Pro 13", iOS 27), screenshots only: the Menus
+  button gone at 320x700 and 460x400 with the bars as main's, present at 500x710, 710x500, 1000x710
+  and 710x1000; the phone's arrangement (`-SillIdiom phone`) at 320x548, 375x647, 393x793, 440x894
+  and 500x710, the button ending the thumbnails' row with two whole thumbnails and more; the stale
+  note a section of its own; `-SillSecondWindow 1`: "nothing inserted (2 windows: …)", the root
+  back to its six menus; the keyboard's two console lines (the panel over the keyboard, the
+  pull-down over it, dismissed: "the keyboard back up"; without the keyboard, "was down before
+  it"); `-SillMacMenu none` against main's build, pixel for pixel at 1000x710, 710x1000, 500x710
+  and 710x500 and the phone's 393x793. Live against a synthetic host with the fixture: its four
+  menus, Probe fetched with its title, Set Label A chosen (the label "A"), the pull-down from the
+  phone's thumbnails' row; against a copy of the fixture named `notfixture`: `-SillMenuPress` and
+  `-SillMenusOpen 'Probe/Deep'` refused, its label "none". Live photos show the Mac's real window
+  thumbnails and name: kept out of the pull request.
+
+Not run: H12 (TextEdit was not running, and none is started); taps (the rules allow only `simctl
+io` screenshots); the software keyboard live (it did not come up in this simulator, so the keyboard
+fix is checked by its console lines in the mock); two windows' key and focus changes past the
+second window's opening; the iPadOS 26 bar itself (headless, it is never shown).
+
+### Untested, for Noah
+
+The plan's P1–P13 (§10), and from the review: two Sill windows side by side (the iPad's bar shows
+none of the Mac's menus, each window's Menus button its own session's; with one window again, the
+bar has them after a key press or focus change); a Slide Over window (no Menus button; on iPadOS 26
+the bar has the menus); a phone held upright (the button at the end of the thumbnails' row); the
+Settings panel open over a hardware keyboard's session, then Menus (keys reach the Mac again once
+the pull-down goes); an app that adds items to an open menu's parent (a Window or History menu while
+its submenus are open on the iPad: "The menus changed…" once, then the new items); and a slow app
+(Blender's Window menu while the iPad's bar is swept: no answer later than the iPad waits).
