@@ -17,7 +17,7 @@ import StreamProtocol
 //   (MaxKeyFrameInterval), parameter sets broadcast before every keyframe;
 // - the catalog's thumbnail pass: every thumbnail again every 6 s.
 // The home door (StreamServer's own listener, advertise: false) serves `--plain` home runs
-// (run.py's DOOR=Home).
+// (run.py's DOOR=Home), and is started only for them; the remote door listens on loopback only.
 //
 // usage: Harness [--port P] [--kf BYTES] [--delta BYTES] [--fps N] [--gop S] [--icons N]
 //                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH] [--plain]
@@ -113,7 +113,10 @@ if plain {
     let tls = RemoteTLS.options(identity: identity.tls, role: .server, queue: server.queue) { _, _ in true }
     params = RemoteTLS.parameters(tls: tls, dialing: false)
 }
-let door = try NWListener(using: params, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
+// Loopback only: nothing but the harness's relay ever connects, and a test host must never take a
+// connection from another machine (the Application Firewall would ask about it).
+params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
+let door = try NWListener(using: params)
 door.stateUpdateHandler = { state in
     if case .ready = state { print("Remote door listening on port \(door.port!.rawValue) (\(plain ? "TCP" : "TLS 1.3"))") }
     if case .failed(let e) = state { print("Remote door failed: \(e)"); exit(1) }
@@ -132,7 +135,9 @@ door.newConnectionHandler = { c in
     c.start(queue: server.queue)
 }
 door.start(queue: server.queue)
-server.start()
+// StreamServer's own listener (the home door, on every interface) only for a home run; a remote run
+// needs none of it (its `start` builds and starts that listener, nothing else).
+if plain { server.start() }
 server.setStreaming(true)
 
 // The fake encoder's output, one frame per 1/fps on its own queue (the VT callback thread's role).
@@ -165,7 +170,7 @@ thumbTimer.setEventHandler { sendThumbnails() }
 thumbTimer.resume()
 
 DispatchQueue.main.async { Stats.shared.startPrinting() }
-DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { print("Home door listening on port \(server.port ?? 0) (TCP, loopback admitted)") }
+if plain { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { print("Home door listening on port \(server.port ?? 0) (TCP, loopback admitted)") } }
 DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
     print("Harness done after \(Int(seconds)) s.")
     exit(0)
