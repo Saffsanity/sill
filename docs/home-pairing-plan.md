@@ -702,11 +702,15 @@ enum CableLink {
 - **The home door's summary** (the plain door's line stays byte for byte for the CLI):
   "Home door refused N connections in the last minute: a unpaired, b through a VPN, c from the
   internet, d from an older Sill (not TLS), e over the limit." A home handshake that fails with
-  -9836 counts as "from an older Sill" and sets `olderDeviceAt` (§4.10): every plain Sill message
+  -9836 counts as "from an older Sill" and, at a source's third within a minute, sets
+  `olderDeviceAt` (§4.10): every plain Sill message
   gets it, whatever its kind (H0's P4), because the TLS record header's version bytes are the Sill
   header's first timestamp bytes, 0x41 0xD0 to 0xDF for any time from 2004 to 2038, never a TLS
-  version. A TLS 1.2 client gets -9836 as well (no Sill build is one; a scanner that tries TLS 1.2
-  lights the menu's item for its 10 minutes). -9858 (an HTTP request, which the TLS stack tells
+  version. A TLS 1.2 client gets -9836 as well (no Sill build is one). So the menu's item waits for
+  a source's third plain try within a minute (`DoorPolicy.olderSillTry`; the security review,
+  2026-09-27: one `openssl s_client -tls1_2` lit it for 10 minutes): an older Sill tries again and
+  again, a tap and then its reconnect every 2 to 10 s, while a scanner usually tries once. The
+  summary counts every try. -9858 (an HTTP request, which the TLS stack tells
   apart) and the remote door's other refusals (`doorRefusals`: -9808, -9863, -9810) count as
   "unpaired", toward the backoff, as they do at the remote door. An older Sill's -9836 counts in
   the summary, not toward its source's backoff: the
@@ -1046,7 +1050,7 @@ New attention items (first group, orange):
 | Title | Subtitle | While | Action |
 |---|---|---|---|
 | "iPad Wants to Pair" (the device's name) | "Showing a code" · "Show a Code…" · "Unlock this Mac, then tap it on the iPad again" | `pairingRequest`, 5 minutes from the ask: a device-opened window is open · an ask the limits kept from showing (never an ask from this Mac, §4.2 step 4) · the Mac was locked | brings the window forward, or opens one on the Mac "asked by" that device |
-| "An iPhone or iPad Needs Sill Updated" | "It tried to connect with an older Sill." | 10 minutes from `olderDeviceAt` | none |
+| "An iPhone or iPad Needs Sill Updated" | "It tried to connect with an older Sill." | 10 minutes from `olderDeviceAt`: a source's third plain try within a minute (one try, a TLS 1.2 scanner's, lights nothing) | none |
 | "Devices Can’t Connect" | "Sill couldn’t use its key in your keychain." | `homeDoor == .unavailable` | Settings › Devices |
 
 - The glyph shows attention for the first and the third (Sill needs its user); the second is only

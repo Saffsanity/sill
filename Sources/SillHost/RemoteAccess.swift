@@ -476,7 +476,8 @@ package final class RemoteAccess {
         paired.contains { $0.fingerprintData == fingerprint }
     }
 
-    /// The home door refused a plain Sill message (an older Sill): the menu's item, for 10 minutes.
+    /// The home door refused plain Sill messages from one source, again and again (an older Sill;
+    /// DoorPolicy.olderSillTry): the menu's item, for 10 minutes.
     private func olderDeviceSeen() {
         olderDeviceAt = Date()
         publish()

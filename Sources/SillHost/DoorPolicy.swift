@@ -176,10 +176,11 @@ enum DoorPolicy {
         /// Counted under this word in the minute's summary, and one failure toward its source's
         /// backoff (5 in 60 s → refused for 300 s).
         case refused(String)
-        /// Plain bytes at a TLS home door (-9836): an older Sill. Counted "older" in the summary and
-        /// shown in the menu, never toward the backoff: the backoff is checked when a connection is
-        /// accepted, before any key is seen, so a device that retried plainly and was then updated
-        /// would have its new build refused for up to 5 minutes.
+        /// Plain bytes at a TLS home door (-9836): an older Sill, or a TLS 1.2 client. Counted
+        /// "older" in the summary, and shown in the menu once one source has tried so a third time
+        /// within a minute (`olderSillTry`), never toward the backoff: the backoff is checked when a
+        /// connection is accepted, before any key is seen, so a device that retried plainly and was
+        /// then updated would have its new build refused for up to 5 minutes.
         case olderSill
     }
 
@@ -195,6 +196,24 @@ enum DoorPolicy {
         case -9808, -9863, -9810, -9836, -9858: return .refused("unpaired")
         default: return nil
         }
+    }
+
+    // MARK: An older Sill, for the menu
+
+    /// How many plain tries (a handshake that failed with -9836 at the home door) one source makes
+    /// within `olderSillSpan` before the menu says "An iPhone or iPad Needs Sill Updated". An older
+    /// Sill tries again and again (a tap, then its reconnect every 2 to 10 s), while a TLS 1.2 client
+    /// (a scanner, an old TLS library), which fails the same way, usually tries once: the menu waits
+    /// for the third (the security review, 2026-09-27). The minute's summary counts every one.
+    static let olderSillTries = 3
+    static let olderSillSpan: Double = 60
+
+    /// One more plain try from a source, at `now`, after its earlier ones (`tries`, in seconds on
+    /// one clock): the tries still inside the span, this one included, and whether the menu's item
+    /// is due now (the `olderSillTries`th of them, or any later one).
+    static func olderSillTry(_ tries: [Double], now: Double) -> (tries: [Double], shown: Bool) {
+        let kept = tries.filter { now - $0 < olderSillSpan } + [now]
+        return (kept, kept.count >= olderSillTries)
     }
 
     // MARK: The ask (the home door's kind 19 "ask")

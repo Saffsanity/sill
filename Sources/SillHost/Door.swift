@@ -72,7 +72,9 @@ final class Door {
 
     /// A pairing attempt; the reply may be called from any thread.
     var onPairAttempt: ((PairAttempt, @escaping @Sendable (PairResult) -> Void) -> Void)?
-    /// Home door: a plain Sill message at the TLS door (an older Sill, -9836), for the menu.
+    /// Home door: plain Sill messages at the TLS door (an older Sill, -9836), for the menu: once one
+    /// source has tried so `DoorPolicy.olderSillTries` times within a minute (a TLS 1.2 client, which
+    /// fails the same way, usually tries once).
     var onOlderSill: (() -> Void)?
 
     private struct Pending {
@@ -90,6 +92,8 @@ final class Door {
     private var pending: [ObjectIdentifier: Pending] = [:]
     private var failures: [String: [CFAbsoluteTime]] = [:]
     private var backoffUntil: [String: CFAbsoluteTime] = [:]
+    /// Home door: each source's plain tries within the last minute (DoorPolicy.olderSillTry).
+    private var olderTries: [String: [CFAbsoluteTime]] = [:]
 
     private lazy var refusals: RefusalSummary = {
         switch kind {
@@ -453,7 +457,9 @@ final class Door {
                 refusals.count(word)
             case .olderSill?:
                 refusals.count("older")
-                onOlderSill?()
+                let seen = DoorPolicy.olderSillTry(olderTries[p.source] ?? [], now: CFAbsoluteTimeGetCurrent())
+                olderTries[p.source] = seen.tries
+                if seen.shown { onOlderSill?() }
             case nil:
                 break
             }
@@ -483,6 +489,7 @@ final class Door {
     private func prune(_ now: CFAbsoluteTime) {
         if failures.count > 256 { failures = failures.filter { $0.value.contains { now - $0 < Self.failureWindow } } }
         if backoffUntil.count > 256 { backoffUntil = backoffUntil.filter { $0.value > now } }
+        if olderTries.count > 256 { olderTries = olderTries.filter { $0.value.contains { now - $0 < DoorPolicy.olderSillSpan } } }
     }
 }
 

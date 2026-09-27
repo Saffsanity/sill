@@ -182,7 +182,8 @@ package struct RemoteStatus: Equatable {
     package var identityProblem: String?
     package var homeDoor: HomeDoor
     package var pairingRequest: PairingRequest?
-    /// The last connection the home door refused as not TLS (an older Sill), for the menu's
+    /// When the home door last refused a source's third plain try within a minute (an older Sill,
+    /// DoorPolicy.olderSillTry: a TLS 1.2 client fails the same way, but once), for the menu's
     /// "An iPhone or iPad Needs Sill Updated" (10 minutes from it).
     package var olderDeviceAt: Date?
 

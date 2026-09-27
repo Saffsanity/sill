@@ -4,6 +4,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "Sources/SillHost/DoorPolicy.swift"
 M = [
+    ("older Sill: the menu at the first plain try (as before the review)", F, "        return (kept, kept.count >= olderSillTries)", "        return (kept, true)"),
+    ("older Sill: tries never leave the span", F, "        let kept = tries.filter { now - $0 < olderSillSpan } + [now]", "        let kept = tries + [now]"),
+    ("older Sill: a try exactly a minute old still counts", F, "        let kept = tries.filter { now - $0 < olderSillSpan } + [now]", "        let kept = tries.filter { now - $0 <= olderSillSpan } + [now]"),
+    ("older Sill: this try not counted", F, "        let kept = tries.filter { now - $0 < olderSillSpan } + [now]", "        let kept = tries.filter { now - $0 < olderSillSpan }"),
     ("kind 19 of a later generation judged as this one's", F, "        guard version == PairRequest.version else { return .closed }\n", ""),
     ("kind 19: only a higher generation is closed", F, "        guard version == PairRequest.version else { return .closed }", "        guard version <= PairRequest.version else { return .closed }"),
     ("kind 19: cancel goes to the window (a wrong code)", F, "        if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }\n", ""),

@@ -231,6 +231,23 @@ check("handshake: an older Sill's plain bytes (-9836) at home count toward no ba
       D.handshakeRefusal(.home, status: -9836) == .olderSill && D.handshakeRefusal(.home, status: -9858) == .refused("unpaired"))
 check("handshake: the remote door keeps -9836 as unpaired, toward the backoff (unchanged)", D.handshakeRefusal(.remote, status: -9836) == .refused("unpaired"))
 
+// The menu's "An iPhone or iPad Needs Sill Updated" (the security review, 2026-09-27): a TLS 1.2
+// client fails with -9836 too, but tries once; an older Sill tries again and again (a tap, then its
+// reconnect every 2 to 10 s). The item waits for a source's third plain try within a minute.
+check("older Sill: 3 tries in 60 s", D.olderSillTries == 3 && D.olderSillSpan == 60)
+var tries: [Double] = []
+var shown: [Bool] = []
+for t in [100.0, 102, 106] { let r = D.olderSillTry(tries, now: t); tries = r.tries; shown.append(r.shown) }
+check("older Sill: one try (a TLS 1.2 scanner) shows nothing, nor a second; the third within a minute does", shown == [false, false, true])
+check("older Sill: every later try shows it too, while three are within the minute", D.olderSillTry(tries, now: 116).shown && D.olderSillTry(tries, now: 150).shown)
+check("older Sill: tries a minute apart never add up", D.olderSillTry(D.olderSillTry(D.olderSillTry([], now: 0).tries, now: 60).tries, now: 120) == ([120], false))
+check("older Sill: a try exactly 60 s old no longer counts", D.olderSillTry([0, 30], now: 60) == ([30, 60], false)
+      && D.olderSillTry([0.1, 30], now: 60) == ([0.1, 30, 60], true))
+check("older Sill: an older Sill's reconnect (2, 4, 8, 10 s apart) shows it at its third try",
+      { var t: [Double] = []; var at = 0.0; var n = 0
+        for gap in [0.0, 2, 4, 8, 10] { at += gap; n += 1; let r = D.olderSillTry(t, now: at); t = r.tries; if r.shown { return n == 3 } }
+        return false }())
+
 // MARK: The ask rule
 
 func askOracle(_ u: Bool, _ seen: Bool, _ claimed: Bool, _ other: Bool, _ w: Bool, _ me: Bool, _ q: Bool, _ n: Int) -> D.Ask {
