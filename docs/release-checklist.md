@@ -138,16 +138,15 @@ Sponsor button); the two excludes keep `--delete` off them.
 
 - [x] Domain, done 2026-09-25: getsill.app at Cloudflare, with A records to GitHub Pages
       (185.199.108.153, .109, .110, .111), the matching AAAA records (2606:50c0:8000::153 to
-      8003::153), and Email Routing forwarding support@ to Noah's mailbox. The records are proxied
-      through Cloudflare, which serves the certificate, so GitHub's "Enforce HTTPS" stays off.
-- [ ] Cloudflare: SSL/TLS mode "Full" and "Always Use HTTPS" on, so the hop to GitHub is encrypted
-      and plain links redirect (.app is HTTPS-only in browsers anyway). Add `www CNAME
-      saffsanity.github.io` if www should work. Optional: verify the domain for the GitHub account
-      (github.com › Settings › Pages › Add a domain, a TXT record) so nobody else can claim it.
-- [ ] Cloudflare rewrites visible email addresses unless they sit inside `<!--email_off-->`
-      comments, which the pages now use; alternatively turn off Scrape Shield › Email Address
-      Obfuscation.
-- [ ] In the repository's Settings › Pages, tick Enforce HTTPS once GitHub has the certificate.
+      8003::153), and Email Routing forwarding support@ to Noah's mailbox. Since 2026-09-27 the
+      records are DNS only (Cloudflare's proxy is off, so the site may serve video, which
+      Cloudflare's free plan forbids), `www` is a CNAME to saffsanity.github.io, and GitHub serves
+      the pages with its own certificate for both names (expiring 2026-12-26; GitHub renews it).
+- [x] Done 2026-09-27: with the proxy off, Cloudflare's SSL/TLS mode, Always Use HTTPS and Email
+      Address Obfuscation no longer touch the site (the pages' `<!--email_off-->` comments stay,
+      inert), and the domain is verified for the Saffsanity GitHub account (the TXT record
+      `_github-pages-challenge-Saffsanity`, which stays).
+- [x] Done 2026-09-27: Enforce HTTPS is on in sill-site's Settings › Pages.
 - [ ] In a private window: https://getsill.app/, `/download`, `/privacy` and `/support` all
       load. GitHub Pages serves `privacy.html` at `/privacy`, the form the app and App Store
       Connect use.
@@ -194,20 +193,26 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
       together, the device build is uploaded first (App Store Connect takes 5 to 30 minutes to
-      process it, and nobody can install it before), the Mac release is published once the build
-      shows as processed, and the site is republished right after. A device with the new build
-      and a Mac without its release is the gentler half of the gap: whichever side can say what
-      to update must be the one that arrives first.
+      process it, and nobody can install it before), its What to Test goes on as soon as it shows
+      in TestFlight (internal testers with automatic distribution get it the moment it is
+      processed), one device tries it from TestFlight against a Mac that runs a build of the same
+      commit (processed is not tested, and the builds tried before it are usually Debug ones),
+      the Mac release is published once that works, and the site is republished right after (the
+      Download button gives the newest release's Sill.dmg the moment it is published, so the
+      pages' words should follow within minutes). A device with the new build and a Mac without
+      its release is the gentler half of the gap: whichever side can say what to update must be
+      the one that arrives first.
 - [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag -a v0.4.0 -m "Sill
       for Mac 0.4.0: …"` and `git push origin v0.4.0` for 0.4.0 (v0.3.0 and v0.3.1 are annotated
-      tags on the merge commit of their pull request). `make-app.sh --release` builds only the
-      commit carrying it, and `release.sh --publish` refuses to start until origin's tag names
-      that commit, then makes the GitHub Release for it. Every Sill.app's update check reads the
-      releases of Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published
-      one's tag (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is
-      public (since 2026-09-26), so within a day of a release there every older Sill.app offers
-      it (Check Now in Settings › General asks at once). A private repository's releases answer
-      the check with a 404, and then no Sill.app offers anything.
+      tags on merge commits of main: v0.3.1 on its release pull request's, #32, and v0.3.0 on
+      main's head that day, #20's). `make-app.sh --release` builds only the commit carrying it,
+      and `release.sh --publish` refuses to start until origin's tag names that commit, then
+      makes the GitHub Release for it. Every Sill.app's update check reads the releases of
+      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
+      (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is public (since
+      2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now
+      in Settings › General asks at once). A private repository's releases answer the check with
+      a 404, and then no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, then puts the stapled app
       in the disk image (`Scripts/make-dmg.sh`, signed with the same identity), has Apple notarize
@@ -357,8 +362,9 @@ address (the number left out, say) stops it before it builds.
       part 1 §3's rsync (never with `--exclude download.html` any more, which kept that page at
       "being prepared" until then; still without touching sill-site's own `.nojekyll` and
       `.github`), right after each release whose builds the pages describe (part 2, the last
-      item). The pages getsill.app serves lack the `<!--email_off-->` comments only because
-      Cloudflare takes them out.
+      item). Since 2026-09-27 GitHub serves the pages itself (Cloudflare's proxy is off, part 1
+      §3), so getsill.app's copies are sill-site's byte for byte, `<!--email_off-->` comments
+      included.
 
 ```
 rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/
