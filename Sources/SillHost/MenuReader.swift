@@ -4,7 +4,7 @@ import StreamProtocol
 
 /// Accessibility reads and presses of one app's menu bar (docs/menu-bar-plan.md §4.3). Every call
 /// runs on `queue`, never on the main actor or `sill.net`: an app's answer can take a second
-/// (Blender: 6 ms a call; a hung app the whole timeout), and a press waits for the app's action.
+/// (Blender: 6 ms a call; a hung app the whole timeout), and a press can wait for the app's action.
 /// Every element touched gets `timeout` before its first call (a local call, no IPC); the
 /// process-wide default is never changed, as it would change the injector's and the sizer's too.
 ///
@@ -175,11 +175,14 @@ final class MenuReader: @unchecked Sendable {
 
     // MARK: Pressing
 
-    /// AXPress on the kept element, or, when it is gone (the app built its menu again), on the item
-    /// at `path`; either only when its title now is `shownTitle`, it has no children and it is
-    /// enabled (`PressDecision`). An id of one part is one of the bar's menus: never pressed (the
-    /// mirror refuses it first). AXPress returns once the app has run the action: one that runs a
-    /// modal loop holds it until the timeout, which counts as pressed.
+    /// AXPress on the kept element, or, when it no longer answers (the app gave the menu a new
+    /// NSMenu), on the item at `path`; either only when its title now is `shownTitle`, it has no
+    /// children and it is enabled (`PressDecision`). AppKit's item elements are positional: after an
+    /// app replaced the items inside the same NSMenu, a kept element answers for whatever item is at
+    /// its place now, and the title decides. An id of one part is one of the bar's menus: never
+    /// pressed (the mirror refuses it first). An AppKit app answers AXPress before it runs the action
+    /// (the fixture: 2–3 ms); one that answers only after holds this queue until the timeout, which
+    /// counts as pressed.
     func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?) -> Pressed {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return Pressed(outcome: .refused(.notTrusted), foundTitle: nil) }
