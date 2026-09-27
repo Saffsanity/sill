@@ -2847,14 +2847,15 @@ good.
   (compiles the app's files it names with swiftc into `.build/checks/<name>/`
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
-  sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `encoder-mailbox`, `encoder-slowstate`, `fence`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
-  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
-  [-v] [name…]` runs them and exits
-  `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
-  `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  sources with `import StreamProtocol` stripped), or a `module.txt` naming the
+  files `module.py` compiles as one module (pairing at home's checks):
+  `addresses`, `ask-limits`, `cable-link`, `clientlink`, `compatibility`,
+  `device-gate`, `door-policy`, `encoder-mailbox`, `encoder-slowstate`,
+  `fence`, `goodbye`, `home-device`, `home-model`, `home-records`,
+  `home-txt`, `ledger`, `origin`, `pairing-address`, `policy` (with its
+  `home.swift`), `protocol`, `remote-rules` (with its `home.swift`),
+  `update-policy` (the two encoder checks refuse a binary that links
+  VideoToolbox). `run-all.sh [--mutants] [-v] [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
