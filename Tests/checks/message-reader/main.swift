@@ -289,18 +289,24 @@ func slow() {
     let length = 1 << 20
     let m = message(1, .frame, length)
     rig.read()
-    // 2 Mbit/s: 4 KB every 16 ms.
+    // 2 Mbit/s, 4 KB a write, paced by the clock: every 16 ms what is due by then goes out, so a
+    // timer that fires late is made up at once rather than lost from the rate. (Each write used to
+    // wait 16 ms after the last one was taken: on GitHub's macOS runner, whose timers fire late,
+    // the frame then took over 15 s.)
+    let rate = 2_000_000.0 / 8
     var sent = 0
     let t0 = now()
     func next() {
-        guard sent < m.count else { return }
-        let n = min(4096, m.count - sent)
-        let chunk = m.subdata(in: sent..<sent + n)
-        sent += n
-        rig.write(chunk) { rig.mac.asyncAfter(deadline: .now() + 0.016) { next() } }
+        let due = min(m.count, Int((now() - t0) * rate) + 4096)
+        while sent < due {
+            let n = min(4096, m.count - sent)
+            rig.write(m.subdata(in: sent..<sent + n))
+            sent += n
+        }
+        if sent < m.count { rig.mac.asyncAfter(deadline: .now() + 0.016) { next() } }
     }
     rig.mac.async { next() }
-    check(rig.wait(15) { $0.messages.count == 1 }, "slow: a 1 MB frame at 2 Mbit/s delivered (\(String(format: "%.1f", now() - t0)) s)")
+    check(rig.wait(30) { $0.messages.count == 1 }, "slow: a 1 MB frame at 2 Mbit/s delivered (\(String(format: "%.1f", now() - t0)) s)")
     let times = rig.look { $0.reads.map(\.t) }
     let gaps = zip(times.dropFirst(), times).map { $0 - $1 }
     let worst = gaps.max() ?? .infinity
@@ -439,14 +445,18 @@ func stopMid() {
     let rig = Rig()
     rig.read()
     let m = message(1, .frame, 3 << 20)
-    // 8 Mbit/s: the frame takes 3 s; stop 0.5 s in.
+    // 8 Mbit/s: the frame takes 3 s; stop 0.5 s in. Paced by the clock, as in `slow`.
+    let rate = 8_000_000.0 / 8
     var sent = 0
+    let t0 = now()
     func next() {
-        guard sent < m.count else { return }
-        let n = min(16384, m.count - sent)
-        let chunk = m.subdata(in: sent..<sent + n)
-        sent += n
-        rig.write(chunk) { rig.mac.asyncAfter(deadline: .now() + 0.016) { next() } }
+        let due = min(m.count, Int((now() - t0) * rate) + 16384)
+        while sent < due {
+            let n = min(16384, m.count - sent)
+            rig.write(m.subdata(in: sent..<sent + n))
+            sent += n
+        }
+        if sent < m.count { rig.mac.asyncAfter(deadline: .now() + 0.016) { next() } }
     }
     rig.mac.async { next() }
     usleep(500_000)
