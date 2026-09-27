@@ -1001,9 +1001,7 @@ enum Spotlight {
         ? "sparkle.magnifyingglass" : "magnifyingglass.circle"
 
     static func press(send: (InputEvent) -> Void) {
-        let space: UInt16 = 0x2C
-        send(.key(hidUsage: space, down: true, modifiers: KeyModifiers.command.rawValue))
-        send(.key(hidUsage: space, down: false, modifiers: KeyModifiers.command.rawValue))
+        KeyChord.spotlight.forEach(send)
     }
 }
 

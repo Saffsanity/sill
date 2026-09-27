@@ -356,8 +356,7 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     /// One key, down and up, carrying the latched modifier bits, then the latch is spent.
     private func sendLatched(_ usage: UInt16) {
-        send(.key(hidUsage: usage, down: true, modifiers: latchedModifiers.rawValue))
-        send(.key(hidUsage: usage, down: false, modifiers: latchedModifiers.rawValue))
+        KeyChord.press(usage, with: latchedModifiers).forEach(send)
         consumeLatch()
     }
 

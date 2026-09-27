@@ -492,18 +492,12 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     // released after it, each event carrying the flags in force at that moment.
 
     private func pressModifiers() {
-        held = []
-        for key in latchedModifiers.keys {
-            held.insert(key.flag)
-            send(.key(hidUsage: key.usage, down: true, modifiers: held.rawValue))
-        }
+        held = latchedModifiers
+        KeyChord.modifiersDown(held).forEach(send)
     }
 
     private func releaseModifiers() {
-        for key in held.keys.reversed() {
-            held.remove(key.flag)
-            send(.key(hidUsage: key.usage, down: false, modifiers: held.rawValue))
-        }
+        KeyChord.modifiersUp(held).forEach(send)
         held = []
     }
 

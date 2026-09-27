@@ -3,32 +3,6 @@ import StreamProtocol
 
 // MARK: - Keys
 
-/// The modifier bits an `InputEvent.key` carries: `UIKeyModifierFlags` raw values, which sit at the
-/// same bit positions as the `CGEventFlags` the host posts with, so they travel unchanged.
-struct KeyModifiers: OptionSet {
-    let rawValue: UInt64
-
-    static let shift   = KeyModifiers(rawValue: 1 << 17)
-    static let control = KeyModifiers(rawValue: 1 << 18)
-    static let option  = KeyModifiers(rawValue: 1 << 19)
-    static let command = KeyModifiers(rawValue: 1 << 20)
-
-    /// The three that make shortcuts instead of characters. Shift is not one of them: it changes
-    /// which character the keyboard produces, which the text path already handles.
-    static let shortcutMakers: KeyModifiers = [.control, .option, .command]
-
-    /// Each latched modifier as its own key: the HID usage to press, and the bit it contributes.
-    /// A pointer event has no modifier field, so a modified click has to hold these down around it.
-    var keys: [(usage: UInt16, flag: KeyModifiers)] {
-        var out: [(usage: UInt16, flag: KeyModifiers)] = []
-        if contains(.control) { out.append((0xE0, .control)) }
-        if contains(.shift)   { out.append((0xE1, .shift)) }
-        if contains(.option)  { out.append((0xE2, .option)) }
-        if contains(.command) { out.append((0xE3, .command)) }
-        return out
-    }
-}
-
 /// The USB HID usages the portrait key row sends, plus the small character table a latched
 /// ⌘/⌃/⌥ needs: those combinations never reach the software keyboard as text.
 enum HIDKey {
@@ -772,8 +746,7 @@ private struct KeyRow: View {
     /// escape, tab and the arrows: down and up, carrying whatever is latched, and the latch is
     /// spent — ⌥← is one tap on opt then one on the left arrow.
     private func press(_ usage: UInt16) {
-        send(.key(hidUsage: usage, down: true, modifiers: latched.rawValue))
-        send(.key(hidUsage: usage, down: false, modifiers: latched.rawValue))
+        KeyChord.press(usage, with: latched).forEach(send)
         latched = []
     }
 
