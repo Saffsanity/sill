@@ -158,7 +158,10 @@ struct ContentView: View {
 ///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
-///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home).
+///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
+///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
+///   short screen).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -169,6 +172,13 @@ struct ContentView: View {
 ///   route, the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired),
 ///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
 ///   and `remoteslow` (none: the route line under it says how instead).
+/// * `-Sill.trackpadGestures 0` — not a harness argument either: this device's switch for
+///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
+///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
+///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
+///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
+///   accessibility actions whether or not it is on).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillMacMenu <case>` — the mock Mac's menus (docs/menu-bar-plan.md §7.8; see
 ///   `MockCatalog.MenuCase`): `code` (the default: VS Code's ten, File with shortcuts, sections, a ✓,
@@ -456,7 +466,11 @@ struct LayoutHarness: View {
 /// * `click` — a tap on the pad: a click where its cursor is;
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
-/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays.
+/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
+/// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
+///   `StreamClient.sendGesture` as a surface's decision goes (the switch, the Mac's `gestures`, the
+///   Desktop first while a window streams): swipeUp, swipeDown, swipeLeft, swipeRight, pinch or
+///   spread; the console says whether it went ("input script: t=… gesture swipeUp: sent").
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
@@ -470,6 +484,7 @@ struct LayoutHarness: View {
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case gesture(TrackpadGestures.Gesture, fingers: Int)
 
         var description: String {
             switch self {
@@ -480,6 +495,7 @@ enum InputScript {
             case .tap(let x, let y): return "tap \(x),\(y)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
+            case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
             }
         }
     }
@@ -505,6 +521,12 @@ enum InputScript {
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
+            case ("gesture", 3):
+                let parts = words[2].split(separator: ",").map(String.init)
+                guard let g = TrackpadGestures.Gesture(rawValue: parts[0]), parts.count <= 2 else { return nil }
+                let fingers = parts.count == 2 ? Int(parts[1]) : 3
+                guard let fingers, fingers == 3 || fingers == 4 else { return nil }
+                step = .gesture(g, fingers: fingers)
             default: return nil
             }
             steps.append((at, step))
@@ -573,6 +595,10 @@ enum InputScript {
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        case .gesture(let g, let fingers):
+            let went = client.sendGesture(g, fingers: fingers)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))
+            return
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }

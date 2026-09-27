@@ -590,6 +590,10 @@ final class StreamClient: ObservableObject {
     /// with the session.
     @Published var hostVersion: String?
     @Published var hostProtocol: Int?
+    /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
+    /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
+    /// session.
+    @Published var hostGestures: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -2194,6 +2198,7 @@ final class StreamClient: ObservableObject {
         notice = nil
         hostVersion = nil
         hostProtocol = nil
+        hostGestures = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -2365,6 +2370,40 @@ final class StreamClient: ObservableObject {
                 }
             }
         }
+    }
+
+    /// This device's switch for three-finger gestures (the Settings panel's This iPad group): on
+    /// unless turned off. The device's own preference, never sent to the Mac; read at each gesture.
+    static let gesturesKey = "Sill.trackpadGestures"
+    static var gesturesOn: Bool {
+        // `bool(forKey:)`, not `as? Bool`: a launch argument's "0" is a string, which it reads as
+        // @AppStorage does, so the switch and the panel always agree.
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
+    }
+
+    /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
+    /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
+    /// only while this device's switch is on and the Mac says it takes gestures. While a window
+    /// streams, the Desktop first, as its button picks it: none of the views a gesture opens
+    /// (Mission Control, App Exposé, Apps, Show Desktop) is in a window's picture. A pointer move
+    /// still waiting goes before the gesture, as before any input but a move. Nothing else: no
+    /// pointer, no scroll, and a latched modifier stays latched. Main thread. True when it went.
+    @discardableResult
+    func sendGesture(_ gesture: TrackpadGestures.Gesture, fingers: Int) -> Bool {
+        var windowStreams = false
+        if case .window = active { windowStreams = true }
+        let plan = TrackpadGestures.sending(switchOn: Self.gesturesOn, connected: connected, hostGestures: hostGestures,
+                                            generation: TrackpadGesture.generation, windowStreams: windowStreams)
+        guard plan.send else { return false }
+        if plan.desktopFirst { select(.desktop) }
+        let payload = Wire.encode(TrackpadGesture(gesture: gesture.rawValue, fingers: fingers))
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.flushPendingMove()
+            self.send(.gesture, payload)
+        }
+        return true
     }
 
     /// On `queue`.
@@ -2659,6 +2698,7 @@ final class StreamClient: ObservableObject {
                 self.sessionHost = list.launchID
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
+                if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG

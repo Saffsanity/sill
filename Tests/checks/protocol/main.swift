@@ -366,8 +366,8 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 29 is audio (the Mac's sound); 28 and 30 unknown (skipped)",
-      header(29)?.kind == .audio && header(28)?.kind == .unknown && header(30)?.kind == .unknown)
+check("kind 28 is gesture (trackpad gestures), 29 audio (the Mac's sound), 30 unknown (skipped)",
+      header(28)?.kind == .gesture && header(29)?.kind == .audio && header(30)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096

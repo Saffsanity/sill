@@ -51,7 +51,9 @@ the App Store yet; until it is, you can build it from source (below).
 - **Your input** goes back the same way: taps and clicks, scrolls with
   momentum, the on-screen trackpad, keys and typed text, and Apple Pencil as
   the pointer. Sill for Mac turns it into mouse and keyboard events, which
-  needs Accessibility.
+  needs Accessibility. Three fingers swipe and pinch as on a Mac's trackpad:
+  Mission Control, App Exposé, the Spaces, Apps and Show Desktop, through the
+  keyboard shortcuts your Mac has for them.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects

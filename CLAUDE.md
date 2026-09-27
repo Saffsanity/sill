@@ -8,6 +8,140 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Three-finger trackpad gestures (2026-09-27, branch `trackpad-gestures` from
+main at 8b0d418, with main merged in at 5c6a850 (6678ca3), at 2b38179, PR #31
+the Mac's pointer among it (5e6ddaa), and at 643af6b, PRs #35 the tour, #36
+the Mac's menus and #34 remote pacing, never rebased, PR #38; the plan, its
+§12 defaults, the results, the review's fixes and the last merge are in
+`docs/trackpad-gestures-plan.md`, §15).** Noah: "I also want to be able to use
+full macos gestures on the touchpad, so far only 1 or 2 finger gestures are
+working" (2026-09-23), and "Work on 5-12 as well please" (2026-09-26). Built
+and reviewed overnight while he slept, every default of the plan's §12 taken.
+Tier 2 (tracking gestures through private IOHID events) is not built and
+§10's probe was not run: nothing was posted to the Mac.
+- Wire: kind 28 `gesture`, device → host, JSON `TrackpadGesture`
+  (`Gesture.swift`): a name (`swipeUp`, `swipeDown`, `swipeLeft`, `swipeRight`,
+  `pinch`, `spread`) and `fingers` (3 or 4). `WindowList.gestures` 1 says a
+  host takes them; nil from every host before, which is sent none.
+- Mac: `GestureChords` (pure) turns a name into the Mac's own shortcut for
+  its action, read from its Keyboard Shortcuts at that moment
+  (`SymbolicHotKeys`, SkyLight's two getters, read-only): the first of the
+  action's that is on and bound, with its stored modifiers' device-independent
+  bits (fn included). Mission Control 108 (the Mission Control key, 160) then
+  32 (⌃↑); App Exposé 115 then 33; the Spaces 81 and 79 (⌃→, ⌃←); Apps 173
+  (the Launchpad key, 131) then 160 (Show Apps); Show Desktop 36 (F11) then
+  110. None on: nothing, never another action's. It remembers the view its
+  last gesture opened: the opposite gesture closes it with the same shortcut,
+  the same gesture again does nothing and, made once more straight after,
+  opens it again (it was closed on the Mac itself), the Spaces leave it open.
+  A device's click, key or text forgets it (`input`; a move, a scroll or a
+  button or key coming up does not), and so do a window picked, an app
+  launched, a window's button and the last device leaving (`forget`). The
+  coordinator takes four a second per connection (the rest one line a
+  minute), waits for a switch in flight (at most 2 s: a gesture over a window
+  comes right after the device's Desktop pick), queues the chord behind input
+  held for an activation, raises nothing, and logs one line: "Gesture from
+  iPad (iPad14,1): swipe up → Mission Control (shortcut 108: key 160, fn)".
+  `InputInjector.chord` posts the key down with the shortcut's flags and the
+  key up with the flags the HID state table held before, so no control or fn
+  is left for the next click or scroll to start from; a quarter of a second
+  later a read of the table counts `in.gestureModifiersLeft` and says once
+  "Gestures: after a gesture's shortcut this Mac's modifier keys still read …"
+  if they are. A host that does not advertise posts none: "(not posted: a
+  test host)" and `in.gestureDry`; TEST ONLY `SILL_TEST_HOTKEYS` gives it a
+  table of its own.
+- Device: `TrackpadGestures` (pure). A stroke goes silent once three fingers
+  are down before any finger moved 24 pt, with no button held, however slowly
+  they came and whatever rests on the glass, until the next stroke's first
+  touch; it arms when the three that landed last came down within 0.15 s of
+  each other (so a resting thumb is not one of them). The first lift of one
+  of the three decides: a swipe at 40 pt, or 20 pt at 500 pt/s over the last
+  50 ms, with one axis 1.3 times the other and the fingers moving together
+  (each of the three half the centroid's travel or more, no other finger that
+  moved half of it the other way: a pinch led by the thumb is no swipe); else
+  a pinch or spread at 25 %, of the three and any other finger that moved;
+  else nothing. Another finger's lift only leaves the stroke; `fingers`
+  counts the three and the others that moved (4 at most); a fifth finger, or
+  a cancel (iPadOS taking four fingers), decides nothing. `StrokeObserver`
+  (InputOverlay.swift) feeds it every direct touch on both surfaces, and each
+  existing finger handler's only change is a first line, `guard
+  !strokes.silent`; a scroll the stroke had begun is closed as it goes silent,
+  with no coast. `StreamClient.sendGesture` sends it (the switch on, the Mac's
+  `gestures` 1; the Desktop first while a window streams; a light tick on an
+  iPhone's trackpad). The stream's overlay turns off iPadOS's three-finger
+  editing gestures. Settings' This iPad (or iPhone) group, after the Mac's and
+  before Take the Tour since the merge: Three-Finger Gestures
+  (`Sill.trackpadGestures`, on by default, never sent), the five
+  mappings while the Mac takes them, and a footnote; with VoiceOver on (which
+  keeps three fingers) the footnote says the rows do the gestures, and each row
+  is an accessibility action doing its gesture (the Spaces row one each way).
+- Verified (§15): gestures 156 checks and 45 of 45 mutants; gesture-chords 141
+  and 33 of 33; compatibility 92 and 19 of 19; `Tests/checks/run-all.sh`, all
+  22; swift build -c release and the three iOS builds with only the known
+  warnings; the CLI idle and with a Desktop client against main's, masked and
+  sorted: identical; the app's 100 previews against main's: identical but the
+  General pane's "Running from" path; the merge commit's StreamProtocol reads
+  kind 28 as unknown and the new list; the touch rig on an iPad's and an
+  iPhone's simulator (one- and two-finger strokes unchanged, also right after
+  a gesture; every stroke of three to five fingers, placed slowly, beside a
+  resting thumb, led by the thumb or with a brief extra contact, one gesture
+  or nothing; the review's HEAD fails 18 of those checks); dry runs on
+  loopback synthetic hosts (every gesture, the reversal, a scroll before the
+  reverse gesture, a second session, the third try, fallbacks, bad payloads,
+  the rate cap); the app in a private simulator against such a host; photos
+  of the group at the Duo's, an iPad mini's and an iPhone's sizes, at Large
+  and accessibility-extra-large, and of its VoiceOver footnote.
+- Merged with main at 643af6b (2026-09-27, one merge commit; the plan's §15,
+  "Merged with main after PRs #34, #35 and #36"). Where the features meet:
+  kinds 24, 25 and 27 (the menus), 26 (the pointer) and 28 (the gesture) side
+  by side, and the compatibility floor below keeps 0–28; the coordinator
+  dispatches both (kind 8 feeds `GestureChords.input`, then the menus'
+  `desktopInputMayActivate`; kind 28 its four a second; 25 and 27 the mirror
+  and its rates), and a menu item chosen from a device (kind 25) now forgets
+  the view a gesture opened, as a click does; the Settings panel ends with This
+  iPad's gestures, then Take the Tour (whose row no longer pads itself while
+  the Mac's settings load); the portrait trackpad keeps `sendGesture` and the
+  tour's target; sillclient.py both sides' flags; the checks that read 28 as
+  unknown (`protocol`, `menus`, `pointer-control`) or 27 as free
+  (`compatibility`) now read the gesture and the fetch, and four mutants that
+  renumbered a kind onto one now taken (so they no longer compiled) use free
+  numbers; CI's mutants matrix lists all 25. Remote pacing (#34: the host's
+  send side, the device's MessageReader, A020/F020) met the gestures only in
+  the documents, CI's matrix and the checks' README. Verified: `swift build -c
+  release` from clean, only the CaptureProbe warning; iOS Debug and Release
+  for the simulator and Debug for a generic device, unsigned, only the old
+  `StreamClient` capture warning; `Tests/checks/run-all.sh`, all 26; the
+  mutants of the 15 checks that compile a file the merge changed, every one
+  caught; on a loopback synthetic host on the software encoder, nothing
+  posted: sillclient's menus subscription and choice beside the gestures (a
+  swipe up, a kind 25, a swipe down gives App Exposé, not "closes Mission
+  Control"), and the app in a private simulator (deleted after) sending four
+  gestures through `sendGesture` beside its menus subscription; photos of the
+  panel's end at 1000×710, an older Mac's, the phone's and the tour's laptop
+  step lighting the keys and the trackpad.
+- Noah tried PR #38 on his devices (2026-09-27): "The gestures work amazing.
+  Please merge that code." The P1–P13 list below was not reported item by item.
+- **Left:** the republish of `site/privacy.html` (it names gestures now) after
+  the merge; the §10 probe before any Tier 2.
+- **Untested, for Noah (the plan's P1–P13, beyond "the gestures work"):** new
+  with the merge, a swipe up, then an item chosen from the Menus button, then
+  a swipe down: App Exposé (with no choice in between, the swipe down closes
+  Mission Control). On the iPad and iPhone with this Sill.app: each gesture
+  in portrait and landscape, with the Desktop and while a window streams (the
+  Desktop first); which shortcut works (P2: that key 160 opens Mission
+  Control and 131 Apps when posted, that ⌃→ switches Spaces
+  rather than tiling the front window, and no "modifier keys still read"
+  line: right after a swipe left, right or down a tap selects with no
+  context menu and a two-finger scroll scrolls); no stray click, drag or
+  pointer jump with three fingers, placed slowly or beside a resting thumb,
+  and one- and two-finger strokes as before; a pinch led by the thumb is a
+  pinch; the reversal pairs, after a scroll too, and Mission Control closed
+  with the Mac's Esc coming back at the second swipe up; with the keyboard
+  up, no iPadOS undo or paste; the virtual display; the switch and a
+  relaunch; the Magic Keyboard trackpad (unchanged); remote; four fingers with
+  iPadOS's gestures on and off; this iPad against main's Sill.app (the update
+  note, nothing sent); VoiceOver (the footnote, the rows as actions).
+
 **Remote pacing (2026-09-27, branch `remote-pacing` from main at 150f781, with
 main at cf05a78, 676b362 and 2b38179 merged in, PR #34; PR A of
 docs/remote-bundle-plan.md, whose "Results: PR A" has every number).** Item 1
@@ -3406,7 +3540,10 @@ good.
   and `PressMenuItem`. `Pointer.swift` —
   `MacPointer` (kind 26, host → device: where the Mac's pointer is in the
   streamed frame while this device is not moving it, and `seen`, the input
-  messages the host had read on the connection).
+  messages the host had read on the connection). `Gesture.swift` —
+  `TrackpadGesture` (kind 28, device → host: a three- or four-finger gesture
+  by name, and its fingers), sent only to a host whose `WindowList.gestures`
+  is 1 or more.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -3505,6 +3642,16 @@ good.
   some device is sent it (`PointerWatch.samplerInterval`), and sends kind 26
   to every device not moving it; InputInjector notes each pointer and scroll
   post just before it and, on a synthetic host, posts nothing (`in.dry`).
+  Trackpad gestures: `GestureChords` (kind 28's gesture as the Mac's own
+  shortcut for its action, the first of its shortcuts that is on; the view
+  Sill's last gesture opened, which the opposite gesture closes; the log line;
+  the TEST ONLY `SILL_TEST_HOTKEYS` table; pure, `Tests/checks/gesture-chords`)
+  and `SymbolicHotKeys` (the Mac's Keyboard Shortcuts read through SkyLight's
+  two getters at each gesture, read-only); the coordinator takes four a second
+  per connection, waits for a switch in flight, queues the chord behind held
+  input, and on a host that does not advertise posts none (`in.gestureDry`);
+  `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
+  state table's flags from before it (`in.gestureModifiersLeft` if some stay).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -3598,7 +3745,9 @@ good.
   `--expect-tls-fail`, printing kinds 18, 20 and 22; the Mac's pointer with
   `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE@T`
   and `--input=JSON@T` (a literal kind 8), the input flags only to a
-  `--synthetic` host on this Mac (lsof and ps); the Mac's menus with
+  `--synthetic` host on this Mac (lsof and ps); trackpad gestures with
+  `--gesture=NAME[,FINGERS]@T` and `--raw28=JSON@T` (kind 28), likewise only to
+  a `--synthetic` host on this Mac; the Mac's menus with
   `--menus` (the subscription; each kind 24 on one line),
   `--fetch=ID[xN][,TITLE]@T` (the title the menu was shown under, by default
   the one listed for the id), `--press=ID[,TITLE]@T`, `--raw25=JSON@T`,
@@ -3753,7 +3902,12 @@ good.
   arrow while the Mac or another device moved it last, this device's own only
   for the portrait trackpad; a kind 26's freshness; the network queue's feed
   with a hand-over's carry-over; the key row keeping what shows; the portrait
-  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301). The
+  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301),
+  `TrackpadGestures` (which stroke on the glass goes silent and which arms,
+  the gesture decided as one of its three fingers lifts, and whether it goes
+  to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701) and, in
+  InputOverlay.swift, `StrokeObserver` (the recognizer on both surfaces that
+  feeds it every direct touch and takes none). The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers,
   what a session decided and the reconnect's, a rotation mid-run, the crease,
@@ -3828,16 +3982,26 @@ good.
   `compatibility`, `device-gate`, `dmg-layout` (Scripts/dmg-layout's
   `.DS_Store` and alias writer, against Finder's own layout of the file,
   make-dmg.sh's layout arguments and the SVG's size and edge),
-  `encoder-mailbox`, `encoder-slowstate`, `fence`, `goodbye`, `ledger`,
-  `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
-  MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`, `pairing-address`,
-  `phone-portrait`, `pointer-control`, `pointer-presence`, `pointer-watch`,
-  `policy`, `protocol`, `remote-rules`, `tour`, `update-policy` (the two encoder
-  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  `encoder-mailbox`, `encoder-slowstate`, `fence`, `gesture-chords`,
+  `gestures`, `goodbye`, `ledger`, `menu-state` (iOSClient's MacMenuState),
+  `menus` (the host's MenuFormat and MenuPolicy, and MacMenu.swift's JSON),
+  `message-reader`, `origin`, `pairing-address`, `phone-portrait`,
+  `pointer-control`, `pointer-presence`, `pointer-watch`, `policy`,
+  `protocol`, `remote-rules`, `tour`, `update-policy` (the two encoder checks
+  refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v]
+  [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
   file updates its check (and a mutant's pattern) in the same commit.
+- `Tests/touchrig/` — the touch rig (docs/trackpad-gestures-plan.md §9.2): the
+  real `TrackpadView.swift` and `InputOverlay.swift` in a scratch simulator
+  app, driven with synthesized touches (`TouchSynth`, private UIKit calls, test
+  only, never in the app), every event logged; `run.sh [--rev REV] [--switch
+  off] NAME` builds and runs it on a simulator of its own
+  (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
+  before, and a stroke made right after a gesture against the same stroke
+  made fresh.
 
 ## Build and run
 
@@ -3857,6 +4021,9 @@ swift run -c release SillHost --menu-selftest=TextEdit   # the menus a device wo
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
+python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
+SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
+SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
 Scripts/pacing/run.sh                   # remote pacing, this tree against origin/main, no encoder, all on loopback (~18 min; --full ~40; --list)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
@@ -4013,7 +4180,12 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay),
+scrolled to its end), `-SillSettingsScroll gestures` (the panel scrolled to its
+This iPad group; the mock Mac takes gestures in every case but `legacy`),
+`-Sill.trackpadGestures 0` (the device's Three-Finger Gestures off for one run,
+in the normal app too), `-SillVoiceOver 1` (that group as with VoiceOver on:
+its footnote says the rows do the gestures), `-SillScanOverlay 1` (Pair This
+iPad…'s overlay),
 `-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
 draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip), and in
@@ -4050,7 +4222,8 @@ what happened), `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`: input
 with no finger, t seconds after the session's first window list: `down`, `pad
 DX,DY`, `lift` and `click` on the portrait pad, `tap X,Y` on the stream at a
 frame fraction, `key USAGE` a hardware key, `row USAGE` a key of the portrait
-key row; the console's "input script: …" and "pointer: …" lines say what
+key row, `gesture NAME[,FINGERS]` a three-finger gesture through
+`StreamClient.sendGesture`; the console's "input script: …" and "pointer: …" lines say what
 happened; it runs only when the session was dialled by `-SillConnect` to a
 loopback address, `127.0.0.1:P`, `::1:P` or `localhost:P`, and the host's first
 window list has no version: Sill.app's always has, and would post the input to
@@ -4109,8 +4282,8 @@ device keeps working with Macs from the first public build on, or each says why
 - Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
   (docs/home-pairing-plan.md, branch `home-pairing`, in progress; it ships before 1.0, Noah
   2026-09-25), not today's plain-TCP `_sill._tcp` door, which only development builds and the CLI
-  keep; the 14-byte header; kinds 0–27 and their payloads (HEVC with ParameterSets; the JSON of
-  Switcher, Input, Viewport, HostSettings, Remote, Compatibility, Pointer and MacMenu); the ping
+  keep; the 14-byte header; kinds 0–28 and their payloads (HEVC with ParameterSets; the JSON of
+  Switcher, Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu and Gesture); the ping
   echo; a kind 16 within 2 s of the first window list; kind 22's `reason`, `message` and
   `reconnect`; the Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3): a kind 27
   without an id is the device's subscription, and only a subscriber is served (another connection's
@@ -4121,7 +4294,9 @@ device keeps working with Macs from the first public build on, or each says why
   tokens come back in `answering`; the fields as they are (MacMenu's `version`, `app`, `bundleID`,
   `menus`, `answering`, `menu`, `items`, `more`, `pressed`, `stale`, `note`; MacMenuItem's `id`,
   `title`, `separator`, `enabled`, `mark`, `key`, `submenu`; FetchMenu's and PressMenuItem's
-  `version`, `id`, `title`, `token`).
+  `version`, `id`, `title`, `token`); a trackpad gesture (kind 28, Gesture.swift) goes only to a
+  host whose window list says `gestures` 1 or more, as one of its six names with `fingers`, and a
+  later generation of gestures says 2 and goes only to a host that says so.
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new

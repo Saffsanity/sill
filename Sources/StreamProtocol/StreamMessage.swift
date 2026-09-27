@@ -62,8 +62,13 @@ public enum StreamMessageKind: UInt8 {
                              // with the title it showed for that menu; without an id, the top level, and a request for
                              // every later one on this connection. Answered to that device alone, from a read of at
                              // most 1 s ago
-    // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and 28, held for the
-    // trackpad gesture (docs/trackpad-gestures-plan.md). Older readers map it to `.unknown` and skip it.
+    // Trackpad gestures (Gesture.swift), after the menus' 24, 25 and 27. Older hosts map it to `.unknown` and
+    // skip it.
+    case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
+                             // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
+                             // Apps…). Only to a host whose window list says `gestures` 1 or more
+    // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28.
+    // Older readers map it to `.unknown` and skip it.
     case audio = 29          // host → device: AudioMessage — the sound of what streams: a format (JSON AudioFormat),
                              // then packets (binary AudioPackets). Only to a device whose hello lists the codec
                              // (Hello.audio), and only while Send Audio is on
