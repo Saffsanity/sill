@@ -18,10 +18,17 @@ enum TourTopic: String, CaseIterable, Comparable {
     private var rank: Int { TourTopic.allCases.firstIndex(of: self) ?? 0 }
 }
 
-/// The two layouts the tour knows: the bar over the picture (the Duo's inner and outer displays on
-/// their side, phones and iPads held sideways) and the laptop layout (held upright).
+/// The layouts the tour knows: the bar over the picture (the Duo's inner and outer displays on
+/// their side, phones and iPads held sideways); the laptop layout's halves held upright (the Duo's
+/// inner display, an iPad, an iPad window narrower than 600 pt), the window bar and the keys under
+/// the picture's half; and a phone held upright (`PhonePortraitLayout`: the picture in a 16:10 pane
+/// at the top, then row 1 with Apps, Aa, Keyboard, Desktop and Settings, the thumbnails, six keys
+/// and the trackpad; the Duo's outer display upright too).
 enum TourLayout: String, Hashable {
-    case landscape, portrait
+    case landscape, portrait, phone
+
+    /// Held upright: the halves or a phone's rows, both with the keys and the trackpad.
+    var upright: Bool { self != .landscape }
 }
 
 /// What a step lights: each reported by its view as a frame in the stream screen's space.
@@ -177,17 +184,19 @@ enum TourPolicy {
         return voiceOver ? all.filter { $0 != .touch } : all
     }
 
-    /// The steps only this layout has: all a turn offers. Portrait: the laptop half; landscape: none.
+    /// The steps only this layout has: all a turn offers. Upright: the keys and the trackpad;
+    /// sideways: none.
     static func only(_ layout: TourLayout) -> [TourTopic] {
-        layout == .portrait ? [.laptop] : []
+        layout.upright ? [.laptop] : []
     }
 
-    /// What each step lights. Sideways the Keyboard button is in the bar; upright the keyboard is a
-    /// cap in the key row, part of `keys`.
+    /// What each step lights. Sideways and on a phone upright the Keyboard button is in the bar (a
+    /// phone's row 1, over the thumbnails); in the halves the keyboard is a cap in the key row, part
+    /// of `keys`.
     static func targets(_ topic: TourTopic, _ layout: TourLayout) -> [TourTarget] {
         switch topic {
         case .touch: return [.stream]
-        case .bar: return layout == .landscape ? [.strip, .textSize, .keyboard] : [.strip, .textSize]
+        case .bar: return layout == .portrait ? [.strip, .textSize] : [.strip, .textSize, .keyboard]
         case .settings: return [.settings]
         case .laptop: return [.keys, .trackpad]
         }
@@ -363,6 +372,12 @@ enum TourPolicy {
     ///   down only when its targets begin within 48 pt and no crease lies between. Too tall for
     ///   that: it grows toward the top margin, then down to 12 pt above its targets (with a crease,
     ///   the picture's half), the same tail rule, its words scrolling past that.
+    /// - A phone held upright has a short picture over its controls, whose rows sit in the middle
+    ///   of the screen: a card too tall for the picture's pane stands 12 pt above its targets,
+    ///   growing toward the top margin (from the top margin down, it would half cover a row), and
+    ///   one that does not fit above them goes 12 pt under them when it fits there, or when the
+    ///   room there is the larger (and holds a card), with a tail up, as sideways. The laptop
+    ///   card's targets reach the bottom, so it stays above them.
     /// - A card never covers its own step's targets, so the lit control stays in view at every text
     ///   size; only a room beside them smaller than `minimumRoom` makes it grow over them (toward
     ///   the top sideways, toward the bottom margin upright), with no tail, `coversTargets`.
@@ -395,7 +410,7 @@ enum TourPolicy {
                 let y = min(max(stream.midY - h / 2, top), lowest - h)
                 return TourPlacement(card: CGRect(x: cardX, y: y, width: w, height: h), tail: nil)
             }
-            let reach = layout == .portrait && fold == nil ? bottom : lowest
+            let reach = layout.upright && fold == nil ? bottom : lowest
             return TourPlacement(card: CGRect(x: cardX, y: top, width: w, height: min(h, reach - top)), tail: nil)
         }
 
@@ -427,11 +442,23 @@ enum TourPolicy {
             return TourPlacement(card: rect, tail: tailDown(rect))
         }
         // Too tall: from the top margin down to 12 pt above its targets (with a crease, the
-        // picture's half); only a room too small for a card makes it grow toward the bottom
-        // margin, over them.
+        // picture's half); on a phone under its targets when it fits there, or when that room is
+        // the larger; only a room too small for a card makes it grow toward the bottom margin, over
+        // them.
         let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom
+        if layout == .phone && h > above - top {
+            let under = t.maxY + gap
+            let room = bottom - under
+            if h <= room || (room > above - top && room >= minimumRoom) {
+                let rect = CGRect(x: cardX, y: under, width: w, height: min(h, room))
+                return TourPlacement(card: rect, tail: TourTail(edge: .up, x: tip(rect, t.midX)))
+            }
+        }
         if fold != nil || h <= above - top || above - top >= minimumRoom {
-            let rect = CGRect(x: cardX, y: top, width: w, height: min(h, above - top))
+            // A phone's card stands on its targets; the halves' grows from the top margin, over the
+            // picture, which is the most room there is.
+            let y = layout == .phone ? max(top, above - h) : top
+            let rect = CGRect(x: cardX, y: y, width: w, height: min(h, above - top))
             return TourPlacement(card: rect, tail: tailDown(rect))
         }
         let rect = CGRect(x: cardX, y: top, width: w, height: min(h, bottom - top))
@@ -468,9 +495,13 @@ enum TourPolicy {
                         row("contextualmenu.and.cursorarrow", [strong("Touch and hold"), plain(" to right-click.")]),
                         row("hand.draw", [strong("Drag"), plain(" to scroll.")])]
             if iPad { rows.append(row("applepencil", [strong("Apple Pencil"), plain(" works as a mouse.")])) }
-            return TourCopy(title: "Tap, Hold and Drag", subtitle: "What you do here happens on \(mac).", rows: rows,
-                            hint: layout == .landscape ? "The picture of \(mac) fills the screen below the bar."
-                                                       : "The picture of \(mac) fills the top half of the screen.")
+            let hint: String
+            switch layout {
+            case .landscape: hint = "The picture of \(mac) fills the screen below the bar."
+            case .portrait: hint = "The picture of \(mac) fills the top half of the screen."
+            case .phone: hint = "The picture of \(mac) is at the top of the screen."
+            }
+            return TourCopy(title: "Tap, Hold and Drag", subtitle: "What you do here happens on \(mac).", rows: rows, hint: hint)
         case .bar:
             var rows: [TourRow]
             // Aa sizes a window, never the Desktop (the Mac ignores a viewport's scale for it), and
@@ -482,16 +513,24 @@ enum TourPolicy {
                 rows = [row("hand.point.up.left", [strong("Touch and hold"), plain(" a window to close, minimize or go full screen. Keep holding and drag to move it.")]),
                         row("textformat.size", [strong("Aa"), plain(": touch it and slide to make a window’s text larger or smaller.")])]
             }
-            if layout == .landscape { rows.append(keyboardRow) }
-            return TourCopy(title: "Windows and Text Size", subtitle: nil, rows: rows,
-                            hint: layout == .landscape ? "In the bar at the top, after Apps." : "In the bar below the picture, after Apps.")
+            // The Keyboard button is the bar's sideways and a phone's upright; the halves' keyboard
+            // is a cap, which the laptop card names.
+            if layout != .portrait { rows.append(keyboardRow) }
+            let hint: String
+            switch layout {
+            case .landscape: hint = "In the bar at the top, after Apps."
+            case .portrait: hint = "In the bar below the picture, after Apps."
+            case .phone: hint = "Under the picture: Aa and Keyboard in the first row, the windows in the second."
+            }
+            return TourCopy(title: "Windows and Text Size", subtitle: nil, rows: rows, hint: hint)
         case .settings:
             var rows = [row("xmark.circle", [strong("Disconnect"), plain(" is at the bottom of Settings.")]),
                         row("questionmark.circle", [strong("Take the Tour"), plain(" is there too, to see this again.")])]
             if layout == .landscape {
                 rows.append(row(iPad ? "ipad" : "iphone", [strong("Hold your \(device) upright"), plain(" for a trackpad and keys.")]))
             }
-            return TourCopy(title: "Settings", subtitle: nil, rows: rows, hint: "The last button in the bar.")
+            return TourCopy(title: "Settings", subtitle: nil, rows: rows,
+                            hint: layout == .phone ? "The last button in the row under the picture." : "The last button in the bar.")
         case .laptop:
             var rows: [TourRow]
             if voiceOver {
@@ -501,13 +540,17 @@ enum TourPolicy {
                 rows = [row("command", [strong("cmd, opt, ctrl and shift"), plain(" stay on for the next key or trackpad click: tap cmd, then C, to copy.")],
                             spoken: "Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.")]
             }
-            rows.append(row("keyboard", [strong("The keyboard key"), plain(" types on \(mac), on screen or with a hardware keyboard.")]))
+            // A phone's keyboard is row 1's button, which the bar card names; the halves' is a cap.
+            if layout != .phone {
+                rows.append(row("keyboard", [strong("The keyboard key"), plain(" types on \(mac), on screen or with a hardware keyboard.")]))
+            }
             if !voiceOver {
                 rows.append(row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" on the trackpad to right-click.")]))
                 rows.append(row("hand.draw", [strong("Touch and hold"), plain(" the trackpad, "), strong("then drag"), plain(", to move a window or select text.")]))
             }
             return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? "Upright, Sill adds keys and a trackpad." : nil,
-                            rows: rows, hint: "Below the bar: the row of keys, then the trackpad.")
+                            rows: rows, hint: layout == .phone ? "Under the windows: the row of keys, then the trackpad."
+                                                               : "Below the bar: the row of keys, then the trackpad.")
         }
     }
 

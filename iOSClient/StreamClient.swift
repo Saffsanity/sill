@@ -253,7 +253,7 @@ final class StreamClient: ObservableObject {
         tourSession = TourPolicy.nextSession(after: tourSession, reconnected: reconnected)
         #if DEBUG
         if tourSession.decided {
-            let layouts = [TourLayout.landscape, .portrait].filter { tourSession.offered.contains($0) }.map(\.rawValue)
+            let layouts = [TourLayout.landscape, .portrait, .phone].filter { tourSession.offered.contains($0) }.map(\.rawValue)
             print("tour: the automatic reconnect's session keeps the last one's decision (decided in: \(layouts.joined(separator: ", ")))")
         }
         #endif

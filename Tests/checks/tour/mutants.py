@@ -37,7 +37,8 @@ MUTANTS = [
     ("a tail on a card over its targets", "let rect = CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y))\n            return TourPlacement(card: rect, tail: nil,", "let rect = CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y))\n            return TourPlacement(card: rect, tail: TourTail(edge: .up, x: t.midX),"),
     ("a card that never stops at the bottom margin (it runs off the screen)", "let rect = CGRect(x: cardX, y: below, width: w, height: min(h, room))", "let rect = CGRect(x: cardX, y: below, width: w, height: h)"),
     ("a landscape card over its targets while the room below holds it", "if h <= room || room >= minimumRoom {", "if h <= room {"),
-    ("a scrolling card loses its tail", "return TourPlacement(card: rect, tail: TourTail(edge: .up, x: tip(rect, t.midX)))", "return TourPlacement(card: rect, tail: h <= room ? TourTail(edge: .up, x: tip(rect, t.midX)) : nil)"),
+    ("a scrolling card loses its tail", "let rect = CGRect(x: cardX, y: below, width: w, height: min(h, room))\n                return TourPlacement(card: rect, tail: TourTail(edge: .up, x: tip(rect, t.midX)))", "let rect = CGRect(x: cardX, y: below, width: w, height: min(h, room))\n                return TourPlacement(card: rect, tail: h <= room ? TourTail(edge: .up, x: tip(rect, t.midX)) : nil)"),
+    ("a phone's card under its targets without its tail", "let rect = CGRect(x: cardX, y: under, width: w, height: min(h, room))\n                return TourPlacement(card: rect, tail: TourTail(edge: .up, x: tip(rect, t.midX)))", "let rect = CGRect(x: cardX, y: under, width: w, height: min(h, room))\n                return TourPlacement(card: rect, tail: nil)"),
     ("an upright card grown past its targets' top", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom", "let above = fold == nil ? bottom : pictureBottom"),
     ("an upright card over its targets while the room above holds it", "if fold != nil || h <= above - top || above - top >= minimumRoom {", "if fold != nil || h <= above - top {"),
     ("an upright card over its targets while it fits above them", "if fold != nil || h <= above - top || above - top >= minimumRoom {", "if fold != nil || above - top >= minimumRoom {"),
@@ -49,6 +50,17 @@ MUTANTS = [
     ("a landscape card above its targets while it fits below", "let below = t.maxY + gap", "let below = t.minY - gap - h"),
     ("the home indicator ignored", "let bottom = max(top, screen.height - margin - max(0, bottomInset))", "let bottom = max(top, screen.height - margin)"),
     ("an upright card past the crease when it grows", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : bottom"),
+    # A phone held upright.
+    ("a phone's bar without its Keyboard", "case .bar: return layout == .portrait ? [.strip, .textSize] : [.strip, .textSize, .keyboard]", "case .bar: return layout != .landscape ? [.strip, .textSize] : [.strip, .textSize, .keyboard]"),
+    ("the laptop card not owed at a turn on a phone", "layout.upright ? [.laptop] : []", "layout == .portrait ? [.laptop] : []"),
+    ("a phone's picture card not growing past the picture", "let reach = layout.upright && fold == nil ? bottom : lowest", "let reach = layout == .portrait && fold == nil ? bottom : lowest"),
+    ("a phone's card never under its targets", "if layout == .phone && h > above - top {", "if false && h > above - top {"),
+    ("a phone's card under its targets while it fits above them", "if layout == .phone && h > above - top {", "if layout == .phone {"),
+    ("the halves' card under its targets too", "if layout == .phone && h > above - top {", "if layout.upright && h > above - top {"),
+    ("a phone's card under a room too small for a card", "if h <= room || (room > above - top && room >= minimumRoom) {", "if h <= room || room > above - top {"),
+    ("a phone's grown card from the top margin, half over a row", "let y = layout == .phone ? max(top, above - h) : top", "let y = top"),
+    ("the halves' grown card standing on its targets", "let y = layout == .phone ? max(top, above - h) : top", "let y = max(top, above - h)"),
+    ("a phone's card under a smaller room", "if h <= room || (room > above - top && room >= minimumRoom) {", "if h <= room || room >= minimumRoom {"),
     # The words.
     ("the Pencil row on iPhone", "if iPad { rows.append(row(\"applepencil\"", "if true { rows.append(row(\"applepencil\""),
     ("the upright row in portrait", "if layout == .landscape {\n                rows.append(row(iPad ? \"ipad\" : \"iphone\"", "if true {\n                rows.append(row(iPad ? \"ipad\" : \"iphone\""),
@@ -56,6 +68,9 @@ MUTANTS = [
     ("the trackpad's rows under VoiceOver", "if !voiceOver {\n                rows.append(row(\"cursorarrow.click.2\"", "if true {\n                rows.append(row(\"cursorarrow.click.2\""),
     ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? \"Upright, Sill adds keys and a trackpad.\" : nil", "subtitle: \"Upright, Sill adds keys and a trackpad.\""),
     ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
+    ("no Keyboard row on a phone's bar card", "if layout != .portrait { rows.append(keyboardRow) }", "if layout == .landscape { rows.append(keyboardRow) }"),
+    ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
+    ("a phone's laptop hint as the halves'", "rows: rows, hint: layout == .phone ? \"Under the windows", "rows: rows, hint: layout == .portrait ? \"Under the windows"),
     ("Aa not said to be a window's", "plain(\": touch it and slide to make a window’s text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
     ("the caps not spoken by name", "spoken: \"Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.\")", "spoken: nil)"),
 ]
@@ -67,7 +82,8 @@ for name, old, new in MUTANTS:
     with tempfile.TemporaryDirectory() as t:
         mf = os.path.join(t, "TourPolicy.swift"); open(mf, "w").write(src.replace(old, new, 1))
         exe = os.path.join(t, "c")
-        r = subprocess.run(["swiftc", "-O", mf, os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
+        r = subprocess.run(["swiftc", "-O", mf, os.path.join(WT, "iOSClient/PhonePortraitLayout.swift"), os.path.join(HERE, "main.swift"),
+                            "-o", exe], capture_output=True, text=True)
         if not os.path.exists(exe): print(f"{name}: did not compile ({r.stderr.strip().splitlines()[:1]})"); continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)
         failed = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]

@@ -179,7 +179,8 @@ struct StreamScreen: View {
         // behind each one.
         GeometryReader { geo in
             let duo = DuoLayout.of(geo.size)
-            let layout: TourLayout = duo == .innerLandscape || duo == .outerLandscape ? .landscape : .portrait
+            let layout: TourLayout = duo == .innerLandscape || duo == .outerLandscape ? .landscape
+                : (DuoLayout.drawsPhone(geo.size) ? .phone : .portrait)
             ZStack {
                 Group {
                     switch duo {

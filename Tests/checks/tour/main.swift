@@ -4,15 +4,16 @@ import CoreGraphics
 // steps and targets per layout, what is owed, the rule of the automatic tour at every boundary,
 // memory, runs, a rotation mid-run, the crease, the card's width and place (pinned at the Duo's four
 // sizes and the iPhone SE's two, against an oracle written from the plan's words, and properties
-// over a grid of screens and card heights), and every string. Compiled with the file as it is:
-//   swiftc -O iOSClient/TourPolicy.swift Tests/checks/tour/main.swift -o .build/checks/tour/check
+// over a grid of screens and card heights; a phone held upright with PhonePortraitLayout's own
+// rects), and every string. Compiled with the files as they are:
+//   swiftc -O iOSClient/TourPolicy.swift iOSClient/PhonePortraitLayout.swift Tests/checks/tour/main.swift -o .build/checks/tour/check
 var failures = 0, checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
     checks += 1
     if !ok { failures += 1; print("FAIL (line \(line)): \(what())") }
 }
 
-let L = TourLayout.landscape, P = TourLayout.portrait
+let L = TourLayout.landscape, P = TourLayout.portrait, F = TourLayout.phone
 let all: [TourTopic] = [.touch, .bar, .settings, .laptop]
 
 // MARK: - Steps and targets
@@ -30,6 +31,14 @@ check(TourPolicy.targets(.bar, P) == [.strip, .textSize], "portrait bar: the str
 check(TourPolicy.targets(.settings, L) == [.settings] && TourPolicy.targets(.settings, P) == [.settings], "settings lights its button")
 check(TourPolicy.targets(.laptop, P) == [.keys, .trackpad], "laptop: the keys, then the trackpad")
 check(TourTarget.allCases.count == 7, "seven targets")
+// A phone held upright (PhonePortraitLayout): the halves' four steps; its Keyboard button is in
+// row 1, over the thumbnails, so `bar` lights it, as sideways.
+check(TourPolicy.steps(F, voiceOver: false) == [.touch, .bar, .settings, .laptop] && TourPolicy.steps(F, voiceOver: true) == [.bar, .settings, .laptop],
+      "a phone upright: four cards, three under VoiceOver")
+check(TourPolicy.only(F) == [.laptop] && F.upright && P.upright && !L.upright, "only(): the keys and the trackpad are upright's alone")
+check(TourPolicy.targets(.bar, F) == [.strip, .textSize, .keyboard], "a phone's bar: the strip, Aa and row 1's Keyboard")
+check(TourPolicy.targets(.touch, F) == [.stream] && TourPolicy.targets(.settings, F) == [.settings] && TourPolicy.targets(.laptop, F) == [.keys, .trackpad],
+      "a phone's other targets")
 
 // MARK: - Memory and what is owed
 
@@ -121,6 +130,11 @@ check(decide(moment(now: 11, decided: true), P) == .show([.laptop]), "then the l
 check(decide(moment(now: 11, decided: true, activity: 7), P) == .show([.laptop]), "a touch before its picture does not count")
 check(decide(moment(now: 11, decided: true, activity: 10.2), P) == .pass(.used), "a touch after it does")
 check(decide(moment(now: 11, decided: true), L) == .pass(.nothingOwed), "a reconnect sideways: nothing new")
+// A phone held upright follows the same rule as the halves.
+check(decide(moment(now: 11), F) == .show(all), "a phone upright: all four")
+check(decide(moment(now: 40, layoutAt: 39, decided: true), F) == .show([.laptop]), "a turn upright on a phone: laptop alone")
+check(decide(moment(now: 40, layoutAt: 39, decided: true), F, sideways) == .show([.laptop]), "the upright card on a phone after a tour sideways")
+check(decide(moment(now: 11), F, TourMemory(seen: [.touch, .bar, .settings, .laptop])) == .pass(.nothingOwed), "a phone: all seen")
 
 // MARK: - Sessions
 
@@ -195,11 +209,10 @@ check(TourPolicy.carry(run([.bar, .settings, .laptop], at: .laptop, passed: [.ba
       "VoiceOver, laptop turned sideways: ends")
 check(TourPolicy.carry(run([.bar, .settings], at: .bar, replay: true), to: P, voiceOver: true, memory: fresh) == run([.bar, .settings, .laptop], at: .bar, replay: true),
       "VoiceOver replay turned upright")
-for layout in [L, P] {
+for (layout, other) in [(L, P), (P, L), (L, F), (F, L)] {
     for voiceOver in [false, true] {
         for step in TourPolicy.steps(layout, voiceOver: voiceOver) {
             let before = TourPolicy.replay(layout, voiceOver: voiceOver, from: step)!
-            let other: TourLayout = layout == L ? P : L
             let after = TourPolicy.carry(before, to: other, voiceOver: voiceOver, memory: fresh)
             if TourPolicy.steps(other, voiceOver: voiceOver).contains(step) {
                 check(after?.at == step && after?.steps == TourPolicy.steps(other, voiceOver: voiceOver), "\(step) keeps its card turning \(layout.rawValue) → \(other.rawValue)")
@@ -314,6 +327,30 @@ check(seSide.layout == L && seSide.stream == CGRect(x: 8, y: 86, width: 651, hei
 check(seUp.layout == P && seUp.stream == CGRect(x: 8, y: 8, width: 359, height: 318) && seUp.targets[.strip]!.width == 75
       && seUp.targets[.keys]!.minY == 416 && seUp.targets[.trackpad]! == CGRect(x: 14, y: 522, width: 347, height: 129), "375×667 as the table")
 
+/// A phone held upright: PhonePortraitLayout's rects, where PortraitStreamScreen places its views and
+/// so where they report themselves: the picture's pane, row 1's Aa, Keyboard and Settings, the strip
+/// as its thumbnails' band (the halo's 5 pt above, the badge's 6 below: WindowStrip.tourBand at the
+/// strip's 6 pt pad), the six caps and the trackpad.
+func phoneModel(_ w: CGFloat, _ h: CGFloat) -> Screen {
+    let l = PhonePortraitLayout(size: CGSize(width: w, height: h))
+    let pad = (PhonePortraitLayout.stripHeight - 50) / 2
+    let band = CGRect(x: l.strip.minX, y: l.strip.minY + max(0, pad - 5), width: l.strip.width,
+                      height: l.strip.height - max(0, pad - 5) - max(0, pad - 6))
+    return Screen(size: l.size, layout: F, stream: l.picture, targets: [
+        .stream: l.picture, .strip: band,
+        .textSize: l.buttons[PhonePortraitLayout.Button.textSize.rawValue],
+        .keyboard: l.buttons[PhonePortraitLayout.Button.keyboard.rawValue],
+        .settings: l.buttons[PhonePortraitLayout.Button.settings.rawValue],
+        .keys: l.keys, .trackpad: l.trackpad])
+}
+// The phones' stream screens upright (their screens less the top inset; the iPhone SE's status bar is
+// 20 pt), and the Duo's outer display, which an iPhone Duo draws as a phone.
+let proMax = phoneModel(440, 894), pro = phoneModel(402, 812), seTall = phoneModel(375, 647), duoPhone = phoneModel(500, 710)
+check(proMax.stream == CGRect(x: 8, y: 8, width: 424, height: 265) && proMax.targets[.textSize]! == CGRect(x: 98, y: 297, width: 76, height: 50)
+      && proMax.targets[.strip]! == CGRect(x: 6, y: 364, width: 428, height: 61) && proMax.targets[.keys]!.minY == 435
+      && proMax.targets[.trackpad]! == CGRect(x: 14, y: 489, width: 412, height: 389), "the 18 Pro Max's rows: \(proMax.targets)")
+check(seTall.stream.height == 224 && seTall.targets[.settings]!.minY == 256 && seTall.targets[.keys]!.minY == 394, "the SE's rows")
+
 // MARK: - Where the card goes: an oracle from the plan's words
 
 /// §6.3 in its own words, to hold `place` to them.
@@ -325,7 +362,7 @@ func oracle(_ s: Screen, _ topic: TourTopic, height h: CGFloat, width w: CGFloat
     if topic == .touch {
         let lowest = s.layout == L ? bottom : halfBottom
         if h <= lowest - top { return TourPlacement(card: CGRect(x: centred(s.stream.midX), y: max(top, min(s.stream.midY - h / 2, lowest - h)), width: w, height: h), tail: nil) }
-        let reach = s.layout == P && crease == nil ? bottom : lowest
+        let reach = s.layout != L && crease == nil ? bottom : lowest
         return TourPlacement(card: CGRect(x: centred(s.stream.midX), y: top, width: w, height: min(h, reach - top)), tail: nil)
     }
     let t = s.union(topic)!
@@ -352,8 +389,18 @@ func oracle(_ s: Screen, _ topic: TourTopic, height h: CGFloat, width w: CGFloat
     // margin, only when the room above them is under 200 pt and there is no crease.
     if halfBottom - h >= top { let card = CGRect(x: x, y: halfBottom - h, width: w, height: h); return TourPlacement(card: card, tail: down(card)) }
     let above = crease == nil ? min(bottom, max(top, t.minY - 12)) : halfBottom
+    // A phone's controls sit mid-screen under a short picture: too tall above them, a card goes 12 pt
+    // under them if it fits there, or if that room is the larger and holds a card, its tail up.
+    if s.layout == F && h > above - top {
+        let room = bottom - (t.maxY + 12)
+        if h <= room || (room > above - top && room >= 200) {
+            return TourPlacement(card: CGRect(x: x, y: t.maxY + 12, width: w, height: min(h, room)), tail: TourTail(edge: .up, x: tip))
+        }
+    }
     if crease != nil || h <= above - top || above - top >= 200 {
-        let card = CGRect(x: x, y: top, width: w, height: min(h, above - top))
+        // A phone's card stands 12 pt over its targets, growing toward the top; the halves' hangs
+        // from the top margin.
+        let card = CGRect(x: x, y: s.layout == F ? max(top, above - h) : top, width: w, height: min(h, above - top))
         return TourPlacement(card: card, tail: down(card))
     }
     let card = CGRect(x: x, y: top, width: w, height: min(h, bottom - top))
@@ -408,6 +455,38 @@ pinned(seUp, .bar, 230, CGRect(x: 16, y: 84, width: 343, height: 230), tail: Tou
 pinned(seUp, .settings, 200, CGRect(x: 16, y: 114, width: 343, height: 200), tail: TourTail(edge: .down, x: 331))
 pinned(seUp, .laptop, 330, CGRect(x: 16, y: 16, width: 343, height: 330), tail: nil)
 pinned(seUp, .laptop, 700, CGRect(x: 16, y: 16, width: 343, height: 388), tail: TourTail(edge: .down, x: 187.5))   // never over the keys
+// A phone held upright (the 18 Pro Max's stream screen, 440×894): a card that fits in the picture's
+// short pane sits there with its tail down at row 1; the bar card, too tall for the room above the
+// rows at the default size (273 pt against 269), goes 12 pt under the thumbnails with its tail up,
+// and Settings too once it is taller than the room above it; the laptop card, too tall for the
+// picture's pane, stands 12 pt over the keys, over rows 1 and 2 (not half of row 1).
+pinned(proMax, .touch, 215, CGRect(x: 40, y: 33, width: 360, height: 215), tail: nil)
+pinned(proMax, .bar, 230, CGRect(x: 40, y: 31, width: 360, height: 230), tail: TourTail(edge: .down, x: 220))
+pinned(proMax, .bar, 273, CGRect(x: 40, y: 437, width: 360, height: 273), tail: TourTail(edge: .up, x: 220))
+pinned(proMax, .bar, 600, CGRect(x: 40, y: 437, width: 360, height: 441), tail: TourTail(edge: .up, x: 220))
+pinned(proMax, .settings, 160, CGRect(x: 64, y: 101, width: 360, height: 160), tail: TourTail(edge: .down, x: 388))
+pinned(proMax, .settings, 400, CGRect(x: 64, y: 359, width: 360, height: 400), tail: TourTail(edge: .up, x: 388))
+pinned(proMax, .laptop, 290, CGRect(x: 40, y: 133, width: 360, height: 290), tail: TourTail(edge: .down, x: 220))
+pinned(proMax, .laptop, 500, CGRect(x: 40, y: 16, width: 360, height: 407), tail: TourTail(edge: .down, x: 220))
+// The 18 Pro (402×812) and the iPhone SE (375×647): the bar card under the thumbnails, scrolling on
+// the SE, where both rooms are short (228 above, 235 under); the laptop card stands over the keys.
+pinned(pro, .bar, 273, CGRect(x: 21, y: 413, width: 360, height: 273), tail: TourTail(edge: .up, x: 201))
+pinned(seTall, .bar, 230, CGRect(x: 16, y: 396, width: 343, height: 230), tail: TourTail(edge: .up, x: 187.5))
+pinned(seTall, .bar, 320, CGRect(x: 16, y: 396, width: 343, height: 235), tail: TourTail(edge: .up, x: 187.5))
+pinned(seTall, .settings, 230, CGRect(x: 16, y: 318, width: 343, height: 230), tail: TourTail(edge: .up, x: 329.5))
+pinned(seTall, .laptop, 330, CGRect(x: 16, y: 52, width: 343, height: 330), tail: TourTail(edge: .down, x: 187.5))
+// The Duo's outer display as a phone (500×710): a taller picture; a bar card too tall for the room
+// above the rows (306) but taller still than the 220 under them stays above and scrolls.
+// The halves never put a card under their bar, even where the room there is the larger (an
+// upright window with its bar high up: only a phone does).
+let highBar = TourPolicy.place(card: CGSize(width: 360, height: 300), targets: CGRect(x: 100, y: 150, width: 300, height: 50), isStream: false,
+                               screen: CGSize(width: 500, height: 900), layout: P, stream: CGRect(x: 8, y: 8, width: 484, height: 100), bottomInset: 0)
+check(highBar == TourPlacement(card: CGRect(x: 70, y: 16, width: 360, height: 300), tail: nil, coversTargets: true), "the halves: never under the bar: \(highBar)")
+check(TourPolicy.place(card: CGSize(width: 360, height: 300), targets: CGRect(x: 100, y: 150, width: 300, height: 50), isStream: false,
+                       screen: CGSize(width: 500, height: 900), layout: F, stream: CGRect(x: 8, y: 8, width: 484, height: 100), bottomInset: 0)
+      == TourPlacement(card: CGRect(x: 70, y: 212, width: 360, height: 300), tail: TourTail(edge: .up, x: 250)), "a phone there: under its targets")
+pinned(duoPhone, .bar, 273, CGRect(x: 70, y: 25, width: 360, height: 273), tail: TourTail(edge: .down, x: 250))
+pinned(duoPhone, .bar, 320, CGRect(x: 70, y: 16, width: 360, height: 306), tail: TourTail(edge: .down, x: 250))
 // A window too small for a card beside its targets (under 200 pt of room): only then over them, with
 // no tail, and the dim then has no cutout or ring (coversTargets).
 let tinySide = model(600, 290), tinyUp = model(330, 420)
@@ -435,71 +514,90 @@ var grid = 0
 let widths: [CGFloat] = [320, 375, 414, 440, 500, 560, 600, 620, 667, 700, 710, 739, 744, 820, 834, 956, 1000, 1133, 1180, 1376]
 let heights: [CGFloat] = [320, 375, 440, 500, 519, 520, 559, 560, 600, 667, 710, 744, 820, 894, 956, 999, 1000, 1100, 1133, 1376]
 let cardHeights: [CGFloat] = [120, 230, 330, 450, 620, 900]
+// Every screen of the grid, and at the sizes a phone has upright (under 600 pt wide, taller than
+// wide) its own arrangement too.
+var gridScreens: [Screen] = []
 for w0 in widths {
     for h0 in heights {
-        let s = model(w0, h0)
-        for ax in [false, true] {
-            let w = TourPolicy.width(screen: s.size, layout: s.layout, accessibilityText: ax)
-            for topic in TourPolicy.steps(s.layout, voiceOver: false) {
-                for h in cardHeights {
-                    for inset: CGFloat in [0, 21] {
-                        grid += 1
-                        let p = place(s, topic, height: h, width: w, inset: inset)
-                        let o = oracle(s, topic, height: h, width: w, inset: inset)
-                        let label = "\(s.size) \(topic) ax \(ax) h \(h) inset \(inset)"
-                        guard p == o else { check(false, "\(label): \(p) against the oracle's \(o)"); continue }
-                        let c = p.card
-                        let bottom = s.size.height - 16 - inset
-                        let crease = TourPolicy.crease(s.size)
-                        let t = topic == .touch ? s.stream : s.union(topic)!
-                        let lit = t.insetBy(dx: -4, dy: -4)
-                        // Inside the margins, as tall as it wants or as the room allows.
-                        if !(c.minX >= 16 - 0.001 && c.maxX <= s.size.width - 16 + 0.001 && c.minY >= 16 && c.maxY <= bottom + 0.001 && c.height <= h) {
-                            check(false, "\(label): \(c) outside the margins"); continue
-                        }
-                        if let crease, c.maxY > crease || (p.tail?.edge == .down && c.maxY + 7 > crease) {
-                            check(false, "\(label): \(c) crosses the crease"); continue
-                        }
-                        if let tail = p.tail {
-                            if c.intersects(lit) { check(false, "\(label): a tail on a card over its targets"); continue }
-                            if topic == .touch { check(false, "\(label): a tail on the picture's card"); continue }
-                            if tail.x < c.minX + 28 - 0.001 || tail.x > c.maxX - 28 + 0.001 { check(false, "\(label): the tip off the straight edge"); continue }
-                            if s.layout == L && (tail.edge != .up || c.minY != t.maxY + 12) { check(false, "\(label): a landscape tail not up from its place"); continue }
-                            if s.layout == P && (tail.edge != .down || t.minY - c.maxY > 48 || t.minY < c.maxY) { check(false, "\(label): a portrait tail too far"); continue }
-                        }
-                        if topic != .touch {
-                            // Never over its own targets while the room beside them holds the card,
-                            // or any card (200 pt): the lit control stays in view at every text size.
-                            let room = s.layout == L ? bottom - (t.maxY + 12) : (crease != nil ? .infinity : min(bottom, t.minY - 12) - 16)
-                            if c.intersects(lit) && (room >= 200 || h <= room) { check(false, "\(label): over its targets with \(room) pt beside them"); continue }
-                            if p.coversTargets != c.intersects(lit) { check(false, "\(label): coversTargets \(p.coversTargets) for \(c)"); continue }
-                        } else if p.coversTargets {
-                            check(false, "\(label): the picture's card hides its ring"); continue
-                        }
-                        if topic != .touch && s.layout == L {
-                            let room = bottom - (t.maxY + 12)
-                            let holds = h <= room || room >= 200
-                            // Under its targets with a tail up, as tall as its words or as the room.
-                            if holds && (c.minY != t.maxY + 12 || c.height != min(h, room) || p.tail?.edge != .up) { check(false, "\(label): not under its targets: \(c)"); continue }
-                            // Only a room too small for a card makes it grow toward the top, tail-less.
-                            if !holds && (c.maxY != bottom || p.tail != nil) { check(false, "\(label): grew wrongly to \(c)"); continue }
-                        }
-                        if topic != .touch && s.layout == P {
-                            let halfBottom = min(s.stream.maxY - 12, (crease ?? 10_000) - 16)
-                            // In the picture's half while it fits; past it only down to its targets' top,
-                            // and without a crease.
-                            if h <= halfBottom - 16 && c.maxY != halfBottom { check(false, "\(label): not at the picture's bottom"); continue }
-                            if c.maxY > halfBottom + 0.001 && crease != nil { check(false, "\(label): past the picture's half with a crease"); continue }
-                            if h > halfBottom - 16 && c.minY != 16 { check(false, "\(label): grew, but not from the top"); continue }
-                            if !p.coversTargets && c.maxY > t.minY - 12 + 0.001 { check(false, "\(label): closer than 12 pt to its targets: \(c)"); continue }
-                        }
-                        if abs(c.width - w) > 0.001 { check(false, "\(label): width \(c.width) not \(w)"); continue }
-                        // The card draws its tail from the height it was laid out at: placed again at
-                        // that height, it must land where it is, tail and all.
-                        let again = place(s, topic, height: c.height, width: w, inset: inset)
-                        if again != p { check(false, "\(label): placed again at \(c.height) it moves to \(again)"); continue }
-                        check(true, "")
+        gridScreens.append(model(w0, h0))
+        if h0 > w0 && w0 < 600 { gridScreens.append(phoneModel(w0, h0)) }
+    }
+}
+for s in gridScreens {
+    for ax in [false, true] {
+        let w = TourPolicy.width(screen: s.size, layout: s.layout, accessibilityText: ax)
+        for topic in TourPolicy.steps(s.layout, voiceOver: false) {
+            for h in cardHeights {
+                for inset: CGFloat in [0, 21] {
+                    grid += 1
+                    let p = place(s, topic, height: h, width: w, inset: inset)
+                    let o = oracle(s, topic, height: h, width: w, inset: inset)
+                    let label = "\(s.size) \(topic) ax \(ax) h \(h) inset \(inset)"
+                    guard p == o else { check(false, "\(label): \(p) against the oracle's \(o)"); continue }
+                    let c = p.card
+                    let bottom = s.size.height - 16 - inset
+                    let crease = TourPolicy.crease(s.size)
+                    let t = topic == .touch ? s.stream : s.union(topic)!
+                    let lit = t.insetBy(dx: -4, dy: -4)
+                    // Inside the margins, as tall as it wants or as the room allows.
+                    if !(c.minX >= 16 - 0.001 && c.maxX <= s.size.width - 16 + 0.001 && c.minY >= 16 && c.maxY <= bottom + 0.001 && c.height <= h) {
+                        check(false, "\(label): \(c) outside the margins"); continue
                     }
+                    if let crease, c.maxY > crease || (p.tail?.edge == .down && c.maxY + 7 > crease) {
+                        check(false, "\(label): \(c) crosses the crease"); continue
+                    }
+                    if let tail = p.tail {
+                        if c.intersects(lit) { check(false, "\(label): a tail on a card over its targets"); continue }
+                        if topic == .touch { check(false, "\(label): a tail on the picture's card"); continue }
+                        if tail.x < c.minX + 28 - 0.001 || tail.x > c.maxX - 28 + 0.001 { check(false, "\(label): the tip off the straight edge"); continue }
+                        if s.layout == L && (tail.edge != .up || c.minY != t.maxY + 12) { check(false, "\(label): a landscape tail not up from its place"); continue }
+                        if s.layout != L && tail.edge == .down && (t.minY - c.maxY > 48 || t.minY < c.maxY) { check(false, "\(label): a portrait tail too far"); continue }
+                        // Up, upright, only from a phone's card 12 pt under its targets.
+                        if s.layout != L && tail.edge == .up && (s.layout != F || c.minY != t.maxY + 12) { check(false, "\(label): an upright tail up away from its place"); continue }
+                    }
+                    if topic != .touch {
+                        // Never over its own targets while the room beside them holds the card,
+                        // or any card (200 pt): the lit control stays in view at every text size.
+                        let roomAbove: CGFloat = crease != nil ? .infinity : min(bottom, t.minY - 12) - 16
+                        let roomBelow = bottom - (t.maxY + 12)
+                        let room = s.layout == L ? roomBelow : s.layout == F ? max(roomAbove, roomBelow) : roomAbove
+                        if c.intersects(lit) && (room >= 200 || h <= room) { check(false, "\(label): over its targets with \(room) pt beside them"); continue }
+                        if p.coversTargets != c.intersects(lit) { check(false, "\(label): coversTargets \(p.coversTargets) for \(c)"); continue }
+                    } else if p.coversTargets {
+                        check(false, "\(label): the picture's card hides its ring"); continue
+                    }
+                    if topic != .touch && s.layout == L {
+                        let room = bottom - (t.maxY + 12)
+                        let holds = h <= room || room >= 200
+                        // Under its targets with a tail up, as tall as its words or as the room.
+                        if holds && (c.minY != t.maxY + 12 || c.height != min(h, room) || p.tail?.edge != .up) { check(false, "\(label): not under its targets: \(c)"); continue }
+                        // Only a room too small for a card makes it grow toward the top, tail-less.
+                        if !holds && (c.maxY != bottom || p.tail != nil) { check(false, "\(label): grew wrongly to \(c)"); continue }
+                    }
+                    if topic != .touch && s.layout != L {
+                        let halfBottom = min(s.stream.maxY - 12, (crease ?? 10_000) - 16)
+                        let roomAbove = min(bottom, max(16, t.minY - 12)) - 16
+                        // A phone's card 12 pt under its targets, its tail up: only when it did not
+                        // fit above them, and it fits under them or has the larger room there.
+                        let under = s.layout == F && c.minY == t.maxY + 12
+                        if under && (h <= roomAbove || p.tail?.edge != .up) { check(false, "\(label): under its targets while it fits above: \(c)"); continue }
+                        // In the picture's half while it fits; past it only down to its targets' top,
+                        // and without a crease.
+                        if h <= halfBottom - 16 && c.maxY != halfBottom { check(false, "\(label): not at the picture's bottom"); continue }
+                        if c.maxY > halfBottom + 0.001 && crease != nil { check(false, "\(label): past the picture's half with a crease"); continue }
+                        // Grown: the halves' from the top margin, a phone's standing 12 pt over its targets.
+                        let stands = s.layout == F && c.maxY == min(bottom, max(16, t.minY - 12))
+                        if h > halfBottom - 16 && c.minY != 16 && !under && !stands { check(false, "\(label): grew, but not from the top"); continue }
+                        if !p.coversTargets && !under && c.maxY > t.minY - 12 + 0.001 { check(false, "\(label): closer than 12 pt to its targets: \(c)"); continue }
+                        // Only a phone goes under; the halves keep their cards above.
+                        if s.layout == P && c.minY > t.minY { check(false, "\(label): the halves' card under its targets"); continue }
+                    }
+                    if abs(c.width - w) > 0.001 { check(false, "\(label): width \(c.width) not \(w)"); continue }
+                    // The card draws its tail from the height it was laid out at: placed again at
+                    // that height, it must land where it is, tail and all.
+                    let again = place(s, topic, height: c.height, width: w, inset: inset)
+                    if again != p { check(false, "\(label): placed again at \(c.height) it moves to \(again)"); continue }
+                    check(true, "")
                 }
             }
         }
@@ -553,6 +651,22 @@ check(laptopFirst.rows[3].spans.filter(\.strong).map(\.text) == ["Touch and hold
 check(laptopFirst.rows.map(\.symbol) == ["command", "keyboard", "cursorarrow.click.2", "hand.draw"], "laptop's symbols")
 check(laptopFirst.hint == "Below the bar: the row of keys, then the trackpad.", "laptop's hint")
 check(touchPad.rows[1].spoken == "Touch and hold to right-click.", "a row is spoken as it reads")
+// A phone held upright: the bar card names row 1's Keyboard, as sideways; the laptop card has no
+// keyboard key (that is row 1's button); the hints say where the rows are.
+let barPhone = words(.bar, F, device: "iPhone")
+check(texts(barPhone) == texts(words(.bar, L, device: "iPhone")) && texts(barPhone).count == 3, "a phone's bar card: as sideways, with Keyboard")
+check(barPhone.hint == "Under the picture: Aa and Keyboard in the first row, the windows in the second.", "a phone's bar hint")
+check(words(.touch, F, device: "iPhone").hint == "The picture of Mac mini is at the top of the screen.", "a phone's picture hint")
+check(words(.settings, F, device: "iPhone").hint == "The last button in the row under the picture."
+      && texts(words(.settings, F, device: "iPhone")) == Array(texts(settingsL).prefix(2)), "a phone's settings card: no upright row")
+let laptopPhone = words(.laptop, F, device: "iPhone", first: true)
+check(texts(laptopPhone) == ["cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy.",
+                             "Tap with two fingers on the trackpad to right-click.",
+                             "Touch and hold the trackpad, then drag, to move a window or select text."], "a phone's laptop card: no keyboard key: \(texts(laptopPhone))")
+check(laptopPhone.hint == "Under the windows: the row of keys, then the trackpad." && laptopPhone.subtitle == "Upright, Sill adds keys and a trackpad.",
+      "a phone's laptop hint and subtitle")
+check(words(.laptop, F, device: "iPhone", voiceOver: true, first: true).rows.map(\.spoken)
+      == ["Command, Option, Control and Shift stay on for the next key: Command, then C, copies."], "a phone's laptop card under VoiceOver")
 // Under VoiceOver: no touch card, no trackpad rows, and no gesture VoiceOver cannot make.
 let barVO = words(.bar, L, voiceOver: true)
 check(texts(barVO) == ["Each window has actions: close, minimize, full screen, and move left or right. Swipe up or down to hear them.",
@@ -561,7 +675,7 @@ check(texts(barVO) == ["Each window has actions: close, minimize, full screen, a
 let laptopVO = words(.laptop, P, voiceOver: true, first: true)
 check(laptopVO.rows.count == 2 && laptopVO.rows[0].spoken == "Command, Option, Control and Shift stay on for the next key: Command, then C, copies."
       && laptopVO.rows[1].text == "The keyboard key types on Mac mini, on screen or with a hardware keyboard.", "laptop under VoiceOver: the keys' rows")
-for layout in [L, P] {
+for layout in [L, P, F] {
     for step in TourPolicy.steps(layout, voiceOver: true) {
         for device in ["iPad", "iPhone"] {
             for row in words(step, layout, device: device, voiceOver: true, first: true).rows {
@@ -573,7 +687,7 @@ for layout in [L, P] {
     }
 }
 // Every row is read whole, never its symbol's name.
-for layout in [L, P] {
+for layout in [L, P, F] {
     for step in TourPolicy.steps(layout, voiceOver: false) {
         for row in words(step, layout, first: true).rows {
             // Read as its words (the key row's caps by name), never with the symbol's name before them.
