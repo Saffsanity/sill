@@ -2688,7 +2688,9 @@ resolved by reading both sides.
   branch's revoking of a saved Mac after "removed".
 - `project.pbxproj`: both sides had taken A01E/F01E, for GoodbyePolicy.swift and
   StreamClient+Home.swift; the auto-merge kept both, and the build lost GoodbyePolicy.
-  StreamClient+Home.swift is A301/F301 now (a block of its own, as App Store readiness took A201).
+  StreamClient+Home.swift is A301/F301 now (a block of its own, as App Store readiness took A201);
+  A601/F601 since the review fixes (2026-09-27), as branch pointer-visibility has A301/F301 for its
+  own file and no open branch has A601.
 - Sill.app: `StreamCoordinator(…, homePairing:, testHooks:, hostVersion:)`; both sides' settings
   notes, panes (General's update section beside the Devices tab), menu entries and debug hooks;
   main's `-SillPrintMenuAfter` is among the timed hooks Sill.app itself ignores, while the update

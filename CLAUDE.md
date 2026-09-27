@@ -29,7 +29,8 @@ security review and Noah's device tests (§11) are next.
   "update" beside "pairingRequired", which GoodbyePolicy knows. The device
   sends its hello first on every session connection (a tap's, a reconnect's,
   a move's, a remote winner's), over TLS at a TLS door. Both sides had taken
-  A01E/F01E in project.pbxproj: StreamClient+Home.swift is A301/F301 now.
+  A01E/F01E in project.pbxproj: StreamClient+Home.swift is A601/F601 now
+  (A301/F301 at the merge, which branch pointer-visibility's own file has).
   `SillProtocol` 1 is 1.0's TLS home door with ALPN `sill/1`. This branch's
   pure checks moved into `Tests/checks` (`door-policy`, `cable-link`,
   `ask-limits`, `home-records`, `home-device`, `home-txt`, `home-model`, and
