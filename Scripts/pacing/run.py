@@ -6,8 +6,9 @@ BUILD is base or new (build.sh's), or any other package made the same way under 
 Writes NAME.host.log (the host's lines with Sill.log's timestamps), NAME.host.out (its stdout),
 NAME.relay.txt and NAME.device.txt into $PACING_RUNS (default .build/pacing/runs). DOOR=Home waits
 for the host's home door (give the host --home and the device --plain) instead of its remote door;
-every door and the relay listen on 127.0.0.1 only. Every process is started in its own session and
-killed by PID at the end: none is left running."""
+RELAY=sillrelay puts Scripts/sillrelay.py on the path instead of bottleneck.py. Every door and
+relay listens on 127.0.0.1 only. Every process is started in its own session and killed by PID at
+the end: none is left running."""
 import os, queue, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,7 +71,9 @@ try:
     door = os.environ.get("DOOR", "Remote")
     port = wait_for(follow(host, host_out), door + r" door listening on port (\d+)", f"{door.lower()} door")
     relay_out = open(path("relay.txt"), "w")
-    relay = start([sys.executable, os.path.join(HERE, "bottleneck.py"), "--listen", "0", "--to", f"127.0.0.1:{port}"] + relay_args,
+    relay_py = {"bottleneck": os.path.join(HERE, "bottleneck.py"),
+                "sillrelay": os.path.join(HERE, "..", "sillrelay.py")}[os.environ.get("RELAY", "bottleneck")]
+    relay = start([sys.executable, relay_py, "--listen", "0", "--to", f"127.0.0.1:{port}"] + relay_args,
                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     rport = wait_for(follow(relay, relay_out), r"listening on 127\.0\.0\.1:(\d+)", "relay")
     with open(path("device.txt"), "w") as dev_out:

@@ -6,8 +6,10 @@ matrix; run it again on a runs folder to read one later.
 usage: summarize.py RUNS_DIR [--skip S]
 Runs are named CASE-I-BUILD (real24-1-base, real24-1-new, …). The first S seconds after the device
 connected (default 5: the catalog and the first keyframe) are left out of every figure except
-fpsK (the fps from the second after the first keyframe arrived) and rec (seconds from the relay's
-last rate increase until the frame age's median is back at 45 ms or less)."""
+fpsK (the fps from the second after the first keyframe arrived), gap (the longest run of seconds
+without a frame from then on), evict@ (seconds from the device's first connection to the host's
+first eviction) and rec (seconds from the relay's last rate increase until the frame age's median
+is back at 45 ms or less)."""
 import os, re, statistics, sys
 from collections import defaultdict
 
@@ -45,10 +47,20 @@ def one(name):
     keys = sum(k for t, *_, k in seconds if t >= lo)
     first_key = next((t for t, *_, k in seconds if k > 0), None)
     after_key = [f for t, f, *_ in seconds if first_key is not None and t > first_key]
+    # The longest run of seconds without a frame, from the second after the first keyframe arrived.
+    gap = stretch = 0
+    for t, frames, *_ in seconds:
+        if first_key is None or t <= first_key: continue
+        stretch = stretch + 1 if frames == 0 else 0
+        gap = max(gap, stretch)
     lost = sum("silent" in l for l in dev)
     sent = drop = wait = wait_after_key = n = evict = 0
+    evict_at = None
     for l in host:
-        if "silent for" in l or "not draining" in l: evict += 1
+        if "silent for" in l or "not draining" in l:
+            evict += 1
+            m = re.match(r"\S+ (\d\d:\d\d:\d\d\.\d+) ", l)
+            if m and evict_at is None: evict_at = secs(m.group(1)) - t0
         m = re.match(r"\S+ (\d\d:\d\d:\d\d\.\d+) \[1s\] (.*)", l)
         if not m: continue
         t = secs(m.group(1))
@@ -68,7 +80,8 @@ def one(name):
     return {"fps": statistics.mean(fps) if fps else 0.0, "p10": pct(fps, 10), "fpsK": statistics.mean(after_key) if after_key else 0.0,
             "sent": sent / max(n, 1), "drop": drop / mins, "wait": wait / mins, "waitK": wait_after_key, "keys": keys / mins,
             "age50": pct(worst_age, 50), "age95": pct(worst_age, 95), "rtt50": pct(worst_rtt, 50), "rtt95": pct(worst_rtt, 95),
-            "rttmax": max(worst_rtt) if worst_rtt else 0, "lost": lost, "evict": evict, "rec": rec, "drops": drop}
+            "rttmax": max(worst_rtt) if worst_rtt else 0, "lost": lost, "evict": evict, "rec": rec, "drops": drop,
+            "gap": gap, "evictAt": evict_at}
 
 names = sorted({f[: -len(".device.txt")] for f in os.listdir(RUNS) if f.endswith(".device.txt")})
 # Runs that ended with the Mac busy (run.sh's load.txt: the load at 20 or more after its last try).
@@ -94,20 +107,21 @@ def f(v, fmt):
     if v == float("inf"): return "never"
     return format(v, fmt)
 
-print(f"{'run':24} {'fps':>5} {'p10':>4} {'fpsK':>5} {'sent/s':>6} {'drop/m':>6} {'wait/m':>6} {'waitK':>5} {'keys/m':>6} "
-      f"{'age50':>6} {'age95':>6} {'rtt50':>6} {'rtt95':>6} {'rttMax':>6} {'lost':>4} {'evict':>5} {'rec s':>5}")
+print(f"{'run':24} {'fps':>5} {'p10':>4} {'fpsK':>5} {'gap':>3} {'sent/s':>6} {'drop/m':>6} {'wait/m':>6} {'waitK':>5} {'keys/m':>6} "
+      f"{'age50':>6} {'age95':>6} {'rtt50':>6} {'rtt95':>6} {'rttMax':>6} {'lost':>4} {'evict':>5} {'evict@':>6} {'rec s':>5}")
 for name, r in runs.items():
-    print(f"{name + ('*' if loaded.get(name) else ''):24} {r['fps']:5.1f} {f(r['p10'], '4.0f'):>4} {r['fpsK']:5.1f} {r['sent']:6.1f} {r['drop']:6.1f} {r['wait']:6.0f} {r['waitK']:5d} "
+    print(f"{name + ('*' if loaded.get(name) else ''):24} {r['fps']:5.1f} {f(r['p10'], '4.0f'):>4} {r['fpsK']:5.1f} {r['gap']:3d} {r['sent']:6.1f} {r['drop']:6.1f} {r['wait']:6.0f} {r['waitK']:5d} "
           f"{r['keys']:6.1f} {f(r['age50'], '6.0f'):>6} {f(r['age95'], '6.0f'):>6} {f(r['rtt50'], '6.0f'):>6} {f(r['rtt95'], '6.0f'):>6} "
-          f"{r['rttmax']:6.0f} {r['lost']:4d} {r['evict']:5d} {f(r['rec'], '5.1f'):>5}")
+          f"{r['rttmax']:6.0f} {r['lost']:4d} {r['evict']:5d} {f(r['evictAt'], '6.1f'):>6} {f(r['rec'], '5.1f'):>5}")
 print(f"""
 fps, p10: the device's frames a second (mean, 10th percentile), after the first {SKIP:g} s; fpsK: the mean
-from the second after the first keyframe arrived; sent/s, drop/m, wait/m: the host's net.sent a
-second, net.dropped and net.waitKey a minute; waitK: net.waitKey in the host's seconds wholly after
-the first keyframe arrived; keys/m: keyframes the device got a minute; age, rtt: each second's worst
-frame age and pong round trip (ms), p50/p95/max; lost: the device's liveness losses; evict: the
-host's silence or drain evictions; rec: seconds from the relay's last rate increase until a
-second's median frame age is 45 ms or less.""")
+from the second after the first keyframe arrived; gap: the longest run of seconds without a frame
+from then on; sent/s, drop/m, wait/m: the host's net.sent a second, net.dropped and net.waitKey a
+minute; waitK: net.waitKey in the host's seconds wholly after the first keyframe arrived; keys/m:
+keyframes the device got a minute; age, rtt: each second's worst frame age and pong round trip
+(ms), p50/p95/max; lost: the device's liveness losses; evict: the host's silence or drain
+evictions; evict@: seconds from the device's first connection to the first of them; rec: seconds
+from the relay's last rate increase until a second's median frame age is 45 ms or less.""")
 if any(loaded.values()):
     print("*: the run ended with the load average at 20 or more, after its last try (load.txt).")
 
@@ -128,6 +142,10 @@ GATES = {
     "fastbig": ("≥ 59 fps, 0 dropped", lambda r, b: r["fps"] >= 59 and r["drops"] == 0),
     "slowkfB": ("≥ 55 fps after the first keyframe, no liveness loss", lambda r, b: r["fpsK"] >= 55 and r["lost"] == 0),
     "dip": ("no loss or eviction, the frame age back at 45 ms within 10 s", lambda r, b: r["lost"] == 0 and r["evict"] == 0 and r["rec"] is not None and r["rec"] <= 10),
+    "relay2": ("no loss or eviction, a frame in every 5 s, keyframes a minute ≤ its base run's + 1",
+               lambda r, b: r["lost"] == 0 and r["evict"] == 0 and r["gap"] < 5 and (b is None or r["keys"] <= b["keys"] + 1)),
+    "blackhole": ("dropped for its silence 11–16 s after it connected (5 + 8)",
+                  lambda r, b: r["evictAt"] is not None and 11 <= r["evictAt"] <= 16),
     "bigkf8": ("recorded (bistable); each run ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "over8": ("recorded; ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "low": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),

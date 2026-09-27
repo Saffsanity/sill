@@ -6,7 +6,9 @@
 #     the working tree (new), serving a remote session over RemoteTLS's TLS 1.3 parameters (home: a
 #     home client over plain TCP), fed fake frames of the case's sizes (a keyframe when asked for
 #     and every 4 s);
-#   - bottleneck.py: a downlink of R Mbit/s behind a Q-byte queue, D ms of round trip;
+#   - bottleneck.py: a downlink of R Mbit/s behind a Q-byte queue, D ms of round trip (or, for the
+#     remote door's slow-link cases, Scripts/sillrelay.py: R Mbit/s read from the host through a
+#     64 KB buffer, D ms of round trip, a blackhole after S s);
 #   - device.py: the iPad's reader, pings, stats and liveness (--liveness-bytes: MessageReader's).
 # Then summarize.py's table: every run, and each case's base and new side by side with the new
 # build's gate. Its exit status is the number of runs that could not run, plus one if a gate
@@ -15,9 +17,9 @@
 # device share the Mac's cores with whatever else runs, and a busy Mac makes a stalled path of any
 # link. Each run's load at its start and end is in the matrix's load.txt.
 #
-#   Scripts/pacing/run.sh                  the gate cases once each (about 10 minutes)
-#   Scripts/pacing/run.sh --full           the plan's H3 matrix: every case, real24, kf25m32 and
-#                                          bigkf8 three times each (about 30 minutes)
+#   Scripts/pacing/run.sh                  the gate cases once each (about 15 minutes)
+#   Scripts/pacing/run.sh --full           the plan's H3 matrix and H4: every case, real24, kf25m32
+#                                          and bigkf8 three times each (about 35 minutes)
 #   Scripts/pacing/run.sh --cases real24,dip [--repeat 3]
 #   Scripts/pacing/run.sh --base 8b0d418   compare with another commit (default origin/main)
 #   Scripts/pacing/run.sh --list           the cases and their arguments
@@ -35,6 +37,12 @@
 #   ext120   Extreme at 120 fps: 2 MB keyframes, 312.5 KB deltas through 600 Mbit/s: never a drop
 #   dip      Low's sizes, 8 Mbit/s with 0.5 from 20 s to 32 s behind a 1 MB queue: no loss, the
 #            frame age back at 45 ms within 10 s of the dip's end
+#   relay2   the remote door's slow link (the plan's H4; the remote plan's H14): sillrelay.py at
+#            2 Mbit/s and +150 ms for 90 s, a stream the size of the synthetic host's (100 KB
+#            keyframes, 2 KB deltas): no loss or eviction, a frame in every 5 s, keyframes a minute
+#            no more than its base run's
+#   blackhole  the same path going dead both ways 5 s into the connection (the remote plan's H15):
+#            the host drops the device for its silence about 13 s after it connected (5 + 8)
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
 #   (the old device's liveness: whole messages) and home (a home client, plain TCP: unchanged).
@@ -50,32 +58,35 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
-        -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
     esac
 done
 
-# name|seconds|repeats in --full|DOOR|host args -- relay args -- device args
+# name|seconds|repeats in --full|DOOR|RELAY|host args -- relay args -- device args
+# (DOOR: the host's door run.py waits for; RELAY: bottleneck.py or Scripts/sillrelay.py)
 cases=(
-  "real24|45|3|Remote|--kf 1500000 --delta 30000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "kf25m32|40|3|Remote|--kf 2500000 --delta 20000 -- --rate-mbps 32 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "bigkf8|45|3|Remote|--kf 1500000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "slowkfB|50|1|Remote|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect --liveness-bytes"
-  "ext120|25|1|Remote|--kf 2000000 --delta 312500 --fps 120 -- --rate-mbps 600 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
-  "dip|60|1|Remote|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 1048576 --rate-at 20:0.5,32:8 -- --reconnect"
+  "real24|45|3|Remote|bottleneck|--kf 1500000 --delta 30000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "kf25m32|40|3|Remote|bottleneck|--kf 2500000 --delta 20000 -- --rate-mbps 32 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "bigkf8|45|3|Remote|bottleneck|--kf 1500000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "slowkfB|50|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect --liveness-bytes"
+  "ext120|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 120 -- --rate-mbps 600 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
+  "dip|60|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 1048576 --rate-at 20:0.5,32:8 -- --reconnect"
+  "relay2|90|1|Remote|sillrelay|--kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 -- --reconnect --liveness-bytes"
+  "blackhole|30|1|Remote|sillrelay|--kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 --blackhole-after 5 -- --reconnect --liveness-bytes"
 )
 full_cases=(
-  "ext60|25|1|Remote|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
-  "fastbig|40|1|Remote|--kf 1500000 --delta 150000 -- --rate-mbps 100 --delay-ms 20 --queue-bytes 1048576 -- --reconnect"
-  "low|40|1|Remote|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "switch|50|1|Remote|--kf 1500000 --delta 30000 --sizes-at 30:150000:8000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "over8|45|1|Remote|--kf 1500000 --delta 60000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "slowkf|50|1|Remote|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "home|30|1|Home|--kf 150000 --delta 8000 --home -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
+  "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"
+  "fastbig|40|1|Remote|bottleneck|--kf 1500000 --delta 150000 -- --rate-mbps 100 --delay-ms 20 --queue-bytes 1048576 -- --reconnect"
+  "low|40|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "switch|50|1|Remote|bottleneck|--kf 1500000 --delta 30000 --sizes-at 30:150000:8000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "over8|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "slowkf|50|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "home|30|1|Home|bottleneck|--kf 150000 --delta 8000 --home -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
 )
 all=("${cases[@]}" "${full_cases[@]}")
 if [ "$list" = 1 ]; then
-    for c in "${all[@]}"; do IFS='|' read -r name secs reps door rest <<< "$c"; printf '%-8s %3s s  %-6s %s\n' "$name" "$secs" "$door" "$rest"; done
+    for c in "${all[@]}"; do IFS='|' read -r name secs reps door relay rest <<< "$c"; printf '%-9s %3s s  %-6s %-10s %s\n' "$name" "$secs" "$door" "$relay" "$rest"; done
     exit 0
 fi
 selected=()
@@ -118,7 +129,7 @@ calm() {
 missed=0
 trap 'exit 130' INT TERM
 for c in "${selected[@]}"; do
-    IFS='|' read -r name secs reps door rest <<< "$c"
+    IFS='|' read -r name secs reps door relay rest <<< "$c"
     n="$repeat"; if [ "$full" = 1 ] && [ -z "$only" ]; then n="$reps"; fi
     read -r -a argv <<< "$rest"
     for i in $(seq 1 "$n"); do
@@ -131,7 +142,7 @@ for c in "${selected[@]}"; do
                 fi
                 start="$(load1)"
                 echo "$(date +%T) $run (${secs} s, load $start)" | tee -a "$runs/load.txt"
-                if ! DOOR="$door" python3 "$here/run.py" "$run" "$build" "$secs" "${argv[@]}" > "$runs/$run.run.txt" 2>&1; then
+                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$build" "$secs" "${argv[@]}" > "$runs/$run.run.txt" 2>&1; then
                     echo "    $run did not run: $(tail -n 1 "$runs/$run.run.txt")" | tee -a "$runs/load.txt"
                     missed=$((missed + 1)); break
                 fi
