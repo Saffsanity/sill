@@ -75,6 +75,14 @@ if CommandLine.arguments.contains("--encoder-selftest") {
     EncoderSelfTest.run()
 }
 
+// `SillHost --menu-selftest[=APP]`: the menus a device would be sent for APP (a pid, or the start of
+// a running app's name; the frontmost app without it), one level deep, with each read's time. Read-
+// only: nothing is activated or pressed, though each menu read makes the app validate that menu.
+// The "=" is needed: a bare argument is the window match above. Exits 0, or 1 when nothing was read.
+if let app = MenuSelfTest.requested(in: CommandLine.arguments) {
+    MenuSelfTest.run(app: app)
+}
+
 // ScreenCaptureKit talks to the window server through CoreGraphics, which must be
 // initialized on the main thread before any other thread touches it. In a CLI tool
 // nothing does that for us, so prime it here and keep stream setup on the main actor.

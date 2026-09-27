@@ -120,6 +120,9 @@ struct StreamScreen: View {
     /// The keyboard was up (the overlay first responder) when the panel opened: closing the panel
     /// puts it back.
     @State private var keyboardBeforeSettings = false
+    /// The Menus pull-down closed the Settings panel, which had taken the keyboard down: it comes
+    /// back when the pull-down goes (`menusClosed`).
+    @State private var keyboardAfterMenus = false
     /// Pair This iPad… (the panel's Away from home group): the pairing overlay covers the stream.
     /// Up here, like the panel, so a rotation keeps it. An outside sill://pair link shows the same
     /// overlay with its confirmation.
@@ -173,6 +176,9 @@ struct StreamScreen: View {
         _scaleOpen = State(initialValue: scaleOpen)
         _textScale = State(initialValue: textScale)
         _settingsOpen = State(initialValue: settingsOpen)
+        // The panel open over the keyboard, as in a session: it took the keyboard down, and closing
+        // it puts it back (`-SillSettings 1 -SillKeyboard 1`).
+        _keyboardBeforeSettings = State(initialValue: settingsOpen && keyboardShown)
         _pairingOverlay = State(initialValue: pairingOverlay)
         self.scannerOverride = scannerOverride
     }
@@ -189,9 +195,9 @@ struct StreamScreen: View {
                 Group {
                     switch duo {
                     case .innerLandscape:
-                        landscape(bar: .regular)
+                        landscape(bar: .regular, width: geo.size.width)
                     case .outerLandscape:
-                        landscape(bar: .compact)
+                        landscape(bar: .compact, width: geo.size.width)
                     case .innerPortrait:
                         portrait(metrics: .regular)
                     case .outerPortrait:
@@ -442,6 +448,28 @@ struct StreamScreen: View {
             if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
             keyboardBeforeSettings = false
         }
+    }
+
+    /// The Menus pull-down opened: the drawer, a thumbnail's lights and the Settings panel go, one
+    /// thing open at a time; the keyboard stays as it is (the plan's §7.5). The panel had taken it
+    /// down, so it comes back, but only when the pull-down goes: raised now, the software keyboard
+    /// would come up, and key focus move, under the open menu.
+    private func menusOpened() {
+        keyboardAfterMenus = settingsOpen && keyboardBeforeSettings
+        #if DEBUG
+        if settingsOpen { print("menus: the pull-down opened over the Settings panel, which closes; the keyboard " + (keyboardAfterMenus ? "comes back when the pull-down goes" : "was down before it")) }
+        #endif
+        setSettings(false, restoreKeyboard: false)
+        windowMenu = nil
+        withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+    }
+
+    private func menusClosed() {
+        #if DEBUG
+        if keyboardAfterMenus { print("menus: the pull-down went; the keyboard back up, as before the Settings panel") }
+        #endif
+        if keyboardAfterMenus { overlay.setKeyboard(shown: true) }
+        keyboardAfterMenus = false
     }
 
     // MARK: The tour
@@ -729,14 +757,18 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
-    private func landscape(bar: BarMetrics) -> some View {
+    private func landscape(bar: BarMetrics, width: CGFloat) -> some View {
         VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
+                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
+                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
+                                                gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
-                   setSettings: { setSettings($0, restoreKeyboard: $1) })
+                   setSettings: { setSettings($0, restoreKeyboard: $1) },
+                   menusOpened: menusOpened, menusClosed: menusClosed)
             contentArea(bar: bar)
         }
     }
@@ -748,6 +780,7 @@ struct StreamScreen: View {
                              latched: $latched, overlay: overlay,
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
+                             menusOpened: menusOpened, menusClosed: menusClosed,
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
                              pairThisDevice: openPairingOverlay,
@@ -867,10 +900,15 @@ private struct TopBar: View {
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
     let settingsOpen: Bool
+    /// Whether the bar holds the Menus button and still a whole thumbnail (`MacMenuButton.fits`).
+    let menusFit: Bool
     let toggleKeyboard: () -> Void
     /// Opens or closes the Settings panel; the second argument says whether closing puts the
     /// keyboard back (see `StreamScreen.setSettings`).
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
+    /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
+    let menusOpened: () -> Void
+    let menusClosed: () -> Void
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -887,6 +925,17 @@ private struct TopBar: View {
                 .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
                 .allowsHitTesting(!scaleOpen)
                 .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
+
+            // The Mac's menus of the streamed app, next to the thumbnails because they are the picked
+            // window's app's. Only while the Mac sent some, and where the bar holds it: with none the
+            // strip takes its room back.
+            if client.menus.hasMenus, menusFit {
+                MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                              spacing: metrics.buttonSpacing, onOpen: menusOpened, onClose: menusClosed)
+                    .opacity(scaleOpen ? 0 : 1)    // under the Aa ruler, as the buttons after Aa
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
 
             // Text size: the host sizes the Mac window to the panel divided by this scale, so a
             // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
@@ -918,6 +967,7 @@ private struct TopBar: View {
                 .tourTarget(.settings)
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
+        .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
         .frame(height: metrics.height)
         .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.

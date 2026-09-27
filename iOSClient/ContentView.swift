@@ -36,7 +36,13 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Tells MacMenuHub which window shows this session: the iPad's menu bar shows its menus while
+        // it is the app's one window.
+        .background(WindowSessionObserver(client: client))
         .onAppear {
+            #if DEBUG
+            SecondWindow.openFromLaunchArgument()   // -SillSecondWindow 1
+            #endif
             client.startBrowsing()
             client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
@@ -164,6 +170,36 @@ struct ContentView: View {
 ///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
 ///   and `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
+/// * `-SillMacMenu <case>` — the mock Mac's menus (docs/menu-bar-plan.md §7.8; see
+///   `MockCatalog.MenuCase`): `code` (the default: VS Code's ten, File with shortcuts, sections, a ✓,
+///   a disabled item and Open Recent ▸, Code › Settings ▸ Themes ▸ three deep, View › Appearance
+///   with a mixed mark), `blender` (Blender and Window), `long` (a Window menu of 300 windows, and a
+///   History of 600: 500 rows and "100 more on the Mac"), `stale` (every menu disabled under "Code
+///   isn’t responding."), `noaccess` (the Accessibility note, no menus), `none` (no Menus button),
+///   `slow` (each menu answered after 1.5 s, UIKit's placeholder meanwhile), `timeout` (never
+///   answered: "Mac mini didn’t answer. Open the menu again." after 4 s) or `refuse` (every choice
+///   refused). The mock answers a menu and a choice 0.2 s after it is asked. Ignored with
+///   `-SillLive 1`, whose session has the Mac's own menus.
+/// * `-SillMenusOpen 1` — the Menus button's pull-down opens after launch, as a tap opens it
+///   (`performPrimaryAction`, iOS 17.4); `-SillMenusOpen 'File'` or `'Code/Settings'` opens it on
+///   that menu's own items instead, each level fetched on the way as a tap on it would fetch it;
+///   `-SillMenusAt <s>` opens it `s` seconds after the button shows (not 0.8), and
+///   `-SillMenusCloseAfter <s>` dismisses it `s` seconds later, as a tap outside it would.
+///   `-SillMenuPress 'File/Save'` chooses that item once the first top level is in, as a tap would
+///   (the menus on the way fetched, the kind 25 sent). Both run once per launch, in the normal app
+///   and under `-SillLive 1` too, but only on the mock's menus or the test app's: against a
+///   synthetic host started with SILL_TEST_MENU_PID, dialled by `-SillConnect` to a loopback
+///   address, whose window list gives no version and whose top level is menufixture's
+///   (`-SillMenuPress 'Probe/Set Label A'`; `StreamClient.menuHarnessRefusal`). Against anything
+///   else they print "refused" and open and choose nothing: on a real Mac a choice would be made in
+///   whatever app it streams. A headless run cannot tap; these stand in for the taps.
+/// * The iPad's menu bar (iPadOS 26), in the normal app too: `-SillMenuBarLayout perMenu|replace|one`
+///   (where the Mac's menus go, the plan's Q1, for one run), `-SillMenuDump 1` (the main menu's
+///   root after each build, on the console), `-SillMenuBuildTwice 1` (the insertion made twice in
+///   one build: the second inserts nothing), `-SillMenuNoView 1` (View removed before the
+///   insertion) and `-SillSecondWindow 1` (a second window opens 2 s after launch: with two, the bar
+///   gets none of the Mac's menus). The console's "menus: …" and "menubar: …" lines say what
+///   happened.
 /// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
 ///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
 ///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
@@ -268,6 +304,8 @@ struct LayoutHarness: View {
         let connectCase: MockCatalog.ConnectCase?
         /// The stream screen under the pairing overlay.
         let scanOverlay: Bool
+        /// The mock Mac's menus. Ignored when `live`, whose session has the Mac's own.
+        let macMenu: MockCatalog.MenuCase
         /// The mock's pointer state (`-SillPointer`), and Q2's flip (`-SillPencilPointer 1`). Ignored
         /// when `live`.
         let pointer: String?
@@ -291,6 +329,7 @@ struct LayoutHarness: View {
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
                         connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
                         scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
+                        macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code,
                         pointer: defaults.string(forKey: "SillPointer"),
                         pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
         }
@@ -315,6 +354,7 @@ struct LayoutHarness: View {
         self.live = live
         _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
+                                                      menus: spec.live ? nil : spec.macMenu,
                                                       pointer: spec.pointer, pencilPointer: spec.pencilPointer))
     }
 
@@ -343,7 +383,10 @@ struct LayoutHarness: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
+        // The iPad's menu bar follows the client this frame shows, as the app's does.
+        .background(WindowSessionObserver(client: spec.live ? live : mock))
         .onAppear {
+            SecondWindow.openFromLaunchArgument()   // -SillSecondWindow 1
             if spec.live {
                 live.startBrowsing()
                 live.startRemote()

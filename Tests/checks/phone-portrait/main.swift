@@ -233,7 +233,8 @@ let rulerRule = Rule("the ruler over row 1, centred on Aa, 4 × step + 60 wide, 
 let panelsRule = Rule("the drawer and the panel from 8 under row 1 to the trackpad's bottom, both across row 1, from 14 to W − 14")
 let anchorRule = Rule("the panel's anchor is its top-trailing corner")
 let dimRule = Rule("the dim covers everything but row 1's buttons, in two pieces")
-let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule]
+let menusRule = Rule("row 2 with the Mac's menus: the Menus button under Settings and as wide, 50 tall, centred in the strip's 62; the strip from 6 to 8 before it, a whole 80 pt thumbnail and its 8 pt ends in it")
+let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule, menusRule]
 
 func within(_ r: CGRect, _ size: CGSize) -> Bool {
     r.minX >= -0.001 && r.minY >= -0.001 && r.maxX <= size.width + 0.001 && r.maxY <= size.height + 0.001 && r.width >= 0 && r.height >= 0
@@ -247,7 +248,8 @@ for w in 300...599 {
         let l = L(size: size)
         gridSizes += 1
 
-        let all = [l.picture, l.row1, l.strip, l.keys, l.trackpad, l.ruler, l.drawer, l.settings] + l.buttons + l.caps + l.dim
+        let all = [l.picture, l.row1, l.strip, l.menus, l.stripBesideMenus, l.keys, l.trackpad, l.ruler, l.drawer, l.settings]
+            + l.buttons + l.caps + l.dim
         inside.expect(all.allSatisfy { within($0, size) }, size, all.first { !within($0, size) }.map(str) ?? "")
 
         ordered.expect(l.picture.maxY <= l.row1.minY && l.row1.maxY <= l.strip.minY && l.strip.maxY <= l.keys.minY
@@ -300,6 +302,12 @@ for w in 300...599 {
         dimRule.expect(l.dim.count == 2 && l.dim[0] == CGRect(x: 0, y: 0, width: W, height: l.row1.minY)
                        && l.dim[1] == CGRect(x: 0, y: l.row1.maxY, width: W, height: H - l.row1.maxY)
                        && !l.dim.contains { $0.intersects(l.row1) }, size)
+
+        menusRule.expect(near(l.menus.minX, b[4].minX) && near(l.menus.width, b[4].width) && l.menus.height == 50
+                         && near(l.menus.midY, l.strip.midY) && l.stripBesideMenus.minX == l.strip.minX
+                         && l.stripBesideMenus.minY == l.strip.minY && l.stripBesideMenus.height == l.strip.height
+                         && near(l.menus.minX - l.stripBesideMenus.maxX, 8) && l.stripBesideMenus.width - 16 >= 80, size,
+                         "menus \(str(l.menus)), strip \(str(l.stripBesideMenus))")
     }
 }
 for rule in rules {
@@ -320,6 +328,17 @@ check("600 pt tall at 400 wide: the picture whole (240) and the trackpad exactly
       L(size: CGSize(width: 400, height: 600)).picture.height == 240 && L(size: CGSize(width: 400, height: 600)).trackpad.height == 120)
 check("a tall screen never makes the picture taller than 16:10",
       L(size: CGSize(width: 402, height: 1400)).picture.height == 241)
+// Row 2 with the Mac's menus (docs/menu-bar-plan.md §7.5), on the narrowest and a common phone.
+do {
+    let l = L(size: se.container)
+    check("iPhone SE (375 wide): the Menus button \(str(l.menus)) under Settings, the strip 6 to \(l.stripBesideMenus.maxX): two whole thumbnails and more",
+          near(l.menus, CGRect(x: 298, y: l.strip.minY + 6, width: 63, height: 50)) && near(l.stripBesideMenus.width, 284)
+            && (l.stripBesideMenus.width - 16) / (80 + 12) >= 2.9)
+    let w320 = L(size: CGSize(width: 320, height: 548))
+    check("320 pt (Display Zoom): the button 52 wide at 254, the strip 240 (two whole thumbnails)",
+          near(w320.menus.minX, 254) && near(w320.menus.width, 52) && near(w320.stripBesideMenus.width, 240)
+            && (w320.stripBesideMenus.width - 16) / (80 + 12) >= 2.4)
+}
 check("the size is all it depends on", L(size: pro.container) == L(size: pro.container) && L(size: pro.container) != L(size: proMax.container))
 
 print("\(passes) passed, \(fails) failed")
