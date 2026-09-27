@@ -116,6 +116,32 @@ enum DoorPolicy {
         }
     }
 
+    // MARK: After the device gate
+
+    /// A session the device gate held (the floor above "0": up to 2 s while it reads the hello, the
+    /// first message inside TLS) is neither pending nor a client meanwhile, so a change that closes
+    /// sessions (Remove, Require pairing on, Remote Access or internet access off) could not reach
+    /// it. Judged again as the gate admits it, from the switches as they are then: the goodbye that
+    /// change sends its sessions, or nil to admit it. `wasPaired`: its key was paired when `.ready`
+    /// admitted it. Remote, in the order its changes are checked: "removed", "remoteOff",
+    /// "internetOff" (an origin the internet switch now refuses), then "busy" at
+    /// `maxRemoteSessions`. Home: a key that was paired and no longer is, "removed"; an unpaired
+    /// key while Require pairing is on, "pairingRequired".
+    static func afterGate(_ door: Door, wasPaired: Bool, origin: OriginPolicy.Origin, _ t: Trust, remoteSessions: Int) -> String? {
+        switch door {
+        case .remote:
+            if !t.hasKey || !t.paired { return Goodbye.removed }
+            if !t.remoteAccess { return Goodbye.remoteOff }
+            if !OriginPolicy.remoteAdmits(origin, internetAccess: t.internetAccess) { return Goodbye.internetOff }
+            if remoteSessions >= maxRemoteSessions { return Goodbye.busy }
+            return nil
+        case .home:
+            if t.paired { return nil }
+            if wasPaired { return Goodbye.removed }
+            return t.requirePairing ? Goodbye.pairingRequired : nil
+        }
+    }
+
     /// How a door treats the one kind 19 of a pairing connection it admitted.
     enum Pairing: Equatable, Sendable {
         /// The ask rule (`ask(…)`): the home door's "pair me".

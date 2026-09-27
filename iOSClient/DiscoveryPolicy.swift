@@ -42,6 +42,14 @@ enum DiscoveryPolicy {
     /// Nor within this long of the network browser last listing that Mac: a Mac the network listed
     /// moments ago is taken to be coming back there.
     static let networkGrace = 10.0
+    /// After the Mac said it quit (goodbye `quit`), a row listed since before the goodbye is left
+    /// alone for this long (`reconnectRow`): it is the registration that is going. A receiver keeps
+    /// a record about 1 s past its goodbye packet (RFC 6762 §10.1), so the row outlives the
+    /// connection, which closes at once (a stand-in for Sill.app's Quit, browsed on the Mac itself:
+    /// the row went 1.05–1.22 s after the connection ended, 11 of 11). After this long such a row
+    /// counts as usual: a Sill relaunched within that second renews the record, so its row never
+    /// leaves, and a goodbye packet can be lost.
+    static let quitWait = 3.0
     /// A session over AWDL moves to the network once the network has listed the same Mac this long
     /// without a break (a blink restarts it).
     static let moveAfter = 2.0
@@ -294,7 +302,21 @@ enum DiscoveryPolicy {
     /// run the session at home over AWDL; if it happens anyway (the network stayed silent longer),
     /// `moveToNetwork` brings the session back. A tap on a Direct row is the user's choice and is
     /// not held back.
-    static func reconnectRow<Row>(network: Row?, direct: Row?, directSince: Double?, networkLeftAt: Double?, now: Double) -> (take: Row?, recheckAt: Double?) {
+    /// After a goodbye `quit` (`quitAt`, the moment the session ended), a row listed since then or
+    /// before (`networkSince`, `directSince`) is the Mac's old registration, which outlives the
+    /// goodbye by about a second: it is not taken until `quitWait` has passed, so the words "‹Mac›
+    /// quit Sill…" stay instead of a dial to a Mac that is going. A row listed again since the quit
+    /// (Sill is back) is taken by the rules above.
+    static func reconnectRow<Row>(network: Row?, networkSince: Double? = nil, direct: Row?, directSince: Double?, networkLeftAt: Double?,
+                                  quitAt: Double? = nil, now: Double) -> (take: Row?, recheckAt: Double?) {
+        if let quitAt, now < quitAt + quitWait {
+            let fresh = { (since: Double?) -> Bool in since.map { $0 > quitAt } ?? false }
+            let choice = reconnectRow(network: fresh(networkSince) ? network : nil, direct: fresh(directSince) ? direct : nil,
+                                      directSince: directSince, networkLeftAt: networkLeftAt, now: now)
+            let heldBack = (network != nil && !fresh(networkSince)) || (direct != nil && !fresh(directSince))
+            guard choice.take == nil, heldBack else { return choice }
+            return (nil, min(choice.recheckAt ?? .infinity, quitAt + quitWait))
+        }
         if let network { return (network, nil) }
         guard let direct, let since = directSince else { return (nil, nil) }
         var due = since + directWait

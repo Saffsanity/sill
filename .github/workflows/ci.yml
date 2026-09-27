@@ -1,0 +1,137 @@
+# CI for Sill: on pull requests and pushes to main (unless they touch only documents), and by hand
+# (Actions › CI › Run workflow).
+#
+# One macOS job builds the Mac side with SwiftPM (release: the host library, the CLI, Sill.app's
+# executable and the probes), runs the pure checks in Tests/checks, builds the iOS app for the
+# simulator without signing, and runs the CLI where it exits before capturing, encoding or
+# listening. Nothing here signs anything or uses a secret. Run by hand with "mutants" ticked, it
+# also runs every check's mutants, one job per check.
+#
+# Cost: GitHub-hosted runners are free for a public repository. For a private one, macOS minutes
+# count against the account's included minutes and are then billed per minute ($0.062 on
+# 2026-09-25). The build job takes about 10 to 15 minutes; the mutants, about two hours of macOS
+# time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
+name: CI
+
+# A change that touches only documents, the website or design files starts no run. (Should this
+# job ever become a required check, such a pull request would wait for it: drop paths-ignore then.)
+on:
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/**', 'LICENSE']
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/**', 'LICENSE']
+  workflow_dispatch:
+    inputs:
+      mutants:
+        description: Also run every check's mutants (one job per check; an hour or more of macOS time)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Every run step under bash -eo pipefail (GitHub leaves pipefail off unless the shell is named).
+defaults:
+  run:
+    shell: bash
+
+# A newer push to the same pull request, or to main, cancels the run still going for the older one.
+# The event is in the group so that a push to main never cancels a run started by hand (the
+# mutants: an hour and more of paid macOS time), nor the other way round.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and check
+    # The newest macOS image GitHub offers, and the only one with Xcode 27, which Sill is built
+    # with: macOS 27 with Xcode 27.0, 27.1 and a 27.2 beta, a public preview in September 2026.
+    # macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The newest Xcode 27 that is not a beta; without one, a warning and the newest Xcode there.
+      - name: Select Xcode 27
+        id: xcode
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+
+      # The package has no dependencies (so no Package.resolved yet): the key is the toolchain and
+      # the manifest. A checkout gives every source a new modification time, so most of them compile
+      # again; the cache mainly keeps what depends only on the toolchain and the SDK, the SDK's
+      # precompiled modules and the module cache (about 200 MB in all). The pure checks' binaries
+      # stay out of it: .build/* with an exclusion, because actions/cache archives each path it
+      # lists whole, so ".build" with "!.build/checks" would still take .build/checks.
+      - name: Restore SwiftPM's build folder
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/*
+            !.build/checks
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.toolchain }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.toolchain }}-
+
+      - name: Build the Mac host, the CLI and the probes (swift build -c release)
+        run: swift build -c release
+
+      - name: Pure checks (Tests/checks/run-all.sh)
+        run: Tests/checks/run-all.sh
+
+      # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
+      # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
+      # simulator destination would also compile every file for x86_64 (Intel Macs' simulators),
+      # twice the work on this arm64 runner, and no source depends on the architecture.
+      - name: Build the iOS app for the simulator (Debug, arm64, not signed)
+        run: |
+          xcodebuild -project iOSClient/Sill.xcodeproj -scheme Sill \
+            -destination 'generic/platform=iOS Simulator' -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build
+
+      # Only the CLI's paths that end before the host starts: a refused flag, and
+      # --print-reachability, which reads this machine's network configuration once (read-only)
+      # and prints the addresses a paired device would be given away from home.
+      - name: Run the CLI where it needs no capture, encoder or listener
+        timeout-minutes: 2
+        run: |
+          status=0
+          message="$(.build/release/SillHost --internet 2>&1)" || status=$?
+          echo "SillHost --internet: exit status $status, \"$message\""
+          if [ "$status" -ne 2 ] || [ "$message" != "--internet needs --remote." ]; then
+            echo "::error::SillHost --internet should refuse with exit status 2"
+            exit 1
+          fi
+          .build/release/SillHost --print-reachability
+
+  mutants:
+    name: Mutants (${{ matrix.check }})
+    if: github.event_name == 'workflow_dispatch' && inputs.mutants
+    runs-on: xcode-27
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [addresses, clientlink, compatibility, device-gate, encoder-mailbox, encoder-slowstate, fence, goodbye, origin, pairing-address, policy, protocol, remote-rules, update-policy]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 27
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+
+      - name: The check, then its mutants
+        env:
+          CHECK: ${{ matrix.check }}
+        run: Tests/checks/run-all.sh --mutants "$CHECK"

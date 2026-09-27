@@ -83,9 +83,10 @@ struct ContentView: View {
 ///   same name: another synthetic host there is refused at its first window list (another launch)
 ///   and not tried again while it stays listed; the first host's own port, with `-SillConnect`
 ///   going through a proxy that delays each direction, moves once the fence has waited out the
-///   proxy's round trip. `to:HOST:PORT` lists that address under the same name: the same host
-///   reached another way, so the Settings panel's route word changes at the hand-over (from
-///   `127.0.0.1`, none, to this Mac's `fe80::…%en0`, "Wi-Fi"). The console says what happened
+///   proxy's round trip. `to:HOST:PORT` lists that address under the same name, read as
+///   `-SillConnect`'s is (`to:[::1]:P` works too): the same host reached another way, so the
+///   Settings panel's route word changes at the hand-over (from `127.0.0.1`, none, to this Mac's
+///   `fe80::…%en0`, "Wi-Fi"). The console says what happened
 ///   ("discovery: …", "move to the network …", "session: …" for the route;
 ///   `xcrun simctl launch --console-pty`).
 /// * `-SillWiredTest HOST:PORT` — a "Wired" row's dial goes to the cable first and falls back to
@@ -111,25 +112,31 @@ struct ContentView: View {
 ///   the cable 2 s after the cable is listed, and the host logs "Client connected: …%en14" and
 ///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
-///   `-SillSettingsEnd 1` starts its rows scrolled to their end (Direct Wireless, Away from home).
+/// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
+///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
-///   `noroute`; and away from home: `remote` (through Tailscale, 48 ms, saved: "Paired"),
-///   `remoteinternet`, `remoteslow` (the slow-link callout), `remotepair` (at home over a plain
-///   door, not saved: Pair This iPad…), `remoteoff` or `noremote` (no kind 18: no group); and
-///   pairing at home, a session over TLS: `paired` (saved: "Paired", Remote Access on), `pairedoff`
-///   (the same with Remote Access off) or `openpair` (not saved, on a Mac that lets any device in,
-///   Remote Access off: Pair This iPad…) (see `MockCatalog.SettingsCase`). The mock answers a pick
-///   after 0.35 s. The session's route, the readout's last word: Wi-Fi, except `directlink`
-///   (Direct), `wired` (Wired), `noroute` (none, as a connection whose path says nothing) and the
-///   remote cases (none: the route line under it says how instead).
+///   `noroute`; and for the Away from home group, away from home: `remote` (through Tailscale,
+///   48 ms, saved: "Paired"), `remoteinternet` or `remoteslow` (the slow-link callout); at home:
+///   `remotepair` (over a plain door, not saved: Pair This iPad…), `remoteoff` (the footnote only)
+///   or `noremote` (no kind 18: no group); and pairing at home, a session over TLS: `paired`
+///   (saved: "Paired", Remote Access on), `pairedoff` (the same with Remote Access off) or
+///   `openpair` (not saved, on a Mac that lets any device in, Remote Access off: Pair This iPad…)
+///   (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's route,
+///   the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired), `noroute`
+///   (none, as a connection whose path says nothing), and `remote`, `remoteinternet` and
+///   `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
-///   `denied` (Local Network access denied: the status says what to do, no hint); or remote
-///   access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
+///   `denied` (Local Network access denied: the status says what to do, no hint); `update` (a Mac
+///   refused this version: "Update Sill on your iPad to keep using Mac mini. It needs version 1.2
+///   or later." as the status line above a Wi‑Fi row, and "Update Sill in the App Store" under it
+///   when `-SillAppStoreURL https://apps.apple.com/app/id000000000` gives the link an address) or
+///   `notice` (a goodbye reason this build does not know: the Mac's two-line message, no link);
+///   or remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
 ///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
 ///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
 ///   `externalpair` (an outside link's confirmation); or pairing at home's
@@ -152,14 +159,23 @@ struct ContentView: View {
 ///   as it is listed), `-SillHomeCode <digits>` and `-SillHomeLink <sill://pair…>` (typed into, or
 ///   scanned by, the home card once the Mac shows its code), `-SillOverlayCode <digits>` (Pair This
 ///   iPad… with that code, once, over a session at home over TLS).
-/// * Real pairing, in the normal app (not the harness): `-SillPairURL '<sill://pair…>'` pairs
-///   with that link at launch without the confirmation; `-SillPairCode <12 digits>
-///   -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first saved Mac as a
-///   tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and this device's key;
+/// * Real pairing, in the normal app and under `-SillLive 1` (not the mock): `-SillPairURL
+///   '<sill://pair…>'` pairs with that link at launch without the confirmation; `-SillPairCode
+///   <12 digits> -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first
+///   saved Mac as a tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and
+///   this device's key; `-SillDeviceKeySE 1` makes and uses a Secure Enclave device key under its
+///   own tag (R0-a: a real device only, the simulator has no Secure Enclave);
 ///   `-Sill.savedMacs '<JSON>'` seeds the saved Macs for one run (never written; `'[]'` empties);
 ///   `-SillRemoteRoute vpn|internet` makes a remote session to a test host on loopback count as
 ///   one through Tailscale or over the internet (the 60 fps request, the slow-link callout), and
 ///   `-SillScreenFPS 120` makes the simulator's screen count as a 120 Hz one (also in the mock).
+/// * `-Sill.directWirelessMacs '("Mac mini")'` — not a harness argument either: the device's saved
+///   memory of Macs seen with Direct Wireless on, which a launch argument sets for one run (`'()'`
+///   empties it), in the normal app and under `-SillLive 1`. Unlike `-Sill.savedMacs`, what the
+///   run learns is still saved.
+/// * Versions, in the normal app too: `-SillHelloVersion <v>` is the version this device's hello
+///   (kind 23) gives, for a host's device floor under test (`SILL_TEST_MIN_DEVICE_VERSION`);
+///   `-SillAppStoreURL <https url>` is the App Store link's address while SillLinks has none.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -484,6 +500,22 @@ struct ConnectScreen: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
+
+        // A Mac that no longer serves this version said so (GoodbyePolicy's "update", its words the
+        // status line above): where to get the new one, while the status line still says why. Not
+        // before Sill's App Store address is known (SillLinks): the words say what to do anyway.
+        if let notice = client.notice, notice.storeLink, notice.text == client.status, let url = SillLinks.appStore {
+            Link(destination: url) {
+                Text("Update Sill in the App Store")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the App Store.")
+        }
 
         ForEach(client.macs) { mac in
             // The kind of link, never the Wi-Fi network's name: that needs Location access, which

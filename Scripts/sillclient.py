@@ -24,6 +24,10 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+  --hello=VER[,PROTO] send a hello (kind 23) first, before the select, as a device from 2026-09-25 on does:
+                     {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
+                     --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
+                     older device, which a host with a device floor above 0 refuses
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -49,7 +53,8 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
                      locked, closed, code, busy, expired or stopped; prints EXPECT-PAIR ok or EXPECT-PAIR
                      FAIL (exit 1). A match that is not a pairing ends the run with exit 0
 A pin mismatch exits 3 before sending a byte. Kinds 18 (verified with `openssl dgst -sha256 -verify`
-and against the Mac ID), 20 and 22 are printed one line each; a session prints the order of the
+and against the Mac ID), 20 and 22 (its reason, then message, minimumVersion and reconnect when sent)
+are printed one line each; a session prints the order of the
 kinds it received first (the catalog). Pairing prints PAIR ok or PAIR FAIL with the reason.
 At exit a LINK line gives the pong round trip (p50/p95/max over every pong), the keyframes' arrival
 times, the frames received in each 5 s window, and the frames' age (host timestamp to arrival; the
@@ -72,7 +77,8 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted")
-VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "then-code", "pair-hold", "expect-pair")
+VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "then-code", "pair-hold",
+          "expect-pair")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 
 def msg(kind, payload=b"", key=False):
@@ -366,10 +372,22 @@ try:
         if not re.fullmatch(r"\d{12}", pair_code): raise ValueError("--pair-code: 12 digits")
         if damm(pair_code) != 0: raise ValueError("--pair-code: the check digit does not match (a typo)")
     if pin_arg and pin_arg != "none" and len(b64u_decode(pin_arg)) != 32: raise ValueError("--pin: a base64url SHA-256 or none")
+    hello_arg = valued("hello")
+    if hello_arg is not None and hello_arg != "none":
+        hv, _, hp = hello_arg.partition(",")
+        if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
+        if hp: number(hp, "--hello's protocol")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 stats = "--stats" in flags or device is not None
 device = device if device is not None else "sillclient"
+# The hello (kind 23), the first message of the session when asked for: a device from 2026-09-25 on.
+hello = None
+if hello_arg == "none":
+    hello = {}
+elif hello_arg is not None:
+    hv, _, hp = hello_arg.partition(",")
+    hello = {"appVersion": hv, **({"protocol": int(hp)} if hp else {}), "device": device}
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -429,6 +447,8 @@ else:
     s = socket.create_connection((host, port), timeout=5)
 s.settimeout(0.25)
 try:
+    if hello is not None:
+        s.sendall(msg(23, json.dumps(hello).encode())); print(f"  sent hello {json.dumps(hello)}")
     s.sendall(msg(6, json.dumps(sel).encode()))
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
@@ -535,7 +555,9 @@ while time.time() - t0 < dur:
         elif kind == 20:
             print(f"  pairResult at {time.time()-t0:.3f}s: {payload.decode(errors='replace')}")
         elif kind == 22:
-            print(f"  goodbye at {time.time()-t0:.3f}s: {json.loads(payload).get('reason')}")
+            g = json.loads(payload)
+            extra = "".join(f"; {k}: {json.dumps(g[k], ensure_ascii=False)}" for k in ("message", "minimumVersion", "reconnect") if k in g)
+            print(f"  goodbye at {time.time()-t0:.3f}s: {g.get('reason')}{extra}")
         elif kind == 16:
             settings_msgs += 1
             try:

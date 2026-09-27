@@ -136,8 +136,8 @@ enum MockCatalog {
     private static func seed(_ client: StreamClient, settings c: SettingsCase) {
         client.connectedAt = Date().addingTimeInterval(c == .legacy ? -10 : -60)
         // How this session reaches the Mac: read from the connection, whatever the Mac runs.
-        // Away from home the route line under the readout says how instead (the remote cases), and
-        // the readout ends in the bitrate.
+        // Away from home the route line under the readout says how instead (`remote`,
+        // `remoteinternet`, `remoteslow`), and the readout ends in the bitrate.
         switch c {
         case .directlink: client.route = .direct
         case .wired: client.route = .wired
@@ -221,6 +221,8 @@ enum MockCatalog {
         case nearby    // searching nearby: a Wi-Fi row, then Direct rows (one with a long name)
         case methods   // every word a row can end in: Wired, Wi-Fi, none, long names with Wired and Wi-Fi, Direct
         case denied    // Local Network access denied: the status says what to do, and no hint
+        case update    // a Mac refused this version: its words, a Wi‑Fi row, the App Store link (with -SillAppStoreURL)
+        case notice    // a goodbye reason this build does not know: the Mac's two-line message, no link
         case remote        // a network row, a Direct row and two Remote rows (a long name, a "(2)")
         case addmac        // Add a Mac unfolded, scanning (a drawn viewfinder: the simulator has no camera)
         case addcode       // the typed path, empty
@@ -325,6 +327,19 @@ enum MockCatalog {
                            mac("MacBook Air", .direct)]
         case .denied:
             client.status = StreamClient.allowLocalNetwork
+        case .update, .notice:
+            // As a session ends with it (StreamClient.endWithNotice): the words as the status line,
+            // the notice beside them. The message is the host's (DeviceGate's), for this device.
+            client.macs = [mac("Mac mini", .wifi)]
+            let goodbye = c == .update
+                ? Goodbye(reason: Goodbye.update, message: "Update Sill on your \(StreamClient.deviceWord) to keep using Mac mini. It needs version 1.2 or later.",
+                          minimumVersion: "1.2", reconnect: false)
+                : Goodbye(reason: "pairingRequired",
+                          message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair iPhone or iPad…, then scan its code with this \(StreamClient.deviceWord).",
+                          reconnect: false)
+            let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
+            client.status = outcome.text
+            client.notice = StreamClient.Notice(text: outcome.text, storeLink: outcome.storeLink)
         case .remote:
             // The long name checks that "Remote" never truncates: the title does.
             client.macs = remoteRows
@@ -402,9 +417,10 @@ enum MockCatalog {
         case "revoked": return copy(.revoked, vpn)
         case "notsill": return copy(.notSill, router)
         case "gaveup": return "Stopped trying to reach Mac mini. Tap it to try again."
-        case "quit": return "Mac mini quit Sill. This \(device) reconnects when it’s back."
-        case "removed": return "Mac mini removed this \(device). To use it again, pair it again."
-        case "remoteoff": return "Mac mini turned off Remote Access."
+        // A session's goodbyes, in the words GoodbyePolicy gives them.
+        case "quit": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.quit), mac: "Mac mini", device: device, saved: true).text
+        case "removed": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.removed), mac: "Mac mini", device: device, saved: true).text
+        case "remoteoff": return GoodbyePolicy.outcome(Goodbye(reason: Goodbye.remoteOff), mac: "Mac mini", device: device, saved: true).text
         case "timeoutip": return copy(.noAnswer, router)
         default: return copy(.noAnswer, vpn)
         }

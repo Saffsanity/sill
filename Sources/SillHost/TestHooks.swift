@@ -13,6 +13,8 @@ enum TestHooks {
         "SILL_TEST_SERVICE_TYPE", "SILL_TEST_SWAP_FAIL", "SILL_TEST_PEER_TO_PEER_INTERFACE", "SILL_TEST_ORIGIN",
         "SILL_TEST_BACKOFF_SECONDS", "SILL_TEST_PAIRING_TTL", "SILL_TEST_NO_ROUTER",
         "SILL_TEST_CABLE_INTERFACE", "SILL_TEST_LOCKED", "SILL_TEST_ASK_FROM_THIS_MAC", "SILL_TEST_ASK_QUIET",
+        // The device gate's (DeviceGate): a floor above "0" refuses devices.
+        "SILL_TEST_MIN_DEVICE_VERSION", "SILL_TEST_GOODBYE",
     ]
 
     /// One line for each such variable set on a host that does not honour them; nothing on a test

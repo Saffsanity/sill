@@ -196,7 +196,7 @@ The device already draws the pointer as a sprite in the Mac's live shape (`.curs
 - a setting to turn any of this off (Q11);
 - VoiceOver announcements of who has the pointer;
 - any change to the video (`showsCursor` stays false);
-- the Mac menu bar's kinds 23–25.
+- the Mac menu bar's kinds (24, 25 and 27; 23 is the device's hello, from update-notice).
 
 ### 2. The design on one page
 
@@ -225,8 +225,9 @@ The device already draws the pointer as a sprite in the Mac's live shape (`.curs
 #### 3.1 The new kind (`Sources/StreamProtocol/StreamMessage.swift`, continuing the enum)
 
 ```swift
-    // 23–25 are held for the Mac menu bar (sketched 2026-09-25, not built: 23 macMenu, 24
-    // pressMenuItem, 25 an optional fetch), so this one is 26 and the two can never collide.
+    // 23 is the device's hello (update-notice). 24 and 25 are held for the Mac menu bar (sketched
+    // 2026-09-25, not built: 24 macMenu, 25 pressMenuItem, and 27 for its optional fetch), so this
+    // one is 26 and none of them can collide.
     case macPointer = 26     // host → device: JSON MacPointer (Pointer.swift) — where the Mac's pointer is while this
                              // device is not the one moving it (the Mac's own mouse, or another device). At most once a
                              // 30 ms tick per device, only when it changed. Older readers map it to `.unknown` and skip it
@@ -235,8 +236,8 @@ The device already draws the pointer as a sprite in the Mac's live shape (`.curs
 - **Who skips it.** Every device and test client since b67f87d (2026-09-23) skips an unknown kind:
   `parseHeader` maps it to `.unknown`, StreamMessage.swift:89-98, and StreamClient.swift:1687-1688
   ignores it.
-- **Nothing else changes.** Kinds 0–22, `InputEvent` (kind 8) and `Viewport` (kind 9) are
-  untouched.
+- **Nothing else changes.** Kinds 0–23 (23 is the device's hello), `InputEvent` (kind 8) and
+  `Viewport` (kind 9) are untouched.
 
 #### 3.2 The payload (`Sources/StreamProtocol/Pointer.swift`, new; the iOS app gets it through the package, no pbxproj entry)
 
@@ -861,7 +862,7 @@ Commit messages end with the session's attribution lines.
 0. **Preflight** (no commit). Branch `pointer-visibility` from `remote-access` at this plan's
    commit: kinds 18–22 must exist, and once PR #13 has merged, branch from main. Then H0.
 1. **"Protocol: kind 26, the Mac's pointer."**
-   - StreamMessage.swift: the case and the 23–25 note.
+   - StreamMessage.swift: the case and its note (23 the hello; 24, 25 and 27 the menu bar's).
    - Pointer.swift: `MacPointer`.
 
    Gates: H1, H3 (the JSON), H13 (the decoder part).
@@ -920,7 +921,8 @@ Commit messages end with the session's attribution lines.
 - **The CLI's stdout stays byte for byte** on the default path, idle and streaming, with and
   without `--direct-wireless`. New output only under the hooks, or as `[1s]` keys on real hosts
   when kind 26 goes out.
-- **Kinds 0–22 and kinds 8 and 9's payloads are untouched.** 23–25 stay free for the Mac menu bar.
+- **Kinds 0–23 and kinds 8 and 9's payloads are untouched.** 24, 25 and 27 stay free for the Mac
+  menu bar (23 is the device's hello, from update-notice).
 - **Tests never post events or move the pointer,** and never use the hardware encoder while Noah
   streams. They never touch `/Applications/Sill.app`, `me.saffer.sill.mac` or his iPad.
 - **TEST ONLY hooks** are honoured only by synthetic hosts, which do not advertise.
@@ -963,5 +965,5 @@ Commit messages end with the session's attribution lines.
     real pointer. The alternative is only with the test pointer set.
 11. **A setting.** Default: **none**. The alternative is a switch in Settings › Streaming and the
     menu, "Show the Mac's pointer on devices".
-12. **The kind number.** Default: **26**, leaving 23–25 to the Mac menu bar sketch. If that sketch
-    is dropped, 23.
+12. **The kind number.** Default: **26**, leaving 24, 25 and 27 to the Mac menu bar sketch (23 is
+    the device's hello, from update-notice). If that sketch is dropped, 24.

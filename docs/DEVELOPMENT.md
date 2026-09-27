@@ -85,6 +85,25 @@ The log: `tail -F ~/Library/Logs/Sill/Sill.log` (`-F`, not `-f`: at 10 MB the
 file moves to Sill.1.log and a new one starts), or Show Log… in the menu.
 Settings: `defaults read me.saffer.sill.mac`.
 
+Updates: once a day (and when you click Check Now in Settings › General),
+Sill asks GitHub (api.github.com) whether a newer Sill has been released, and
+when one has, the menu offers "Sill 0.4 Is Available…" and Settings › General
+says so; either opens the release's page on GitHub, where you download it.
+Sill never downloads or installs anything by itself, and a failed check is one
+line in the log and in Settings, never an alert. The request carries the Mac's
+IP address (like any visit to a website), Sill's version in its User-Agent
+("Sill/0.3.0"), a fixed `Accept-Language: en` (URLSession would otherwise send
+the Mac's languages) and, after a first answer, GitHub's own ETag back
+(If-None-Match); nothing else about the Mac or you: no identifier, no cookie,
+nothing about your devices. "Check for updates automatically" turns the daily
+check off (what an earlier check found stays in the menu); the check needs a
+published GitHub release, so while the repository has none it logs "GitHub has
+no release of Sill (HTTP 404)" once a day. It keeps `updateLastCheck`,
+`updateETag`, `updateLatestTag` and `updateLatestURL` in `me.saffer.sill.mac`;
+to make the next launch check again after 30 s: `for k in updateLastCheck
+updateETag updateLatestTag updateLatestURL; do defaults delete
+me.saffer.sill.mac $k; done` (`defaults delete` takes one key at a time).
+
 ### The command-line host
 
 ```
@@ -159,6 +178,14 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
+
+Every connection starts with the device's hello (its Sill version, build and
+name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
+on the device answers with a notice instead of a stream: the connect screen
+shows the Mac's words ("Update Sill on your iPad to keep using Mac mini. It
+needs version 1.2 or later."), with "Update Sill in the App Store" under them
+once the app has its App Store address, and the device does not reconnect by
+itself. Today's Macs refuse no device.
 
 The project is a plain Xcode project checked in by hand: its source files, an
 asset catalog, and the package reference. Nothing else. A new source file
@@ -306,6 +333,21 @@ None of these needs a device. `CLAUDE.md`, Build and run, has the complete
 list, with the test-only environment variables and the recipes for headless
 tests of Direct Wireless Connection and remote access.
 
+### The pure checks
+
+`Tests/checks/run-all.sh` compiles the files that decide things (discovery and
+the session's path, the settings ledger, the wire format, pairing, who may use
+which door, how frames go into the video encoder and when a stream gets a new
+encoder session) on their own with a check each, and runs them: about two
+minutes, no device, permission or encoder. `--mutants` also checks that each check fails
+which door, the device floor, how a session ends, the update check) on their
+own with a check each, and runs them: about two minutes,
+no device, permission or encoder. `--mutants` also checks that each check fails
+when its file is changed in one place (most of an hour).
+`Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
+on every pull request and push to `main`, with `swift build -c release` and the
+iOS app's build for the simulator.
+
 ### The test client and the relay
 
 `Scripts/sillclient.py PORT [seconds] [desktop|none|window:ID] [flags…]` speaks
@@ -393,7 +435,30 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ### What to try if it's slow
 
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Read the host's stats line. `enc.mailboxDrop` counts captured frames the
+  encoder had no room for, so `enc.out` well under `cap.complete` with the
+  difference in `enc.mailboxDrop` means the encoder takes longer than a frame
+  interval. At the Retina Desktop's size that is either its slow state (about
+  30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
+  seconds of few frames, at any bitrate) or another app encoding at the same
+  time (a screen recording, the Simulator's recorder, or the Claude app's iOS
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The stats
+  line can read alike for both: a test-pattern Retina stream beside that panel
+  alone read about 32 fps with about 27 drops a second. The kernel's encoder
+  log tells them apart (`Scripts/encoder-check/hbparse.py` reads it; its
+  header says how to fetch it): while another app shares the encoder, it lists
+  that app's session beside Sill's, and hbparse.py marks those windows
+  "(shared)"; in the slow state Sill's session is alone. Its C/F column is the
+  engine's figure, not Sill's time per frame, and moves with how many frames
+  the engine completes in all: about 14 ms in the slow state alone, about 10
+  beside the Simulator panel. The host gives a stream in the slow state a new
+  encoder session about 2 s into the motion, which runs at the full rate
+  again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
+  ms each …; a new session takes 9 ms …"); if a new session is no faster
+  (another app sharing the encoder, say), the log says that and the stream
+  keeps it.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
+  it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
@@ -434,21 +499,57 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ## Releasing
 
-Distribution (M6): `Scripts/release.sh` makes the download. It runs
-`make-app.sh --release` (which refuses any signature but Developer ID), zips
-the app, sends it to Apple's notary service and waits, staples the ticket,
-zips it again so the download carries the ticket, checks a copy unpacked from
-that zip with `stapler validate` and `spctl`, and prints the zip's path and
-SHA-256. It needs `SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'`
-and `SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
+Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
+CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
+tag v0.4.0`, `git push origin v0.4.0`), and its GitHub release in
+Saffsanity/sill is published (not a draft, not a prerelease) with the
+notarized zip attached; every Sill.app's update check reads that repository's
+releases alone and compares the tag with the version it runs.
+`Scripts/release.sh` makes the download. It runs `make-app.sh --release`
+(which refuses a HEAD without that tag, and any signature but Developer ID),
+zips the app, sends it to Apple's notary service and waits, staples the
+ticket, zips it again so the download carries the ticket, checks a copy
+unpacked from that zip with `stapler validate` and `spctl`, and prints the
+zip's path and SHA-256. With `--publish` it then makes the GitHub Release,
+and refuses to start unless origin has the tag and it names HEAD (gh would
+otherwise make the tag from the default branch); a `SILL_RELEASE_REPO` other
+than Saffsanity/sill gets a warning, since no Sill.app offers a release
+published there. It needs
+`SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)'` and
+`SILL_NOTARY_PROFILE` (a profile saved with `xcrun notarytool
 store-credentials sill-notary`), and refuses to start without them. Give
 both on the release command itself, never in your shell profile: `make-app.sh`
 signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
 included. `--dry-run` needs only the identity and stops before anything goes
-to Apple.
+to Apple; it builds any commit, and only warns that HEAD lacks the tag.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
+The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
+`v<version>`: it checks and builds, and with the repository variable
+`SILL_SIGN_IN_CI` set to `true` it also signs, notarizes and publishes with
+`release.sh --publish` (docs/release-checklist.md, "Releasing from GitHub
+Actions"). Its checkout is that tag, so there `--publish` checks the local
+tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
+`--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
+on, let that run publish instead.
+
+The iOS app goes to App Store Connect (TestFlight, then the App Store) from
+`Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
+signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
+checked (the version and build, the export compliance key, the Local Network
+and camera strings, the privacy manifest, an App Store signature and
+profile), and with `--upload` uploaded. `--bump` gives each upload of a
+version the next build number, alone in a commit; both refuse uncommitted
+changes, so every uploaded build is a commit's. It signs and uploads
+through the Apple Account in Xcode › Settings › Accounts, or through an App
+Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
+and it needs Xcode 27.
+`--privacy-report` lists what the archive's privacy manifest declares and the
+required-reason APIs its binary uses. The TestFlight workflow
+(`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.
+docs/release-checklist.md, "TestFlight", has the App Store Connect side, the
+record field by field.
 
 ## Known limitations
 
@@ -469,10 +570,16 @@ permissions are granted once more.
   with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
   `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
-- `Packaging/`: Sill.app's Info.plist and entitlements.
+- `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
+  export options for App Store Connect.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `sillclient.py` (a wire-format test client) and
-  `sillrelay.py` (a relay that slows or cuts the link, for tests).
+  zip people download), `release-ios.sh` (the iOS app's build for App Store
+  Connect and TestFlight), `sillclient.py` (a wire-format test client),
+  `sillrelay.py` (a relay that slows or cuts the link, for tests) and
+  `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
+  check's tests).
+- `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
+  TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.

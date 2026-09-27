@@ -184,6 +184,9 @@ package final class StreamCoordinator {
     /// network checks that the new connection reaches this same running host, since the Bonjour
     /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
     private let launchID = UUID().uuidString
+    /// In every window list (`WindowList.hostVersion`, with `protocol`): Sill.app's version; nil
+    /// from the CLI, which has no bundle. For later devices, which can then say which Mac to update.
+    private let hostVersion: String?
     /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote. Nil: no
     /// identity, no TXT tag, no kind 18, no remote door, exactly the host as before.
     package let remote: RemoteAccess?
@@ -199,14 +202,16 @@ package final class StreamCoordinator {
     /// when that identity could not be loaded; without it the home door is plain, as before (the
     /// CLI's default). `testHooks`: false for Sill.app's own executable, which honours no TEST ONLY
     /// hook that bears on who gets in or what pairing needs (§4.3): with it false, or on a host
-    /// that advertises, those hooks are ignored with one line each.
+    /// that advertises, those hooks are ignored with one line each. `hostVersion`: Sill.app's
+    /// version for the window lists, when it has one that parses.
     package init(config: HostConfig, synthetic: Bool = false, appKitLoop: Bool, remote: RemoteAccess? = nil,
-                 homePairing: Bool = false, testHooks: Bool = true) throws {
+                 homePairing: Bool = false, testHooks: Bool = true, hostVersion: String? = nil) throws {
         var config = config.validated()
         if !appKitLoop { config.virtualDisplay = false }
         self.config = config
         self.synthetic = synthetic
         self.appKitLoop = appKitLoop
+        self.hostVersion = hostVersion
         status = HostStatus()
         var home = StreamServer.HomeDoorMode.plain
         if homePairing, let remote {
@@ -218,6 +223,7 @@ package final class StreamCoordinator {
         }
         // The test pattern is for test clients, not devices.
         server = try StreamServer(advertise: !synthetic, home: home, testHooks: testHooks)
+        server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
         TestHooks.reportIgnored(testHost: server.isTestHost)
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
@@ -258,7 +264,8 @@ package final class StreamCoordinator {
             }
         }
         server.onKeyframeNeeded = { [weak self] in
-            // Network queue → encoder lock; requestKeyframe re-encodes the last frame right away.
+            // Network queue → encoder lock: the next repaint carries the keyframe, or the last frame is
+            // re-encoded once the window has been still for 50 ms (HEVCEncoder.requestKeyframe).
             self?.encoderBox.current?.requestKeyframe()
         }
         server.onClientDisconnected = { [weak self] connection in
@@ -342,6 +349,20 @@ package final class StreamCoordinator {
                 self?.status.update {
                     guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
                     $0.devices[i].route = route
+                }
+            }
+        }
+        // A device's hello names it before its first stats (a second later): the card shows
+        // "iPad (iPad14,1)" from the first moment instead of an address. Its stats replace it, as
+        // they always did; a remote device keeps its paired name meanwhile.
+        server.onClientHello = { [weak self] connection, hello in
+            let id = ObjectIdentifier(connection)
+            let name = SafeText.label(hello.device ?? "")
+            guard !name.isEmpty else { return }
+            Task { @MainActor in
+                self?.status.update {
+                    guard let i = $0.devices.firstIndex(where: { $0.id == id }), $0.devices[i].name == nil else { return }
+                    $0.devices[i].name = name
                 }
             }
         }
@@ -1329,7 +1350,7 @@ package final class StreamCoordinator {
     /// end. The CLI without --virtual-display dies on a plain SIGINT with no goodbye, as before:
     /// its devices notice by liveness.
     package func shutdownForExit() {
-        server.goodbyeAll(Goodbye.quit, within: 0.1)
+        server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()
     }
@@ -1623,7 +1644,8 @@ package final class StreamCoordinator {
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID)))
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                                                      hostVersion: hostVersion, protocol: SillProtocol.current)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

@@ -16,8 +16,11 @@ import StreamProtocol
 /// from the lock-protected TrustSnapshot and the negotiated ALPN (DoorPolicy.trusts). Refusals are
 /// counted and reported at most once a minute, one line per door.
 ///
-/// Admitted sessions go to `StreamServer.serve` with their route; a pairing connection carries
-/// exactly one PairRequest, judged on the main actor (RemoteAccess), and one PairResult back. At
+/// Admitted sessions pass the device gate here, one place for both doors (DeviceGate; with the
+/// floor above "0" the hello, the first message inside TLS, is read before anything is registered,
+/// and what changed while the gate read it is judged again, DoorPolicy.afterGate), then go to
+/// `StreamServer.serve` with their route; a pairing connection carries exactly one PairRequest,
+/// judged on the main actor (RemoteAccess), and one PairResult back, and never meets the gate. At
 /// the home door an attempt also says where it came from, whether that is this Mac itself, and
 /// which iPhone or iPad it came over by the USB cable, read afresh (CableLink).
 ///
@@ -77,6 +80,8 @@ final class Door {
         let source: String
         var origin: OriginPolicy.Origin?
         var interface: String?
+        /// Home door: the listener that accepted it included peer-to-peer Wi-Fi (Direct Wireless on).
+        var peerToPeer = false
         /// The door refused it (counted in the minute's summary already), so its end counts one
         /// failure for its source.
         var refused = false
@@ -146,8 +151,9 @@ final class Door {
         return StreamServer.addressText(host).text
     }
 
-    /// On `queue`: a new connection from the listener.
-    func accept(_ c: NWConnection) {
+    /// On `queue`: a new connection from the listener. `peerToPeer`: that listener included
+    /// peer-to-peer Wi-Fi (the home door with Direct Wireless on; never the remote door).
+    func accept(_ c: NWConnection, peerToPeer: Bool = false) {
         guard let server else { c.cancel(); return }
         let now = CFAbsoluteTimeGetCurrent()
         let source = sourceText(c)
@@ -175,7 +181,7 @@ final class Door {
         }
         let id = ObjectIdentifier(c)
         let deadline = DispatchWorkItem { [weak self] in self?.deadlinePassed(id) }
-        pending[id] = Pending(connection: c, source: source, deadline: deadline)
+        pending[id] = Pending(connection: c, source: source, peerToPeer: peerToPeer, deadline: deadline)
         queue.asyncAfter(deadline: .now() + Self.admissionDeadline, execute: deadline)
         c.stateUpdateHandler = { [weak self] state in self?.stateChanged(id, c, state) }
         c.start(queue: queue)
@@ -208,8 +214,10 @@ final class Door {
     /// at `.preparing` (behind the check before start), again at `.ready` and at a pairing's kind
     /// 19, so the remote door's internet switch turned off during the handshake refuses a
     /// connection not yet admitted. Admitted ones are `closeSessions`' (RemoteAccess changes the
-    /// snapshot before it queues that), so none slips between the two. False when refused, or no
-    /// longer pending.
+    /// snapshot before it queues that), so none slips between the two; one the device gate holds
+    /// (the floor above "0") is neither pending nor a client yet, and `afterGate` judges it again as
+    /// the gate admits it, from the same snapshot: admitted before the change, it is a client when
+    /// `closeSessions` runs; after it, it is refused. False when refused, or no longer pending.
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id], let server else { return false }
         if p.origin == nil {
@@ -240,11 +248,13 @@ final class Door {
             readPairRequest(id, c, fp)
         case .goodbye(let reason):
             // A paired key the door does not serve now: it proved itself, so its source starts clean.
+            // Closed with a FIN and a drain (`closeWithGoodbye`): the device has sent its hello by
+            // now, and a cancel with it unread answered with a reset that could beat the goodbye.
             guard let p = pending.removeValue(forKey: id) else { return }
             p.deadline?.cancel()
             forgive(p.source)
             if reason == Goodbye.busy { refusals.count("limit") }
-            StreamServer.sayGoodbye(reason, on: c, queue: queue)
+            StreamServer.closeWithGoodbye(Goodbye(reason: reason), on: c, queue: queue)
         case .refuse(let word):
             refuse(id, word)
             c.cancel()
@@ -253,31 +263,74 @@ final class Door {
 
     /// `sill/1`, judged again at `.ready`: the remote door's paired session (Remote Access on,
     /// fewer than 8 sessions), or the home door's session with its key (paired, or any key while
-    /// Require pairing is off). Registered with its route; a paired key clears its source.
+    /// Require pairing is off). A paired key clears its source. Then the device gate, here for both
+    /// doors (StreamServer's `gate`): with the floor at "0" (every build so far) nothing waits; above
+    /// it the session's first message inside TLS must be a hello the floor admits, and any other
+    /// device gets the update goodbye and is never registered. While the gate reads (up to 2 s) the
+    /// session is neither pending nor a client, so a change that closes sessions cannot see it: as
+    /// the gate admits it, it is judged again from the snapshot as it is then (`afterGate`).
+    /// Registered with its route (`serve`), then its line.
     private func admitSession(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data, _ t: TrustSnapshot) {
         guard let server, let p = pending.removeValue(forKey: id) else { return }
         p.deadline?.cancel()
         let name = t.paired[fp]
         if name != nil { forgive(p.source) }
+        if kind == .remote, name == nil { c.cancel(); return }    // atReady admits only a paired key here
         let origin = p.origin ?? .loopback
-        switch kind {
-        case .remote:
-            guard let name else { c.cancel(); return }    // atReady admits only a paired key here
-            let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { t.serviceNames[$0] }) ?? "by address"
-            server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: name))
-            print("Remote client connected: \(name) \(label) (\(c.endpoint))")
-        case .home:
-            let cable = cableDevice(of: c).flatMap { $0.serial }.map(CableLink.deviceID)
-            server.serve(c, route: .home(origin, peer: ClientRoute.Peer(fingerprint: fp, name: name, cableDevice: cable)))
-            print("Client connected: \(c.endpoint)")
+        // Home: the iPhone or iPad behind the cable, read once, as the session is admitted.
+        let cable = kind == .home ? cableDevice(of: c).flatMap { $0.serial }.map(CableLink.deviceID) : nil
+        server.gate(c) { [weak self] hello in
+            guard let self, let server = self.server else { c.cancel(); return }
+            var snapshot = t
+            if let hello {
+                // Held by the gate: judged again as it is now.
+                snapshot = self.trust.snapshot
+                if let reason = DoorPolicy.afterGate(self.kind, wasPaired: name != nil, origin: origin, self.trustFor(fp, snapshot),
+                                                     remoteSessions: server.remoteSessionCount) {
+                    self.closeAfterGate(c, reason, name: name ?? SafeText.label(hello.device ?? ""))
+                    return
+                }
+                if self.kind == .home, server.droppedForDirectWireless(c, acceptedPeerToPeer: p.peerToPeer, hello: hello) { return }
+            }
+            let endpoint = "\(c.endpoint)"
+            switch self.kind {
+            case .remote:
+                guard let paired = snapshot.paired[fp] else { c.cancel(); return }
+                let label = OriginPolicy.label(origin, interface: p.interface, serviceName: p.interface.flatMap { snapshot.serviceNames[$0] }) ?? "by address"
+                server.serve(c, route: .remote(origin: origin, label: label, fingerprint: fp, name: paired), hello: hello,
+                             admitted: { print("Remote client connected: \(paired) \(label) (\(endpoint))") })
+            case .home:
+                let peer = ClientRoute.Peer(fingerprint: fp, name: snapshot.paired[fp], cableDevice: cable)
+                server.serve(c, route: .home(origin, peer: peer), hello: hello, admitted: { print("Client connected: \(endpoint)") })
+            }
         }
+    }
+
+    /// A session the gate held that `afterGate` refused: the line the change's own `closeSessions`
+    /// prints (Remove, Require pairing, Remote Access, internet access; the limit is counted, as at
+    /// `.ready`), then the goodbye and the close (`closeWithGoodbye`), never registered. `name`: its
+    /// paired name, else the hello's device name. On `queue`.
+    private func closeAfterGate(_ c: NWConnection, _ reason: String, name: String) {
+        let who = name.isEmpty ? "a device" : name
+        let endpoint = "\(c.endpoint)"
+        switch reason {
+        case Goodbye.removed: print("Removed \(who): disconnecting it at \(endpoint).")
+        case Goodbye.remoteOff: print("Remote access off: disconnecting \(who) at \(endpoint).")
+        case Goodbye.internetOff: print("Internet access off: disconnecting \(who) at \(endpoint).")
+        case Goodbye.pairingRequired: print("Require pairing: disconnecting \(who) at \(endpoint), which isn’t paired.")
+        case Goodbye.busy: refusals.count("limit")
+        default: break
+        }
+        StreamServer.closeWithGoodbye(Goodbye(reason: reason), on: c, queue: queue)
     }
 
     /// `sill-pair/1`: exactly one kind 19 of at most 4 KB within the admission deadline, then
     /// DoorPolicy.pairing says how it is treated: judged on the main actor (an ask at home, or a
     /// proof for the pairing window), or, for an ask at the remote door, answered `closed` here
     /// with no try counted. One kind 20 back, then closed once that is sent (or after 250 ms). A
-    /// device that goes away before its kind 19 is not refused, only closed.
+    /// device that goes away before its kind 19 is not refused, only closed. Pairing is never
+    /// refused for the device's age (DeviceGate judges sessions only): a device too old for this
+    /// Mac's sessions can still pair, and hears the update notice when it connects.
     private func readPairRequest(_ id: ObjectIdentifier, _ c: NWConnection, _ fp: Data) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, _, _ in
             guard let self else { return }

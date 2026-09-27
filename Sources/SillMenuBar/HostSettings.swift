@@ -23,6 +23,10 @@ import SillHostCore
 /// Require pairing never live here: any process of the same user can write these defaults
 /// (KeychainIdentityStore; docs/home-pairing-plan.md §6.5). `config.requirePairing` only carries
 /// the stored value to the host (AppModel.setRequirePairing), and `save(changedFrom:)` never writes it.
+///
+/// `updateCheck` (automatic update checks) is here too, outside HostConfig: it moves no listener and
+/// no pipeline. What the checks found is UpdateChecker's own (updateLastCheck, updateETag,
+/// updateLatestTag, updateLatestURL, in the same defaults).
 @MainActor @Observable
 final class HostSettings {
     enum Key {
@@ -33,6 +37,7 @@ final class HostSettings {
         static let settingsTab = "settingsTab", permissionsOnboardingDismissed = "permissionsOnboardingDismissed"
         static let askedScreenRecording = "askedScreenRecording", askedAccessibility = "askedAccessibility"
         static let logShowsStats = "logShowsStats"
+        static let updateCheck = "updateCheck"
     }
 
     var config: HostConfig {
@@ -66,6 +71,17 @@ final class HostSettings {
         }
     }
     @ObservationIgnored var onAddressNameChange: (@MainActor () -> Void)?
+    /// "Check for updates automatically" (Settings › General): once a day, GitHub's releases feed
+    /// (UpdateChecker). On by default; `-updateCheck 0` turns it off for one run without saving.
+    var updateCheck: Bool {
+        didSet {
+            guard updateCheck != oldValue else { return }
+            defaults.set(updateCheck, forKey: Key.updateCheck)
+            print("Update check: automatic checks \(updateCheck ? "on" : "off").")
+            onUpdateCheckChange?()
+        }
+    }
+    @ObservationIgnored var onUpdateCheckChange: (@MainActor () -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -85,6 +101,7 @@ final class HostSettings {
             Key.remotePort: standard.remotePort,
             Key.internetAccess: standard.internetAccess,
             Key.remoteAddressName: "",
+            Key.updateCheck: true,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -100,6 +117,7 @@ final class HostSettings {
                             // the host starts, and to which the Devices pane saves it.
                             requirePairing: HostConfig.standard.requirePairing).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
+        updateCheck = defaults.bool(forKey: Key.updateCheck)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
         permissionsOnboardingDismissed = defaults.bool(forKey: Key.permissionsOnboardingDismissed)
         askedScreenRecording = defaults.bool(forKey: Key.askedScreenRecording)

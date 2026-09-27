@@ -420,17 +420,25 @@ extension StreamClient {
         discoveryChanged()
     }
 
-    /// The connection ended (StreamClient.connectionLost). A remote dial whose winner never
-    /// delivered its window list failed as a dial; a session that ran goes back to the connect
-    /// screen with the words its end deserves, and a reconnect: the network row, the Direct row,
-    /// then (a saved Mac) its saved addresses (§7.4).
+    /// The connection ended (StreamClient.connectionLost). The Mac's own words first: a notice
+    /// (GoodbyePolicy: a reason this build does not know) ends any session, a remote dial's winner
+    /// before its window list included, with those words and a reconnect only when the Mac asks for
+    /// one. Otherwise a remote dial whose winner never delivered its window list failed as a dial;
+    /// a session that ran goes back to the connect screen with the words its end deserves, and a
+    /// reconnect: the network row, the Direct row, then (a saved Mac) its saved addresses (§7.4).
     func sessionEnded(error: NWError?, end: RemoteDialPolicy.End?) {
         let s = session
-        let goodbye = goodbyeReason
+        let goodbye = self.goodbye
         firstListDeadline?.cancel()
         firstListDeadline = nil
+        let saved = s?.macID.flatMap { savedMac($0) }
+        let name = saved.map { displayName($0.macID) } ?? hostName
+        if let goodbye, GoodbyePolicy.isNotice(goodbye) {
+            endWithNotice(goodbye, session: s, saved: saved, name: name)
+            return
+        }
         if let s, s.route.isRemote, !connected, let id = s.macID {
-            let how: RemoteDialPolicy.End = end ?? goodbye.map { .goodbye($0) } ?? error.map { e in
+            let how: RemoteDialPolicy.End = end ?? goodbye.map { .goodbye($0.reason) } ?? error.map { e in
                 if case .tls(let st) = e { return .tlsAfterReady(st) }
                 return RemoteConnector.end(of: e)
             } ?? .posix(ECONNRESET)
@@ -441,49 +449,59 @@ extension StreamClient {
         }
         // At home over TLS: removed, pairing now required, or another key as the saved Mac
         // (StreamClient+Home). Every other end goes on below.
-        if homeSessionEnded(s, error: error, goodbye: goodbye) { return }
-        let saved = s?.macID.flatMap { savedMac($0) }
-        let name = saved.map { displayName($0.macID) } ?? hostName
-        var remoteAllowed = saved != nil
-        var reconnects = true
-        let text: String
-        switch goodbye {
-        case Goodbye.quit?: text = "\(name) quit Sill. This \(Self.deviceWord) reconnects when it’s back."
-        case Goodbye.removed?:
-            text = "\(name) removed this \(Self.deviceWord). To use it again, pair it again."
-            reconnects = false
+        if homeSessionEnded(s, error: error, goodbye: goodbye?.reason) { return }
+        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        if goodbye?.reason == Goodbye.removed, let id = saved?.macID, let next = SavedMacs.revoking(id, in: savedMacs) {
             // One trust list on the Mac: removed away is removed at home too. The row reads Not
             // paired, and a tap asks (docs/home-pairing-plan.md §7.6).
-            if let id = saved?.macID, let next = SavedMacs.revoking(id, in: savedMacs) {
-                savedMacs = next
-                persistSavedMacs()
-            }
-        case Goodbye.remoteOff?:
-            text = "\(name) turned off Remote Access."
-            remoteAllowed = false
-        case Goodbye.internetOff?:
-            text = "\(name) stopped accepting connections from the internet. Connect through your VPN."
-            remoteAllowed = false
-        case Goodbye.busy?: text = "\(name) is already serving 8 devices."
-        default:
-            text = saved != nil ? "\(name) disconnected. Sill will reconnect when it can reach it."
-                                : "\(hostName) disconnected. It will reconnect when the Mac is back."
+            savedMacs = next
+            persistSavedMacs()
         }
-        tearDown(status: text)
-        if reconnects {
-            let bonjour = s?.bonjourName ?? saved?.bonjourName
-            reconnect = Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
-                                  lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
-                                  remoteAllowed: remoteAllowed,
-                                  rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false)
-        } else {
-            reconnect = nil
-        }
+        tearDown(status: outcome.text)
+        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
+                                                      afterQuit: goodbye?.reason == Goodbye.quit) : nil
         updateDiscovery()
-        if reconnects {
+        if outcome.reconnect {
             scheduleReconnectRetry()
             reconnectIfListed()
         }
+    }
+
+    /// A session ended by a notice (GoodbyePolicy): the Mac's words as the status line, spoken like
+    /// every ended session's line (ConnectScreen), and no reconnect unless the Mac asked for one:
+    /// nothing dials that Mac again until the person taps its row. A remote session refused before
+    /// its first window list never left the connect screen, so its Remote rows stay (the search is
+    /// not restarted), and an after-pairing dial's watch ends with its card going idle; the remote
+    /// dial's failure rules, which would say "isn’t accepting remote connections" and redial, are
+    /// not asked.
+    private func endWithNotice(_ goodbye: Goodbye, session s: Session?, saved: SavedMac?, name: String) {
+        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        tearDown(status: outcome.text, restartSearch: connected)
+        notice = Notice(text: outcome.text, storeLink: outcome.storeLink)
+        if s?.why == .afterPairing {
+            afterPairingWatch?.cancel()
+            afterPairingWatch = nil
+            pairing = .idle
+        }
+        reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed) : nil
+        #if DEBUG
+        print("session: the Mac said goodbye (\(goodbye.reason.isEmpty ? "unreadable" : goodbye.reason)): “\(outcome.text)”; \(outcome.reconnect ? "reconnecting" : "not reconnecting")")
+        #endif
+        discoveryChanged()
+        if outcome.reconnect { scheduleReconnectRetry() }
+    }
+
+    /// The automatic reconnect after a session with this Mac ended on its own (§7.4). `afterQuit`:
+    /// the session ended with goodbye `quit`, so the Mac's row that is going is left alone for
+    /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice.
+    private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
+                               afterQuit: Bool = false) -> Reconnect {
+        let bonjour = s?.bonjourName ?? saved?.bonjourName
+        return Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
+                         lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
+                         remoteAllowed: remoteAllowed,
+                         rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
+                         afterQuit: afterQuit)
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
@@ -498,7 +516,11 @@ extension StreamClient {
     /// ("MacBook Pro" and "MacBook Pro (2)"), and stripping the suffix would rejoin the wrong one.
     /// Never while a move is under way (`moveUnderWay`): a session at home whose connection went is
     /// carried on by one (StreamClient.rescue) and stays connected until it takes over, or until it
-    /// fails and the session's end brings the reconnect here.
+    /// fails and the session's end brings the reconnect here. After goodbye `quit`, a row listed
+    /// since before the loss is the registration that is going (it outlives the goodbye by about a
+    /// second): it is left alone for DiscoveryPolicy.quitWait, and the words "‹Mac› quit Sill…"
+    /// stay meanwhile; the row listed again (Sill is back), or still listed after that, is taken as
+    /// above.
     @discardableResult
     func reconnectIfListed() -> Bool {
         reconnectCheck?.cancel()
@@ -518,9 +540,10 @@ extension StreamClient {
         // The network's sightings are by the name it lists: the Direct row's, else the name last
         // used with the Mac.
         let listedName = direct?.name ?? r.bonjourName
-        let choice = DiscoveryPolicy.reconnectRow(network: network, direct: direct,
-                                                  directSince: direct.flatMap { directSince[$0.name] },
-                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] }, now: now)
+        let choice = DiscoveryPolicy.reconnectRow(network: network, networkSince: network.flatMap { sightings.since[$0.name] },
+                                                  direct: direct, directSince: direct.flatMap { directSince[$0.name] },
+                                                  networkLeftAt: listedName.flatMap { sightings.leftAt[$0] },
+                                                  quitAt: r.afterQuit ? r.lostAt : nil, now: now)
         if let mac = choice.take, mac.endpoint != nil {
             // The row's door decides whether the reconnect dials it at all (DiscoveryPolicy.homeDial,
             // never an ask): a Mac that removed this device, or an unsaved one that requires

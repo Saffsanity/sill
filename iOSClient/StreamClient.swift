@@ -254,7 +254,8 @@ final class StreamClient: ObservableObject {
     /// Main thread only.
     var localPointer: CGPoint? { didSet { onLocalPointerChange?(localPointer) } }
     var onLocalPointerChange: ((CGPoint?) -> Void)?
-    /// The last Viewport sent, so the local-cursor flag can be re-sent without re-measuring. Main thread.
+    /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
+    /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite. Not
@@ -523,6 +524,9 @@ final class StreamClient: ObservableObject {
         var rememberedDirect: Bool
         var remoteFailures = 0
         var nextRemoteAt = 0.0
+        /// The session ended with goodbye `quit`: a row listed since before `lostAt` is the Mac's
+        /// registration that is going, left alone for DiscoveryPolicy.quitWait (`reconnectRow`).
+        var afterQuit = false
     }
     var reconnect: Reconnect?
     /// The dial in flight, remote or pairing: one at a time each.
@@ -533,8 +537,25 @@ final class StreamClient: ObservableObject {
     var reconnectCheck: DispatchWorkItem?
     /// A remote session's first window list must come within 10 s of `.ready`.
     var firstListDeadline: DispatchWorkItem?
-    /// A kind 22 on the current connection: why the Mac is about to close it.
-    var goodbyeReason: String?
+    /// A kind 22 on the current connection: why the Mac is about to close it, and what to do then
+    /// (GoodbyePolicy). One that does not decode reads as reason "", a reason this build does not know.
+    var goodbye: Goodbye?
+    /// The Mac's own words from the goodbye that ended the last session, when it was a notice
+    /// ("update", or a reason this build does not know): the connect screen's status line
+    /// (GoodbyePolicy), and for "update" the App Store link under it, shown while the status line
+    /// still says it: the next status (a tap, a dial, Forget) takes the link away. Cleared by the
+    /// next session's tear-down.
+    struct Notice: Equatable {
+        let text: String
+        var storeLink = false
+    }
+    @Published var notice: Notice?
+    /// The Mac's version and protocol from this session's window lists (`WindowList.hostVersion`,
+    /// `protocol`): nil from SillHost and from Macs before 2026-09-25. Shown nowhere yet; kept so a
+    /// later device can tell a Mac from the first public build from what it needs (§14). Cleared
+    /// with the session.
+    @Published var hostVersion: String?
+    @Published var hostProtocol: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -600,6 +621,9 @@ final class StreamClient: ObservableObject {
     private(set) var savedMacsSeeded = false
 
     init() {
+        // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
+        // the network queue, where connections become ready and send it, must not be first to touch.
+        _ = Self.helloPayload
         #if DEBUG
         // Read from the command line itself: the argument domain drops a value that starts like a
         // property list but is not one, and JSON's "[" is such a start.
@@ -1029,12 +1053,20 @@ final class StreamClient: ObservableObject {
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
         session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName, home: trust, row: row,
                           endpoint: endpoint)
-        goodbyeReason = nil
+        goodbye = nil
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
         #if DEBUG
         if trust.tls { print("home: dialing \(name) over TLS, \(DiscoveryPolicy.pin(trust) == .anyKey ? "any key" : "pinned")") }
         #endif
         let c = NWConnection(to: endpoint, using: params)
+        // The hello first, written to `c` before it becomes the session's connection below: from
+        // then on the session can send through the link before `.ready` (a coast's end as the
+        // stream screen goes, the pointer's viewport 200 ms after a tear-down), and a send made
+        // before `.ready` goes out once it is ready, in the order made. Sent at `.ready`, the hello
+        // came after such a message, and a Mac with a device floor refuses a device whose first
+        // message is not its hello. Over TLS (a TLS home door) the send waits for the handshake, so
+        // the hello is the first message inside TLS.
+        sendHello(on: c)
         var wasReady = false   // the handler runs on `queue`, one state at a time
         c.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
@@ -1177,6 +1209,36 @@ final class StreamClient: ObservableObject {
         return DeviceTLS.refusing(peerToPeer: false, queue: queue)
     }
 
+    /// This device's hello (kind 23): its version, build, protocol and name, built once. DEBUG:
+    /// `-SillHelloVersion <v>` replaces the version, for a host's device floor under test.
+    private static let helloPayload: Data = {
+        var version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        #if DEBUG
+        if let v = UserDefaults.standard.string(forKey: "SillHelloVersion"), !v.isEmpty { version = v }
+        #endif
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return Wire.encode(Hello(appVersion: version, build: build, protocol: SillProtocol.current, device: ClientStatsReporter.deviceName))
+    }()
+
+    /// The hello, the first thing on every session connection, written straight to `c` before
+    /// anything else can go out on it: a Mac with a device floor judges the device by its first
+    /// message. A tap's, a reconnect's, a wired dial's and its fallback's as the connection is
+    /// made, before it becomes the session's (`connect(to:)`: a send made before `.ready` waits
+    /// for it, in order, and over TLS for the handshake, so it is the first message inside TLS); a
+    /// move's as it is made (`startMove`: from AWDL, to the cable, to Wi-Fi, a rescue's reconnect,
+    /// and each one's fallback; nothing else goes out on it before the hand-over); a remote dial's
+    /// winner before it becomes the session's (`adopt`). Never on a pairing connection, whose one
+    /// message is kind 19. Older Macs skip it. Any thread.
+    private func sendHello(on c: NWConnection) {
+        let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Self.helloPayload)
+        c.send(content: message.serialized(), completion: .contentProcessed { _ in })
+        #if DEBUG
+        if let hello = Wire.decode(Hello.self, from: Self.helloPayload) {
+            print("hello: sent Sill \(hello.appVersion ?? "?") (\(hello.build ?? "?")), protocol \(hello.protocol ?? 0)")
+        }
+        #endif
+    }
+
     // MARK: Moving a session over AWDL to the network
 
     /// This session runs over peer-to-peer Wi-Fi and the network lists the same Mac by its Bonjour
@@ -1242,6 +1304,13 @@ final class StreamClient: ObservableObject {
     /// ready within wiredWait, or unable to go on, ends the move (`giveUpMove`). Main thread.
     private func startMove(to endpoint: NWEndpoint, kind: MoveKind, fallback: NWEndpoint?) {
         let c = NWConnection(to: endpoint, using: moveParameters())
+        // Its own hello first, written to `c` as it is made, as `connect(to:)` does: every move's
+        // connection (from AWDL, to the cable, to Wi-Fi, a rescue's, each fallback's) is a new
+        // session connection to the Mac, and a Mac with a device floor judges it by its first
+        // message (inside TLS at a TLS home door). Nothing else goes out on it before the
+        // hand-over: what the session sends meanwhile waits in SessionLink (a fence, a hold), which
+        // releases it onto `c` only after.
+        sendHello(on: c)
         moving = Move(connection: c, kind: kind)
         // A move up gives up; a reconnect over the cable (`sessionDead`) has the row as listed for
         // its fallback instead, whose own dial has the move's 5 s.
@@ -1330,9 +1399,10 @@ final class StreamClient: ObservableObject {
     /// On `queue`, once the network connection is ready: reads it up to its first window list,
     /// keeping every message for the session's read loop to replay should it take over, and hands
     /// the list's host to `moveProbed`. Ticks, frames or a broadcast can come before the list: the
-    /// Mac adds a connection to its broadcasts before its catalog goes out. A read that fails, a
-    /// message cut short, or one bigger than the session's reader takes (`readHeader`), cancels
-    /// `c`, which ends the move (`moveEnded`).
+    /// Mac adds a connection to its broadcasts before its catalog goes out. A goodbye (kind 22)
+    /// before the list goes to `moveSaidGoodbye`, and the reading goes on to the Mac's close. A read
+    /// that fails, a message cut short, or one bigger than the session's reader takes
+    /// (`readHeader`), cancels `c`, which ends the move (`moveEnded`).
     private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -1351,6 +1421,13 @@ final class StreamClient: ObservableObject {
             }
             let next = { (payload: Data) in
                 let kept = kept + [(header, payload)]
+                if header.kind == .goodbye {
+                    // Queued on main before the `.cancelled` that the Mac's close brings (read on
+                    // below), so `moveEnded` finds what it said. One that does not decode is a
+                    // reason this build does not know, as in `handle`.
+                    let goodbye = Wire.decode(Goodbye.self, from: payload) ?? Goodbye(reason: "")
+                    DispatchQueue.main.async { self.moveSaidGoodbye(c, goodbye) }
+                }
                 guard header.kind == .windowList else { self.probeMove(c, kept: kept); return }
                 guard let list = Wire.decode(WindowList.self, from: payload) else { c.cancel(); return }
                 DispatchQueue.main.async { self.moveProbed(c, kept: kept, host: list.launchID) }
@@ -1392,6 +1469,34 @@ final class StreamClient: ObservableObject {
             return
         }
         finishMove(c, kind: move.kind, kept: kept)
+    }
+
+    /// The Mac said goodbye on the move's connection before its first window list: it closes that
+    /// connection unserved (a device floor above this build refused it, "update", or Sill is
+    /// quitting), and its close ends the move (`moveEnded`) right after this. A session whose own
+    /// connection has gone (`sessionDead`: a rescue's reconnect, or a move to Wi-Fi that carries
+    /// it) then ends as a refusal on any connection ends (StreamClient+Remote's `sessionEnded`): with
+    /// the Mac's words, and without dialling that Mac again unless the goodbye asks for it. A
+    /// session still running stays where it is, and a move up does not try the listing that
+    /// refused it again while that lasts, as with another Mac (`moveProbed`). Main thread.
+    private func moveSaidGoodbye(_ c: NWConnection, _ goodbye: Goodbye) {
+        guard let move = moving, move.connection === c else { return }   // given up meanwhile
+        let reason = goodbye.reason.isEmpty ? "unreadable" : goodbye.reason
+        if sessionDead {
+            print("path: the Mac said goodbye (\(reason)) on the new connection: the session ends with its words")
+            self.goodbye = goodbye
+            return
+        }
+        switch move.kind {
+        case .fromDirect:
+            print("move to the network refused: \(hostName) on the network said goodbye (\(reason))")
+            refusedListing = sightings.since[hostName]
+        case .toCable:
+            print("path: move refused: \(hostName) on the cable said goodbye (\(reason))")
+            refusedCable = upListing
+        case .toWifi:
+            print("path: move refused: \(hostName) on Wi\u{2011}Fi said goodbye (\(reason))")
+        }
     }
 
     /// The move's connection reaches this session's host: it takes the session over and the old one
@@ -1687,7 +1792,7 @@ final class StreamClient: ObservableObject {
     /// goodbye on (kind 22: it closed it on purpose, "quit" at home, and the session ends with the
     /// words that goodbye deserves rather than after a dial to a Mac that is going). Main thread.
     private func rescue(from c: NWConnection) -> Bool {
-        guard connected, sessionListed, goodbyeReason == nil else { return false }
+        guard connected, sessionListed, goodbye == nil else { return false }
         let now = ProcessInfo.processInfo.systemUptime
         var input = pathInput(now: now)
         input.dead = true
@@ -1804,9 +1909,10 @@ final class StreamClient: ObservableObject {
     /// there is another launch (one try, refused at its first list, none again while it stays
     /// listed); the same host's own port, with `-SillConnect` through a proxy that delays each
     /// direction, is the same launch behind a slow direct link (moved once the fence has waited out
-    /// the proxy's round trip). `to:HOST:PORT` lists that address: the same host reached another
-    /// way, so the route can change at the hand-over (from 127.0.0.1, no word, to this Mac's
-    /// fe80::…%en0 address, "Wi-Fi"). Main thread.
+    /// the proxy's round trip). `to:HOST:PORT` lists that address, read as `-SillConnect`'s is
+    /// (`address(_:)`, so `to:[::1]:P` lists ::1 rather than the name "[::1]", which never
+    /// connected): the same host reached another way, so the route can change at the hand-over
+    /// (from 127.0.0.1, no word, to this Mac's fe80::…%en0 address, "Wi-Fi"). Main thread.
     private func beginMoveTest(endpoint: NWEndpoint, name: String, mode: String) {
         guard case .hostPort(let host, _) = endpoint, testNetworkRows.isEmpty else { return }
         let listed: NWEndpoint
@@ -1816,9 +1922,8 @@ final class StreamClient: ObservableObject {
             listed = .hostPort(host: host, port: 1)
         } else if mode.hasPrefix("other:"), let number = UInt16(mode.dropFirst(6)), let port = NWEndpoint.Port(rawValue: number) {
             listed = .hostPort(host: host, port: port)
-        } else if mode.hasPrefix("to:"), let colon = mode.lastIndex(of: ":"), mode.distance(from: mode.startIndex, to: colon) > 3,
-                  let number = UInt16(mode[mode.index(after: colon)...]), let port = NWEndpoint.Port(rawValue: number) {
-            listed = .hostPort(host: NWEndpoint.Host(String(mode[mode.index(mode.startIndex, offsetBy: 3)..<colon])), port: port)
+        } else if mode.hasPrefix("to:"), let address = Self.address(String(mode.dropFirst(3))) {
+            listed = address
         } else {
             return
         }
@@ -2057,7 +2162,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         session = s
-        goodbyeReason = nil
+        goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
         if route != nil { route = nil }
         c.stateUpdateHandler = { [weak self] state in
@@ -2079,6 +2184,9 @@ final class StreamClient: ObservableObject {
             guard let self else { return }
             self.unviableSince = viable ? nil : (self.unviableSince ?? CACurrentMediaTime())
         }
+        // The winner is `.ready` already: its hello goes out before anything the session sends,
+        // which only starts once it is `connection`.
+        sendHello(on: c)
         connection = c
         queue.async { [weak self] in
             self?.startMeasuring(c, remote: true)
@@ -2153,7 +2261,10 @@ final class StreamClient: ObservableObject {
         firstListDeadline?.cancel()
         firstListDeadline = nil
         session = nil
-        goodbyeReason = nil
+        goodbye = nil
+        notice = nil
+        hostVersion = nil
+        hostProtocol = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -2163,6 +2274,9 @@ final class StreamClient: ObservableObject {
         recentRttMedians = []
         slowLink = false
         localPointer = nil
+        // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
+        // session's viewport may reach the next connection, which may already be dialling.
+        forgetViewport()
         cursorShape = nil
         connected = false
         connectedDirectly = false
@@ -2402,8 +2516,17 @@ final class StreamClient: ObservableObject {
                 // The host this session runs on, which a move to the network must reach again
                 // (`moveProbed`); its first list is what lets a move start.
                 self.sessionHost = list.launchID
+                if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
+                if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if !self.sessionListed {
                     self.sessionListed = true
+                    #if DEBUG
+                    switch (list.hostVersion, list.protocol) {
+                    case (nil, nil): print("host: no version (a Mac from before 2026-09-25)")
+                    case (nil, let p?): print("host: no version, protocol \(p)")
+                    case (let v?, let p): print("host: Sill \(v), protocol \(p.map(String.init) ?? "?")")
+                    }
+                    #endif
                     self.moveToNetworkIfListed()
                     self.followBestPath()
                 }
@@ -2498,12 +2621,14 @@ final class StreamClient: ObservableObject {
                 self.receiveMacInfo(signed, endpoint: from?.endpoint)
             }
         case .goodbye:
-            // Why the Mac is about to close this connection: the words, and whether to reconnect.
-            let reason = Wire.decode(Goodbye.self, from: data)?.reason ?? ""
+            // Why the Mac is about to close this connection: the words, and whether to reconnect
+            // (GoodbyePolicy, when the connection ends). One that does not decode is a reason this
+            // build does not know: its own words, and no reconnect.
+            let goodbye = Wire.decode(Goodbye.self, from: data) ?? Goodbye(reason: "")
             let from = connection
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
-                self.goodbyeReason = reason
+                self.goodbye = goodbye
             }
         default:
             break // client → host kinds, and anything a newer host invents
@@ -2774,27 +2899,23 @@ extension StreamClient {
     }
 
     /// `-SillWiredTest host:port`: the fallback of a wired dial, under test in the simulator against
-    /// a synthetic host. `-SillConnect`'s dial, a network row's (any row not Direct counts as
-    /// Wired) and a move's under `-SillMoveTest` go to that address first, the way a "Wired" row's
-    /// goes to its cable, with the address they would have dialled as the fallback: `192.0.2.1:9`
-    /// (TEST-NET-1, never answers) is given up after DiscoveryPolicy.wiredWait, `127.0.0.1:1`
-    /// (nothing listens) at once.
+    /// a synthetic host. `-SillConnect`'s dial, any network row's (each counts as Wired; a Direct or
+    /// Remote row's never) and a move's under `-SillMoveTest` go to that address first, the way a
+    /// "Wired" row's goes to its cable, with the address they would have dialled as the fallback:
+    /// `192.0.2.1:9` (TEST-NET-1, never answers) is given up after DiscoveryPolicy.wiredWait,
+    /// `127.0.0.1:1` (nothing listens) at once.
     private static let wiredTest = address(argument: "SillWiredTest")
 
-    /// A `host:port` launch argument as an address: by the strict address parser, so `[::1]:P`
-    /// works (a split at the last colon broke IPv6), else, for what the parser refuses, split at
-    /// the last colon as before, so a scoped link-local address works too (`fe80::…%en0:P`: a zone
-    /// means nothing to a saved address, which the parser is for, and everything to a test on this
-    /// Mac's own link).
+    /// A `host:port` launch argument as an address (`address(_:)`).
     private static func address(argument key: String) -> NWEndpoint? {
         UserDefaults.standard.string(forKey: key).flatMap(address(_:))
     }
 
-    /// `host:port` as an address (a launch argument's, `-SillPathTest`'s `wifi=` and `cable=`): by
-    /// the strict address parser, so `[::1]:P` works (a split at the last colon broke IPv6), else,
-    /// for what the parser refuses, split at the last colon as before, so a scoped link-local
-    /// address works too (`fe80::…%en0:P`: a zone means nothing to a saved address, which the
-    /// parser is for, and everything to a test on this Mac's own link).
+    /// `host:port` as an address (a launch argument's, `-SillPathTest`'s `wifi=` and `cable=`,
+    /// `-SillMoveTest`'s `to:`): by the strict address parser, so `[::1]:P` works (a split at the
+    /// last colon broke IPv6), else, for what the parser refuses, split at the last colon as
+    /// before, so a scoped link-local address works too (`fe80::…%en0:P`: a zone means nothing to a
+    /// saved address, which the parser is for, and everything to a test on this Mac's own link).
     private static func address(_ raw: String) -> NWEndpoint? {
         if case .success(let address) = AddressParser.parse(raw), let number = address.port,
            let port = NWEndpoint.Port(rawValue: UInt16(number)) {
