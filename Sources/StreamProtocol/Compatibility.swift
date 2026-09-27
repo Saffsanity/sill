@@ -13,9 +13,13 @@ import Foundation
 //
 // Pure: Foundation only, so it is checked on its own with swiftc.
 
-/// The wire's generation. 1: the 14-byte header, kinds 0–23 and the JSON rules of HostSettings.swift.
-/// Raised only by a change an older peer cannot skip (a new transport, pairing required on the home
-/// door); an additive change never raises it. When it rises, the host's device floor rises too
+/// The wire's generation. 1: the 14-byte header, kinds 0–23 and the JSON rules of HostSettings.swift,
+/// inside TLS 1.3 with both keys pinned at both doors, whose session protocol is the ALPN `sill/1`
+/// (RemoteTLS.sessionALPN): the home door pairs as the remote door does, as the first public builds
+/// ship it (docs/home-pairing-plan.md; the plain home door is development builds' and the CLI's).
+/// Raised only by a change an older peer cannot skip (a new transport, a kind or rule it cannot
+/// skip); an additive change never raises it. When it rises, the session ALPN rises with it (`sill/2`,
+/// offered beside `sill/1` while older peers are served) and so does the host's device floor
 /// (DeviceGate, docs/update-notice-plan.md §4.6).
 public enum SillProtocol {
     public static let current = 1

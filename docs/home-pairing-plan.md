@@ -496,7 +496,9 @@ in them.
 
 HostSettings.swift's rules, as for every payload since PR #13: JSON only; new fields optional; no
 enums on the wire (strings; an unknown value is skipped or, for `p`, read as "1"); never rename or
-retype a field. A later generation goes in the ALPN (`sill/2`), `PairRequest.v` and `MacInfo.v`.
+retype a field. A later generation goes in the ALPN (`sill/2`), `PairRequest.v` and `MacInfo.v`,
+with `SillProtocol.current` (Compatibility.swift, main's since the update notice): protocol 1 is
+this door's `sill/1`, settled at the merge with main (Results, "The merge with main").
 
 ---
 
@@ -1554,11 +1556,13 @@ Commit messages end with the session's attribution lines.
   pointer work) build a Sill.app with a plain home door. Once his iPad has seen Sill.app with `p`,
   such a build reads "Update Sill" on it (§3.4): merge this change into a branch before installing
   its Sill.app, or launch the iPad build once with `-SillForgetHomeTLS 1`.
-- `update-notice` (not merged): its DeviceGate holds a ready connection at both doors until the
-  device's hello (kind 23). Whichever lands second puts the gate inside `Door`, one place for both
-  doors; the hello goes first on every TLS session connection and never on a pairing connection, as
-  that branch already has it at the remote door. Builds from before either change nothing here:
-  they cannot speak TLS at home, so no goodbye, `update` or `pairingRequired`, ever reaches them.
+- `update-notice` (main's since PR #18): its DeviceGate holds a ready connection at both doors until
+  the device's hello (kind 23). Whichever lands second puts the gate inside `Door`, one place for
+  both doors; the hello goes first on every TLS session connection and never on a pairing
+  connection, as that branch already has it at the remote door. Builds from before either change
+  nothing here: they cannot speak TLS at home, so no goodbye, `update` or `pairingRequired`, ever
+  reaches them. This branch landed second: the merge with main put the gate in `Door` (Results,
+  "The merge with main").
 - At the hand-over, **the iPad build first** (Debug): it still dials today's Sill.app plainly. Then
   Sill.app. His iPad is already paired, so P1 needs no step. If Sill.app goes first, the iPad on
   main's build cannot connect until it is updated, and the Mac's menu says so.

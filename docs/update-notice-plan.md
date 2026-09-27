@@ -189,6 +189,9 @@ public struct Hello: Codable, Sendable {
 /// Raised only by a change an older peer cannot skip (a new transport, pairing required on the home
 /// door); an additive change never raises it. When it rises, the host's floor rises too (§4.6).
 public enum SillProtocol { public static let current = 1 }
+// Settled at the merge with home-pairing (2026-09-27): home pairing ships before 1.0, so protocol 1
+// is 1.0's TLS home door with ALPN `sill/1`, and pairing on the home door is no longer an example of
+// what raises it; a later generation raises it and the ALPN (`sill/2`) together (Compatibility.swift).
 
 /// A version as tags, bundles and the wire write it: "v0.4.0", "0.4.0", "0.4", "1.2.3-beta.1".
 public struct SillVersion: Comparable, Hashable, Sendable, CustomStringConvertible {
@@ -432,8 +435,9 @@ SILL_TEST_GOODBYE ignored: not a Goodbye.
 correctly. Then, in that host's own step:
 
 1. **Only for a requirement, never as a nudge.** Raise it only when the host needs something older
-   devices cannot do: pairing on the home door, a new transport, a kind they cannot skip. Everything
-   else stays additive (§3.7), and older devices keep working.
+   devices cannot do: a new transport, a kind they cannot skip. (Pairing on the home door was the
+   first example; it ships in 1.0 with protocol 1, settled at the merge with home-pairing.)
+   Everything else stays additive (§3.7), and older devices keep working.
 2. **To a version people can get.** The floor is the first iOS version that has what the host
    needs, live on the App Store with its phased release finished before the host ships. It runs on
    every iOS the refused versions ran on (17.0 today), or the host's release notes say which
@@ -1143,6 +1147,9 @@ Commit messages end with the session's attribution lines.
 >   handshake and EOF, never kind 22 "update", and redial. Only development and TestFlight builds
 >   are that old, so no plaintext path or sniffer answers them.
 
+(Since the merge of main into `home-pairing`, 2026-09-27: the last bullet says what that merge
+settled, the gate in `Door` and protocol 1 with ALPN `sill/1`.)
+
 **CLAUDE.md, elsewhere:**
 - the current step: both features, the defaults taken, what was verified;
 - Layout: Compatibility.swift, DeviceGate.swift, UpdatePolicy.swift, UpdateChecker.swift,
@@ -1219,7 +1226,10 @@ Commit messages end with the session's attribution lines.
     never sends kind 22). Left for the merge with `home-pairing`: whether 1.0's TLS home door is
     `SillProtocol` 1 with ALPN `sill/1`; if it is, pairing on the home door leaves the examples of
     what raises the protocol (Compatibility.swift, §3.2, §4.6 rule 1), and a later generation raises
-    both it and the ALPN (`sill/2`).
+    both it and the ALPN (`sill/2`). **Settled at that merge (2026-09-27, d11aa60 on
+    `home-pairing`):** it is; the gate runs in `Door`, one place for both TLS doors, and what
+    changed while it held a session is judged again by `DoorPolicy.afterGate`
+    (docs/home-pairing-plan.md, Results, "The merge with main").
 
 ---
 

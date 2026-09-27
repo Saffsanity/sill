@@ -10,8 +10,8 @@ import Security
 ///
 /// Two application protocols tell a pairing connection from a session before any data:
 /// `sill/1` (a session: paired devices only) and `sill-pair/1` (pairing, one message each way).
-/// A later generation can offer `sill/2` beside `sill/1`. Inside TLS: the same 14-byte header and
-/// the same kinds as the home door.
+/// A later generation can offer `sill/2` beside `sill/1`, with `SillProtocol.current`
+/// (Compatibility.swift). Inside TLS: the same 14-byte header and the same kinds as the home door.
 ///
 /// Measured on loopback (2026-09-24): mutual TLS 1.3 is ready in 12–20 ms with suite 0x1302. The
 /// server's verify block sees the negotiated ALPN already, so the host refuses an unpaired key on
