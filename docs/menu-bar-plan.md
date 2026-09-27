@@ -131,16 +131,53 @@ Checked, without the hardware encoder:
   files, `SILL_TEST_MENU_PID` taken only when synthetic, `kAXPressAction` only in MenuReader (after
   `PressDecision`) and WindowSizer's close button.
 
+Through a synthetic host (2026-09-27, 03:33–03:41, once the device had left Sill.app; one host at
+a time, each after `no-device.sh` and again after it; `lsappinfo front` sampled every 0.2 s), before
+the merge (d392679, against main at 150f781) and after it (8ea4882, against cf05a78):
+- H2: the CLI's stdout, digits masked and lines sorted, identical to main's, idle 35 s and with a
+  5 s client, each with and without `--direct-wireless`, at both points; the clients' kinds the same
+  counts (no 24), "first kinds" identical.
+- H4 (8ea4882): the "Test menus" line; the subscription answered at once (v1 with no menus, since it
+  came before the pick: §3.3), then the fixture's top level as v2; Probe as §5's table; the fetch at
+  3.4 s from the cache (`menu.cached 1`, Dynamic N unchanged, no validation), the one at 4.6 s read
+  again; Probe validated 3 times over both runs, none for run B's Deep fetches (they read through
+  the kept element); Deep level by level. Recorded: Edit, the fixture having no key window, reads
+  Undo, Redo, Cut, Copy, Paste and Start Dictation disabled, with AppKit's own AutoFill ▸, Start
+  Dictation 🎤 and Emoji & Symbols (fn E) added. Q12: no callback in the 2 s between the
+  subscription's top-level read and the first fetch. The 5 ms budget host: 600 Items, 1 item and
+  more=599.
+- H5, both builds: 4.0 and Deep Leaf pressed (the labels "A" and "Deep", the two ACTION lines, the
+  host's two "Menu from" lines); Unavailable refused as disabled; 4.1 under Set Label A's title
+  refused; the bar item and Deep refused in 0–1 ms, nothing opened; top levels v2, none v3, v4; an
+  older version refused, the line giving the id.
+- H6: Rebuilt found again by its path after a new NSMenu and pressed; Renamed Leaf refused, the
+  host's line naming it; Dynamic N pressed 0.3 s after its fetch, refused 1.5 s after.
+- H7: 50 fetches, 20 served and 30 too many; ten presses, 4 and 6; one ignored line each.
+- H8: the fixture v2, none at 3 s (v3), the fixture at 4 s (v4), none after the kill at 6 s (v5,
+  from the next poll), and the fetch at 7 s refused ("The menus changed…").
+- H9: main's StreamMessage.swift reads 24, 25 and 27 as `.unknown`; main's `sillclient.py` gets no
+  24; junk ids, a missing version or title, a bar item and 4.99 answered with the note; the
+  1,000,000-byte title refused and never printed; a message over the cap closed with
+  StreamServer's line; the host streams on; main's host with this branch's `--menus --fetch`: no 24,
+  nothing printed about menus.
+- H10: Slow Action pressed in 4–11 ms; the fetch during it stale ("menufixture isn’t responding."),
+  a stale top level, the not-answering line, then "answering again" and a fresh top level; the two
+  kind 16 answers 1–7 ms after their changes while `sill.menus` waited; a `[1s]` line each second.
+- H11: a subscribed client with nothing streaming, 35 s: no `menu.*` key, the host's CPU 0.0–0.6 %;
+  streaming the Desktop 20 s with nothing asked: `menu.top 1` for the subscription, nothing else.
+- The front never changed in 33 of 34 host runs. In one (main's host with this branch's client,
+  03:35:33–03:35:40, after the merge) Finder was sampled in front, and the Mac's last HID input was
+  at 03:35:43: someone at the Mac, not the run (the same run before the merge: unchanged). No device
+  connected during any run. Other agents' synthetic hosts ran in the same minutes.
+- The gate script first misjudged five checks (the fixture log's padded field hid its ACTION lines,
+  a subscription answered v1, Probe's count, H2's kinds compared as text); re-evaluated from the
+  saved logs (`reeval.py`), all pass.
+
 Not run in this step:
-- H2 and H4–H11 through the host: every synthetic host encodes on the hardware (its launch probe,
-  and the Desktop it streams), and a device streamed the Desktop from Sill.app the whole time
-  (`Scripts/encoder-check/no-device.sh` blocked from 00:41 on). The gate scripts wait for it:
-  session scratchpad `menubar-finish/tools/gates.py` (H4–H11, one host at a time, each after
-  `no-device.sh`, `lsappinfo front` sampled throughout) and `h2.py`, with builds of main at
-  150f781 and cf05a78 and of 8ea4882 beside them.
 - H12: TextEdit was not running, and none is started.
 - H13's previews: the bare SillMenuBar is an accessory app, which takes the front when started from
-  a shell; the only app change is `--menu-selftest`'s branch in its main, before NSApplication.
+  a shell, and Noah was at the Mac; the only app change is `--menu-selftest`'s branch in its main,
+  before NSApplication.
 
 Found, for the review (step 5):
 - A fetch by id does not check that the item at that id is still the one the device opened.
@@ -158,10 +195,10 @@ Found, for the review (step 5):
 Next agent, in order:
 1. (Done) Merge main: cf05a78 at 53522ab. Main has not changed StreamCoordinator, StreamClient,
    StreamMessage or the pbxproj since 150f781, so this plan's line numbers still hold there.
-2. (Done but for the gates through the host) Verify and fix the host. Run H2 and H4–H11 once no
-   device is on Sill.app: the scratchpad's scripts, or by hand from §10. `Scripts/menu-check/run.sh`
-   covers the reader and the mirror without a host (safe while Sill.app streams); run it again after
-   any change to the menu files.
+2. (Done) Verify and fix the host. After any change to the menu files, run
+   `Scripts/menu-check/run.sh` (no host; safe while Sill.app streams), and H2 and H4–H11 once no
+   device is on Sill.app (the session scratchpad's `menubar-finish/tools/gates.py` and `h2.py`, or by
+   hand from §10).
 3. The iOS side, §7: the files and their four pbxproj entries by hand, `MacMenuState` checked with
    swiftc and mutants, the iPadOS 26 menu bar, the Menus button, `StreamClient`, the harness cases
    of §7.8; photos at the four Duo sizes and on an iPhone.
