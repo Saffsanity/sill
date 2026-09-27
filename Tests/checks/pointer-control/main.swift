@@ -356,12 +356,14 @@ check(MacPointer(x: .nan, y: 0.5, inside: true).position == nil && MacPointer(x:
 check(MacPointer(x: 1.2, y: -0.1, inside: true).position.map { $0.x == 1.2 && $0.y == -0.1 } == true,
       "position: out-of-range values are passed on (the sprite clamps them)")
 
-// The kind: 26, every earlier kind unchanged, and a reader that knows it takes it with its payload.
+// The kind: 26, between the Mac's menus' 24, 25 and 27, every other kind unchanged, and a reader that knows it
+// takes it with its payload.
 let known: [(StreamMessageKind, UInt8)] = [
     (.parameterSets, 0), (.frame, 1), (.windowList, 2), (.thumbnail, 3), (.appIcon, 4), (.appList, 5), (.selectSource, 6),
     (.launchApp, 7), (.input, 8), (.viewport, 9), (.ping, 10), (.pong, 11), (.clientStats, 12), (.tick, 13), (.cursorShape, 14),
     (.windowCommand, 15), (.hostSettings, 16), (.changeSettings, 17), (.macInfo, 18), (.pairRequest, 19), (.pairResult, 20),
-    (.pairingWanted, 21), (.goodbye, 22), (.hello, 23), (.macPointer, 26), (.unknown, 255),
+    (.pairingWanted, 21), (.goodbye, 22), (.hello, 23), (.macMenu, 24), (.pressMenuItem, 25), (.macPointer, 26),
+    (.fetchMenu, 27), (.unknown, 255),
 ]
 for (kind, raw) in known {
     check(kind.rawValue == raw && StreamMessageKind(rawValue: raw) == kind, "kind \(raw) is \(kind)")
@@ -371,7 +373,7 @@ for raw in UInt8.min...UInt8.max where !known.contains(where: { $0.1 == raw }) {
     let header = Data([raw]) + Data(count: 9) + Data([0, 0, 0, 3])
     if StreamMessageKind(rawValue: raw) != nil || StreamMessage.parseHeader(header)?.kind != .unknown { unknownRaw.append(raw) }
 }
-check(unknownRaw.isEmpty, "every other kind (24, 25, 27…254) is unknown to this build: \(unknownRaw)")
+check(unknownRaw.isEmpty, "every other kind (28…254) is unknown to this build: \(unknownRaw)")
 let message = StreamMessage(kind: .macPointer, timestamp: 1_790_000_000.25, isKeyframe: false, payload: Wire.encode(over)).serialized()
 let header = StreamMessage.parseHeader(message)
 check(message.first == 26 && header?.kind == .macPointer && header?.payloadLength == message.count - StreamMessage.headerLength

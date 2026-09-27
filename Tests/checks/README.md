@@ -3,13 +3,13 @@
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
 video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
-session ends, how the device reads the Mac's messages, what the update check makes of GitHub's
-answer, who moves the Mac's pointer and what the device's pointer sprite shows, how the Mac
-download's disk image lays out its window, where everything goes on a phone held upright) are plain
-Swift files that compile on their own. Each folder here compiles one or a few of those files,
-exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own `main.swift`,
-and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the video encoder
-or any network but loopback, so the checks run anywhere Xcode does, and in CI
+session ends, how the device reads the Mac's messages, what the update check makes of GitHub's answer, who moves the Mac's pointer and what
+the device's pointer sprite shows, how the Mac download's disk image lays out its window, where
+everything goes on a phone held upright, what the Mac sends of its menus and what the device makes
+of it) are plain Swift files that compile on their own. Each folder here compiles one or a few of
+those files, exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own
+`main.swift`, and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the
+video encoder or any network but loopback, so the checks run anywhere Xcode does, and in CI
 (`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
 
 ```
@@ -37,16 +37,19 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order, whatever the machine's speed (each step waits for what it needs, not a set time); the inputs counted for the session's connection, which the Mac's pointer reports are judged by, equal those the stand-in read there (every mode, and `count` step by step) | 15 modes | 32 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
+| `menu-state` | `iOSClient/MacMenuState.swift` with `Sources/StreamProtocol` (`build.sh`) | the device's view of the Mac's menus (docs/menu-bar-plan.md §7.2): the top level, fetches joined, answered, refused, timed out, a new tree and a move's hand-over, choices and their refusals, stale menus, a bar menu built from an older top level keeping its id only while the menu there has its title (another session's versions included), every fetch carrying the title it was shown under, the rows and sections (a note a section of its own); then 5,000 random sessions in which every opened menu's completion is settled exactly once | 122 and 5,000 sessions | 29 |
+| `menus` | `Sources/SillHost/MenuFormat.swift` and `MenuPolicy.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | kinds 24, 25 and 27 and MacMenu.swift's JSON (a fetch's title); the Mac's shortcuts as it draws them (modifiers, special and function keys, glyphs); items, ids and paths; the 1 s cache, only under the title it was read under, and the wait after an app is brought forward; the title shown; the request rates; a request's deadline from its device's wait; the submenus a version has read at their places (one tree per version); the press decision (only a leaf whose title now is the one shown); the refusals' words and the log's path | 309 | 43 |
 | `message-reader` | `iOSClient/MessageReader.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's reader against a stand-in Mac on loopback: 2,000 random messages in random chunks delivered byte for byte and in order, payloads read in pieces of at most 256 KB with every piece reported (liveness counts bytes), the end mid-message and with the last bytes, the caps, and a stop between messages, mid-payload and at a message the end came with | 46 | 17 |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
-| `phone-portrait` | `iOSClient/PhonePortraitLayout.swift` | where everything goes on a phone held upright: the picture's 16:10 pane, row 1's five buttons in their band, the strip, the six caps, the trackpad and its span, the Aa ruler, the drawer and the Settings panel across row 1, and the dim; the plan's tables phone by phone (the keyboard's too, and the Duo's outer display's), the approved mockup's numbers, and every width from 300 to 599 pt at every height to 1,400 | 149 | 28 |
-| `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries (the far edges outside); kind 26 itself (MacPointer's JSON, the kind table), with 5,000 random runs | 152 | 33 |
+| `phone-portrait` | `iOSClient/PhonePortraitLayout.swift` | where everything goes on a phone held upright: the picture's 16:10 pane, row 1's five buttons in their band, the strip, the six caps, the trackpad and its span, the Aa ruler, the drawer and the Settings panel across row 1, and the dim, and the Menus button ending the strip's row; the plan's tables phone by phone (the keyboard's too, and the Duo's outer display's), the approved mockup's numbers, and every width from 300 to 599 pt at every height to 1,400 | 152 | 31 |
+| `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries (the far edges outside); kind 26 itself (MacPointer's JSON, the kind table), with 5,000 random runs | 155 | 33 |
 | `pointer-presence` | `iOSClient/PointerPresence.swift` | what the device's pointer sprite shows, row by row of the plan's table (the Mac's, the portrait trackpad's, the Pencil's, both flips), the portrait key row keeping what shows, a new frame re-centring only this device's own pointer while it shows, a report's freshness, the network queue's feed (the anchor, its re-seeds, a hand-over's carry-over and restatements), the portrait pad's cursor and its re-seed mid-stroke or under a resting finger | 165 | 43 |
 | `pointer-watch` | `Sources/SillHost/PointerWatch.swift` with `PointerControl.swift`, `Stats.swift` and `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's sampling of the Mac's pointer around PointerControl: nothing read without a geometry, and a synthetic host never reading the real pointer; the fraction and inside per geometry; the kind 26 each device is sent (nothing to the one driving); a regular-mode window's bounds and on-screen flag re-read on a queue of its own (after a move at most every 0.1 s while a device is sent the pointer, every 2 s anyway), never waited for, a stale answer dropped and an owed one run; Sill's own motion; the frame interval and when the frame-rate sampler runs (over the source, a device sent it, faster than the tick); the TEST ONLY scripted pointer (its file, its clock, a dry run's move against its steps) and the software-encoder hook, with their lines | 132 | 40 |
 | `policy` | `iOSClient/DiscoveryPolicy.swift` | when the device looks nearby, its rows and their words, the route word, the wired dial, reconnects, the move off AWDL, a session following the best path (the cable, Wi-Fi, Direct) and the remote rule | 286 | 70 |
 | `protocol` | `Sources/StreamProtocol/*.swift`, then `crosscheck.py` | the address parser, SafeText, pairing codes and proofs, tags, the Mac ID, the certificate, kind 18's signature, framing, and TLS 1.3 with pinned keys on loopback; the cross-check repeats the certificate and signature with Python and `/usr/bin/openssl` | 188 + 8 | 20 |
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`) | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs | 64 | 35 |
+| `tour` | `iOSClient/TourPolicy.swift` (with `PhonePortraitLayout.swift`) | the first-run tour's rules: the steps and targets per layout (sideways, the halves, a phone's rows; and under VoiceOver), what is owed, when the tour shows by itself (a beat after the picture, nothing touched, sent, used or open; a turn), memory and runs, Skip in Take the Tour, what a session decided and the automatic reconnect's, a rotation mid-run, the crease, the card's width and place, beside its targets (pinned at the Duo's four sizes, the iPhone SE's two and four phones upright against PhonePortraitLayout's rects, an oracle, a grid of screens and heights), every string | 43,784 | 63 |
 | `update-policy` | `Sources/SillMenuBar/UpdatePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | Sill.app's update check: what each answer from GitHub's releases feed means, the offer, the schedule, the feeds and pages it accepts, every text | 124 | 18 |
 
 The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
@@ -55,8 +58,10 @@ two encoder checks' are those of the encoder-two-in-flight branch that brought t
 its merge with main at 32d532b, `dmg-layout`'s and `phone-portrait`'s those of the `mac-dmg` and
 `iphone-portrait` branches that brought them, `fence`'s main's at cf05a78 (ci-fence-fix's) with the
 `pointer-visibility` branch's count on top, `pointer-control`, `pointer-presence` and
-`pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md), and
-`message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5).
+`pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md), `menus`' and
+`menu-state`'s those of the `menu-bar-mirror` branch after its review, which also added the menus'
+kinds to `pointer-control`'s (152 before) and the Menus button to `phone-portrait`'s (149 and 28),
+and `message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -84,7 +89,9 @@ compile line now), and each list of mutants, a JSON file beside it there, the sa
 `mutants.py`. `dmg-layout` was written for the `mac-dmg` branch, after its review: its allocator
 expectations are those of a Finder-made image's `.DS_Store` (an installer image of 2023, which is
 not in the repository), and its run reads make-dmg.sh's layout by sourcing the script, which then
-only defines its functions.
+only defines its functions. `menus` and `menu-state` were written for `menu-bar-mirror` (the plan's
+H3); the menu reader and mirror, which need Accessibility and an app to read, are checked against a
+fixture app by `Scripts/menu-check/run.sh`, outside CI.
 
 ## Adding a check
 
@@ -109,3 +116,7 @@ a permission, a device or the network, and never anything that links VideoToolbo
 - `home-pairing` and the rest of `remote-bundle` (items 2–4) are plans so far, without checks. Its
   item 1's host side is measured by the pacing harness (`Scripts/pacing/run.sh`), which needs no
   encoder but runs for minutes and on loopback at up to 600 Mbit/s, so it is not a pure check.
+- `trackpad-gestures` (kind 28): `protocol`, `menus` and `pointer-control` expect 28 to read as
+  `.unknown`, and three mutants renumber a kind onto 28 or 29 (`menus`' "the fetch at 28",
+  `pointer-control`'s "kind 26 numbered 28" and "… 29"); that branch flips the cases and moves the
+  mutants to free numbers, since a kind renumbered onto a taken one no longer compiles.

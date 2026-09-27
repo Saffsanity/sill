@@ -123,6 +123,308 @@ the move home: PR B, not started).
   from mid-scroll; a pick or a rotation while it scrolls keeps moving from the
   new stream's first picture, with no second-long freeze.
 
+**The Mac's menus on the device (2026-09-26/27, branch `menu-bar-mirror` from
+main at 150f781, main merged in at cf05a78, 676b362, ed7f8c6 (PRs #30–#32) and
+2b38179 (#33), never rebased, PR #36; the plan, its critique, the review and
+every result are in `docs/menu-bar-plan.md`, "Results").** Noah: "For apps used
+in Window mode, how can we access the menu bar options? Is there a way we can
+add that menu and submenu?" (2026-09-25), item 10 of "Work on 5-12 as well
+please" (2026-09-26). The streamed app's menu bar (the Desktop's: the frontmost
+app's, as the Mac's own bar shows) reaches the device: on an iPad with
+iPadOS 26 in the iPad's own menu bar, and behind a Menus button in the bar.
+Each menu is read from the Mac when it opens, and an item chosen there is
+pressed on the Mac through Accessibility. The Mac's shortcuts show as text,
+never as key commands (⌘S typed still reaches the Mac as a key). Never the
+Apple menu, never Sill's own. Built, reviewed (eleven findings, all fixed) and
+checked; PR #36 waits on Noah's device tests (below).
+- Wire (additive; `MacMenu.swift`; the compatibility floor below): kind 24
+  `macMenu` (host → device: a top level, or the answer to one request), 25
+  `pressMenuItem`, 27 `fetchMenu` (one menu's items; without an id, the
+  subscription to the top level), around the pointer's 26. An id is a path
+  ("2.9": Accessibility's child indexes below the bar, separators counted) that
+  names one item for every device within one tree version; the version is the
+  host's, +1 when the app, its top level or a submenu at its place changes, and
+  when the last subscriber leaves. A fetch and a choice carry the title the
+  device showed, and the host acts only while the item there still has it. A
+  device's tokens come back in `answering`. Only a connection that sent the
+  subscription is served (older devices and test clients cost the Mac
+  nothing); an older host skips 25 and 27, and no button shows.
+- Host (`MenuFormat`, `MenuPolicy`, `MenuReader`, `MenuMirror`,
+  `MenuSelfTest`; Layout): Accessibility on its own queue (`sill.menus`), a 1 s
+  timeout on each element, 1.5 s and 500 items a menu; one request at a time,
+  and one that could no longer be answered in time for its device (its wait,
+  from the connection's round trip) is not read, a choice that late refused; a
+  menu read less than a second ago answered from that read (AppKit validates a
+  menu at most once a second); the top level read at a pick, when the app
+  changes, and with a fetch at most once a second while nothing waits behind
+  it, never on a timer. A window source's app is made active and its window key
+  first, as a device's click does (the states are then the Mac's own); never
+  for the Desktop or on a synthetic host. Only a leaf the device was shown is
+  pressed: two parts or more, no children, its title now the one shown,
+  enabled. 20 fetches and 4 presses a second per connection. The Desktop
+  follows the frontmost app after a device's click, under the AppKit loop at
+  once (NSWorkspace), else at the catalog's poll. One line per press, "Menu
+  from ‹device›: menufixture › Probe › Set Label A", and a line for a refusal,
+  an app that stops or starts answering again, or a device over its rate;
+  nothing else prints, and `menu.*` stats keys only while menus are used.
+- Device (`MacMenuState`, `MacMenuElements`, `MacMenuHub`, `SillAppDelegate`,
+  `MacMenuButton`; Layout): the subscription at a connection's first window
+  list and on a move's new connection; each menu an uncached deferred element
+  (UIKit's placeholder while the Mac answers), its completion settled exactly
+  once (the answer, a new tree, the timeout max(4 s, 4 × the worst recent round
+  trip), a move, the end); leaves are `UIAction`s with the shortcut as the
+  subtitle, and no `UIKeyCommand` or `UICommand` anywhere (a clash drops the
+  whole inserted menu, a duplicate throws: the plan's probe). The iPad's bar
+  (iPadOS 26): the menus of the app's one window's session right after the
+  iPad's View, inserted once per build next to an anchor looked up first; with
+  two or more windows none (every window is key in its own scene, so nothing
+  says whose session the bar would act on). The button: between the window
+  strip and Aa in the landscape bar and an iPad's portrait window bar, where
+  the bar holds it and still a whole thumbnail (not in a 320 pt Slide Over),
+  and on a phone held upright at the end of the thumbnails' row, under
+  Settings; a UIKit pull-down over the bar's look, the Mac's order top to
+  bottom whichever way it opens, faded under the Aa ruler; opened over the
+  Settings panel, it puts back the keyboard the panel took down when it goes.
+  A refused choice: the warning haptic (iPhone) and a VoiceOver announcement,
+  nothing on screen.
+- Sill.app: nothing on its screen changes (no setting, no menu item); its
+  coordinator is the CLI's; `--menu-selftest` works in the bundle, and the
+  "Menu from" lines are in Show Log….
+- Observed: iOS 27 rebuilds the main menu lazily, as the plan measured on 26:
+  a top level that arrived after the window became key was in the bar only
+  after a focus change (opening the pull-down, or the stream screen going), so
+  each bar menu asks by the title it was built with (§7.2 rule 11).
+- The review (2026-09-27, the plan's "The review and its fixes"): a fetch
+  never checked against the menu the device opened (after an app inserted an
+  item above a submenu in place, the device's "600 Items" listed 300 Items'
+  items and a choice among them ran there); a queue with no deadline and a
+  top-level read per fetch (a slow app's fourth menu answered after the device
+  gave up); the compatibility floor without 24, 25 and 27; non-subscribers
+  served and a departed device's fetch still read; two windows' bar acting on
+  the other session; the button pushing narrow bars off the window and leaving
+  a phone's strip less than a thumbnail; the keyboard left down after Menus
+  over Settings; rule 11 across sessions; the stale note like a dimmed menu;
+  the harness choosing on any Mac. Each reproduced, then fixed (992229f the
+  host, 9dfa45a the device).
+- Verified after the fixes (2026-09-27; the plan's Results have every number):
+  `Tests/checks/run-all.sh`, all 22; mutants: menus 43 of 43 (309 checks),
+  menu-state 29 of 29 (5,122), phone-portrait 31 of 31 (152), pointer-control
+  33 of 33 (155), protocol 20 of 20; `Scripts/menu-check/run.sh`, reader 40,
+  budget 4 and mirror 69 (the shift, the walks, only subscribers, the
+  deadline, a sweep's one top-level read); through synthetic hosts on loopback
+  with the fixture, one at a time, no device on Sill.app and the front never
+  changing: H2 against main at 2b38179 (the CLI byte for byte, masked and
+  sorted, idle and with a client, with and without `--direct-wireless`), and
+  H4–H11, H14 (the tree changed in place) and H15 (only subscribers), 99
+  checks; an app busy 500 ms a call, swept menu by menu: the four answered by
+  3.6 s with one top-level read (5.6 s and four reads before); iOS Debug and
+  Release for the simulator and Debug for a device, only the old
+  `StreamClient` capture warning; `swift build -c release` from `git archive`,
+  only the CaptureProbe warning; `make-app.sh` without `--install`, and the
+  bundle's `--menu-selftest` against the fixture; in a private simulator,
+  screenshots only: no button at 320x700 and 460x400, the phone's row at five
+  widths, the note's own section, the bar empty with two windows, the
+  keyboard's console lines, and `-SillMacMenu none` pixel for pixel main's
+  build at the Duo's four sizes and the phone's 393x793; live against the
+  fixture through a synthetic host (Probe asked by its title, Set Label A
+  chosen), and a renamed copy of it refused by `-SillMenuPress` and
+  `-SillMenusOpen`.
+- Known: an app busier still (700 ms a call) answered the fourth menu at
+  4.25 s, after the device's 4 s: the deadline is kept between Accessibility
+  calls, not inside one. H12 (TextEdit through a host) was not run: TextEdit
+  was not open, and none is started.
+- **For Noah:** the plan's open questions took their defaults (Q1 the Mac's
+  menus after the iPad's View, Sill's own kept; Q2 the button in every bar that
+  holds it; Q3 shortcuts as subtitles; Q4 no Apple menu; Q5 the app activated
+  when a menu opens; Q6 Option alternates as rows of their own; Q7 the
+  Desktop's frontmost app; Q8 ⌘W unchanged; Q9 no banner; Q10 no setting; Q11
+  kinds 24, 25, 27; Q12 no timer). Two placements are the review's defaults
+  (Q2): on a phone the button ends the thumbnails' row (row 1's five kept; the
+  key row is the other place), and a window too narrow for it leaves it out,
+  so before iPadOS 26 a Slide Over has no menus.
+- For the other branches: kind 28 (`trackpad-gestures`) flips
+  `Tests/checks/protocol`'s, `menus`' and `pointer-control`'s "28 unknown",
+  and the three mutants that renumber a kind onto 28 or 29 move to free
+  numbers (Tests/checks/README.md); the pbxproj block A040–A044/F040–F044;
+  StreamClient's `handle` gains `.macMenu`, its first window list the
+  subscription, a move's `finishMove` `menusMoved()` and `tearDown`
+  `resetMenus()`; `TopBar`, the portrait `windowBar` and the phone's
+  thumbnails' row (`PhonePortraitLayout.menus`) the button; `SillApp` the
+  adaptor.
+- **Untested, for Noah (the plan's P1–P13, and the review's):** VS Code (its
+  ten menus, Copy enabled with a selection, Themes, New Text File, "F5"),
+  Weather (a ✓ toggled), Bambu Studio, Blender's two menus, the Desktop
+  following the frontmost app (at once in Sill.app), the virtual display (Save
+  As…'s sheet), ⌘S through a hardware keyboard with the menu showing it as
+  text, the iPadOS 26 bar itself (a pointer at the top edge or a swipe down:
+  the subtitles, the placeholder, ten or more menus, the lazy rebuild after a
+  thumbnail tap), an app that stops answering, mixed builds, VoiceOver ("Code
+  menus"), five minutes of use (frame age and rtt unchanged), an iPhone (the
+  button at the end of the thumbnails' row); two Sill windows (the bar shows
+  none of the Mac's menus, each window's button its own); a Slide Over (no
+  button); Menus over the Settings panel with a hardware keyboard (keys reach
+  the Mac again once the pull-down goes); a menu whose parent changes while it
+  is open ("The menus changed…" once, then the new items); Blender's Window
+  menu while the iPad's bar is swept (no answer later than the iPad waits).
+
+**First-run tour (2026-09-27, branch `first-run-walkthrough` from main at
+cf05a78, merged with main at 5c6a850 and 2b38179, not rebased, PR #35; the
+plan, its critique and the results are in
+`docs/first-run-walkthrough-plan.md`).** Noah (2026-09-26): "Add to feature
+list, app usage walkthrough first time after pairing/connecting". The device
+only: no wire change, nothing sent to the Mac, two UserDefaults keys.
+- What it does: a second after the first picture from a Mac (the window list,
+  a frame size, a source), if nothing was touched anywhere on the screen, sent
+  to the Mac, used or opened since (a recognizer on the window that takes
+  nothing counts every touch; `StreamClient.lastInputAt` every input;
+  `lastActionAt` a control used by any means, VoiceOver's double tap, Switch
+  Control, Voice Control or Full Keyboard Access included), the stream
+  screen dims (black 0.58 over the whole screen, safe areas included) and a
+  card points at one part at a time, cut out of the dim and ringed in the
+  accent: `touch` (the picture: tap, hold, drag; Apple Pencil on iPad), `bar`
+  (hold a thumbnail, slide on Aa for a window's text; sideways and on a phone
+  upright Keyboard), `settings` (Disconnect
+  and Take the Tour live there; sideways "Hold your iPad upright"), upright
+  `laptop` (the sticky modifiers, the keyboard key, the trackpad's two-finger
+  tap and hold-then-drag). Three cards sideways, four upright. Whoever touched
+  anything in that second is left alone for the session; one decision per
+  session and layout, and a turn after it offers only what its layout has
+  alone (the laptop card). The automatic reconnect's session goes on with the
+  last one's decision (`StreamClient.tourSession`), unless that one ended
+  before it or mid-run. Next and Done save each step (`Sill.tourSeen`), so
+  an ended session resumes at the first step not passed; Skip ends it for good
+  (`Sill.tourSkipped`), but in Take the Tour only closes it; the Settings
+  panel's last row, Take the Tour, shows every step of the layout again. While it shows the layouts take no touch and
+  the keyboard is down (back after, but never under a pairing link), so no
+  touch, Pencil, hover or key reaches the Mac, and the device's own pointer
+  move for a new frame size waits (`inputPaused`); an outside pairing link
+  puts it aside. Esc skips (Done on the last
+  card), Return goes on. VoiceOver: no touch card and no trackpad rows, the
+  rest in VoiceOver's words (swipe up or down for a thumbnail's actions and
+  Aa), focus on each title with "step N of M" and where the lit part is, the
+  escape gesture skips, Magic Tap goes on. Every text size: the card widens to
+  560 pt at accessibility sizes and stays beside the controls it lights
+  (sideways under the bar; upright from the picture's half toward the top,
+  then down to 12 pt above its targets, never across the Duo's crease; on a
+  phone upright standing on its targets, or under the rows when it does not
+  fit above them), its words scrolling there under a fade with the footer in
+  reach; only a room under 200 pt (a tiny window) makes it cover them, without
+  a cutout or ring. Each step's words start at their top. Reduce Motion
+  cross-fades. On a phone held upright (main's PR #30) `TourLayout.phone`:
+  `bar` lights the thumbnails with Aa and row 1's Keyboard, the laptop card
+  has no keyboard key row, the hints say where the rows are.
+- Files (Layout): `TourPolicy.swift` (pure), `TourOverlay.swift`, targets in
+  StreamScreen, TopBar and PortraitStreamScreen, the row in
+  HostSettingsPanel, `lastInputAt`, `lastActionAt`, `inputPaused`,
+  `tourSession` and a DEBUG tripwire in StreamClient, the harness's arguments
+  and `-SillOrientation` in ContentView; `Tests/checks/tour` (compiles
+  PhonePortraitLayout.swift too; in CI's mutants matrix). pbxproj A401/F401,
+  A402/F402.
+- Beyond the plan (its Results say why): the count goes on across a rotation
+  (the plan restarted it); a laptop card passed under VoiceOver counts as seen;
+  "not active" is UIKit's applicationState (SwiftUI's scenePhase read inactive
+  for an active app in a headless simulator, so every decision passed); the
+  strip's lit band takes in the active halo and the badge; the card's tail and
+  frame come from its laid-out height (a GeometryReader in it saw the appear
+  animation's scale); `-SillTakeTourAt`. Found and fixed: Done wrapping to two
+  lines on the iPhone SE at accessibility-extra-large (the footer's line was
+  measured with its words free to wrap); a run carried into the other layout
+  left that layout's decision open; a card on a 3x screen fading its last
+  row (below).
+- Verified (the plan's Results): Debug and Release for the simulator and Debug
+  for a device, only the known StreamClient warning, and each commit's state
+  builds; `Tests/checks/tour` 34,059 checks and 35 of 35 mutants, `run-all.sh`
+  whole (16 checks); the hard-rule greps (no presentation or TipKit, nothing
+  sent from the tour's files, nothing outside the app changed); 32 harness
+  photos against the base, pixel for pixel equal but the held thumbnail's
+  wiggle (which differs base against base); the Settings panel's photos differ
+  only by the new row at the end; every step photographed at 1000x710,
+  710x500, 710x1000, 500x710, the iPad Pro 13-inch's two sizes and the iPhone
+  SE's 667x375 and 375x667, at default and accessibility-extra-large text,
+  the largest size at the tightest four, and the VoiceOver run, each card's
+  frame and tail (the console's `tour: screen …` lines) as the check's model
+  of the layouts; the rule in the mock (fresh, landscape, done, skipped, the
+  Apps list, a stand-in touch, the pairing overlay, Next through Done); with
+  the real keys in the mock, shown, then "nothing owed", then back from
+  Settings. Live (03:28–03:40, once Noah's iPad had left Sill.app, which it
+  streamed from until then; `SillHost --synthetic` on loopback, the guard
+  before each host and a watchdog on Sill.log during, each host under 40 s,
+  none left running; the normal app on an iPhone 18 Pro Max with
+  `-SillConnect`): on a fresh install the first connection showed the touch
+  card 1.06 s after the picture and, the stand-in pressing Next, saved all
+  four steps; the second connection said "nothing owed here"; the Settings
+  panel's Take the Tour (`-SillTakeTourAt 2`) showed it again from the first
+  step; a session cut at the third card went on next time with what was left
+  (the laptop card alone, with its subtitle); a host refusing this version
+  (`SILL_TEST_MIN_DEVICE_VERSION=99`) gave its notice and no tour; every step
+  upright and sideways (`-SillOrientation landscape` turns the normal app) at
+  the default size and accessibility-extra-large, each ring on its controls
+  under the real safe areas; the tripwire never fired. Found there and fixed:
+  upright on that 3x screen the Settings card faded its second row as if it
+  scrolled (its words missed their fit test by a rounding); the card is
+  measured with a point of slack.
+- Review fixes (2026-09-27; the plan's Results, "Review fixes", one commit
+  each): Next kept the last card's scroll (Reduce Motion off); Skip in Take the
+  Tour saved the permanent skip; an assistive technology's action did not count
+  as starting; every automatic reconnect decided afresh (the dim over someone
+  at work when a dropped picture came back); the bar card taught Aa over the
+  Desktop, which Aa does not resize; at accessibility sizes a card covered the
+  controls it lit, slivers of its ring beside it; a put-aside run ended by a
+  turn put the keyboard back under a link's confirmation; a new frame size sent
+  a pointer move under the tour. Found while verifying: the tour's delayed work
+  acted on a gone stream screen (it now keeps to its session); DEBUG
+  `-SillTourActivityAt` touches in the first session only. Then main at
+  5c6a850 merged in (PRs #29 and #30; ci.yml, CLAUDE.md, DEVELOPMENT.md,
+  HostSettingsPanel and PortraitStreamScreen conflicted; the targets on the
+  views both arrangements share), and the phone's arrangement got its rules;
+  then main at 2b38179 (PRs #31–#33): the Mac's pointer's `pointerFrameChanged`
+  now holds its move while a card shows (the eighth fix, carried over).
+  Verified: `Tests/checks/tour` 43,784 checks and 63 of 63 mutants,
+  `run-all.sh` all 21 on the last merge; iOS Debug and Release for the simulator and Debug for a
+  device, each commit's state building, only the known warning; `swift build
+  -c release`; the review's probes before and after (the scroll after Next
+  486 → 0; an accessibility activation in the beat: the tour came, now "not
+  this session"); Take the Tour's Skip leaving the upright card owed (the
+  mock); live through the remote door on loopback (a second host on the same
+  port and identity, the app's own automatic redial): a session that passed,
+  the reconnect's showed nothing; one cut mid-run, the reconnect's showed the
+  tour from the step not passed; the build before showed the tour again after
+  a reconnect; harness photos of every layout, text size and the phone's
+  arrangement (four phone sizes); live on an iPhone 18 Pro Max, every step
+  upright (the phone's arrangement) and sideways at two text sizes under the
+  real safe areas; the tripwire never fired.
+- **Untested, for Noah (the plan's P1–P16, on the iPad mini and the iPhone 15
+  Pro):** the automatic tour needs a Release or TestFlight build on a fresh
+  install, or Debug with `-SillTourState fresh` (Xcode's scheme). P1 a second
+  after the Desktop shows, untouched: the tour; while it shows tap, hold and
+  drag on the picture, type on a hardware keyboard, hover and touch with the
+  Pencil, use a trackpad or mouse: nothing reaches the Mac (no `in.` counters
+  in the host's `[1s]` lines) and the picture keeps moving; fresh again,
+  touch the picture within the first second: no tour this session. P2 each
+  step lights what it names in both layouts; held upright after a tour
+  sideways and left alone: the laptop card once. P3 quit Sill.app at the
+  third card, reopen: the next session starts at the first step not passed.
+  P4 Take the Tour in both layouts with the keyboard up before Settings: the
+  keyboard back after Done. P5 Skip on the first card: no tour at the next
+  session, nor upright. P6 VoiceOver (no touch card, no trackpad rows, focus
+  on each title, rows read whole, swipe up or down in the bar rows, the
+  escape gesture skips, Magic Tap goes on, the stream screen read afresh
+  after Done). P7 the largest text size. P8 Reduce Motion (fades only). P9 a
+  hardware keyboard (Return on, Esc skips). P10 an outside link (the Camera on
+  the Mac's pairing code) during the tour: it steps aside, Cancel, it is back
+  at its step. P11 the iPhone upright and sideways: each ring on its
+  controls, the cards clear of the Dynamic Island and the home indicator,
+  "iPhone" and no Pencil row. Also the taps themselves: Next, Skip and Done
+  under a finger, and a tap on the dim nudging Next (no tap could be made
+  here; if one is lost to the dim, the plan's §6.1 drops the nudge). After the
+  review: P12 the iPhone upright (the bar card under the thumbnails, the
+  laptop card standing on the keys); P13 start at once, then drop the
+  connection (Wi-Fi off and on, the Mac asleep and awake): no tour when the
+  picture returns, and a tour on screen at the drop comes back; P14 VoiceOver,
+  double-tap a thumbnail in the first second: no tour; P15 Take the Tour, Skip,
+  then upright: the laptop card still comes; P16 the largest text size, every
+  card beside its controls with its ring whole.
+
 **The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
 from main at 8b0d418, merged with main at cf05a78 in b6f57d0, at 676b362 in
 e7307e6 and at 5c6a850 (PR #30, the iPhone's portrait layout) in e21ce1c, not
@@ -3098,10 +3400,13 @@ good.
   bundles and the wire's versions, compared part by part) and `Hello` (kind 23,
   the device's first message); `Goodbye` (Remote.swift) carries `message`,
   `minimumVersion` and `reconnect` too, and `WindowList` the host's
-  `hostVersion` and `protocol`. `Pointer.swift` — `MacPointer` (kind 26, host
-  → device: where the Mac's pointer is in the streamed frame while this device
-  is not moving it, and `seen`, the input messages the host had read on the
-  connection).
+  `hostVersion` and `protocol`. `MacMenu.swift` — the Mac's menus (kinds 24,
+  25 and 27): `MacMenu` (a top level, or the answer to one fetch or press),
+  `MacMenuItem`, `FetchMenu` (with the title the device showed for the menu)
+  and `PressMenuItem`. `Pointer.swift` —
+  `MacPointer` (kind 26, host → device: where the Mac's pointer is in the
+  streamed frame while this device is not moving it, and `seen`, the input
+  messages the host had read on the connection).
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -3112,7 +3417,10 @@ good.
   answered and published as kind 16; a pick made during a restart runs after
   it), keeps each connection's route (home or the remote door's: kind 21 only
   from near the Mac, Direct Wireless never from away), sends kind 18 with the
-  catalog, says goodbye (kind 22) at quit, and writes `HostStatus`),
+  catalog, says goodbye (kind 22) at quit, sends the streamed app's menus to
+  the devices that ask (`MenuMirror`; a window source's app made active and
+  its window key first, as a click does: `focusForMenus`), and writes
+  `HostStatus`),
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps,
   prioritizeSpeed, virtualDisplay, directWireless, remoteAccess, remotePort,
   internetAccess; `standard` is the CLI's values and the app's defaults),
@@ -3168,6 +3476,24 @@ good.
   words and log lines; pure, checked with swiftc; the gate itself, which runs
   only above "0", is StreamServer's, with the TEST ONLY
   SILL_TEST_MIN_DEVICE_VERSION and SILL_TEST_GOODBYE).
+  The Mac's menus (docs/menu-bar-plan.md): `MenuFormat` (a shortcut as the
+  Mac draws it, "⇧⌘S", "fn ⌃F"; an item and a top-level menu as sent; pure),
+  `MenuPolicy` (`MenuPath`, the ids; `MenuCache`, a menu's read kept 1 s,
+  answering only under the title it was read under; `ShownTitle`;
+  `RequestRate`; `RequestDeadline`, when a request can no longer be answered
+  in time for its device; `SubmenuRecord`, the submenus a version has read at
+  their places; `PressDecision`, only a leaf whose title now is the one shown;
+  `TopLevel`; the refusals' words and log lines; pure; both checked by
+  `Tests/checks/menus`), `MenuReader` (every Accessibility call for menus, on
+  its own queue `sill.menus`: the top level, one menu's items under the title
+  shown, walks checked against the version's record, a press; a 1 s timeout
+  per element, 1.5 s a menu, and no item begun that would end past the
+  request's deadline), `MenuMirror` (main actor: the target, the version, the
+  subscribers (only they are served), one request at a time with its
+  deadline, the cache and the kept elements; the TEST ONLY
+  SILL_TEST_MENU_PID, honoured only by a synthetic host, makes a process's
+  menus the test pattern's) and `MenuSelfTest` (`--menu-selftest[=APP]`,
+  read-only).
   The Mac's pointer: `PointerControl` (who moves it, the Mac or the device
   whose input the host read last, with the settle for Sill's own motion; the
   fraction kind 26 carries; pure, `Tests/checks/pointer-control`) and
@@ -3272,8 +3598,26 @@ good.
   `--expect-tls-fail`, printing kinds 18, 20 and 22; the Mac's pointer with
   `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE@T`
   and `--input=JSON@T` (a literal kind 8), the input flags only to a
-  `--synthetic` host on this Mac (lsof and ps); every argument is checked
-  before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
+  `--synthetic` host on this Mac (lsof and ps); the Mac's menus with
+  `--menus` (the subscription; each kind 24 on one line),
+  `--fetch=ID[xN][,TITLE]@T` (the title the menu was shown under, by default
+  the one listed for the id), `--press=ID[,TITLE]@T`, `--raw25=JSON@T`,
+  `--raw27=JSON@T` and
+  `--expect-menus=TITLE[,…]`, the fetches and presses only with
+  SILL_TEST_MENU_PID in its own environment (against any other host they
+  would open and choose the menus of whatever app is in front); every
+  argument is checked before it connects, and a bad one exits 2).
+  `Scripts/menufixture.swift` (TEST ONLY) is the menu gates' app: an AppKit
+  menu bar of known menus (Probe's marks, shortcuts, a disabled item, a
+  retitled one, a slow action, Deep three levels, 300 and 600 items), the
+  prohibited policy so it can never take the front, its one window off every
+  display, every delegate call and action logged (an action also as "PRESS
+  'item' in 'menu'"), SIGUSR1 and SIGUSR2 giving Probe › Rebuilt a new NSMenu,
+  SIGHUP inserting an item at the top of Probe in place and SIGALRM giving
+  Probe a new NSMenu; `menufixture label PID` reads its label over
+  Accessibility. `Scripts/menu-check/run.sh` runs the real MenuReader and
+  MenuMirror against it with no host and no encoder (safe while Sill.app
+  streams; it needs Accessibility for whatever runs it). `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -3355,7 +3699,8 @@ good.
   an iPhone, as rects from the stream screen's size: the picture's fixed 16:10
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
-  row 1, and the dim; pure, `Tests/checks/phone-portrait`),
+  row 1, and the dim, and the Menus button ending the strip's row (`menus`,
+  `stripBesideMenus`); pure, `Tests/checks/phone-portrait`),
   `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum; each input
   says what drew this device's pointer), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
@@ -3389,11 +3734,37 @@ good.
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
-  swiftc), `PointerPresence` (the rules of the one pointer sprite: the Mac's
+  swiftc). The Mac's menus (docs/menu-bar-plan.md §7): `MacMenuState` (one
+  connection's view: the top level, the menus asked for and the choices sent,
+  each opened menu's completion settled exactly once, the rows and sections;
+  pure, `Tests/checks/menu-state`), `MacMenuElements` (the one builder of
+  `UIMenuElement`s for the iPad's bar and the button: uncached deferred
+  elements, `UIAction` leaves with the Mac's shortcut as the subtitle, never a
+  `UIKeyCommand` or `UICommand`), `SillAppDelegate` (`SillApp`'s
+  `@UIApplicationDelegateAdaptor`; only `buildMenu(with:)`) with `MacMenuBar`
+  (where the Mac's menus go in the iPadOS 26 bar, once per build, every
+  anchor looked up first), `MacMenuHub` (whose session the bar shows: the
+  app's one window's while exactly one window scene is connected, none with
+  two or more; from each scene's `WindowSessionObserver`; asks for a rebuild)
+  and `MacMenuButton` (the bars' Menus button: the bar's look, and
+  `MacMenuTrigger`'s clear UIButton with the pull-down over it; `fits`, where
+  a bar holds it and still a whole thumbnail).
+  `PointerPresence` (the rules of the one pointer sprite: the Mac's
   arrow while the Mac or another device moved it last, this device's own only
   for the portrait trackpad; a kind 26's freshness; the network queue's feed
   with a hand-over's carry-over; the key row keeping what shows; the portrait
-  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301).
+  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301). The
+  first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
+  a phone's rows and sideways; when it shows by itself, what it remembers,
+  what a session decided and the reconnect's, a rotation mid-run, the crease,
+  where the card goes, every word; pure, Foundation and CoreGraphics,
+  `Tests/checks/tour`) and `TourOverlay` (the dim with the lit cutout and its
+  ring, the card placed by a Layout, the targets' preference in the stream
+  screen's named space `sill.screen`, `TourStore` for `Sill.tourSeen` and
+  `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
+  every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
+  (targets, the rule's inputs, the layer above the layouts and under the
+  pairing overlay, Take the Tour from the Settings panel's last row).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -3458,15 +3829,15 @@ good.
   `.DS_Store` and alias writer, against Finder's own layout of the file,
   make-dmg.sh's layout arguments and the SVG's size and edge),
   `encoder-mailbox`, `encoder-slowstate`, `fence`, `goodbye`, `ledger`,
-  `message-reader`, `origin`, `pairing-address`, `phone-portrait`,
-  `pointer-control`, `pointer-presence`, `pointer-watch`, `policy`,
-  `protocol`, `remote-rules`, `update-policy` (the two encoder checks refuse a
-  binary that links VideoToolbox). `run-all.sh [--mutants] [-v] [name…]` runs
-  them and exits with the number that failed (a folder whose `run.sh` is not
-  executable fails); `common.sh` is sourced by each `run.sh`; `README.md`
-  lists what each compiles and the checks that belong to open branches. A
-  change to a checked file updates its check (and a mutant's pattern) in the
-  same commit.
+  `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
+  MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`, `pairing-address`,
+  `phone-portrait`, `pointer-control`, `pointer-presence`, `pointer-watch`,
+  `policy`, `protocol`, `remote-rules`, `tour`, `update-policy` (the two encoder
+  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v] [name…]` runs them and exits
+  with the number that failed (a folder whose `run.sh` is not executable
+  fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
+  compiles and the checks that belong to open branches. A change to a checked
+  file updates its check (and a mutant's pattern) in the same commit.
 
 ## Build and run
 
@@ -3482,6 +3853,7 @@ swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
+swift run -c release SillHost --menu-selftest=TextEdit   # the menus a device would be sent for that app (a pid, or the start of its name), read once; read-only
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
@@ -3496,6 +3868,7 @@ Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (do
 Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's disk image of any build, ad hoc (release.sh makes the real one)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
+Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
@@ -3578,6 +3951,21 @@ of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is
 ignored with one line), and `SILL_TEST_GOODBYE='<JSON Goodbye>'` makes its
 refusals send that payload instead (a reason the device does not know).
+The Mac's menus, headless: `swiftc -O Scripts/menufixture.swift -o
+$T/menufixture -framework AppKit`, then `$T/menufixture serve $T/fixture.log
+60` (it exits by itself, 120 s at most, and can never take the front) and a
+synthetic host with `SILL_TEST_MENU_PID=<its pid>` (honoured only by a host
+that does not advertise; "Test menus: …" at start): the test pattern's menus
+are then the fixture's, read and pressed without activating it. `python3
+Scripts/sillclient.py PORT 20 desktop --menus --fetch=4@3 --press=4.0@5` (with
+SILL_TEST_MENU_PID in the client's environment too) prints each kind 24 on a
+line, and `$T/menufixture label PID` what the last press set ("A"); `kill
+-HUP` inserts an item at the top of Probe in place (the ids below it move: the
+host's next read of a moved place moves the version), `-ALRM` gives Probe a
+new menu, and `-USR1`/`-USR2` give Probe › Rebuilt one.
+`--menu-selftest=menufixture` reads it. Presses go only to the fixture, and a
+real app's menus are read only with `--menu-selftest=TextEdit`, never a bare
+`--menu-selftest` (the frontmost app); the plan's §10 has the gates.
 The bare app takes `-remoteAccess 1 -remotePort P`, `-SillSetAfter '3
 remotePort=P2'`, `-SillPairAfter <s>` and `-SillUnpairAfter <s>`; its
 `-SillRenderPreviews` adds the Remote Access pane's states and the pairing
@@ -3596,7 +3984,21 @@ Debug harness (simulator, no Duo simulator exists yet): launch arguments
 `-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
 (outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
-`-SillSettings 1` (the Settings panel open), `-SillSettingsCase
+`-SillSettings 1` (the Settings panel open), `-SillMacMenu
+code|blender|long|stale|noaccess|none|slow|timeout|refuse` (the mock Mac's
+menus; `code` by default, VS Code's ten), `-SillMenusOpen 1` (the Menus
+pull-down opens after launch) or `-SillMenusOpen 'File/Open Recent'` (opens
+on that menu, each level fetched on the way), `-SillMenuPress 'File/Save'`
+(chooses that item once the menus are in; both live too, but only on the test
+app's menus through a test host: `-SillConnect` to a loopback address, no host
+version, menufixture's top level; anything else prints "refused"),
+`-SillMenusAt <s>` and `-SillMenusCloseAfter <s>` (when the pull-down opens,
+and closes after it), and on an iPad `-SillMenuBarLayout perMenu|replace|one`,
+`-SillMenuDump 1` (the main menu's root after each build, on the console),
+`-SillMenuBuildTwice 1` and `-SillMenuNoView 1` (the insertion's guards),
+`-SillSecondWindow 1` (a second window 2 s after launch: the bar then gets
+none of the Mac's menus; the console's "menus: …" and "menubar: …" lines say
+what happened), `-SillSettingsCase
 default|cli|software|custom|vdproblem|vdstream|legacy|pending|timeout|direct|
 directlink|nodirect|wired|noroute` (the mock Mac's settings; it answers a pick
 after 0.35 s; the readout's route is Wi-Fi except `directlink` Direct, `wired`
@@ -3655,7 +4057,20 @@ window list has no version: Sill.app's always has, and would post the input to
 this Mac, so the console says "input script: refused: …" and nothing is sent;
 point it only at `--synthetic` hosts. `[::1]:P` never reaches the app:
 UserDefaults reads a launch argument that starts with `[` as a property list
-and drops it). A fake screen wider than the
+and drops it). The first-run tour, in the mock, under `-SillLive 1` and in
+the normal app: `-SillTourState fresh|landscape|done|skipped|saved` turns the
+automatic tour on (a Debug build never shows it by itself otherwise; `saved`
+reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, the others last one
+run), `-SillTour touch|bar|settings|laptop` starts it at that step, and the
+stand-ins `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S` (the app
+run's first session only), `-SillTakeTourAt S` (Settings, then its Take the
+Tour) and
+`-SillTourVoiceOver 1`; `-SillOrientation landscape|portrait` asks the normal
+app's scene for that orientation (a phone simulator sideways with its real
+safe areas); the console's "tour: …" lines say what happened, and a card's
+line gives its frame and tail. `xcrun simctl launch --console-pty` streams the
+console; `--stdout=PATH` writes inside the simulated device's own file system.
+A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot. One that fits
 neither way (the Duo's or an iPad's size on an iPhone simulator) is drawn
@@ -3694,9 +4109,19 @@ device keeps working with Macs from the first public build on, or each says why
 - Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
   (docs/home-pairing-plan.md, branch `home-pairing`, in progress; it ships before 1.0, Noah
   2026-09-25), not today's plain-TCP `_sill._tcp` door, which only development builds and the CLI
-  keep; the 14-byte header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of
-  Switcher, Input, Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16
-  within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`.
+  keep; the 14-byte header; kinds 0–27 and their payloads (HEVC with ParameterSets; the JSON of
+  Switcher, Input, Viewport, HostSettings, Remote, Compatibility, Pointer and MacMenu); the ping
+  echo; a kind 16 within 2 s of the first window list; kind 22's `reason`, `message` and
+  `reconnect`; the Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3): a kind 27
+  without an id is the device's subscription, and only a subscriber is served (another connection's
+  fetches and choices are answered "The menus changed…", nothing read or pressed); an id is a path
+  of child indexes that names one item for every device within one version, and a request of another
+  version is answered with that note and never acted on; a fetch and a choice carry the title the
+  device showed, and the host reads or presses only while the item there still has it; a device's
+  tokens come back in `answering`; the fields as they are (MacMenu's `version`, `app`, `bundleID`,
+  `menus`, `answering`, `menu`, `items`, `more`, `pressed`, `stale`, `note`; MacMenuItem's `id`,
+  `title`, `separator`, `enabled`, `mark`, `key`, `submenu`; FetchMenu's and PressMenuItem's
+  `version`, `id`, `title`, `token`).
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new

@@ -45,12 +45,23 @@ public enum StreamMessageKind: UInt8 {
                              // name). The first message of every session connection, before anything else, so a
                              // host can judge the device before it sends anything (DeviceGate). Never on a
                              // pairing connection
-    // The Mac's pointer (Pointer.swift). 24 and 25 are held for the Mac menu bar (sketched 2026-09-25, not
-    // built), which would put an optional third kind at 27, so this one is 26. Older readers map it to
-    // `.unknown` and skip it.
+    // The Mac's menus (MacMenu.swift): 24, 25 and 27, around the pointer's 26. Older readers map all three
+    // to `.unknown` and skip them.
+    case macMenu = 24        // host → device: JSON MacMenu — the streamed app's menu bar (the Desktop's: the frontmost
+                             // app's), to a device that asked for it with a kind 27 without an id: its top level then, and
+                             // again whenever the app or its titles change. With `answering` set: the reply to one of
+                             // that device's kind 27s (one menu's items) or kind 25s
+    case pressMenuItem = 25  // device → host: JSON PressMenuItem — choose one item, by the id and title the device was
+                             // shown in that tree version. Answered to that device alone (a kind 24 with `pressed`)
+    // The Mac's pointer (Pointer.swift), between the menus' kinds: 24 and 25 were the menus', whose third kind is
+    // 27. Older readers map it to `.unknown` and skip it.
     case macPointer = 26     // host → device: JSON MacPointer — where the Mac's pointer is while this device is not the
                              // one moving it (the Mac's own mouse, or another device). Only when it changed, at most once
                              // per sample per device: each 30 ms tick, and at the stream's frame rate while it moves
+    case fetchMenu = 27      // device → host: JSON FetchMenu — one menu's current items, asked when the device opens it,
+                             // with the title it showed for that menu; without an id, the top level, and a request for
+                             // every later one on this connection. Answered to that device alone, from a read of at
+                             // most 1 s ago
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

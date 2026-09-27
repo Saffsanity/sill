@@ -13,7 +13,8 @@ import Foundation
 //
 // Pure: Foundation only, so it is checked on its own with swiftc.
 
-/// The wire's generation. 1: the 14-byte header, kinds 0–23 and the JSON rules of HostSettings.swift.
+/// The wire's generation. 1: the 14-byte header, kinds 0–23, and any later kind an older peer can
+/// skip (24, 25 and 27, the Mac's menus: MacMenu.swift), and the JSON rules of HostSettings.swift.
 /// Raised only by a change an older peer cannot skip (a new transport, pairing required on the home
 /// door); an additive change never raises it. When it rises, the host's device floor rises too
 /// (DeviceGate, docs/update-notice-plan.md §4.6).
