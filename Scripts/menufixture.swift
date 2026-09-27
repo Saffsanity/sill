@@ -6,14 +6,19 @@
 // Run:    $T/menufixture serve LOG SECONDS     the app; exits by itself after SECONDS (at most 120)
 //         $T/menufixture label PID             prints that fixture's label, read over Accessibility
 //
-// `serve` never activates itself: accessory policy (no Dock icon, no menu bar of its own on screen),
+// `serve` never activates itself: the prohibited policy, a background-only app that cannot be
+// activated (no Dock icon, no menu bar of its own on screen; an accessory app run from a shell
+// took the front at launch, 2026-09-27), whose menus Accessibility reads as any app's (the probe),
 // and one borderless 240×40 window far off every display (at -20000, -20000), which ignores the
 // mouse and can never be key; it holds one label, "none" at first. Every menu delegate and
 // validation callback is logged with its time (seconds since 1970, then since launch), and every
 // action as "ACTION ‹item›", setting the label: Set Label A → "A", Set Label B → "B", Deep Leaf →
-// "Deep", Rebuilt Leaf → "Rebuilt", any other → its title. SIGUSR1 builds Probe › Rebuilt's item
-// again with the same title, SIGUSR2 titled "Renamed Leaf": the old element is then gone, as when an
-// app rebuilds a menu.
+// "Deep", Rebuilt Leaf → "Rebuilt", any other → its title. SIGUSR1 gives Probe › Rebuilt a new menu
+// whose one item has the same title, SIGUSR2 one titled "Renamed Leaf", as an app that builds its
+// menus again does (Electron): the old item's element is then invalid, and the host finds the item
+// again by its path. (AppKit's menu item elements are positional: items replaced inside the same
+// NSMenu leave an element answering for whatever item is at its place now, measured 2026-09-27;
+// Dynamic N, retitled at each validation, shows the host's title check for that case.)
 import AppKit
 
 let arguments = CommandLine.arguments
@@ -62,7 +67,7 @@ func log(_ s: String) {
 }
 
 let app = NSApplication.shared
-_ = app.setActivationPolicy(.accessory)
+_ = app.setActivationPolicy(.prohibited)
 
 // The label, in a window no one sees and that never takes a click or the keyboard.
 let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 240, height: 40), styleMask: [.borderless],
@@ -209,15 +214,18 @@ main.addItem(submenu("Probe", [
 ]))
 app.mainMenu = main
 
-// SIGUSR1: Rebuilt's item made again, same title; SIGUSR2: made again as "Renamed Leaf".
+// SIGUSR1: Rebuilt's menu made again, a new NSMenu with an item of the same title; SIGUSR2: one
+// titled "Renamed Leaf". A new menu, not new items in the old one: only then is the old element gone.
 signal(SIGUSR1, SIG_IGN); signal(SIGUSR2, SIG_IGN)
 var signalSources: [DispatchSourceSignal] = []
 for (sig, title) in [(SIGUSR1, "Rebuilt Leaf"), (SIGUSR2, "Renamed Leaf")] {
     let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
     source.setEventHandler {
-        rebuilt.submenu?.removeAllItems()
-        rebuilt.submenu?.addItem(item(title))
-        log("REBUILT Rebuilt's item as '\(title)'")
+        let menu = NSMenu(title: "Rebuilt")
+        menu.delegate = logging
+        menu.addItem(item(title))
+        rebuilt.submenu = menu
+        log("REBUILT Rebuilt's menu as a new one holding '\(title)'")
     }
     source.resume()
     signalSources.append(source)
