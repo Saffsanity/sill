@@ -183,7 +183,7 @@ struct StreamScreen: View {
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
             #if DEBUG
-            runKeyboardArguments()
+            runLaunchArguments()
             #endif
         }
         .onChange(of: client.active) { _, source in
@@ -241,16 +241,24 @@ struct StreamScreen: View {
         abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
     }
 
-    /// The harness's keyboard arguments (ContentView's contract), once per launch: `-SillKeyboard 1`
-    /// brings the software keyboard up for real in a live session (the mock only lights the button,
-    /// from its init), and `-SillKeyboardToggle <s>[,<s>…]` toggles it at those seconds as the
-    /// Keyboard button does, a stand-in for a tap.
-    private func runKeyboardArguments() {
-        guard !Self.keyboardArgumentsRan else { return }
-        Self.keyboardArgumentsRan = true
+    /// The harness's arguments that act once the stream screen shows (ContentView's contract), once
+    /// per launch. `-SillKeyboard 1` brings the software keyboard up for real in a live session (the
+    /// mock only lights the button, from its init); `-SillKeyboardToggle <s>[,<s>…]` toggles it at
+    /// those seconds as the Keyboard button does, a stand-in for a tap. In a live session (the
+    /// normal app with `-SillConnect`, or `-SillLive 1`) `-SillDrawer 1`, `-SillSettings 1` and
+    /// `-SillScaleOpen 1` (with `-SillScale`) open theirs 1.5 s in, once the Desktop has started:
+    /// its start closes a drawer opened before it, and the normal app has no harness to pass them
+    /// in at the start.
+    private func runLaunchArguments() {
+        guard !Self.launchArgumentsRan else { return }
+        Self.launchArgumentsRan = true
         let defaults = UserDefaults.standard
-        if defaults.bool(forKey: "SillKeyboard"), !client.mockDiscovery {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        let live = !client.mockDiscovery
+        func after(_ seconds: Double, _ step: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
+        }
+        if defaults.bool(forKey: "SillKeyboard"), live {
+            after(0.5) {
                 print("keyboard: -SillKeyboard 1, the input view takes first responder")
                 overlay.setKeyboard(shown: true)
             }
@@ -258,15 +266,30 @@ struct StreamScreen: View {
         let times = (defaults.string(forKey: "SillKeyboardToggle") ?? "")
             .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 >= 0 }
         for time in times {
-            DispatchQueue.main.asyncAfter(deadline: .now() + time) {
+            after(time) {
                 print("keyboard: toggled at \(Self.points(CGFloat(time))) s, as the Keyboard button does (it was "
                       + (keyboardShown ? "up" : "down") + ")")
                 setSettings(false, restoreKeyboard: false)
                 overlay.toggleKeyboard()
             }
         }
+        guard live else { return }
+        if defaults.bool(forKey: "SillDrawer") {
+            after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
+        }
+        if defaults.bool(forKey: "SillSettings") {
+            after(1.5) { print("harness: the Settings panel opened"); setSettings(true) }
+        }
+        if defaults.bool(forKey: "SillScaleOpen") {
+            after(1.5) {
+                let scale = defaults.double(forKey: "SillScale")
+                if scale > 0 { textScale = scale }
+                print("harness: the Aa ruler opened")
+                scaleOpen = true
+            }
+        }
     }
-    private static var keyboardArgumentsRan = false
+    private static var launchArgumentsRan = false
     #endif
 
     private func closeWindowMenu() { windowMenu = nil }

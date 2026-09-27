@@ -59,7 +59,9 @@ struct ContentView: View {
 /// Only a launch argument turns it on. The whole contract:
 ///
 /// * `-SillLayout 1000x710` — required; the fake screen's size in points.
-/// * `-SillDrawer 1` — start with the app drawer open.
+/// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
+///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
+///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
 /// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
 ///   `-SillScale 1.5` sets the scale it opens at.
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
@@ -178,7 +180,11 @@ struct ContentView: View {
 /// (`sips -r 270 shot.png`). Touches follow the rotation. One that fits neither way (the Duo's
 /// 710×1000 on an iPhone) is drawn scaled down to fit, upright or turned, whichever is larger
 /// (`Fit`); only the drawing shrinks, the stream screen still lays out at the fake size, and the
-/// console says so ("harness: 710x1000 drawn at 0.62").
+/// console says so ("harness: 710x1000 drawn at 0.62"). A fake screen that reaches into the
+/// simulator's own safe area (a phone's whole container on that phone: 440x894 on an iPhone 18 Pro
+/// Max, 402x812 on an 18 Pro) passes the stream screen the simulator's bottom inset, which it
+/// ignores, so the trackpad runs past the fake screen's bottom edge: photograph such a size on a
+/// larger simulator, or in the normal app.
 ///
 /// Console lines for the gates, in the harness and the normal app alike: `viewport: 386×241 pt,
 /// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen).
