@@ -1597,7 +1597,7 @@ Built on `remote-away`, from `remote-pacing` at c564142 (PR A, #34, open) on 202
 commit per step: the wire (340f98b), the host's away quality and per-connection states (934f997),
 each device's link (98290b6), Sill.app (0e5d4ce), the device's panel, callout and line (6222d7c),
 the move home (2e40673) and these docs, then the review (below). It stacks on PR A: its
-pull request is against `remote-pacing`, and GitHub moves it to main once PR A merges.
+pull request, #39, is against `remote-pacing`, and GitHub moves it to main once PR A merges.
 
 ### Defaults taken
 
