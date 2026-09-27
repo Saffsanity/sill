@@ -571,9 +571,8 @@ struct StreamScreen: View {
     /// A card came on screen (the tour's first, the next, or the same one back from under the
     /// pairing overlay), or the tour went or was put aside under that overlay.
     private func tourCardChanged(_ card: TourTopic?) {
-        #if DEBUG
-        client.tourShowing = card != nil
-        #endif
+        // Nothing reaches the Mac as input while a card shows (StreamClient.inputPaused).
+        client.inputPaused = card != nil
         guard let run = tour else { return }
         if card != nil {
             let since = pictureAt.map { String(format: ", %.2f s after the picture", ProcessInfo.processInfo.systemUptime - $0) } ?? ""

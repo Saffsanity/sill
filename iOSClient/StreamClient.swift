@@ -229,14 +229,23 @@ final class StreamClient: ObservableObject {
     /// connection's start) are not the person's and leave it alone. Main thread.
     private(set) var lastActionAt: Double?
     func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
+    /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
+    /// size (`recentrePointer`), waits for the pause to end; the DEBUG tripwire in `sendInput` names
+    /// anything else. Cleared with the session. Main thread.
+    var inputPaused = false {
+        didSet {
+            guard oldValue, !inputPaused, pointerMoveOwed else { return }
+            pointerMoveOwed = false
+            if let p = localPointer { sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y))) }
+        }
+    }
+    /// A pointer move `recentrePointer` held back while input was paused.
+    private var pointerMoveOwed = false
     /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
     /// than with the stream screen, which goes with its session, so the automatic reconnect's
     /// session can go on with it. StreamScreen reads and writes it. Main thread.
     var tourSession = TourSession()
-    #if DEBUG
-    /// The tour is on screen (StreamScreen): `sendInput` says so if input goes out meanwhile.
-    var tourShowing = false
-    #endif
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -2109,6 +2118,9 @@ final class StreamClient: ObservableObject {
         recentRttMedians = []
         slowLink = false
         localPointer = nil
+        // A tour cut short by the session's end takes its pause with it, and a held pointer move.
+        pointerMoveOwed = false
+        inputPaused = false
         // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
         // session's viewport may reach the next connection, which may already be dialling.
         forgetViewport()
@@ -2227,14 +2239,24 @@ final class StreamClient: ObservableObject {
         link.send(message.serialized())
     }
 
+    /// A new frame size (another source, an Aa resize) invalidates where the drawn pointer was: it
+    /// starts in the middle, and the Mac's cursor moves there too, so the two agree; while the tour
+    /// pauses input (`inputPaused`), the move waits for its end. Main thread.
+    func recentrePointer() {
+        localPointer = CGPoint(x: 0.5, y: 0.5)
+        if inputPaused { pointerMoveOwed = true; return }
+        sendInput(.pointer(.move, x: 0.5, y: 0.5))
+    }
+
     func sendInput(_ event: InputEvent) {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
         lastInputAt = ProcessInfo.processInfo.systemUptime
         #if DEBUG
-        // The tour takes every touch and the keyboard while it shows, so nothing should get here
-        // then; the one case expected is a flick's coast still running out under Take the Tour.
-        if tourShowing { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
+        // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
+        // move to a new frame's middle, so nothing should get here then; the one case expected is a
+        // flick's coast still running out under Take the Tour.
+        if inputPaused { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
         #endif
         queue.async { [weak self] in
             guard let self else { return }

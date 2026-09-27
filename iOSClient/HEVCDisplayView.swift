@@ -319,11 +319,11 @@ struct StreamView: UIViewRepresentable {
             client?.setLocalCursor(p != nil)
         }
         // A new frame size (another source, an Aa resize) invalidates where the pointer was. If it
-        // is showing, start it in the middle and move the Mac cursor there too, so the two agree.
+        // is showing, start it in the middle and move the Mac cursor there too, so the two agree
+        // (after the tour, while one shows: `recentrePointer`).
         view.onVideoSizeForPointer = { [weak client] _ in
             guard let client, client.localPointer != nil else { return }
-            client.localPointer = CGPoint(x: 0.5, y: 0.5)
-            client.sendInput(.pointer(.move, x: 0.5, y: 0.5))
+            client.recentrePointer()
         }
         // Catch up with a pointer set before this view was hosted; a no-op on re-hosts.
         client.onLocalPointerChange?(client.localPointer)
