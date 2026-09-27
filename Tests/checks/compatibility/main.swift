@@ -123,8 +123,11 @@ check(json(update) == #"{"message":"Update Sill on your iPad to keep using Mac m
       "the update goodbye: \(json(update))")
 check(Wire.decode(Goodbye.self, from: Data(#"{"reason":"quit"}"#.utf8)) == Goodbye(reason: "quit"), "an old goodbye reads with nil fields")
 check(Wire.decode(Goodbye.self, from: Data(#"{"message":"x"}"#.utf8)) == nil, "no reason: no goodbye")
-let later = #"{"reason":"pairingRequired","message":"Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.","reconnect":false}"#
-check(Wire.decode(Goodbye.self, from: Data(later.utf8))?.reason == "pairingRequired", "a later reason decodes")
+// A reason from a later host ("pairingRequired", this example until pairing at home made it a reason
+// the device knows, is Goodbye.pairingRequired now).
+let later = #"{"reason":"pairAgain","message":"Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.","reconnect":false}"#
+check(Wire.decode(Goodbye.self, from: Data(later.utf8))?.reason == "pairAgain", "a later reason decodes")
+check(Goodbye.pairingRequired == "pairingRequired" && Goodbye.update == "update", "pairing at home's reason and the update notice's, as their devices read them")
 // The window list with and without the new keys.
 let list = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.4.0", protocol: SillProtocol.current)
 let listJSON = json(list)

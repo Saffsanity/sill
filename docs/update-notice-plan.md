@@ -274,7 +274,9 @@ Every list carries them, as it carries `launchID` (about 35 bytes). An older dev
 ```
 
 The first, third and fourth were encoded by the probe (sorted keys); an old `{reason}` struct read
-the third as "update", and the new struct read the fourth with every new field nil.
+the third as "update", and the new struct read the fourth with every new field nil. (Pairing at home,
+merged later, made "pairingRequired" a reason the device knows, with its own words; the checks and
+the harness's `notice` case use "pairAgain" as the reason a device does not know since that merge.)
 
 #### 3.6 Compatibility
 

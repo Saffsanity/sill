@@ -334,7 +334,8 @@ enum MockCatalog {
             let goodbye = c == .update
                 ? Goodbye(reason: Goodbye.update, message: "Update Sill on your \(StreamClient.deviceWord) to keep using Mac mini. It needs version 1.2 or later.",
                           minimumVersion: "1.2", reconnect: false)
-                : Goodbye(reason: "pairingRequired",
+                // A reason this build does not know ("pairingRequired" is pairing at home's own now).
+                : Goodbye(reason: "pairAgain",
                           message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair iPhone or iPad…, then scan its code with this \(StreamClient.deviceWord).",
                           reconnect: false)
             let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
