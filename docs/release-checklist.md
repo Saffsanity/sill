@@ -3,8 +3,9 @@
 The order of work for putting the iOS app in the App Store and Sill for Mac on the web: part 1
 once, part 2 on every release. The texts and answers App Store Connect asks for, ready to paste,
 are in `docs/app-store-metadata.md` ("metadata §N" below). The pages are in `site/` (plain HTML,
-no build step), `Scripts/release.sh` makes the notarized Mac download, and `Scripts/release-ios.sh`
-the iOS app's build for App Store Connect (TestFlight, below).
+no build step), `Scripts/release.sh` makes the notarized Mac downloads (the disk image `Sill.dmg`,
+with `Scripts/make-dmg.sh`, and the zip `Sill.zip`), and `Scripts/release-ios.sh` the iOS app's
+build for App Store Connect (TestFlight, below).
 
 ## Placeholders
 
@@ -15,7 +16,7 @@ still waits, for the App Store Connect record. Each lives in the places listed.
 |---|---|---|
 | The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `README.md`, `docs/DEVELOPMENT.md`, `docs/app-store-metadata.md`, `Scripts/release.sh`, this file |
 | The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `README.md`, `docs/app-store-metadata.md`, this file |
-| The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names | `site/download.html` (never edited per release, part 2) |
+| The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names beside `Sill.dmg` and `Sill.dmg.sha256`; once a release carries `Sill.dmg`, the page links that instead (part 2, "The download page moves to Sill.dmg") | `site/download.html` (edited once for the disk image, otherwise never per release, part 2) |
 | The App Store address | `APP_STORE_URL_PLACEHOLDER`: until it is replaced, a Mac's update notice on the device shows no "Update Sill in the App Store" link (its words still say what to do), and `release-ios.sh` warns | `iOSClient/SillLinks.swift` (`appStoreText`; TestFlight §2 has the command) |
 
 To change one, with the new value in place of `<address>` or `<domain>`: the first command
@@ -73,10 +74,22 @@ To type them once, put the two lines `export SILL_SIGN_IDENTITY=…` and
 run `(. ~/.sill-release && Scripts/release.sh --dry-run)`. The parentheses keep them out of your
 shell.
 
-- [ ] Rehearse with that command: `--dry-run` checks the setup, builds, signs and zips, and stops
-      before anything goes to Apple. When something is missing it says what, and builds nothing.
-      It builds any commit and only warns that HEAD lacks the release's tag (part 2), which a real
-      run refuses to build without.
+- [ ] Rehearse with that command: `--dry-run` checks the setup, builds, signs and zips, makes the
+      disk image `.build/Sill-<version>.dmg` signed with the same identity, and stops before
+      anything goes to Apple. When something is missing it says what, and builds nothing. It
+      builds any commit and only warns that HEAD lacks the release's tag (part 2), which a real
+      run refuses to build without. `spctl -a -vv -t open --context context:primary-signature
+      .build/Sill-<version>.dmg` then says `source=Unnotarized Developer ID`, which a real run's
+      notarization turns into `Notarized Developer ID`.
+- [ ] Look at the disk image once, on this Mac (it isn't notarized, so nowhere else): double-click
+      `.build/Sill-<version>.dmg`. Its window should show Sill on the left and Applications on the
+      right with the arrow between them and "To install Sill, drag it to Applications." under it,
+      no toolbar or sidebar, the whole picture in view, and the Sill disk in the Finder's sidebar
+      with Sill's icon. Switch the Mac to Dark Mode (System Settings › Appearance) and look again:
+      the names under the two icons must still be readable on the light picture (if the Finder
+      draws them white there, design/DMGBackground.svg needs a change before the page links the
+      image). Eject it, and don't drag this copy to Applications: a Developer ID build asks for
+      Screen Recording and Accessibility again (part 1 §1).
 
 ### 3. The website
 
@@ -176,19 +189,25 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       day of a release there, every older Sill.app offers it. While the repository is private,
       GitHub answers the check with a 404 and no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
-      zips, checks a copy unpacked from the zip the way Gatekeeper will, and prints the zip's
-      path, its SHA-256 and where Apple's notary log is. It warns when the log lists issues: read
-      them.
-- [ ] Try the zip as someone new to Sill would: on another Mac or a new macOS user account,
-      download it from where it will live (so it gets the quarantine flag), unzip it, open it,
-      allow the permissions and stream to a device. For 1.0 this is the reviewer's path: film it
-      for the review video (metadata §8).
+      zips, checks a copy unpacked from the zip the way Gatekeeper will, then puts the stapled app
+      in the disk image (`Scripts/make-dmg.sh`, signed with the same identity), has Apple notarize
+      the image too, staples its ticket and checks it (`hdiutil verify`, `stapler validate`,
+      `spctl`'s open context as "Notarized Developer ID", and the Sill.app inside it as the zip's
+      copy was checked). It prints both files' paths and SHA-256 and where Apple's two notary logs
+      are (`.build/Sill-<version>-notary-log.json`, `…-dmg-notary-log.json`). It warns when a log
+      lists issues: read them. Two submissions, so it waits for Apple twice.
+- [ ] Try the disk image as someone new to Sill would: on another Mac or a new macOS user account,
+      download `Sill.dmg` from where it will live (so it gets the quarantine flag), open it, drag
+      Sill to Applications in its window, open it, allow the permissions and stream to a device.
+      While the page still links the zip, try the zip the same way too. For 1.0 this is the
+      reviewer's path: film it for the review video (metadata §8).
 - [ ] Publish: `Scripts/release.sh --publish` (with the same two variables), or a pushed tag with
       the release workflow ("Releasing from GitHub Actions" below), creates the GitHub Release
-      `v<version>` in Saffsanity/sill with the assets `Sill.zip` and `Sill.zip.sha256`; before it
-      builds, `--publish` checks that origin has the tag and that it names HEAD (the workflow's
-      checkout is that tag). The site's Download button links `releases/latest/download/Sill.zip`,
-      which GitHub redirects to the newest release, so download.html is never edited. The
+      `v<version>` in Saffsanity/sill with the assets `Sill.dmg`, `Sill.dmg.sha256`, `Sill.zip` and
+      `Sill.zip.sha256`; before it builds, `--publish` checks that origin has the tag and that it
+      names HEAD (the workflow's checkout is that tag). The site's Download button links
+      `releases/latest/download/<name>`, which GitHub redirects to the newest release, so
+      download.html is never edited per release (the one exception: the next item). The
       repository must be public for anonymous downloads and for the update check. Until it is,
       `SILL_RELEASE_REPO=Saffsanity/sill-site` publishes there instead (point download.html's three
       GitHub links there too), and release.sh warns: a release in sill-site can be downloaded, but
@@ -200,6 +219,20 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       release workflow. With `SILL_SIGN_IN_CI` set to `true` that run publishes the release, so
       don't also run `--publish` here (whichever comes second stops at "already exists"); without
       it the run only verifies (macOS minutes either way).
+- [ ] The download page moves to Sill.dmg, once, in this order: first the release that carries
+      `Sill.dmg` is published (the item above); then, in a private window,
+      https://github.com/Saffsanity/sill/releases/latest/download/Sill.dmg downloads the image
+      (before that release it is a 404, so the page must not move first); then edit
+      `site/download.html` as the comment above its card says (the button, the checksum line, the
+      three Install steps and "Check the download"), delete the comment, and republish the site
+      (the rsync in part 1 §3). Then download it from https://getsill.app/download and compare its
+      `shasum -a 256` with `Sill.dmg.sha256`.
+- [ ] Keep `Sill.zip` in every release for now: `release.sh --publish` uploads it beside the disk
+      image, so the page's zip links keep working until it moves, and so do links that name
+      `Sill.zip` elsewhere (v0.3.0's notes, pages people saved). Every Sill.app's update check
+      opens the release's page, which lists both. Dropping the zip later is one line in
+      `publish_release` (and its `.sha256`), for a release after the page has moved, never while
+      download.html still links it.
 - [ ] The first release only: the published copy of download.html says the build is being prepared;
       right after Saffsanity/sill goes public, republish `site/` (the rsync below) so the button
       shows (before that, the button and every GitHub link on the pages answer 404 to visitors).
@@ -476,18 +509,21 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
       commit.
 - Without the variable `SILL_SIGN_IN_CI`: verify only. The run checks the tag, runs the pure
   checks, builds Sill.app with `Scripts/make-app.sh` (signed ad hoc, as the runner has no identity),
-  fails if the icon is missing, and keeps `Sill-<version>-adhoc.zip` as the run's artifact for 14
-  days. That zip is for trying out only: not Developer ID, not notarized. Nothing is published.
+  fails if the icon is missing, makes the disk image from it with `Scripts/make-dmg.sh` (ad hoc
+  too), and keeps `Sill-<version>-adhoc.zip` and `Sill-<version>-adhoc.dmg` as the run's two
+  artifacts for 14 days. They are for trying out only (the image, to look at its window): not
+  Developer ID, not notarized. Nothing is published.
 - With `SILL_SIGN_IN_CI` set to `true`: sign and publish. The same checks, then the Developer ID
   certificate goes into a temporary keychain with a random password, the notary key into a profile
   in it (`notarytool store-credentials`, which validates the key with Apple first), and
   `Scripts/release.sh --publish` runs with `SILL_RELEASE_TAG` set: it builds, notarizes, staples,
-  checks a copy unpacked from the zip the way Gatekeeper will, and creates the GitHub Release with
-  `Sill.zip` and `Sill.zip.sha256`. Apple's notary log is kept as an artifact for 30 days. The last
+  checks a copy unpacked from the zip the way Gatekeeper will, makes, notarizes, staples and checks
+  the disk image, and creates the GitHub Release with `Sill.dmg`, `Sill.zip` and their `.sha256`
+  files. Apple's notary logs (the zip's and the image's) are kept as an artifact for 30 days. The last
   step deletes the keychain and the key files whatever happened. The runner image already carries
   Apple's Developer ID intermediate certificate.
-- Then the rest of part 2 as usual: try the zip on another Mac, and for the first release,
-  republish `site/`.
+- Then the rest of part 2 as usual: try the disk image on another Mac, and for the first release
+  that carries it, move the download page to it.
 - A failed run can be re-run from its page. A version that is already released is refused
   before anything is built or sent to Apple (`release.sh --publish` asks GitHub first, as it asks
   whether its token reaches the repository): bump the version. Deleting that release and its tag
@@ -581,13 +617,13 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   and about 100 included minutes before that, so the month's included minutes cover some 15 to 20
   runs on Free. Each push to a pull request (drafts too) is a run, so a busy day of pushes can
   use a week's share; making the repository public ends the question. A verify-only release
-  takes about the same. A signed release also waits for Apple's notary service, usually 15 to 30
-  minutes in all. The mutants (CI started by hand with "mutants" ticked) take about two hours of
+  takes about the same (the disk image adds well under a minute). A signed release also waits for
+  Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all. The mutants (CI started by hand with "mutants" ticked) take about two hours of
   macOS time across their twelve jobs: some 1,200 included minutes, more than half of Free's
   month, or about $7.50.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
-  the artifacts (a zip of about 2 MB for 14 days, the notary log for 30, a TestFlight .ipa of
-  about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.
+  the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
+  TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.
 
 ### The runner image
 
