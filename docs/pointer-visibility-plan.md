@@ -1546,7 +1546,23 @@ and after the host gates):
 - H12: the bare app's 100 previews from main (676b362) and from the merge, rendered from one path:
   identical.
 
+Merged with main again at 5c6a850 (e21ce1c): PR #30, the iPhone's portrait layout, landed minutes
+after this branch's pull request opened. The pad keeps its PadCursor from the anchor and counts a
+finger's travel down against main's vertical span (a phone's pad width ÷ 1.6); main's layout sends
+its key row through `sendFromKeyRow` and gives its trackpad the pointer's closures; `DuoLayout` keeps
+`isPortrait` beside main's `phoneArrangement`. Main's DEBUG input test said a synthetic host posts
+what it gets, which since this branch it does not (it counts `in.dry`); its notes now say so, and
+that a real host would. Run on the merge: `Tests/checks/run-all.sh`, all 20; the three iOS builds;
+S2–S8, 51 of 51; S9, new: the phone's arrangement (`-SillIdiom phone` at 440x956 on the iPad
+simulator), the Mac's arrow at the 1 s step, a stroke that starts there, and 50 pt down moving the
+pointer 0.2427 of the frame (100 / the pad's width, by the span; by the pad's height it would be about
+0.14), the pad's arrow where it went (the photo's analysis leaves out the picture's rounded corners,
+which a first run counted as the sprite); S1's 40 photos, the same inside the frame as before the
+merge; the four pointer states in the phone's arrangement at 440x956 and 402x874, the tips within
+1 pt.
+
 Not run: anything on a device (P1–P12; P3 now in both orders); S5's moves to the cable and back to
 Wi-Fi, and its reconnect over the cable (they need a host on this Mac's Wi-Fi and cable addresses);
 the hand-over race live (a report on the old connection between the probe's read and `moveProbed`
-on main: from the code and the pure model).
+on main: from the code and the pure model); the host's gates after the second merge (no host source
+changed in it).

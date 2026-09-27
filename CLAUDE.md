@@ -9,9 +9,10 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
-from main at 8b0d418, merged with main at cf05a78 in b6f57d0 and at 676b362
-in e7307e6, not rebased, PR #31; the plan and the results, host, device and
-the review's fixes, are in `docs/pointer-visibility-plan.md`).** Noah: "When the
+from main at 8b0d418, merged with main at cf05a78 in b6f57d0, at 676b362 in
+e7307e6 and at 5c6a850 (PR #30, the iPhone's portrait layout) in e21ce1c, not
+rebased, PR #31; the plan and the results, host, device and the review's
+fixes, are in `docs/pointer-visibility-plan.md`).** Noah: "When the
 Mac is controlling the mouse pointer, it should show the real mouse pointer
 on the desktop on Sill. When Sill is controlling the Mac, continue to hide
 the real pointer and only render the client side one in portrait mode when
@@ -105,7 +106,11 @@ checked; PR #31 waits on Noah's device tests (P1–P12, below).
   on, then a move and a click from where it went) and S8 (the input script
   refused against a host that says it is Sill, run by 127.0.0.1, ::1 and
   localhost against one that does not); H12, the bare app's 100 previews
-  identical to main's. Not run: S5's moves to the cable and back to Wi-Fi
+  identical to main's. On the merge with PR #30 again: all 20 checks, the
+  three iOS builds, S2–S8 (51 of 51), S9 (the phone's arrangement: the pad
+  starts at the Mac's arrow, and 50 pt down moves the pointer by the pad's
+  width ÷ 1.6, 0.243 of the frame), S1, and the pointer's states photographed
+  in the phone's arrangement. Not run: S5's moves to the cable and back to Wi-Fi
   (they need a host on this Mac's own Wi-Fi and cable addresses, and test hosts
   listen on loopback only now), the hand-over race live, anything on a device.
 - **Untested, for Noah:** everything on the devices, the plan's P1–P12: the
