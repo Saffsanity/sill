@@ -22,6 +22,7 @@ the command under the table changes every copy in this file.
 | Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `support@getsill.app` | Noah's: Cloudflare Email Routing forwards it to his mailbox (2026-09-25). |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
+| App Store Connect record | "Sill – Mac Streaming", Apple ID 6816359860, SKU `sill-ios` | Created 2026-09-26 (section 1). Build 0.5 (1), from b37f47a, is on TestFlight for internal testers. |
 | Remote Access in 1.0 | Undecided: main has it since ba91136 (PR #13) | Noah decides, before anything is pasted, whether 1.0 keeps it or ships without it (the audit's advice, given before it merged). |
 
 To change the domain or the contact address in this file, with both values
@@ -68,18 +69,21 @@ These texts are only true once these are:
   version 1.0, and only a build whose version matches can be added to it, so
   set the record's Version to 0.5 (section 5).
 - Every claim in the description has been seen working on a device. Still
-  open: the USB cable on an iPhone (verified on the iPad mini only; if it
-  fails, write "a USB cable (iPad)"), Apple Pencil hover, and 120 frames per
-  second, which no device has shown yet (the iPad mini is 60 Hz). For that
-  one, stream a moving window, then the whole desktop, to a ProMotion iPhone
-  or iPad. Sill.app's log should say "Streaming … 120 fps", and its `client …`
-  lines for the device, or the device's row in the Sill menu, should stay near
-  120 fps. If they don't, delete the bullet "Up to 120 frames per second…". If
-  120 holds only for some sources, say which in the bullet.
+  open: the menus (PR #36's P1 to P13: the Menus button, the iPad's menu bar
+  on iPadOS 26), the Mac's pointer on the device (PR #31's P1 to P12), the
+  first-run tour (PR #35's P1 to P16), the USB cable on an iPhone (verified
+  on the iPad mini only; if it fails, write "a USB cable (iPad)"), Apple
+  Pencil hover, and 120 frames per second, which no device has shown yet (the
+  iPad mini is 60 Hz). For that one, stream a moving window, then the whole
+  desktop, to a ProMotion iPhone or iPad. Sill.app's log should say
+  "Streaming … 120 fps", and its `client …` lines for the device, or the
+  device's row in the Sill menu, should stay near 120 fps. If they don't,
+  delete the bullet "Up to 120 frames per second…". If 120 holds only for
+  some sources, say which in the bullet.
 - The screenshots come from the build you submit.
 
-Create the app record (section 1) now. It holds the name without submitting
-anything, and it is the only real test of whether "Sill" is free.
+The app record (section 1) exists since 2026-09-26: "Sill" was taken, so it
+holds "Sill – Mac Streaming".
 
 ## 1. New app record
 
@@ -210,9 +214,11 @@ developer can't reach:
   generic name ("iPad"), so the model is what tells devices apart. It goes to
   the Mac the device is connected to, which shows it in its menu and writes it
   in its own log on that Mac (`~/Library/Logs/Sill`).
-- Taps, pointer moves, scrolls, keys, typed text and the panel size go to the
-  same Mac. The Mac sends back the picture, window titles, thumbnails, app
-  icons and its name.
+- Taps, pointer moves, scrolls, keys, typed text, the menu items chosen and
+  the panel size go to the same Mac. The Mac sends back the picture, window
+  titles, thumbnails, app icons, its name, the menus of the app in use (their
+  titles, and a menu's items when the device opens it) and where its own
+  pointer is over the picture.
 - Kept on the device only: each Mac's thumbnail order, the names of Macs
   seen with Direct Wireless Connection on, and which steps of the first-run
   tour were seen (or that it was skipped). With Remote Access: the device's
@@ -247,13 +253,16 @@ Get started
 • Open Sill for Mac and allow Screen Recording and Accessibility.
 • Open Sill on your iPhone or iPad. Your Mac shows up in the list. Tap it.
 • Pick a window from the Apps list, or tap Desktop to see the whole screen.
+• The first time, a short tour shows you the controls.
 
 Made for touch
 • Tap to click. Touch and hold to right-click. Drag to scroll.
 • Apple Pencil works as a mouse, with hover on iPad models that support it.
 • Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below.
 • Type with the on-screen keyboard or a hardware keyboard. Shortcuts work too.
+• Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26, use the menu bar at the top of the screen.
 • Switch windows from live thumbnails in the bar. Touch and hold one to close, minimize or go full screen. Drag it to reorder.
+• When the mouse moves on your Mac, its pointer shows on your iPhone or iPad too.
 • Aa makes text larger or smaller.
 
 Smooth and sharp
@@ -325,8 +334,10 @@ company's name.
 ### What's New
 
 App Store Connect doesn't show this field for an app's first version; it is
-required from the second on. Use this for a TestFlight build's "What to Test",
-the site, and as the pattern for 1.1:
+required from the second on. This was build 0.5 (1)'s "What to Test" on
+TestFlight, and is the pattern for the site and for 1.1. TestFlight asks for
+What to Test for every build (the build › Test Details): for a later build,
+say what changed since the build before, as the release notes do.
 
 ```text
 The first version of Sill. Use any window on your Mac, or the whole desktop, on your iPhone or iPad, with touch, a trackpad, a keyboard or Apple Pencil. Connect over Wi-Fi or a USB cable, directly when you share no network, or through your own VPN once paired.
@@ -413,6 +424,8 @@ WHAT TO TRY
 - Apps (magnifying glass): pick an open window, or search the list and open an app.
 - Tap to click. Drag to scroll. Touch and hold to right-click. Apple Pencil works as a mouse.
 - Keyboard: type into the window. A hardware keyboard works too, with shortcuts.
+- Menus (in the bar; on iPad with iPadOS 26 also the menu bar at the top of the screen): the menus of the app on the Mac. Choose an item and the Mac does it.
+- Move the mouse on the Mac: its pointer shows on the device too.
 - Aa: touch and slide to change the text size.
 - Window thumbnails in the bar: tap to switch. Touch and hold for the window's close, minimize and full screen buttons. Keep holding and drag to reorder.
 - Desktop: the whole Mac screen.
@@ -453,7 +466,7 @@ together with a camera:
 | 3 | Screen Recording: Allow…, the switch in System Settings, Quit & Reopen | The System Settings switch turning on |
 | 4 | Accessibility: Allow…, the switch; the pane says "You're all set." | Both permissions allowed |
 | 5 | Open Sill on the iPad, Allow Local Network, the Mac appears, tap it | The Mac found without typing anything; the Mac's desktop on the iPad |
-| 6 | Apps, pick Notes (a note written for the shoot) | The same window on both screens |
+| 6 | Apps, pick Notes (a note written for the shoot); then Menus, Format, and a style for a line | The same window on both screens; the style chosen on the iPad applied on the Mac |
 | 7 | Touch: tap to click, drag to scroll, touch and hold for a right-click menu; Apple Pencil moving the pointer, with hover if the iPad supports it | Each action landing on the Mac at the same moment |
 | 8 | Keyboard: type a sentence into the note | The letters appearing on the Mac too |
 | 9 | Turn the iPad upright: the laptop layout; move the pointer with the trackpad, click, two-finger scroll; switch windows from a thumbnail; touch and hold one for its window buttons | The trackpad driving the Mac's pointer |
@@ -598,6 +611,14 @@ Safe:
   keyword at least three characters, no spaces, no repeats; review notes
   3,553 bytes (local-only 2,845) of 4,000, all ASCII;
   What's New 260 and 226 characters.
+- Again on 2026-09-27, after the tour (PR #35), the menus (PR #36) and the
+  Mac's pointer (PR #31) joined the description and the review notes, with
+  another script (it reads the blocks as 0.3.1 had them 3 to 6 lower than
+  the counts above: description 2,056, review notes 3,550; keywords and
+  What's New the same): description 2,323 (local-only 2,167) of 4,000
+  characters; review notes 3,897 bytes (local-only 3,190) of 4,000, all
+  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 103
+  bytes left, or the notes lose words elsewhere.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
