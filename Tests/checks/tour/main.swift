@@ -112,6 +112,32 @@ check(decide(moment(now: 40, layoutAt: 39, decided: true, down: 2), P) == .pass(
 check(decide(moment(now: 40, layoutAt: 39, decided: true, busy: true), P) == .pass(.busy), "a turn with the keyboard up")
 check(decide(moment(now: 40, layoutAt: 39, decided: true, offered: true), P) == .pass(.nothingOwed), "each layout once")
 check(decide(moment(now: 40, layoutAt: 39, decided: true, voiceOver: true), P) == .show([.laptop]), "the keys card under VoiceOver")
+// A session that went on with an earlier one's decision (the automatic reconnect's): nothing at its
+// picture in a layout that one decided in; in another, only what that layout has alone, a beat
+// after this session's picture, not after its screen came (layoutAt 5, the picture at 10).
+check(decide(moment(now: 11, decided: true, offered: true), L) == .pass(.nothingOwed), "a reconnect sideways after a decision there: nothing")
+check(decide(moment(now: 10.5, decided: true), P) == .wait(until: 11), "a reconnect upright: a beat from its picture")
+check(decide(moment(now: 11, decided: true), P) == .show([.laptop]), "then the laptop card alone")
+check(decide(moment(now: 11, decided: true, activity: 7), P) == .show([.laptop]), "a touch before its picture does not count")
+check(decide(moment(now: 11, decided: true, activity: 10.2), P) == .pass(.used), "a touch after it does")
+check(decide(moment(now: 11, decided: true), L) == .pass(.nothingOwed), "a reconnect sideways: nothing new")
+
+// MARK: - Sessions
+
+let decidedHere = TourSession(decided: true, offered: [L], running: false)
+check(TourPolicy.nextSession(after: decidedHere, reconnected: true) == decidedHere, "the reconnect goes on with the last decision")
+check(TourPolicy.nextSession(after: TourSession(decided: true, offered: [L, P], running: false), reconnected: true)
+      == TourSession(decided: true, offered: [L, P], running: false), "…in every layout it had")
+check(TourPolicy.nextSession(after: decidedHere, reconnected: false) == TourSession(), "a session the person starts decides afresh")
+check(TourPolicy.nextSession(after: TourSession(decided: true, offered: [L], running: true), reconnected: true) == TourSession(),
+      "a run cut short comes back at the reconnect's picture")
+check(TourPolicy.nextSession(after: TourSession(decided: false, offered: [], running: false), reconnected: true) == TourSession(),
+      "a session lost before its decision: the next one decides")
+check(TourPolicy.nextSession(after: TourSession(), reconnected: false) == TourSession() && TourSession() == TourSession(decided: false, offered: [], running: false),
+      "a first session")
+// Two reconnects in a row, the middle one lost before its picture: the first decision still holds.
+let middle = TourPolicy.nextSession(after: decidedHere, reconnected: true)
+check(TourPolicy.nextSession(after: middle, reconnected: true) == decidedHere, "a decision survives a reconnect that never showed a picture")
 
 // MARK: - Runs
 

@@ -93,6 +93,18 @@ enum TourDecision: Equatable {
     case pass(TourReason)
 }
 
+/// What the automatic tour decided in a session. It outlives the session's stream screen
+/// (StreamClient keeps it), so the automatic reconnect's session can go on with it
+/// (`TourPolicy.nextSession`).
+struct TourSession: Equatable {
+    /// The picture's decision was made.
+    var decided = false
+    /// The layouts that had their decision.
+    var offered: Set<TourLayout> = []
+    /// A run is on screen, or put aside under the pairing overlay.
+    var running = false
+}
+
 // MARK: - A run of the tour
 
 /// The tour on screen: its steps, the one showing, and those this run has passed.
@@ -195,10 +207,12 @@ enum TourPolicy {
         guard let picture = m.pictureAt else { return .wait(until: nil) }
         // Before the picture's decision every step owed in this layout, from the picture or from
         // a rotation during the beat, which starts it again. After it, a turn: only the steps this
-        // layout has alone, from the turn.
+        // layout has alone, from the turn, or from the picture of a session that went on with an
+        // earlier one's decision (the automatic reconnect's: `nextSession`) in a layout that one
+        // never decided in.
         let owedHere = owed(layout, voiceOver: m.voiceOver, memory)
         let list = m.decided ? owedHere.filter { only(layout).contains($0) } : owedHere
-        let opens = m.decided ? m.layoutAt : max(picture, m.layoutAt)
+        let opens = max(picture, m.layoutAt)
         if list.isEmpty { return .pass(.nothingOwed) }
         if let activity = m.lastActivityAt, activity >= opens { return .pass(.used) }
         if m.now < opens + beat { return .wait(until: opens + beat) }
@@ -229,6 +243,19 @@ enum TourPolicy {
     /// upright card, a topic a later build adds) stays owed.
     static func skip(_ run: TourRun, _ m: TourMemory) -> TourMemory {
         run.replay ? m : skipped(m)
+    }
+
+    // MARK: Sessions
+
+    /// A new session's start. The automatic reconnect's session (a Wi-Fi drop, the Mac waking, an
+    /// eviction after a trip to another app, Sill.app relaunched) goes on with the last session's
+    /// decisions, so someone who started at once is not walked through the tour when the picture
+    /// comes back; unless the last one ended before its picture's decision, or in the middle of a
+    /// run, which then comes back with a beat of its own. A session the person starts (a row's
+    /// tap, pairing, a link, a launch) decides afresh.
+    static func nextSession(after last: TourSession, reconnected: Bool) -> TourSession {
+        guard reconnected, last.decided, !last.running else { return TourSession() }
+        return TourSession(decided: true, offered: last.offered, running: false)
     }
 
     // MARK: Runs

@@ -229,6 +229,10 @@ final class StreamClient: ObservableObject {
     /// connection's start) are not the person's and leave it alone. Main thread.
     private(set) var lastActionAt: Double?
     func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
+    /// than with the stream screen, which goes with its session, so the automatic reconnect's
+    /// session can go on with it. StreamScreen reads and writes it. Main thread.
+    var tourSession = TourSession()
     #if DEBUG
     /// The tour is on screen (StreamScreen): `sendInput` says so if input goes out meanwhile.
     var tourShowing = false
@@ -944,6 +948,9 @@ final class StreamClient: ObservableObject {
                 let path = c.currentPath
                 DispatchQueue.main.async {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
+                    // The automatic reconnect's session (its `reconnect` is kept until now; a tap
+                    // clears it) goes on with the last session's tour decision.
+                    self.tourSession = TourPolicy.nextSession(after: self.tourSession, reconnected: self.reconnect != nil)
                     self.reconnect = nil
                     self.connected = true
                     self.connectedDirectly = direct

@@ -100,7 +100,8 @@ struct StreamScreen: View {
     @State private var pendingViewport: Task<Void, Never>? = nil
 
     // The first-run tour (TourPolicy, TourOverlay; docs/first-run-walkthrough-plan.md). One stream
-    // screen is one session: what it decided goes with it.
+    // screen is one session. What the session decided is `client.tourSession`, which outlives the
+    // screen: the automatic reconnect's session goes on with it (TourPolicy.nextSession).
     /// The tour on screen, if any. While it shows the layouts take no touch and the keyboard is down.
     @State private var tour: TourRun? = nil
     /// Where the tour's targets are, as the layout on screen reports them.
@@ -110,9 +111,6 @@ struct StreamScreen: View {
     /// The layout on screen (nil until the screen has a size), and when it began.
     @State private var tourLayout: TourLayout? = nil
     @State private var layoutAt: Double = ProcessInfo.processInfo.systemUptime
-    /// The picture has had its decision, and the layouts this session has had theirs in.
-    @State private var tourDecided = false
-    @State private var tourOffered: Set<TourLayout> = []
     /// The decision waiting out its beat.
     @State private var tourWait: Task<Void, Never>? = nil
     /// Every touch on the screen, taken by none.
@@ -250,6 +248,12 @@ struct StreamScreen: View {
         .onChange(of: textScale) { _, _ in client.noteAction() }
         .onChange(of: tourCard, initial: true) { _, card in tourCardChanged(card) }
         .onChange(of: tourVoiceOver) { _, _ in carryTour(reason: "VoiceOver") }
+        // The session is over: a decision still waiting out its beat must not land in the next
+        // session's `client.tourSession`.
+        .onDisappear {
+            tourWait?.cancel()
+            tourWait = nil
+        }
     }
 
     // MARK: Viewport
@@ -383,6 +387,10 @@ struct StreamScreen: View {
         guard pictureAt == nil else { return }
         pictureAt = ProcessInfo.processInfo.systemUptime
         #if DEBUG
+        if client.tourSession.decided {
+            let offered = [TourLayout.landscape, .portrait].filter { client.tourSession.offered.contains($0) }.map(\.rawValue)
+            tourLog("the automatic reconnect's session: the last one's decision holds (decided in: \(Self.names(offered)))")
+        }
         let debug = TourDebug.current
         if let step = debug.start {
             // A turn later, once the screen has said which layout it is.
@@ -390,7 +398,8 @@ struct StreamScreen: View {
                 startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver, from: step))
             }
         }
-        if let s = debug.activityAt {
+        if let s = debug.activityAt, !TourDebug.touchedOnce {
+            TourDebug.touchedOnce = true
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(s))
                 touches.lastTouchAt = ProcessInfo.processInfo.systemUptime
@@ -433,7 +442,7 @@ struct StreamScreen: View {
             return
         }
         // Shown in this layout now: a later turn back into it offers nothing again this session.
-        tourOffered.insert(layout)
+        client.tourSession.offered.insert(layout)
         guard carried != run else { return }
         tourLog("carried to \(carried.at.rawValue) (\(carried.index + 1) of \(carried.count), \(layout.rawValue))")
         tour = carried
@@ -450,9 +459,10 @@ struct StreamScreen: View {
         // swipes that only move its focus are reading, as a look around the screen is, and are not
         // counted; VoiceOver also moves its focus by itself as a screen or a layout comes.
         let activity = [touches.lastTouchAt, client.lastInputAt, client.lastActionAt].compactMap { $0 }.max()
-        let moment = TourMoment(now: now, pictureAt: pictureAt, layoutAt: layoutAt, decided: tourDecided,
+        let session = client.tourSession
+        let moment = TourMoment(now: now, pictureAt: pictureAt, layoutAt: layoutAt, decided: session.decided,
                                 lastActivityAt: activity, touchesDown: touches.down, busy: tourBusy != nil,
-                                offered: tourOffered.contains(layout), voiceOver: tourVoiceOver,
+                                offered: session.offered.contains(layout), voiceOver: tourVoiceOver,
                                 enabled: tourStore.automatic)
         switch TourPolicy.automatic(moment, layout, tourStore.memory) {
         case .wait(let until):
@@ -462,7 +472,7 @@ struct StreamScreen: View {
                 tourWaitLogged = until
                 let owed = TourPolicy.owed(layout, voiceOver: tourVoiceOver, tourStore.memory)
                 tourLog("owed here: \(Self.names(owed.map(\.rawValue))) (\(layout.rawValue); seen: \(Self.names(tourStore.memory.names)))")
-                tourLog("waiting until 1.0 s after the \(tourDecided ? "turn" : "picture")")
+                tourLog("waiting until 1.0 s after the \(session.decided && layoutAt > (pictureAt ?? 0) ? "turn" : "picture")")
             }
             #endif
             tourWait = Task { @MainActor in
@@ -472,9 +482,9 @@ struct StreamScreen: View {
         case .pass(let reason):
             // A pass before the picture (the tour off) or once decided changes nothing.
             guard pictureAt != nil, moment.enabled, !moment.offered else { return }
-            let since = tourDecided ? "the turn" : "the picture"
-            tourOffered.insert(layout)
-            tourDecided = true
+            let since = session.decided && layoutAt > (pictureAt ?? 0) ? "the turn" : "the picture"
+            client.tourSession.offered.insert(layout)
+            client.tourSession.decided = true
             switch reason {
             case .nothingOwed:
                 tourLog("nothing owed here (\(layout.rawValue); seen: \(Self.names(tourStore.memory.names))\(tourStore.memory.skipped ? "; skipped" : ""))")
@@ -499,8 +509,9 @@ struct StreamScreen: View {
         guard let run else { return }
         tourWait?.cancel()
         tourWait = nil
-        if let layout = tourLayout { tourOffered.insert(layout) }
-        tourDecided = true
+        if let layout = tourLayout { client.tourSession.offered.insert(layout) }
+        client.tourSession.decided = true
+        client.tourSession.running = true
         let keyboard = keyboardAfter ?? keyboardShown
         putAwayForOverlay()
         tourKeyboardAfter = keyboard
@@ -533,6 +544,7 @@ struct StreamScreen: View {
 
     private func endTour() {
         withAnimation(.easeOut(duration: 0.2)) { tour = nil }
+        client.tourSession.running = false
         if tourKeyboardAfter { overlay.setKeyboard(shown: true) }
         tourKeyboardAfter = false
         // VoiceOver reads the stream screen afresh.
@@ -547,6 +559,7 @@ struct StreamScreen: View {
         tourLog("Take the Tour")
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(0.18))      // the panel's close
+            guard client.connected else { return }          // the session ended meanwhile
             startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver), keyboardAfter: keyboard)
         }
     }

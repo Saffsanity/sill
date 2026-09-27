@@ -745,7 +745,8 @@ private struct TailEdge: Shape {
 /// `-SillTour touch|bar|settings|laptop` starts the tour at that step, as Take the Tour does, at the
 /// first picture (the mock's is at once); `-SillTourPress next@S|skip@S` presses Next (Done on the
 /// last card) S seconds after each card appears, or Skip once; `-SillTourActivityAt S` is a touch S
-/// seconds after the picture; `-SillTakeTourAt S` opens the Settings panel S seconds after the
+/// seconds after the picture of the app run's first session (so the automatic reconnect's session
+/// after it has none of its own); `-SillTakeTourAt S` opens the Settings panel S seconds after the
 /// picture and presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and
 /// its words as under VoiceOver.
 struct TourDebug {
@@ -755,6 +756,8 @@ struct TourDebug {
     let activityAt: Double?
     let takeTourAt: Double?
     let voiceOver: Bool
+    /// `-SillTourActivityAt` has made its one stand-in touch.
+    @MainActor static var touchedOnce = false
 
     static let current: TourDebug = {
         let d = UserDefaults.standard

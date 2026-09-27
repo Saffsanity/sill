@@ -184,9 +184,10 @@ struct ContentView: View {
 ///   layout lacks starts at the first), with no beat, at the first picture. Stand-ins for what the
 ///   gates may not do: `-SillTourPress next@S|skip@S` presses Next (Done on the last card) S
 ///   seconds after each card appears, or Skip once; `-SillTourActivityAt S` is a touch S seconds
-///   after the picture; `-SillTakeTourAt S` opens the Settings panel S seconds after the picture
-///   and presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its
-///   words as under VoiceOver. The console says what happened ("tour: …").
+///   after the picture of the app run's first session (the automatic reconnect's session after
+///   it gets none); `-SillTakeTourAt S` opens the Settings panel S seconds after the picture and
+///   presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its words
+///   as under VoiceOver. The console says what happened ("tour: …").
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
 ///   orientation at launch (a phone simulator sideways, with its real safe areas).
 ///
