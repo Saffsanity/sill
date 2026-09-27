@@ -191,6 +191,23 @@ trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
+The first time a Mac's picture shows on a device, and nothing is touched, sent,
+used (by any means, VoiceOver's double tap included) or opened in the second
+after it, a short tour dims the screen and lights one part at a time: the
+picture (tap, hold, drag), the thumbnails with Aa (and Keyboard, sideways and
+on a phone upright), Settings, and upright the key row and the trackpad. A card
+stays beside what it lights at every text size, its words scrolling there. Skip
+ends it for good on that device (in Take the Tour it only closes it); a step
+passed stays passed; the automatic reconnect's session keeps the decision the
+last one made; after a tour taken sideways, the upright card comes the first
+time the device is held upright and left alone for a second. Settings › Take
+the Tour, the panel's last row, shows it again. Nothing reaches the Mac while it shows, and it sends
+nothing. What it remembers is two keys in the app's own defaults,
+`Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
+uninstall`, to see it afresh). Debug builds show it by themselves only with
+`-SillTourState` (the harness below). docs/first-run-walkthrough-plan.md has
+the rules; `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
+
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
@@ -494,6 +511,16 @@ simulator:
   `-SillMenuBarLayout perMenu|replace|one` moves the Mac's menus in it, and
   `-SillSecondWindow 1` opens a second window 2 s after launch (the bar then
   gets none of the Mac's menus).
+- The first-run tour, in the mock, under `-SillLive 1` and in the normal app:
+  `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour
+  on (a Debug build never shows it by itself otherwise; `saved` reads and
+  writes the real keys, the others last one run), `-SillTour
+  touch|bar|settings|laptop` starts it at that step, and the stand-ins
+  `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`, `-SillTakeTourAt S`
+  and `-SillTourVoiceOver 1` press, touch, take it from Settings and speak as
+  VoiceOver would. `-SillOrientation landscape` turns the normal app sideways
+  in a phone simulator. The console's `tour:` lines say what happened;
+  ContentView's comment has the whole contract.
 
 ## Measuring latency
 

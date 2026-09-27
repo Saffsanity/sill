@@ -270,6 +270,50 @@ final class StreamClient: ObservableObject {
     private var pointerRestatementLoggedAt = -Double.infinity
     private var pointerHeard = false
     #endif
+    /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
+    /// tour's rule reads it when it decides. Main thread.
+    var lastInputAt: Double?
+    /// When the person last used one of the stream screen's controls, by whatever means: a tap, or
+    /// VoiceOver's double tap, Switch Control, Voice Control or Full Keyboard Access, none of which
+    /// makes a touch (a pick, a launch, a window's command or place in the bar, a settings change;
+    /// StreamScreen stamps its own buttons with `noteAction`). systemUptime, not @Published: the
+    /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
+    /// connection's start) are not the person's and leave it alone. Main thread.
+    private(set) var lastActionAt: Double?
+    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
+    /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
+    /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
+    /// still has the pointer and its own still shows (the Mac, or another device, may have taken it
+    /// since); the DEBUG tripwire in `sendInput` names anything else. Cleared with the session.
+    /// Main thread.
+    var inputPaused = false {
+        didSet {
+            guard oldValue, !inputPaused, pointerMoveOwed else { return }
+            pointerMoveOwed = false
+            presence.follow(pointerFeed.current)
+            guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
+            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)))
+        }
+    }
+    /// A pointer move `pointerFrameChanged` held back while input was paused.
+    private var pointerMoveOwed = false
+    /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
+    /// than with the stream screen, which goes with its session, so the automatic reconnect's
+    /// session can go on with it. StreamScreen reads and writes it. Main thread.
+    var tourSession = TourSession()
+
+    /// A session is connected: the automatic reconnect's goes on with the last one's tour decision
+    /// (TourPolicy.nextSession), any other decides afresh. Main thread.
+    func startTourSession(reconnected: Bool) {
+        tourSession = TourPolicy.nextSession(after: tourSession, reconnected: reconnected)
+        #if DEBUG
+        if tourSession.decided {
+            let layouts = [TourLayout.landscape, .portrait, .phone].filter { tourSession.offered.contains($0) }.map(\.rawValue)
+            print("tour: the automatic reconnect's session keeps the last one's decision (decided in: \(layouts.joined(separator: ", ")))")
+        }
+        #endif
+    }
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -982,6 +1026,9 @@ final class StreamClient: ObservableObject {
                 let path = c.currentPath
                 DispatchQueue.main.async {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
+                    // The automatic reconnect's session (its `reconnect` is kept until now; a tap
+                    // clears it) goes on with the last session's tour decision.
+                    self.startTourSession(reconnected: self.reconnect != nil)
                     self.reconnect = nil
                     self.connected = true
                     self.connectedDirectly = direct
@@ -2154,6 +2201,9 @@ final class StreamClient: ObservableObject {
         recentRttMedians = []
         slowLink = false
         resetPointer()
+        // A tour cut short by the session's end takes its pause with it, and a held pointer move.
+        pointerMoveOwed = false
+        inputPaused = false
         // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
         // session's viewport may reach the next connection, which may already be dialling.
         forgetViewport()
@@ -2191,8 +2241,17 @@ final class StreamClient: ObservableObject {
 
     // MARK: - Client → host
 
-    /// Ask the host to stream this source. The host answers with a fresh window list.
+    /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
+    /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        noteAction()
+        request(source)
+    }
+
+    /// Asks the host to stream this source: the person's pick (`select`), or this device's own
+    /// request (the Desktop on a connection's first list, a pick made again after a move), which
+    /// is not the person's doing.
+    private func request(_ source: StreamSource) {
         choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
@@ -2203,6 +2262,7 @@ final class StreamClient: ObservableObject {
 
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
+        noteAction()
         send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
@@ -2218,6 +2278,7 @@ final class StreamClient: ObservableObject {
 
     /// Moves a window to `index` of the arranged bar (a drag in progress). Main thread.
     func moveWindow(_ id: UInt32, to index: Int) {
+        noteAction()
         var order = orderedWindows.map(\.id)
         guard let from = order.firstIndex(of: id), index >= 0, index < order.count, from != index else { return }
         order.remove(at: from)
@@ -2244,6 +2305,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
@@ -2264,6 +2326,15 @@ final class StreamClient: ObservableObject {
     }
 
     func sendInput(_ event: InputEvent) {
+        // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
+        // as something happening (StreamScreen.considerTour).
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
+        // move to a new frame's middle, so nothing should get here then; the one case expected is a
+        // flick's coast still running out under Take the Tour.
+        if inputPaused { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
+        #endif
         queue.async { [weak self] in
             guard let self else { return }
             // Every input hands this device the pointer, coalesced moves included, here where the
@@ -2384,6 +2455,8 @@ final class StreamClient: ObservableObject {
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
+        // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
+        if inputPaused { pointerMoveOwed = true; return }
         sendInput(.pointer(.move, x: 0.5, y: 0.5))
     }
 
@@ -2638,7 +2711,7 @@ final class StreamClient: ObservableObject {
                         #if DEBUG
                         print("path: nothing streams on the new connection: picking \(pick) again")
                         #endif
-                        self.select(pick)
+                        self.request(pick)
                         return
                     }
                 }
@@ -2650,7 +2723,7 @@ final class StreamClient: ObservableObject {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
-                        self.select(.desktop)
+                        self.request(.desktop)
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
@@ -2664,7 +2737,7 @@ final class StreamClient: ObservableObject {
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
-                            self.select(.desktop)
+                            self.request(.desktop)
                         }
                     default:
                         break
@@ -2864,6 +2937,7 @@ extension StreamClient {
     /// shown, and nothing before this connection's first state (an older Mac never sends one).
     /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
     func changeSettings(_ change: HostSettingsChange) {
+        noteAction()
         guard let out = settings.pick(change, token: settingsToken, now: ProcessInfo.processInfo.systemUptime) else { return }
         settingsToken += 1
         settingsProblem = nil

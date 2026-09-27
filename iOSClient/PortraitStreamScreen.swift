@@ -181,6 +181,8 @@ struct PortraitStreamScreen: View {
     let onPanelSize: (CGSize) -> Void
     /// Pair This iPad… in the panel (see `StreamScreen.openPairingOverlay`).
     var pairThisDevice: () -> Void = {}
+    /// Take the Tour in the panel (see `StreamScreen.takeTour`).
+    var takeTour: () -> Void = {}
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
@@ -284,6 +286,7 @@ struct PortraitStreamScreen: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              radius: metrics.buttonRadius, pointsPerStep: 36)
+                .tourTarget(.textSize)
 
             desktopButton()
                 .opacity(scaleOpen ? 0 : 1)
@@ -364,6 +367,7 @@ struct PortraitStreamScreen: View {
                              width: width, height: layout.row1.height,
                              radius: metrics.buttonRadius, pointsPerStep: layout.rulerStep,
                              iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+                .tourTarget(.textSize)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
                       accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
@@ -373,6 +377,7 @@ struct PortraitStreamScreen: View {
                       })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.keyboard)
 
             desktopButton(width: width)
                 .opacity(scaleOpen ? 0 : 1)
@@ -427,6 +432,7 @@ struct PortraitStreamScreen: View {
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)
+        .tourTarget(.stream)
     }
 
     private var windowStrip: some View {
@@ -434,6 +440,7 @@ struct PortraitStreamScreen: View {
                     radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
                     pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
                     menuFor: $windowMenu)
+            .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
     }
 
     /// A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
@@ -442,6 +449,7 @@ struct PortraitStreamScreen: View {
                send: { client.sendFromKeyRow($0) },
                toggleKeyboard: { overlay.toggleKeyboard() },
                showSpotlight: client.active == .desktop)
+            .tourTarget(.keys)
     }
 
     private func trackpad(verticalSpan: CGFloat?) -> some View {
@@ -452,12 +460,14 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan)
+            .tourTarget(.trackpad)
     }
 
     private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }
 
     private var settingsPanel: some View {
-        HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice)
+        HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice,
+                          takeTour: takeTour)
     }
 
     /// The drawer's dim: a tap on it closes the drawer instead of clicking the Mac.
@@ -497,6 +507,7 @@ struct PortraitStreamScreen: View {
         barButton(open: settingsOpen, symbol: "gearshape", label: "Settings", width: width,
                   accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
                   action: { setSettings(!settingsOpen, true) })
+            .tourTarget(.settings)
     }
 
     /// A bar button at the board's size, or at `width` (the phone's share of its row). On the phone
