@@ -4,7 +4,7 @@ The parts of Sill that decide things (when the device looks for a Mac and which 
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
 video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
 session ends, how the device reads the Mac's messages, what the update check makes of GitHub's answer, who moves the Mac's pointer and what
-the device's pointer sprite shows, how the Mac download's disk image lays out its window, where
+the device's pointer sprite shows, which modifiers the Mac's keys leave set, how the Mac download's disk image lays out its window, where
 everything goes on a phone held upright, what the Mac sends of its menus and what the device makes
 of it) are plain Swift files that compile on their own. Each folder here compiles one or a few of
 those files, exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own
@@ -36,6 +36,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `device-gate` | `Sources/SillHost/DeviceGate.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's device floor: which hello it admits, the refusal's words, the Refused, count and hello lines, the shipped floor "0" | 58 | 14 |
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order, whatever the machine's speed (each step waits for what it needs, not a set time); the inputs counted for the session's connection, which the Mac's pointer reports are judged by, equal those the stand-in read there (every mode, and `count` step by step) | 15 modes | 32 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
+| `key-strokes` | `Sources/SillHost/KeyStrokes.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the keyboard events the Mac is sent for a device's keys and what they leave in its HID state table, which the next click and scroll start from: a shortcut sent as one key down and up (the Spotlight key's ⌘Space) leaves no modifier behind, a modifier's own key goes up without its flag, a device's own word on its modifiers lets go of the keys it no longer holds, a device that leaves and the host that goes let go of theirs; the exact events, and 3,000 random sessions of two devices (moves, leaves, a hardware keyboard losing releases) against the invariant | 79 | 32 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `menu-state` | `iOSClient/MacMenuState.swift` with `Sources/StreamProtocol` (`build.sh`) | the device's view of the Mac's menus (docs/menu-bar-plan.md §7.2): the top level, fetches joined, answered, refused, timed out, a new tree and a move's hand-over, choices and their refusals, stale menus, a bar menu built from an older top level keeping its id only while the menu there has its title (another session's versions included), every fetch carrying the title it was shown under, the rows and sections (a note a section of its own); then 5,000 random sessions in which every opened menu's completion is settled exactly once | 122 and 5,000 sessions | 29 |
 | `menus` | `Sources/SillHost/MenuFormat.swift` and `MenuPolicy.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | kinds 24, 25 and 27 and MacMenu.swift's JSON (a fetch's title); the Mac's shortcuts as it draws them (modifiers, special and function keys, glyphs); items, ids and paths; the 1 s cache, only under the title it was read under, and the wait after an app is brought forward; the title shown; the request rates; a request's deadline from its device's wait; the submenus a version has read at their places (one tree per version); the press decision (only a leaf whose title now is the one shown); the refusals' words and the log's path | 309 | 43 |
@@ -61,7 +62,8 @@ its merge with main at 32d532b, `dmg-layout`'s and `phone-portrait`'s those of t
 `pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md), `menus`' and
 `menu-state`'s those of the `menu-bar-mirror` branch after its review, which also added the menus'
 kinds to `pointer-control`'s (152 before) and the Menus button to `phone-portrait`'s (149 and 28),
-and `message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5).
+`message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5), and `key-strokes`'
+the `spotlight-modifier-fix` branch's.
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.

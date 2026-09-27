@@ -292,6 +292,7 @@ package final class StreamCoordinator {
                 self.routes[ObjectIdentifier(connection)] = nil
                 self.lastPairingWanted[ObjectIdentifier(connection)] = nil
                 self.menus.clientLeft(connection)
+                self.releaseKeys(of: ObjectIdentifier(connection))
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
@@ -666,12 +667,19 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = Wire.decode(InputEvent.self, from: message.payload),
-                  let rect = currentSourceRect() else { return }
+            guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            let device = ObjectIdentifier(connection)
+            guard let rect = currentSourceRect() else {
+                // Nothing streams (between sources, or the stream stopped): input has nowhere to land.
+                // A key's up still goes when the Mac has that key down, so a key or a modifier this
+                // device pressed comes up (KeyStrokes) and never turns a later click into a ⌘-click.
+                if case .key(let usage, false, _) = event, injector.isKeyDown(usage) { deliver(event, in: .zero, from: device) }
+                return
+            }
             // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
             // activates and raises nothing either.
             if !synthetic { raiseIfInteracting(event) }
-            deliver(event, in: rect)
+            deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
@@ -938,7 +946,15 @@ package final class StreamCoordinator {
         await syntheticCapture.stop()
         capture.onFrame = nil; syntheticCapture.onFrame = nil   // both queues drained: let the old encoder go
         rectCache = nil
-        heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
+        // Input held for the old source must not replay into the new one, but the ups of keys the Mac
+        // has down still go (a key or a modifier left down makes the next click a ⌘-click), and the
+        // keys of devices that left meanwhile go up.
+        let dropped = heldInput
+        heldInput = []; holdUntil = 0
+        for held in dropped {
+            if case .key(let usage, false, _) = held.event, injector.isKeyDown(usage) { injector.apply(held.event, in: held.rect, from: held.device) }
+        }
+        releaseKeysOfDevicesThatLeft()
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
         // New settings take effect here, between pipelines, before the rate, the scale and the
@@ -1171,23 +1187,40 @@ package final class StreamCoordinator {
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
     private var lastActivationAt: CFAbsoluteTime = 0
-    private var heldInput: [(InputEvent, CGRect)] = []
+    private var heldInput: [(event: InputEvent, rect: CGRect, device: KeyStrokes.Device)] = []
     private var holdUntil: CFAbsoluteTime = 0
+    /// Devices that left while input was held: their keys go up after it (`releaseKeys`).
+    private var leftWhileHeld: [KeyStrokes.Device] = []
     /// How long held input waits for the app to become frontmost before it is replayed anyway.
     private static let activationTimeout: TimeInterval = 0.6
 
-    private func deliver(_ event: InputEvent, in rect: CGRect) {
+    private func deliver(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
         // Queue while holding, and while anything is still queued, so order is never inverted.
-        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append((event, rect)); return }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append((event, rect, device)); return }
         logClick(event, in: rect)
-        injector.apply(event, in: rect)
+        injector.apply(event, in: rect, from: device)
     }
 
     private func releaseHeldInput() {
         holdUntil = 0
         let held = heldInput
         heldInput = []
-        for (event, rect) in held { logClick(event, in: rect); injector.apply(event, in: rect) }
+        for item in held { logClick(item.event, in: item.rect); injector.apply(item.event, in: item.rect, from: item.device) }
+        releaseKeysOfDevicesThatLeft()
+    }
+
+    /// A device left: the keys it still holds down on the Mac go up (InputInjector.releaseKeys),
+    /// after whatever of its input is still held for an activation, so no up of its own is overtaken
+    /// and no down of its own comes after.
+    private func releaseKeys(of device: KeyStrokes.Device) {
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { leftWhileHeld.append(device); return }
+        injector.releaseKeys(of: device)
+    }
+
+    private func releaseKeysOfDevicesThatLeft() {
+        let left = leftWhileHeld
+        leftWhileHeld = []
+        for device in left { injector.releaseKeys(of: device) }
     }
 
     private func raiseIfInteracting(_ event: InputEvent) {
@@ -1513,11 +1546,13 @@ package final class StreamCoordinator {
     }
 
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
-    /// before AppKit exits): every connected device hears why (kind 22 "quit", at most 0.1 s),
-    /// then window home, display gone. Capture and encoder need no stop; the process is about to
-    /// end. The CLI without --virtual-display dies on a plain SIGINT with no goodbye, as before:
-    /// its devices notice by liveness.
+    /// before AppKit exits): every key a device holds down on the Mac goes up (a modifier left down
+    /// would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why (kind 22
+    /// "quit", at most 0.1 s), then window home, display gone. Capture and encoder need no stop; the
+    /// process is about to end. The CLI without --virtual-display dies on a plain SIGINT with no
+    /// goodbye, as before: its devices notice by liveness.
     package func shutdownForExit() {
+        injector.releaseAllKeys()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()

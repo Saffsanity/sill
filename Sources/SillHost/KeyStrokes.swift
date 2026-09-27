@@ -1,10 +1,32 @@
 import Foundation
 
 // A device's key (kind 8's `.key`: a USB HID usage going down or up, with UIKeyModifierFlags bits) as
-// the keyboard event InputInjector posts for it: the Mac's virtual key, and the flags it carries.
+// the keyboard events InputInjector posts for it: the Mac's virtual key, and the flags each carries.
+//
+// The flags are what a keyboard would give (2026-09-27, the stuck command after Spotlight). The Mac
+// keeps the modifier state of the source InputInjector posts from in the HID system's state table:
+// each keyboard event posted leaves its flags there (CGEventSource.h: the source's "accumulated
+// information on modifier flag state", placed in effect by posting events), and every pointer and
+// scroll event made from the source afterwards starts from them. A device sends a shortcut as one
+// key down and up, each carrying its modifiers (the Spotlight key's ⌘Space, the key row's ⌘esc, a
+// latched ⌘S), not with the modifier's own key pressed around it as a keyboard does; posted as it
+// came, the up left command in the table, and the next tap was a ⌘-click until typed text (posted
+// with no flags) cleared it. So:
+//   - a key's down carries the modifiers its device sent and whatever modifier keys are down (a
+//     Mac with two keyboards does the same): the shortcut acts on the down;
+//   - a key's up carries only the modifiers the modifier keys down hold, never its chord's own;
+//   - a modifier's own key (a latched modifier pressed around a click, a hardware keyboard's) is a
+//     flags-changed event with what is held once it is down or up: never its own flag after its up
+//     (unless the same modifier's other key is down), whatever the device said;
+//   - a device's key or text saying it no longer holds a modifier lets go of that modifier's key
+//     first (a device from before this fix never sent a hardware ⌘'s release);
+//   - a device that leaves has every key it still holds down let go, and so does the host at its end.
+// Pointer and scroll events are made from the source as before, so they start from what is held.
+// Inferred, not observed: nothing may be posted while this is built. Typed text is InputInjector's:
+// it goes out with no flags, after `text` has let go of the device's modifier keys.
 //
 // Pure: Foundation only, checked on its own with swiftc (Tests/checks/key-strokes; its `package`
-// access needs -package-name sill). Nothing here posts anything: InputInjector makes the event from
+// access needs -package-name sill). Nothing here posts anything: InputInjector makes each event from
 // its source and posts it.
 
 /// One keyboard event to post: a virtual key (Carbon's kVK_*) going down or up, carrying these flags
@@ -21,14 +43,104 @@ package struct KeyStroke: Equatable, Sendable {
 }
 
 package struct KeyStrokes: Sendable {
+    /// A device's connection (the ObjectIdentifier of its NWConnection): whose key is down.
+    package typealias Device = ObjectIdentifier
+
+    /// Every key whose down went to the Mac and whose up has not, with the device that pressed it
+    /// (the last to, if two did). Only usages with a Mac key (`virtualKeys`), so at most 82.
+    package private(set) var down: [UInt16: Device] = [:]
+
     package init() {}
 
-    /// A device's key: the event to post, or nil for a usage no Mac key answers to (the injector
-    /// drops it and counts it).
-    package mutating func key(usage: UInt16, down: Bool, modifiers: UInt64) -> KeyStroke? {
+    /// The flags the modifier keys down hold between them.
+    package var heldFlags: UInt64 { down.keys.reduce(0) { $0 | (Self.modifierKeys[$1] ?? 0) } }
+
+    /// Whether `usage`'s down went to the Mac and its up has not.
+    package func isDown(_ usage: UInt16) -> Bool { down[usage] != nil }
+
+    /// A device's key: the events to post, in order, or nil for a usage no Mac key answers to (the
+    /// injector drops it and counts it; nothing changes). First the ups of this device's modifier keys
+    /// that `modifiers` no longer has (but this key), then the key: a modifier key with what is held
+    /// once it is down or up, any other key's down with the device's modifiers and what is held, and
+    /// its up with what is held.
+    package mutating func key(usage: UInt16, down isDown: Bool, modifiers: UInt64, from device: Device) -> [KeyStroke]? {
         guard let virtualKey = Self.virtualKeys[usage] else { return nil }
-        return KeyStroke(virtualKey: virtualKey, down: down, flags: Self.flags(fromDevice: modifiers))
+        let said = Self.flags(fromDevice: modifiers)
+        var strokes = letGo(of: device, keeping: said, except: usage)
+        let flags: UInt64
+        if Self.modifierKeys[usage] != nil {
+            down[usage] = isDown ? device : nil
+            flags = heldFlags
+        } else if isDown {
+            down[usage] = device
+            flags = said | heldFlags
+        } else {
+            down[usage] = nil
+            flags = heldFlags
+        }
+        strokes.append(KeyStroke(virtualKey: virtualKey, down: isDown, flags: flags))
+        return strokes
     }
+
+    /// Text from a device, which InputInjector types with no flags: the events to post first. A
+    /// device types text only while it holds no ⌘, ⌃ or ⌥ (those make its keys shortcuts) and never
+    /// holds a modifier's own key for it, so its modifier keys still down go up.
+    package mutating func text(from device: Device) -> [KeyStroke] {
+        letGo(of: device, keeping: 0, except: nil)
+    }
+
+    /// A device left (its connection closed): the ups of every key it still holds down, its other
+    /// keys first with what is still held, then its modifier keys, each leaving the rest. A key
+    /// another device pressed last stays down.
+    package mutating func release(_ device: Device) -> [KeyStroke] { letGoOfKeys { $0 == device } }
+
+    /// The host is going (the app's Quit, a signal it catches): the ups of every key down, whoever
+    /// pressed it, in `release`'s order, so no modifier outlives Sill on the Mac.
+    package mutating func releaseAll() -> [KeyStroke] { letGoOfKeys { _ in true } }
+
+    private mutating func letGoOfKeys(pressedBy owner: (Device) -> Bool) -> [KeyStroke] {
+        var strokes: [KeyStroke] = []
+        for usage in down.keys.sorted() where Self.modifierKeys[usage] == nil {
+            guard let who = down[usage], owner(who) else { continue }
+            down[usage] = nil
+            strokes.append(KeyStroke(virtualKey: Self.virtualKeys[usage] ?? 0, down: false, flags: heldFlags))
+        }
+        for usage in down.keys.sorted(by: >) where Self.modifierKeys[usage] != nil {
+            guard let who = down[usage], owner(who) else { continue }
+            down[usage] = nil
+            strokes.append(KeyStroke(virtualKey: Self.virtualKeys[usage] ?? 0, down: false, flags: heldFlags))
+        }
+        return strokes
+    }
+
+    /// The ups of `device`'s modifier keys down whose flag `keeping` lacks, `except` left alone: from
+    /// 0xE7 down (the right-hand keys, then command, option, shift and control: the reverse of the
+    /// order the trackpad presses them in), each with what is held after it.
+    private mutating func letGo(of device: Device, keeping: UInt64, except: UInt16?) -> [KeyStroke] {
+        var strokes: [KeyStroke] = []
+        for usage in down.keys.sorted(by: >) where usage != except && down[usage] == device {
+            guard let flag = Self.modifierKeys[usage], keeping & flag == 0 else { continue }
+            down[usage] = nil
+            strokes.append(KeyStroke(virtualKey: Self.virtualKeys[usage] ?? 0, down: false, flags: heldFlags))
+        }
+        return strokes
+    }
+
+    /// "command", "control + shift" (in the Mac's order: caps lock, control, option, shift,
+    /// command), or "none": for the log.
+    package static func names(_ flags: UInt64) -> String {
+        let named: [(UInt64, String)] = [(capsLock, "caps lock"), (control, "control"), (option, "option"),
+                                         (shift, "shift"), (command, "command")]
+        let held = named.filter { flags & $0.0 != 0 }.map(\.1)
+        return held.isEmpty ? "none" : held.joined(separator: " + ")
+    }
+
+    /// The modifiers' own keys (HID usages 0xE0 to 0xE7: left and right control, shift, option and
+    /// command) and the flag each holds while down.
+    package static let modifierKeys: [UInt16: UInt64] = [
+        0xE0: control, 0xE1: shift, 0xE2: option, 0xE3: command,
+        0xE4: control, 0xE5: shift, 0xE6: option, 0xE7: command,
+    ]
 
     /// The client sends UIKeyModifierFlags bits. They sit at the same bit positions as the
     /// CGEventFlags masks, but build the flags explicitly rather than reinterpreting the number:
