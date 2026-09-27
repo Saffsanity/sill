@@ -45,19 +45,22 @@ func rows(_ c: S.Content) -> [Row] {
     return s.flatMap { $0 }
 }
 func keys(_ done: [S.Done]) -> [Int] { done.map(\.key) }
+/// The title a menu was shown under, which its fetch carries (the Mac reads it only while the item at
+/// its id has it): here one per id.
+func t(_ id: String) -> String { "Menu \(id)" }
 
 // MARK: Rule 1: nothing before the first top level
 
 do {
     var s = S()
     check(!s.hasMenus && s.version == nil && s.menus.isEmpty, "a new state has nothing")
-    check(s.fetch("2", version: nil, key: 1, token: 1, now: 0) == .settled(.message("Not connected.")), "a fetch before any top level is settled at once")
-    check(s.fetch("2", version: 3, key: 2, token: 2, now: 0) == .settled(.message("Not connected.")), "…whatever its version")
+    check(s.fetch("2", title: t("2"), version: nil, key: 1, token: 1, now: 0) == .settled(.message("Not connected.")), "a fetch before any top level is settled at once")
+    check(s.fetch("2", title: t("2"), version: 3, key: 2, token: 2, now: 0) == .settled(.message("Not connected.")), "…whatever its version")
     check(s.waitingKeys.isEmpty && s.oldestWait == nil, "nothing waits before a top level")
     check(s.press(Row(kind: .item, id: "2.5", title: "Save", version: 3), token: 3) == nil, "no choice before a top level")
     let r = s.receive(answer(3, token: 1, fileItems), now: 0)
     check(r.done.isEmpty && !r.topChanged && r.refusal == nil, "an answer before a top level settles nothing")
-    check(s.barMenuID(builtID: "2", builtVersion: 3, title: "File") == nil, "no bar id without a top level")
+    check(s.barMenuID(builtID: "2", title: "File") == nil, "no bar id without a top level")
 }
 
 // MARK: The top level
@@ -112,10 +115,15 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    check(s.fetch("2", version: 3, key: 1, token: 10, now: 1) == .send(FetchMenu(version: 3, id: "2", token: 10)), "a fetch is sent with the version and its token")
-    check(s.fetch("2", version: 3, key: 2, token: 11, now: 1.1) == .joined, "the same menu again joins the waiting fetch")
-    check(s.fetch("3", version: 3, key: 3, token: 12, now: 1.2) == .send(FetchMenu(version: 3, id: "3", token: 12)), "another menu is its own fetch")
+    check(s.fetch("2", title: t("2"), version: 3, key: 1, token: 10, now: 1) == .send(FetchMenu(version: 3, id: "2", title: t("2"), token: 10)), "a fetch is sent with the version and its token")
+    check(s.fetch("2", title: t("2"), version: 3, key: 2, token: 11, now: 1.1) == .joined, "the same menu again joins the waiting fetch")
+    check(s.fetch("3", title: t("3"), version: 3, key: 3, token: 12, now: 1.2) == .send(FetchMenu(version: 3, id: "3", title: t("3"), token: 12)), "another menu is its own fetch")
     check(s.waitingKeys == [1, 2, 3] && s.oldestWait == 1, "three completions wait, the oldest sent at 1")
+    do {
+        var u = s
+        check(u.fetch("2", title: "Other", version: 3, key: 9, token: 19, now: 1.2) == .send(FetchMenu(version: 3, id: "2", title: "Other", token: 19)),
+              "the same id under another title (rows of two reads) is its own fetch, carrying that title")
+    }
     let r = s.receive(answer(3, token: 10, fileItems), now: 1.3)
     check(keys(r.done) == [1, 2] && !r.topChanged && r.refusal == nil, "the answer settles both completions of its fetch")
     check(r.done.count == 2 && r.done[0].content == r.done[1].content, "…with the same content")
@@ -124,10 +132,10 @@ do {
     check(s.waitingKeys == [3], "only the other menu still waits")
     check(s.receive(answer(3, token: 10, fileItems), now: 1.4).done.isEmpty, "the same token again settles nothing (rule 4)")
     check(s.receive(answer(3, token: 99, fileItems), now: 1.4).done.isEmpty, "an unknown token settles nothing")
-    check(s.fetch("2", version: 3, key: 4, token: 13, now: 2) == .send(FetchMenu(version: 3, id: "2", token: 13)), "once answered, the menu is asked again")
+    check(s.fetch("2", title: t("2"), version: 3, key: 4, token: 13, now: 2) == .send(FetchMenu(version: 3, id: "2", title: t("2"), token: 13)), "once answered, the menu is asked again")
     let other = s.receive(MacMenu(version: 4, answering: 13, menu: "2", items: [], note: changed), now: 2.1)
     check(keys(other.done) == [4] && other.done[0].content == .message(changed), "an answer of another version: the menus changed (rule 5)")
-    check(s.fetch("2", version: 2, key: 5, token: 14, now: 3) == .settled(.message(changed)), "a row of an older version is settled unasked")
+    check(s.fetch("2", title: t("2"), version: 2, key: 5, token: 14, now: 3) == .settled(.message(changed)), "a row of an older version is settled unasked")
     check(s.waitingKeys == [3], "and does not wait")
     let late = s.receive(answer(3, token: 12, [item("3.0", "Undo", key: "⌘Z")]), now: 3)
     check(keys(late.done) == [3] && titles(late.done[0].content) == [["Undo"]], "the other menu's answer")
@@ -138,9 +146,9 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    _ = s.fetch("2", version: 3, key: 1, token: 1, now: 0)
-    _ = s.fetch("5", version: 3, key: 2, token: 2, now: 0)
-    _ = s.fetch("5", version: 3, key: 3, token: 3, now: 0)
+    _ = s.fetch("2", title: t("2"), version: 3, key: 1, token: 1, now: 0)
+    _ = s.fetch("5", title: t("5"), version: 3, key: 2, token: 2, now: 0)
+    _ = s.fetch("5", title: t("5"), version: 3, key: 3, token: 3, now: 0)
     let same = s.receive(top(3, code), now: 0.5)
     check(same.done.isEmpty && s.waitingKeys == [1, 2, 3], "the same version again settles nothing")
     let staleSame = s.receive(top(3, code, stale: true, note: "Code isn’t responding."), now: 0.6)
@@ -156,13 +164,22 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    check(s.barMenuID(builtID: "2", builtVersion: 3, title: "File") == "2", "built from the current version: its own id")
+    check(s.barMenuID(builtID: "2", title: "File") == "2", "the current top level's menu there has its title: its own id")
     _ = s.receive(top(5, ["Safari", "Edit", "File", "Edit"], app: "Safari"), now: 1)
-    check(s.barMenuID(builtID: "2", builtVersion: 3, title: "File") == "3", "built from version 3: the new app's File")
-    check(s.barMenuID(builtID: "3", builtVersion: 3, title: "Edit") == "2", "the first menu of that title")
-    check(s.barMenuID(builtID: "4", builtVersion: 3, title: "Selection") == nil, "a title the new top level lacks: none")
-    check(s.barMenuID(builtID: "1", builtVersion: 4, title: "Code") == nil, "built from any other version: by title")
-    check(s.barMenuID(builtID: "7", builtVersion: 5, title: "Anything") == "7", "built from version 5: its own id, whatever its title")
+    check(s.barMenuID(builtID: "2", title: "File") == "3", "built as File (2), and 2 is Edit now: the new app's File")
+    check(s.barMenuID(builtID: "3", title: "Edit") == "2", "the first menu of that title")
+    check(s.barMenuID(builtID: "4", title: "Selection") == nil, "a title the new top level lacks: none")
+    check(s.barMenuID(builtID: "1", title: "Code") == nil, "…even at an id the new top level has")
+    check(s.barMenuID(builtID: "4", title: "Edit") == "4", "its own id while the menu there has its title, a later one of the same title included")
+    check(s.barMenuID(builtID: "7", title: "Anything") == nil, "an id the top level lacks, under a title it lacks: none")
+    // Versions start again with each launch of the Mac's host: a bar built in another session can
+    // meet its own version again, with other menus (the review's case).
+    var r = S()
+    _ = r.receive(top(2, code), now: 0)
+    _ = r.reset()
+    _ = r.receive(top(2, ["Safari", "File", "Edit", "View", "History"], app: "Safari"), now: 10)
+    check(r.barMenuID(builtID: "4", title: "Selection") == nil, "after a reset, the same version from another launch: Selection (4, View now) asks for nothing")
+    check(r.barMenuID(builtID: "5", title: "View") == "4", "…and View, built at 5, finds View at 4")
 }
 
 // MARK: Rule 6: the timeout
@@ -170,9 +187,9 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    _ = s.fetch("2", version: 3, key: 1, token: 1, now: 10)
-    _ = s.fetch("2", version: 3, key: 2, token: 1, now: 11)
-    _ = s.fetch("3", version: 3, key: 3, token: 2, now: 12)
+    _ = s.fetch("2", title: t("2"), version: 3, key: 1, token: 1, now: 10)
+    _ = s.fetch("2", title: t("2"), version: 3, key: 2, token: 1, now: 11)
+    _ = s.fetch("3", title: t("3"), version: 3, key: 3, token: 2, now: 12)
     check(s.expire(now: 13.99, timeout: 4, mac: "Mac mini").isEmpty, "not before 4 s")
     let e = s.expire(now: 14, timeout: 4, mac: "Mac mini")
     check(keys(e) == [1, 2] && e.allSatisfy { $0.content == .message("Mac mini didn’t answer. Open the menu again.") }, "at 4 s exactly, the fetch and the one that joined it")
@@ -190,7 +207,7 @@ do {
     _ = s.receive(top(3, code), now: 0)
     let r = s.receive(top(3, code, stale: true, note: "Code isn’t responding."), now: 0)
     check(r.topChanged && s.stale && s.note == "Code isn’t responding." && s.hasMenus, "a stale top level")
-    let f = s.fetch("2", version: 3, key: 1, token: 1, now: 0)
+    let f = s.fetch("2", title: t("2"), version: 3, key: 1, token: 1, now: 0)
     check(f == .settled(.sections([[Row.note("Code isn’t responding.")]], more: 0)), "a menu opened while stale holds the note alone, unasked")
     check(s.waitingKeys.isEmpty, "nothing was sent")
     let choice = s.press(Row(kind: .item, id: "2.5", title: "Save", version: 3), token: 2)
@@ -201,7 +218,7 @@ do {
     check(s.note == "The app isn’t responding.", "…without the app's name")
     _ = s.receive(top(3, code), now: 2)
     check(!s.stale && s.note == nil, "answering again: not stale")
-    check(s.fetch("2", version: 3, key: 3, token: 3, now: 2) == .send(FetchMenu(version: 3, id: "2", token: 3)), "and asked again")
+    check(s.fetch("2", title: t("2"), version: 3, key: 3, token: 3, now: 2) == .send(FetchMenu(version: 3, id: "2", title: t("2"), token: 3)), "and asked again")
     let a = s.receive(answer(3, token: 3, fileItems, stale: true, note: "Code isn’t responding."), now: 2.1)
     check(a.done.count == 1, "a stale answer settles its fetch")
     let rs = a.done.first.map { rows($0.content) } ?? []
@@ -243,9 +260,9 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    _ = s.fetch("2", version: 3, key: 1, token: 1, now: 0)
-    _ = s.fetch("2", version: 3, key: 2, token: 1, now: 0)
-    _ = s.fetch("4", version: 3, key: 3, token: 2, now: 0)
+    _ = s.fetch("2", title: t("2"), version: 3, key: 1, token: 1, now: 0)
+    _ = s.fetch("2", title: t("2"), version: 3, key: 2, token: 1, now: 0)
+    _ = s.fetch("4", title: t("4"), version: 3, key: 3, token: 2, now: 0)
     _ = s.press(Row(kind: .item, id: "2.5", title: "Save", version: 3), token: 3)
     let d = s.reset()
     check(keys(d).sorted() == [1, 2, 3] && d.allSatisfy { $0.content == .message("Not connected.") }, "reset settles every waiting completion: Not connected.")
@@ -253,18 +270,18 @@ do {
     check(s.reset().isEmpty, "a second reset settles nothing")
     check(s.receive(answer(3, token: 1, fileItems), now: 1).done.isEmpty, "an answer after the reset is dropped")
     check(s.receive(pressed(3, token: 3, false), now: 1).refusal == nil, "and so is a refusal")
-    check(s.fetch("2", version: 3, key: 4, token: 4, now: 1) == .settled(.message("Not connected.")), "after a reset: rule 1 again")
+    check(s.fetch("2", title: t("2"), version: 3, key: 4, token: 4, now: 1) == .settled(.message("Not connected.")), "after a reset: rule 1 again")
 
     var m = S()
     _ = m.receive(top(3, code), now: 0)
-    _ = m.fetch("2", version: 3, key: 1, token: 1, now: 0)
-    _ = m.fetch("2", version: 3, key: 2, token: 1, now: 0)
+    _ = m.fetch("2", title: t("2"), version: 3, key: 1, token: 1, now: 0)
+    _ = m.fetch("2", title: t("2"), version: 3, key: 2, token: 1, now: 0)
     _ = m.press(Row(kind: .item, id: "2.5", title: "Save", version: 3), token: 2)
     let moved = m.connectionReplaced()
     check(keys(moved) == [1, 2] && moved.allSatisfy { $0.content == .message(changed) }, "a hand-over settles the waiting fetches: the menus changed")
     check(m.version == 3 && m.menus.count == 10 && m.waitingKeys.isEmpty, "…and keeps the top level")
     check(m.receive(pressed(3, token: 2, false), now: 1).refusal == nil, "…and forgets the choices")
-    check(m.fetch("2", version: 3, key: 3, token: 3, now: 1) == .send(FetchMenu(version: 3, id: "2", token: 3)), "a menu opened after it is asked on the new connection")
+    check(m.fetch("2", title: t("2"), version: 3, key: 3, token: 3, now: 1) == .send(FetchMenu(version: 3, id: "2", title: t("2"), token: 3)), "a menu opened after it is asked on the new connection")
 }
 
 // MARK: Rule 10: rows and sections
@@ -307,12 +324,12 @@ do {
 do {
     var s = S()
     _ = s.receive(top(3, code), now: 0)
-    _ = s.fetch("9", version: 3, key: 1, token: 1, now: 0)
+    _ = s.fetch("9", title: t("9"), version: 3, key: 1, token: 1, now: 0)
     let window = (0..<500).map { item("9.\($0)", "Window \($0)") }
     let r = s.receive(answer(3, token: 1, menu: "9", window, more: 100), now: 0.2)
     guard case .sections(let sections, let more)? = r.done.first?.content else { check(false, "the long menu's content"); exit(1) }
     check(more == 100 && sections.count == 2 && sections[0].count == 500 && sections[1] == [Row.note("100 more on the Mac")], "500 rows and 100 more on the Mac")
-    _ = s.fetch("9", version: 3, key: 2, token: 2, now: 1)
+    _ = s.fetch("9", title: t("9"), version: 3, key: 2, token: 2, now: 1)
     let neg = s.receive(answer(3, token: 2, menu: "9", [], more: -4), now: 1)
     check(neg.done.first?.content == .sections([[Row.note("No items")]], more: 0), "a negative more counts as none")
 }
@@ -373,11 +390,11 @@ for seed in 0..<5_000 {
             issued.insert(key)
             let token = nextToken
             let expected = openFetch["\(id)@\(v)"]
-            switch s.fetch(id, version: v, key: key, token: token, now: now) {
+            switch s.fetch(id, title: t(id), version: v, key: key, token: token, now: now) {
             case .send(let f):
                 nextToken += 1
                 if expected != nil { ok = false; print("FAIL: seed \(seed): a second kind 27 for \(id)@\(v) while one waits") }
-                if f.token != token || f.id != id || f.version != v || v != s.version { ok = false; print("FAIL: seed \(seed): the kind 27 \(f)") }
+                if f.token != token || f.id != id || f.title != t(id) || f.version != v || v != s.version { ok = false; print("FAIL: seed \(seed): the kind 27 \(f)") }
                 openFetch["\(id)@\(v)"] = token
                 sentAt[token] = (id, v, now)
             case .joined:

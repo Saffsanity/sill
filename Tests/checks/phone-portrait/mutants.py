@@ -43,6 +43,9 @@ MUTANTS = {
     "M27 the fixed height without the band": ("margin + margin + underPicture + band + buttonHeight + band + rowGap",
                                               "margin + margin + underPicture + buttonHeight + rowGap"),
     "M28 the band 4 pt": ("static let band: CGFloat = 6", "static let band: CGFloat = 4"),
+    "M29 the Menus button under Aa": ("let settingsButton = buttons[Button.settings.rawValue]", "let settingsButton = buttons[Button.textSize.rawValue]"),
+    "M30 the strip running under the Menus button": ("width: max(0, menus.minX - Self.gap - strip.minX)", "width: strip.width"),
+    "M31 the Menus button at the strip's top": ("y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,", "y: strip.minY,"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

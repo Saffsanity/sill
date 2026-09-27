@@ -31,12 +31,15 @@ enum MacMenuElements {
     /// The top level: one menu per Mac menu, each holding one deferred element. `barIdentifiers`:
     /// the iPad's bar, whose menus carry `barIdentifier`s and never change shape while stale (each
     /// then holds the note, from its deferred element). The pull-down (false) draws a stale or a
-    /// disabled Mac menu as a disabled row, after the note.
+    /// disabled Mac menu as a disabled row, after the note, which is a section of its own: a dimmed
+    /// line of words just above the dimmed menus would read as one more of them.
     static func topMenus(_ client: StreamClient, barIdentifiers: Bool) -> [UIMenuElement] {
         let state = client.menus
         guard let version = state.version else { return [] }
         var out: [UIMenuElement] = []
-        if !barIdentifiers, let note = state.note { out.append(noteAction(note)) }
+        if !barIdentifiers, let note = state.note {
+            out.append(UIMenu(title: "", options: .displayInline, children: [noteAction(note)]))
+        }
         for row in state.menus {
             guard let id = row.id else { continue }
             if !barIdentifiers, state.stale || !row.enabled {

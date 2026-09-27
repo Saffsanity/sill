@@ -6,8 +6,9 @@ import UIKit
 /// of scenes and of `sill://` links (ContentView's `onOpenURL`).
 ///
 /// Nothing is inserted on an iPhone, before iPadOS 26 (there the main menu only feeds the ⌘ list of
-/// key commands, and the Mac's menus have none), with no window key, or when the key window's
-/// session has no menus.
+/// key commands, and the Mac's menus have none), while the app has more than one window (MacMenuHub:
+/// nothing says which window's session the bar's choices would reach), or when the window's session
+/// has no menus.
 final class SillAppDelegate: UIResponder, UIApplicationDelegate {
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
@@ -55,14 +56,15 @@ enum MacMenuBar {
         return .perMenu
     }
 
-    /// One build of the main menu: the focused session's menus, if it has any.
+    /// One build of the main menu: the menus of the session in the app's one window, if it has any.
     static func build(_ builder: UIMenuBuilder) {
         #if DEBUG
         // The guards under test (S3): View gone before the insertion.
         if UserDefaults.standard.bool(forKey: "SillMenuNoView"), builder.menu(for: .view) != nil { builder.remove(menu: .view) }
         #endif
-        var line = "nothing inserted (no window is key)"
-        if let client = MacMenuHub.shared.focused {
+        let focus = MacMenuHub.shared.focus
+        var line = "nothing inserted (\(focus.why))"
+        if let client = focus.client {
             if client.menus.menus.isEmpty {
                 line = "nothing inserted (the session has no menus)"
             } else {

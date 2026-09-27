@@ -3010,14 +3010,14 @@ extension StreamClient {
         send(.fetchMenu, payload: Wire.encode(FetchMenu(token: nextMenuToken())))
     }
 
-    /// A menu of the top level opened, in the iPad's bar or the Menus button's pull-down: built from
-    /// the top level of `builtVersion`, it asks by its title when the top level has moved since
-    /// (MacMenuState rule 11), since UIKit rebuilds the bar lazily. With no menu of that title now,
-    /// the menus changed, and the bar is asked for a rebuild again. `completion` runs once, on the
-    /// main queue. Main thread.
+    /// A menu of the top level opened, in the iPad's bar or the Menus button's pull-down: built as
+    /// `id` under `title` from the top level of `builtVersion` (another session's, perhaps), it asks
+    /// by its title when the current top level's menu there has another (MacMenuState rule 11),
+    /// since UIKit rebuilds the bar lazily. With no menu of that title now, the menus changed, and
+    /// the bar is asked for a rebuild again. `completion` runs once, on the main queue. Main thread.
     func fetchTopMenu(id: String, title: String, builtVersion: Int, completion: @escaping (MacMenuState.Content) -> Void) {
         guard let current = menus.version else { completion(.message(MacMenuState.notConnected)); return }
-        guard let asked = menus.barMenuID(builtID: id, builtVersion: builtVersion, title: title) else {
+        guard let asked = menus.barMenuID(builtID: id, title: title) else {
             #if DEBUG
             print("menubar: \(title) was built from version \(builtVersion); version \(current) has none")
             #endif
@@ -3026,7 +3026,7 @@ extension StreamClient {
             return
         }
         #if DEBUG
-        if builtVersion != current { print("menubar: \(title) was built from version \(builtVersion); asked as \(asked) in version \(current)") }
+        if builtVersion != current || asked != id { print("menubar: \(title) was built from version \(builtVersion) as \(id); asked as \(asked) in version \(current)") }
         #endif
         fetchMenu(id: asked, version: current, title: title, completion: completion)
     }
@@ -3042,7 +3042,7 @@ extension StreamClient {
         let key = menuKey
         let token = menuToken
         let now = ProcessInfo.processInfo.systemUptime
-        switch menus.fetch(id, version: version, key: key, token: token, now: now) {
+        switch menus.fetch(id, title: title, version: version, key: key, token: token, now: now) {
         case .send(let request):
             menuToken += 1
             menuCompletions[key] = completion
@@ -3230,14 +3230,33 @@ extension StreamClient {
         step(titles.dropFirst())
     }
 
+    /// Why the harness must not open menus by their path or choose an item in this session
+    /// (`-SillMenusOpen 'File/…'`, `-SillMenuPress`), or nil when it may: the mock's menus, or the
+    /// test app's (Scripts/menufixture.swift) through a test host, a session dialled to a loopback
+    /// address whose Mac's window list gives no version (SillHost; Sill.app always gives one) and
+    /// whose top level is menufixture's. Never a real Mac's menus: a choice there is made in whatever
+    /// app it streams, and each menu opened is validated by that app.
+    var menuHarnessRefusal: String? {
+        guard connection != nil else { return nil }
+        if let why = InputScript.refusal(endpoint: connection?.endpoint, hostVersion: hostVersion) {
+            return why.replacingOccurrences(of: ", which posts input to this Mac", with: "")
+        }
+        guard menus.app == "menufixture" else { return "the menus are \(menus.app ?? "no app")'s, not the test app's (menufixture)" }
+        return nil
+    }
+
     /// `-SillMenuPress 'File/Save'`: once the first top level is in, the item at that path is chosen
     /// as a tap on it would choose it (the menus on the way fetched, the kind 25 sent), once per
     /// client. The harness cannot tap; against a synthetic host with SILL_TEST_MENU_PID this is the
-    /// fixture's item pressed through the host.
+    /// fixture's item pressed through the host. Only where `menuHarnessRefusal` lets it.
     private func pressFromLaunchArgument() {
         guard !menuPressArgumentDone, menus.version != nil, !menus.menus.isEmpty,
               let raw = UserDefaults.standard.string(forKey: "SillMenuPress"), !raw.isEmpty else { return }
         menuPressArgumentDone = true
+        if let why = menuHarnessRefusal {
+            print("menus: harness: -SillMenuPress \(raw) refused: \(why)")
+            return
+        }
         let path = raw.split(separator: "/").map { String($0) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             self?.resolveMenuPath(path) { [weak self] found in

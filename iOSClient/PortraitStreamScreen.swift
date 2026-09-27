@@ -172,6 +172,9 @@ struct PortraitStreamScreen: View {
     /// The Settings panel, owned by `StreamScreen` (see its `setSettings`).
     let settingsOpen: Bool
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
+    /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
+    let menusOpened: () -> Void
+    let menusClosed: () -> Void
     /// The panel's open and close motion, scaled about the given point (see `StreamScreen`).
     let settingsTransition: (_ anchor: UnitPoint) -> AnyTransition
     /// The stream panel's size in points, for the viewport `StreamScreen` sends the host.
@@ -200,7 +203,7 @@ struct PortraitStreamScreen: View {
 
             VStack(spacing: 0) {
                 picturePane.padding(8).frame(height: half)
-                controls.frame(height: size.height - half)
+                controls(width: size.width).frame(height: size.height - half)
             }
 
             // Same order as landscape: the dim goes over the stream so a tap with the drawer
@@ -242,9 +245,9 @@ struct PortraitStreamScreen: View {
         }
     }
 
-    private var controls: some View {
+    private func controls(width: CGFloat) -> some View {
         VStack(spacing: metrics.rowGap) {
-            windowBar
+            windowBar(width: width - 2 * metrics.padSide)
             keyRow(.full)
             trackpad(verticalSpan: nil)
         }
@@ -255,9 +258,13 @@ struct PortraitStreamScreen: View {
 
     /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
     /// Keyboard button (it is in the key row) but with the Aa control, whose ruler opens centred on
-    /// it; the strip's end and the Desktop button fade while it is open.
-    private var windowBar: some View {
-        HStack(spacing: 12) {
+    /// it; the strip's end and the Desktop button fade while it is open. `width`: the bar's row.
+    private func windowBar(width: CGFloat) -> some View {
+        // Apps, Menus, Aa, Desktop, Settings, and the strip: Menus only where the row holds it and
+        // still a whole thumbnail (not in a 320 pt Slide Over).
+        let menusFit = MacMenuButton.fits(width: width, buttons: 5, buttonWidth: metrics.buttonWidth, gap: 12,
+                                          thumbWidth: metrics.thumbWidth)
+        return HStack(spacing: 12) {
             appsButton()
 
             windowStrip
@@ -265,14 +272,10 @@ struct PortraitStreamScreen: View {
                 .allowsHitTesting(!scaleOpen)
 
             // The Mac's menus, as in the landscape bar: only while the Mac sent some.
-            if client.menus.hasMenus {
+            if client.menus.hasMenus, menusFit {
                 MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
                               radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
-                              onOpen: {
-                                  setSettings(false, false)
-                                  windowMenu = nil
-                                  withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
-                              })
+                              onOpen: menusOpened, onClose: menusClosed)
                     .opacity(scaleOpen ? 0 : 1)
                     .allowsHitTesting(!scaleOpen)
                     .transition(.opacity)
@@ -316,7 +319,7 @@ struct PortraitStreamScreen: View {
             PhoneRows(layout: layout) {
                 picturePane.accessibilityHidden(drawerOpen)
                 phoneRow1(layout)
-                windowStrip
+                phoneRow2(layout)
                     .opacity(drawerOpen || settingsOpen ? 0 : 1)
                     .accessibilityHidden(drawerOpen)
                 keyRow(.phone).accessibilityHidden(drawerOpen)
@@ -380,6 +383,28 @@ struct PortraitStreamScreen: View {
                 .allowsHitTesting(!scaleOpen)
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
+    }
+
+    /// Row 2: the thumbnails, and at the row's end, under Settings, the Menus button while the Mac
+    /// sent menus (`PhonePortraitLayout.menus`), which it takes from the strip's width: next to the
+    /// thumbnails because its menus are the picked window's app's, as in the other bars, and out of
+    /// row 1, whose five share the row (the approved mockup's). The strip still shows a whole
+    /// thumbnail and more on every phone.
+    private func phoneRow2(_ layout: PhonePortraitLayout) -> some View {
+        let menus = client.menus.hasMenus
+        let strip = menus ? layout.stripBesideMenus : layout.strip
+        return ZStack(alignment: .topLeading) {
+            windowStrip.frame(width: strip.width, height: strip.height)
+            if menus {
+                MacMenuButton(client: client, width: layout.menus.width, height: layout.menus.height,
+                              radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
+                              iconBox: PortraitMetrics.phoneIconBox, onOpen: menusOpened, onClose: menusClosed)
+                    .offset(x: layout.menus.minX - layout.strip.minX, y: layout.menus.minY - layout.strip.minY)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: layout.strip.width, height: layout.strip.height, alignment: .topLeading)
+        .animation(.easeOut(duration: 0.18), value: menus)
     }
 
     // MARK: Shared by both

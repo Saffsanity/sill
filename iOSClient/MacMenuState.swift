@@ -17,7 +17,8 @@ import StreamProtocol
 /// 2. A top level replaces the one before. A new version settles every waiting fetch of another
 ///    version with "The menus changed. Open the menu again.".
 /// 3. One fetch per menu: opening a menu whose fetch is waiting joins it (UIKit may ask a provider
-///    more than once), and one kind 27 goes out.
+///    more than once), and one kind 27 goes out. It carries the title the menu was shown under: the
+///    Mac reads the menu only while the item at its id still has that title.
 /// 4. An answer settles only the fetch with its token. An unknown token is dropped: a late answer
 ///    after its timeout.
 /// 5. An answer whose version is not the fetch's settles it with "The menus changed…". A menu
@@ -40,8 +41,10 @@ import StreamProtocol
 ///    note and no items, and shows the note alone.
 /// 11. A menu of the top level asks by what it showed: UIKit rebuilds the iPad's bar lazily (at
 ///    the next key event or focus change, measured), so a bar menu can have been built from an
-///    older top level than the current one. Built from the current version, its own id; from
-///    another, the id of the current top level's first menu with the same title (the old app's
+///    older top level than the current one, even another session's: versions start again at each
+///    launch of the Mac's host, so a reconnect, or another Mac, can reach the version it was built
+///    in with other menus. So its own id only while the current top level's menu there has its
+///    title; else the id of the current top level's first menu with the same title (the old app's
 ///    File finds the new app's File); with no such menu, none (`barMenuID`).
 ///
 /// What the Mac sends is cleaned here as any text from the Mac is (SafeText): titles to 100
@@ -149,6 +152,7 @@ struct MacMenuState: Equatable {
 
     private struct Waiting: Equatable {
         let id: String
+        let title: String
         let version: Int
         let token: Int
         var keys: [Int]
@@ -219,27 +223,28 @@ struct MacMenuState: Equatable {
 
     // MARK: From the device
 
-    /// A menu opened: the row's id, in the version the row came from. The kind 27 to send, a
-    /// completion that joins one waiting, or what it gets at once (rules 1, 3, 5 and 7).
-    mutating func fetch(_ id: String, version asked: Int?, key: Int, token: Int, now: Double) -> Fetch {
+    /// A menu opened: the row's id and title, in the version the row came from. The kind 27 to
+    /// send, a completion that joins one waiting, or what it gets at once (rules 1, 3, 5 and 7).
+    mutating func fetch(_ id: String, title: String, version asked: Int?, key: Int, token: Int, now: Double) -> Fetch {
         guard let current = version else { return .settled(.message(Self.notConnected)) }
         guard asked == current else { return .settled(.message(Self.changedNote)) }
         if stale {
             return .settled(.sections(Self.sections([], stale: true, note: note, more: 0, version: current), more: 0))
         }
-        if let i = waiting.firstIndex(where: { $0.id == id && $0.version == current }) {
+        if let i = waiting.firstIndex(where: { $0.id == id && $0.title == title && $0.version == current }) {
             waiting[i].keys.append(key)
             return .joined
         }
-        waiting.append(Waiting(id: id, version: current, token: token, keys: [key], sentAt: now))
-        return .send(FetchMenu(version: current, id: id, token: token))
+        waiting.append(Waiting(id: id, title: title, version: current, token: token, keys: [key], sentAt: now))
+        return .send(FetchMenu(version: current, id: id, title: title, token: token))
     }
 
-    /// Rule 11: the id a menu of the top level built from `builtVersion` asks for now, or nil when
-    /// the current top level has none of that title (or there is none).
-    func barMenuID(builtID: String, builtVersion: Int, title: String) -> String? {
-        guard let current = version else { return nil }
-        if builtVersion == current { return builtID }
+    /// Rule 11: the id a menu of the top level built as `builtID` under `title` asks for now: its
+    /// own while the current top level's menu there has that title, else the current top level's
+    /// first menu of that title; nil when there is none (or no top level).
+    func barMenuID(builtID: String, title: String) -> String? {
+        guard version != nil else { return nil }
+        if menus.contains(where: { $0.id == builtID && $0.title == title }) { return builtID }
         return menus.first { $0.title == title }?.id
     }
 
