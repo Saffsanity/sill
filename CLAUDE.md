@@ -2721,8 +2721,10 @@ good.
   base commit built from `git archive` (parity, stream, harness, probe,
   keyframe), each only while `no-device.sh` finds no device connected to
   Sill.app; outputs go to `.build/encoder-check/`.
-  through). `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's
-  hello first, and kind 22's new fields are printed. `Scripts/sillfeed.py PORT`
+  `sillclient.py --hello=VER[,PROTO]` (or `none`) sends a device's hello
+  first (`--hello-delay=S` S seconds after the connection is up, for a change
+  made while a host's device gate holds it), and kind 22's new fields are
+  printed. `Scripts/sillfeed.py PORT`
   is a fake GitHub releases feed for the update check's tests (`--tag`,
   `--status`, `--etag`, `--draft`, `--prerelease`, `--html-url`, `--body`,
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,

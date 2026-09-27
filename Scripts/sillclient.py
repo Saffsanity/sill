@@ -28,6 +28,9 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
                      older device, which a host with a device floor above 0 refuses
+  --hello-delay=S    with --hello: send it S seconds after the connection is up (TLS included), and
+                     nothing before it: a device whose hello a host's device gate waits for while the
+                     Mac changes something (its gate gives up after 2 s)
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -77,8 +80,8 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted")
-VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "then-code", "pair-hold",
-          "expect-pair")
+VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
+          "pair-hold", "expect-pair")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
 
 def msg(kind, payload=b"", key=False):
@@ -377,6 +380,9 @@ try:
         hv, _, hp = hello_arg.partition(",")
         if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
         if hp: number(hp, "--hello's protocol")
+    hello_delay = number(valued("hello-delay"), "--hello-delay", float) if valued("hello-delay") else 0
+    if hello_delay and hello_arg is None: raise ValueError("--hello-delay needs --hello")
+    if hello_delay < 0: raise ValueError("--hello-delay must be 0 or more")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 stats = "--stats" in flags or device is not None
@@ -448,7 +454,9 @@ else:
 s.settimeout(0.25)
 try:
     if hello is not None:
-        s.sendall(msg(23, json.dumps(hello).encode())); print(f"  sent hello {json.dumps(hello)}")
+        if hello_delay:
+            time.sleep(hello_delay)
+        s.sendall(msg(23, json.dumps(hello).encode())); print(f"  sent hello {json.dumps(hello)}" + (f" after {hello_delay:g} s" if hello_delay else ""))
     s.sendall(msg(6, json.dumps(sel).encode()))
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
