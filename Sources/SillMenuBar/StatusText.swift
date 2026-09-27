@@ -40,6 +40,9 @@ struct StatusPresentation: Equatable {
     var remoteAccessNote: String?
     /// Pair iPhone or iPad… can open a pairing window (the Mac has an identity).
     var canPair = false
+    /// Every connected device is away from home, so the away quality is the target: the menu's
+    /// Quality subtitle says so (docs/remote-bundle-plan.md §5.7).
+    var away = false
 }
 
 /// Whether Sill holds its two permissions, as last read.
@@ -100,7 +103,7 @@ enum StatusText {
                                   virtualDisplayNote: virtualDisplayNote(s),
                                   tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
                                   advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
-                                  canPair: s.remote.map { $0.identityProblem == nil } ?? false)
+                                  canPair: s.remote.map { $0.identityProblem == nil } ?? false, away: s.away)
     }
 
     /// The remote door's port while Remote Access is on and another app holds that port.
@@ -206,17 +209,37 @@ enum StatusText {
     /// Tailscale"); the address until the device's first report (within a second; a remote device
     /// shows its paired name), and until then the route alone. A second without a sample reads
     /// "–", as in the host's log line and the device's HUD: a still window sends no frames
-    /// (ScreenCaptureKit delivers only repaints), and a second can pass without a pong.
+    /// (ScreenCaptureKit delivers only repaints), and a second can pass without a pong. While its
+    /// link does not keep up (docs/remote-bundle-plan.md §6.6) the numbers give way to it, the frame
+    /// age dropping out to keep the row short: "3 fps, the link can’t carry Pro · RTT 531 ms ·
+    /// through Tailscale", or "Nothing is getting through · through Tailscale".
     private static func deviceRow(_ d: HostStatusSnapshot.Device) -> StatusPresentation.Row {
         let name = d.name ?? d.endpoint
         let symbol = name.localizedCaseInsensitiveContains("iphone") ? "iphone" : "ipad"
         var parts: [String] = []
-        if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
+        if let link = d.link {
+            parts.append(linkWords(link, fps: d.fps, rttMs: d.rttMs))
+        } else if let fps = d.fps, let age = d.frameAgeMs, let rtt = d.rttMs {
             parts.append("\(fps) fps · frame age \(ms(age)) · RTT \(ms(rtt))")
         }
         if let route = routeWord(d) { parts.append(route) }
         return StatusPresentation.Row(id: String(describing: d.id), symbol: symbol, title: name,
                                       detail: parts.isEmpty ? nil : parts.joined(separator: " · "))
+    }
+
+    /// A device's link that does not keep up, as its row says it: behind, "3 fps, the link can’t carry
+    /// Pro · RTT 531 ms" (the fps and the round trip when its stats have come); stalled, "Nothing is
+    /// getting through".
+    static func linkWords(_ link: HostStatusSnapshot.LinkStatus, fps: Int?, rttMs: Int?) -> String {
+        switch link.state {
+        case .stalled:
+            return "Nothing is getting through"
+        case .behind:
+            let quality = QualityPreset.name(forBitrate: link.bitrate).replacingOccurrences(of: " ", with: "\u{00A0}")
+            var words = (fps.map { "\($0) fps, " } ?? "") + "the link can’t carry \(quality)"
+            if let rtt = rttMs { words += " · RTT \(ms(rtt))" }
+            return fps == nil ? words.prefix(1).uppercased() + words.dropFirst() : words
+        }
     }
 
     /// How a device reaches this Mac, the one place the card decides it (the device's row, and the
