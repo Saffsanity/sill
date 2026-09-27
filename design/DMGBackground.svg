@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Sill.dmg window's background, 660 x 400 points (Scripts/make-dmg.sh renders it at 1x and 2x).
+     The two icons sit on it where the .DS_Store puts them: Sill.app centred at (170, 180),
+     Applications at (490, 180), 128 points each, their names below. The arrow's greys are the app
+     icon's (AppIcon.svg), its space grey glass. Keep every edge white (#ffffff, make-dmg.sh's
+     backgroundColor and Finder's own fill in Light Mode): the window is sized for macOS 27's 32-point
+     title bar, so under macOS 14's and 15's 28-point one it shows 4 points of white below the picture,
+     and a window someone makes larger shows white beyond it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400"><defs>
+<linearGradient id="d-arrow" gradientUnits="userSpaceOnUse" x1="262" y1="180" x2="398" y2="180"><stop offset="0" stop-color="#7c7e86" stop-opacity="0.55"></stop><stop offset="1" stop-color="#4c4e56" stop-opacity="0.95"></stop></linearGradient>
+</defs>
+<rect x="0" y="0" width="660" height="400" fill="#ffffff"></rect>
+<!-- the arrow, from Sill.app to Applications -->
+<g fill="none" stroke="url(#d-arrow)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+<path d="M 262 180 L 396 180"></path>
+<path d="M 374 158 L 398 180 L 374 202"></path>
+</g>
+<text x="330" y="318" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif" font-size="15" font-weight="500" fill="#5a5f6b" text-anchor="middle">To install Sill, drag it to Applications.</text>
+</svg>

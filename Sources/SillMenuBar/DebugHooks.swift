@@ -569,7 +569,7 @@ extension DebugHooks {
         let open = RemoteStatus.Pairing.open(requestedBy: nil, expiresAt: expires, triesLeft: 5, lastWrongFrom: nil)
         let wifi = [MacAddress(host: "192.168.1.20", kind: MacAddress.lan, via: "Wi\u{2011}Fi")]
         let otherVPN = [MacAddress(host: "10.8.0.6", kind: MacAddress.vpn, via: "WireGuard")] + wifi
-        let longName = "christinas-macbook-pro.tailc94091.ts.net"
+        let longName = "studio-macbook-pro-16-in.tail1234.ts.net"
         let long = [MacAddress(host: longName, kind: MacAddress.vpn, via: "Tailscale")] + tailscaleAddresses.dropFirst()
         let longLink = makeLink(port: 17455, [longName, "100.101.102.103", "fd7a:115c:a1e0::1234", "192.168.1.20"])
         return [

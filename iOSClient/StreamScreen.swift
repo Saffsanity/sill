@@ -33,8 +33,9 @@ enum Palette {
 // MARK: - Layout selection
 
 /// Which layout a screen gets, decided from its size in points alone: no device check, no idiom,
-/// so an iPad at an odd split size and an iPhone each get the layout their dimensions deserve.
-/// The numbers are written for the iPhone Duo and its four postures:
+/// so an iPad at an odd split size and an iPhone each get the layout their dimensions deserve (only
+/// the arrangement `.outerPortrait` draws depends on the device; below). The numbers are written
+/// for the iPhone Duo and its four postures:
 ///
 /// * inner display, unfolded landscape — 1000×710 → `.innerLandscape` (top bar over the stream)
 /// * inner display, portrait or half-folded — 710×1000 → `.innerPortrait` (stream over controls)
@@ -45,6 +46,17 @@ enum Palette {
 /// the posture only changed how much room there is, not what the screen is for. The thresholds sit
 /// between those sizes with room to spare — 600 separates the 500 pt outer width from the 710 pt
 /// inner one, and 560 the 500 pt outer height from the inner 710.
+///
+/// The same sizes catch the phones: every iPhone held upright (375–440 pt wide, 320 with Display
+/// Zoom) is `.outerPortrait` and on its side `.outerLandscape`, and so is an iPad window narrower
+/// than 600 pt held upright (Slide Over, a narrow Split View). On an iPhone `.outerPortrait` draws
+/// the phone's arrangement (Noah, 2026-09-27: the picture in a fixed 16:10 pane on top, then the
+/// Keyboard button's row, the thumbnails, six keys and the trackpad; `PhonePortraitLayout`), the
+/// Duo's outer display included: it has a phone's shape and the same keyboard over its key row. An
+/// iPad keeps the compact halves in such a window, as before: the approval covered iPhones and left
+/// the iPad as it was (`phoneArrangement`, the one place the layout reads the idiom). To give the
+/// Duo's outer display back the halves, draw `.compact` from 480 pt wide (phones are at most 440;
+/// docs/iphone-portrait-plan.md, Detection).
 enum DuoLayout {
     case innerLandscape, innerPortrait, outerPortrait, outerLandscape
 
@@ -58,6 +70,24 @@ enum DuoLayout {
         if size.width > size.height, size.height < outerMaxHeight { return .outerLandscape }
         return size.width > size.height ? .innerLandscape : .innerPortrait
     }
+
+    /// Whether `.outerPortrait` draws the phone's arrangement: on an iPhone, yes; on an iPad (a
+    /// window narrower than 600 pt held upright), no: the compact halves, as before. DEBUG:
+    /// `-SillIdiom pad` (or `phone`) draws the other device's, so the harness can photograph an
+    /// iPad window's on an iPhone simulator (ContentView's contract).
+    static var phoneArrangement: Bool {
+        #if DEBUG
+        switch UserDefaults.standard.string(forKey: "SillIdiom") {
+        case "pad"?: return false
+        case "phone"?: return true
+        default: break
+        }
+        #endif
+        return UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// Whether a screen of this size draws the phone's arrangement.
+    static func drawsPhone(_ size: CGSize) -> Bool { of(size) == .outerPortrait && phoneArrangement }
 }
 
 // MARK: - Screen
@@ -130,7 +160,7 @@ struct StreamScreen: View {
                     case .innerPortrait:
                         portrait(metrics: .regular)
                     case .outerPortrait:
-                        portrait(metrics: .compact)
+                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact)
                     }
                 }
                 // Under the pairing overlay nothing takes a touch: not the bar, and not the
@@ -150,7 +180,8 @@ struct StreamScreen: View {
             if let anchor, let id = windowMenu, let window = client.windows.first(where: { $0.id == id }) {
                 WindowLightsMenu(anchor: anchor, window: window,
                                  command: { action in client.command(action, window: id); closeWindowMenu() },
-                                 dismiss: closeWindowMenu)
+                                 dismiss: closeWindowMenu,
+                                 alwaysBelow: DuoLayout.drawsPhone)
             }
         }
         .animation(.spring(duration: 0.25, bounce: 0.2), value: windowMenu)
@@ -173,6 +204,9 @@ struct StreamScreen: View {
             sendViewport()
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
+            #if DEBUG
+            runLaunchArguments()
+            #endif
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
@@ -210,12 +244,75 @@ struct StreamScreen: View {
                 if Task.isCancelled { return }
             }
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
+            let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
+            #if DEBUG
+            print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
+                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+            #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: StreamClient.wantedFPS(remote: client.awayCapsFrameRate)))
+                                         fps: fps))
         }
     }
+
+    #if DEBUG
+    /// A length for the console: whole points as whole numbers (within a hundredth: a scaled harness
+    /// screen measures 693.99…), anything else to a tenth.
+    private static func points(_ value: CGFloat) -> String {
+        abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
+    }
+
+    /// The harness's arguments that act once the stream screen shows (ContentView's contract), once
+    /// per launch. `-SillKeyboard 1` brings the software keyboard up for real in a live session (the
+    /// mock only lights the button, from its init); `-SillKeyboardToggle <s>[,<s>…]` toggles it at
+    /// those seconds as the Keyboard button does, a stand-in for a tap. In a live session (the
+    /// normal app with `-SillConnect`, or `-SillLive 1`) `-SillDrawer 1`, `-SillSettings 1` and
+    /// `-SillScaleOpen 1` (with `-SillScale`) open theirs 1.5 s in, once the Desktop has started:
+    /// its start closes a drawer opened before it, and the normal app has no harness to pass them
+    /// in at the start.
+    private func runLaunchArguments() {
+        guard !Self.launchArgumentsRan else { return }
+        Self.launchArgumentsRan = true
+        let defaults = UserDefaults.standard
+        let live = !client.mockDiscovery
+        func after(_ seconds: Double, _ step: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: step)
+        }
+        if defaults.bool(forKey: "SillKeyboard"), live {
+            after(0.5) {
+                print("keyboard: -SillKeyboard 1, the input view takes first responder")
+                overlay.setKeyboard(shown: true)
+            }
+        }
+        let times = (defaults.string(forKey: "SillKeyboardToggle") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 >= 0 }
+        for time in times {
+            after(time) {
+                print("keyboard: toggled at \(Self.points(CGFloat(time))) s, as the Keyboard button does (it was "
+                      + (keyboardShown ? "up" : "down") + ")")
+                setSettings(false, restoreKeyboard: false)
+                overlay.toggleKeyboard()
+            }
+        }
+        guard live else { return }
+        if defaults.bool(forKey: "SillDrawer") {
+            after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
+        }
+        if defaults.bool(forKey: "SillSettings") {
+            after(1.5) { print("harness: the Settings panel opened"); setSettings(true) }
+        }
+        if defaults.bool(forKey: "SillScaleOpen") {
+            after(1.5) {
+                let scale = defaults.double(forKey: "SillScale")
+                if scale > 0 { textScale = scale }
+                print("harness: the Aa ruler opened")
+                scaleOpen = true
+            }
+        }
+    }
+    private static var launchArgumentsRan = false
+    #endif
 
     private func closeWindowMenu() { windowMenu = nil }
 
@@ -509,7 +606,8 @@ enum Spotlight {
 }
 
 /// A bar button: 66×66 in the roomy top bar, 64×58 in the compact one and the portrait window bar,
-/// 56×50 with a 14 pt radius in the outer display's portrait bar.
+/// 56×50 with a 14 pt radius in the outer display's portrait bar, and 50 pt tall with its share of
+/// the row's width in a phone's row 1.
 struct BarButton<Content: View>: View {
     let open: Bool
     let width: CGFloat
@@ -561,6 +659,11 @@ struct TextScaleControl: View {
     /// Finger travel (and ruler spacing) per detent; smaller in the tighter bars so the ruler,
     /// centred on the button, stays inside the screen.
     var pointsPerStep: CGFloat = 44
+    /// A fixed height for "Aa", and the space under it, so its value lines up with the labels of
+    /// bar buttons whose symbols sit in a box of that height (a phone's row 1); nil: as tall as the
+    /// text, 2 pt over the value (every bar that has always had it).
+    var iconBox: CGFloat? = nil
+    var iconSpacing: CGFloat = 2
 
     static let steps: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5]
     /// Padding either side of the visible ruler; two detents show each side of the thumb.
@@ -572,10 +675,17 @@ struct TextScaleControl: View {
     @State private var startX: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text("Aa")
-                .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
-                .foregroundStyle(Palette.text)
+        VStack(spacing: iconBox == nil ? 2 : iconSpacing) {
+            if let iconBox {
+                Text("Aa")
+                    .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
+                    .foregroundStyle(Palette.text)
+                    .frame(height: iconBox)
+            } else {
+                Text("Aa")
+                    .font(.system(size: height >= 60 ? 19 : 17, weight: .semibold))
+                    .foregroundStyle(Palette.text)
+            }
             Text(Self.label(scale ?? 1.0) + "×")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.barLabel)
@@ -665,11 +775,15 @@ struct TextScaleControl: View {
                 .frame(width: 22, height: 22)
                 .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                 .offset(x: midX - 11, y: midY - 11)
+            // The live value over the thumb, where the finger does not cover it. In a 50 pt ruler
+            // (a phone's row 1, the compact window bar) `midY - 34` put the top of its digits 2 pt
+            // outside the clip; it sits where the 58 pt bars put it (1 pt above the frame's top,
+            // the digits 2 pt inside), and in the taller bars as it always has.
             Text(Self.label(live) + "×")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.text)
                 .frame(width: 60, alignment: .center)
-                .offset(x: midX - 30, y: midY - 34)
+                .offset(x: midX - 30, y: max(midY - 34, -1))
         }
         .frame(width: w, height: height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -873,20 +987,25 @@ struct WindowMenuAnchorKey: PreferenceKey {
 }
 
 /// macOS's three lights in a floating submenu beside the held thumbnail: below it when the bar
-/// is at the top of the screen, above it when the bar is at the bottom (portrait). A tap anywhere
-/// else dismisses it. Drawn by the screen root, over everything.
+/// is at the top of the screen, above it when the bar is at the bottom (portrait's halves), and
+/// always below it on a phone upright, where the strip sits under row 1 and the key row below has
+/// room on every phone (above, it would cover row 1 on the shortest). A tap anywhere else
+/// dismisses it. Drawn by the screen root, over everything.
 struct WindowLightsMenu: View {
     let anchor: Anchor<CGRect>
     let window: WindowInfo
     let command: (WindowCommand.Action) -> Void
     let dismiss: () -> Void
+    /// Whether a screen of this size always puts the lights below the thumbnail (the phone's
+    /// arrangement); otherwise they go on the side of the screen's middle away from it.
+    var alwaysBelow: (CGSize) -> Bool = { _ in false }
 
     private static let size = CGSize(width: 214, height: 62)
 
     var body: some View {
         GeometryReader { proxy in
             let frame = proxy[anchor]
-            let below = frame.midY < proxy.size.height / 2
+            let below = alwaysBelow(proxy.size) || frame.midY < proxy.size.height / 2
             let w = Self.size.width, h = Self.size.height
             let x = min(max(frame.midX, w / 2 + 8), proxy.size.width - w / 2 - 8)
             let y = below ? frame.maxY + 8 + h / 2 : frame.minY - 8 - h / 2

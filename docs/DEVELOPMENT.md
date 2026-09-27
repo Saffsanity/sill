@@ -179,6 +179,17 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
 
+On a phone held upright (and on the Duo's outer display) the picture sits in
+a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
+it, and nothing under it moves. Under it come Apps, Aa, Keyboard, Desktop and
+Settings, as wide as the row; the window thumbnails; esc, tab, ctrl, opt, cmd
+and shift; and the trackpad in the rest. The Keyboard button stays above the
+software keyboard, so it always takes it down. There are no arrow keys or
+Spotlight key there: Spotlight is cmd, then space on the keyboard. The
+trackpad counts a stroke down it as far as the same stroke across a 16:10
+picture, however tall it is. On its side, and on an iPad (a narrow window
+included), everything is as it was.
+
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
@@ -337,10 +348,12 @@ tests of Direct Wireless Connection and remote access.
 
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
-which door, the device floor, how a session ends, the update check) on their
-own with a check each, and runs them: about two minutes,
-no device, permission or encoder. `--mutants` also checks that each check fails
-when its file is changed in one place (most of an hour).
+which door, how frames go into the video encoder and when a stream gets a new
+encoder session, the device floor, how a session ends, the update check, the
+disk image's window, where everything goes on a phone held upright) on their
+own with a check each, and runs them: about two minutes, no device, permission
+or encoder. `--mutants` also checks that each check fails when its file is
+changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -390,8 +403,13 @@ Debug builds of the iOS app take launch arguments that set up a screen in the
 simulator:
 
 - `-SillLayout 1000x710` or `710x1000` (the inner display of iPhone Duo, in
-  landscape and portrait), `500x710` or `710x500` (its outer display): a fake
-  screen of that size.
+  landscape and portrait), `500x710` or `710x500` (its outer display), or a
+  phone's stream screen (its screen less the status bar: `402x812` for an
+  iPhone 18 Pro upright, `440x894` for a Pro Max): a fake screen of that
+  size. One larger than the simulator is drawn scaled down to fit, laid out
+  at its own size. One that reaches into the simulator's own safe area (a
+  phone's whole size on that phone) runs its trackpad past its bottom edge:
+  photograph it on a larger simulator, or in the normal app.
 - `-SillLive 1`: a real client inside that frame. Otherwise the Mac is a mock,
   and `-SillActive none|desktop|<windowID>` picks what it streams.
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
@@ -399,6 +417,22 @@ simulator:
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
 - `-SillConnect 127.0.0.1:PORT`: connect by address, also in the normal app.
+  There, and under `-SillLive 1`, `-SillDrawer 1`, `-SillSettings 1` and
+  `-SillScaleOpen 1` open theirs 1.5 s after the stream starts.
+- `-SillKeyboard 1` brings the software keyboard up in a live session (in the
+  mock it only lights the button), and `-SillKeyboardToggle 5,8.5` toggles it
+  at those seconds as the Keyboard button does. A simulator shows it only
+  with no hardware keyboard connected to it.
+- `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: the portrait
+  key row taps cmd, esc, shift and ctrl and the trackpad strokes, taps and
+  scrolls, through their own code, once. A synthetic host posts what it gets
+  on this Mac, so put a relay that drops input in front of it.
+- The console prints `viewport: 386×241 pt, scale none, 60 fps` for each
+  viewport the stream screen sends the Mac.
+- `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
+  drawn as an iPad draws such a window (the compact halves), not as a phone
+  does, so an iPhone simulator can photograph it; `phone` the other way
+  round.
 
 ## Measuring latency
 
@@ -432,7 +466,30 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ### What to try if it's slow
 
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Read the host's stats line. `enc.mailboxDrop` counts captured frames the
+  encoder had no room for, so `enc.out` well under `cap.complete` with the
+  difference in `enc.mailboxDrop` means the encoder takes longer than a frame
+  interval. At the Retina Desktop's size that is either its slow state (about
+  30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
+  seconds of few frames, at any bitrate) or another app encoding at the same
+  time (a screen recording, the Simulator's recorder, or the Claude app's iOS
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The stats
+  line can read alike for both: a test-pattern Retina stream beside that panel
+  alone read about 32 fps with about 27 drops a second. The kernel's encoder
+  log tells them apart (`Scripts/encoder-check/hbparse.py` reads it; its
+  header says how to fetch it): while another app shares the encoder, it lists
+  that app's session beside Sill's, and hbparse.py marks those windows
+  "(shared)"; in the slow state Sill's session is alone. Its C/F column is the
+  engine's figure, not Sill's time per frame, and moves with how many frames
+  the engine completes in all: about 14 ms in the slow state alone, about 10
+  beside the Simulator panel. The host gives a stream in the slow state a new
+  encoder session about 2 s into the motion, which runs at the full rate
+  again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
+  ms each …; a new session takes 9 ms …"); if a new session is no faster
+  (another app sharing the encoder, say), the log says that and the stream
+  keeps it.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
+  it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
@@ -477,14 +534,21 @@ Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
 CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
 tag v0.4.0`, `git push origin v0.4.0`), and its GitHub release in
 Saffsanity/sill is published (not a draft, not a prerelease) with the
-notarized zip attached; every Sill.app's update check reads that repository's
-releases alone and compares the tag with the version it runs.
-`Scripts/release.sh` makes the download. It runs `make-app.sh --release`
+notarized disk image and zip attached; every Sill.app's update check reads
+that repository's releases alone and compares the tag with the version it
+runs.
+`Scripts/release.sh` makes the downloads. It runs `make-app.sh --release`
 (which refuses a HEAD without that tag, and any signature but Developer ID),
 zips the app, sends it to Apple's notary service and waits, staples the
 ticket, zips it again so the download carries the ticket, checks a copy
-unpacked from that zip with `stapler validate` and `spctl`, and prints the
-zip's path and SHA-256. With `--publish` it then makes the GitHub Release,
+unpacked from that zip with `stapler validate` and `spctl`, then puts the
+stapled app in the disk image (`Scripts/make-dmg.sh`: Sill.app beside a link
+to Applications over a background with an arrow, the window laid out by a
+`.DS_Store` that `Scripts/dmg-layout` writes without Finder), signs it, has
+Apple notarize it too, staples and checks it (`hdiutil verify`, `stapler
+validate`, `spctl -t open --context context:primary-signature`, the app
+inside), and prints both files' paths and SHA-256. With `--publish` it then
+makes the GitHub Release (Sill.dmg, Sill.zip and their `.sha256` files),
 and refuses to start unless origin has the tag and it names HEAD (gh would
 otherwise make the tag from the default branch); a `SILL_RELEASE_REPO` other
 than Saffsanity/sill gets a warning, since no Sill.app offers a release
@@ -494,8 +558,16 @@ published there. It needs
 store-credentials sill-notary`), and refuses to start without them. Give
 both on the release command itself, never in your shell profile: `make-app.sh`
 signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
-included. `--dry-run` needs only the identity and stops before anything goes
-to Apple; it builds any commit, and only warns that HEAD lacks the tag.
+included. `--dry-run` needs only the identity, makes the zip and a disk image
+signed with it, and stops before anything goes to Apple; it builds any
+commit, and only warns that HEAD lacks the tag.
+`Scripts/make-dmg.sh --sign - .build/Sill.app /tmp/Sill.dmg` makes an ad hoc
+image of any build, to look at its window. The window is 660 x 432 points: its
+picture (`design/DMGBackground.svg`, 660 x 400, white to every edge) and
+macOS 27's 32-point title bar, so the whole picture shows there, with a strip
+of white below it under macOS 14's and 15's 28-point bar;
+`Tests/checks/dmg-layout` checks the `.DS_Store` and the background's alias
+that the layout tool writes.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
@@ -506,7 +578,26 @@ The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
 Actions"). Its checkout is that tag, so there `--publish` checks the local
 tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
 `--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
-on, let that run publish instead.
+on, let that run publish instead. Apple's answers and logs for both
+submissions are the run's artifact `notary-v<version>` for 30 days: when the
+job's log says a notary log lists issues, read them there.
+
+The iOS app goes to App Store Connect (TestFlight, then the App Store) from
+`Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
+signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
+checked (the version and build, the export compliance key, the Local Network
+and camera strings, the privacy manifest, an App Store signature and
+profile), and with `--upload` uploaded. `--bump` gives each upload of a
+version the next build number, alone in a commit; both refuse uncommitted
+changes, so every uploaded build is a commit's. It signs and uploads
+through the Apple Account in Xcode › Settings › Accounts, or through an App
+Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
+and it needs Xcode 27.
+`--privacy-report` lists what the archive's privacy manifest declares and the
+required-reason APIs its binary uses. The TestFlight workflow
+(`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.
+docs/release-checklist.md, "TestFlight", has the App Store Connect side, the
+record field by field.
 
 ## Known limitations
 
@@ -527,14 +618,17 @@ on, let that run publish instead.
   with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
   `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
-- `Packaging/`: Sill.app's Info.plist and entitlements.
+- `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
+  export options for App Store Connect.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `sillclient.py` (a wire-format test client),
-  `sillrelay.py` (a relay that slows or cuts the link, for tests) and
-  `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
-  check's tests).
-- `Tests/checks/`: the pure checks (above). `.github/`: the CI and release
-  workflows, and the Sponsor button.
+  disk image and zip people download), `make-dmg.sh` and `dmg-layout/` (the
+  disk image, and the tool that lays out its window), `release-ios.sh` (the
+  iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
+  wire-format test client), `sillrelay.py` (a relay that slows or cuts the
+  link, for tests) and `sillfeed.py` (a stand-in for GitHub's releases feed,
+  for the update check's tests).
+- `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
+  TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.

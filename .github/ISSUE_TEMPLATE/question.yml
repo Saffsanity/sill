@@ -1,0 +1,13 @@
+name: Question
+description: Ask something about Sill that the support page doesn't answer.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: The [support page](https://getsill.app/support) may already have the answer.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
