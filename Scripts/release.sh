@@ -1,15 +1,18 @@
 #!/bin/bash
 # Makes the Sill.app people download: built and signed with Developer ID, notarized by Apple, the
-# ticket stapled, zipped, and checked the way Gatekeeper will check it on someone else's Mac.
+# ticket stapled, in a disk image and in a zip, each checked the way Gatekeeper will check it on
+# someone else's Mac.
 #
 #   SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary \
-#     Scripts/release.sh             build, zip, notarize, staple, zip again, verify
-#   Scripts/release.sh --dry-run     the same checks, build and first zip, then stops before
-#                                    notarytool and prints what a real run would do next
+#     Scripts/release.sh             build, zip, notarize, staple, zip again, verify; then the disk
+#                                    image of the stapled app, signed, notarized, stapled, verified
+#   Scripts/release.sh --dry-run     the same checks, build, first zip and a disk image signed with
+#                                    the same identity, then stops before notarytool and prints what
+#                                    a real run would do next
 #   Scripts/release.sh --publish     everything, then a GitHub Release (tag v<version>) with the
-#                                    assets Sill.zip and Sill.zip.sha256, which the site's download
-#                                    page links under those fixed names (needs gh, signed in, and
-#                                    the tag pushed: origin's v<version> must name HEAD)
+#                                    assets Sill.dmg, Sill.dmg.sha256, Sill.zip and Sill.zip.sha256,
+#                                    fixed names the site's download page links (needs gh, signed
+#                                    in, and the tag pushed: origin's v<version> must name HEAD)
 #   SILL_RELEASE_TAG=v0.3.0 Scripts/release.sh --check-tag
 #                                    only checks the tag against Packaging/Info.plist, then exits
 #
@@ -39,8 +42,18 @@
 #   ticket online, but stapling puts it inside the app, so Gatekeeper finds it on a Mac that is
 #   offline.
 # - The zip is made again after stapling: the first one, the one sent to Apple, has no ticket.
-# - Last, a copy unpacked from the final zip must pass `stapler validate` and `spctl` as
-#   "Notarized Developer ID": that zip is exactly what people download.
+# - A copy unpacked from the final zip must pass `stapler validate` and `spctl` as "Notarized
+#   Developer ID": that zip is exactly what people download.
+# - Then Sill.dmg (Scripts/make-dmg.sh, which says how it is made and checks it): the stapled app
+#   beside a link to Applications, the drag every Mac app asks for. The image is signed with the
+#   same Developer ID and sent to Apple on its own, since Gatekeeper judges the image before it
+#   opens it; its ticket is stapled to it. It must pass hdiutil verify, stapler validate, spctl's
+#   open context as "Notarized Developer ID" (how Gatekeeper judges a downloaded image), and the
+#   Sill.app inside it the app's checks. The image is made from the stapled app, so a copy dragged
+#   out of it carries its own ticket and opens on a Mac that is offline.
+# - The zip stays in every release for now: the site's download page links it until a release
+#   carries the disk image (then the page moves, docs/release-checklist.md, part 2), and links that
+#   name Sill.zip elsewhere, such as v0.3.0's notes, keep working.
 # - --publish checks origin's tag before it builds: `gh release create` makes a tag the release's
 #   repository lacks from its default branch's tip, so the release (and its source archives) would
 #   name another commit than the one built, and pushing the real tag later would be refused. In
@@ -55,13 +68,17 @@ usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
 
   SILL_SIGN_IDENTITY='Developer ID Application: … (TEAMID)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh
       builds Sill.app with make-app.sh --release, zips it, has Apple notarize it, staples the
-      ticket, zips it again, checks the zip's copy with stapler and spctl, and prints the zip's
-      path and SHA-256 (--publish puts it in the release's notes; site/download.html never changes).
+      ticket, zips it again, checks the zip's copy with stapler and spctl; then puts the stapled
+      app in a disk image (make-dmg.sh), signs it, has Apple notarize it, staples it, checks it
+      with hdiutil, stapler and spctl, and prints both files' paths and SHA-256 (--publish puts
+      them in the release's notes).
   --dry-run
-      the same checks, build and first zip; stops before notarytool and prints the rest.
+      the same checks, build, first zip and disk image (signed, not notarized); stops before
+      notarytool and prints the rest.
   --publish
       after the checks, creates the GitHub Release v<version> in $SILL_RELEASE_REPO
-      (default Saffsanity/sill) with Sill.zip and Sill.zip.sha256, the names the site links.
+      (default Saffsanity/sill) with Sill.dmg, Sill.zip and their .sha256 files, the names the
+      site links.
       Before building, it checks that gh reaches that repository and the release isn't there yet,
       and refuses unless origin has the tag v<version> and it names HEAD (git push origin
       v<version>). Every Sill.app's update check reads only Saffsanity/sill's releases: one
@@ -269,8 +286,75 @@ plist_value() {
     /usr/libexec/PlistBuddy -c "Print :$1" "$2" 2>/dev/null
 }
 
-unpacked=""   # the zip's copy being checked; removed on exit
-cleanup() { if [ -n "$unpacked" ]; then rm -rf "$unpacked"; fi; }
+unpacked=""       # the zip's copy being checked; removed on exit
+dmg_device=""     # the disk image while it's mounted to be checked; detached on exit
+dmg_mounts=""     # the folder it's mounted in
+cleanup() {
+    if [ -n "$unpacked" ]; then rm -rf "$unpacked"; fi
+    if [ -n "$dmg_device" ]; then hdiutil detach "$dmg_device" -force -quiet 2>/dev/null || true; fi
+    if [ -n "$dmg_mounts" ]; then rmdir "$dmg_mounts" 2>/dev/null || true; fi
+}
+
+# Sends $1 to Apple's notary service and waits for its answer: accepted, or the script stops with
+# Apple's reasons. The answer goes to $2 (a plist), Apple's log to $3.
+notarize() {
+    local file="$1" result="$2" log="$3" profile="$SILL_NOTARY_PROFILE" status id submitted=0
+    rm -f "$result" "$log"
+    say "Sending $file to Apple's notary service and waiting for its answer (usually a few minutes)"
+    xcrun notarytool submit "$file" --keychain-profile "$profile" --wait --output-format plist >"$result" || submitted=$?
+    status="$(plist_value status "$result")" || status=""
+    id="$(plist_value id "$result")" || id=""
+    if [ -n "$id" ]; then
+        # Apple's log lists every issue, and its warnings even when the submission is accepted.
+        if xcrun notarytool log "$id" --keychain-profile "$profile" "$log" >/dev/null 2>&1; then
+            echo "Apple's notary log: $log"
+        else
+            echo "warning: couldn't fetch the notary log; try: xcrun notarytool log $id --keychain-profile \"$profile\"" >&2
+        fi
+    fi
+    if [ "$status" != "Accepted" ]; then
+        echo "notarytool answered (exit status $submitted):" >&2
+        sed 's/^/  /' "$result" >&2
+        if [ -f "$log" ]; then
+            grep -E '"(message|path|severity)"' "$log" | head -40 | sed 's/^ */  /' >&2 || true
+        fi
+        fail "notarization of $file ended with status '${status:-unknown}'. Nothing was stapled to it."
+    fi
+    if [ -f "$log" ] && ! grep -Eq '"issues"[[:space:]]*:[[:space:]]*null' "$log"; then
+        echo "warning: the notary log lists issues; read $log before publishing." >&2
+    fi
+}
+
+# Gatekeeper's verdict on the disk image, as a browser leaves it in Downloads: its checksum, a valid
+# stapled ticket, "Notarized Developer ID" in spctl's open context (how Gatekeeper judges an image
+# before it mounts it), and the Sill.app inside it judged as check_gatekeeper judges the app.
+check_disk_image() {
+    local dmg="$1" verdict output line mounted
+    hdiutil verify "$dmg" >/dev/null 2>&1 || fail "hdiutil verify: $dmg's checksum is wrong"
+    xcrun stapler validate "$dmg" || fail "no valid ticket is stapled to $dmg"
+    verdict="$(spctl -a -vv -t open --context context:primary-signature "$dmg" 2>&1)" \
+        || { printf '%s\n' "$verdict" >&2; fail "Gatekeeper rejects $dmg"; }
+    printf '%s\n' "$verdict"
+    grep -q '^source=Notarized Developer ID' <<<"$verdict" || fail "Gatekeeper accepts $dmg, but not as notarized Developer ID"
+    # Mounted where Finder doesn't show it (-nobrowse), in a folder of its own, never /Volumes/Sill;
+    # a second and third try, as make-dmg.sh gives hdiutil (a busy runner can answer "Resource busy").
+    dmg_mounts="$(mktemp -d "${TMPDIR:-/tmp}/sill-release-dmg.XXXXXX")"
+    local try
+    for try in 1 2 3; do
+        if output="$(hdiutil attach -readonly -nobrowse -noautoopen -mountrandom "$dmg_mounts" "$dmg" 2>&1)"; then break; fi
+        if [ "$try" = 3 ]; then printf '%s\n' "$output" >&2; fail "hdiutil can't attach $dmg"; fi
+        sleep 2
+    done
+    line="$(printf '%s\n' "$output" | awk -F'\t' '$2 ~ /Apple_HFS/ { print; exit }')"
+    dmg_device="$(printf '%s' "$line" | awk -F'\t' '{ sub(/[ \t]+$/, "", $1); print $1 }' | sed 's/s[0-9][0-9]*$//')"
+    mounted="$(printf '%s' "$line" | awk -F'\t' '{ print $NF }')"
+    [ -n "$dmg_device" ] && [ -d "$mounted/Sill.app" ] || { printf '%s\n' "$output" >&2; fail "$dmg mounted no Sill.app"; }
+    check_gatekeeper "$mounted/Sill.app"
+    hdiutil detach "$dmg_device" -quiet || hdiutil detach "$dmg_device" -force -quiet
+    dmg_device=""
+    rmdir "$dmg_mounts" 2>/dev/null || true
+    dmg_mounts=""
+}
 
 main() {
     local dry_run=0 publish=0 check_tag=0 arg
@@ -330,64 +414,51 @@ main() {
         Scripts/make-app.sh --release
     fi
 
-    local app=.build/Sill.app version build zip
+    local app=.build/Sill.app version build zip dmg
     # Read as make-app.sh's last line reads it: the version from Packaging/Info.plist, and the
     # build number (the commit count) it stamped into the bundle.
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
     build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
     zip=".build/Sill-$version.zip"
+    dmg=".build/Sill-$version.dmg"
     check_signature "$app"
     # make-app.sh only warns when Quick Look or actool can't make the icon (a build machine without
     # them, such as a CI runner, would still build); a release must not ship the generic icon.
     [ -f "$app/Contents/Resources/Assets.car" ] && [ -f "$app/Contents/Resources/AppIcon.icns" ] \
         || fail "$app has no icon (Assets.car and AppIcon.icns): make-app.sh's warning above says why"
     say "Sill $version ($build) for $(lipo -archs "$app/Contents/MacOS/Sill"). The site says Apple silicon: change that if this ever lists x86_64."
+    # The disk image is made only after the app's notarization; its tool and background now, so a
+    # problem with either stops the run before anything goes to Apple.
+    Scripts/make-dmg.sh --prepare
 
     say "Zipping $app into $zip"
     rm -f "$zip"
     ditto -c -k --keepParent "$app" "$zip"
 
     if [ "$dry_run" = 1 ]; then
+        # The image as a real run makes it, from the app as it is (not stapled yet), signed with the
+        # same identity: the layout, the signature and make-dmg.sh's checks, rehearsed.
+        say "Making the disk image $dmg (Scripts/make-dmg.sh), signed like a release's"
+        Scripts/make-dmg.sh --sign "$SILL_SIGN_IDENTITY" "$app" "$dmg"
         cat <<DRY
 
-Dry run: stopped before notarization. $zip is signed but not notarized, so don't publish it.
+Dry run: stopped before notarization. $zip and $dmg are signed but not notarized, so don't publish them.
 A real run goes on with:
   xcrun notarytool submit $zip --keychain-profile "${SILL_NOTARY_PROFILE:-<SILL_NOTARY_PROFILE>}" --wait --output-format plist
   xcrun notarytool log <submission id> --keychain-profile "${SILL_NOTARY_PROFILE:-<SILL_NOTARY_PROFILE>}" .build/Sill-$version-notary-log.json
   xcrun stapler staple $app
   ditto -c -k --keepParent $app $zip   (again, now with the ticket inside)
   xcrun stapler validate and spctl -a -vv -t exec, on $app and on a copy unpacked from $zip
-  shasum -a 256 $zip
+  Scripts/make-dmg.sh --sign "\$SILL_SIGN_IDENTITY" $app $dmg   (again, now with the stapled app inside)
+  xcrun notarytool submit $dmg (the same way; its log .build/Sill-$version-dmg-notary-log.json), then xcrun stapler staple $dmg
+  hdiutil verify, xcrun stapler validate and spctl -a -vv -t open --context context:primary-signature on $dmg,
+    then xcrun stapler validate and spctl -a -vv -t exec on the Sill.app inside it
+  shasum -a 256 $dmg $zip
 DRY
         exit 0
     fi
 
-    local profile="$SILL_NOTARY_PROFILE" result=".build/Sill-$version-notary.plist"
-    local log=".build/Sill-$version-notary-log.json" status id submitted=0
-    rm -f "$result" "$log"
-    say "Sending $zip to Apple's notary service and waiting for its answer (usually a few minutes)"
-    xcrun notarytool submit "$zip" --keychain-profile "$profile" --wait --output-format plist >"$result" || submitted=$?
-    status="$(plist_value status "$result")" || status=""
-    id="$(plist_value id "$result")" || id=""
-    if [ -n "$id" ]; then
-        # Apple's log lists every issue, and its warnings even when the submission is accepted.
-        if xcrun notarytool log "$id" --keychain-profile "$profile" "$log" >/dev/null 2>&1; then
-            echo "Apple's notary log: $log"
-        else
-            echo "warning: couldn't fetch the notary log; try: xcrun notarytool log $id --keychain-profile \"$profile\"" >&2
-        fi
-    fi
-    if [ "$status" != "Accepted" ]; then
-        echo "notarytool answered (exit status $submitted):" >&2
-        sed 's/^/  /' "$result" >&2
-        if [ -f "$log" ]; then
-            grep -E '"(message|path|severity)"' "$log" | head -40 | sed 's/^ */  /' >&2 || true
-        fi
-        fail "notarization ended with status '${status:-unknown}'. Nothing was stapled."
-    fi
-    if [ -f "$log" ] && ! grep -Eq '"issues"[[:space:]]*:[[:space:]]*null' "$log"; then
-        echo "warning: the notary log lists issues; read $log before publishing." >&2
-    fi
+    notarize "$zip" ".build/Sill-$version-notary.plist" ".build/Sill-$version-notary-log.json"
 
     say "Stapling the ticket to $app"
     xcrun stapler staple "$app"
@@ -403,50 +474,64 @@ DRY
     check_gatekeeper "$app"
     check_gatekeeper "$unpacked/Sill.app"
 
-    local sha
+    say "Making the disk image $dmg with the stapled app (Scripts/make-dmg.sh)"
+    Scripts/make-dmg.sh --sign "$SILL_SIGN_IDENTITY" "$app" "$dmg"
+    notarize "$dmg" ".build/Sill-$version-dmg-notary.plist" ".build/Sill-$version-dmg-notary-log.json"
+    say "Stapling the ticket to $dmg"
+    xcrun stapler staple "$dmg"
+    say "Checking $dmg, and the Sill.app inside it"
+    check_disk_image "$dmg"
+
+    local sha dmg_sha
     sha="$(shasum -a 256 "$zip" | awk '{ print $1 }')"
+    dmg_sha="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
     echo
-    echo "Sill $version ($build) is notarized, stapled and zipped:"
-    shasum -a 256 "$zip"
+    echo "Sill $version ($build) is notarized and stapled, in a disk image and in a zip:"
+    shasum -a 256 "$dmg" "$zip"
     if [ "$publish" = 1 ]; then
-        publish_release "$zip" "$version" "$build" "$sha"
+        publish_release "$zip" "$dmg" "$version" "$build" "$sha" "$dmg_sha"
     else
         echo "Next (docs/release-checklist.md): Scripts/release.sh --publish creates the GitHub Release"
-        echo "v$version with Sill.zip and Sill.zip.sha256, which https://getsill.app/download links."
+        echo "v$version with Sill.dmg, Sill.zip and their .sha256 files, which https://getsill.app/download links."
         echo "It refuses to start until origin has the tag: git push origin v$version."
-        echo "  SHA-256  $sha"
+        echo "  SHA-256  $dmg_sha  Sill.dmg"
+        echo "  SHA-256  $sha  Sill.zip"
     fi
 }
 
-# The GitHub Release the site's download page links: tag v<version>, assets named exactly Sill.zip and
-# Sill.zip.sha256 so /releases/latest/download/<name> keeps working release after release.
+# The GitHub Release the site's download page links: tag v<version>, assets named exactly Sill.dmg,
+# Sill.dmg.sha256, Sill.zip and Sill.zip.sha256 so /releases/latest/download/<name> keeps working
+# release after release.
 publish_release() {
-    local zip="$1" version="$2" build="$3" sha="$4"
-    local repo="${SILL_RELEASE_REPO:-$feed_repo}" dir asset problem verify=""
+    local zip="$1" dmg="$2" version="$3" build="$4" sha="$5" dmg_sha="$6"
+    local repo="${SILL_RELEASE_REPO:-$feed_repo}" dir problem verify=""
     # Asked before the build too (publish_problems); again here, in case that changed meanwhile.
     problem="$(publish_problems)"
-    if [ -n "$problem" ]; then fail "$problem (The notarized zip is $zip.)"; fi
+    if [ -n "$problem" ]; then fail "$problem (The notarized files are $dmg and $zip.)"; fi
     # The release's tag is the pushed one (the preflight checked origin's): in the feed's repository
     # gh must find it there too, and never make it from the default branch. Another repository never
     # holds the source's tags, so there gh makes one, which nothing reads.
     if is_feed_repo "$repo"; then verify=1; else feed_warning "$repo"; fi
     dir="$(mktemp -d "${TMPDIR:-/tmp}/sill-publish.XXXXXX")"
-    asset="$dir/Sill.zip"
-    cp "$zip" "$asset"
-    (cd "$dir" && shasum -a 256 Sill.zip > Sill.zip.sha256)
+    cp "$dmg" "$dir/Sill.dmg"
+    cp "$zip" "$dir/Sill.zip"
+    (cd "$dir" && shasum -a 256 Sill.dmg > Sill.dmg.sha256 && shasum -a 256 Sill.zip > Sill.zip.sha256)
     say "Creating the GitHub Release v$version in $repo"
-    if ! gh release create "v$version" "$asset" "$dir/Sill.zip.sha256" --repo "$repo" ${verify:+--verify-tag} \
+    if ! gh release create "v$version" "$dir/Sill.dmg" "$dir/Sill.dmg.sha256" "$dir/Sill.zip" "$dir/Sill.zip.sha256" \
+        --repo "$repo" ${verify:+--verify-tag} \
         --title "Sill $version" \
-        --notes "Sill for Mac $version ($build), notarized. SHA-256 of Sill.zip: $sha. Download at https://getsill.app/download"; then
+        --notes "Sill for Mac $version ($build), notarized. SHA-256 of Sill.dmg: $dmg_sha. SHA-256 of Sill.zip: $sha. Download at https://getsill.app/download"; then
         rm -rf "$dir"
         fail "gh release create failed for v$version in $repo (its message is above). If it left a draft release there, delete it before trying again."
     fi
     rm -rf "$dir"
     echo "Published: https://github.com/$repo/releases/tag/v$version"
     if [ -n "$verify" ]; then
-        echo "The site's Download button already points at the newest release."
+        echo "The site's Download button already points at the newest release. If site/download.html"
+        echo "still links Sill.zip, this release is the one to move it to Sill.dmg now: the comment there"
+        echo "has the new lines (docs/release-checklist.md, part 2)."
     else
-        echo "The site's Download button links $feed_repo's newest release: point site/download.html's three links at $repo while releases go there."
+        echo "The site's Download button links $feed_repo's newest release: point site/download.html's GitHub links at $repo while releases go there."
     fi
 }
 
