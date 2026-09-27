@@ -55,6 +55,8 @@ final class StreamServer {
         /// them, so a report the rate limit skips still shows its spike. Only newer clients send maxima.
         var worstFrameAgeSincePrint = -1
         var worstRttSincePrint = -1
+        /// The sound's packets too late to play (ClientStats.audioLate) reported since that line.
+        var audioLateSincePrint = 0
         /// Which door and from where: `.home(origin)` decided at `.ready`, or the remote door's.
         var route = ClientRoute.home(.loopback)
         /// The device's own name from its last ClientStats, cleaned (SafeText), for its stats line
@@ -1243,12 +1245,21 @@ final class StreamServer {
                         client.device = name.isEmpty ? nil : name
                         client.worstFrameAgeSincePrint = max(client.worstFrameAgeSincePrint, stats.frameAgeMaxMs ?? -1)
                         client.worstRttSincePrint = max(client.worstRttSincePrint, stats.rttMaxMs ?? -1)
+                        client.audioLateSincePrint += max(0, stats.audioLate ?? 0)
                         let now = CFAbsoluteTimeGetCurrent()
                         if now - client.lastStatsPrint >= 1.5 {
                             client.lastStatsPrint = now
                             let age = Self.medianAndWorst(stats.frameAgeMs, worst: stats.frameAgeMaxMs.map { _ in client.worstFrameAgeSincePrint })
                             let rtt = Self.medianAndWorst(stats.rttMs, worst: stats.rttMaxMs.map { _ in client.worstRttSincePrint })
-                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)")
+                            // The Mac's sound, from a device that plays it: how far it trailed the picture
+                            // that second, and the packets too late to play since the line before
+                            // (docs/audio-plan.md §4.10).
+                            var sound = ""
+                            if let behind = stats.audioBehindMs, behind >= 0 {
+                                sound = ", sound \(behind) ms behind" + (client.audioLateSincePrint > 0 ? ", \(client.audioLateSincePrint) late" : "")
+                            }
+                            client.audioLateSincePrint = 0
+                            print("client \(client.device ?? "\(c.endpoint)"): \(stats.fps) fps, frame age \(age), rtt \(rtt)\(sound)")
                             client.worstFrameAgeSincePrint = -1
                             client.worstRttSincePrint = -1
                         }
