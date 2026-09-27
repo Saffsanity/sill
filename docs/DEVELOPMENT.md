@@ -177,7 +177,9 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    below) keeps its way in until it ends.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
-changed from the device, and Disconnect at the bottom.
+changed from the device, and Disconnect at the bottom. Its last group, This
+iPad (or iPhone), is the device's own: Three-Finger Gestures (below, Trackpad
+gestures), on unless turned off, and never sent to the Mac.
 
 On a phone held upright (and on the Duo's outer display) the picture sits in
 a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
@@ -234,6 +236,35 @@ device, and a streaming setting restarts the stream for a moment. To put one
 setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 `prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
+
+## Trackpad gestures
+
+Three fingers on the device's glass, on the portrait trackpad or over the
+stream, are the Mac's own trackpad gestures: swipe up for Mission Control, down
+for App Exposé, left or right for the Space beside (the content follows the
+fingers, as on a Mac), pinch for Apps (Launchpad before macOS 26) and spread for
+Show Desktop. The device decides the gesture when the fingers lift, from how
+far they travelled since the third one landed, and sends only its name (kind
+28); a stroke that becomes a gesture clicks, drags and scrolls nothing, and one-
+and two-finger strokes are what they always were. The Mac presses its own
+keyboard shortcut for that action, as System Settings › Keyboard › Keyboard
+Shortcuts has it at that moment (Mission Control, and Launchpad & Dock), so a
+shortcut changed there is followed and one turned off does nothing. While a
+window streams, a gesture shows the Desktop first, since none of these views is
+in a window's picture; the opposite gesture closes what one opened (a swipe
+down after Mission Control, a pinch after Show Desktop). Four fingers do the
+same where iPadOS lets them through (Settings › Multitasking & Gestures); a
+Magic Keyboard trackpad's own three- and four-finger gestures stay with iPadOS.
+
+Sill's log names what each gesture did: "Gesture from iPad (iPad14,1): swipe up
+→ Mission Control (shortcut 108: key 160, fn)", or "… pinch → nothing: no
+shortcut for Show Apps is on in Keyboard Shortcuts", which says which shortcut
+to turn on. A Mac from before them gets no gesture, and the device's group says
+to update Sill on it. A synthetic host (`SillHost --synthetic`) posts none: it
+logs the shortcut it would post with "(not posted: a test host)", so
+`python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
+without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
+such a host a table of its own instead of this Mac's shortcuts.
 
 ## Direct Wireless Connection
 
@@ -350,8 +381,9 @@ tests of Direct Wireless Connection and remote access.
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
 encoder session, the device floor, how a session ends, the update check, the
-disk image's window, where everything goes on a phone held upright) on their
-own with a check each, and runs them: about two minutes, no device, permission
+disk image's window, where everything goes on a phone held upright, which
+three-finger strokes are gestures and what the Mac does with one) on their own
+with a check each, and runs them: about two minutes, no device, permission
 or encoder. `--mutants` also checks that each check fails when its file is
 changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
@@ -373,6 +405,9 @@ device, the remote door with pairing, and more. It checks every argument
 before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
+
+`--gesture=NAME[,FINGERS]@T` sends a trackpad gesture (kind 28), and, like its
+input flags, only to a `--synthetic` host on this Mac, which posts nothing.
 
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
@@ -435,6 +470,22 @@ simulator:
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
   round.
+- `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
+  one run, and `-SillSettingsScroll gestures` opens the Settings panel at that
+  group. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
+  gesture through the app's own path, only to a test host on this Mac.
+
+### The touch rig
+
+`Tests/touchrig/run.sh NAME` compiles the real `TrackpadView.swift` and
+`InputOverlay.swift` into a scratch app for the iOS simulator, drives both
+surfaces with synthesized one- to five-finger touches, and logs every event
+each would send the Mac (nothing leaves the app). `--rev REV` builds the
+surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
+[OFF.log]` checks that one- and two-finger strokes send what they sent before
+and that each three-finger stroke sends one gesture and nothing else. It runs on
+a simulator of its own (`SILL_TOUCHRIG_SIM`, made and deleted when missing),
+never XCUITest or a recording.
 
 ## Measuring latency
 

@@ -1,28 +1,24 @@
 # Full macOS trackpad gestures from the device — the plan
 
-## Status and hand-off (2026-09-26 03:50)
+## Status (2026-09-27)
 
-Stopped by Noah at about 95 % of the week's usage, before any code was written ("Stop trackpad
-gestures and menu bar mirror for now. Mark down next steps for agents that will pick up the task.").
-What the branch `trackpad-gestures` holds (worktree `/Users/noah/Downloads/winstream-gestures`, from
-main at 8b0d418): 8dd3539, the plan as first written, and this commit, the critique's revision of it
-(the critique finished its pass, §14, and its wording fixes; the interrupted agent was reading how the
-client sends a source selection when it stopped, so §6.3 and §7.4 deserve one more look against
-`StreamClient.swift` and `StreamCoordinator.swift`). No source file has changed.
+Built on the branch `trackpad-gestures` (worktree `/Users/noah/Downloads/winstream-gestures`) in
+§13's order, one commit per step, every default of §12 taken: main merged twice (6678ca3 at
+5c6a850; 5e6ddaa at 2b38179, PR #31 the Mac's pointer among it, which landed during the host step),
+kind 28 and `WindowList.gestures` (649ff7f), the Mac's side (902e5e4), the pure recognizer (487ec26),
+the surfaces, the device's switch and the rig (5cd067c), then these documents. §15 has the results
+and what differs from the plan. **Tier 2 is not built and §10's probe was not run**: nothing was ever
+posted to the Mac (the workflow's rule while Noah slept), so Tier 2 stays a later PR that starts with
+that probe, run by Noah or with his go-ahead.
 
-Next agent, in order:
-1. Merge main (a550e27 or later: PRs #20–#22 landed since 8b0d418) into the branch; the plan's line
-   numbers are at 8b0d418.
-2. Read §12 and take each default unless Noah has answered it in the conversation that resumes this.
-3. §10's bounded probe, only under §11's guards (Noah may be using the Mac: never post an event at it
-   while a device is connected or he is active; the idle and encoder guards of §2.5).
-4. Implement in §13's order, one commit per step, each passing its gates before the next
-   (`Tests/checks/` with mutants for the two pure files, the touch rig of §9.2).
-5. Review (wire and hard rules, the recognizer's state machine, the device UI), then a PR against
-   main whose body lists Noah's device tests P2, P4, P5 and P6 from §14.
-The workflow prompt must quote Noah's authorization in his words: "Work on 5-12 as well please"
-(2026-09-26, item 8 is these gestures) and this stop and its resumption, so a relayed message about
-another topic does not stop the agents again.
+Left, in order: a review (the three lenses of §13's step 7), the branch pushed and its PR opened
+once Noah says so in his own words (its body lists P1–P12), and Noah's device tests, §9.5.
+
+The earlier hand-off (2026-09-26 03:50), for the record: Noah stopped the first build at about 95 %
+of the week's usage ("Stop trackpad gestures and menu bar mirror for now. Mark down next steps for
+agents that will pick up the task.") and resumed it on 2026-09-26 at 23:38 ("Continue working where
+you left off with Opus 5.5 subagents"); his request for the gestures is "Work on 5-12 as well please"
+(2026-09-26, item 8 of that list).
 
 
 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
@@ -911,3 +907,100 @@ this branch's.
   `.none` (P6); which of Spaces and tiling a synthesized control-fn arrow triggers, and whether keys
   160 and 131 open their views when posted (P2); what a second key 131 does to Apps (P5); §2.1's
   table on the iPad (P4).
+
+---
+
+## 15. Results (2026-09-27)
+
+Built in §13's order on `trackpad-gestures`: the merge with main (6678ca3) and this plan's line
+numbers (a66839c), kind 28 (649ff7f), SILL_TEST_LOOPBACK taken from PR #31 so the test hosts listen
+on 127.0.0.1 alone (55f87cc), the Mac's side (902e5e4), main merged again once PR #31 landed
+(5e6ddaa), the pure recognizer (487ec26), the surfaces and the device's switch (5cd067c), then these
+documents. Every §12 default was taken. Nothing was pushed.
+
+### What differs from the plan
+
+1. **Project IDs** `A701`/`F701`: `A401`/`F401` are held by the local branch `first-run-walkthrough`.
+   No branch or worktree holds `A701`/`F701`.
+2. **GestureChords** also holds the log line (`line`, `describe`) and the TEST ONLY table
+   (`testTable`, read from `SILL_TEST_HOTKEYS` by a host that does not advertise), so both are checked.
+   Its outcomes carry no "closes" flag: the line says "closes" when a view's shortcut answers another
+   view's gesture.
+3. **The coordinator waits for a switch in flight**, at most 2 s, before it posts: the Desktop pick
+   the device sends just before a gesture made over a window then starts first, and a window on the
+   virtual display is home before Mission Control opens. Gestures post in arrival order.
+4. **A held chord survives a select**: `select` drops input held for the old source, but a chord acts
+   on the whole Mac, so it is posted there instead of dropped.
+5. **`InputInjector.chord` posts through PR #31's `post()`**, so a dry run posts no chord either (the
+   coordinator already calls it only on a host that advertises).
+6. **`sillclient.py --gesture` and `--raw28`** go only to a `--synthetic` host on this Mac, as PR #31's
+   input flags do (the listener's own arguments, by lsof and ps). H5's "sillclient.py sends no kind
+   8" no longer holds since PR #31, whose `--input` flags send it to such hosts only.
+7. **`TrackpadGestures.cancelled(_ id:)`** takes the touch, and a cancel before arming keeps that
+   stroke from arming. **`TrackpadGestures.sending`** is the send rule (the switch, a session, the
+   Mac's `gestures` at least 1, the Desktop first over a window), pure and checked;
+   `StreamClient.sendGesture` runs it.
+8. **`StrokeObserver`** is its own delegate (so the overlay, which has none, needs no change), and its
+   `reset` counts a touch it never saw end as cancelled.
+9. **DEBUG**: `-SillInputScript`'s `gesture NAME[,FINGERS]` step (PR #31's script, with its refusal of
+   any host but a test host on this Mac) instead of a new argument; `-SillSettingsScroll gestures`
+   opens the panel at the group, whose rows a long footnote pushes out of `-SillSettingsEnd`'s view.
+10. **The footnote** is a little shorter than §8's: "Three fingers on the trackpad or over the
+    stream. While a window streams, a gesture shows the Desktop first, and the opposite gesture
+    closes what one opened. ‹Mac› does these with its own keyboard shortcuts: one turned off in its
+    Keyboard settings does nothing." (and on an iPad the iPadOS sentence).
+11. **The public README** names the gestures, and `site/privacy.html` lists them among what a device
+    sends; the published site needs a republish after the merge.
+
+### Verified (without a device)
+
+- H1: `swift build -c release`, only the CaptureProbe warning; iOS Debug and Release for the
+  simulator and Debug for a device (unsigned), only the old `StreamClient` capture warning.
+- H2: the CLI (`SILL_TEST_LOOPBACK=1 SillHost --synthetic`), idle 35 s (8 lines) and with a client
+  streaming the Desktop for 5 s (17 lines up to its leaving), against main's at 2b38179, digits masked
+  and sorted: identical. (A stats line after the client leaves follows the timer's phase in both.)
+- H3: `gestures`, 105 checks (each swipe at, under and over its distances; the flick; the axis at
+  exactly 1.3 both ways; pinch and spread exactly at 0.75 and 1.25 on a 3-4-5 triangle; arming at
+  exactly 0.15 s and 24 pt; a button; two fingers; a late third; four; five; cancels; one decision; a
+  swipe taken back; silence to the next stroke; the send rule; 5,000 random strokes against a model),
+  29 of 29 mutants.
+- H4: `gesture-chords`, 106 checks (each gesture on macOS 27's table, fallbacks, rebound shortcuts and
+  their bits, every reversal pair, the same gesture twice, the Spaces, other input, unknown names, the
+  line, the TEST ONLY table, 5,000 random sequences against a model), 21 of 21 mutants. `protocol`
+  and `compatibility` (92 checks, 19 of 19 mutants; `protocol` 20 of 20) know kind 28 and `gestures`;
+  `pointer-control`'s kind table too (153 checks, 33 of 33 mutants). `Tests/checks/run-all.sh`: all 22.
+- H5: no `IOHIDEventCreate`, event tap, global monitor, event type 29 or 30, or hotkey setter in
+  `Sources/` or `iOSClient/`; both pans still at two touches; `flags(from:)` unchanged; the only
+  change inside an existing finger handler is the first-line guard (eight of them).
+- H6: 6678ca3's StreamProtocol maps 28 to `.unknown` and reads exactly its payload's length, and
+  decodes a window list with `gestures`; this build decodes 6678ca3's list with `gestures` nil; the
+  device's send rule sends nothing to it.
+- H7: the touch rig on the surfaces before (HEAD at 487ec26) and after, and after with the switch off:
+  84 of 84. One- and two-finger strokes, and a third finger that joins a scroll after 133 ms, send what
+  they sent before; every other three-, four- and five-finger stroke sends one gesture or nothing after
+  its third finger (before: a pinch clicked, a rest dragged on the trackpad and right-clicked on the
+  stream, four fingers moved the pointer or scrolled, five scrolled); with the switch off the same,
+  the gesture refused.
+- H8: `sillclient.py --gesture` against loopback synthetic hosts: swipe up then down named 108 and
+  closed it, every gesture and the reversals for Apps and Show Desktop, four fingers named, an unknown
+  name cleaned to letters and digits, bad JSON and a nameless gesture ignored, the fifth gesture in a
+  second dropped with its line, `SILL_TEST_HOTKEYS`'s fallbacks (32, 110, 115) and "no shortcut for
+  Show Apps", a value that does not parse ignored with its line; `in.gestureDry` counted, nothing
+  posted.
+- H9: the bare app's 100 previews against main's: identical but the General pane's "Running from"
+  path, which names each build's folder.
+- Live, in a private simulator: the app in the layout harness with its real client, dialled to a
+  loopback synthetic host on the software encoder, sent eleven gestures through `sendGesture`
+  (`-SillInputScript`): all named and not posted, the reversal, four fingers, the fifth in a second
+  dropped; with `-Sill.trackpadGestures 0` none sent; against main's host (no `gestures`) none sent.
+  The live panel showed the group with the host's mappings.
+- §9.3's photos: the group in its three states (on, an older Mac, off) at 1000×710, 710×1000, 500×710,
+  710×500, an iPad mini's 1133×744 and 744×1133, and an iPhone's 402×812 and 812×402, at Large and
+  accessibility-extra-large (the rows stack, nothing truncates): 48 screenshots, kept out of the
+  repository.
+
+### Not verified
+
+Everything on glass and on the real Mac, §9.5's P1–P12, above all P2 (whether keys 160 and 131 open
+their views when posted, and whether ⌃→ switches Spaces or tiles the front window) and P6 (the editing
+overlay under `.none`). §10's probe, before any Tier 2.
