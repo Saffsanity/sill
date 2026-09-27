@@ -249,48 +249,94 @@ attributes, and one code path is easier to keep sound than two.
   only asks what this process is entitled to.
 - **The store.** `KeychainIdentityStore(accessGroup:)` adds `kSecUseDataProtectionKeychain` +
   `kSecAttrAccessGroup` to every query in data‑protection mode; `summary` names the keychain.
-- **Migration (data‑protection mode only), so an update keeps the identity.** On the first entitled
-  launch, each item missing from the data‑protection keychain is adopted from the login keychain if
-  it is there: `adoptLegacyKey` exports the legacy P‑256 key and re‑imports the same material (so an
-  identical fingerprint → the same Mac ID and every device's pin), `adoptLegacyGeneric` copies the
-  recognition key, trust list and Require pairing. Then the login keychain is never consulted again.
-  A key found but not copyable throws (never a silent new Mac ID); a generic that fails to copy is
-  returned and re‑copied next launch. Proven with test items of the store's own shapes in throwaway
-  keychains (scratch `keychain/migrate.swift`): the re‑imported key's public key is byte‑for‑byte
-  identical, the Mac ID is unchanged, the signed Require‑pairing‑off record still verifies under it,
-  and the three generic items round‑trip. (The key's *persistence* lands in the data‑protection
-  keychain, which needs the entitlement and so is Noah's on‑device pass; file keychains reject key
-  import, which is itself why the real destination is the data‑protection keychain.)
+- **No migration from the login keychain — by design (see §9a).** In data‑protection mode the store
+  **never reads the login keychain**: every query is pinned to the data‑protection keychain, and a
+  fresh install (or an entitled build's first launch on a Mac that had legacy items) creates a fresh
+  key straight in the strong keychain. Because this lands before the first public build, the only
+  Macs with legacy items are Noah's own dev Macs, which do a **one‑time reset** (delete the legacy
+  items and re‑pair; the command is in release‑checklist.md Part 1 §5). Public installs have nothing
+  to migrate. (An earlier draft auto‑adopted the legacy items; §9a says why that was removed.)
+- **Availability.** Each data‑protection item is created `AfterFirstUnlockThisDeviceOnly`: readable
+  once the Mac has been unlocked after boot — so remote access, whose whole point is a Mac left at
+  home while its owner is away, works while the screen is later locked — but never synced to iCloud
+  and never carried to another Mac in a keychain restore, so the identity key cannot leave this Mac
+  (the same posture as the iOS device key). The default keychain accessibility is `WhenUnlocked`,
+  which would have made the identity unreadable exactly when remote access needs it (§9a).
 - **make-app.sh / release.sh, with a safe fallback.** `Packaging/SillRelease.entitlements`
   (`application-identifier`, `keychain-access-groups` `[9B2KKVM937.me.saffer.sill.mac]`,
-  `com.apple.developer.team-identifier`). `make-app.sh --release`: **with** a profile at
-  `Packaging/embedded.provisionprofile` (or `SILL_PROVISION_PROFILE`) it verifies the profile
-  authorises the access group (refusing a mismatch, which would AMFI‑kill the app), embeds it,
-  signs with the release entitlements, and verifies the signed app carries the group; **without** a
-  profile it signs as before (no keychain entitlements — a valid, notarizable Developer ID app on
-  the login keychain) and says so in the log. Every build's last line now names the identity
-  keychain. `release.sh`'s `check_signature` confirms the state (an embedded profile ⇒
-  keychain‑access‑groups present, else the login‑keychain note). The default (Apple Development) and
-  ad‑hoc paths keep `SillDebug.entitlements` (no keychain groups), so a dev build is never
-  AMFI‑killed and always takes the legacy store.
+  `com.apple.developer.team-identifier`, **no XML comments** — codesign's AMFI entitlement parser
+  rejects a comment in a file that carries restricted entitlements; §9a). `make-app.sh --release`:
+  **with** a profile at `Packaging/embedded.provisionprofile` (or `SILL_PROVISION_PROFILE`) it
+  verifies the profile authorises the access group **and is not expired** (refusing either, which
+  would leave an app that AMFI kills at launch), embeds it, signs with the release entitlements, and
+  verifies the signed app carries the group; **without** a profile it signs as before (no keychain
+  entitlements — a valid, notarizable Developer ID app on the login keychain) and says so in the
+  log. Every build's last line names the identity keychain. `release.sh`'s `check_signature`
+  confirms the state (an embedded profile ⇒ keychain‑access‑groups present, else the login‑keychain
+  note). The default (Apple Development) and ad‑hoc paths keep `SillDebug.entitlements` (no keychain
+  groups), so a dev build is never AMFI‑killed and always takes the legacy store.
 - **The CLI** is unchanged (`MemoryIdentityStore`), and the bare `SillMenuBar` test binary stays on
   memory / the test directory — neither carries the entitlement, both are safe.
 
-Rehearsed here (no notarization, no device, no profile minted): `swift build` clean; `make-app.sh`
-(Apple Development) → login‑keychain note, entitlements get‑task‑allow only; `make-app.sh --release`
-dry‑run (Developer ID, no profile) → the login‑keychain fallback, hardened, no keychain groups,
-`codesign --verify --strict` clean; a bogus profile is refused (exit 1) before any AMFI‑killable app
-is written; the migration proof passes with test names in throwaway keychains, and nothing leaked to
-the login keychain (the search list stays login + System).
+## 9a. Review (2026-09-27)
+
+A review of the first draft (§9 as it was) found that the hardening's steady state was sound but
+its edges reopened the hole it set out to close, or would not have shipped at all. Each finding was
+verified — by reading the code, and, for the release‑path ones, against real `codesign`/`security`
+runs with throwaway CMS profiles and test binaries only — and fixed:
+
+- **Auto‑migration reopened the pre‑creation hole (removed).** The draft adopted the login keychain's
+  items on the first entitled launch, to keep the Mac ID and pairings. But §1/§3 already established
+  that the login keychain cannot authenticate a maker and that a Sill‑trusting ACL is forgeable, so
+  the adoption code — which read the item by tag/service with *no* maker check and *no* gate — would
+  have promoted a **planted** key into the strong keychain as the Mac's permanent identity, exactly
+  the pre‑creation attack, merely relocated to "before the entitled build's first launch." There is
+  no sound gate on the legacy side (ACL inspection is the forgeable check §3 rejects; a partial
+  adoption of only the generics is still useless and still seeds a planted trust list / pairing‑off).
+  So auto‑migration is **dropped**: the store never reads the login keychain, and Noah's own dev
+  Macs (the only Macs with legacy items before the first public build) do the documented one‑time
+  reset. This also resolves the draft's second gap — that adoption never *deleted* the exportable
+  legacy key, leaving it in the weak keychain — since the reset removes it.
+- **The identity key set no accessibility (fixed).** Neither the created key nor the (now removed)
+  re‑imported key set `kSecAttrAccessible`, so the data‑protection keychain's default,
+  `WhenUnlocked`, applied — and remote access, used while the Mac is locked and its owner is away,
+  would have failed exactly then. The store now creates every item
+  `AfterFirstUnlockThisDeviceOnly`. (Set consciously; the data‑protection keychain is unreachable
+  without the profile, so its runtime behaviour is on Noah's device — §10.)
+- **The release path could not build the hardened app at all (fixed).** `Packaging/SillRelease.entitlements`
+  carried an explanatory XML comment. codesign feeds a restricted‑entitlement file to AMFI's
+  `AMFIUnserializeXML`, which rejects comments ("syntax error near line 5"), so `make-app.sh --release`
+  **with a valid profile** failed at the sign step — the draft's rehearsal never caught it because
+  it had no valid profile to reach that step. Reproduced here with a throwaway‑signed test binary
+  (comment → fail; comment stripped → signs, entitlements read back correctly). The comment is
+  removed from the entitlements file; its rationale moved into `make-app.sh`'s comment. (`SillDebug.entitlements`
+  keeps its comment: `get-task-allow` alone does not trigger AMFI's strict parser — verified.)
+- **make-app.sh did not check the profile's expiry (fixed).** It matched the profile's
+  `application-identifier` but not its `ExpirationDate`. Gatekeeper evaluates a Developer ID
+  profile's validity at every launch, so an expired embedded profile ships an app that will not
+  launch, with no fallback. `make-app.sh` now refuses an expired profile (and warns within 30 days)
+  before signing.
+
+Rehearsed here (no notarization, no device, no profile minted; every keychain touch used throwaway
+keychains and test service names, never the login keychain or Sill's real items): `swift build`
+clean; `Tests/checks/run-all.sh` all pass and the keychain check's 7 mutants are caught. The four
+`make-app.sh` paths against throwaway CMS profiles and a real Developer ID signature into `.build`
+(the bundle deleted after, never installed or launched): the default (Apple Development) →
+login‑keychain note; a profile‑less `--release` → login‑keychain fallback, no keychain groups,
+`codesign --verify --strict` clean; a valid (future‑dated, right app‑id) profile → the app builds,
+embeds the profile, carries the three entitlements, verifies strict, and prints the data‑protection
+note; a garbage, wrong‑app‑id, or expired profile is refused (exit 1) before any AMFI‑killable app
+is written.
 
 Left for the follow‑up (it needs the profile and a device): `docs/release-checklist.md` carries the
-one‑time `-allowProvisioningUpdates` command, profile renewal and the two‑team note (§10).
+one‑time `-allowProvisioningUpdates` command, profile renewal, the two‑team note and the dev‑Mac
+reset (§10).
 
 ## 10. For Noah
 
-The code is in place (§9): an entitled Developer ID build uses the data‑protection keychain and
-adopts any legacy identity on first launch; every other build safely uses the login keychain and
-says so. What is left needs your account and a device:
+The code is in place (§9, §9a): an entitled Developer ID build uses the data‑protection keychain and
+**never** the login keychain (no auto‑migration — §9a); every other build safely uses the login
+keychain and says so. What is left needs your account and a device:
 
 - **Mint the provisioning profile** for `me.saffer.sill.mac` (team 9B2KKVM937, Keychain Sharing,
   Developer ID): one `xcodebuild -allowProvisioningUpdates` run from a throwaway macOS target, the
@@ -300,16 +346,28 @@ says so. What is left needs your account and a device:
   `Packaging/embedded.provisionprofile` and rebuild; `make-app.sh --release` then says
   "data-protection keychain". Without it, a release still ships on the login keychain (a log line
   says so) — safe, just not hardened.
+- **Reset your own dev Macs once (no auto‑migration).** On the first entitled build, a Mac that used
+  remote access on the legacy store gets a **fresh** key and Mac ID (the store does not read the
+  login keychain — §9a explains why auto‑migration is unsafe), so any device paired to that Mac
+  re‑pairs. Since remote access is off by default and home pairing has not shipped publicly, this is
+  near zero. To start clean, delete the legacy items by hand and re‑pair: `for a in recognition-key
+  paired-devices require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a
+  $a; done` (and the "Sill Remote Access" key in Keychain Access) — on a Mac you own, never in CI.
 - **Decide the sequencing:** land the hardened build with home pairing, before the first public
-  build, so new installs write straight to the strong keychain and only your own dev Macs migrate
-  (automatically). It is off the wire, so it does not touch the 1.0 compatibility floor; slipping it
-  to 1.x still works, with the same automatic migration.
+  build, so new installs write straight to the strong keychain and only your own dev Macs need the
+  reset above. It is off the wire, so it does not touch the 1.0 compatibility floor; slipping it to
+  1.x still works, with the same one‑time reset for anyone who had legacy items.
 - **Verify on a device (an "untested, for Noah" pass):** only a Developer‑ID‑signed,
-  profile‑embedded, notarised build can prove the app launches (not AMFI‑killed) and reads and
-  writes its data‑protection items, that a rebuild keeps them, and that an update from a legacy‑store
-  build migrates cleanly (the log's "migrated the Mac's identity key…", the same Mac ID, pairings
-  intact). The rule, the migration algorithm and the fallbacks are checked here; the data‑protection
-  keychain itself cannot be reached without the profile (an unentitled binary gets `-34018`).
+  profile‑embedded, notarised build can prove it. Check that the app **launches** (not AMFI‑killed —
+  the profile and entitlements are right), reads and writes its data‑protection items, and **keeps
+  them across a rebuild** (same Mac ID on the second launch, no `-34018`). Because the items are
+  `AfterFirstUnlockThisDeviceOnly`, confirm remote access still works **with the screen locked and
+  you away** (pair a device, lock the Mac, connect from away): if the identity is unreadable while
+  locked, reconsider the accessibility. And confirm the update story: from a legacy‑store build,
+  the first hardened launch mints a fresh key (a new Mac ID, so re‑pair once) — this is expected, not
+  a bug — and after that the identity is stable. The rule and the fallbacks are checked here; the
+  data‑protection keychain itself cannot be reached without the profile (an unentitled binary gets
+  `-34018`).
 - **If the profile slips:** ship on the legacy store (not a floor blocker); optionally take the
   Secure Enclave interim (§5, no profile, removes key exfiltration); the full move is already coded
   and waits only for the profile.

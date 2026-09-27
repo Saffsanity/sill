@@ -37,39 +37,69 @@ affected (the CLI is memory, iOS is already data-protection).
   measured nil for every ad-hoc/dev build, so only a profile-embedded Developer
   ID build takes the strong path. `KeychainIdentityStore(accessGroup:)` is
   parameterised — nil is the legacy keychain byte-for-byte, a group adds
-  `kSecUseDataProtectionKeychain` + the access group to every query — and, in
-  data-protection mode, adopts any legacy item on first launch (`adoptLegacyKey`
-  re-imports the same key material, so the same fingerprint, Mac ID and every
-  device's pin; `adoptLegacyGeneric` copies the recognition key, trust list and
-  Require pairing), so an update keeps the identity; then the login keychain is
-  never read again. `Packaging/SillRelease.entitlements` and `make-app.sh
-  --release`: with a profile at `Packaging/embedded.provisionprofile` (gitignored)
-  it verifies the profile authorises the access group (refusing a mismatch that
-  would AMFI-kill the app), embeds it and signs with the entitlements; without
-  one it signs as before (login keychain) and says so; every build's last line
-  names the identity keychain. `release.sh`'s `check_signature` confirms the
-  state. The CLI and the bare binary are unchanged.
-- Verified (no notarization, no device, no profile minted): `swift build`
-  clean; `Tests/checks/run-all.sh` all 28 pass (keychain new); the keychain
-  check's 7 mutants; `make-app.sh` (Apple Development) → login-keychain note,
-  entitlements get-task-allow only; `make-app.sh --release` dry-run (Developer
-  ID, no profile) → the login-keychain fallback, hardened, no keychain groups,
-  `codesign --verify --strict` clean; a bogus profile refused (exit 1); the
-  migration proof (scratch `keychain/migrate.swift`) passes with test names in
-  throwaway keychains (same public key, same Mac ID, the signed require-pairing
-  record still verifies, the generics round-trip), nothing leaked to the login
-  keychain, the search list unchanged.
+  `kSecUseDataProtectionKeychain` + the access group to every query.
+  `Packaging/SillRelease.entitlements` and `make-app.sh --release`: with a
+  profile at `Packaging/embedded.provisionprofile` (gitignored) it verifies the
+  profile authorises the access group and is not expired (refusing either, which
+  would AMFI-kill or fail to launch the app), embeds it and signs with the
+  entitlements; without one it signs as before (login keychain) and says so;
+  every build's last line names the identity keychain. `release.sh`'s
+  `check_signature` confirms the state. The CLI and the bare binary are
+  unchanged.
+- **Review (2026-09-27, `docs/keychain-plan.md` §9a), four findings verified
+  and fixed:** (1) **Auto-migration reopened the pre-creation hole — removed.**
+  The first draft adopted the login keychain's items on the first entitled
+  launch (to keep the Mac ID and pairings), but the login keychain cannot
+  authenticate a maker, so the adoption code (no maker check, no gate) would
+  have promoted a *planted* key into the strong keychain as the Mac's identity
+  — the very attack this closes, only relocated. There is no sound legacy-side
+  gate, so migration is dropped: the store now never reads the login keychain,
+  and Noah's own dev Macs (the only Macs with legacy items before the first
+  public build) do a documented one-time reset (a fresh key, a new Mac ID,
+  re-pair). This also resolves the draft's leaving the exportable legacy key in
+  the weak keychain. (2) **The identity key set no accessibility — fixed:** the
+  data-protection default is `WhenUnlocked`, so remote access would have failed
+  while the Mac was locked and its owner away; every item is now
+  `AfterFirstUnlockThisDeviceOnly` (readable after first unlock, never off this
+  Mac). (3) **The release path could not build the hardened app at all —
+  fixed:** `SillRelease.entitlements` carried an XML comment, which codesign's
+  AMFI parser rejects for a restricted-entitlement file, so `--release` with a
+  valid profile failed at signing (the draft's rehearsal had no valid profile
+  to reach that step); the comment is removed (its rationale moved into
+  make-app.sh; `SillDebug.entitlements` keeps its comment — get-task-allow alone
+  does not trip AMFI's parser, verified). (4) **make-app.sh did not check the
+  profile's expiry — fixed:** Gatekeeper checks a Developer ID profile at every
+  launch, so an expired embedded profile stops the app launching; make-app.sh
+  now refuses an expired profile (and warns within 30 days) before signing.
+- Verified (no notarization, no device, no profile minted; every keychain touch
+  used throwaway keychains and test service names, never the login keychain or
+  Sill's real items): `swift build` clean; `Tests/checks/run-all.sh` all 28
+  pass, keychain's 7 mutants caught. The four `make-app.sh` paths, driven with
+  throwaway CMS profiles and a real Developer ID signature into `.build` (the
+  bundle deleted after, never installed or launched): default (Apple
+  Development) → login-keychain note; profile-less `--release` → login-keychain
+  fallback, no keychain groups, `codesign --verify --strict` clean; a valid
+  (future-dated, right app-id) profile → the app builds, embeds the profile,
+  carries the three entitlements, verifies strict, prints the data-protection
+  note; a garbage, wrong-app-id, or expired profile refused (exit 1) before any
+  AMFI-killable app is written. Confirmed with a throwaway-signed test binary
+  that the entitlements comment broke codesign and that stripping it signs and
+  reads the entitlements back.
 - **For Noah (docs/keychain-plan.md §10, release-checklist.md Part 1 §5):**
   mint the Developer ID provisioning profile for `me.saffer.sill.mac` (team
   9B2KKVM937, Keychain Sharing) with one `xcodebuild -allowProvisioningUpdates`
   run from a throwaway macOS target — it touches your Apple Account, so this
   branch did not run it — drop it at `Packaging/embedded.provisionprofile` and
   rebuild; then the on-device pass (the strong keychain is unreachable without
-  the profile: the app launches un-AMFI-killed, reads and writes its items, a
-  rebuild keeps them, an update from a legacy-store build migrates cleanly).
-  Land it with home pairing, before the first public build, so new installs go
-  straight to the strong keychain (off the wire, so not a floor blocker). The
-  base is `home-pairing` until #37 merges; then merge main in.
+  the profile): the app launches un-AMFI-killed, reads and writes its items, a
+  rebuild keeps them (same Mac ID), and — since the items are
+  `AfterFirstUnlockThisDeviceOnly` — remote access works with the Mac's screen
+  locked and you away. There is **no** auto-migration: a dev Mac that used the
+  legacy store gets a fresh Mac ID on the first hardened launch (re-pair once);
+  the one-time reset command is in release-checklist.md Part 1 §5. Land it with
+  home pairing, before the first public build, so new installs go straight to
+  the strong keychain (off the wire, so not a floor blocker). The base is
+  `home-pairing` until #37 merges; then merge main in.
 
 **Pairing at home (2026-09-25 to 27, branch `home-pairing` from main at
 1f3072a, with main merged in at cf05a78 and again at 2b38179, not rebased,

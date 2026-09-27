@@ -31,21 +31,32 @@ import Security
 ///   and a signature by the Mac's key (RequirePairingValue, docs/home-pairing-plan.md §4.8). A
 ///   missing item, or one without that signature, reads as on, so deleting it only turns pairing on.
 ///
-/// **Adoption (migration), data-protection mode only.** A Mac that already ran a legacy-store build
-/// (remote access on 0.3.x, or a development Sill) keeps its identity in the login keychain. On the
-/// first launch of an entitled build, each item missing from the data-protection keychain is copied
-/// from the login keychain if it is there, so the Mac ID (from the key's fingerprint) and every
-/// pairing survive the update; after that the item lives in the data-protection keychain and the
-/// login keychain is never consulted again. Adoption carries forward exactly the identity Sill was
-/// already using on that Mac — no new exposure for an upgrader — while a fresh install (nothing to
-/// adopt) gets a fresh key straight in the strong keychain, where the pre-creation guarantee is
-/// whole. Landing this before the first public build keeps adoption to Noah's own Macs
-/// (docs/keychain-plan.md §6).
+/// **No migration from the login keychain — by design (the security review, 2026-09-27).** An
+/// earlier draft copied a Mac's existing legacy items into the data-protection keychain on the first
+/// entitled launch, to keep the Mac ID and pairings across the update. That reopened the very hole
+/// this change closes: the login keychain cannot say who made an item, so the adoption code would
+/// have adopted a *planted* legacy key just as readily as Sill's own, promoting an attacker's key
+/// into the strong keychain as the Mac's permanent identity — and there is no sound gate on the
+/// legacy side to tell the two apart (§3, §4 of docs/keychain-plan.md; ACL inspection is forgeable).
+/// So in data-protection mode this store **never reads the login keychain**: every query is pinned to
+/// the data-protection keychain by `scope()`, and a fresh install (or an entitled build's first
+/// launch on a Mac that had legacy items) simply creates a fresh key straight in the strong keychain,
+/// where the pre-creation guarantee is whole. This lands before the first public build, so the only
+/// Macs with legacy items are Noah's own dev Macs, which do a one-time reset once (delete the legacy
+/// items and re-pair; docs/keychain-plan.md §6, release-checklist.md Part 1 §5); public installs have
+/// nothing to migrate.
 ///
-/// Only an item that does not exist yet (in this keychain, and, in data-protection mode, not in the
-/// login keychain either) is created. Any other failure to read one throws: a new key would be a new
-/// Mac ID (every device's pin broken), and an empty list saved over an unreadable one would forget
-/// every pairing. RemoteAccess then runs without an identity and the pane says why.
+/// Only an item that does not exist yet in this keychain is created. Any other failure to read one
+/// throws: a new key would be a new Mac ID (every device's pin broken), and an empty list saved over
+/// an unreadable one would forget every pairing. RemoteAccess then runs without an identity and the
+/// pane says why.
+///
+/// **Availability (data-protection mode).** Every item is `AfterFirstUnlockThisDeviceOnly`: readable
+/// once the Mac has been unlocked after boot, so remote access works while the screen is later locked
+/// (its whole point is a Mac left at home while its owner is away), but never synced to iCloud and
+/// never carried to another Mac in a keychain restore, so the identity key cannot leave this Mac
+/// (the same posture as the iOS device key, WhenUnlockedThisDeviceOnly). The legacy store keeps the
+/// login keychain's own default, as it always did.
 package final class KeychainIdentityStore: IdentityStore {
     static let keyTag = Data("me.saffer.sill.remote.host-key".utf8)
     static let label = "Sill Remote Access"
@@ -68,11 +79,18 @@ package final class KeychainIdentityStore: IdentityStore {
     package var testDirectory: URL? { nil }
 
     /// The keychain-selecting attributes added to every query: the data-protection flag and access
-    /// group when this store is the strong one, nothing for the legacy store.
+    /// group when this store is the strong one, nothing for the legacy store. Pinning every query to
+    /// the data-protection keychain is what makes the "never reads the login keychain" guarantee hold.
     private func scope() -> [String: Any] {
         guard let accessGroup else { return [:] }
         return [kSecUseDataProtectionKeychain as String: true, kSecAttrAccessGroup as String: accessGroup]
     }
+
+    /// The accessibility a new data-protection item is created with: readable after the first unlock
+    /// (so remote access works while the Mac's screen is later locked), this device only (never
+    /// synced, never restored to another Mac). Nothing for the legacy store — it keeps the login
+    /// keychain's default, unchanged from before this change. See the type.
+    private var accessible: CFString? { dataProtection ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly : nil }
 
     package func loadOrCreateKey() throws -> SecKey {
         var query: [String: Any] = [
@@ -90,9 +108,10 @@ package final class KeychainIdentityStore: IdentityStore {
             return item as! SecKey      // the type was just checked
         }
         guard status == errSecItemNotFound else { throw Self.error("the key couldn’t be read", status) }
-        // Data-protection mode: adopt the login keychain's key (same material, so the same Mac ID)
-        // before making a fresh one, so an update keeps this Mac's identity and every pairing.
-        if dataProtection, let adopted = try adoptLegacyKey() { return adopted }
+        // No key here: make a fresh one. In data-protection mode this store never reads the login
+        // keychain (no migration: it could not tell Sill's own legacy key from a planted one — see
+        // the type), so a Mac with only a legacy key gets a fresh Mac ID and re-pairs; that is why
+        // this lands before the first public build, when only Noah's own dev Macs have legacy items.
         var attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
@@ -103,12 +122,14 @@ package final class KeychainIdentityStore: IdentityStore {
             ] as [String: Any],
         ]
         if let accessGroup {
-            // For SecKeyCreateRandomKey the data-protection flag and access group go inside the
-            // private-key attributes, beside kSecAttrIsPermanent, so the stored key lands in the
-            // data-protection keychain under the group.
+            // For SecKeyCreateRandomKey the data-protection flag, access group and accessibility go
+            // inside the private-key attributes, beside kSecAttrIsPermanent, so the stored key lands
+            // in the data-protection keychain under the group, readable after the first unlock and
+            // never off this Mac.
             var priv = attributes[kSecPrivateKeyAttrs as String] as! [String: Any]
             priv[kSecAttrAccessGroup as String] = accessGroup
             priv[kSecUseDataProtectionKeychain as String] = true
+            if let accessible { priv[kSecAttrAccessible as String] = accessible }
             attributes[kSecPrivateKeyAttrs as String] = priv
         }
         var error: Unmanaged<CFError>?
@@ -159,9 +180,8 @@ package final class KeychainIdentityStore: IdentityStore {
     // MARK: Generic passwords
 
     /// The item's bytes, or nil when it does not exist yet; anything else throws (see the type). In
-    /// data-protection mode a miss first tries the login keychain and, finding the item there, copies
-    /// it in (adoption) before reporting nil, so an update keeps the recognition key, the trust list
-    /// and Require pairing.
+    /// data-protection mode the query is pinned to the data-protection keychain (`scope()`), so a
+    /// miss is a genuine miss — the login keychain is never consulted (no migration; see the type).
     private func read(_ account: String) throws -> Data? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -173,13 +193,13 @@ package final class KeychainIdentityStore: IdentityStore {
         query.merge(scope()) { _, new in new }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess, let data = item as? Data { return data }
-        guard status == errSecItemNotFound else { throw Self.error("\(account) couldn’t be read", status) }
-        if dataProtection, let adopted = try adoptLegacyGeneric(account) { return adopted }
-        return nil
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = item as? Data else { throw Self.error("\(account) couldn’t be read", status) }
+        return data
     }
 
-    /// Replaces the item's bytes, or adds it (in this store's keychain).
+    /// Replaces the item's bytes, or adds it (in this store's keychain). A new item in
+    /// data-protection mode is created `AfterFirstUnlockThisDeviceOnly` (see the type).
     private func write(_ data: Data, account: String, label: String) throws {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -193,80 +213,9 @@ package final class KeychainIdentityStore: IdentityStore {
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = label
+        if let accessible { add[kSecAttrAccessible as String] = accessible }
         let added = SecItemAdd(add as CFDictionary, nil)
         guard added == errSecSuccess else { throw Self.error("\(account) couldn’t be saved", added) }
-    }
-
-    // MARK: Adoption from the login keychain (data-protection mode only)
-
-    /// The login keychain's identity key, exported and re-imported into the data-protection keychain
-    /// under this store's access group, or nil when the login keychain has none (a fresh install).
-    /// The re-imported key has the same material, so the same fingerprint and Mac ID. A key found but
-    /// not copyable throws, rather than fall through to a fresh key and a new Mac ID.
-    private func adoptLegacyKey() throws -> SecKey? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: Self.keyTag,
-            kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnRef as String: true,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let item, CFGetTypeID(item) == SecKeyGetTypeID() else {
-            throw Self.error("the login keychain’s key couldn’t be read for migration", status)
-        }
-        let legacyKey = item as! SecKey
-        guard let material = SecKeyCopyExternalRepresentation(legacyKey, nil) as Data?,
-              let group = accessGroup else {
-            throw IdentityStoreError("the login keychain’s key couldn’t be exported for migration")
-        }
-        let importAttrs: [String: Any] = [
-            kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
-            kSecAttrKeySizeInBits as String: 256,
-        ]
-        guard let imported = SecKeyCreateWithData(material as CFData, importAttrs as CFDictionary, nil) else {
-            throw IdentityStoreError("the login keychain’s key couldn’t be re-imported for migration")
-        }
-        let add: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecUseDataProtectionKeychain as String: true,
-            kSecAttrAccessGroup as String: group,
-            kSecAttrApplicationTag as String: Self.keyTag,
-            kSecAttrLabel as String: Self.label,
-            kSecValueRef as String: imported,
-        ]
-        let added = SecItemAdd(add as CFDictionary, nil)
-        guard added == errSecSuccess || added == errSecDuplicateItem else {
-            throw Self.error("the migrated key couldn’t be saved to the data-protection keychain", added)
-        }
-        print("Remote access: migrated the Mac’s identity key from the login keychain to the data-protection keychain (the Mac ID and paired devices are kept).")
-        return imported
-    }
-
-    /// A generic-password item from the login keychain, copied into the data-protection keychain
-    /// under this store's access group; nil when the login keychain has none. A copy that fails to
-    /// save is ignored (the item is returned anyway): it is re-copied next launch, and unlike the key
-    /// a lost recognition key or Require pairing does not change the Mac ID.
-    private func adoptLegacyGeneric(_ account: String) throws -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: account,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = item as? Data else {
-            throw Self.error("\(account) couldn’t be read from the login keychain for migration", status)
-        }
-        try? write(data, account: account, label: "\(Self.label) (\(account))")
-        return data
     }
 
     private static func error(_ what: String, _ status: OSStatus) -> IdentityStoreError {

@@ -137,6 +137,13 @@ if [ "$release" = 1 ]; then
     # yet be killed by AMFI at launch. The profile-free build is a valid, notarizable Developer ID
     # app that keeps its identity in the login keychain (the same store as before this change) — safe,
     # and said in the log so the softer keychain is never a silent surprise.
+    #
+    # SillRelease.entitlements holds exactly three profile-restricted entitlements —
+    # application-identifier and team-identifier 9B2KKVM937, and keychain-access-groups
+    # [9B2KKVM937.me.saffer.sill.mac] — and NO XML comments: codesign feeds it to AMFI's entitlement
+    # parser (AMFIUnserializeXML), which rejects a comment with "syntax error", so a commented file
+    # fails the sign. A development or Apple Development (team HG877AGTQ7) build must never carry
+    # these — it would be AMFI-killed too — so the default path below keeps SillDebug.entitlements.
     profile="${SILL_PROVISION_PROFILE:-Packaging/embedded.provisionprofile}"
     group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' Packaging/SillRelease.entitlements)"
     if [ -f "$profile" ]; then
@@ -150,6 +157,23 @@ if [ "$release" = 1 ]; then
             rm -rf "$stage"
             echo "error: the provisioning profile '$profile' is for '${prof_appid:-nothing}', not '$group'; it would AMFI-kill the app. Mint one for me.saffer.sill.mac (docs/release-checklist.md)." >&2
             exit 1
+        fi
+        # The profile must not be expired. Gatekeeper evaluates a Developer ID profile's validity at
+        # every launch (developer.apple.com/support/developer-id), so an app that embeds an expired
+        # one will not launch — and there is no login-keychain fallback once it is embedded, unlike
+        # the no-profile path above. Refuse it here (renewing is the same -allowProvisioningUpdates
+        # run, docs/release-checklist.md), and warn when it is within 30 days.
+        prof_exp_iso="$(plutil -extract ExpirationDate raw -o - "$prof_dir/prof.plist" 2>/dev/null || true)"
+        prof_exp="$(TZ=UTC date -j -f '%Y-%m-%dT%H:%M:%SZ' "${prof_exp_iso:-}" +%s 2>/dev/null || true)"
+        now="$(date +%s)"
+        if [ -z "$prof_exp" ]; then
+            rm -rf "$stage"; echo "error: the provisioning profile '$profile' has no readable ExpirationDate; refusing rather than embed a profile that might already have expired." >&2; exit 1
+        elif [ "$prof_exp" -le "$now" ]; then
+            rm -rf "$stage"
+            echo "error: the provisioning profile '$profile' expired on ${prof_exp_iso} (UTC); an app that embeds it will not launch. Renew it (docs/release-checklist.md)." >&2
+            exit 1
+        elif [ "$prof_exp" -lt "$(( now + 2592000 ))" ]; then
+            echo "warning: the provisioning profile '$profile' expires on ${prof_exp_iso} (UTC), within 30 days; renew it soon (docs/release-checklist.md)." >&2
         fi
         cp "$profile" "$stage/Contents/embedded.provisionprofile"
         codesign --force --options runtime --timestamp --entitlements Packaging/SillRelease.entitlements --sign "$identity" "$stage"

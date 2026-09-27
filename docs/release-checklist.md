@@ -203,23 +203,26 @@ Xcode project for the Mac app, so mint the profile with a one‑off target:
       `Packaging/embedded.provisionprofile` (git‑ignored; keep a backup outside the repo), or point
       `SILL_PROVISION_PROFILE` at it.
 - [ ] Check: `make-app.sh --release` prints `identity keychain: data-protection keychain (access
-      group 9B2KKVM937.me.saffer.sill.mac)`; a mismatched profile is refused before it builds an
-      AMFI‑killable app.
+      group 9B2KKVM937.me.saffer.sill.mac)`. A profile that is for the wrong app‑id, expired, or
+      undecodable is refused before it builds an app that macOS would kill at launch.
 - Two teams: your Apple Development identity is team **HG877AGTQ7**, the Developer ID is
       **9B2KKVM937**. Only the Developer ID build carries the profile and the access group; a
       development build (make-app.sh's default) must **not** — it keeps `SillDebug.entitlements` and
       the login keychain, or macOS would kill it at launch.
-- The profile expires (a year). Renewing it is the same `-allowProvisioningUpdates` run; replace
-      `Packaging/embedded.provisionprofile`. A release with an expired or missing profile falls back
-      to the login keychain with a log line, so it never fails silently.
-- Your own dev Macs that already used remote access on the legacy store are migrated
-      **automatically** on the first hardened launch: the code copies the key (same Mac ID),
-      recognition key, trust list and Require pairing from the login keychain into the
-      data‑protection keychain, so pairings survive and the log says
-      "migrated the Mac's identity key…". Nothing to do. Only if you want to start fresh instead,
-      delete the login‑keychain items by hand (`security delete-generic-password -s
-      me.saffer.sill.remote` for each of `recognition-key`, `paired-devices`, `require-pairing`, and
-      the key in Keychain Access) and re‑pair — on a Mac you own, never in CI.
+- Profile validity: a Developer ID provisioning profile is issued valid for years (Apple issues
+      them well beyond the signing certificate's own life), but Gatekeeper checks it at **every
+      launch**, so an expired one stops the app launching. `make-app.sh` refuses an expired profile
+      and warns within 30 days; renew with the same `-allowProvisioningUpdates` run and replace
+      `Packaging/embedded.provisionprofile`. A **missing** profile is the safe fallback — the release
+      builds on the login keychain with a log line — but an **expired** one is an error, not a
+      fallback, because it would already be embedded.
+- No auto‑migration (the security review, docs/keychain-plan.md §9a): an entitled build never reads
+      the login keychain, so a dev Mac that used remote access on the legacy store gets a **fresh**
+      key and Mac ID on its first hardened launch (any device paired to it re‑pairs). Remote access
+      is off by default and home pairing has not shipped publicly, so this is near zero. To start
+      clean, delete the legacy items by hand — `for a in recognition-key paired-devices
+      require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a $a; done`, and
+      the "Sill Remote Access" key in Keychain Access — and re‑pair. On a Mac you own, never in CI.
 
 ## Part 2: every release
 
