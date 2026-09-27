@@ -221,11 +221,13 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       copy was checked). It prints both files' paths and SHA-256 and where Apple's two notary logs
       are (`.build/Sill-<version>-notary-log.json`, `…-dmg-notary-log.json`). It warns when a log
       lists issues: read them. Two submissions, so it waits for Apple twice.
-- [ ] Try the disk image as someone new to Sill would: on another Mac or a new macOS user account,
-      download `Sill.dmg` from where it will live (so it gets the quarantine flag), open it, drag
-      Sill to Applications in its window, open it, allow the permissions and stream to a device.
-      While the page still links the zip, try the zip the same way too. For 1.0 this is the
-      reviewer's path: film it for the review video (metadata §8).
+- [ ] Try the disk image as someone new to Sill would, on another Mac or a new macOS user account,
+      with the quarantine flag a download sets: before publishing, the real run's
+      `.build/Sill-<version>.dmg` sent there by AirDrop (which sets it too); once published, the
+      image downloaded from the release (a release published in one `--publish` run is tried
+      then). Open it, drag Sill to Applications in its window, open it, allow the permissions and
+      stream to a device. For 1.0 this is the reviewer's path: film it for the review video
+      (metadata §8).
 - [ ] Publish: `Scripts/release.sh --publish` (with the same two variables), or a pushed tag with
       the release workflow ("Releasing from GitHub Actions" below), creates the GitHub Release
       `v<version>` in Saffsanity/sill with the assets `Sill.dmg`, `Sill.dmg.sha256`, `Sill.zip` and
