@@ -34,6 +34,14 @@ config.virtualDisplay = virtualDisplay
 // CLAUDE.md. A device can still turn it on or off; that lasts until SillHost quits.
 config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 
+// `SillHost --audio`: Send Audio for this run: every connected device that plays the Mac's sound (its
+// hello lists a codec) gets the streamed app's sound, or every app's for the Desktop, or with
+// --synthetic a test tone. Off by default, as in Sill.app: the Mac keeps playing its own sound. A
+// device can still turn it on or off; that lasts until SillHost quits. Without it the output is what
+// it always was.
+let audioFlag = CommandLine.arguments.contains("--audio")
+config.sendAudio = audioFlag
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
@@ -115,6 +123,10 @@ func startHost() {
             if virtualDisplay { print("Virtual display mode: a picked window streams from its own HiDPI display; Ctrl-C puts it back.") }
             print("\(c.windowCount) windows on screen. Advertising _sill._tcp on the local network.")
             if c.active == .none { print("Nothing is streaming yet: pick a window from the iOS app. Ctrl-C to stop.") }
+            if audioFlag {
+                print(synthetic ? "Audio on for this run: devices that play sound get a test tone with the test pattern."
+                                : "Audio on for this run: devices that play sound get the streamed app's sound, or the whole Mac's for the Desktop.")
+            }
             Stats.shared.startPrinting()
         } catch {
             print("Error: \(error)")

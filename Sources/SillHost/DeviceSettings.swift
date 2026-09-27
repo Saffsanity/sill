@@ -10,7 +10,7 @@ extension HostConfig {
     var streamSettings: StreamSettings {
         StreamSettings(maxFPS: maxFPS, bitrate: bitrate, captureScale: Double(captureScale),
                        prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                       directWireless: directWireless, sendAudio: nil)   // no sound yet: the devices show no row
+                       directWireless: directWireless, sendAudio: sendAudio)
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:
@@ -23,14 +23,16 @@ extension HostConfig {
         if let v = change.prioritizeSpeed { c.prioritizeSpeed = v }
         if let v = change.virtualDisplay { c.virtualDisplay = v }
         if let v = change.directWireless { c.directWireless = v }
+        if let v = change.sendAudio { c.sendAudio = v }
         return c
     }
 }
 
 /// What a device may change on this host. There is no generic "write a default": a device moves
-/// these six knobs, to exactly the Mac menu's values, and nothing else. Remote access, its port and
+/// these seven knobs, to exactly the Mac menu's values, and nothing else. Remote access, its port and
 /// internet access can never enter this whitelist: they widen who reaches the Mac, and only the
-/// Mac's own user may do that.
+/// Mac's own user may do that. Send Audio changes what the devices hear of the Mac, not who can
+/// reach it, so any device may turn it on or off, from either door (docs/audio-plan.md, Q8).
 enum DeviceSettings {
     /// The fields of `c` a device may set: exactly the Mac menu's choices (`SettingsChoices`), and
     /// the virtual display on only where this host can run it (off is always allowed), and Direct
@@ -43,7 +45,7 @@ enum DeviceSettings {
     /// here is dropped without a refusal or a log line (StreamProtocol's HostSettings.swift lists
     /// every place a new setting goes).
     static func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool, fromRemote: Bool = false) -> (HostSettingsChange, refused: [String]) {
-        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed)
+        var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, sendAudio: c.sendAudio)
         var refused: [String] = []
         if let v = c.directWireless {
             if fromRemote { refused.append("direct wireless (not from a remote connection)") } else { ok.directWireless = v }

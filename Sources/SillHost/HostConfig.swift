@@ -35,10 +35,16 @@ package struct HostConfig: Equatable, Sendable {
     /// The remote door also admits sources outside this Mac's networks and VPNs (a router port
     /// forward).
     package var internetAccess: Bool
+    /// Send Audio: every connected device that plays the Mac's sound (its hello lists a codec) gets the
+    /// sound of what streams, the streamed window's app or every app for the Desktop (AudioPipeline,
+    /// kind 29). Off by default: the Mac keeps playing its own sound, so a device beside it would
+    /// double every sound a moment late. The sound's own stream's, not the pipeline's: a change starts
+    /// or stops that stream and never restarts the picture (absent from `restartNeeded`).
+    package var sendAudio: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, prioritizeSpeed: Bool, virtualDisplay: Bool,
-                 directWireless: Bool, remoteAccess: Bool, remotePort: Int, internetAccess: Bool) {
+                 directWireless: Bool, remoteAccess: Bool, remotePort: Int, internetAccess: Bool, sendAudio: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -48,16 +54,18 @@ package struct HostConfig: Equatable, Sendable {
         self.remoteAccess = remoteAccess
         self.remotePort = remotePort
         self.internetAccess = internetAccess
+        self.sendAudio = sendAudio
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift, and the app's
     /// defaults. Virtual display off in both until Noah flips it. Direct Wireless off in both
     /// (Noah, 2026-09-24): AWDL costs every Wi-Fi stream its steadiness, and a shared network needs
     /// none of it. Remote access and internet access off in both: only the Mac's own user widens
-    /// exposure. 7455 is unassigned at IANA and below the ephemeral range.
+    /// exposure. 7455 is unassigned at IANA and below the ephemeral range. Send Audio off in both
+    /// until Noah has tried it (docs/audio-plan.md, Q1).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
-                                             remoteAccess: false, remotePort: 7455, internetAccess: false)
+                                             remoteAccess: false, remotePort: 7455, internetAccess: false, sendAudio: false)
 
     /// The remote door's port when none is set.
     package static let defaultRemotePort = 7455
@@ -77,7 +85,8 @@ package struct HostConfig: Equatable, Sendable {
 
     /// What differs from `new`, for the log: "frame rate limit 120 → 60 fps, bitrate 15 → 8 Mbps
     /// per 60 fps, Retina → points, speed off → on, virtual display off → on, direct wireless
-    /// off → on, remote access off → on, remote port 7455 → 7460, internet access off → on".
+    /// off → on, remote access off → on, remote port 7455 → 7460, internet access off → on, send audio
+    /// off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -91,6 +100,7 @@ package struct HostConfig: Equatable, Sendable {
         if remoteAccess != new.remoteAccess { parts.append("remote access \(onOff(remoteAccess)) → \(onOff(new.remoteAccess))") }
         if remotePort != new.remotePort { parts.append("remote port \(remotePort) → \(new.remotePort)") }
         if internetAccess != new.internetAccess { parts.append("internet access \(onOff(internetAccess)) → \(onOff(new.internetAccess))") }
+        if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

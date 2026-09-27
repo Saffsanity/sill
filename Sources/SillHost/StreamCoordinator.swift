@@ -148,6 +148,7 @@ package final class StreamCoordinator {
             cursorShapes.running = active != .none
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
+            audioFollow()                           // and the sound (the same app keeps its stream)
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -198,6 +199,13 @@ package final class StreamCoordinator {
     /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
     /// MenuMirror). Reads and presses nothing for a device that never asked.
     let menus: MenuMirror
+    /// The Mac's sound (kind 29, AudioPipeline): the sound of what streams, to the devices that play
+    /// it, while Send Audio is on. It follows the source from `active`'s didSet, as the pointer and
+    /// the menus do, so the picture always starts first, and nothing of it waits on the picture or the
+    /// other way round.
+    let audio = AudioPipeline()
+    /// Connected devices that play the sound (the server's count, from their hellos).
+    private var audioListeners = 0
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -259,6 +267,19 @@ package final class StreamCoordinator {
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
         catalog.onPolled = { [weak self] in self?.menusPolled() }
+        // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
+        let server = self.server
+        audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
+        audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+        audio.onStatus = { [weak self] _ in self?.showAudio() }
+        server.onAudioListenersChanged = { [weak self] count in
+            Task { @MainActor in
+                guard let self else { return }
+                self.audioListeners = count
+                self.audioFollow()
+                self.showAudio()
+            }
+        }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -583,6 +604,9 @@ package final class StreamCoordinator {
         if !old.virtualDisplay && next.virtualDisplay { enableVirtualDisplay() }
         status.update { $0.virtualDisplayOn = next.virtualDisplay }
         print("Settings: " + old.changes(to: next))
+        // The sound's own stream's, not the pipeline's: at once when nothing is switching; inside a
+        // select, `active`'s didSet follows once the picture has started.
+        if old.sendAudio != next.sendAudio, !switching { audioFollow() }
     }
 
     /// Settings › Virtual Display › Try Again: clear a run-level disable, and stage the streamed
@@ -1497,6 +1521,99 @@ package final class StreamCoordinator {
         return (pid, "Test menus: the test pattern's menus are pid \(pid)'s (\(name)); read and pressed without activating it.")
     }
 
+    // MARK: The Mac's sound (AudioPipeline; docs/audio-plan.md §4.7)
+    //
+    // One function decides what the sound is of, from Send Audio, the devices that play it, the
+    // source and whether Sill is quitting, and hands it to the pipeline, which keeps the same app's
+    // stream through the picture's restarts and starts another for another source. It runs in
+    // `active`'s didSet (set on every path of `select`, once the picture has started, or to none),
+    // when the count of devices that play it changes, in `adopt` when Send Audio changed outside a
+    // select, and at quit. The sound adds no device → host kind and no per-connection state here: the
+    // server keeps each device's codec and epoch.
+
+    /// What the sound should be of now, and why none when none: the log's reason.
+    private func audioKey() -> (AudioKey, String) {
+        if shuttingDown { return (.none, "Sill is quitting") }
+        guard config.sendAudio else { return (.none, "Send Audio is off") }
+        guard audioListeners > 0 else { return (.none, "no connected device plays sound") }
+        switch active {
+        case .none:
+            return (.none, "nothing streams")
+        case .desktop:
+            // A filter of the same kind as the picture's; a synthetic host's Desktop is the test pattern,
+            // and its sound the test tone.
+            return (synthetic ? .test : .desktop, "")
+        case .window(let id):
+            // A synthetic host never captures a real app's sound: its tests hear only the tone.
+            if synthetic { return (.none, "a test host sends only its test tone") }
+            let pid: pid_t
+            if virtualDisplay, let p = stage.placement, p.windowID == id {
+                pid = p.pid
+            } else if let app = catalog.window(id: id)?.owningApplication {
+                pid = app.processID
+            } else {
+                return (.none, "the streamed window's app is not known")
+            }
+            // Sill's own sound never goes out (and the capture leaves this process out anyway).
+            guard pid != WindowCatalog.ownPID else { return (.none, "Sill's own window streams") }
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? catalog.window(id: id)?.owningApplication?.applicationName ?? "pid \(pid)"
+            return (.app(pid: pid, name: SafeText.label(name)), "")
+        }
+    }
+
+    /// Hands the pipeline what the sound should be of now.
+    private func audioFollow() {
+        let (key, reason) = audioKey()
+        audio.follow(key, reason: reason) { [weak self] key in
+            await self?.makeAudioSource(key) ?? .failed("the host is shutting down")
+        }
+    }
+
+    /// The source for `key`: ScreenCaptureKit's sound of one app, or of every app but Sill's, on the
+    /// main display (sound does not depend on the display: an app on the virtual display is heard
+    /// the same); or a synthetic host's test tone.
+    private func makeAudioSource(_ key: AudioKey) async -> AudioPipeline.Made {
+        switch key {
+        case .none:
+            return .failed("nothing to capture")
+        case .test:
+            return .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
+        case .desktop:
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            let filter: SCContentFilter
+            if let own = catalog.ownApplication {
+                filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
+            } else {
+                filter = SCContentFilter(display: display, excludingWindows: [])   // the CLI: no Sill app to leave out
+            }
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing the whole Mac's sound (every app but Sill).")
+        case .app(let pid, let name):
+            guard let display = catalog.display else { return .failed("no display to capture from") }
+            guard let app = await runningApplication(pid) else { return .failed("\(name) is not among the apps ScreenCaptureKit lists") }
+            let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+            return .source(AudioCapture(filter: filter, queue: audio.queue), line: "Audio: capturing \(name)'s sound (every window of it).")
+        }
+    }
+
+    /// The app with this pid as ScreenCaptureKit lists it: from the catalog's last look, else from one
+    /// bounded look at every window and app (a window staged on the virtual display, or a minimized
+    /// app's, can be off the on-screen list).
+    private func runningApplication(_ pid: pid_t) async -> SCRunningApplication? {
+        if let app = catalog.windows.first(where: { $0.owningApplication?.processID == pid })?.owningApplication { return app }
+        guard let all = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 2) else { return nil }
+        return all.applications.first { $0.processID == pid }
+    }
+
+    /// The Mac's status of the sound, from the pipeline's and the devices' count.
+    private func showAudio() {
+        let s = audio.status
+        status.update {
+            $0.audio = s.map { HostStatusSnapshot.Audio(source: $0.source, devices: $0.capturing && $0.problem == nil ? audioListeners : 0,
+                                                        problem: $0.problem) }
+        }
+    }
+
     // MARK: Virtual display lifecycle
 
     /// The window server removed the virtual display (sleep/wake, display arbitration). The stage
@@ -1520,6 +1637,7 @@ package final class StreamCoordinator {
     package func shutdownForExit() {
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        audio.shutdown()   // "Audio stopped: Sill is quitting."
         stage.release()
     }
 
@@ -1857,7 +1975,8 @@ package final class StreamCoordinator {
                                  virtualDisplayNote: virtualDisplayNote(target: t, snapshot: s),
                                  softwareEncoder: s.softwareEncoder,
                                  stream: s.stream?.wire,
-                                 answering: answering)
+                                 answering: answering,
+                                 audioNote: t.sendAudio ? s.audio?.note : nil)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the

@@ -16,7 +16,10 @@ pixels. TLS 1.3 with a client certificate and ALPN sill/1 (or plain TCP with --p
   remote dial).
 The key and certificate are made on first use with /usr/bin/openssl in $PACING_OUT (run.py sets
 it; default the repository's .build/pacing), never in the repository.
-usage: device.py PORT [--seconds S] [--plain] [--reconnect] [--liveness-bytes] [--tag NAME]"""
+With --audio it plays the Mac's sound (docs/audio-plan.md H6): its hello, the first message, lists
+"aac-eld", and each second's line adds the kind 29 packets that came and their age (arrival minus stamp,
+median/max: the host runs on this Mac, so one clock), and the seq gaps.
+usage: device.py PORT [--seconds S] [--plain] [--reconnect] [--liveness-bytes] [--audio] [--tag NAME]"""
 import asyncio, json, os, ssl, struct, subprocess, sys, time
 
 def opt(name, default=None):
@@ -29,6 +32,7 @@ PLAIN = "--plain" in sys.argv
 RECONNECT = "--reconnect" in sys.argv
 TAG = opt("--tag", "dev")
 BYTES_LIVENESS = "--liveness-bytes" in sys.argv
+AUDIO = "--audio" in sys.argv
 NEWEST = [0.0]      # the newest frame's stamp (the header's), across sessions
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.environ.get("PACING_OUT") or os.path.join(HERE, "..", "..", ".build", "pacing")
@@ -66,7 +70,10 @@ async def session(ctx, deadline):
                                                    server_hostname=None if PLAIN else "sill")
     say("connected")
     st = {"last": time.monotonic(), "worst": None, "frames": 0, "ages": [], "rtts": [], "bytes": 0,
-          "keys": 0, "open": True, "why": None}
+          "keys": 0, "open": True, "why": None, "aud": 0, "aages": [], "next": {}, "gaps": 0}
+    if AUDIO:
+        hello = {"appVersion": "0.6", "protocol": 1, "device": "harness", "audio": ["aac-eld"]}
+        writer.write(msg(23, json.dumps(hello).encode()))
 
     async def read():
         buf = bytearray()
@@ -94,6 +101,12 @@ async def session(ctx, deadline):
                     if key: st["keys"] += 1
                 elif kind == 11 and len(payload) >= 8:
                     st["rtts"].append((time.monotonic() - struct.unpack(">d", payload[:8])[0]) * 1000)
+                elif kind == 29 and len(payload) >= 9 and payload[0] == 2:
+                    epoch, seq, flags, count = struct.unpack(">HIBB", payload[1:9])
+                    if epoch in st["next"] and st["next"][epoch] != seq: st["gaps"] += 1
+                    st["next"][epoch] = seq + count
+                    st["aud"] += count
+                    st["aages"].append(max(0.0, (time.time() - ts) * 1000))
         st["open"] = False
 
     async def ping():
@@ -119,8 +132,12 @@ async def session(ctx, deadline):
             writer.write(msg(12, json.dumps(stats).encode()))
             a = f"{age[0]}/{age[1]}" if age else "–"
             r = f"{rtt[0]}/{rtt[1]}" if rtt else "–"
-            say(f"{fps:3d} fps  age {a:>11}  rtt {r:>11}  in {st['bytes'] // 1000:5d} kB  keys {st['keys']}  newest {NEWEST[0]:.3f}")
-            st["frames"] = 0; st["ages"].clear(); st["rtts"].clear(); st["bytes"] = 0; st["keys"] = 0
+            sound = ""
+            if AUDIO:
+                aa = medmax(st["aages"])
+                sound = f"  aud {st['aud']:3d}  aage {(f'{aa[0]}/{aa[1]}' if aa else '–'):>11}  gaps {st['gaps']}"
+            say(f"{fps:3d} fps  age {a:>11}  rtt {r:>11}  in {st['bytes'] // 1000:5d} kB  keys {st['keys']}  newest {NEWEST[0]:.3f}{sound}")
+            st["frames"] = 0; st["ages"].clear(); st["rtts"].clear(); st["bytes"] = 0; st["keys"] = 0; st["aud"] = 0; st["aages"].clear()
             if time.monotonic() > deadline: st["why"] = "done"; st["open"] = False
 
     tasks = [asyncio.ensure_future(t()) for t in (read, ping, window)]

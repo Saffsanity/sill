@@ -36,6 +36,7 @@ final class HostSettings {
         static let askedScreenRecording = "askedScreenRecording", askedAccessibility = "askedAccessibility"
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
+        static let sendAudio = "sendAudio"
     }
 
     var config: HostConfig {
@@ -100,6 +101,8 @@ final class HostSettings {
             Key.internetAccess: standard.internetAccess,
             Key.remoteAddressName: "",
             Key.updateCheck: true,
+            // Off, like the CLI: the Mac keeps playing its own sound (docs/audio-plan.md, Q1).
+            Key.sendAudio: standard.sendAudio,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -109,7 +112,8 @@ final class HostSettings {
                             directWireless: defaults.bool(forKey: Key.directWireless),
                             remoteAccess: defaults.bool(forKey: Key.remoteAccess),
                             remotePort: defaults.integer(forKey: Key.remotePort),
-                            internetAccess: defaults.bool(forKey: Key.internetAccess)).validated()
+                            internetAccess: defaults.bool(forKey: Key.internetAccess),
+                            sendAudio: defaults.bool(forKey: Key.sendAudio)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
@@ -131,6 +135,7 @@ final class HostSettings {
         if config.remoteAccess != old.remoteAccess { defaults.set(config.remoteAccess, forKey: Key.remoteAccess) }
         if config.remotePort != old.remotePort { defaults.set(config.remotePort, forKey: Key.remotePort) }
         if config.internetAccess != old.internetAccess { defaults.set(config.internetAccess, forKey: Key.internetAccess) }
+        if config.sendAudio != old.sendAudio { defaults.set(config.sendAudio, forKey: Key.sendAudio) }
     }
 
     // MARK: Remote devices seen (display only)

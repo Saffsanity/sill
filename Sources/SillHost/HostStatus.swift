@@ -104,6 +104,31 @@ package struct HostStatusSnapshot: Equatable {
     package var synthetic = false
     /// Remote access, on a host with an identity (Sill.app, SillHost --remote); nil otherwise.
     package var remote: RemoteStatus?
+    /// The Mac's sound while it is wanted (Send Audio on, something streams, a device plays it); nil
+    /// otherwise.
+    package var audio: Audio?
+
+    /// The Mac's sound as the menu's card and Settings show it.
+    package struct Audio: Equatable {
+        /// "Safari", "Whole Mac" or "Test Tone".
+        package var source: String
+        /// How many devices get it: 0 while it starts, and while it fails.
+        package var devices: Int
+        /// Why there is none: "couldn’t capture the sound of Safari: the stream did not start within 2
+        /// s". Nil while all is well.
+        package var problem: String?
+
+        package init(source: String, devices: Int, problem: String? = nil) {
+            self.source = source; self.devices = devices; self.problem = problem
+        }
+
+        /// The devices' words for the problem (kind 16's `audioNote`): "Couldn’t capture the sound of
+        /// Safari: …."
+        package var note: String? {
+            guard let p = problem, let first = p.first else { return nil }
+            return first.uppercased() + p.dropFirst() + "."
+        }
+    }
 
     /// Devices connected through the remote door: while any is, the app keeps the Mac from idle
     /// sleep (it could not be woken from away).

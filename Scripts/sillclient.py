@@ -7,7 +7,7 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --fps-after=N@T    send a second viewport asking for N fps after T seconds
   --set=K=V[,K=V]@T  send a settings change (kind 17) T seconds in, with integer tokens 1, 2, 3...
                      in send order. Keys: maxFPS, bitrate, captureScale, prioritizeSpeed,
-                     virtualDisplay, directWireless; booleans accept 1/0/true/false/on/off
+                     virtualDisplay, directWireless, sendAudio; booleans accept 1/0/true/false/on/off
   --raw17=JSON@T     send this literal kind 17 payload T seconds in (split on the last @)
   --pick=SRC@T       a timed selectSource: none, desktop or window:ID
   --stats            send ClientStats (kind 12) once a second as device "sillclient", so the host
@@ -28,6 +28,11 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
                      older device, which a host with a device floor above 0 refuses
+  --audio            the hello (sent even without --hello) lists "aac-eld": this client plays the Mac's
+                     sound, so a host with Send Audio on sends it kind 29. Each format (type 1) is printed
+                     on one line; the packets (type 2) are counted each second (aud=) with their seq
+                     gaps, and summed at exit (AUDIO line: packets, epochs, segment starts, seq gaps,
+                     the first and last packet's arrival, their age: arrival minus stamp)
 The Mac's menus (kinds 24, 25 and 27; docs/menu-bar-plan.md). Tokens are shared with --set's: 1, 2, 3...
 in send order. Each kind 24 is printed on one line: a top level ("menus v3 at 1.234s: File ▸ | …"),
 a menu's items ("menu 4 v3 (answering 2) at …: 4.0 Set Label A ⌥⌘A | — | …"), a press's answer
@@ -85,12 +90,12 @@ with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP 
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",29:"audio"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
-BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
-# What --set may send: HostSettingsChange's six fields. The host drops any other key without a
+BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio", "persistent", "virtualDisplayAvailable"}
+# What --set may send: HostSettingsChange's seven fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
-SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
+SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless", "sendAudio"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
          "move", "tap", "key", "input")
@@ -335,7 +340,7 @@ try:
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer") and not a.startswith(("--fps=", "--expect=")):
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--audio") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
@@ -383,6 +388,10 @@ if hello_arg == "none":
 elif hello_arg is not None:
     hv, _, hp = hello_arg.partition(",")
     hello = {"appVersion": hv, **({"protocol": int(hp)} if hp else {}), "device": device}
+# --audio: this client plays the Mac's sound (the hello lists the codec, as a device from 2026-09-27 on).
+plays_audio = "--audio" in flags
+if plays_audio:
+    hello = dict(hello if hello is not None else {"device": device}, audio=["aac-eld"])
 
 if flood:
     # Connections that are reset before a byte is sent: the door must not keep them (no descriptor
@@ -445,9 +454,11 @@ def describe(d):
                if stream else "none")
     note = d.get("virtualDisplayNote")
     dw = "-" if st.get("directWireless") is None else b(st.get("directWireless"))   # "-": an older host
+    au = "-" if st.get("sendAudio") is None else b(st.get("sendAudio"))             # "-": a host without sound
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
-            f"vd={b(st.get('virtualDisplay'))} dw={dw} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
-            f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else ""))
+            f"vd={b(st.get('virtualDisplay'))} dw={dw} audio={au} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
+            f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "")
+            + (f" audioNote={d['audioNote']!r}" if d.get("audioNote") else ""))
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
@@ -464,6 +475,11 @@ def menu_line(it):
     if it.get("enabled") is False: t += " (off)"
     return t
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
+# The Mac's sound (kind 29): packets this second, and in all; each epoch's next seq; gaps; the arrival
+# times of the first and the last packet; each packet's age (arrival minus its stamp: the same clock
+# when the host runs on this Mac).
+aud_sec = 0; aud_total = 0; aud_epochs = []; aud_next = {}; aud_gaps = 0; aud_starts = 0; aud_first = None; aud_last = None; aud_ages = []
+aud_formats = 0; aud_orphans = 0
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
@@ -541,7 +557,7 @@ while time.time() - t0 < dur:
         if len(buf) < 14 + ln: break
         payload = buf[14:14+ln]; buf = buf[14+ln:]
         name = KIND.get(kind, str(kind)); bump(name); served = True
-        if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13, 26): first_kinds.append(kind)
+        if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13, 26, 29): first_kinds.append(kind)
         if kind == 1:
             frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
@@ -570,6 +586,29 @@ while time.time() - t0 < dur:
             where = (f"x={d['x']:.4f} y={d['y']:.4f} inside=1" if d.get("inside") and isinstance(d.get("x"), (int, float))
                      and isinstance(d.get("y"), (int, float)) else "inside=0")
             print(f"  pointer at {time.time()-t0:.3f}s {where} seen={d.get('seen') or 0}")
+        elif kind == 29:
+            at = time.time() - t0
+            if not payload: continue
+            if payload[0] == 1:
+                aud_formats += 1
+                try:
+                    f = json.loads(payload[1:])
+                except ValueError:
+                    print(f"  audio format at {at:.3f}s: undecodable"); continue
+                aud_epochs.append(f.get("epoch"))
+                print(f"  audio format at {at:.3f}s: epoch {f.get('epoch')} {f.get('codec')} {f.get('sampleRate')} Hz {f.get('channels')} ch, "
+                      f"{f.get('framesPerPacket')} frames (priming {f.get('primingFrames')}), {f.get('bitrate')} bps, "
+                      f"{f.get('source')}{' ' + f['app'] if f.get('app') else ''}, cookie {len(f.get('cookie') or '')} base64 chars")
+            elif payload[0] == 2 and len(payload) >= 9:
+                epoch, seq, flags, count = struct.unpack(">HIBB", payload[1:9])
+                if epoch not in aud_epochs: aud_orphans += 1          # a packet before its epoch's format
+                if epoch in aud_next and seq != aud_next[epoch]: aud_gaps += 1
+                aud_next[epoch] = seq + count
+                if flags & 1: aud_starts += 1
+                aud_sec += count; aud_total += count
+                aud_ages.append((time.time() - ts) * 1000)
+                if aud_first is None: aud_first = at; print(f"  first audio packet at {at:.3f}s (epoch {epoch}, seq {seq})")
+                aud_last = at
         elif kind == 22:
             g = json.loads(payload)
             extra = "".join(f"; {k}: {json.dumps(g[k], ensure_ascii=False)}" for k in ("message", "minimumVersion", "reconnect") if k in g)
@@ -606,9 +645,10 @@ while time.time() - t0 < dur:
     if now - last >= 1:
         f = per.get("frame", 0)
         # kB: the frames' payload this second (the encoder's output; ×8/1000 for Mbps).
-        print(f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
-              f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d}")
-        per = {}; kb_sec = 0; last = now
+        line = (f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d} cursor={per.get('cursor',0)} "
+                f"rtt={rtt:.1f}ms" if rtt is not None else f"t={now-t0:4.1f}s frames={f:3d} kB={kb_sec:6.0f} ticks={per.get('tick',0):3d}")
+        print(line + (f" aud={aud_sec}" if plays_audio else ""))
+        per = {}; kb_sec = 0; aud_sec = 0; last = now
 print(f"TOTAL {frames} frames ({keys} key) {kb:.0f} kB in {dur:.0f}s = {frames/dur:.1f} fps; kinds={tot}")
 print(f"settings messages: {settings_msgs}")
 def runs(ks):
@@ -626,6 +666,12 @@ def pct(v, q):
 windows = [window_frames.get(w, 0) for w in range(int(dur // 5))]
 print(f"LINK rtt p50 {pct(rtts, .5):.1f} p95 {pct(rtts, .95):.1f} max {max(rtts) if rtts else float('nan'):.1f} ms over {len(rtts)} pongs; "
       f"keyframes at {key_times}; frames per 5 s {windows}; frame age p50 {pct(ages, .5):.2f} p95 {pct(ages, .95):.2f} ms")
+if plays_audio:
+    first_at = f"{aud_first:.3f}s" if aud_first is not None else "none"
+    last_at = f"{aud_last:.3f}s" if aud_last is not None else "none"
+    print(f"AUDIO {aud_total} packets, {aud_formats} formats, epochs {aud_epochs}, {aud_starts} segment starts, {aud_gaps} seq gaps, "
+          f"{aud_orphans} before their format; first at {first_at}, last at {last_at}; "
+          f"age p50 {pct(aud_ages, .5):.2f} p95 {pct(aud_ages, .95):.2f} max {max(aud_ages) if aud_ages else float('nan'):.2f} ms")
 s.close()
 menus_failed = False
 if expect_menus is not None:

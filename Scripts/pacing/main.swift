@@ -34,6 +34,10 @@ import StreamProtocol
 //   the same sizes (a window picked, a rotation, a settings change), so its first keyframe goes out
 //   while that keyframe may still be crossing the link. It prints "Restart: …".
 // --log: the host's lines with Sill.log's timestamps (HostLog), which summarize.py reads.
+// --audio: Send Audio on (docs/audio-plan.md H6): while a device plays the sound (device.py --audio), the
+//   test tone goes through the real AudioPipeline and StreamServer's send path, as SillHost --synthetic
+//   --audio sends it. Only in a build with the sound's files (build.sh defines SILL_AUDIO); another
+//   build refuses the flag.
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
@@ -69,6 +73,7 @@ func pairs(_ name: String) -> [(t: Double, d: Double)] {
 }
 let stills = pairs("--still-at")
 let restarts = pairs("--restart-at")
+let withAudio = args.contains("--audio")
 
 if !logPath.isEmpty { HostLog.shared.configure(keepLines: 0, fileURL: URL(fileURLWithPath: logPath)) }
 
@@ -104,6 +109,21 @@ let psPayload = ParameterSets(nalUnitHeaderLength: 4, sets: [Data(count: 24), Da
 
 server.onKeyframeNeeded = { encoder.requestKeyframe() }
 server.onClientCountChanged = { n in Stats.shared.activeClients = n }
+#if SILL_AUDIO
+// The sound, as the coordinator follows it: the test tone while Send Audio is on and a device plays it.
+let audio = AudioPipeline()
+audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
+audio.onPackets = { data, epoch in server.broadcastAudio(packets: data, epoch: epoch) }
+server.onAudioListenersChanged = { n in
+    Task { @MainActor in
+        audio.follow(withAudio && n > 0 ? .test : .none, reason: withAudio ? "no connected device plays sound" : "Send Audio is off") { _ in
+            .source(SyntheticAudio(queue: audio.queue), line: "Audio: a test tone (440 Hz at -30 dBFS, a click at each second).")
+        }
+    }
+}
+#else
+if withAudio { print("--audio needs a build with the sound (Scripts/pacing/build.sh defines SILL_AUDIO)."); exit(2) }
+#endif
 server.onClientConnected = { connection, route, _ in
     // The coordinator hops to the main actor first; so does this.
     DispatchQueue.main.async {

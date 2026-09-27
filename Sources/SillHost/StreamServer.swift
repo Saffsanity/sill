@@ -102,6 +102,14 @@ final class StreamServer {
         /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
         /// whatever it says.
         var lastPointer: MacPointer?
+        /// The codec of the Mac's sound it gets, from its hello (`AudioCodec.choose`); nil for a device
+        /// that plays none (every device before 2026-09-27, a test client without --audio), which is
+        /// sent no kind 29.
+        var audioCodec: String?
+        /// The epoch whose format it was sent: a packet of another epoch goes after that epoch's format.
+        var audioEpochSent: Int?
+        /// Sound messages handed to its connection and not taken yet (`audioCap`).
+        var audioUnsent = 0
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -145,6 +153,14 @@ final class StreamServer {
     /// the source and a device is sent it, at the stream's frame rate; every device that is not
     /// moving it is sent where it is (kind 26). Set before `start()`.
     var pointerWatch: PointerWatch?
+    /// How many registered devices play the Mac's sound (their hello lists a codec this host makes),
+    /// whenever that changes: a hello, a device leaving. Called on the network queue.
+    var onAudioListenersChanged: ((Int) -> Void)?
+    /// The last count reported. On `queue`.
+    private var audioListeners = 0
+    /// The current epoch's format message, for a device whose first packet of the epoch is next. On
+    /// `queue`.
+    private var audioFormat: (epoch: Int, data: Data)?
 
     /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
     /// nothing waits for a hello. TEST ONLY: SILL_TEST_MIN_DEVICE_VERSION on a host that does not
@@ -1085,6 +1101,9 @@ final class StreamServer {
         let name = SafeText.label(hello.device ?? "")
         if client.device == nil, !name.isEmpty { client.device = name }
         print(DeviceGate.helloLine(hello, endpoint: "\(c.endpoint)"))
+        // The Mac's sound goes only to a device that said it plays a codec this host makes.
+        client.audioCodec = AudioCodec.choose(offered: hello.audio)
+        updateAudioListeners()
         onClientHello?(c, hello)
     }
 
@@ -1151,6 +1170,7 @@ final class StreamServer {
         onClientCountChanged?(clients.count)
         updateTicking()
         updateRemoteSweep()
+        if client.audioCodec != nil { updateAudioListeners() }
     }
 
     /// The source is changing: forget the old parameter sets and make every client wait for
@@ -1301,6 +1321,77 @@ final class StreamServer {
                 send(data, to: client, isFrame: message.kind == .frame)
             }
         }
+    }
+
+    // MARK: The Mac's sound (kind 29; docs/audio-plan.md §4.6)
+    //
+    // A send path of its own, as the tick and kind 26 have: never counted in `inflight`,
+    // `inflightFrames` or the drain eviction, which stay the picture's, so a hundred small messages a
+    // second never make the picture drop a frame at home. Away from home its bytes count in
+    // `pendingBytes`, because the link carries them: the budget, the slack, the hold behind a keyframe
+    // and the idle mark see them; `paceRemote` decides for frames only, so it drops frames and never
+    // the sound, and never touches `keyframesInFlight` or `backlogFloor` for it (the floor follows
+    // `pendingBytes` down by itself). Each message sets `lastSentAt`, so a remote client skips its
+    // tick while sound flows (the sound keeps the radio awake instead). Only a cap on what a device
+    // has not taken (`audioCap`) skips a packet: a stalled link's safety valve, not pacing.
+
+    /// Sound messages a device may leave untaken before a packet is skipped (`aud.drop`). At home a
+    /// second: the picture never queues there (the delta-drop rule), so a longer queue of sound is a
+    /// link that no longer carries it. Away as long as the drain backstop (`remoteDeadAfter`, 15 s):
+    /// remote pacing lets the picture's own queue hold a keyframe, the hold behind it and the budget,
+    /// which on a link that cannot carry the stream is seconds of it (the harness: 2.8 s behind at 8
+    /// Mbit/s and 5 s at 4 with 1.5 MB keyframes, where 3 s of sound skipped a fifth of its packets at
+    /// 4), and the sound waits with the picture rather than be cut; past that the device is dropped
+    /// anyway. 100 messages a second, about 190 bytes each.
+    static let audioCapHome = 100
+    static let audioCapRemote = 1500
+
+    /// On `queue`: the count of devices that play the sound, reported when it changed.
+    private func updateAudioListeners() {
+        let n = clients.values.filter { $0.audioCodec == AudioCodec.aacELD }.count
+        guard n != audioListeners else { return }
+        audioListeners = n
+        onAudioListenersChanged?(n)
+    }
+
+    /// The format message of a new epoch (a whole kind 29): kept, and sent to each device before its
+    /// first packet of that epoch, never skipped. Thread-safe.
+    func broadcastAudio(format: Data, epoch: Int) {
+        queue.async { [self] in audioFormat = (epoch, format) }
+    }
+
+    /// One packets message (a whole kind 29) of `epoch`, to every ready device that plays the sound:
+    /// the epoch's format first to a device that has not had it, then the packet, unless the device
+    /// has `audioCap` messages untaken. Thread-safe.
+    func broadcastAudio(packets: Data, epoch: Int) {
+        queue.async { [self] in
+            for client in clients.values where client.audioCodec == AudioCodec.aacELD && client.connection.state == .ready {
+                if client.audioEpochSent != epoch {
+                    guard let format = audioFormat, format.epoch == epoch else { continue }
+                    sendAudio(format.data, to: client)
+                    client.audioEpochSent = epoch
+                }
+                if client.audioUnsent >= (client.route.isRemote ? Self.audioCapRemote : Self.audioCapHome) {
+                    Stats.shared.bump("aud.drop")
+                    continue
+                }
+                sendAudio(packets, to: client)
+            }
+        }
+    }
+
+    /// On `queue`: one sound message to one device, counted as the section above says.
+    private func sendAudio(_ data: Data, to client: Client) {
+        let remote = client.route.isRemote
+        client.audioUnsent += 1
+        client.lastSentAt = Date().timeIntervalSince1970
+        if remote { client.pendingBytes += data.count }
+        client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
+            guard let client else { return }
+            client.audioUnsent -= 1
+            if remote { client.pendingBytes -= data.count }
+        })
+        Stats.shared.bump("aud.sent")
     }
 
     /// Remote clients' frames (home clients keep the rule above byte for byte). What is queued is

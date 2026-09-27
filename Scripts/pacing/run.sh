@@ -22,6 +22,10 @@
 #                                          and bigkf8 three times each (about 40 minutes)
 #   Scripts/pacing/run.sh --cases real24,dip [--repeat 3]
 #   Scripts/pacing/run.sh --base 8b0d418   compare with another commit (default origin/main)
+#   Scripts/pacing/run.sh --sound --cases real24,kf25m32,restartkf,stillend
+#                                          the working tree without the Mac's sound (as "base") against
+#                                          the same with it (as "new": the host's and device.py's --audio;
+#                                          docs/audio-plan.md H6), so the gates judge the run with sound
 #   Scripts/pacing/run.sh --list           the cases and their arguments
 #   Scripts/pacing/summarize.py DIR        the table again, from a finished matrix
 # Everything goes to .build/pacing (git-ignored): the two packages, the device's key, and each
@@ -58,7 +62,7 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 out="$root/.build/pacing"
-base=origin/main full=0 repeat=1 only="" list=0
+base=origin/main full=0 repeat=1 only="" list=0 sound=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) base="$2"; shift 2 ;;
@@ -66,8 +70,9 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
-        -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
+        --sound) sound=1; shift ;;
+        -h|--help) sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--sound] [--list]" >&2; exit 2 ;;
     esac
 done
 
@@ -124,6 +129,7 @@ export PACING_OUT="$out" PACING_RUNS="$runs"
     echo "base: $base = $(git -C "$root" rev-parse --short "$base"), StreamServer.swift md5 $(md5 -q "$out/base/Sources/Harness/StreamServer.swift")"
     dirty=""; git -C "$root" diff --quiet HEAD -- Sources/SillHost Sources/StreamProtocol Scripts/pacing || dirty=" with uncommitted changes"
     echo "new:  the working tree at $(git -C "$root" rev-parse --short HEAD)$dirty, StreamServer.swift md5 $(md5 -q "$out/new/Sources/Harness/StreamServer.swift")"
+    if [ "$sound" = 1 ]; then echo "--sound: both runs are new's build; base's without the Mac's sound, new's with it (--audio on the host and the device)"; fi
 } > "$runs/matrix.txt"
 
 load1() { sysctl -n vm.loadavg | awk '{print $2}'; }
@@ -143,8 +149,11 @@ for c in "${selected[@]}"; do
     n="$repeat"; if [ "$full" = 1 ] && [ -z "$only" ]; then n="$reps"; fi
     read -r -a argv <<< "$rest"
     for i in $(seq 1 "$n"); do
-        for build in base new; do
-            run="$name-$i-$build"
+        for side in base new; do
+            run="$name-$i-$side"
+            build="$side" args=("${argv[@]}")
+            # --sound: new's build both times; the sound on the host (its args come first) and the device (last).
+            if [ "$sound" = 1 ]; then build=new; [ "$side" = new ] && args=(--audio "${argv[@]}" --audio); fi
             for try in 1 2 3; do
                 if ! calm; then
                     echo "$(date +%T) skipped $run: load $(load1)" | tee -a "$runs/load.txt"
@@ -152,7 +161,7 @@ for c in "${selected[@]}"; do
                 fi
                 start="$(load1)"
                 echo "$(date +%T) $run (${secs} s, load $start)" | tee -a "$runs/load.txt"
-                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$build" "$secs" "${argv[@]}" > "$runs/$run.run.txt" 2>&1; then
+                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$build" "$secs" "${args[@]}" > "$runs/$run.run.txt" 2>&1; then
                     echo "    $run did not run: $(tail -n 1 "$runs/$run.run.txt")" | tee -a "$runs/load.txt"
                     missed=$((missed + 1)); break
                 fi
