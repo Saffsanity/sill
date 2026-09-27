@@ -9,14 +9,15 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
-from main at 8b0d418, not merged with main since; the plan, its hand-off and
-the host's results are in `docs/pointer-visibility-plan.md`).** Noah: "When the
-Mac is controlling the mouse pointer, it should show the real mouse pointer on
-the desktop on Sill. When Sill is controlling the Mac, continue to hide the
-real pointer and only render the client side one in portrait mode when the
-trackpad is used" (2026-09-25); the plan's defaults, but Q4: the pointer is
-sampled at the stream's frame rate while it moves. The host half is done and
-checked; the device half (the plan's §7) is next.
+from main at 8b0d418, merged with main at cf05a78 in b6f57d0, not rebased;
+the plan, its hand-off and the results, host and device, are in
+`docs/pointer-visibility-plan.md`).** Noah: "When the Mac is controlling the
+mouse pointer, it should show the real mouse pointer on the desktop on Sill.
+When Sill is controlling the Mac, continue to hide the real pointer and only
+render the client side one in portrait mode when the trackpad is used"
+(2026-09-25); the plan's defaults, but Q4: the pointer is sampled at the
+stream's frame rate while it moves. Both halves are built and checked; the
+review (the plan's §11 step 5) and the PR are next.
 - Wire: kind 26 `macPointer`, host → device, JSON `MacPointer`
   (`Pointer.swift`): where the Mac's pointer is in the streamed frame (`x`,
   `y` as fractions to 4 places, left out off the stream), `inside`, and `seen`,
@@ -44,31 +45,67 @@ checked; the device half (the plan's §7) is next.
   has a pointer only with the TEST ONLY `SILL_TEST_POINTER_PATH`;
   `SILL_TEST_SOFTWARE_ENCODER=1` keeps a synthetic host off the hardware
   encoder for good (Build and run).
-- Device: `PointerPresence.swift` (pure: what the one sprite shows, a report's
-  freshness, the carry-over across a hand-over, the portrait pad's cursor) and
-  SessionLink's input count (`inputsOnSession`) are in; nothing calls them yet.
-- Verified (the plan's "Results: the host"; the step ran twice, the first run
-  interrupted at about 00:22 before it committed, the second running every gate
-  again but the two on the hardware encoder): a clean `swift build -c release`
-  (only the CaptureProbe warning), iOS Debug and Release for the simulator (only
-  the old `StreamClient` warning); `Tests/checks/run-all.sh`, all 16
-  (pointer-control 147 and 30 of 30 mutants, pointer-watch 112 and 33 of 33,
-  pointer-presence 141); on synthetic hosts with the scripted pointer, the
-  software encoder and `sillclient.py --pointer`: the path's positions, the
-  settle after a move (the Mac's next report 0.30 s later) and after a scroll
-  gesture's began (0.31 s), none after a key (0.06 s), `seen` per connection,
-  two devices taking turns, a driver leaving, another device's motion reaching a
-  watcher at 60 fps (17 ms apart), the sampler at the stream's rate (33 ms apart
-  at 30 fps, 17 at 60), kind 26 through the remote door, 0.0 % CPU with nobody
-  streaming, nothing posted and the real pointer never moved; 8 integration
-  mutants of the wiring, each caught by one of those runs. From the first run's
-  logs (the hardware encoder, with no device connected to Sill.app; one streamed
-  through the second run, so they were not run again): the CLI's output against
-  8b0d418's, masked and sorted, idle and with a client, with and without
-  `--direct-wireless`, identical, with no kind 26 from a host without the hook,
-  and the sampler at 120 fps (8.0 ms apart).
-- **Untested, for Noah:** everything on the devices, once the device half is
-  built: the plan's P1–P12.
+- Device: one sprite (`HEVCDisplayView.setPointer`, in the Mac's shape from
+  kind 14) shows what `PointerPresence` (pure) says. Kind 26 is judged on the
+  network queue, where input is sent and counted (`PointerFeed`): stale when
+  its `seen` is below SessionLink's `inputsOnSession` or a coalesced move
+  waits; during a hand-over's carry-over (a move to a new connection while
+  this device had the pointer, until its first input there) a report of this
+  device's own position is dropped; else the Mac has the pointer, and its
+  arrow shows where the report says, in every layout. Every input this device
+  sends gives the pointer back to it: its own arrow then shows only for the
+  portrait trackpad (`setOwnPointer(_:from: .trackpad)`), never in landscape,
+  never for a finger, typing, a key or the iPad's own pointer, and not for the
+  Pencil unless Q2's flip (`pencilShowsPointer`). A key of the portrait key row
+  keeps what shows (`sendFromKeyRow`: the Mac's arrow stays where it is, as
+  this device's own). The pad's cursor is `PadCursor`: a stroke's first finger
+  starts at the anchor (the newer of the Mac's last position and this
+  device's last pointer event) and a move after the Mac took the pointer under
+  a resting finger re-seeds from it (`takeovers`), so neither end jumps. The
+  layout reaches the client (`DuoLayout.isPortrait`); nothing shows while
+  nothing streams. Q1's linger timer is built and idle.
+- Verified (the plan's "Results: the host" and "Results: the device"): iOS
+  Debug and Release (only the old `StreamClient` warning); `swift build -c
+  release`; `Tests/checks/run-all.sh`, all 18 after the merge, and every one
+  of their 452 mutants caught (pointer-presence 157 and 41 of 41,
+  pointer-control 147 and 30 of 30, pointer-watch 112 and 33 of 33, the
+  fence's 15 modes and 32 of 32); S1, 40 harness photos
+  (`-SillPointer`) at the Duo's, an iPhone's and an iPad mini's sizes, each
+  measured, the tip within 1 pt; live against synthetic hosts on the software
+  encoder with the scripted pointer (`-SillInputScript`): portrait strokes that
+  start where the Mac's arrow is and never jump back after the Mac took over
+  (S2), a tap hiding the arrow until the Mac's next move (S3), stale reports
+  dropped through a 150 ms relay (S4), no arrow across the move from AWDL, a
+  move to the cable, a move back to Wi-Fi and a reconnect over the cable
+  (S5), the key row keeping the arrow (S6), and a host that sends no kind 26:
+  no Mac arrow ever (S7), 54 of 54 in one run on the merge; the host's
+  synthetic gates H4–H9 and H13 again on the merge (the Mac's next report
+  0.31 s after a device's move, 0.07 s after a key, `seen` per connection, a
+  watcher hearing the driver, 17 ms apart at 60 fps, nothing posted, the real
+  pointer never moved), and the bare app's 100 previews identical to main's
+  (H12). The hardware-encoder gates (the CLI's output against 8b0d418's,
+  identical; the sampler at 120 fps, 8 ms apart) are the host step's first
+  run's: a device streamed from Sill.app through every later run.
+- **Untested, for Noah:** everything on the devices, the plan's P1–P12: the
+  Desktop in landscape (move the Mac's mouse: the arrow on the iPad where it
+  is, in its shape, following within about a tick; stop: it stays; tap the
+  iPad: gone; move again: back); a window in regular mode (shown over it,
+  gone off it, still over a window covering it, gone minimized); portrait
+  (the trackpad's arrow starts where the Mac's was, no jump on the Mac; lift:
+  it stays; the Mac's mouse: the arrow jumps to it; a finger resting on the
+  pad while the Mac's mouse moves, then moving: it carries on from the Mac's
+  pointer); rotation (the pad's arrow gone in landscape, the Mac's shown in
+  both); typing and hardware keys hide the portrait arrow, the key row does
+  not; the Pencil draws none; the virtual display (the arrow over the staged
+  window, a full-screen video's band); remote (the arrow trails by about the
+  round trip, `net.dropped` no higher while the mouse moves); two devices (the
+  iPhone shows the arrow the iPad's trackpad moves); mixed builds (this iPad
+  against PR #13's Sill.app: no Mac arrow; PR #13's iPad against this Sill.app:
+  as before); five minutes on a still window (Sill.app's CPU as before, frame
+  age and rtt unchanged, `ptr.sent` only in seconds the mouse moved, the arrow
+  never choppy enough to want Q4 undone); moves keep the device's control
+  (streaming in landscape, tap, plug the cable in and later pull it: no arrow
+  at either move; move the Mac's mouse: it shows).
 
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
@@ -2455,10 +2492,14 @@ set so ProMotion iPhones render above 60.
 3. The only pointer the user could see was the Mac cursor baked into the video,
    so it moved as unevenly as the video arrived. The client now draws its own
    arrow sprite (`HEVCDisplayView`, a CALayer, no implicit animation, fed by
-   `StreamClient.localPointer`, not @Published) for the trackpad and Pencil
+   `StreamClient.renderPointer`, not @Published) for the trackpad and Pencil
    hover; the host leaves the Mac cursor out of the video for good
    (`showsCursor` false at capture start; reconfiguring a running SCStream
-   wedged it) and streams its shape as `.cursorShape`. The trackpad also lost UIKit's ~10 pt start-of-
+   wedged it) and streams its shape as `.cursorShape`. Since 2026-09-27
+   (branch `pointer-visibility`) the sprite also shows the Mac's own pointer
+   while the Mac, or another device, moves it (kind 26, at the tick or the
+   stream's rate), and this device's own only for the portrait trackpad (the
+   Pencil's with Q2's flip). The trackpad also lost UIKit's ~10 pt start-of-
    stroke dead zone (a zero-duration long-press tracker drives the first
    movement) and gained Force-Touch-style haptics on click/drag (iPhone only:
    iPads have no Taptic Engine).
@@ -2827,7 +2868,9 @@ good.
   `FoundMac` rows; connection, parsing, reconnect, the move of a session over
   AWDL to the network, a live session following the best path
   (`followBestPath`: to the cable, to Wi-Fi, made again over either), ping,
-  generic `send`), `SessionLink` (the session's connection and the one door out
+  generic `send`, and the pointer: kind 26 judged on its queue, `renderPointer`,
+  `setOwnPointer`, `sendFromKeyRow`, a hand-over's carry-over),
+  `SessionLink` (the session's connection and the one door out
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
   off a lost path: `handOver`, `hold`, `adopt`, `unhold`; the input messages
   counted for the session's connection, `inputsOnSession`, which a kind 26's
@@ -2842,8 +2885,11 @@ good.
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
   selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
   layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
-  Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
-  display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
+  Pencil, keyboard, scroll momentum; each input says what drew this device's
+  pointer), `TrackpadView` (the portrait pad: its cursor a `PadCursor`, from the
+  anchor; a recognizer that only counts fingers), `HEVCDisplayView` (shared
+  display view, the one pointer sprite + DEBUG HUD), `DiagnosticsHUD` (client
+  stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
   Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, and
   a footer along the bottom, "Needs the free Sill app on your Mac." with links
@@ -2857,7 +2903,8 @@ good.
   12 pt clear, both inside the gap); one scroll view
   whatever the fit (`ColumnOverFooter`, measuring a hidden copy of the
   footer), so a fit that changes never builds the card anew (its fields, the
-  camera); + DEBUG harness), `SillLinks`
+  camera); + DEBUG harness, and `InputScript`, `-SillInputScript`'s steps),
+  `SillLinks`
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
   and the App Store address for a Mac's update notice, a placeholder until the
   App Store Connect record exists),
@@ -2870,10 +2917,11 @@ good.
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
-  swiftc), `PointerPresence` (the Mac's pointer: what the one pointer sprite
-  shows, a kind 26's freshness, the network queue's feed with a hand-over's
-  carry-over, the portrait pad's cursor; pure, `Tests/checks/pointer-presence`;
-  pbxproj A301/F301; nothing calls it yet).
+  swiftc), `PointerPresence` (the rules of the one pointer sprite: the Mac's
+  arrow while the Mac or another device moved it last, this device's own only
+  for the portrait trackpad; a kind 26's freshness; the network queue's feed
+  with a hand-over's carry-over; the key row keeping what shows; the portrait
+  pad's cursor; pure, `Tests/checks/pointer-presence`; pbxproj A301/F301).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -3078,7 +3126,10 @@ pairing|remotedial|remotefail|camera|externalpair` (`-SillRemoteFailure
 vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|
 remoteoff` picks remotefail's words), the settings cases `remote|remoteinternet|
 remoteslow|remotepair|remoteoff|noremote`, `-SillSettingsEnd 1` (the panel
-scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay), and in
+scrolled to its end), `-SillScanOverlay 1` (Pair This iPad…'s overlay),
+`-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
+of docs/pointer-visibility-plan.md's states over the mock's frame, which it
+draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip), and in
 the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
 at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
 `-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
@@ -3108,7 +3159,12 @@ panel's route word change at the hand-over; the console's "discovery: …" and
 '<spec>'` (with `-SillConnect`: the session's Mac listed as a network row whose
 cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say
-what happened). A fake screen wider than the
+what happened), `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`: input
+with no finger, t seconds after the session's first window list: `down`, `pad
+DX,DY`, `lift` and `click` on the portrait pad, `tap X,Y` on the stream at a
+frame fraction, `key USAGE` a hardware key, `row USAGE` a key of the portrait
+key row; the console's "input script: …" and "pointer: …" lines say what
+happened). A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot.
 

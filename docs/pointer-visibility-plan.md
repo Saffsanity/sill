@@ -1,24 +1,26 @@
 # The Mac's pointer on the device — the plan
 
-## Status and hand-off (2026-09-27 01:10)
+## Status and hand-off (2026-09-27 03:00)
 
 Branch `pointer-visibility` (worktree `/Users/noah/Downloads/winstream-pointer`, from main at
-8b0d418, not merged with main since):
+8b0d418, merged with main at cf05a78 in b6f57d0):
 - 7e3de05, kind 26 and the host's pure rules (`MacPointer`, `PointerControl`, with
   `Tests/checks/pointer-control`); d75b827, this plan as its critique left it; 9ec9673, the
   device's pure parts (`PointerPresence.swift`, SessionLink's input count, with
-  `Tests/checks/pointer-presence` and the fence check's count; nothing calls them yet); a18acd6,
-  those checks listed and in CI.
+  `Tests/checks/pointer-presence` and the fence check's count); a18acd6, those checks listed and in
+  CI.
 - 49abee1, the rest of the host as an interrupted build left it on 2026-09-26 (Noah stopped the
-  workflow at 99 % of the week's usage), then this step, the host's finish, in two runs (the first
-  was interrupted at about 00:22 before it committed; the second checked its work again and
-  committed it): the host read against §4–§6, the test client's `--input`, the pointer-watch check
-  listed and in CI's mutants, and every host gate run ("Results: the host", at the end). Nothing in
-  the host was missing; no host source changed in this step.
-- Next: (2) the iOS half, §7 (the Mac's pointer shown while the Mac or another device moves it,
-  the device's own only on the portrait trackpad), gates H1 (iOS), H3 (presence, SessionLink) and
-  S1–S5; (3) merge main (cf05a78 or later: keep both Current step entries in CLAUDE.md, union
-  ci.yml's lists), the review of §11 step 5, and the PR with P1–P12 for Noah.
+  workflow at 99 % of the week's usage), then the host's finish, in two runs (the first was
+  interrupted at about 00:22 before it committed; the second checked its work again and committed
+  it: f8f08f6, 9e6996b, 4a08fd3): the host read against §4–§6, the test client's `--input`, the
+  pointer-watch check listed and in CI's mutants, and every host gate run ("Results: the host").
+  Nothing in the host was missing; no host source changed in that step.
+- The device (§7): 0a5a394, two more pure rules (the key row, a new frame); 67a78b1, the device's
+  half wired up, with the harness; b6f57d0, main at cf05a78 merged in (one merge commit); then this
+  plan's "Results: the device" and CLAUDE.md. Everything was run again on the merge.
+- Next: the review of §11 step 5 (three lenses: the control rule and its races on both ends, the
+  host's threads and cost, the device UI in all four layouts and through rotation), then the PR
+  with P1–P12 for Noah. Nothing is pushed.
 
 Noah's authorization: "When the Mac is controlling the mouse pointer, it should show the real mouse
 pointer… When Sill is controlling the Mac, continue to hide the real pointer and only render the
@@ -1344,3 +1346,115 @@ beside Sill.app: the real pointer's path is covered by the pointer-watch check's
 H10's harness, which read the real location and a real window's bounds. The synthetic hosts listen
 on every interface, as SillHost always has (nothing binds it to loopback); they advertise nothing,
 only loopback clients reached them, and the Application Firewall's list gained no entry.
+
+---
+
+## Results: the device (2026-09-27)
+
+§7 as built (0a5a394, 67a78b1), then main at cf05a78 merged in (b6f57d0) and everything run again.
+The device shows the Mac's pointer, in the Mac's shape, wherever kind 26 says it is while the Mac
+or another device moved it last, in every layout; its own only for the portrait trackpad; none for
+a finger, typing, a key, the iPad's own pointer or the Pencil (Q2's default); and nothing while
+nothing streams.
+
+Built as §7 says, but for these, each found while wiring it up:
+- **The key row keeps what shows.** §7.5 says the portrait key row does not hide the arrow, and the
+  table's rows gave it no rule: a key hands the pointer to the device, and after the Mac had taken
+  it the sprite then went back to the pad's cursor from before, where the pointer no longer was.
+  `StreamClient.sendFromKeyRow` asks `PointerPresence.ownForKeyRow` (pure, checked): while the Mac or
+  another device has the pointer, the arrow stays where it shows, now the device's own (the
+  trackpad's, portrait's only pointer), and none while the Mac's is off the stream.
+- **A two-finger scroll on the pad** catches up with the anchor and shows the pad's arrow where it
+  scrolls, as a move does; a click, a drag and each scroll step catch up first too (§7.5 named the
+  moves, the scroll positions and the drag).
+- **One look at the feed.** The pad reads the anchor and the takeovers together
+  (`StreamClient.pointerFeedState`, one lock) instead of `pointerAnchor` and `pointerTakeovers`;
+  `localPointer` is gone: `presence.own`, written only by `setOwnPointer`.
+- **A new frame** re-centres the device's own pointer by `PointerPresence.recentresOnNewFrame`
+  (pure, checked): only while it shows under the device's control.
+- **Fingers** are counted by a recognizer that never recognizes (`FingerCounter`): the pad's pan
+  and taps cancel the view's own touches as they recognize, after which the view never hears a
+  finger lift. Only Q1's flip reads the count.
+- **Resets.** The feed is reset at a new dial and at a remote dial's winner as well as at the
+  session's end, on main and again on the network queue, behind anything of the old connection
+  still being handled there.
+- **The harness.** `-SillPointer` draws the mock's frame as a dim rectangle, so a photo shows what
+  the sprite points into (the mock never streams). `-SillInputScript` gained `down` (a finger lands
+  on the pad), `click` (a tap on the pad) and `row USAGE` (a key of the key row). The DEBUG console's
+  "the Mac has it" also prints for a session's first report.
+
+Checked, the hardware encoder never used (every host synthetic, on the software encoder, killed by
+PID, none left running) and nothing posted to the Mac (every input to a synthetic host, which only
+counts it); the real pointer read before and after the host gates, the same point:
+- Builds: iOS Debug and Release for the generic simulator, arm64, unsigned (only the old
+  `StreamClient` capture warning), before and after the merge; `swift build -c release`.
+- Pure checks: pointer-presence 157 (141 and 16 new), 41 of 41 mutants (36 and 5 new: the key row
+  hiding the Mac's arrow, leaving the pad's older cursor, keeping the Mac's arrow off the stream; a
+  new frame re-centring under the Mac's control, or a hidden pointer). After the merge
+  `Tests/checks/run-all.sh`, all 18, and `--mutants`, every one of the 452 caught (78 minutes beside
+  other sessions' jobs): among them the fence check, main's event-driven one with this branch's
+  count on top, 15 modes and 32 of 32 (main's 20 and the count's 12), pointer-control 30 of 30 and
+  pointer-watch 33 of 33.
+- S1, the photo matrix (a simulator of its own, "Sill pointer", an iPad Pro 13" whose screen draws
+  every harness size): `mac@0.40,0.30`, `device@0.62,0.55`, `hidden`, `pencil@0.50,0.50`, and the
+  Pencil again with `-SillPencilPointer 1`, at the Duo's four sizes, an iPhone 17 Pro Max's two
+  (440x956, 956x440) and an iPad mini's two (744x1133, 1133x744): 40 photos, each measured (the
+  frame's rectangle and the sprite's bounding box in the screenshot): the Mac's arrow in all eight
+  layouts, its tip within 1 pt of 40 %, 30 % of the frame; the device's only in the four portrait
+  ones, within 1 pt of 62 %, 55 %; `hidden` nowhere; the Pencil's nowhere, and with the flip in all
+  eight. After the merge the 40 again, pixel for pixel the same inside the harness's frame (16 files
+  differ only in the iPad's own home indicator, outside it).
+- Live, the app in the harness (`-SillLive 1 -SillConnect`) against a synthetic host with the
+  scripted pointer, `sillclient.py --pointer` as a second device, input from `-SillInputScript`, and
+  a screenshot taken about 0.2 s after it is asked for (measured: an arrow walking 0.009 of the
+  frame every 0.1 s):
+  - S2, portrait (710x1000), steps at 1, 2, 3, 5.5 and 9 s: the Mac's arrow at the first three
+    steps; a stroke from 4.0 to 4.5 s, the finger resting until 6.5 and moving again to 7.0: the
+    second device's first position after 4.0 s 0.0037 from the 3 s step's (the stroke started where
+    the Mac's arrow was); at 6.0 s the arrow at the 5.5 s step (the Mac took it under the resting
+    finger); the first position after 6.5 s 0.0037 from the 5.5 s step's (the pad re-seeded, no
+    jump back); the pad's own arrow at 4.8 and 7.6 s where the stroke took it; the 9 s step jumps the
+    arrow there.
+  - S3, landscape (1000x710): the arrow at each step; a tap on the stream half-way between two steps
+    hides it (the photo taken as the tap's console line comes); the next step, past the settle,
+    shows it again (the Mac's line 0.91–0.93 s after the tap's). The steps are 2 s apart, not the
+    plan's 1 s: under load (other sessions' jobs) a screenshot took its frame up to 0.7 s after it
+    was asked for, and with 0.5 s between a tap and the next step the photo showed that step.
+  - S4, through `sillrelay.py --delay-ms 150`, a path moving every 0.05 s, five taps 2 s apart:
+    "ignored a position the Mac sent before reading this device's input" once a second at each
+    (seen 0 sent 3, seen 3 sent 6…), and the Mac's arrow back 0.42–0.45 s after each tap, never
+    within 0.3 s.
+  - S5, landscape, steps at 0.5 and 12 s, a tap at 1.5 s: the arrow at connect (Q6), none after
+    the tap, and none at any move nor 1 and 3 s after it, the console printing "carried over" and
+    "ignored the Mac restating this device's own position" at each, and no "the Mac has it" until
+    the 12 s step, whose arrow shows: across the move from AWDL (`-SillMoveTest 1`, fenced), a move
+    to the cable (fenced) and then to Wi-Fi when the cable goes (adopt), and a move to the cable then
+    its connection closed and made again over it (adopt, the old connection gone), the last two by
+    `-SillPathTest` on this Mac's own Wi-Fi and cable addresses, which the kernel delivers here.
+  - S6, new (portrait): after the Mac took the pointer, `esc` on the key row leaves the arrow at the
+    Mac's position (not at the pad's older cursor); a hardware `esc` hides it; the pad's next stroke
+    starts from the Mac's position.
+  - S7, new (§3.4's second row): a host that sends no kind 26 (a synthetic host without the
+    scripted pointer, as every host before this change): no arrow at connect; a portrait stroke
+    shows the pad's own arrow, from the pad's own cursor (there is no anchor); a tap hides it; no
+    "the Mac has it" line, and no kind 26 at the second device either.
+  Before the merge S2–S6, 50 of 50; on the merge S2–S7 in one run, 54 of 54 (a first run on the
+  merge, at load averages of 150–330 on 12 cores from other sessions' jobs and the mutants, failed
+  only S3's photos, which came seconds late and showed later steps while the device's console had
+  the right lines at the right times: hence its 2 s steps).
+- The host's gates again on the merge, every host synthetic: H4 (four lines 0.48–0.51 s apart,
+  `seen=0`), H5a (nothing after the device's move, `in.dry 1`), H5b (the next report 0.308 s after
+  the move, `seen=1`), H6 (0.067 s after a key, `seen=2`), H7 (the watcher hears the driver's move),
+  H8 (120 lines over 2.0 s, at most 61 in any second, 17 ms apart, none after the path stopped), H9
+  (no `in.pointer`, `in.scroll`, `in.text` or `in.key` in any second; the real pointer read before
+  and after, the same point), H13 (main's `sillclient.py`, which knows no kind 26, runs through
+  against a host sending it and lists 26 by number), H12 (the bare app's 100 previews from main and
+  from the merge, rendered from one path: identical).
+
+Not run: anything on a device (P1–P12); the Pencil's hover (the simulator has none; S1's flip photo
+covers the state); rotation live (the harness draws fixed sizes: the pure check and the photos per
+layout cover it); Q1's timer live (the pure check only; it is off by default); H2 after the merge,
+which uses the hardware encoder: a device streamed from Sill.app throughout (main's
+`Scripts/encoder-check/no-device.sh` said so at every look). The synthetic hosts listen on every
+interface, as SillHost always has; they advertise nothing and only loopback clients, and the
+simulator on this Mac through its own link-local addresses, reached them.
