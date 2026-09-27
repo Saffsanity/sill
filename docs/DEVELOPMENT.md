@@ -179,6 +179,17 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
 
+On a phone held upright (and on the Duo's outer display, or an iPad window
+narrower than 600 pt) the picture sits in a fixed 16:10 pane at the top: a
+16:9 window gets black bars above and below it, and nothing under it moves.
+Under it come Apps, Aa, Keyboard, Desktop and Settings, as wide as the row;
+the window thumbnails; esc, tab, ctrl, opt, cmd and shift; and the trackpad
+in the rest. The Keyboard button stays above the software keyboard, so it
+always takes it down. There are no arrow keys or Spotlight key there:
+Spotlight is cmd, then space on the keyboard. The trackpad counts a stroke
+down it as far as the same stroke across a 16:10 picture, however tall it
+is. On its side, and on an iPad, everything is as it was.
+
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
@@ -393,8 +404,13 @@ Debug builds of the iOS app take launch arguments that set up a screen in the
 simulator:
 
 - `-SillLayout 1000x710` or `710x1000` (the inner display of iPhone Duo, in
-  landscape and portrait), `500x710` or `710x500` (its outer display): a fake
-  screen of that size.
+  landscape and portrait), `500x710` or `710x500` (its outer display), or a
+  phone's stream screen (its screen less the status bar: `402x812` for an
+  iPhone 18 Pro upright, `440x894` for a Pro Max): a fake screen of that
+  size. One larger than the simulator is drawn scaled down to fit, laid out
+  at its own size. One that reaches into the simulator's own safe area (a
+  phone's whole size on that phone) runs its trackpad past its bottom edge:
+  photograph it on a larger simulator, or in the normal app.
 - `-SillLive 1`: a real client inside that frame. Otherwise the Mac is a mock,
   and `-SillActive none|desktop|<windowID>` picks what it streams.
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
@@ -402,6 +418,18 @@ simulator:
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
 - `-SillConnect 127.0.0.1:PORT`: connect by address, also in the normal app.
+  There, and under `-SillLive 1`, `-SillDrawer 1`, `-SillSettings 1` and
+  `-SillScaleOpen 1` open theirs 1.5 s after the stream starts.
+- `-SillKeyboard 1` brings the software keyboard up in a live session (in the
+  mock it only lights the button), and `-SillKeyboardToggle 5,8.5` toggles it
+  at those seconds as the Keyboard button does. A simulator shows it only
+  with no hardware keyboard connected to it.
+- `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: the portrait
+  key row taps cmd, esc, shift and ctrl and the trackpad strokes, taps and
+  scrolls, through their own code, once. A synthetic host posts what it gets
+  on this Mac, so put a relay that drops input in front of it.
+- The console prints `viewport: 386×241 pt, scale none, 60 fps` for each
+  viewport the stream screen sends the Mac.
 
 ## Measuring latency
 
