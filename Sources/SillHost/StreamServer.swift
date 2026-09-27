@@ -73,13 +73,17 @@ final class StreamServer {
         /// When a message was last handed to it (remote clients skip a tick right after one).
         var lastSentAt: TimeInterval = 0
         /// Remote clients: bytes handed to the connection that it has not taken yet
-        /// (`.contentProcessed`), every message `inflight` counts; and the last keyframe among
-        /// them, while it is still being taken (its sequence number and size).
+        /// (`.contentProcessed`), every message `inflight` counts; and the keyframes among them it
+        /// is still taking (sequence number and size, oldest first), with their bytes. Usually
+        /// none or one; two when a keyframe comes while another is still being taken: a restarted
+        /// stream's first (a pick, a rotation, a settings change), or the next one on a link that
+        /// takes a keyframe longer than the time between two.
         var pendingBytes = 0
-        var keyframeInFlight: (seq: Int, bytes: Int)?
+        var keyframesInFlight: [(seq: Int, bytes: Int)] = []
+        var keyframeBytesInFlight = 0
         var keyframeSeq = 0
-        /// Remote clients: the smallest backlog since the last keyframe was taken, which starts at
-        /// what that keyframe left behind it (the frames that queued while it was taken).
+        /// Remote clients: the smallest backlog since the keyframes it was taking were all taken,
+        /// which starts at what they left behind them (the frames that queued while they were).
         var backlogFloor = 0
         /// The device gate is reading its first message (floor above "0"): not registered yet.
         var judging = false
@@ -1163,7 +1167,10 @@ final class StreamServer {
     /// - Behind a keyframe the connection is still taking, frames go out up to `remoteHoldCap`:
     ///   every delta references that keyframe, so dropping them for its sake wasted it and looped
     ///   (drop, a keyframe 2 s later, the next delta dropped behind it: 2026-09-25, 0–3 fps and
-    ///   rtt up to 12 s at 150 Mbps on a phone's hotspot).
+    ///   rtt up to 12 s at 150 Mbps on a phone's hotspot). What counts against the cap is what
+    ///   waits beyond every keyframe still being taken: a restarted stream's first keyframe goes
+    ///   out at once, behind the old stream's if that one is still crossing, and its deltas
+    ///   reference it alone.
     /// - Otherwise a frame is dropped only when the backlog exceeds both `remoteBacklogBudget` and
     ///   what the last keyframe left behind it (`backlogFloor`, following the backlog down) plus
     ///   `remoteBacklogSlack`: a backlog that shrinks is a link catching up, one that grows is a
@@ -1203,8 +1210,8 @@ final class StreamServer {
             client.awaitingFirstKeyframe = false
         } else {
             let tooMuch: Bool
-            if let key = client.keyframeInFlight {
-                tooMuch = client.pendingBytes - key.bytes > Self.remoteHoldCap
+            if !client.keyframesInFlight.isEmpty {
+                tooMuch = client.pendingBytes - client.keyframeBytesInFlight > Self.remoteHoldCap
             } else {
                 tooMuch = client.pendingBytes > max(Self.remoteBacklogBudget, client.backlogFloor + Self.remoteBacklogSlack)
             }
@@ -1282,7 +1289,8 @@ final class StreamServer {
             if isKeyframe {
                 client.keyframeSeq += 1
                 keyframeSeq = client.keyframeSeq
-                client.keyframeInFlight = (client.keyframeSeq, data.count)
+                client.keyframesInFlight.append((client.keyframeSeq, data.count))
+                client.keyframeBytesInFlight += data.count
             }
         }
         if isFrame {
@@ -1294,9 +1302,10 @@ final class StreamServer {
             client.inflight -= 1
             if remote {
                 client.pendingBytes -= data.count
-                if let seq = keyframeSeq, client.keyframeInFlight?.seq == seq {
-                    client.keyframeInFlight = nil
-                    client.backlogFloor = client.pendingBytes      // what it left behind it
+                if let seq = keyframeSeq, let i = client.keyframesInFlight.firstIndex(where: { $0.seq == seq }) {
+                    client.keyframeBytesInFlight -= client.keyframesInFlight.remove(at: i).bytes
+                    // The last of them taken: what they left behind them.
+                    if client.keyframesInFlight.isEmpty { client.backlogFloor = client.pendingBytes }
                 }
             }
             if isFrame {
