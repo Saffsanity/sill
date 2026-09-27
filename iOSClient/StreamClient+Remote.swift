@@ -38,11 +38,13 @@ enum PairingProblem: Equatable {
     case localNetwork(String)
     case notALink
     case noKey(String)
-    /// At home (docs/home-pairing-plan.md §7.7): the Mac stopped its window after five wrong codes;
-    /// the code was used or expired; the Mac could not prove it knows the code; the row did not
+    /// At home (docs/home-pairing-plan.md §7.7, DiscoveryPolicy.homeRefusal): the Mac stopped its
+    /// window after five wrong codes; the code expired; the code no longer works (the Mac's Cancel,
+    /// or another device used it); the Mac could not prove it knows the code; the row did not
     /// answer the proof.
     case homeStopped(String)
-    case homeUsed(String)
+    case homeExpired(String)
+    case homeClosed(String)
     case homeProofFailed(String)
     case homeNoAnswer(String)
     /// Pair This iPad… over a stream at home, where there is no row to tap: the Mac could not prove
@@ -56,7 +58,7 @@ enum PairingProblem: Equatable {
     var field: Field {
         switch self {
         case .address, .zone, .nothingAnswered, .notSill, .localNetwork: return .address
-        case .codeLength, .codeTypo, .wrongCode, .expired, .stopped, .homeStopped, .homeUsed: return .code
+        case .codeLength, .codeTypo, .wrongCode, .expired, .stopped, .homeStopped, .homeExpired, .homeClosed: return .code
         case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer, .proofFailedOverStream, .noAnswerOverStream,
              .macSaid:
             return .card
@@ -84,7 +86,8 @@ enum PairingProblem: Equatable {
         case .notALink: return "That’s not a Sill code."
         case .noKey(let reason): return "This \(StreamClient.deviceWord) couldn’t make its key (\(reason))."
         case .homeStopped(let mac): return DiscoveryPolicy.HomeCopy.stopped(mac: mac)
-        case .homeUsed(let mac): return DiscoveryPolicy.HomeCopy.usedOrExpired(mac: mac)
+        case .homeExpired(let mac): return DiscoveryPolicy.HomeCopy.expired(mac: mac)
+        case .homeClosed(let mac): return DiscoveryPolicy.HomeCopy.closed(mac: mac)
         case .homeProofFailed(let mac): return DiscoveryPolicy.HomeCopy.proofFailed(mac: mac)
         case .homeNoAnswer(let mac): return DiscoveryPolicy.HomeCopy.noAnswer(mac: mac)
         case .proofFailedOverStream(let mac): return DiscoveryPolicy.HomeCopy.proofFailedOverStream(mac: mac)

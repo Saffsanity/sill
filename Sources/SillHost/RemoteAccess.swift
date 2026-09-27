@@ -492,6 +492,10 @@ package final class RemoteAccess {
             guard attempt.door == .home else { return PairResult(ok: false, reason: PairResult.closed) }
             return ask(attempt, identity)
         }
+        if attempt.request.method == PairRequest.cancel {
+            if attempt.door == .home { withdraw(asker: attempt.deviceFingerprint, name: Self.displayName(attempt.request), display: attempt.display) }
+            return PairResult(ok: false, reason: PairResult.closed)
+        }
         if attempt.door == .remote, let w = window.current, !w.forRemote {
             return PairResult(ok: false, reason: PairResult.closed)
         }
@@ -534,14 +538,22 @@ package final class RemoteAccess {
             if wasOpen && reason == .stopped {
                 print("Pairing stopped after \(PairingWindow.maxFailures) wrong codes.")
                 windowClosed(.stopped, reopen: true)
-                return PairResult(ok: false, reason: PairResult.stopped)
+            } else if wasOpen && reason == .expired {
+                windowClosed(.expired, reopen: true)
             }
-            if reason == .expired {
-                if wasOpen { windowClosed(.expired, reopen: true) }
-                return PairResult(ok: false, reason: PairResult.expired)
-            }
-            return PairResult(ok: false, reason: PairResult.closed)
+            return PairResult(ok: false, reason: PairingWindow.closedReason(reason, stoppedByThisProof: wasOpen))
         }
+    }
+
+    /// Kind 19 "cancel" at the home door: the device no longer needs the code its ask put up. The
+    /// window closes, withdrawn (its asker is not kept quiet), only when this very key's ask opened
+    /// it and it is still the home door's alone: a window the Mac's user opened, or opened over it,
+    /// stays theirs. Whatever happened, the answer is `closed` (the caller's).
+    private func withdraw(asker: Data, name: String, display: String) {
+        guard let w = window.current, !w.forRemote, windowAsk?.fingerprint == asker else { return }
+        window.close(.withdrawn)
+        print("Pairing: \(name) at \(display) no longer needs its code; the window closed.")
+        windowClosed(.withdrawn, reopen: true)
     }
 
     // MARK: The ask (docs/home-pairing-plan.md §4.2, §4.6)
@@ -605,6 +617,9 @@ package final class RemoteAccess {
                             method: PairResult.cable)
         let fingerprint = Base64URL.encode(a.deviceFingerprint)
         let deviceID = cable.serial.map(CableLink.deviceID)
+        // A window this very key's ask opened earlier (over Wi-Fi, say) has no one to show its code
+        // to now: it goes, withdrawn, so it neither stays up for its 5 minutes nor quiets anyone.
+        defer { closeWindowOpened(by: a.deviceFingerprint) }
         if let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) {
             if paired[i].cableDevice == nil, let deviceID {
                 var next = paired
@@ -628,6 +643,14 @@ package final class RemoteAccess {
         print("Paired \(device.displayName) (key \(RemoteIdentity.shortName(a.deviceFingerprint))…) over the USB cable (\(a.display)).")
         onCablePaired?(device.displayName, fingerprint)
         return ok
+    }
+
+    /// A device paired over the cable: the window its own ask opened, if it is still up and the home
+    /// door's alone, closes withdrawn (no line: the pairing's own says it all).
+    private func closeWindowOpened(by key: Data) {
+        guard let w = window.current, !w.forRemote, windowAsk?.fingerprint == key else { return }
+        window.close(.withdrawn)
+        windowClosed(.withdrawn, reopen: true)
     }
 
     /// One line per ask (§4.11), at most one a minute per source address: a stranger asking in a
@@ -697,9 +720,10 @@ package final class RemoteAccess {
         Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
     }
 
-    /// After a window closed: the ask limits (a device-opened window closed unused quiets its
-    /// asker), the snapshot, the door (it stops if Remote Access is off), the status. The CLI then
-    /// opens a fresh one after a use or an expiry.
+    /// After a window closed: the ask limits (a device-opened window cancelled on the Mac or stopped
+    /// quiets its asker; one that ran out or was withdrawn does not), the snapshot, the door (it
+    /// stops if Remote Access is off), the status. The CLI then opens a fresh one after a use, an
+    /// expiry or a withdrawal.
     private func windowClosed(_ reason: PairingWindow.CloseReason, reopen: Bool) {
         expiryTask?.cancel()
         expiryTask = nil
@@ -716,14 +740,14 @@ package final class RemoteAccess {
         case .used: break                       // pairingState already names the device
         case .stopped: pairingState = .stopped
         case .expired: pairingState = .expired
-        case .cancelled, .none: pairingState = .closed
+        case .cancelled, .withdrawn, .none: pairingState = .closed
         }
         publishTrust()
         updateDoor()
         updateWatchers()
         publish()
         broadcastIfChanged()
-        if reopen, reopensPairing, reason == .used || reason == .expired {
+        if reopen, reopensPairing, reason == .used || reason == .expired || reason == .withdrawn {
             openPairing(requestedBy: nil)
         }
     }

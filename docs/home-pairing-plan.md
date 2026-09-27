@@ -131,10 +131,14 @@ today's plain open door unless `--pairing` is given, so its output stays byte fo
 - One window at a time. A request while one is open is told the code is showing.
 - Never while the Mac is locked, or while another user's session is on the console: the device is
   told to unlock the Mac.
-- When the Mac's user closes a window a device opened, lets it expire, or it stops after five
-  wrong codes, that device (its key, and its address) opens no other for 10 minutes. At most 3
-  device-opened windows in any 10 minutes. Past either limit the device is told to use the Mac's
-  menu, and the menu says "iPad Wants to Pair".
+- When the Mac's user closes a window a device opened, or it stops after five wrong codes, that
+  device (its key, and its address) opens no other for 10 minutes. At most 3 device-opened windows
+  in any 10 minutes. Past either limit the device is told to use the Mac's menu, and the menu says
+  "iPad Wants to Pair". (As first planned, a window that simply ran out quieted its device too; the
+  security review, 2026-09-27, found the device's card promising "Tap Mac mini for a new one" then,
+  while the Mac refused that tap for 10 minutes. A window that runs out, or that its device withdraws
+  with its own Cancel, kind 19 "cancel", or by pairing over the cable, quiets nobody now; the 3 in
+  10 minutes still bound how often one can come up.)
 - The window comes to the front without taking the keyboard (`orderFrontRegardless`, no app
   activation), so a request can never swallow a password being typed in another app.
 - Its code is the one pairing code there is: 12 digits, 5 tries, 5 minutes, single use. A window a
@@ -353,6 +357,10 @@ their string values grow, and every new field is optional.
   up; otherwise its handshake refuses any pairing connection, as today); PairingWindow never sees
   it. An older host never receives one:
   the device sends it only to a Mac whose TXT record carries `p`.
+- **Kind 19 `PairRequest.method`** also gains `"cancel"` (the security review, 2026-09-27): the
+  device's Cancel after the Mac answered its ask `shown`, "I no longer need that code". The window
+  that ask opened closes without keeping the device quiet (§4.6); the answer is `closed` whatever
+  happened, with no try counted, and the remote door answers it `closed` too. Its `proof` is `""`.
 - **Kind 19 `PairRequest.cable`**, a new optional field: `true` only in an `ask` sent over a
   connection the device itself judged to be the USB cable to the Mac (`DiscoveryPolicy.onCable`,
   §7.5), absent otherwise. The Mac pairs by itself only when its own rule agrees as well (§4.3), so
@@ -599,8 +607,8 @@ enum DoorPolicy {
    step (What stays open). The Simulator pairs with a window the Mac's user opens (Pair iPhone or
    iPad…). TEST ONLY `SILL_TEST_ASK_FROM_THIS_MAC=1`, on a test host (§4.3), skips this step and
    its menu rule, so the gates' local clients (H6–H8) open windows and light the menu;
-5. this device's key or address is quiet (its last window was closed, expired or stopped within 10
-   minutes)
+5. this device's key or address is quiet (its last window was cancelled on the Mac or stopped
+   within 10 minutes; one that ran out or that it withdrew quiets nobody)
    → `openOnMac("quiet")`; 3 device-opened windows in the last 10 minutes → `openOnMac("often")`
    (the labels are the log's; the device only sees `openOnMac`);
 6. otherwise → `shown(opened: true)`: a window opens for it.
@@ -790,8 +798,16 @@ enum CableLink {
   again (`again: true`) once the addresses are known, so a device away can pair with it. Today's
   `openPairing` only offers the open window again, which would leave the remote door refusing its
   proofs and its QR code without addresses. A device's ask never takes `forRemote` away. When a
-  device-opened window closes cancelled, expired or stopped (five wrong codes), `AskLimits` makes
-  that key and address quiet for 10 minutes.
+  device-opened window closes cancelled on the Mac or stopped (five wrong codes), `AskLimits` makes
+  that key and address quiet for 10 minutes; when it runs out, or its device withdraws it, nobody.
+- **Kind 19 "cancel"** (the security review, 2026-09-27): the device's Cancel on the home card, or a
+  new tap elsewhere, after the Mac answered its ask "shown", tells the Mac on a `sill-pair/1`
+  connection pinned to the key that answered. The window closes, withdrawn (no quiet, "Pairing:
+  ‹name› at ‹address› no longer needs its code; the window closed."), only when that very key's ask
+  opened it and it is still the home door's alone: a window the Mac's user opened, or opened over
+  it, stays. Always answered `closed`, never judged by the window. A device that pairs over the
+  cable withdraws its own device-opened window the same way (no line), so its code does not stay
+  up for its 5 minutes beside the cable notice.
 - **Kind 21** (`pairingWanted`, :244) opens a device-opened window too (a Pair This iPad… from an
   unpaired session while Require pairing is off), through the ask rule's steps 1 and 3–6 and
   `AskLimits` (never step 2: a session is no pairing connection).
@@ -817,7 +833,7 @@ enum CableLink {
 - **`AskLimits`** (new, pure, same file, checked with swiftc):
   ```swift
   struct AskLimits {
-      static let quietFor: Double = 600      // after a device-opened window is closed, expires or stops unused
+      static let quietFor: Double = 600      // after the Mac's user cancels a device-opened window, or it stops
       static let span: Double = 600          // at most `maxWindows` device-opened windows in this span
       static let maxWindows = 3
       func quiet(fingerprint: Data, source: String, now: Double) -> Bool
@@ -1264,7 +1280,7 @@ New attention items (first group, orange):
 | Viewfinder | Caption "Point at the code on Mac mini"; spoken "Camera. Point it at the code on Mac mini." |
 | Typed | "Type the code Mac mini shows." Field "Code", placeholder "0000 0000 0000", the remote path's code keyboard; [Pair] |
 | Links | "Enter Code Instead" / "Scan Code Instead" · "Cancel" |
-| Errors, under the field | "A code has 12 digits." · "That code has a typo. Check it against your Mac." · "That code didn’t work. Check the code on your Mac. 4 tries left." · "Mac mini stopped pairing after too many wrong codes. Tap Mac mini for a new code." · "That code was used or has expired. Tap Mac mini for a new one." · "Pairing didn’t finish: Mac mini couldn’t show it knows the code. Tap it to try again." |
+| Errors, under the field | "A code has 12 digits." · "That code has a typo. Check it against your Mac." · "That code didn’t work. Check the code on your Mac. 4 tries left." · "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then tap Mac mini again." · "That code expired. Tap Mac mini for a new one." · "That code no longer works. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then tap Mac mini again." · "Pairing didn’t finish: Mac mini couldn’t show it knows the code. Tap it to try again." (the security review, 2026-09-27: after a stop, or a code closed by the Mac's Cancel, the Mac keeps the device quiet for 10 minutes, so the words send the person to its menu first; "Tap … for a new one" only after an expiry, which quiets nobody; a reason the device does not know shows the Mac's own `message`) |
 
 As built (step 5): the row a tap's ask is waiting on is lit (the app drawer's highlight) while
 "Pairing with…" shows; Cancel, Esc or the escape gesture stops the ask or the proof and puts the idle
@@ -1367,7 +1383,7 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
 |---|---|
 | Home door: accept → admission (TLS, plus a pairing connection's one kind 19) | 10 s |
 | Home door: pending connections | 8 in all, 2 per source; 5 of the door's own refusals in 60 s → refused for 300 s (an older Sill's plain tries do not count, §4.4); a paired key clears its source |
-| Device-opened pairing windows | one at a time; at most 3 in any 10 minutes; a device whose window was cancelled, expired or stopped opens none for 10 minutes (by key and by address) |
+| Device-opened pairing windows | one at a time; at most 3 in any 10 minutes; a device whose window was cancelled on the Mac or stopped opens none for 10 minutes (by key and by address); a window that ran out, or that its device withdrew, quiets nobody |
 | Pairing window | 300 s, 5 wrong proofs, spacing 1/2/4/8 s, 5 s per source, single use (as today) |
 | The ask: kind 20 on the device | within 15 s |
 | The cable: keys paired by themselves per iPhone or iPad (a hash of its USB serial number) | 1 while that key stays paired (the same key may pair again; Remove frees the device) |

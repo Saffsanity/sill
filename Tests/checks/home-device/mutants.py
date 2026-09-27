@@ -115,5 +115,16 @@ M = [
      "static func noAnswerOverStream(mac: String) -> String { noAnswer(mac: mac) }"),
     ("copy: over a stream, the card's proof words", F, "            \"Pairing didn\\u{2019}t finish: \\(mac) couldn\\u{2019}t show it knows the code.\"\n",
      "            proofFailed(mac: mac)\n"),
+    ("refusal: stopped read as closed", F, "        case \"stopped\"?: return .stopped\n", ""),
+    ("refusal: expired read as closed", F, "        case \"expired\"?: return .expired\n", ""),
+    ("refusal: the tries left can go below 0", F, "        case \"code\"?: return .wrongCode(triesLeft: max(0, triesLeft ?? 0))",
+     "        case \"code\"?: return .wrongCode(triesLeft: triesLeft ?? 0)"),
+    ("refusal: an unknown reason read as expired (a tap, not the menu)", F, "        default: return .closed\n        }\n    }\n\n    /// Where a pairing link goes",
+     "        default: return .expired\n        }\n    }\n\n    /// Where a pairing link goes"),
+    ("copy: a closed code says tap for a new one (as before the review)", F,
+     "            \"That code no longer works. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"That code no longer works. Tap \\(mac) for a new one.\""),
+    ("copy: an expired code sends to the menu", F, "static func expired(mac: String) -> String { \"That code expired. Tap \\(mac) for a new one.\" }",
+     "static func expired(mac: String) -> String { \"That code expired. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\" }"),
 ]
 sys.exit(0 if module.mutate("home-device", M, sys.argv[1]) else 1)

@@ -6,6 +6,11 @@ F = "Sources/SillHost/DoorPolicy.swift"
 M = [
     ("kind 19 of a later generation judged as this one's", F, "        guard version == PairRequest.version else { return .closed }\n", ""),
     ("kind 19: only a higher generation is closed", F, "        guard version == PairRequest.version else { return .closed }", "        guard version <= PairRequest.version else { return .closed }"),
+    ("kind 19: cancel goes to the window (a wrong code)", F, "        if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }\n", ""),
+    ("kind 19: cancel withdraws at the remote door too", F, "if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }",
+     "if method == PairRequest.cancel { return .withdraw }"),
+    ("kind 19: a later generation's cancel withdraws", F, "        guard version == PairRequest.version else { return .closed }\n        if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }",
+     "        if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }\n        guard version == PairRequest.version else { return .closed }"),
     ("remote door ignores Require pairing too", F, "return door == .home ? t.paired || !t.requirePairing : t.paired", "return t.paired || !t.requirePairing"),
     ("home sill/1 needs a paired key even with Require pairing off", F, "return door == .home ? t.paired || !t.requirePairing : t.paired", "return t.paired"),
     ("remote pairing takes any window, as before this change", F, "return door == .home ? true : t.remotePairingOpen", "return door == .home ? true : t.pairingOpen"),

@@ -196,6 +196,14 @@ check("kind 19 at the remote door: ask → closed, never the window and never th
 check("kind 19 at the remote door: qr, code and unknown methods → the window, as before",
       ["qr", "code", "icloud", "", "ASK"].allSatisfy { D.pairing(.remote, method: $0, version: 1) == .window })
 check("PairRequest.ask is the method the door looks for", PairRequest.ask == "ask")
+// The device's own Cancel (the security review, 2026-09-27): at home the window its ask opened is
+// withdrawn; the remote door answers it closed; never the window, which would count a wrong code.
+check("kind 19 cancel at home: withdraw, never the window", D.pairing(.home, method: "cancel", version: 1) == .withdraw)
+check("kind 19 cancel at the remote door: closed", D.pairing(.remote, method: "cancel", version: 1) == .closed)
+check("kind 19 cancel of another generation: closed at both doors",
+      D.pairing(.home, method: "cancel", version: 2) == .closed && D.pairing(.remote, method: "cancel", version: 2) == .closed)
+check("PairRequest.cancel is the method the door looks for, spelled exactly", PairRequest.cancel == "cancel"
+      && ["Cancel", "CANCEL", "cancel "].allSatisfy { D.pairing(.home, method: $0, version: 1) == .window })
 // The floor: kind 19's generation is `v` (1). A later one (another method, another proof format)
 // is answered `closed` without a try at either door, never judged by the window, which would count
 // it as a wrong code and use up one of its five.

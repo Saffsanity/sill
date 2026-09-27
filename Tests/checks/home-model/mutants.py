@@ -4,7 +4,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import module
 F = "iOSClient/DiscoveryPolicy.swift"
 S = "iOSClient/SavedMacs.swift"
+W = "Sources/SillHost/PairingWindow.swift"
 M = [
+    ("the card's closed words say a tap is enough (as before the review)", F,
+     "            \"That code no longer works. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"That code no longer works. Tap \\(mac) for a new one.\""),
+    ("the card's stopped words say a tap is enough (as before the review)", F,
+     "            \"\\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"\\(mac) stopped pairing after too many wrong codes. Tap \\(mac) for a new code.\""),
+    ("an expired window quiets again", W, "case .cancelled, .stopped: return true\n        case .used, .expired, .withdrawn, .none: return false",
+     "case .cancelled, .stopped, .expired: return true\n        case .used, .withdrawn, .none: return false"),
+    ("homeRefusal: expired read as closed", F, "        case \"expired\"?: return .expired\n", ""),
     ("homeEnd: removed misspelt", F, "        if goodbye == \"removed\" { return .removed }", "        if goodbye == \"remove\" { return .removed }"),
     ("homeEnd: pairingRequired misspelt", F, "        if goodbye == \"pairingRequired\" { return .pairingRequired }", "        if goodbye == \"pairingrequired\" { return .pairingRequired }"),
     ("askAnswer: the cable's method misspelt", F, "guard method == \"cable\", askedCable", "guard method == \"usb\", askedCable"),

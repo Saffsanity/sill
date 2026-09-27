@@ -16,6 +16,9 @@ struct PairingWindow {
         case stopped
         /// The Mac's user closed it, or Remote Access went off.
         case cancelled
+        /// The device whose ask opened it no longer needs it: it gave up (its own Cancel, kind 19
+        /// "cancel") or paired another way (over the USB cable). Nobody is kept waiting for it.
+        case withdrawn
         /// No window was ever opened.
         case none
     }
@@ -117,6 +120,16 @@ struct PairingWindow {
         return true
     }
 
+    /// Kind 20's reason for a proof the window turned away closed (`Verdict.closed`): "stopped" for
+    /// the proof that stopped it (the fifth wrong one), "expired" for any proof after its time ran
+    /// out, else "closed": no window, one used or withdrawn, one the Mac's user cancelled, and every
+    /// proof after a stop. What the device says then (DiscoveryPolicy.homeRefusal) follows from it.
+    static func closedReason(_ reason: CloseReason, stoppedByThisProof: Bool) -> String {
+        if reason == .stopped && stoppedByThisProof { return PairResult.stopped }
+        if reason == .expired { return PairResult.expired }
+        return PairResult.closed
+    }
+
     /// Judges one PairRequest's proof. `fpDevice` and `fpMac` are the two keys of the TLS session
     /// it arrived on, never anything the message says; `source` is the connection's address.
     mutating func tryProof(method: String, proof: Data, fpDevice: Data, fpMac: Data, source: String, now: Double) -> Verdict {
@@ -156,12 +169,14 @@ struct PairingWindow {
 
 /// How often devices may put a code on this Mac's screen by asking (docs/home-pairing-plan.md
 /// §4.7, the ask rule's step 5): at most `maxWindows` device-opened windows in any `span`, and a
-/// device whose window the Mac's user cancelled, or that expired or stopped after five wrong codes,
-/// opens none for `quietFor`, by its key and by its address, so a stranger asking again with a new
-/// key from the same address, or from a new address with the same key, stays quiet. One window at
-/// a time is the ask rule's own step 3. Pure (no clock: `now` is passed in; the caller uses a
-/// monotonic one, so a clock change moves nothing), checked on its own with swiftc. RemoteAccess
-/// owns one on the main actor.
+/// device whose window the Mac's user cancelled, or that stopped after five wrong codes, opens none
+/// for `quietFor`, by its key and by its address, so a stranger asking again with a new key from
+/// the same address, or from a new address with the same key, stays quiet. A window that simply
+/// ran out, or that its device withdrew, quiets nobody (the security review, 2026-09-27): its
+/// person, tapping again, gets a fresh code, as the device's words say, and `maxWindows` still
+/// bounds how often a device can put one up. One window at a time is the ask rule's own step 3.
+/// Pure (no clock: `now` is passed in; the caller uses a monotonic one, so a clock change moves
+/// nothing), checked on its own with swiftc. RemoteAccess owns one on the main actor.
 struct AskLimits {
     static let quietFor: Double = 600
     static let span: Double = 600
@@ -211,12 +226,14 @@ struct AskLimits {
         quietSources[source] = now
     }
 
-    /// Whether a device-opened window that closed this way quiets its asker: cancelled on the Mac,
-    /// expired, or stopped after five wrong codes. Not one a device paired with.
+    /// Whether a device-opened window that closed this way quiets its asker: cancelled on the Mac
+    /// ("Didn't ask for this? Click Cancel."), or stopped after five wrong codes. Not one a device
+    /// paired with, nor one that ran out or that its device withdrew: that device's next tap gets a
+    /// fresh code, as its words after "expired" promise (DiscoveryPolicy.homeRefusal).
     static func quiets(_ reason: PairingWindow.CloseReason) -> Bool {
         switch reason {
-        case .cancelled, .expired, .stopped: return true
-        case .used, .none: return false
+        case .cancelled, .stopped: return true
+        case .used, .expired, .withdrawn, .none: return false
         }
     }
 

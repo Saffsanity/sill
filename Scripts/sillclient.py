@@ -52,6 +52,9 @@ Pairing at home (a TLS home door: SillHost --pairing, or the bare app; PORT is t
                      the link after "shown"
   --pair-hold=S      open a pairing connection (ALPN sill-pair/1) that sends nothing for S seconds, then
                      print whether the host closed it first (HOLD closed at T s, or HOLD open); nothing else
+  --pair-cancel      the device's Cancel: kind 19 "cancel" on a new pairing connection, after --pair-ask's
+                     "shown" pinned to the key the ask saw, or alone (any key, or --pin's); prints kind 20
+                     (always closed). The window that ask opened closes, withdrawn, its asker not quiet
   --pair-v=N         the kind 19's v (1 unless given): a host answers any other closed, with no try
                      counted (the compatibility floor: a later method or proof comes with a later v)
   --expect-pair=R    the pairing's last kind 20 must be R: ok (a proof checked), cable, shown, openOnMac,
@@ -295,6 +298,23 @@ def ask(cable, pin=None):
     print(f"PAIR ok: {r.get('name')} ({r['macID']}) over the cable, pin saved")
     return r, fp_mac
 
+def cancel_ask(pin=None):
+    """--pair-cancel: the device's Cancel (kind 19 "cancel"); the answer is always closed."""
+    ensure_identity(identity_dir)
+    s, fp_mac = tls_connect("sill-pair/1", pin)
+    req = {"v": pair_v, "method": "cancel", "proof": "", "name": device, "model": "sillclient"}
+    s.sendall(msg(19, json.dumps(req).encode()))
+    try:
+        m = read_message(s, 15)
+    except (OSError, ssl.SSLError) as e:
+        print(f"CANCEL FAIL: {e}"); return None
+    s.close()
+    if m is None or m[0] != 20: print(f"CANCEL FAIL: no kind 20 ({m[0] if m else 'EOF'})"); return None
+    r = json.loads(m[1]); print(f"  pairResult: {json.dumps(r, sort_keys=True)}")
+    pair_results.append(r)
+    print(f"CANCEL {r.get('reason')}")
+    return r
+
 def read_code(path, wait=5.0):
     """--then-code: the 12 digits in `path`, waiting up to `wait` s for the file to hold them."""
     deadline = time.time() + wait
@@ -342,7 +362,7 @@ try:
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--pair-ask", "--pair-ask=cable") \
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--pair-ask", "--pair-ask=cable", "--pair-cancel") \
                 and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -355,11 +375,12 @@ try:
     big_payload = number(valued("big-payload"), "--big-payload") if valued("big-payload") else None
     flood = number(valued("flood"), "--flood") if valued("flood") else 0
     pair_ask = "--pair-ask" in flags or "--pair-ask=cable" in flags
+    pair_cancel = "--pair-cancel" in flags
     ask_cable = "--pair-ask=cable" in flags
     then_code = valued("then-code"); expect_pair = valued("expect-pair")
     pair_v = number(valued("pair-v"), "--pair-v") if valued("pair-v") is not None else 1
     pair_hold = number(valued("pair-hold"), "--pair-hold", float) if valued("pair-hold") else None
-    tls = ("--tls" in flags or valued("pair-url") is not None or valued("pair-code") is not None or pair_ask
+    tls = ("--tls" in flags or valued("pair-url") is not None or valued("pair-code") is not None or pair_ask or pair_cancel
            or pair_hold is not None)
     identity_dir = valued("identity")
     pair_url = valued("pair-url"); pair_code = valued("pair-code"); pin_arg = valued("pin")
@@ -370,7 +391,8 @@ try:
     if then_code and (pair_url or pair_code): raise ValueError("--then-code, --pair-url or --pair-code after an ask, not two")
     if pair_ask and pair_code: raise ValueError("--pair-ask with --then-code=FILE (its code is read after the ask), not --pair-code")
     if expect_pair is not None and expect_pair not in PAIR_RESULTS: raise ValueError(f"--expect-pair: one of {', '.join(PAIR_RESULTS)}")
-    if expect_pair is not None and not (pair_ask or pair_url or pair_code): raise ValueError("--expect-pair needs --pair-ask, --pair-url or --pair-code")
+    if expect_pair is not None and not (pair_ask or pair_url or pair_code or pair_cancel): raise ValueError("--expect-pair needs --pair-ask, --pair-url, --pair-code or --pair-cancel")
+    if pair_cancel and (then_code or pair_url or pair_code): raise ValueError("--pair-cancel ends the pairing: not with --then-code, --pair-url or --pair-code")
     if pair_hold is not None and (pair_hold <= 0 or pair_ask or pair_url or pair_code): raise ValueError("--pair-hold=S (S > 0) runs alone")
     if pair_url: link = parse_link(pair_url)
     if pair_code:
@@ -428,7 +450,9 @@ if tls:
     if pair_ask:
         r, asked_fp = ask(ask_cable, ask_pin)
         word = result_word(r)
-        if word == "shown" and then_code:
+        if word == "shown" and pair_cancel:
+            cancel_ask(asked_fp)
+        elif word == "shown" and then_code:
             code_text = read_code(then_code)
             if code_text is None: print(f"PAIR FAIL: no code in {then_code}"); sys.exit(1)
             if not pair(code=code_text, pin=asked_fp) and expect_pair is None: sys.exit(1)
@@ -438,6 +462,8 @@ if tls:
             sys.exit(1)
     elif pair_url or pair_code:
         if not pair() and expect_pair is None: sys.exit(1)
+    elif pair_cancel:
+        cancel_ask(ask_pin)
     if expect_pair is not None:
         check_expect_pair()
         if result_word(pair_results[-1] if pair_results else None) not in ("ok", "cable"): sys.exit(0)

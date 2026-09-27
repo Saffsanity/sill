@@ -452,7 +452,15 @@ extension StreamClient {
             self.homeExchange(w, identity: identity, deviceName: deviceName, method: PairRequest.ask, cable: check.cable ? true : nil,
                               key: nil) { outcome in
                 DispatchQueue.main.async {
-                    guard self.homeDialer === dialer, self.pairingAttempt == attempt else { return }
+                    guard self.homeDialer === dialer, self.pairingAttempt == attempt else {
+                        // Cancelled while the ask was on its way, and the Mac showed a code for it
+                        // meanwhile: that code can go too.
+                        if case .answer(let r, _) = outcome, r.reason == PairResult.shown {
+                            self.withdrawAsk(at: HomeDialer.Target(endpoint: w.endpoint, peerToPeer: w.target.peerToPeer,
+                                                                   row: w.target.row, label: w.target.label), key: w.fingerprint)
+                        }
+                        return
+                    }
                     self.homeDialer = nil
                     self.asked(outcome, winner: w, claimed: check.cable, busyRetried: busyRetried)
                 }
@@ -563,11 +571,41 @@ extension StreamClient {
         guard let ask = homeAsk else { return }
         pairingAttempt += 1
         homeAsk = nil
+        // The Mac showed a code for this ask: it can go now, rather than stay up its 5 minutes.
+        if ask.phase == .shown, let key = ask.askedKey, let answered = ask.answered {
+            withdrawAsk(at: askedTarget(ask, answered), key: key)
+        }
         if idleStatus, status == DiscoveryPolicy.HomeCopy.pairing(mac: ask.name, cable: ask.cableRow)
             || status == DiscoveryPolicy.HomeCopy.showing(mac: ask.name, device: Self.deviceWord) {
             status = Self.lookingOnNetwork
             updateDiscovery()
         }
+    }
+
+    /// The Cancel of an ask the Mac answered "shown" (§7.5): kind 19 "cancel" on a `sill-pair/1`
+    /// connection to where the ask was answered, pinned to the key that answered, so the window it
+    /// opened closes (withdrawn) instead of staying up for its 5 minutes with a live code. Nothing
+    /// waits for it and nothing follows from its answer (always "closed"): the Mac closes only a
+    /// window this device's own ask opened and that is still the home door's alone. Main thread.
+    func withdrawAsk(at target: HomeDialer.Target, key: Data) {
+        guard let identity = try? DeviceIdentity.loadOrCreate() else { return }
+        homeWithdrawal?.cancel()
+        let dialer = HomeDialer(targets: [target], pin: key, identity: identity, queue: queue)
+        homeWithdrawal = dialer
+        let deviceName = UIDevice.current.name
+        #if DEBUG
+        print("home: telling \(target.label) its code is no longer needed")
+        #endif
+        dialer.onWinner = { [weak self, weak dialer] w in
+            guard let self, let dialer else { w.connection.cancel(); return }
+            self.homeExchange(w, identity: identity, deviceName: deviceName, method: PairRequest.cancel, cable: nil, key: nil) { _ in
+                DispatchQueue.main.async { if self.homeWithdrawal === dialer { self.homeWithdrawal = nil } }
+            }
+        }
+        dialer.onFailed = { [weak self, weak dialer] _ in
+            DispatchQueue.main.async { if let self, self.homeWithdrawal === dialer { self.homeWithdrawal = nil } }
+        }
+        dialer.start()
     }
 
     // MARK: Proofs at the home door (§7.5)
@@ -775,17 +813,19 @@ extension StreamClient {
         sessionAfterHomePairing(id, target: w.target)
     }
 
-    /// A refused proof at the home door: the home card's words, which send the person back to the
-    /// Mac's row ("Tap Mac mini for a new code"); over a stream (`overStream`, Pair This iPad…),
-    /// where there is no row, the remote path's, which send them to the Sill menu on the Mac.
+    /// A refused proof at the home door: the home card's words (DiscoveryPolicy.homeRefusal), which
+    /// send the person back to the Mac's row only where a tap gets a new code ("expired"), else to
+    /// the Sill menu on the Mac first; over a stream (`overStream`, Pair This iPad…), where there is
+    /// no row, the remote path's, which send them to the Sill menu on the Mac.
     static func homeProblem(for r: PairResult, mac: String, overStream: Bool = false) -> PairingProblem {
         if overStream { return problem(for: r, mac: mac) }
         // A reason this build does not know, with the Mac's own words for it: those, not a guess.
         if let words = r.unknownReasonMessage { return .macSaid(words) }
-        switch r.reason {
-        case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
-        case PairResult.stopped?: return .homeStopped(mac)
-        default: return .homeUsed(mac)     // "expired", "closed", or a reason this build does not know
+        switch DiscoveryPolicy.homeRefusal(reason: r.reason, triesLeft: r.triesLeft) {
+        case .wrongCode(let left): return .wrongCode(triesLeft: left)
+        case .stopped: return .homeStopped(mac)
+        case .expired: return .homeExpired(mac)
+        case .closed: return .homeClosed(mac)
         }
     }
 

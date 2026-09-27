@@ -3069,7 +3069,7 @@ device keeps working with Macs from the first public build on, or each says why
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
   a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions
   only), and one kind 20, then the Mac closes it; kind 19's methods `qr`, `code` and, at the home
-  door, `ask` (the remote door answers it `closed`), at `v` 1: a host answers any other `v`
+  door, `ask` and `cancel` (the remote door answers both `closed`), at `v` 1: a host answers any other `v`
   `closed` without counting a try, so a later method or proof format comes with a later `v`, never
   as a new method at 1, which a 1.0 host counts as a wrong code; kind 20's reasons `code`,
   `closed`, `expired`, `stopped`, `busy` and, after an ask, `shown`, `openOnMac` and `locked`, with

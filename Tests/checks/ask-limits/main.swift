@@ -1,7 +1,8 @@
 // H3 (step 1): AskLimits (PairingWindow.swift), pure, compiled with StreamProtocol's sources as one
 // module: one window at a time is the ask rule's (the door check); here 10 minutes of quiet by key
 // and by address, 3 device-opened windows in any 10 minutes, which closes quiet their asker
-// (cancelled, expired, stopped; not used), and the test override.
+// (cancelled on the Mac and stopped; not used, not expired, not withdrawn by its device: the
+// security review, 2026-09-27), the reason a proof turned away closed hears, and the test override.
 import Foundation
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if ok { passes += 1; print("ok   \(name)") } else { fails += 1; print("FAIL \(name)") }; fflush(stdout) }
@@ -43,8 +44,28 @@ check("opening prunes nothing it should keep: 200 and 650 count at 750", w.recen
 check("opened windows do not make anyone quiet", !w.quiet(fingerprint: keyA, source: x, now: 700))
 
 // Which closes quiet the asker.
-check("quiets: cancelled, expired and stopped windows", AskLimits.quiets(.cancelled) && AskLimits.quiets(.expired) && AskLimits.quiets(.stopped))
+check("quiets: a window the Mac's user cancelled, and one stopped by five wrong codes", AskLimits.quiets(.cancelled) && AskLimits.quiets(.stopped))
 check("quiets: not a window a device paired with, nor none", !AskLimits.quiets(.used) && !AskLimits.quiets(.none))
+check("quiets: not a window that simply ran out (its device's next tap gets a fresh code, as its words say)", !AskLimits.quiets(.expired))
+check("quiets: not a window its own device withdrew (its Cancel, or paired over the cable)", !AskLimits.quiets(.withdrawn))
+
+// What a proof turned away closed hears (kind 20's reason), which the device's words follow.
+typealias W = PairingWindow
+check("closed: the proof that stopped the window hears stopped; a later one closed",
+      W.closedReason(.stopped, stoppedByThisProof: true) == "stopped" && W.closedReason(.stopped, stoppedByThisProof: false) == "closed")
+check("closed: after its time ran out, expired, whether or not this proof noticed it",
+      W.closedReason(.expired, stoppedByThisProof: true) == "expired" && W.closedReason(.expired, stoppedByThisProof: false) == "expired")
+check("closed: used, cancelled, withdrawn and none hear closed",
+      [W.CloseReason.used, .cancelled, .withdrawn, .none].allSatisfy { W.closedReason($0, stoppedByThisProof: true) == "closed" && W.closedReason($0, stoppedByThisProof: false) == "closed" })
+
+// The window itself: its device's Cancel (withdrawn) closes it, and a later proof hears closed.
+var win = PairingWindow()
+win.open(secret: Data(repeating: 1, count: 16), code: "000000000000", now: 0, requestedBy: "iPad", byDevice: .init(fingerprint: keyA, source: x), forRemote: false)
+win.close(.withdrawn)
+check("withdrawn: the window is closed, and says why", !win.isOpen && win.closeReason == .withdrawn)
+if case .closed(let r) = win.tryProof(method: "qr", proof: Data(), fpDevice: keyA, fpMac: keyB, source: x, now: 1) {
+    check("withdrawn: a later proof is turned away closed, with no try counted", W.closedReason(r, stoppedByThisProof: false) == "closed")
+} else { check("withdrawn: a later proof is turned away closed", false) }
 
 // The test override.
 let t = AskLimits(seconds: 5)

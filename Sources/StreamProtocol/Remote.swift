@@ -115,8 +115,9 @@ public struct PairRequest: Codable, Sendable {
     public var v: Int
     /// "qr" or "code": a proof for the pairing window. "ask", at the home door only: "pair me, now
     /// if you can, else show me your code" (docs/home-pairing-plan.md §3.1); the remote door
-    /// answers it `closed` without counting a try. A device sends "ask" only to a Mac whose TXT
-    /// record carries `p` (HomeDoorTXT), so an older host never receives one.
+    /// answers it `closed` without counting a try. "cancel", at the home door only: the device no
+    /// longer needs the code its ask put up (`cancel`). A device sends "ask" and "cancel" only to a
+    /// Mac whose TXT record carries `p` (HomeDoorTXT), so an older host never receives one.
     public var method: String
     /// base64url(proof_D) (PairingProof); "" with "ask".
     public var proof: String
@@ -134,6 +135,12 @@ public struct PairRequest: Codable, Sendable {
     }
 
     public static let qr = "qr", code = "code", ask = "ask"
+    /// At the home door only, after an ask the Mac answered "shown": the device's Cancel, "I no
+    /// longer need the code you showed for me". The window that ask opened closes, if it is still
+    /// the home door's alone, and its asker is not kept quiet for it (docs/home-pairing-plan.md
+    /// §3.1); the answer is "closed" whatever happened. Its `proof` is "". The remote door answers
+    /// it "closed" too, with no try counted.
+    public static let cancel = "cancel"
     /// The one generation of kind 19 there is: the first public build's, frozen with it.
     public static let version = 1
 }

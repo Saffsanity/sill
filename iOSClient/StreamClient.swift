@@ -177,6 +177,9 @@ final class StreamClient: ObservableObject {
     @Published var homeAsk: HomeAsk?
     /// The home door's pairing dial in flight (an ask, or a proof): one at a time.
     var homeDialer: HomeDialer?
+    /// The Cancel of an ask the Mac answered "shown", on its way to the Mac (`withdrawAsk`): kept
+    /// here until it is done, beside whatever the next tap dials.
+    var homeWithdrawal: HomeDialer?
     /// Rows the automatic reconnect took by their Bonjour name alone whose key was another's
     /// (-9808): skipped until a session connects (docs/home-pairing-plan.md §7.3).
     var pinRefusedRows = Set<String>()

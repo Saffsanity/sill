@@ -146,6 +146,11 @@ enum DoorPolicy {
     enum Pairing: Equatable, Sendable {
         /// The ask rule (`ask(…)`): the home door's "pair me".
         case ask
+        /// The device's own Cancel at the home door (kind 19 "cancel"): the window its ask opened
+        /// closes, if it is still the home door's alone, without quieting its asker
+        /// (`PairingWindow.CloseReason.withdrawn`). Answered `closed` whatever happened, and never
+        /// judged by the window, so it counts no try and tells nobody anything.
+        case withdraw
         /// The pairing window judges its proof: "qr" and "code", and any other method, which the
         /// window counts as a wrong proof, as the remote door always has.
         case window
@@ -160,6 +165,7 @@ enum DoorPolicy {
     /// counted as one of the window's five wrong codes (the compatibility floor).
     static func pairing(_ door: Door, method: String, version: Int) -> Pairing {
         guard version == PairRequest.version else { return .closed }
+        if method == PairRequest.cancel { return door == .home ? .withdraw : .closed }
         guard method == PairRequest.ask else { return .window }
         return door == .home ? .ask : .closed
     }
@@ -200,7 +206,7 @@ enum DoorPolicy {
         /// "shown".
         case shown(opened: Bool)
         /// No window by itself: "this Mac" (the ask came from this Mac), "quiet" (this key or
-        /// address had a device-opened window closed unused within 10 minutes) or "often" (3
+        /// address had a device-opened window cancelled or stopped within 10 minutes) or "often" (3
         /// device-opened windows in the last 10 minutes). The words are the log's; the device only
         /// sees kind 20 "openOnMac".
         case openOnMac(String)
@@ -217,8 +223,9 @@ enum DoorPolicy {
     /// 4. from this Mac itself (loopback, or one of this Mac's own addresses: `isFromThisMac`) →
     ///    `openOnMac("this Mac")`: an app that can record the screen would otherwise ask, read the
     ///    code it put up and pair, turning Screen Recording into control of the Mac through Sill;
-    /// 5. this key or address is quiet → `openOnMac("quiet")`; `AskLimits.maxWindows`
-    ///    device-opened windows in the last 10 minutes → `openOnMac("often")`;
+    /// 5. this key or address is quiet (a window it opened was cancelled on the Mac or stopped
+    ///    within 10 minutes) → `openOnMac("quiet")`; `AskLimits.maxWindows` device-opened windows
+    ///    in the last 10 minutes → `openOnMac("often")`;
     /// 6. otherwise → `shown(opened: true)`: a window opens for it.
     static func ask(unlocked: Bool, cableSeen: Bool, cableClaimed: Bool, otherKeyOfDevice: Bool, windowOpen: Bool,
                     fromThisMac: Bool, quiet: Bool, recentDeviceWindows: Int) -> Ask {

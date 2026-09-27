@@ -156,8 +156,9 @@ func homePolicy() {
     check("copy: removed", C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again."
           && C.removed(mac: mini, device: "iPhone") == "Mac mini removed this iPhone. Tap it to pair again.")
     check("copy: pairingRequired", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad.")
-    check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. Tap Mac mini for a new code."
-          && C.usedOrExpired(mac: mini) == "That code was used or has expired. Tap Mac mini for a new one."
+    check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+          && C.expired(mac: mini) == "That code expired. Tap Mac mini for a new one."
+          && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
           && C.proofFailed(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code. Tap it to try again.")
     check("copy: no answer", C.noAnswer(mac: mini) == "Mac mini didn\u{2019}t answer. Check that Sill is open on it, then tap it again.")
 

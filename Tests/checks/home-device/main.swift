@@ -352,9 +352,34 @@ check("copy: locked", C.locked(mac: mini) == "Unlock Mac mini, then tap it again
 check("copy: removed", C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again."
       && C.removed(mac: mini, device: "iPhone") == "Mac mini removed this iPhone. Tap it to pair again.")
 check("copy: pairingRequired", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad.")
-check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. Tap Mac mini for a new code."
-      && C.usedOrExpired(mac: mini) == "That code was used or has expired. Tap Mac mini for a new one."
+check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+      && C.expired(mac: mini) == "That code expired. Tap Mac mini for a new one."
+      && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
       && C.proofFailed(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code. Tap it to try again.")
+
+// A refused proof at home (the security review, 2026-09-27): kind 20's reason → the card's words.
+// After a stop, and after a code closed (the Mac's Cancel, or used by another device), the Mac keeps
+// this device quiet, so a tap alone gets no new code: the words send the person to the Sill menu
+// first. After an expiry a tap gets one (AskLimits: an expired window quiets nobody).
+typealias R = DiscoveryPolicy.HomeRefusal
+check("refusal: code → a wrong code, with the tries left (never below 0)", P.homeRefusal(reason: "code", triesLeft: 4) == .wrongCode(triesLeft: 4)
+      && P.homeRefusal(reason: "code", triesLeft: nil) == .wrongCode(triesLeft: 0) && P.homeRefusal(reason: "code", triesLeft: -2) == .wrongCode(triesLeft: 0))
+check("refusal: stopped, expired", P.homeRefusal(reason: "stopped", triesLeft: nil) == .stopped && P.homeRefusal(reason: "expired", triesLeft: nil) == .expired)
+check("refusal: closed, busy (a second time), no reason, or one this build does not know → closed",
+      ["closed", "busy", "shown", "later", "Stopped", ""].allSatisfy { P.homeRefusal(reason: $0, triesLeft: nil) == .closed }
+      && P.homeRefusal(reason: nil, triesLeft: nil) == .closed)
+func refusalWords(_ r: R) -> String {
+    switch r {
+    case .wrongCode: return "a wrong code"
+    case .stopped: return C.stopped(mac: mini)
+    case .expired: return C.expired(mac: mini)
+    case .closed: return C.closed(mac: mini)
+    }
+}
+check("refusal: stopped and closed send the person to the Sill menu before a tap",
+      [R.stopped, .closed].allSatisfy { refusalWords($0).contains("choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again") })
+check("refusal: expired, and only expired, says a tap alone gets a new code",
+      refusalWords(.expired).hasSuffix("Tap Mac mini for a new one.") && ![R.stopped, .closed].contains { refusalWords($0).contains("for a new") })
 check("copy: no answer", C.noAnswer(mac: mini) == "Mac mini didn\u{2019}t answer. Check that Sill is open on it, then tap it again.")
 
 // MARK: Step 5: the Settings panel's Away from home (§7.6) and the words of the home card and the
@@ -402,8 +427,9 @@ check("copy: over a stream no row can be tapped: the overlay's words never say T
       C.proofFailedOverStream(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code."
       && C.noAnswerOverStream(mac: mini) == "Mac mini didn\u{2019}t answer. Try again."
       && ![C.proofFailedOverStream(mac: mini), C.noAnswerOverStream(mac: mini)].contains { $0.contains("Tap") || $0.contains("tap") })
-check("copy: the card's own errors (under the field) send the person back to the row, the overlay's do not",
-      C.stopped(mac: mini).contains("Tap Mac mini") && C.usedOrExpired(mac: mini).contains("Tap Mac mini") && C.proofFailed(mac: mini).contains("Tap it"))
+check("copy: the card's own errors (under the field) end at the row, the overlay's do not",
+      C.stopped(mac: mini).hasSuffix("tap Mac mini again.") && C.closed(mac: mini).hasSuffix("tap Mac mini again.")
+      && C.expired(mac: mini).contains("Tap Mac mini") && C.proofFailed(mac: mini).contains("Tap it"))
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

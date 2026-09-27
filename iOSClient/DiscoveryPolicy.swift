@@ -948,6 +948,30 @@ enum DiscoveryPolicy {
         }
     }
 
+    /// What the home card says for a proof the Mac refused (kind 20's `reason`, §7.7). The words
+    /// follow what the Mac does next (AskLimits, PairingWindow.closedReason): a window the Mac's
+    /// user cancelled, or one five wrong codes stopped, keeps this device quiet for 10 minutes, so a
+    /// tap alone would get no new code, and those words send the person to the Sill menu on the Mac
+    /// first ("stopped"; "closed", which is also a code another device used, where the menu's way
+    /// works as well). A window that ran out quiets nobody, so "tap it for a new one" holds
+    /// ("expired"). Anything else ("busy" a second time, or a reason this build does not know that
+    /// came without the Mac's own words) reads as "closed".
+    enum HomeRefusal: Equatable {
+        case wrongCode(triesLeft: Int)
+        case stopped
+        case expired
+        case closed
+    }
+
+    static func homeRefusal(reason: String?, triesLeft: Int?) -> HomeRefusal {
+        switch reason {
+        case "code"?: return .wrongCode(triesLeft: max(0, triesLeft ?? 0))
+        case "stopped"?: return .stopped
+        case "expired"?: return .expired
+        default: return .closed
+        }
+    }
+
     /// Where a pairing link goes at home (§7.5): nil for the connection the ask reached, when the
     /// link's key is the one that connection saw (`askedKey`); else every home row with `p`, in the
     /// connect screen's order, each to be dialed pinned to the link's key, one at a time (the Mac
@@ -1029,11 +1053,16 @@ enum DiscoveryPolicy {
         static func pairingRequired(mac: String, device: String) -> String {
             "\(mac) now asks devices to pair. Tap it to pair this \(device)."
         }
-        /// The home card's errors, under its field or in its place.
+        /// The home card's errors, under its field or in its place (`homeRefusal`). After a stop
+        /// or a closed code the Mac keeps this device quiet (a cancel on the Mac, a stop), so the
+        /// words send the person to its menu first; after an expiry a tap is enough.
         static func stopped(mac: String) -> String {
-            "\(mac) stopped pairing after too many wrong codes. Tap \(mac) for a new code."
+            "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
         }
-        static func usedOrExpired(mac: String) -> String { "That code was used or has expired. Tap \(mac) for a new one." }
+        static func expired(mac: String) -> String { "That code expired. Tap \(mac) for a new one." }
+        static func closed(mac: String) -> String {
+            "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+        }
         static func proofFailed(mac: String) -> String {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again."
         }
