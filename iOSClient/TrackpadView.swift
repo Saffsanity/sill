@@ -21,6 +21,9 @@ struct Trackpad: View {
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    /// What the pad's vertical motion is measured against: nil is its own height (see
+    /// `TrackpadSurface.verticalSpan`).
+    var verticalSpan: CGFloat? = nil
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
 
@@ -29,7 +32,8 @@ struct Trackpad: View {
             Palette.trackpad
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setPointer: setPointer, feed: feed, onFingers: onFingers,
-                         latched: latched, onModifiersConsumed: onModifiersConsumed)
+                         latched: latched, onModifiersConsumed: onModifiersConsumed,
+                         verticalSpan: verticalSpan)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -77,6 +81,7 @@ struct TrackpadView: UIViewRepresentable {
     let onFingers: (Int) -> Void
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    var verticalSpan: CGFloat? = nil
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -94,6 +99,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.feed = feed
         uiView.onFingers = onFingers
         uiView.latchedModifiers = latched
+        uiView.verticalSpan = verticalSpan
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -115,6 +121,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// Modifiers the key row is holding for the next click. Cleared here when one is spent.
     var latchedModifiers: KeyModifiers = []
     var onModifiersConsumed: (() -> Void)?
+    /// How far a finger travels down the pad for the share of the frame that the pad's width is
+    /// across: nil is the pad's own height. A phone's pad is far taller than the picture's shape,
+    /// so it passes its width ÷ 1.6 (PhonePortraitLayout.trackpadSpan): a stroke then moves the
+    /// pointer as far down as across on a 16:10 picture, and the extra height is room, not a slower
+    /// pointer. Pointer motion, two-finger scrolling and its coast all use it.
+    var verticalSpan: CGFloat?
+    /// `verticalSpan`, or the pad's height.
+    private var ySpan: CGFloat { verticalSpan.flatMap { $0 > 0 ? $0 : nil } ?? bounds.height }
 
     /// The virtual cursor, in frame coordinates (0…1), starting in the middle, clamped, so pushing
     /// past an edge parks the pointer there instead of losing it (PadCursor, pure, checked in
@@ -234,7 +248,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func moveCursor(dx: CGFloat, dy: CGFloat) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         catchUp()
-        pad.move(dx: Double(dx / bounds.width * Self.travel), dy: Double(dy / bounds.height * Self.travel))
+        pad.move(dx: Double(dx / bounds.width * Self.travel), dy: Double(dy / ySpan * Self.travel))
         // The sprite first, since it is the feedback the finger is waiting for; then the Mac, whose
         // cursor still has to follow for clicks to land there. No rate limit needed here:
         // sendInput coalesces moves to one every 8 ms.
@@ -341,7 +355,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 catchUp()
                 // Natural sign, same as the direct-touch overlay: fingers down, content down.
                 send(.scroll(x: cursor.x, y: cursor.y,
-                             dx: dx / bounds.width, dy: dy / bounds.height))
+                             dx: dx / bounds.width, dy: dy / ySpan))
             } else if !trackerDriving {
                 moveCursor(dx: dx, dy: dy)
             }
@@ -391,7 +405,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // Converted to frame fractions exactly as live two-finger deltas are.
                 guard let self, self.bounds.width > 0, self.bounds.height > 0 else { return }
                 self.send(.scroll(x: at.x, y: at.y,
-                                  dx: step.x / self.bounds.width, dy: step.y / self.bounds.height))
+                                  dx: step.x / self.bounds.width, dy: step.y / self.ySpan))
             },
             onEnd: { send(.scrollGesture(.momentumEnded, x: at.x, y: at.y)) })
     }
@@ -422,6 +436,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             adoptAnchor()
             #if DEBUG
             InputScript.pad = self
+            runInputTest()
             #endif
         }
     }
@@ -600,3 +615,80 @@ private final class FingerTracker: UILongPressGestureRecognizer {
         sawSecondFinger = false
     }
 }
+
+#if DEBUG
+
+// MARK: - Input test (DEBUG)
+
+/// DEBUG `-SillInputTest 1` (ContentView's contract): a scripted run through the key row's and the
+/// trackpad's own code, once per launch, so a gate can see what they send without anything driving
+/// the UI. Only for a session `-SillConnect` dialed on this Mac's loopback, and even there each
+/// event reaches the Mac's host: a synthetic host counts it as `in.dry` and posts nothing, a real
+/// one posts it on this Mac, so point it only at a synthetic host, or put a relay that drops kind 8
+/// (input) in front of the host. The key row taps cmd, esc, shift and ctrl (KeyRow.runInputTest);
+/// the trackpad then strokes, taps and scrolls (`TrackpadSurface.runInputTest`).
+enum InputTest {
+    static let enabled: Bool = {
+        guard UserDefaults.standard.bool(forKey: "SillInputTest") else { return false }
+        let host = (UserDefaults.standard.string(forKey: "SillConnect") ?? "").lowercased()
+        guard host.hasPrefix("127.0.0.1:") || host.hasPrefix("[::1]:") || host.hasPrefix("localhost:") else {
+            print("input test: not run: -SillInputTest needs a session -SillConnect dials on this Mac's loopback")
+            return false
+        }
+        return true
+    }()
+    private static var claimed: Set<String> = []
+
+    /// True the first time `part` asks, while the test is on.
+    static func claim(_ part: String) -> Bool {
+        guard enabled, !claimed.contains(part) else { return false }
+        claimed.insert(part)
+        return true
+    }
+
+    static func describe(_ m: KeyModifiers) -> String {
+        let names = [(KeyModifiers.control, "ctrl"), (.option, "opt"), (.command, "cmd"), (.shift, "shift")]
+            .filter { m.contains($0.0) }.map(\.1)
+        return names.isEmpty ? "nothing" : names.joined(separator: "+")
+    }
+}
+
+extension TrackpadSurface {
+    /// The trackpad's half of `InputTest`, 2.6 s after the pad joins a window (after the key row's
+    /// taps): a touch at the pad's centre is checked to land on the pad itself, then a stroke of 12
+    /// moves (60 pt right and 40 down, through `moveCursor`, which the tracker and the pan call),
+    /// a tap (`click`: the latched shift and ctrl go down around it and the latch is spent), and a
+    /// two-finger scroll of five 8 pt steps down with its begin and end, no coast.
+    fileprivate func runInputTest() {
+        guard InputTest.claim("trackpad") else { return }
+        let start = DispatchTime.now()
+        func at(_ seconds: Double, _ step: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: start + seconds, execute: step)
+        }
+        at(2.6) { [weak self] in
+            guard let self, let window = self.window else { return }
+            let centre = self.convert(CGPoint(x: self.bounds.midX, y: self.bounds.midY), to: window)
+            let hit = window.hitTest(centre, with: nil)
+            let reached = hit === self ? "the pad" : hit.map { String(describing: type(of: $0)) } ?? "nothing"
+            print("input test: the pad is " + String(format: "%.0f×%.0f pt", self.bounds.width, self.bounds.height)
+                  + String(format: ", its vertical span %.1f pt; a touch at its centre reaches ", self.ySpan) + reached)
+            for _ in 0..<12 { self.moveCursor(dx: 5, dy: 40.0 / 12) }
+            print("input test: stroke done, the pointer at " + String(format: "(%.3f, %.3f)", self.cursor.x, self.cursor.y))
+        }
+        at(3.2) { [weak self] in
+            guard let self else { return }
+            print("input test: tap with " + InputTest.describe(self.latchedModifiers) + " latched")
+            self.handleTap()
+        }
+        at(3.8) { [weak self] in
+            guard let self else { return }
+            self.beginScroll()
+            for _ in 0..<5 {
+                self.send(.scroll(x: self.cursor.x, y: self.cursor.y, dx: 0, dy: 8 / self.ySpan))
+            }
+            self.endScroll(momentumVelocity: nil)
+            print("input test: two-finger scroll done (5 steps of 8 pt down)")
+        }
+    }
+}
+#endif

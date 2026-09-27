@@ -72,12 +72,14 @@ enum HIDKey {
 
 // MARK: - Screen
 
-/// Everything the portrait layout sizes, at the inner display's size and the outer display's.
+/// Everything the portrait layouts size: the halves at the inner display's size (`.regular`) and at
+/// the outer display's (`.compact`), which an iPad window narrower than 600 pt keeps, and a phone
+/// held upright (`.phone`), whose rects come from `PhonePortraitLayout`.
 ///
-/// The outer display is the same screen, not a different one: same 50/50 split, same three rows in
-/// the same order. It is only 500 pt wide, so the numbers shrink — but nothing shrinks below a
-/// 44 pt touch target, which is what forces the one real change: twelve caps do not fit across
-/// 472 pt at 44 pt each, so the key row folds into two rows of six.
+/// The compact halves are the same screen as the inner display's, not a different one: same 50/50
+/// split, same three rows in the same order. They are only 500 pt wide, so the numbers shrink — but
+/// nothing shrinks below a 44 pt touch target, which is what forces the one real change: twelve caps
+/// do not fit across 472 pt at 44 pt each, so the key row folds into two rows of six.
 struct PortraitMetrics {
     let padTop: CGFloat
     let padSide: CGFloat
@@ -104,6 +106,8 @@ struct PortraitMetrics {
     let keyRowGap: CGFloat
     /// Whether the key row folds into two.
     let splitKeys: Bool
+    /// The phone's arrangement (`PhonePortraitLayout`) rather than the halves.
+    let phone: Bool
 
     var keyBlockHeight: CGFloat { splitKeys ? capHeight * 2 + keyRowGap : capHeight }
 
@@ -114,21 +118,47 @@ struct PortraitMetrics {
         buttonIcon: 22, buttonSpacing: 3,
         thumbWidth: 92, thumbHeight: 58, thumbRadius: 9, thumbSpacing: 14, thumbPad: 10,
         thumbFade: 0.88, badge: 24,
-        capHeight: 48, keyGap: 8, keyRowGap: 8, splitKeys: false)
+        capHeight: 48, keyGap: 8, keyRowGap: 8, splitKeys: false, phone: false)
 
-    /// The same thing on the outer display's 500×710.
+    /// The same thing on the outer display's 500×710: an iPad window narrower than 600 pt held
+    /// upright (Slide Over, a narrow Split View), as before the phone's arrangement.
     static let compact = PortraitMetrics(
         padTop: 10, padSide: 14, padBottom: 16, rowGap: 10,
         barHeight: 62, buttonWidth: 56, buttonHeight: 50, buttonRadius: 14,
         buttonIcon: 20, buttonSpacing: 3,
         thumbWidth: 80, thumbHeight: 50, thumbRadius: 8, thumbSpacing: 12, thumbPad: 6,
         thumbFade: 0.88, badge: 22,
-        capHeight: 44, keyGap: 8, keyRowGap: 8, splitKeys: true)
+        capHeight: 44, keyGap: 8, keyRowGap: 8, splitKeys: true, phone: false)
+
+    /// A phone held upright, and the Duo's outer display upright (500×710): the compact styles
+    /// (radii, symbol and thumbnail sizes, the badge, the fade). The sizes that place things are
+    /// `PhonePortraitLayout`'s, and a button's width is its share of the row at the screen's width.
+    static let phone = PortraitMetrics(
+        padTop: PhonePortraitLayout.underPicture, padSide: PhonePortraitLayout.side,
+        padBottom: PhonePortraitLayout.bottom, rowGap: PhonePortraitLayout.rowGap,
+        barHeight: PhonePortraitLayout.stripHeight, buttonWidth: 0,
+        buttonHeight: PhonePortraitLayout.buttonHeight, buttonRadius: 14,
+        buttonIcon: 20, buttonSpacing: 3,
+        thumbWidth: 80, thumbHeight: 50, thumbRadius: 8, thumbSpacing: 12,
+        thumbPad: (PhonePortraitLayout.stripHeight - 50) / 2,
+        thumbFade: 0.88, badge: 22,
+        capHeight: PhonePortraitLayout.capHeight, keyGap: PhonePortraitLayout.gap,
+        keyRowGap: PhonePortraitLayout.gap, splitKeys: false, phone: true)
+
+    /// Row 1's symbols sit in a box this tall on the phone, so their labels share one line whatever
+    /// each symbol's height (the keyboard's is 15 pt, the gear's 21), as a tab bar's do; Aa's text
+    /// gets the same box (`TextScaleControl.iconBox`).
+    static let phoneIconBox: CGFloat = 24
 }
 
-/// Portrait: the "Laptop mode, half folded" board. The upper half is the streamed window on its
-/// own, touched directly like in landscape; the lower half is the machine you drive it with —
-/// window bar, key row, trackpad — the way a folded laptop's bottom half carries them.
+/// Portrait, in two arrangements. The halves (the inner display's, and an iPad window's) are the
+/// "Laptop mode, half folded" board: the upper half is the streamed window on its own, touched
+/// directly like in landscape; the lower half is the machine you drive it with (window bar, key
+/// row, trackpad), the way a folded laptop's bottom half carries them. A phone's (Noah, 2026-09-27)
+/// puts the picture in a fixed 16:10 pane at the top and gives the rest to the controls: row 1
+/// (Apps, Aa, Keyboard, Desktop, Settings), the thumbnails, six keys and a taller trackpad
+/// (`PhonePortraitLayout`). The picture pane, the key row, the trackpad, the drawer and the Settings
+/// panel are the same views in both; each arrangement places them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
     var metrics: PortraitMetrics = .regular
@@ -153,67 +183,196 @@ struct PortraitStreamScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            let half = (geo.size.height / 2).rounded()
-            ZStack(alignment: .topLeading) {
-                Color.black
-
-                VStack(spacing: 0) {
-                    streamPane.frame(height: half)
-                    controls.frame(height: geo.size.height - half)
-                }
-
-                // Same order as landscape: the dim goes over the stream so a tap with the drawer
-                // open closes the drawer instead of clicking the Mac. It covers both halves.
-                if drawerOpen {
-                    Color.black.opacity(0.58)
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
-                        .accessibilityHidden(true)
-                        .transition(.opacity)
-
-                    AppDrawer(client: client, drawerOpen: $drawerOpen)
-                        .frame(width: min(380, geo.size.width - 44))
-                        .frame(maxHeight: .infinity)
-                        .padding(.leading, 22)
-                        // Hangs from just under the window bar, so the button that opened it stays visible.
-                        .padding(.top, half + metrics.padTop + metrics.barHeight + 8)
-                        .padding(.bottom, metrics.padBottom)
-                        .transition(.opacity)
-                }
-
-                // The drawer's mirror: from just under the window bar at the trailing edge, lined up
-                // with the Settings button, entirely in the lower half, so it never spans the Duo's
-                // crease and the stream above stays in view. No dim; the tap catcher covers both
-                // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
-                // and never reaches the Mac.
-                if settingsOpen {
-                    let top = half + metrics.padTop + metrics.barHeight + 8
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { setSettings(false, true) }
-                        .accessibilityHidden(true)
-
-                    HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice)
-                        .frame(width: min(360, geo.size.width - 2 * metrics.padSide))
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .padding(.top, top)
-                        .padding(.bottom, metrics.padBottom)
-                        .padding(.trailing, metrics.padSide)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        // The view carrying the transition fills the screen, so the panel's own
-                        // top-trailing corner, under the Settings button, is given as a point in it.
-                        .transition(settingsTransition(UnitPoint(x: 1 - metrics.padSide / max(geo.size.width, 1),
-                                                                 y: top / max(geo.size.height, 1))))
-                }
+            if metrics.phone {
+                phone(PhonePortraitLayout(size: geo.size))
+            } else {
+                halves(geo.size)
             }
         }
     }
 
-    // MARK: Upper half
+    // MARK: Two halves: the inner display, an iPad window
 
-    /// Identical to the landscape stream panel, including the direct-touch overlay: in both
-    /// layouts this is the view that holds first responder, so the software keyboard types here.
-    private var streamPane: some View {
+    private func halves(_ size: CGSize) -> some View {
+        let half = (size.height / 2).rounded()
+        return ZStack(alignment: .topLeading) {
+            Color.black
+
+            VStack(spacing: 0) {
+                picturePane.padding(8).frame(height: half)
+                controls.frame(height: size.height - half)
+            }
+
+            // Same order as landscape: the dim goes over the stream so a tap with the drawer
+            // open closes the drawer instead of clicking the Mac. It covers both halves.
+            if drawerOpen {
+                dim
+
+                drawer
+                    .frame(width: min(380, size.width - 44))
+                    .frame(maxHeight: .infinity)
+                    .padding(.leading, 22)
+                    // Hangs from just under the window bar, so the button that opened it stays visible.
+                    .padding(.top, half + metrics.padTop + metrics.barHeight + 8)
+                    .padding(.bottom, metrics.padBottom)
+                    .transition(.opacity)
+            }
+
+            // The drawer's mirror: from just under the window bar at the trailing edge, lined up
+            // with the Settings button, entirely in the lower half, so it never spans the Duo's
+            // crease and the stream above stays in view. No dim; the tap catcher covers both
+            // halves, as the drawer's dim does, so a tap anywhere outside closes the panel first
+            // and never reaches the Mac.
+            if settingsOpen {
+                let top = half + metrics.padTop + metrics.barHeight + 8
+                catcher
+
+                settingsPanel
+                    .frame(width: min(360, size.width - 2 * metrics.padSide))
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, top)
+                    .padding(.bottom, metrics.padBottom)
+                    .padding(.trailing, metrics.padSide)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    // The view carrying the transition fills the screen, so the panel's own
+                    // top-trailing corner, under the Settings button, is given as a point in it.
+                    .transition(settingsTransition(UnitPoint(x: 1 - metrics.padSide / max(size.width, 1),
+                                                             y: top / max(size.height, 1))))
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: metrics.rowGap) {
+            windowBar
+            keyRow(.full)
+            trackpad(verticalSpan: nil)
+        }
+        .padding(.top, metrics.padTop)
+        .padding(.horizontal, metrics.padSide)
+        .padding(.bottom, metrics.padBottom)
+    }
+
+    /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
+    /// Keyboard button (it is in the key row) but with the Aa control, whose ruler opens centred on
+    /// it; the strip's end and the Desktop button fade while it is open.
+    private var windowBar: some View {
+        HStack(spacing: 12) {
+            appsButton()
+
+            windowStrip
+                .opacity(scaleOpen ? 0.2 : 1)      // the slider unfolds over the strip's end
+                .allowsHitTesting(!scaleOpen)
+
+            TextScaleControl(scale: $textScale, open: $scaleOpen,
+                             width: metrics.buttonWidth, height: metrics.buttonHeight,
+                             radius: metrics.buttonRadius, pointsPerStep: 36)
+
+            desktopButton()
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            settingsButton()
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+        }
+        .frame(height: metrics.barHeight)
+        .animation(.easeOut(duration: 0.16), value: scaleOpen)
+    }
+
+    // MARK: A phone held upright
+
+    /// Every rect is `PhonePortraitLayout`'s, from this screen's size alone: the picture's pane is
+    /// fixed at 16:10, so a 16:9 window gets black bars above and below and nothing under it moves.
+    /// Row 1 holds the Keyboard button, which the software keyboard never covers; the keyboard
+    /// covers the trackpad (this screen ignores its safe area, so nothing moves up). The drawer and
+    /// the Settings panel hang under row 1, which stays live and undimmed while they are open, as
+    /// the landscape bar does; the dim and the tap catcher cover everything else, so a tap outside
+    /// closes them and never reaches the Mac.
+    private func phone(_ layout: PhonePortraitLayout) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.black
+
+            // In reading order, which is also top to bottom. While the drawer is open VoiceOver
+            // skips what it dims (a double-tap there would reach the Mac, where a tap only closes
+            // the drawer): row 1, then the drawer. The drawer and the Settings panel cover the strip
+            // but for its first thumbnail's badge, which sticks out past row 1's leading edge; the
+            // strip goes while either is open, so nothing cut shows beside them.
+            PhoneRows(layout: layout) {
+                picturePane.accessibilityHidden(drawerOpen)
+                phoneRow1(layout)
+                windowStrip
+                    .opacity(drawerOpen || settingsOpen ? 0 : 1)
+                    .accessibilityHidden(drawerOpen)
+                keyRow(.phone).accessibilityHidden(drawerOpen)
+                trackpad(verticalSpan: layout.trackpadSpan).accessibilityHidden(drawerOpen)
+            }
+
+            if drawerOpen {
+                ForEach(layout.dim.indices, id: \.self) { index in
+                    dim.placed(layout.dim[index], in: layout.size)
+                }
+                drawer
+                    .placed(layout.drawer, in: layout.size)
+                    .transition(.opacity)
+            }
+
+            if settingsOpen {
+                ForEach(layout.dim.indices, id: \.self) { index in
+                    catcher.placed(layout.dim[index], in: layout.size)
+                }
+                settingsPanel
+                    .frame(width: layout.settings.width)
+                    .frame(maxHeight: layout.settings.height, alignment: .top)
+                    .placed(at: layout.settings.origin, in: layout.size)
+                    // Placed in a view the screen's size, so the anchor is the panel's top-trailing
+                    // corner as a point of the screen, as in the halves.
+                    .transition(settingsTransition(UnitPoint(x: layout.settingsAnchor.x, y: layout.settingsAnchor.y)))
+            }
+        }
+    }
+
+    /// Row 1: the landscape bar's five, in its order, widened to share the row with the key row's
+    /// whitespace between them (Noah). Aa's ruler unfolds over the row; the other four fade and take
+    /// no touch until it folds.
+    private func phoneRow1(_ layout: PhonePortraitLayout) -> some View {
+        let width = layout.buttons[PhonePortraitLayout.Button.apps.rawValue].width
+        return HStack(spacing: PhonePortraitLayout.gap) {
+            appsButton(width: width)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            TextScaleControl(scale: $textScale, open: $scaleOpen,
+                             width: width, height: layout.row1.height,
+                             radius: metrics.buttonRadius, pointsPerStep: layout.rulerStep,
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
+
+            barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
+                      accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
+                      action: {
+                          setSettings(false, false)
+                          overlay.toggleKeyboard()
+                      })
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            desktopButton(width: width)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+
+            settingsButton(width: width)
+                .opacity(scaleOpen ? 0 : 1)
+                .allowsHitTesting(!scaleOpen)
+        }
+        .animation(.easeOut(duration: 0.16), value: scaleOpen)
+    }
+
+    // MARK: Shared by both
+
+    /// Identical to the landscape stream panel, including the direct-touch overlay: in every layout
+    /// this is the view that holds first responder, so the software keyboard types here. Measured
+    /// as it is drawn: the panel the video is fitted into, which the viewport sends the Mac.
+    private var picturePane: some View {
         ZStack {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
@@ -227,93 +386,158 @@ struct PortraitStreamScreen: View {
         .background(Palette.panel)
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-        // Measured inside the padding, as in landscape: the panel the video is drawn in.
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)
-        .padding(8)
     }
 
-    // MARK: Lower half
-
-    private var controls: some View {
-        VStack(spacing: metrics.rowGap) {
-            windowBar
-            // A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
-            KeyRow(metrics: metrics, latched: $latched, keyboardShown: keyboardShown,
-                   send: { client.sendFromKeyRow($0) },
-                   toggleKeyboard: { overlay.toggleKeyboard() },
-                   showSpotlight: client.active == .desktop)
-            Trackpad(send: { client.sendInput($0) },
-                     setPointer: { client.setOwnPointer($0, from: .trackpad) },
-                     feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
-                     onFingers: { client.trackpadFingers($0) },
-                     latched: latched,
-                     onModifiersConsumed: { latched = [] })
-        }
-        .padding(.top, metrics.padTop)
-        .padding(.horizontal, metrics.padSide)
-        .padding(.bottom, metrics.padBottom)
+    private var windowStrip: some View {
+        WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
+                    radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
+                    pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
+                    menuFor: $windowMenu)
     }
 
-    /// The same Apps button and thumbnails as landscape, at the board's tighter size, with no
-    /// Keyboard button (it moved into the key row) but with the Aa control, whose ruler opens
-    /// centred on it; the strip's end and the Desktop button fade while it is open.
-    private var windowBar: some View {
-        HStack(spacing: 12) {
-            barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps",
-                      accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
-                      action: {
-                          setSettings(false, false)
-                          withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
-                      })
-
-            WindowStrip(client: client, width: metrics.thumbWidth, height: metrics.thumbHeight,
-                        radius: metrics.thumbRadius, spacing: metrics.thumbSpacing,
-                        pad: metrics.thumbPad, fade: metrics.thumbFade, badge: metrics.badge,
-                        menuFor: $windowMenu)
-                .opacity(scaleOpen ? 0.2 : 1)      // the slider unfolds over the strip's end
-                .allowsHitTesting(!scaleOpen)
-
-            TextScaleControl(scale: $textScale, open: $scaleOpen,
-                             width: metrics.buttonWidth, height: metrics.buttonHeight,
-                             radius: metrics.buttonRadius, pointsPerStep: 36)
-
-            barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                      accessibilityLabel: "Show the full Mac desktop",
-                      action: { client.select(.desktop) })
-                .opacity(scaleOpen ? 0 : 1)
-                .allowsHitTesting(!scaleOpen)
-
-            // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
-            barButton(open: settingsOpen, symbol: "gearshape", label: "Settings",
-                      accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
-                      action: { setSettings(!settingsOpen, true) })
-                .opacity(scaleOpen ? 0 : 1)
-                .allowsHitTesting(!scaleOpen)
-        }
-        .frame(height: metrics.barHeight)
-        .animation(.easeOut(duration: 0.16), value: scaleOpen)
+    /// A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
+    private func keyRow(_ keys: KeyRow.Keys) -> some View {
+        KeyRow(metrics: metrics, keys: keys, latched: $latched, keyboardShown: keyboardShown,
+               send: { client.sendFromKeyRow($0) },
+               toggleKeyboard: { overlay.toggleKeyboard() },
+               showSpotlight: client.active == .desktop)
     }
 
-    private func barButton(open: Bool, symbol: String, label: String, accessibilityLabel: String,
-                           action: @escaping () -> Void) -> some View {
-        BarButton(open: open, width: metrics.buttonWidth, height: metrics.buttonHeight,
-                  radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
-                  action: action) {
-            VStack(spacing: metrics.buttonSpacing) {
-                Image(systemName: symbol)
-                    .font(.system(size: metrics.buttonIcon))
-                    .foregroundStyle(open ? Palette.accent : Palette.text)
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+    private func trackpad(verticalSpan: CGFloat?) -> some View {
+        Trackpad(send: { client.sendInput($0) },
+                 setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                 feed: { let f = client.pointerFeedState; return (f.anchor, f.reseeds) },
+                 onFingers: { client.trackpadFingers($0) },
+                 latched: latched,
+                 onModifiersConsumed: { latched = [] },
+                 verticalSpan: verticalSpan)
+    }
+
+    private var drawer: some View { AppDrawer(client: client, drawerOpen: $drawerOpen) }
+
+    private var settingsPanel: some View {
+        HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice)
+    }
+
+    /// The drawer's dim: a tap on it closes the drawer instead of clicking the Mac.
+    private var dim: some View {
+        Color.black.opacity(0.58)
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+            .accessibilityHidden(true)
+            .transition(.opacity)
+    }
+
+    /// The Settings panel's tap catcher: clear, so the stream stays in view while a setting changes.
+    private var catcher: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture { setSettings(false, true) }
+            .accessibilityHidden(true)
+    }
+
+    private func appsButton(width: CGFloat? = nil) -> some View {
+        barButton(open: drawerOpen, symbol: "magnifyingglass", label: "Apps", width: width,
+                  accessibilityLabel: drawerOpen ? "Close the app list" : "Open the app list",
+                  action: {
+                      setSettings(false, false)
+                      withAnimation(.easeOut(duration: 0.18)) { drawerOpen.toggle() }
+                  })
+    }
+
+    private func desktopButton(width: CGFloat? = nil) -> some View {
+        barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
+                  accessibilityLabel: "Show the full Mac desktop",
+                  action: { client.select(.desktop) })
+    }
+
+    /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.
+    private func settingsButton(width: CGFloat? = nil) -> some View {
+        barButton(open: settingsOpen, symbol: "gearshape", label: "Settings", width: width,
+                  accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                  action: { setSettings(!settingsOpen, true) })
+    }
+
+    /// A bar button at the board's size, or at `width` (the phone's share of its row). On the phone
+    /// the symbol sits in a fixed box, so the five labels share one line, and the labels stay on one
+    /// line, shrinking a little before they would wrap (Bold Text at 320 pt); the row does not grow
+    /// with the text size, so at the accessibility sizes a long press shows the button large.
+    @ViewBuilder
+    private func barButton(open: Bool, symbol: String, label: String, width: CGFloat? = nil,
+                           accessibilityLabel: String, action: @escaping () -> Void) -> some View {
+        if metrics.phone {
+            BarButton(open: open, width: width ?? metrics.buttonWidth, height: metrics.buttonHeight,
+                      radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
+                      action: action) {
+                VStack(spacing: metrics.buttonSpacing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: metrics.buttonIcon))
+                        .foregroundStyle(open ? Palette.accent : Palette.text)
+                        .frame(height: PortraitMetrics.phoneIconBox)
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .accessibilityShowsLargeContentViewer { Label(label, systemImage: symbol) }
+        } else {
+            BarButton(open: open, width: width ?? metrics.buttonWidth, height: metrics.buttonHeight,
+                      radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
+                      action: action) {
+                VStack(spacing: metrics.buttonSpacing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: metrics.buttonIcon))
+                        .foregroundStyle(open ? Palette.accent : Palette.text)
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+                }
             }
         }
     }
 }
 
+/// The phone's five parts at their `PhonePortraitLayout` rects, each proposed exactly its rect, in
+/// the order they are declared (picture, row 1, strip, key row, trackpad), which is the reading
+/// order VoiceOver takes.
+private struct PhoneRows: Layout {
+    let layout: PhonePortraitLayout
+
+    private var rects: [CGRect] { [layout.picture, layout.row1, layout.strip, layout.keys, layout.trackpad] }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        layout.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, rect) in zip(subviews, rects) {
+            subview.place(at: CGPoint(x: bounds.minX + rect.minX, y: bounds.minY + rect.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(rect.size))
+        }
+    }
+}
+
+private extension View {
+    /// This view with its top-leading corner at `origin`, in a view the size of the whole screen, so
+    /// a transition's anchor is a point of the screen; the room around it takes no touch.
+    func placed(at origin: CGPoint, in size: CGSize) -> some View {
+        padding(.leading, origin.x)
+            .padding(.top, origin.y)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    /// This view at exactly `rect`, in a view the size of the whole screen.
+    func placed(_ rect: CGRect, in size: CGSize) -> some View {
+        frame(width: rect.width, height: rect.height).placed(at: rect.origin, in: size)
+    }
+}
+
 // MARK: - Key row
 
-/// One cap in the key row, as data, so the same twelve can be laid out as one row or two.
+/// One cap in the key row, as data, so each layout can pick its own set and fold it.
 private enum Key {
     /// A key that types itself: the cap's text, its HID usage, its accessibility label.
     case press(String, UInt16, String)
@@ -325,14 +549,30 @@ private enum Key {
     case keyboard
     /// Spotlight on the Mac: always exactly ⌘Space, whatever is latched.
     case spotlight
+
+    #if DEBUG
+    /// What the cap says, for `-SillInputTest` to find it by.
+    var title: String? {
+        switch self {
+        case .press(let title, _, _), .modifier(let title, _, _): return title
+        case .arrow, .keyboard, .spotlight: return nil
+        }
+    }
+    #endif
 }
 
-/// The keys a Mac needs that a software keyboard does not offer: escape, tab, the four arrows, the
-/// four modifiers, the keyboard itself and Spotlight. Twelve equal caps across the screen at 48 pt
-/// tall, ≈49 pt wide at 710 pt — or, on the outer display where twelve 44 pt caps do not fit
-/// across 472 pt, six and then six, 72 pt wide at 500 pt.
+/// The keys a Mac needs that a software keyboard does not offer. In the halves (`.full`): escape,
+/// tab, the four modifiers, the four arrows, the keyboard itself and Spotlight, twelve equal caps
+/// across the screen at 48 pt tall, ≈49 pt wide at 710 pt — or, in the compact halves where twelve
+/// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
+/// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
+/// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
+/// ⌘Space). Arrows there come from a hardware keyboard.
 private struct KeyRow: View {
+    enum Keys { case full, phone }
+
     let metrics: PortraitMetrics
+    let keys: Keys
     @Binding var latched: KeyModifiers
     let keyboardShown: Bool
     let send: (InputEvent) -> Void
@@ -356,16 +596,22 @@ private struct KeyRow: View {
         .spotlight,
     ]
 
-    /// One row of twelve, or the split: the six that name a key, then the four arrows, the
-    /// keyboard and Spotlight. The break falls where the row changes job, not merely where it runs
-    /// out of width.
-    private var keys: [Key] {
-        showSpotlight ? Self.all : Self.all.filter { if case .spotlight = $0 { return false } else { return true } }
+    /// The six that name a key.
+    private static let phone = Array(all.prefix(6))
+
+    private var shown: [Key] {
+        switch keys {
+        case .phone: return Self.phone
+        case .full: return showSpotlight ? Self.all : Self.all.filter { if case .spotlight = $0 { return false } else { return true } }
+        }
     }
 
+    /// One row, or the compact halves' split: the six that name a key, then the four arrows, the
+    /// keyboard and Spotlight. The break falls where the row changes job, not merely where it runs
+    /// out of width.
     private var rows: [[Key]] {
-        guard metrics.splitKeys else { return [keys] }
-        return [Array(keys.prefix(6)), Array(keys.dropFirst(6))]
+        guard metrics.splitKeys else { return [shown] }
+        return [Array(shown.prefix(6)), Array(shown.dropFirst(6))]
     }
 
     var body: some View {
@@ -380,28 +626,33 @@ private struct KeyRow: View {
             }
         }
         .frame(height: metrics.keyBlockHeight)
+        #if DEBUG
+        .onAppear(perform: runInputTest)
+        #endif
     }
 
     @ViewBuilder private func key(_ key: Key) -> some View {
         switch key {
-        case .press(let title, let usage, let label):
-            cap(open: false, label: label, action: { press(usage) }) { text(title) }
-        case .arrow(let symbol, let usage, let label):
-            arrow(symbol, usage, label: label)
+        case .press(let title, _, let label):
+            cap(open: false, label: label, largeContent: title, action: { tap(key) }) { text(title) }
+        case .arrow(let symbol, _, let label):
+            cap(open: false, label: label, action: { tap(key) }) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Palette.text)
+            }
         case .modifier(let title, let flag, let label):
-            latchKey(title, flag, label: label)
+            latchKey(key, title, flag, label: label)
         case .keyboard:
             cap(open: keyboardShown,
                 label: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
-                action: toggleKeyboard) {
+                action: { tap(key) }) {
                 Image(systemName: "keyboard")
                     .font(.system(size: 20))
                     .foregroundStyle(keyboardShown ? Palette.accent : Palette.text)
             }
         case .spotlight:
-            // Latched modifiers do not join ⌘Space, but the tap still spends them.
-            cap(open: false, label: "Open Spotlight on the Mac",
-                action: { Spotlight.press(send: send); latched = [] }) {
+            cap(open: false, label: "Open Spotlight on the Mac", action: { tap(key) }) {
                 Image(systemName: Spotlight.symbol)
                     .font(.system(size: 19))
                     .foregroundStyle(Palette.text)
@@ -409,12 +660,32 @@ private struct KeyRow: View {
         }
     }
 
+    /// What a tap on each cap does.
+    private func tap(_ key: Key) {
+        switch key {
+        case .press(_, let usage, _), .arrow(_, let usage, _):
+            press(usage)
+        case .modifier(_, let flag, _):
+            latched.formSymmetricDifference(flag)
+        case .keyboard:
+            toggleKeyboard()
+        case .spotlight:
+            // Latched modifiers do not join ⌘Space, but the tap still spends them.
+            Spotlight.press(send: send)
+            latched = []
+        }
+    }
+
     // MARK: Caps
 
-    private func cap<Content: View>(open: Bool, label: String, action: @escaping () -> Void,
+    /// `largeContent`: the cap's text, which the phone's caps (fixed in size, as the row is) show
+    /// large on a long press at the accessibility text sizes.
+    @ViewBuilder
+    private func cap<Content: View>(open: Bool, label: String, largeContent: String? = nil,
+                                    action: @escaping () -> Void,
                                     @ViewBuilder content: () -> Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
-        return Button(action: action) {
+        let button = Button(action: action) {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(shape.fill(open ? Palette.controlOpen : Palette.control))
@@ -422,6 +693,11 @@ private struct KeyRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        if keys == .phone, let largeContent {
+            button.accessibilityShowsLargeContentViewer { Text(largeContent) }
+        } else {
+            button
+        }
     }
 
     private func text(_ title: String) -> some View {
@@ -430,20 +706,12 @@ private struct KeyRow: View {
             .foregroundStyle(Palette.text)
     }
 
-    private func arrow(_ symbol: String, _ usage: UInt16, label: String) -> some View {
-        cap(open: false, label: label, action: { press(usage) }) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Palette.text)
-        }
-    }
-
     /// A latching modifier: it stays lit until something uses it, or until it is tapped again.
-    private func latchKey(_ title: String, _ flag: KeyModifiers, label: String) -> some View {
+    private func latchKey(_ key: Key, _ title: String, _ flag: KeyModifiers, label: String) -> some View {
         let on = latched.contains(flag)
         return cap(open: on,
                    label: on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
-                   action: { latched.formSymmetricDifference(flag) }) {
+                   largeContent: title, action: { tap(key) }) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(on ? Palette.accent : Palette.text)
@@ -457,4 +725,23 @@ private struct KeyRow: View {
         send(.key(hidUsage: usage, down: false, modifiers: latched.rawValue))
         latched = []
     }
+
+    #if DEBUG
+    /// DEBUG `-SillInputTest 1` (ContentView's contract), the key row's half: once per launch, taps
+    /// cmd, esc, shift and ctrl through `tap`, as the caps do, 1.0, 1.4, 1.8 and 2.0 s after the row
+    /// shows: ⌘esc goes out and spends the ⌘ latch, and shift and ctrl stay latched for the
+    /// trackpad's tap (TrackpadSurface's half).
+    private func runInputTest() {
+        guard InputTest.claim("key row") else { return }
+        for (time, title) in [(1.0, "cmd"), (1.4, "esc"), (1.8, "shift"), (2.0, "ctrl")] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) {
+                guard let key = shown.first(where: { $0.title == title }) else {
+                    print("input test: no \(title) cap in this key row"); return
+                }
+                tap(key)
+                print("input test: the key row's \(title) tapped; latched now " + InputTest.describe(latched))
+            }
+        }
+    }
+    #endif
 }

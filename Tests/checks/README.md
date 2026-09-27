@@ -4,12 +4,13 @@ The parts of Sill that decide things (when the device looks for a Mac and which 
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
 video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
 session ends, what the update check makes of GitHub's answer, who moves the Mac's pointer and what
-the device's pointer sprite shows, how the Mac download's disk image lays out its window) are plain
-Swift files that compile on their own. Each folder here compiles one or a few of those files,
-exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own `main.swift`,
-and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the video encoder
-or any network but loopback, so the checks run anywhere Xcode does, and in CI
-(`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
+the device's pointer sprite shows, how the Mac download's disk image lays out its window, where
+everything goes on a phone held upright) are plain Swift files that compile on their own. Each
+folder here compiles one or a few of those files, exactly as they are in `Sources/`, `iOSClient/`
+and `Scripts/`, together with its own `main.swift`, and runs the result. Nothing here needs a
+device, Screen Recording, Accessibility, the video encoder or any network but loopback, so the
+checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and pushes
+to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about two minutes on an M-series Mac
@@ -38,6 +39,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
+| `phone-portrait` | `iOSClient/PhonePortraitLayout.swift` | where everything goes on a phone held upright: the picture's 16:10 pane, row 1's five buttons in their band, the strip, the six caps, the trackpad and its span, the Aa ruler, the drawer and the Settings panel across row 1, and the dim; the plan's tables phone by phone (the keyboard's too, and the Duo's outer display's), the approved mockup's numbers, and every width from 300 to 599 pt at every height to 1,400 | 149 | 28 |
 | `pointer-control` | `Sources/SillHost/PointerControl.swift` with `Sources/StreamProtocol` (`build.sh`) | who moves the Mac's pointer: the settle after Sill's own input, posts and warps, a real move from the last position that counted (jitter never, a slow drift yes), keys, one controller of two devices, a read after a gap, when it counts as moving (the frame-rate sampling), the fraction kind 26 carries (the far edges outside); kind 26 itself (MacPointer's JSON, the kind table), with 5,000 random runs | 152 | 33 |
 | `pointer-presence` | `iOSClient/PointerPresence.swift` | what the device's pointer sprite shows, row by row of the plan's table (the Mac's, the portrait trackpad's, the Pencil's, both flips), the portrait key row keeping what shows, a new frame re-centring only this device's own pointer while it shows, a report's freshness, the network queue's feed (the anchor, its re-seeds, a hand-over's carry-over and restatements), the portrait pad's cursor and its re-seed mid-stroke or under a resting finger | 165 | 43 |
 | `pointer-watch` | `Sources/SillHost/PointerWatch.swift` with `PointerControl.swift`, `Stats.swift` and `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's sampling of the Mac's pointer around PointerControl: nothing read without a geometry, and a synthetic host never reading the real pointer; the fraction and inside per geometry; the kind 26 each device is sent (nothing to the one driving); a regular-mode window's bounds and on-screen flag re-read on a queue of its own (after a move at most every 0.1 s while a device is sent the pointer, every 2 s anyway), never waited for, a stale answer dropped and an owed one run; Sill's own motion; the frame interval and when the frame-rate sampler runs (over the source, a device sent it, faster than the tick); the TEST ONLY scripted pointer (its file, its clock, a dry run's move against its steps) and the software-encoder hook, with their lines | 132 | 40 |
@@ -49,10 +51,10 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
 two encoder checks' are those of the encoder-two-in-flight branch that brought them, the four the
 `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`, `update-policy`) those of
-its merge with main at 32d532b, `dmg-layout`'s those of the `mac-dmg` branch that brought it,
-`fence`'s main's at cf05a78 (ci-fence-fix's) with the `pointer-visibility` branch's count on top,
-and `pointer-control`, `pointer-presence` and `pointer-watch`'s that branch's after its review
-(docs/pointer-visibility-plan.md).
+its merge with main at 32d532b, `dmg-layout`'s and `phone-portrait`'s those of the `mac-dmg` and
+`iphone-portrait` branches that brought them, `fence`'s main's at cf05a78 (ci-fence-fix's) with the
+`pointer-visibility` branch's count on top, and `pointer-control`, `pointer-presence` and
+`pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
