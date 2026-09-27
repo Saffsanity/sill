@@ -23,8 +23,9 @@ Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frame
   diagnosis and experiments, not shipped.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
 - `Packaging/`: Sill.app's `Info.plist` and development entitlements.
-  `Scripts/`: `make-app.sh`, and the test tools below. `design/`: the icon (see
-  its README). `docs/`: the brief and the plans.
+  `Scripts/`: `make-app.sh`, and the test tools below. `design/`: the icon and
+  the disk image's background (see its README). `docs/`: the brief and the
+  plans.
 
 `CLAUDE.md`, Layout, goes through the code file by file.
 
@@ -215,9 +216,8 @@ Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
 shows the Mac's words ("Update Sill on your iPad to keep using Mac mini. It
-needs version 1.2 or later."), with "Update Sill in the App Store" under them
-once the app has its App Store address, and the device does not reconnect by
-itself. Today's Macs refuse no device.
+needs version 1.2 or later."), with "Update Sill in the App Store" under them,
+and the device does not reconnect by itself. Today's Macs refuse no device.
 
 The project is a plain Xcode project checked in by hand: its source files, an
 asset catalog, and the package reference. Nothing else. A new source file
@@ -806,4 +806,4 @@ record field by field.
 - `docs/`: the brief, the plans, `app-store-metadata.md` (what App Store
   Connect asks for) and `release-checklist.md` (the order of work for a
   release).
-- `design/`: the app icon.
+- `design/`: the app icon, and the disk image's background.

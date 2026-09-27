@@ -839,7 +839,8 @@ display unchanged; no wire change.
 cf05a78, PR #29).** Noah: "Sill should open in a .dmg and be draggable into
 applications folder like regular apps". `Scripts/release.sh` now makes
 `Sill.dmg` beside `Sill.zip`, from the same notarized, stapled app. Nothing was
-notarized, published or tagged, and the download page still links the zip.
+notarized, published or tagged here; Sill 0.3.1 (PR #32, 2026-09-27) is the
+first release with the image, and the download page links it (PR #33).
 - The image (`Scripts/make-dmg.sh`, Layout): Sill.app, a link to
   /Applications, a white background with an arrow from one to the other
   (`design/DMGBackground.svg`, 660 x 400 points, the arrow in the app icon's
@@ -871,11 +872,11 @@ notarized, published or tagged, and the download page still links the zip.
   prints both SHA-256s, and `--publish` uploads Sill.dmg, Sill.dmg.sha256,
   Sill.zip and Sill.zip.sha256, the notes naming both hashes. A dry run makes
   the image from the app before stapling, signed with the identity.
-- The zip stays in every release for now; the download page moves to the
-  image only once a release carries it: docs/release-checklist.md, part 2
-  (the release first, the link checked, then the page, then the site
-  republished), and the page's new lines wait in a comment above its card in
-  `site/download.html`. The release workflow's verify job makes
+- The zip stays in every release for now, for older links; the download page
+  moved to the image once a release carried it, as docs/release-checklist.md,
+  part 2, says (the release first, the link checked, then the page, then the
+  site republished): Sill 0.3.1, then PR #33 and sill-site on 2026-09-27. The
+  release workflow's verify job makes
   `Sill-<version>-adhoc.dmg` (`make-dmg.sh --sign -`) and keeps it as a second
   artifact; the publish job keeps both submissions' answers and logs as the
   artifact `notary-v<version>`.
@@ -948,15 +949,15 @@ notarized, published or tagged, and the download page still links the zip.
   again) and 38 of 38 mutants; publish_release with the real gh against a
   stand-in GitHub API (the four uploads with their names and sizes, the
   notes), 13 checks.
-- **Untested, for Noah:** a real release (two notarizations, the image's
-  staple, spctl's "Notarized Developer ID" for it, `--publish`'s four assets,
-  the `notary-v<version>` artifact on a signed run); the window in the Finder
+- **Untested, for Noah:** the `notary-v<version>` artifact on a signed run
+  (0.3.1 was released by hand with `release.sh --publish`: the image signed,
+  notarized and stapled, the four assets; its verify job ran on GitHub and
+  kept `Sill-0.3.1-adhoc.dmg`; the page moved, PR #33); the window in the Finder
   on macOS 27 (the whole picture, a scroll settles back, the names under the
   icons readable in Dark Mode on the white picture, the volume icon): the
   checklist's part 1 §2 has the look; on macOS 14 or 15, the 4 points of white
   below the picture; the image on another Mac (downloaded, so quarantined: it
-  opens, the drag, Sill opens, also offline); the verify job on GitHub
-  (hdiutil and Quick Look on the runner); the page's move.
+  opens, the drag, Sill opens, also offline).
 - Known: files written from a Claude session carry `com.apple.provenance`,
   which `xattr -d` can't remove, so the rehearsal image's files carry it
   (Claude.dmg's have none); the zip has always carried the same attributes in
@@ -966,7 +967,9 @@ notarized, published or tagged, and the download page still links the zip.
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and
 the site). This branch makes those minutes of work: the upload tooling and
-the record field by field. Nothing was uploaded and no record was created.
+the record field by field. Nothing was uploaded and no record was created
+here; on 2026-09-26 the record was made ("Sill – Mac Streaming", Apple ID
+6816359860, PR #27), and 0.5 (1), built from b37f47a, was uploaded.
 - `Scripts/release-ios.sh` (Layout): archive (Release, generic/platform=iOS,
   automatic signing, `-allowProvisioningUpdates`), export with
   `Packaging/ExportOptions-appstore.plist` (app-store-connect, team
@@ -1038,10 +1041,9 @@ the record field by field. Nothing was uploaded and no record was created.
   39 mutants (27 and 12 new); the key step under bash 3.2 with a good, a
   raw, a garbled and an empty secret; the export options against Xcode
   27.0's `xcodebuild -help`.
-- **Untested, for Noah:** the record, the upload (`Scripts/release-ios.sh
-  --upload` after the checklist's TestFlight §1 and §2), TestFlight on the
-  devices, any run on GitHub (unsigned first, then with the key), signing
-  through an API key, and the Organizer's privacy report PDF.
+- **Untested, for Noah:** TestFlight on the devices, any run on GitHub
+  (unsigned first, then with the key), signing through an API key, and the
+  Organizer's privacy report PDF. The record and the upload are done (above).
 
 **Before going public (2026-09-26, branch `public-sweep` from main at 150f781,
 with main at a550e27 merged in, PR #24).** Noah's four steps for the first Mac
@@ -1074,7 +1076,13 @@ pt wide with its port against 291.6.
   reporting, rulesets for main and the v* tags, the site republished, then the
   edits the comments hold back (the README's CI badge, index.html's "Free and
   open source", support.html's issues link, the checklist's private-repository
-  lines). The sweep's report has the commands.
+  lines). The sweep's report has the commands. Since: public on 2026-09-26
+  with its history as it is (Noah), Apache-2.0 kept, and PR #26 made the
+  held-back edits (sill-site republished with them). On 2026-09-27 the
+  repository has secret scanning, push protection, private vulnerability
+  reporting and the Actions allow-list (selected actions, pinned by SHA) on;
+  still open: rulesets for main and the v* tags (none yet) and immutable
+  releases (off).
 
 **Update check and device notice (2026-09-25, branch `update-notice` from
 `remote-access` at cb0ec55, PR #13, with main merged in at 1f3072a and again
@@ -1124,7 +1132,7 @@ set the compatibility floor for good (the section before Conventions).
   remote dial's failure rules (before, an unknown reason showed "disconnected"
   and redialled at once: a loop against a Mac that refuses). "update" adds
   "Update Sill in the App Store" under it once `SillLinks.appStoreText` holds
-  the App Store address (a placeholder now; DEBUG `-SillAppStoreURL`). The
+  the App Store address (the record's since PR #27; DEBUG `-SillAppStoreURL`). The
   hello goes out first on a tap's, a reconnect's, a wired dial's and its
   fallback's, a move's and a remote winner's connection (`-SillHelloVersion`),
   written to a home dial's connection as it is made, before it is the
@@ -1146,8 +1154,8 @@ set the compatibility floor for good (the section before Conventions).
   automatically", on by default, wired to the checker from launch; Check Now's
   result until GitHub answers an automatic check, else the offer or the last
   check; Open Release Page…; Check Now); both open the page in the browser,
-  nothing is downloaded. A 404
-  (the repository is private today) is one log line a day and nothing else.
+  nothing is downloaded. A 404 (the repository was private and without a
+  release until 2026-09-26) is one log line a day and nothing else.
   `make-app.sh --release` builds only a commit tagged `v‹version›`.
 - Verified (the plan's Results has every number): clean builds (only the
   CaptureProbe and `StreamClient` capture warnings); pure checks with swiftc
@@ -1263,11 +1271,12 @@ set the compatibility floor for good (the section before Conventions).
   fake GitHub API; the simulator against this head's CLI (floor 99: the
   notice, no reconnect; floor 0.1: admitted and streaming, and a move's own
   connection with its hello; a goodbye "quit": its words and one connection).
-- **Untested, for Noah:** the plan's V1–V7: V1 the real check today (install
-  this Sill.app yourself; within a minute "Update check failed: GitHub has no
-  release of Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t
-  check: GitHub has no release of Sill yet.", `updateLastCheck` set), V2 once
-  the repository is public with a newer release, V3 a refusal on the iPad (its
+- **Untested, for Noah:** the plan's V1–V7: V1 the real check while the
+  repository had no release (moot since it went public with v0.3.0 on
+  2026-09-26: within a minute "Update check failed: GitHub has no release of
+  Sill (HTTP 404)." once, no menu item, Check Now says "Couldn’t check: GitHub
+  has no release of Sill yet.", `updateLastCheck` set), V2 now that it has a
+  newer release (0.3.1 for a 0.3.0 Sill.app), V3 a refusal on the iPad (its
   Debug build, `-SillConnect <this Mac>:P`, against
   `SILL_TEST_MIN_DEVICE_VERSION=99 SillHost --synthetic`; VoiceOver speaks it; no
   reconnect in 2 minutes), V4 mixed builds (PR #13's iPad build against this
@@ -1276,7 +1285,7 @@ set the compatibility floor for good (the section before Conventions).
   `--release` refuses an untagged HEAD, `release.sh --dry-run` only warns,
   `--publish` refuses until the tag is pushed), V7
   the privacy policy's Update check section (site/privacy.html) on the
-  published site, once Saffsanity/sill-site is republished.
+  published site (Saffsanity/sill-site republished with it on 2026-09-26).
 
 **GitHub Actions (2026-09-25, branch `github-actions` from main at 1f3072a).**
 Noah: the download link still fails; a new release should be checked by
@@ -1284,7 +1293,8 @@ GitHub, and does that cost money. The link fails twice over: there is no
 release (`release.sh --publish` has never run; `gh release list` is empty), and
 Saffsanity/sill is private, so its release files are a 404 to anyone not signed
 in with access (docs/release-checklist.md, "Releasing from GitHub Actions",
-has both ways out: go public, or publish in sill-site). Added:
+has both ways out: go public, or publish in sill-site; it went public on
+2026-09-26, and v0.3.0 and v0.3.1 are published there). Added:
 - `.github/workflows/ci.yml` (Layout): pull requests and pushes to main that
   touch more than documents, the site or design files, and by hand; one job on
   `xcode-27`, 30 minutes, cancelling an older run of the same event and ref.
@@ -1399,6 +1409,12 @@ has both ways out: go public, or publish in sill-site). Added:
   free once public; private, about 10 minutes a CI run against roughly 200
   included macOS minutes a month on GitHub Free (a macOS minute counts ten),
   then $0.062 a minute with a payment method on file, and nothing without one.
+  Since (2026-09-27): CI runs on pull requests and pushes to main, and the
+  release workflow's verify job ran for v0.3.0 and v0.3.1 (make-app.sh's Quick
+  Look icon on the runner included); the repository is public, so the runs
+  cost nothing. The sign job never ran (no secrets are set, and
+  `SILL_SIGN_IN_CI` is not), so both releases were published by hand with
+  `release.sh --publish`.
 
 **Public README (2026-09-25, branch `public-readme` from main at b50e224,
 PR #15, merged at 1f3072a).** For the repository going public at launch: `README.md` is the
@@ -1415,11 +1431,10 @@ plainly.
 - **For Noah:** Sponsorships turned on in the repository's settings (General,
   Features), or GitHub shows no Sponsor button (github.com/sponsors/Saffsanity
   is live since 2026-09-25); a Ko-fi handle, if wanted, goes in two places, a
-  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; the license,
-  Apache-2.0 unless Noah says otherwise (docs/BRIEF.md; for MPL-2.0, replace
-  LICENSE and the README's License section before the repository is public);
-  the App Store badge and the sentence under the README's links, as the
-  listing and the first notarized Sill for Mac come out.
+  `ko_fi:` line in FUNDING.yml and a link in the README's Tips; the license
+  stays Apache-2.0 (the repository went public with it on 2026-09-26); the App
+  Store badge and the sentence under the README's links, once the listing is
+  out (the sentence names the notarized Mac download since PR #24).
 - Merging (done: PR #15 merged at 1f3072a, and every branch named here has
   merged since): main gained follow-best-path (PR #12, cea195c) after this branch
   began, so PR #15 conflicts in README.md and CLAUDE.md: take this branch's
@@ -1455,8 +1470,8 @@ Apple's sources and every text to paste into App Store Connect;
   `support@getsill.app` (the privacy and support pages, the README and the
   metadata; Cloudflare Email Routing forwards it to Noah), and the Mac download
   at `/download` (`site/download.html`, which links the newest GitHub Release's
-  `Sill.zip` and is never edited per release). The checklist's Placeholders
-  table has the commands that change each everywhere.
+  `Sill.dmg`, `Sill.zip` until 0.3.1, and is never edited per release). The
+  checklist's Placeholders table has the commands that change each everywhere.
 - The merge: the footer sits under main's connect screen (Add a Mac…, the
   Remote rows, the card, the leading anchor, the Duo's top half, the column at
   the top while a field has the keyboard). The branch drew the column twice,
@@ -1514,8 +1529,8 @@ Apple's sources and every text to paste into App Store Connect;
 - **Untested, for Noah:** the decisions: the domain, the contact address, and
   whether 1.0 keeps Remote Access, which main has had since ba91136 (the
   audit advised a 1.0 without it before it merged; the metadata's switch lists
-  the cuts). On a device: the footer's links open Safari (the pages are not
-  served yet), VoiceOver reads the footer once, after the rows (its measuring
+  the cuts). On a device: the footer's links open Safari (the site: live since
+  2026-09-25), VoiceOver reads the footer once, after the rows (its measuring
   copy is hidden from it), the card's fields with a hardware keyboard (the
   column at the top, the footer in view) and the software one (the footer
   under it), and a phone held sideways, which only the harness drew here
@@ -1524,6 +1539,9 @@ Apple's sources and every text to paste into App Store Connect;
   Mac that never had Sill, the site on GitHub Pages with its DNS record, the
   App Store Connect record (the checklist's part 1). The description's claims
   not yet seen on a device: the cable on an iPhone, Pencil hover, 120 fps.
+  Done since: the domain and the address (2026-09-25), the site at getsill.app,
+  the Developer ID certificate, the notary credentials and release.sh for real
+  (v0.3.0 and v0.3.1), and the App Store Connect record (2026-09-26).
 
 **Follow-best-path merged with main after remote access (2026-09-25, branch
 `follow-best-path`: merge of main at ba91136, PR #13, into 8e1e4e3, PR #12,
@@ -3720,8 +3738,8 @@ good.
   workflow, whose checkout is that tag and keeps no credentials); in
   Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
   Sill.app will offer the release. It uploads `Sill.dmg`, `Sill.dmg.sha256`,
-  `Sill.zip` and `Sill.zip.sha256` (the zip kept for now: the site's links name
-  it until a release carries the image). Sourced, it only defines its functions.
+  `Sill.zip` and `Sill.zip.sha256` (the zip kept for older links: the download
+  page names the image since 0.3.1). Sourced, it only defines its functions.
   `Scripts/make-dmg.sh --sign IDENTITY APP DMG` (`-` for ad hoc) makes the
   image: an HFS+ volume "Sill" (not APFS: Finder names the background by an
   HFS+ alias record, and Finder-made and current third-party images are
@@ -3804,8 +3822,8 @@ good.
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
   `--all-headers`; `GET /__control?key=value` changes them while it runs).
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
-  `index.html`, `download.html` (links the newest GitHub Release's `Sill.zip`
-  and `Sill.zip.sha256`; never edited per release), `privacy.html` (the policy
+  `index.html`, `download.html` (links the newest GitHub Release's `Sill.dmg`
+  and `Sill.dmg.sha256`; never edited per release), `privacy.html` (the policy
   App Store Connect and the app link to), `support.html`, `style.css` (system
   fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
   scripts and nothing loaded from elsewhere: every page's
@@ -3878,8 +3896,8 @@ good.
   camera); + DEBUG harness, and `InputScript`, `-SillInputScript`'s steps),
   `SillLinks`
   (the site's addresses, written once; getsill.app is live since 2026-09-25;
-  and the App Store address for a Mac's update notice, a placeholder until the
-  App Store Connect record exists),
+  and the App Store address for a Mac's update notice, the App Store Connect
+  record's since PR #27),
   `MockCatalog` (harness data and the settings cases), `HostSettingsLedger`
   (the Mac's settings with this device's unanswered picks; pure logic, checked
   with swiftc), `HostSettingsPanel` (the Settings panel; the route line, Away
@@ -4351,6 +4369,6 @@ device keeps working with Macs from the first public build on, or each says why
 - iCloud auto-pairing (same Apple Account, Mac just appears) for milestone 5.
   Bonjour only for the spike.
 - Native feel is the bar: Flighty-level polish, iOS conventions, Duo layouts.
-- License: Apache-2.0, LICENSE since PR #15 (MPL-2.0 only if Noah switches
-  before the repository is public; paid plan is gone, so no GPL/CLA needed).
+- License: Apache-2.0, LICENSE since PR #15, kept when the repository went
+  public on 2026-09-26 (paid plan is gone, so no GPL/CLA needed).
 - v1 out of scope: hole punching, multi-window, layout customization, audio.
