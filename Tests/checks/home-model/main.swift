@@ -180,5 +180,33 @@ check("after a window ran out, the card's \"Tap Mac mini for a new one.\" holds:
       cardWords(PairingWindow.closedReason(.expired, stoppedByThisProof: false)) == P.HomeCopy.expired(mac: "Mac mini") && !AskLimits.quiets(.expired))
 check("the literals homeRefusal reads are the wire's", PairResult.code == "code" && PairResult.stopped == "stopped" && PairResult.expired == "expired")
 
+// MARK: 10. A kind 18 replayed on a look-alike's connection (the security review, 2026-09-27)
+
+// Mac M signs its kind 18 (a real signature, SignedMacInfo, with a real key); a look-alike with key X
+// replays it on an open door's session. It verifies (M signed it), but the connection's key is X: it
+// names nothing, so the session is not M's, M's record is not refreshed or renamed, the panel does
+// not say "Paired", and a goodbye "removed" from that session revokes nothing. On M's own
+// connection (pinned to M, or an open one that saw M's key) it speaks for M, and so does its goodbye.
+if let keyM = RemoteKey.generate(), let idM = RemoteIdentity(privateKey: keyM), let keyX = RemoteKey.generate(),
+   let idX = RemoteIdentity(privateKey: keyX),
+   let signed = SignedMacInfo.signing(MacInfo(macID: MacID.make(fingerprint: idM.fingerprint), name: "Mac mini", issuedAt: 1_790_000_000,
+                                              remoteAccess: true, remotePort: 7455, internet: false, addresses: []), with: keyM),
+   let (info, signer) = signed.verified() {
+    let fM = idM.fingerprint, fX = idX.fingerprint
+    check("10 M's kind 18 verifies, signed by M's key", signer == fM && info.macID == MacID.make(fingerprint: fM))
+    check("10 replayed on X's connection it names nothing", !P.macInfoNamesSession(signer: signer, connectionKey: fX))
+    check("10 on a plain connection it names nothing", !P.macInfoNamesSession(signer: signer, connectionKey: nil))
+    check("10 on M's own connection it speaks for M", P.macInfoNamesSession(signer: signer, connectionKey: fM))
+    let lookAlike = P.trust(.open(seen: nil), readyWith: fX)
+    check("10 goodbye removed from the look-alike's open session: removed, but M is not revoked",
+          P.homeEnd(trust: lookAlike, goodbye: Goodbye.removed, tls: nil) == .removed
+          && !P.removalRevokes(remote: false, trust: lookAlike, savedKey: fM))
+    check("10 from M's pinned session, or an open one that saw M's key, M is revoked",
+          P.removalRevokes(remote: false, trust: .saved(pin: fM), savedKey: fM)
+          && P.removalRevokes(remote: false, trust: P.trust(.open(seen: nil), readyWith: fM), savedKey: fM))
+} else {
+    check("10 two P-256 keys and M's signed kind 18", false)
+}
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

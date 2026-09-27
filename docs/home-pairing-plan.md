@@ -1266,6 +1266,16 @@ New attention items (first group, orange):
   the saved Mac's Bonjour name alone (§7.3) is skipped by the reconnect from then on
   (`pinRefusedRows`) without that copy; after a tap, which asked for that Mac, the copy follows the
   Mac's other rows as for a row its tag named.
+- **Kind 18 speaks for the session's Mac only when the key of the connection it came on signed it**
+  (`DiscoveryPolicy.macInfoNamesSession`, the security review, 2026-09-27): a Mac sends its kind 18
+  to every session, an open door's included (and in plaintext at a plain door), so another Mac can
+  replay it on a connection of its own. Before, a kind 18 whose signature checked named any session
+  as that saved Mac: the panel said "Paired", the record was refreshed and took the look-alike's
+  Bonjour name, and a goodbye `removed` from that session then revoked the real Mac. Now such a kind
+  18 is shown as an unverified one is, and names, refreshes and renames nothing; over a plain
+  connection (DEBUG) nothing is ever named. A goodbye `removed` (and -9825/-9829 on a pinned dial)
+  revokes a saved Mac only from a session pinned to that Mac's key, at home or through the remote
+  door (`removalRevokes`), never from a plain one or an open one that saw another key.
 - **The panel's Away from home group** (HostSettingsPanel.swift:303; :305 at `cea195c`): the
   saved Mac's row reads "Paired" (was "Paired for remote access"); Pair This ‹iPad›… shows only in
   an unpaired session. As built (step 5, `DiscoveryPolicy.awayFromHome`, pure): under "Paired",

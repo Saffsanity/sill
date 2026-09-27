@@ -1004,6 +1004,29 @@ enum DiscoveryPolicy {
         return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\.id)
     }
 
+    /// Whether a kind 18 whose signature checked, signed by `signer`, speaks for this session's Mac
+    /// (§7.6): only when that is the key the connection it came on showed in its TLS handshake
+    /// (`connectionKey`; nil on a plain connection). Only then may it name the session's Mac, make
+    /// the panel say "Paired", or refresh or rename a saved Mac. Its signature alone proves only
+    /// that the Mac signed it once: a Mac hands its kind 18 to every session (an open door's
+    /// included, and in plaintext at a plain door), so another Mac can replay it on a connection of
+    /// its own (the security review, 2026-09-27).
+    static func macInfoNamesSession(signer: Data, connectionKey: Data?) -> Bool {
+        connectionKey == signer
+    }
+
+    /// Whether goodbye "removed" (or a saved Mac's key refused right after `.ready`) revokes the
+    /// saved Mac whose key is `savedKey` (§7.6): only from a session that Mac's own key answered, a
+    /// remote one (always pinned to it) or one at home whose connections are pinned to it
+    /// (`pin(trust)`). Never from a plain session, which has no key, nor from an open one that saw
+    /// another key: a look-alike's goodbye must not revoke the real Mac.
+    static func removalRevokes(remote: Bool, trust: HomeTrust?, savedKey: Data?) -> Bool {
+        guard let savedKey else { return false }
+        if remote { return true }
+        guard let trust else { return false }
+        return pin(trust) == .key(savedKey)
+    }
+
     /// The Settings panel's last group, Away from home (§7.6): "Paired" for a Mac this device saved,
     /// with how it is reached from afar under it; else Pair This iPad… wherever a pairing can start.
     enum AwayFromHome: Equatable {

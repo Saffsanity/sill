@@ -475,5 +475,28 @@ check("copy: the card's own errors (under the field) end at the row, the overlay
       C.stopped(mac: mini).hasSuffix("tap Mac mini again.") && C.closed(mac: mini).hasSuffix("tap Mac mini again.")
       && C.expired(mac: mini).contains("Tap Mac mini") && C.proofFailed(mac: mini).contains("Tap it"))
 
+// MARK: Kind 18 and a goodbye "removed" speak for the Mac whose key the session has (the security
+// review, 2026-09-27)
+
+let kM = Data(repeating: 0x4D, count: 32), kX = Data(repeating: 0x58, count: 32)
+check("kind 18 names the session's Mac only when the connection's own key signed it",
+      P.macInfoNamesSession(signer: kM, connectionKey: kM) && !P.macInfoNamesSession(signer: kM, connectionKey: kX))
+check("kind 18 on a plain connection (no key) names nothing, however well it is signed", !P.macInfoNamesSession(signer: kM, connectionKey: nil))
+check("removed revokes the saved Mac from a remote session (pinned to its key)", P.removalRevokes(remote: true, trust: nil, savedKey: kM))
+check("removed revokes it from a home session pinned to its key", P.removalRevokes(remote: false, trust: .saved(pin: kM), savedKey: kM))
+check("removed revokes it from an open session whose connection showed its key",
+      P.removalRevokes(remote: false, trust: .open(seen: kM), savedKey: kM))
+check("removed never revokes from a session that another key answered, a plain one, or one that saw no key yet",
+      !P.removalRevokes(remote: false, trust: .open(seen: kX), savedKey: kM) && !P.removalRevokes(remote: false, trust: .saved(pin: kX), savedKey: kM)
+      && !P.removalRevokes(remote: false, trust: .plain, savedKey: kM) && !P.removalRevokes(remote: false, trust: .open(seen: nil), savedKey: kM)
+      && !P.removalRevokes(remote: false, trust: nil, savedKey: kM))
+check("removed revokes nothing without a saved key", !P.removalRevokes(remote: true, trust: .saved(pin: kM), savedKey: nil))
+// Over every trust a session at home can have: removed revokes exactly when the session's pin is the saved key.
+var revokesAsPinned = true
+for t in [P.HomeTrust.plain, .saved(pin: kM), .saved(pin: kX), .open(seen: nil), .open(seen: kM), .open(seen: kX)] {
+    if P.removalRevokes(remote: false, trust: t, savedKey: kM) != (P.pin(t) == .key(kM)) { revokesAsPinned = false }
+}
+check("removed revokes at home exactly when the session is pinned to the saved Mac's key, over every trust", revokesAsPinned)
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

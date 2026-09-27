@@ -140,5 +140,17 @@ M = [
      "            \"That code no longer works. Tap \\(mac) for a new one.\""),
     ("copy: an expired code sends to the menu", F, "static func expired(mac: String) -> String { \"That code expired. Tap \\(mac) for a new one.\" }",
      "static func expired(mac: String) -> String { \"That code expired. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\" }"),
+    # Kind 18 and goodbye "removed" bound to the session's key (the security review, 2026-09-27).
+    ("macInfoNamesSession: any signature names the session (as before the review)", F,
+     "        connectionKey == signer\n", "        true\n"),
+    ("macInfoNamesSession: a plain connection's kind 18 names it", F,
+     "        connectionKey == signer\n", "        connectionKey == nil || connectionKey == signer\n"),
+    ("removalRevokes: any session's goodbye revokes (as before the review)", F,
+     "        guard let trust else { return false }\n        return pin(trust) == .key(savedKey)\n", "        return true\n"),
+    ("removalRevokes: an open session revokes whatever key it saw", F,
+     "        return pin(trust) == .key(savedKey)\n", "        return trust.tls\n"),
+    ("removalRevokes: a remote session never revokes", F, "        if remote { return true }\n", "        if remote { return false }\n"),
+    ("removalRevokes: no saved key still revokes", F, "        guard let savedKey else { return false }\n        if remote",
+     "        guard let savedKey else { return remote }\n        if remote"),
 ]
 sys.exit(0 if module.mutate("home-device", M, sys.argv[1]) else 1)

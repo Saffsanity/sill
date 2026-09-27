@@ -459,9 +459,13 @@ extension StreamClient {
         // (StreamClient+Home). Every other end goes on below.
         if homeSessionEnded(s, error: error, goodbye: goodbye?.reason) { return }
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
-        if goodbye?.reason == Goodbye.removed, let id = saved?.macID, let next = SavedMacs.revoking(id, in: savedMacs) {
+        if goodbye?.reason == Goodbye.removed, let mac = saved,
+           DiscoveryPolicy.removalRevokes(remote: s?.route.isRemote == true, trust: s?.home, savedKey: mac.fingerprintData),
+           let next = SavedMacs.revoking(mac.macID, in: savedMacs) {
             // One trust list on the Mac: removed away is removed at home too. The row reads Not
-            // paired, and a tap asks (docs/home-pairing-plan.md §7.6).
+            // paired, and a tap asks (docs/home-pairing-plan.md §7.6). Only a remote session's
+            // goodbye gets here with a key (a TLS one at home ends in homeSessionEnded), and a
+            // plain session's revokes nothing: it has no key, so anyone could have sent it.
             savedMacs = next
             persistSavedMacs()
         }
@@ -604,12 +608,16 @@ extension StreamClient {
 
     // MARK: Kind 18
 
-    /// Who this connection's Mac is. Verified against a saved pin, it refreshes that Mac (name,
-    /// port, addresses, only when newer) and names the session's Mac; unverified, it is shown in
-    /// the panel's Away from home group and never saved.
-    func receiveMacInfo(_ signed: SignedMacInfo, endpoint: NWEndpoint?) {
+    /// Who this connection's Mac is. Signed by the key this connection showed in its handshake
+    /// (`connectionKey`, DiscoveryPolicy.macInfoNamesSession) and matching a saved pin, it
+    /// refreshes that Mac (name, port, addresses, only when newer) and names the session's Mac;
+    /// otherwise (unsigned, signed by another key, or on a plain connection, which has none) it is
+    /// shown in the panel's Away from home group and never saved: a Mac's kind 18 replayed on
+    /// another Mac's connection names nothing, renames nothing, and makes nothing "Paired".
+    func receiveMacInfo(_ signed: SignedMacInfo, endpoint: NWEndpoint?, connectionKey: Data?) {
         if macInfoAt == nil { macInfoAt = Date() }
-        guard let (info, fingerprint) = signed.verified() else {
+        guard let (info, fingerprint) = signed.verified(),
+              DiscoveryPolicy.macInfoNamesSession(signer: fingerprint, connectionKey: connectionKey) else {
             macInfo = signed.unverifiedInfo()
             macInfoVerified = nil
             macInfoSaved = false

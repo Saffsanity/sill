@@ -2636,12 +2636,15 @@ final class StreamClient: ObservableObject {
             let at = ProcessInfo.processInfo.systemUptime
             DispatchQueue.main.async { self.heardPong(at) }
         case .macInfo:
-            // Who this Mac is and how to reach it from afar (StreamClient+Remote).
+            // Who this Mac is and how to reach it from afar (StreamClient+Remote), with the key the
+            // connection it came on showed in its handshake (nil on a plain one): only a kind 18
+            // that key signed speaks for this session's Mac (DiscoveryPolicy.macInfoNamesSession).
             guard let signed = Wire.decode(SignedMacInfo.self, from: data) else { return }
             let from = connection
+            let key = from.flatMap { RemoteTLS.peerFingerprint($0) }
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
-                self.receiveMacInfo(signed, endpoint: from?.endpoint)
+                self.receiveMacInfo(signed, endpoint: from?.endpoint, connectionKey: key)
             }
         case .goodbye:
             // Why the Mac is about to close this connection: the words, and whether to reconnect

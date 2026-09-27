@@ -362,7 +362,10 @@ extension StreamClient {
         case .other:
             return false
         case .removed:
-            if let id = saved?.macID, let next = SavedMacs.revoking(id, in: savedMacs) {
+            // Revoked only when the saved Mac's own key answered this session (its connections
+            // pinned to it): an open session with another key never revokes the real Mac.
+            if let mac = saved, DiscoveryPolicy.removalRevokes(remote: false, trust: s.home, savedKey: mac.fingerprintData),
+               let next = SavedMacs.revoking(mac.macID, in: savedMacs) {
                 savedMacs = next
                 persistSavedMacs()
             }
