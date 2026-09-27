@@ -11,9 +11,15 @@ rerun the pure checks and the home and device mutants and was building iOS Relea
 build and sheeting the Settings cases at phone sizes; results in the session scratchpad,
 home-pairing/5/, if it survives a reboot). Unreviewed.
 
+2026-09-27 01:15: step 5 verified as 1b8de5f left it, with nothing to fix (Results, Step 5, "Verified
+again"), by two sessions, the first interrupted at 00:22 with this written but not committed: the
+builds, every pure check with its mutants, S1's photos and the Settings cases at the Duo and phone
+sizes, S7, and S2 with S5's end live, 18 of 18, every test listener on loopback (the first session's
+run; the second's found Noah's iPad streaming from Sill.app throughout).
+
 Next agent, in order: (1) verify step 5 (§11's gates for it; the mutants; iOS Debug, Release and
-device builds; the sheets); (2) merge main (bd46192 or later: PRs #16–#26; the update notice's
-`DeviceGate` and hello meet this branch at the door and in `SessionLink`/`StreamClient`; the
+device builds; the sheets): done, above; (2) merge main (cf05a78 or later: PRs #16–#28; the update
+notice's `DeviceGate` and hello meet this branch at the door and in `SessionLink`/`StreamClient`; the
 update-notice plan says the gate moves into this branch's `Door`, one place for both doors) and
 rerun every check; (3) the security review the workflow planned (three lenses: the wire and TLS,
 pairing's rules and limits, the device UI), fixes; (4) the PR with Noah's device tests (§11) and
@@ -2504,3 +2510,70 @@ real cable ("Wired") live, and a Direct row's "Not paired"; Noah's devices (P1�
 
 **What step 5 changed in this plan:** §7.1 (two rows new, two amended), §7.6 (the panel as built), §7.7 (the UI's
 additions) and §7.9 (two cases).
+
+**Verified again (2026-09-27, two sessions; `scratchpad/home-pairing-finish`, the second's in its
+`verify/`).** Step 5 as 1b8de5f holds it (74cd925's code; 1b8de5f added only the hand-off), checked from
+scratch after the interrupted verification, by a session that was itself interrupted at 00:22 (this
+section written, nothing committed, its simulator still booted), then by the next, 00:39–01:15, which
+ran everything again but the live gates. Nothing failed and no code changed.
+- Builds, both sessions: `swift build -c release` in the worktree (nothing to do) and clean from `git
+  archive` of 1b8de5f (29–30 s, only the CaptureProbe warning); iOS Debug for the simulator (signed ad
+  hoc), Release for the simulator and Debug for `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`,
+  each with its own fresh DerivedData (the second session built them from the archive, so nothing was
+  built in the worktree): only the old `StreamClient.swift:2449` capture warning. `NSBonjourServices`:
+  Debug `_sill._tcp` and `_silltest._tcp`, Release `_sill._tcp`; all three with
+  `ITSAppUsesNonExemptEncryption` false and `PrivacyInfo.xcprivacy`. None of the harness's arguments
+  or cases (`SillConnectCase`, `SillHomeCode`, `SillTapRow`, `mockHomeTLS`, …) is in the Release binary.
+- H3, H17 and S7's strings, both sessions with the same counts: step 5's checks copied and run against
+  the tree, each with its mutants: the device check 128 (79 of 79), home 34 (11 of 11), the policy
+  check 336 (105 of 105), rf2 remote-rules 102 (52 of 52), records 30 (16 of 16), DoorPolicy 104 (41 of
+  41), CableLink 40 (20 of 20), AskLimits 27 (15 of 15), HomeDoorTXT 39 (19 of 19), the fence check's 14
+  modes (19 of 19); the wire probe's 50 lines byte for byte against the base; step 0's policy 286,
+  ledger 90, fence 14 modes, remote-rules 64, addresses 41, pairing address 80, origin 66, ClientLink 89,
+  the protocol 188 and its 8 cross-checks. S7's headings and focus moves read in the source again: the
+  title is a heading under either card and takes VoiceOver's focus as a card unfolds or folds, the
+  card's escape action and Esc key fold it (`fold`, which cancels the ask or the proof), ProblemLine
+  announces its words, each status line is announced but the idle ones.
+- S1. The first session, on a simulator of its own ("Sill home-pairing", an iPad Pro 13"), 192 photos:
+  the 11 connect cases at the seven sizes and at `accessibility-extra-large` at the Duo sizes and
+  402×874, the Settings cases `paired`, `pairedoff` and `openpair` scrolled to their end at the four
+  Duo sizes, 402×874, 874×402 and 375×667, both text sizes, and at their top at 1000×710, 402×874 and
+  874×402, with `remote`, `remotepair` and `remoteoff` scrolled to their end at the phone sizes beside
+  them. The second deleted that simulator, made a fresh one of the same kind (deleted after) and took
+  225: the same 192, pixel for pixel the first session's, the 162 of them step 5 took pixel for pixel
+  step 5's own, and 33 more, the three Settings cases at their top at every other Duo and phone size
+  and text size. At 710×1000 nothing of the column lies below 488 pt; each size's title edge is one
+  within 1 px ("C" or "P"); the card is side by side at 710×500 and 874×402, stacked elsewhere; "Not
+  paired" and "Update Sill" whole at every size, the long names truncated. The Settings panel's scroll
+  area is small where the stream shares a phone's screen (two rows at 375×667), so scrolled to its end
+  `openpair`'s five-line footnote puts Pair This ‹iPad›… partly or wholly under the header at 500×710
+  and 375×667, and at the larger text at 402×874 and 874×402 too; `remotepair`'s shorter one only
+  tucks the button's top under the header at 375×667. The panel's scrolling, as before, not step 5's:
+  at their top every case shows its first rows.
+- S2 again with S5's end, the first session (`sgates.py`, `live/`: 18 of 18, 00:14–00:19), under the rule
+  that test listeners bind to loopback only: each host (the CLI with `--pairing`, the bare app) ran with
+  an interposer (`loopback/loopback.dylib`, `DYLD_INSERT_LIBRARIES`) that binds its listeners to `::1`
+  and refuses a listen anywhere else, `lsof` by its PID said `[::1]` alone before anything connected,
+  and the app dialed the real `_silltest._tcp` row's wired-test address (`-SillWiredTest ::1:PORT`), the
+  way a Wired row dials its cable. With Noah's iPad on this Mac's cable the unpaired row read "Wired";
+  the tap asked, the card came up on `shown`, a wrong code gave "That code didn’t work… 4 tries left."
+  and saved nothing, the right one paired at the home door and a pinned session streamed; a second
+  host with the same identity listed as the saved Mac ("(p=1)", no home word) and a tap connected
+  pinned with no ask; the bare app's window paired the row, and `-SillUnpairAfter` gave "… removed this
+  iPad. Tap it to pair again." with the row reading "Wired" again (an unpaired Mac on the cable). Each
+  host under 90 s, on the software encoder, Noah's Sill.log idle before each. The second session did
+  not run them again: Noah's iPad streamed from Sill.app over the cable from 00:38 to past its end, and
+  the gates start a host only while `no-device.sh` finds no device connected (their hosts use the
+  software encoder, but a stream beside his is load he did not ask for). Its interposer, rebuilt from
+  the same source, kept an `NWListener` on `::1` again.
+- Found on the way, none of them step 5's code: the launch-argument domain drops a value that starts
+  with "[" (`-SillWiredTest '[::1]:P'` or `-SillConnect '[::1]:P'` arrive as nothing, checked again with
+  a probe of `UserDefaults`; `::1:P`, or the value quoted as `'"[::1]:P"'`, arrive), which
+  `address(argument:)`'s comment does not say (StreamClient's `init` says it of `-Sill.savedMacs`);
+  `-SillMoveTest to:[::1]:P` and `-SillPathTest` specs are unaffected. Under the wired test the ask is
+  answered at an address, so the saved Mac has no Bonjour name (a real row's answer is its service).
+  Step 5's own gate (`sgates5.py`) matched the row's word anywhere in the console, so with the iPad on
+  the cable ("Wired" either way) two of its checks could pass without a pairing; the first session's
+  read the saved Mac's "(p=1)" and the row after the removal.
+- Not verified, as before: taps, VoiceOver, the live scanner, the real cable at both ends, Noah's
+  devices (P1–P16).
