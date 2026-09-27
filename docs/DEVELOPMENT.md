@@ -240,15 +240,19 @@ me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 
 The app a device streams keeps its menu bar on the Mac, and the device shows
 it: on an iPad with iPadOS 26 or later in the iPad's own menu bar (move the
-pointer to the top edge, or swipe down from it), and on every device behind the
-Menus button in Sill's bar, between the window thumbnails and Aa. With the
-Desktop streaming, the menus are the frontmost app's, as the Mac's own menu bar
-shows. Each menu is read from the Mac as it opens, so what is checked, dimmed
-or listed (Open Recent, the Window menu) is what the Mac shows then; an item
-chosen on the device is chosen on the Mac, as if clicked there. The Mac's
-keyboard shortcuts show under the items, as text: typed on a hardware keyboard
-they reach the Mac as keys, as before, never the device's menus. The Apple menu
-and Sill's own are never shown.
+pointer to the top edge, or swipe down from it), and behind the Menus button in
+Sill's bar, between the window thumbnails and Aa (on a phone held upright, at
+the end of the thumbnails' row). A window too narrow for the button and a whole
+thumbnail beside it (a Slide Over) leaves the button out. With two Sill windows
+open, the iPad's menu bar shows none of the Mac's menus, since nothing says
+which window's session a choice there would reach; each window's Menus button
+still has its own. With the Desktop streaming, the menus are the frontmost
+app's, as the Mac's own menu bar shows. Each menu is read from the Mac as it
+opens, so what is checked, dimmed or listed (Open Recent, the Window menu) is
+what the Mac shows then; an item chosen on the device is chosen on the Mac, as
+if clicked there. The Mac's keyboard shortcuts show under the items, as text:
+typed on a hardware keyboard they reach the Mac as keys, as before, never the
+device's menus. The Apple menu and Sill's own are never shown.
 
 It needs Accessibility for Sill on the Mac, as the device's clicks do; without
 it the button shows where to allow it. Opening a menu of a window streamed on
@@ -409,10 +413,14 @@ slows or cuts the link. TLS passes through.
 `Scripts/menufixture.swift` is a small AppKit app with menus of known contents
 (marks, shortcuts, a dimmed item, one retitled at every look, a slow action,
 submenus three deep, 300 and 600 items) that can never come to the front, and
-whose one window is off every display. A synthetic host started with
-`SILL_TEST_MENU_PID=<its pid>` streams the test pattern with the fixture's
-menus, so the menus are read and chosen without touching a real app; the
-fetches and choices of `sillclient.py` refuse to run without that variable.
+whose one window is off every display. Signals change its menus the way apps
+do: SIGUSR1 and SIGUSR2 give Probe › Rebuilt a new menu, SIGHUP inserts an item
+at the top of Probe in place, and SIGALRM gives Probe itself a new menu. A
+synthetic host started with `SILL_TEST_MENU_PID=<its pid>` streams the test
+pattern with the fixture's menus, so the menus are read and chosen without
+touching a real app; the fetches and choices of `sillclient.py` refuse to run
+without that variable (a fetch carries the title its menu was shown under, as a
+device's does: the host reads a menu only under that title).
 `Scripts/menu-check/run.sh` runs the host's menu reader and mirror against the
 fixture without a host (it needs Accessibility for whatever runs it). The
 file's header says how to build and run it.
@@ -477,10 +485,15 @@ simulator:
 - `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
   mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
   `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
-  `-SillMenuPress 'File/Save'` chooses that item (both also live, against a
-  real host's menus). On an iPad, `-SillMenuDump 1` prints the main menu after
-  each build and `-SillMenuBarLayout perMenu|replace|one` moves the Mac's
-  menus in it.
+  `-SillMenuPress 'File/Save'` chooses that item. Live, both act only on the
+  test app's menus through a test host (dialled by `-SillConnect` to a loopback
+  address, no host version, menufixture's top level) and print "refused"
+  otherwise. `-SillMenusAt <s>` opens the pull-down `s` seconds after the
+  button shows, and `-SillMenusCloseAfter <s>` closes it `s` seconds later. On
+  an iPad, `-SillMenuDump 1` prints the main menu after each build,
+  `-SillMenuBarLayout perMenu|replace|one` moves the Mac's menus in it, and
+  `-SillSecondWindow 1` opens a second window 2 s after launch (the bar then
+  gets none of the Mac's menus).
 
 ## Measuring latency
 
