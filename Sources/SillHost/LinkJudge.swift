@@ -115,7 +115,7 @@ struct LinkJudge {
         return nil
     }
 
-    /// The stream restarted (a settings change, a rate change, a new source): the window is cleared
+    /// The stream restarted at another quality, or stopped (`judgedAfresh`): the window is cleared
     /// and the state goes back to fine, to be judged afresh. A verdict, marked `reset`, when it was
     /// not fine: picking a lower quality clears the callout at once.
     mutating func reset() -> Verdict? {
@@ -126,6 +126,26 @@ struct LinkJudge {
         stallRun = 0
         reportedCarried = nil
         return was == .fine ? nil : Verdict(state: .fine, withheld: 0, offered: 0, carriedKbps: nil, waiting: 0, reset: true)
+    }
+
+    /// What the links are judged at: the stream's bitrate (per 60 fps, as the reports name it), its
+    /// frame rate and its capture scale.
+    struct Quality: Equatable {
+        var bitrate: Int
+        var fps: Int
+        var captureScale: Double
+    }
+
+    /// Whether a restarted stream's links are judged afresh (`reset`): when it runs at another
+    /// quality (a bitrate, a rate or a resolution the reports and suggestions were not made for),
+    /// and when nothing streams any more (`new` nil). A restart that keeps the quality (a window
+    /// picked, a rotation, a resize, the Aa scale, the virtual display) keeps the judgement: the link
+    /// and what it must carry are the same. Judged afresh there, a link that could not carry the
+    /// quality was reported again 2.5–3 s later, after the device's line had gone (its linger is 2 s):
+    /// the line came back, VoiceOver said it again and the Mac logged it again, at every such restart
+    /// (the review of 2026-09-27; the pacing harness's linkrestart).
+    static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {
+        new != old
     }
 
     /// What the link carried in the seconds it set the pace: the bytes taken in the last `window`

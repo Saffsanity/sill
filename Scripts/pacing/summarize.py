@@ -252,6 +252,12 @@ LINK_GATES = {
                  lambda r: (first(r, "behind", r["withheldAt"]) or 99) <= 3
                            and not any(st == "stalled" for _, st, _, _ in r["links"])),
     "home": ("never behind or stalled after the first keyframe", lambda r: never(r, "behind", "stalled")),
+    # A restart that keeps the quality keeps the judgement (the review of 2026-09-27): the stream the
+    # link could not carry restarts at the same size and rate, so no report of fine, a restart's reset
+    # included, may come between its first behind and the run's end.
+    "linkrestart": ("behind within 5 s of the first keyframe, then never fine (a reset included) through two restarts at the same quality",
+                    lambda r: (b := first(r, "behind", r["firstKey"])) is not None and b <= 5
+                              and not any(st == "fine" for u, st, _, _ in r["links"] if u > r["firstKey"] + b)),
 }
 link_failed = []
 news = [(name, r) for name, r in runs.items() if name.endswith("-new")]

@@ -31,14 +31,16 @@ import StreamProtocol
 //   run's fps and Standard (the harness has no resolution). Only the new build prints them: the lines
 //   compile under LINK_JUDGE, which build.sh defines for it alone (the base's StreamServer has no
 //   onClientLinkChanged).
-// --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change).
+// --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change: the
+//   links are judged afresh, StreamServer.resetLinks, as the coordinator does for another quality).
 // --still-at: from T seconds for D seconds no frame is captured (a still window: the motion stopped).
 //   A keyframe asked for meanwhile is the last frame encoded again, once the window has been still
 //   for 50 ms, as HEVCEncoder.requestKeyframe does; nothing else is sent. It prints "Still: …" with
 //   the stamp of the last frame before it, and "Moving again" after it (summarize.py's still rows).
 // --restart-at: D seconds after the first keyframe at or after T seconds, the stream restarts with
-//   the same sizes (a window picked, a rotation, a settings change), so its first keyframe goes out
-//   while that keyframe may still be crossing the link. It prints "Restart: …".
+//   the same sizes (a window picked, a rotation: the quality kept, so the links keep their
+//   judgement), so its first keyframe goes out while that keyframe may still be crossing the link.
+//   It prints "Restart: …".
 // --log: the host's lines with Sill.log's timestamps (HostLog), which summarize.py reads.
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -212,6 +214,9 @@ frameTimer.setEventHandler {
         print("Sizes: keyframe \(s.kf) B, delta \(s.delta) B")
         encoder.requestKeyframe()
         server.resetForNewStream()          // a settings change restarts the stream
+        #if LINK_JUDGE
+        server.resetLinks()                 // …at another quality: the links are judged afresh
+        #endif
     }
     if let due = restartDue, t >= due {
         restartDue = nil

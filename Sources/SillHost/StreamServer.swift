@@ -153,8 +153,9 @@ final class StreamServer {
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
     /// A device's link changed (LinkJudge, docs/remote-bundle-plan.md §6): behind, stalled, fine again,
-    /// fine because the stream restarted (`reset`), or the same state once its carried rate is first
-    /// measured. Called on the network queue, from the once-a-second sweep and `resetForNewStream`.
+    /// fine because the stream restarted at another quality (`reset`), or the same state once its
+    /// carried rate is first measured. Called on the network queue, from the once-a-second sweep and
+    /// `resetLinks`.
     var onClientLinkChanged: ((NWConnection, LinkJudge.Verdict) -> Void)?
     /// The Mac's pointer (PointerWatch): who moves it, sampled at each tick and, while it moves over
     /// the source and a device is sent it, at the stream's frame rate; every device that is not
@@ -1198,14 +1199,23 @@ final class StreamServer {
 
     /// The source is changing: forget the old parameter sets and make every client wait for
     /// the next keyframe, so nobody decodes frames of the new window with the old format. Each
-    /// client's link is judged afresh (LinkJudge.reset): one that was not fine is reported fine,
-    /// marked as a reset.
+    /// client's link keeps its judgement (`resetLinks` is the coordinator's to call).
     func resetForNewStream() {
         queue.async { [self] in
             lastParameterSets = nil
             for client in clients.values {
                 client.needsKeyframe = true
                 client.awaitingFirstKeyframe = true
+            }
+        }
+    }
+
+    /// The stream runs at another quality, or stopped (LinkJudge.judgedAfresh): each client's link is
+    /// judged afresh (LinkJudge.reset), and one that was not fine is reported fine, marked as a
+    /// reset. A restart that keeps the quality never calls it. Thread-safe.
+    func resetLinks() {
+        queue.async { [self] in
+            for client in clients.values {
                 client.sentThisSecond = 0
                 client.withheldThisSecond = 0
                 if let verdict = client.judge.reset() { onClientLinkChanged?(client.connection, verdict) }

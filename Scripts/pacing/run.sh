@@ -58,6 +58,11 @@
 #            loopback path's buffers first take 0.7–1 MB)
 #   linkdown   the same, the downlink alone at 0 from 20 s (the device's pings still arrive): behind
 #            within 3 s of the end of the host's first second withholding frames, never stalled
+#   linkrestart  over8's stream on its 8 Mbit/s link, restarting twice at the same quality (a window
+#            picked, a rotation: --restart-at): behind within 5 s of the first keyframe and never
+#            fine after it, reset included, since a restart that keeps the quality keeps the
+#            judgement (the review of 2026-09-27: clearing it there made the device's line go and
+#            come back, spoken again, a few seconds later)
 #   and the link's gates on real24 (never behind), over8 (behind within 5 s, carried within 20 % of
 #   8 Mbit/s, Low suggested for Pro), dip (behind within 3 s of the end of the host's first second
 #   withholding frames, which waits for the dip's 1 MB queue to fill; fine within 10 s of its end),
@@ -77,7 +82,7 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
-        -h|--help) sed -n '2,65p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,72p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
     esac
 done
@@ -98,6 +103,7 @@ cases=(
   "linkstill|55|1|Remote|bottleneck|--kf 1600000 --delta 1000 --gop 30 --icons 20 --still-at 31:10 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect --liveness-bytes"
   "linkdead|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --blackhole-at 20 -- --reconnect --liveness-bytes"
   "linkdown|35|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 --rate-at 20:0 -- --reconnect --liveness-bytes"
+  "linkrestart|45|1|Remote|bottleneck|--kf 1500000 --delta 60000 --bitrate 40000000 --restart-at 20:0.1,30:0.1 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
 )
 full_cases=(
   "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"

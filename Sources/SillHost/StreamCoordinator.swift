@@ -214,6 +214,9 @@ package final class StreamCoordinator {
     /// already carries none (the restart's reset follows). The bitrate alone: a change of the capture
     /// scale alone may restart nothing (the software encoder runs at points).
     private var linkReports: [ObjectIdentifier: LinkReport] = [:]
+    /// The quality the devices' links are judged at: the running stream's (`select`'s commit), nil
+    /// while nothing streams. A restart that keeps it keeps their judgement (LinkJudge.judgedAfresh).
+    private var judgedQuality: LinkJudge.Quality?
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
 
@@ -692,6 +695,15 @@ package final class StreamCoordinator {
 
     // MARK: Each device's link (docs/remote-bundle-plan.md §6)
 
+    /// The stream's quality as `select` commits it (nil: nothing streams). The devices' links are
+    /// judged afresh when it changes (LinkJudge.judgedAfresh: another bitrate, rate or resolution, or
+    /// no stream), and keep their judgement through a restart that keeps it, so a device's report,
+    /// line and callout neither go nor come back for a window picked or a rotation.
+    private func judgeLinks(_ quality: LinkJudge.Quality?) {
+        if LinkJudge.judgedAfresh(from: judgedQuality, to: quality) { server.resetLinks() }
+        judgedQuality = quality
+    }
+
     /// A device's link changed: behind or stalled becomes its report (the running quality, what was
     /// withheld, the carried rate and what would fit at the running pair and the stream's rate), a
     /// line when the state is new, and the card's row; a report that only moves the carried rate
@@ -1039,6 +1051,9 @@ package final class StreamCoordinator {
             // Settings, or a flip between the home and the away quality, that came in meanwhile; a
             // no-op when the pick's select commits them first.
             if pendingConfig != nil || (awayWanted != awayRunning && flipWait == nil) { Task { @MainActor in await self.applyPending() } }
+            // A stream that did not start (its window gone, capture refused): nothing streams, so
+            // the links have nothing to be judged at.
+            if active == .none { judgeLinks(nil) }
         }
 
         await capture.stop()
@@ -1076,6 +1091,9 @@ package final class StreamCoordinator {
             adopt(config, away: awayWanted)
         }
         fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
+        // The devices' links: judged afresh when the stream comes back at another quality or not at
+        // all, kept through a restart that keeps it (a window picked, a rotation, a resize).
+        judgeLinks(source == .none ? nil : LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
         let comeForward = bringForward || cameHome
 
         if virtualDisplay {

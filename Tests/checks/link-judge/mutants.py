@@ -28,6 +28,11 @@ MUTANTS = [
     ("LJ20 a report every second of a spell", "reportedCarried.map({ Double(abs(now - $0)) >= Self.carriedMove * Double($0) }) ?? true", "true"),
     ("LJ21 a rate reported once a spell, never as it moves", "reportedCarried.map({ Double(abs(now - $0)) >= Self.carriedMove * Double($0) }) ?? true", "reportedCarried.map({ _ in false }) ?? true"),
     ("LJ22 a rate reported at any move", "static let carriedMove = 0.25", "static let carriedMove = 0.05"),
+    # A restart's judgement (the review of 2026-09-27): judged afresh only at another quality, or none.
+    ("LJ23 every restart judged afresh", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new != old", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        true"),
+    ("LJ24 only the bitrate compared", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new != old", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new?.bitrate != old?.bitrate"),
+    ("LJ25 a stop keeps the judgement", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new != old", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new != nil && new != old"),
+    ("LJ26 the resolution ignored", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new != old", "static func judgedAfresh(from old: Quality?, to new: Quality?) -> Bool {\n        new?.bitrate != old?.bitrate || new?.fps != old?.fps"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

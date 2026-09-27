@@ -6,7 +6,8 @@
 // What it checks: a short second; behind at exactly 3 short seconds of the last 5, fine again after 5
 // clean ones in a row, still seconds as clean; stalled after 3 seconds with bytes waiting, none taken
 // and nothing heard, and not when the device was heard (a keyframe crossing a slow link); the stall's
-// end, to behind or to fine; a restart's reset; the carried rate (3 measured seconds, their mean); the
+// end, to behind or to fine; a restart's reset, and which restarts judge afresh (another quality, or
+// no stream: never one that keeps it); the carried rate (3 measured seconds, their mean); the
 // report once more when the rate is first measured, once a spell; the suggestion at 60 and 120 fps,
 // Low when none fits, one step down without a measure, Standard only with Low from Retina, the same
 // bitrate at Standard below Low, nothing at Low · Standard, never higher; the host's lines. Then a
@@ -119,6 +120,23 @@ do {
     check(f.reset() == nil, "a reset from fine reports nothing")
     var s = run([dead, dead, dead]).judge
     check(s.reset()?.reset == true, "a reset from stalled reports fine, marked as a reset")
+}
+do {
+    // Which restarts judge afresh (the review of 2026-09-27): another quality, or no stream; never a
+    // restart that keeps it (a window picked, a rotation), which clearing made the device's line go
+    // and come back, spoken again.
+    typealias Q = LinkJudge.Quality
+    let pro = Q(bitrate: 40_000_000, fps: 60, captureScale: 2)
+    check(!LinkJudge.judgedAfresh(from: pro, to: pro), "a restart at the same quality keeps the judgement")
+    check(LinkJudge.judgedAfresh(from: pro, to: Q(bitrate: 4_000_000, fps: 60, captureScale: 2)), "another bitrate: afresh")
+    check(LinkJudge.judgedAfresh(from: pro, to: Q(bitrate: 40_000_000, fps: 120, captureScale: 2)), "another rate: afresh")
+    check(LinkJudge.judgedAfresh(from: pro, to: Q(bitrate: 40_000_000, fps: 60, captureScale: 1)),
+          "another resolution alone: afresh (the suggestion Low · Standard from Low · Retina is that)")
+    check(LinkJudge.judgedAfresh(from: Q(bitrate: 8_000_000, fps: 60, captureScale: 1), to: Q(bitrate: 4_000_000, fps: 120, captureScale: 1)),
+          "the same bits a second at another bitrate and rate: afresh (the report names the bitrate per 60 fps)")
+    check(LinkJudge.judgedAfresh(from: pro, to: nil), "the stream stops: afresh")
+    check(LinkJudge.judgedAfresh(from: nil, to: pro), "a stream starts: afresh")
+    check(!LinkJudge.judgedAfresh(from: nil, to: nil), "nothing streamed and nothing streams: nothing to do")
 }
 
 // MARK: The carried rate
