@@ -22,7 +22,7 @@ import StreamProtocol
 /// connections, their verify blocks and the timers share. Callbacks out are on that queue.
 ///
 /// TEST ONLY: SILL_TEST_BACKOFF_SECONDS=<s> replaces the 300 s backoff on a host that does not
-/// advertise.
+/// advertise, and StreamServer's SILL_TEST_LOOPBACK=1 puts this listener on 127.0.0.1 alone too.
 final class RemoteServer {
     /// One pairing attempt, for RemoteAccess to judge on the main actor.
     struct PairAttempt: Sendable {
@@ -131,10 +131,16 @@ final class RemoteServer {
         let l: NWListener
         do {
             if port == 0 {
+                if server.loopbackOnly { StreamServer.bindToLoopback(params, port: nil) }   // TEST ONLY
                 l = try NWListener(using: params)
             } else {
                 guard let p = NWEndpoint.Port(rawValue: UInt16(port)) else { failed(.posix(.EINVAL)); return }
-                l = try NWListener(using: params, on: p)
+                if server.loopbackOnly {   // TEST ONLY: SILL_TEST_LOOPBACK (StreamServer)
+                    StreamServer.bindToLoopback(params, port: p)
+                    l = try NWListener(using: params)
+                } else {
+                    l = try NWListener(using: params, on: p)
+                }
             }
         } catch {
             failed(error as? NWError ?? .posix(.EINVAL))

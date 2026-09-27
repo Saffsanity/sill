@@ -425,8 +425,10 @@ simulator:
   with no hardware keyboard connected to it.
 - `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: the portrait
   key row taps cmd, esc, shift and ctrl and the trackpad strokes, taps and
-  scrolls, through their own code, once. A synthetic host posts what it gets
-  on this Mac, so put a relay that drops input in front of it.
+  scrolls, through their own code, once. A synthetic host posts nothing (it
+  counts input as `in.dry`), but a real host, Sill.app included, posts it on
+  this Mac: point it only at a synthetic host, or put a relay that drops
+  input in front of the host.
 - The console prints `viewport: 386×241 pt, scale none, 60 fps` for each
   viewport the stream screen sends the Mac.
 - `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
