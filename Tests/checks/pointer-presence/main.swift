@@ -137,6 +137,55 @@ do {
     check(p.control == .here && p.sprite(now: 2) == ownAt, "…and back to this device's own")
 }
 
+// MARK: The portrait key row keeps what shows
+
+do {
+    // The Mac has the pointer, its arrow over the stream: a key row key makes it this device's own, where it is.
+    let over = presence(.elsewhere, mac: macAt, inside: true, own: ownAt, origin: .trackpad, portrait: true)
+    let kept = over.ownForKeyRow()
+    check(kept?.own == macAt && kept?.origin == .trackpad, "the key row with the Mac's arrow showing: this device's own there")
+    var after = over
+    if let kept { after.setOwn(kept.own, from: kept.origin) }
+    after.control = .here
+    check(after.sprite(now: 0) == macAt, "…so the arrow stays where it was, not back at the pad's old cursor")
+    // Off the stream: nothing to keep, and the pad's old cursor must not come back either.
+    let off = presence(.elsewhere, mac: macAt, inside: false, own: ownAt, origin: .trackpad, portrait: true)
+    let none = off.ownForKeyRow()
+    check(none != nil && none?.own == nil && none?.origin == P.Origin.none, "the key row with the Mac's pointer off the stream: no own pointer")
+    var hidden = off
+    if let none { hidden.setOwn(none.own, from: none.origin) }
+    hidden.control = .here
+    check(hidden.sprite(now: 0) == nil, "…so nothing shows")
+    let unknown = presence(.elsewhere, mac: nil, inside: true, own: ownAt, origin: .trackpad, portrait: true).ownForKeyRow()
+    check(unknown != nil && unknown?.own == nil, "the Mac's, inside but no position: none either")
+    // This device has it already: its own stays as it is (shown or not).
+    for origin in [P.Origin.trackpad, .pencil, .none] {
+        check(presence(.here, own: ownAt, origin: origin, portrait: true).ownForKeyRow() == nil,
+              "the key row while this device has the pointer (\(origin)): unchanged")
+    }
+}
+
+// MARK: A new frame size re-centres this device's own pointer only while it shows
+
+do {
+    check(presence(.here, own: ownAt, origin: .trackpad, portrait: true).recentresOnNewFrame(now: 0), "the pad's arrow showing: re-centred")
+    check(!presence(.here, own: ownAt, origin: .trackpad, portrait: false).recentresOnNewFrame(now: 0), "the pad's, in landscape (hidden): not")
+    check(!presence(.elsewhere, mac: macAt, inside: true, own: ownAt, origin: .trackpad, portrait: true).recentresOnNewFrame(now: 0),
+          "the Mac's arrow: not (its next report is in the new geometry)")
+    check(!presence(.here, own: nil, origin: .none, portrait: true).recentresOnNewFrame(now: 0), "nothing of this device's: not")
+    var pencil = presence(.here, own: ownAt, origin: .pencil, portrait: false)
+    check(!pencil.recentresOnNewFrame(now: 0), "the Pencil's, hidden by default: not")
+    pencil.pencilShowsPointer = true
+    check(pencil.recentresOnNewFrame(now: 0), "…shown with Q2's flip: re-centred")
+    check(!presence(.here, own: ownAt, origin: .trackpad, portrait: true, streaming: false).recentresOnNewFrame(now: 0),
+          "nothing streams: not")
+    var lingered = presence(.here, own: ownAt, origin: .trackpad, portrait: true)
+    lingered.trackpadLinger = 2
+    lingered.fingers(1, now: 0)
+    lingered.fingers(0, now: 0)
+    check(lingered.recentresOnNewFrame(now: 1) && !lingered.recentresOnNewFrame(now: 3), "Q1's flip: while it lingers, not after")
+}
+
 // MARK: Freshness (§3.3)
 
 check(!P.isFresh(seen: 41, sentOnSession: 42, movePending: false), "seen 41 against 42 sent: stale")

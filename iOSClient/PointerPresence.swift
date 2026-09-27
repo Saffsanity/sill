@@ -116,6 +116,27 @@ struct PointerPresence: Equatable {
         macInside = feed.macInside
     }
 
+    /// A key from the portrait key row hands the pointer to this device, as every input does, and
+    /// keeps what the sprite shows (§7.5: the key row never hides the arrow, as a key on a Mac never
+    /// hides its pointer). While the Mac, or another device, has the pointer, this is what this
+    /// device's own pointer becomes: the arrow where the Mac's shows (the trackpad's, the laptop
+    /// layout's only pointer), or none while the Mac's is off the stream. Nil while this device has
+    /// the pointer already: its own stays as it is. Without it the key would bring back the pad's
+    /// cursor from before the Mac took over, where the pointer no longer is.
+    func ownForKeyRow() -> (own: CGPoint?, origin: Origin)? {
+        guard control == .elsewhere else { return nil }
+        guard macInside, let mac else { return (nil, .none) }
+        return (mac, .trackpad)
+    }
+
+    /// A new frame size (another source, an Aa resize) changes what a fraction means (§7.3): this
+    /// device's own pointer, only while it shows under this device's control, starts again in the
+    /// middle, and the Mac's pointer is moved there too, so the two agree (as before this plan). The
+    /// Mac's arrow needs nothing: the host's next report is in the new geometry.
+    func recentresOnNewFrame(now: Double) -> Bool {
+        control == .here && own != nil && sprite(now: now) != nil
+    }
+
     /// §3.3: a report (kind 26) counts only if the Mac had read every input this device sent on the
     /// connection (`seen` at least what SessionLink counted; nil counts as 0) and no coalesced move is
     /// still waiting to go out. Otherwise the Mac built it before it read this device's latest input.

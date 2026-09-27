@@ -16,6 +16,14 @@ MUTANTS = [
     ("a finger down does not stop the linger", "        if fingersOnTrackpad > 0 {\n            trackpadLiftedAt = nil\n        } else if wasDown {",
      "        if fingersOnTrackpad > 0 {\n        } else if wasDown {"),
     ("a lift without a finger down starts the linger", "        } else if wasDown {\n            trackpadLiftedAt = now", "        } else {\n            trackpadLiftedAt = now"),
+    # The key row, and a new frame size
+    ("the key row hides the Mac's arrow", "        guard macInside, let mac else { return (nil, .none) }\n        return (mac, .trackpad)\n",
+     "        return (nil, .none)\n"),
+    ("the key row leaves the pad's old cursor", "        guard control == .elsewhere else { return nil }\n        guard macInside, let mac else",
+     "        if true { return nil }\n        guard macInside, let mac else"),
+    ("the key row keeps the Mac's arrow off the stream", "guard macInside, let mac else { return (nil, .none) }", "guard let mac else { return (nil, .none) }"),
+    ("a new frame re-centres under the Mac's control", "control == .here && own != nil && sprite(now: now) != nil", "own != nil && sprite(now: now) != nil"),
+    ("a new frame re-centres a hidden pointer", "control == .here && own != nil && sprite(now: now) != nil", "control == .here && own != nil"),
     # Freshness and restatements
     ("`>` for `>=` in freshness", "(seen ?? 0) >= sentOnSession", "(seen ?? 0) > sentOnSession"),
     ("the pending move ignored", "!movePending && (seen ?? 0) >= sentOnSession", "(seen ?? 0) >= sentOnSession"),
