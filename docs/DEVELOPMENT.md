@@ -190,14 +190,17 @@ trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
-The first time a Mac's picture shows on a device, and nothing is touched, sent
-or opened in the second after it, a short tour dims the screen and lights one
-part at a time: the picture (tap, hold, drag), the thumbnails with Aa (and
-Keyboard, sideways), Settings, and upright the key row and the trackpad. Skip
-ends it for good on that device; a step passed stays passed; after a tour
-taken sideways, the upright card comes the first time the device is held
-upright and left alone for a second. Settings › Take the Tour, the panel's
-last row, shows it again. Nothing reaches the Mac while it shows, and it sends
+The first time a Mac's picture shows on a device, and nothing is touched, sent,
+used (by any means, VoiceOver's double tap included) or opened in the second
+after it, a short tour dims the screen and lights one part at a time: the
+picture (tap, hold, drag), the thumbnails with Aa (and Keyboard, sideways and
+on a phone upright), Settings, and upright the key row and the trackpad. A card
+stays beside what it lights at every text size, its words scrolling there. Skip
+ends it for good on that device (in Take the Tour it only closes it); a step
+passed stays passed; the automatic reconnect's session keeps the decision the
+last one made; after a tour taken sideways, the upright card comes the first
+time the device is held upright and left alone for a second. Settings › Take
+the Tour, the panel's last row, shows it again. Nothing reaches the Mac while it shows, and it sends
 nothing. What it remembers is two keys in the app's own defaults,
 `Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
 uninstall`, to see it afresh). Debug builds show it by themselves only with

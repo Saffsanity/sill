@@ -42,7 +42,7 @@ too), and Settings; held upright, also the keys and the trackpad. Three cards si
 upright, each a few short rows in the App Store description's words, with Skip and Next. Someone
 who touched anything in that second is left alone for the session. The picture keeps moving
 underneath, and nothing reaches the Mac while the tour shows. Skip ends it for good on this device
-and Done ends the run; a step passed stays passed if the session ends first; after a tour taken
+(in Take the Tour it only closes it) and Done ends the run; a step passed stays passed if the session ends first; after a tour taken
 sideways, the upright card comes the first time the device is held upright and left alone for a
 second; and the Settings panel's last row, Take the Tour, shows it again. All of it is on the
 device: no wire change, nothing sent, two UserDefaults keys.
@@ -180,7 +180,8 @@ carries the welcome in its subtitle instead, and one card less is one tap less.
 ### Skipping it, and seeing it again
 
 - **Skip** on every card but the last ends the tour for good on this device: no automatic tour
-  again, not even the upright card.
+  again, not even the upright card. In Take the Tour, which the person asked for, Skip only closes
+  it (review fix: it saved the permanent skip there too).
 - **Done** on the last card.
 - **Keys and assistive tech:** Esc is Skip (Done on the last card), Return is Next or Done, the
   VoiceOver escape gesture is Skip, and Magic Tap is Next.
@@ -300,6 +301,13 @@ Where each target is reported (a `.tourTarget(_:)` modifier, §6.1):
 | `keys` | — | `KeyRow`, one row or the two folded rows (:240-243) |
 | `trackpad` | — | `Trackpad` (:244-248) |
 
+**A phone held upright** (main's PR #30, merged after this plan: `PhonePortraitLayout`, the picture
+in a 16:10 pane at the top, then row 1 with Apps, Aa, Keyboard, Desktop and Settings, row 2 the
+thumbnails, row 3 six caps, and the trackpad) is a third layout, `TourLayout.phone`, with the halves'
+four steps: `stream` is the pane, `bar` lights the strip (row 2) with Aa and Keyboard (row 1), as
+sideways, since its Keyboard is a button there; `settings` row 1's Settings; `laptop` the six caps
+and the trackpad. An iPad window as narrow keeps the compact halves (`DuoLayout.drawsPhone`).
+
 A step's cutout is the union of its targets' frames as one rounded rectangle, 4 pt larger all
 round and clipped to the screen, with the radius of its step: `touch` 16 (the panel's 12 + 4),
 `bar` and `settings` 20, `laptop` 20 (between the caps' 15 and the pad's 26). Its ring is a 2 pt
@@ -351,8 +359,20 @@ In order:
 6. `touchesDown > 0` or `busy`: `pass(.busy)`.
 7. Otherwise `show(list)`.
 
+`lastActivityAt` is the latest of a touch the window's watcher saw, input sent to the Mac, and a
+control used by any means (review fix: VoiceOver's double tap, Switch Control, Voice Control and
+Full Keyboard Access activate with no touch; a pick, a launch, a window's command or place in the
+bar, a settings change, or the bar's own buttons, `StreamClient.lastActionAt`). VoiceOver's swipes
+that only move its focus are reading, as a look is, and do not count; VoiceOver also moves its focus
+by itself as a screen or a layout comes. `opens` is the later of the picture and the layout's start
+in both cases (a session that went on with an earlier one's decision opens at its own picture).
+
 A decision (a `show`, or a `pass` at step 3, 4 or 6) marks the session `offered` in this layout,
-and the first one `decided`. Each layout gets one decision per session: no second chance later in
+and the first one `decided`. What a session decided (`TourSession`) lives on StreamClient: the
+automatic reconnect's session goes on with it (review fix: every reconnect used to decide afresh
+and could dim the screen over someone at work when the picture came back), unless the last session
+ended before its decision or in the middle of a run; a session the person starts decides afresh
+(`TourPolicy.nextSession`). Each layout gets one decision per session: no second chance later in
 it, and no ten-second window of pauses to catch. `StreamScreen` asks at the picture, at a layout
 change, whenever an input of the rule changes, and at the time a `wait` names: one pending `Task`,
 replaced on every answer.
@@ -500,12 +520,18 @@ static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool) -
     the picture's bottom, centered on the targets' middle and clamped. A tail down only when the
     targets begin within 48 pt of the card and no crease lies between: at 500×710 and on phones the
     `bar` and `settings` cards point at the window bar and `laptop` does not; at 710×1000 none do.
-- **Too tall for it.** A card taller than its preferred room (larger text, a phone held sideways,
-  a narrow Split View) grows toward the screen's top margin first, then, upright on a screen
-  without a crease, toward the bottom margin, over its own targets if it must; a card that overlaps
-  its targets has no tail. At those sizes the words matter more than the ring. Past the whole
-  screen less its margins (with a crease, the upper half), its title and rows scroll. It never
-  crosses a crease.
+- **Too tall for it** (as revised by the review: a card grown over its own targets hid the very
+  control it lit, with slivers of its ring beside it, at accessibility sizes on phones and the Duo's
+  outer display). A card never covers its own step's targets: sideways it stays 12 pt under the bar,
+  as tall as the room to the bottom margin, its tail up, and its words scroll there; upright it
+  grows from the picture's half toward the top margin, then down to 12 pt above its targets (never
+  past a crease), with the same tail rule, its words scrolling past that. On a phone held upright,
+  whose rows sit in the middle under a short picture, a card too tall for the picture's pane stands
+  12 pt above its targets, and one that does not fit above them goes 12 pt under them when it fits
+  there, or when that room is the larger, with a tail up. Only a room under 200 pt beside its
+  targets (`minimumRoom`: a tiny window, no real screen) makes a card cover them, and then the dim
+  has no cutout or ring (`coversTargets`). The picture's card sits inside the picture and grows as
+  before.
 
 The layouts' numbers, from the metrics (BarMetrics, StreamScreen.swift:403-413; PortraitMetrics,
 PortraitStreamScreen.swift:111-126). A phone's stream screen is the phone's screen less its top
@@ -584,7 +610,11 @@ No animation repeats: nothing moves once a card is in place.
 - **`StreamClient.lastInputAt`** (main thread, systemUptime, not published): stamped in `sendInput`
   (StreamClient.swift:2196) before its hop to the network queue. Every input passes there, a hover
   and a coast after a flick included. `lastActivityAt` is the later of it and `lastTouchAt`.
-- **The tripwire, DEBUG only:** `StreamClient.tourShowing`, set by `StreamScreen`. `sendInput`
+- **The device's own input** (review fix): a new frame size (another source, an Aa resize, a window
+  refitted after a turn) moves the drawn pointer to the middle and the Mac's cursor with it. While a
+  card shows that move waits for the tour's end (`StreamClient.inputPaused`, `recentrePointer`), so
+  nothing reaches the Mac then.
+- **The tripwire, DEBUG only:** `StreamClient.inputPaused` (it was `tourShowing`), set by `StreamScreen`. `sendInput`
   prints "tour: INPUT SENT WHILE THE TOUR SHOWED: …" if it is ever called while it is true. It is
   not expected on a device either, but for one case: Take the Tour chosen within two seconds of a
   flick, whose coast (InputOverlay.swift:473-477) may send its last scrolls under the tour.
@@ -599,18 +629,24 @@ scroll."). The name in each row is semibold. The check pins every string.
 | Step | Title | Subtitle | Rows (symbol · text) | Spoken where (the title's hint) |
 |---|---|---|---|---|
 | `touch` | Tap, Hold and Drag | What you do here happens on ‹Mac›. | `hand.tap` · **Tap** to click.<br>`contextualmenu.and.cursorarrow` · **Touch and hold** to right-click.<br>`hand.draw` · **Drag** to scroll.<br>`applepencil` · **Apple Pencil** works as a mouse. (iPad only) | Landscape: "The picture of ‹Mac› fills the screen below the bar." Portrait: "The picture of ‹Mac› fills the top half of the screen." |
-| `bar` | Windows and Text Size | — | `hand.point.up.left` · **Touch and hold** a window to close, minimize or go full screen. Keep holding and drag to move it.<br>`textformat.size` · **Aa**: touch it and slide to make text larger or smaller.<br>`keyboard` · **Keyboard** types on ‹Mac›, on screen or with a hardware keyboard. (landscape only) | Landscape: "In the bar at the top, after Apps." Portrait: "In the bar below the picture, after Apps." |
+| `bar` | Windows and Text Size | — | `hand.point.up.left` · **Touch and hold** a window to close, minimize or go full screen. Keep holding and drag to move it.<br>`textformat.size` · **Aa**: touch it and slide to make a window’s text larger or smaller.<br>`keyboard` · **Keyboard** types on ‹Mac›, on screen or with a hardware keyboard. (landscape and a phone upright) | Landscape: "In the bar at the top, after Apps." Portrait: "In the bar below the picture, after Apps." A phone upright: "Under the picture: Aa and Keyboard in the first row, the windows in the second." |
 | `settings` | Settings | — | `xmark.circle` · **Disconnect** is at the bottom of Settings.<br>`questionmark.circle` · **Take the Tour** is there too, to see this again.<br>`ipad` or `iphone` · **Hold your ‹device› upright** for a trackpad and keys. (landscape only) | "The last button in the bar." |
 | `laptop` | Keys and Trackpad | Only as a run's first card: "Upright, Sill adds keys and a trackpad." | `command` · **cmd, opt, ctrl and shift** stay on for the next key or trackpad click: tap cmd, then C, to copy.<br>`keyboard` · **The keyboard key** types on ‹Mac›, on screen or with a hardware keyboard.<br>`cursorarrow.click.2` · **Tap with two fingers** on the trackpad to right-click.<br>`hand.draw` · **Touch and hold** the trackpad, **then drag**, to move a window or select text. | "Below the bar: the row of keys, then the trackpad." |
 
+- **A phone held upright** (§3.1): the picture's hint "The picture of ‹Mac› is at the top of the
+  screen."; Settings' "The last button in the row under the picture."; the laptop card has no
+  keyboard key row (a phone's keyboard is row 1's button, which the bar card names) and the hint
+  "Under the windows: the row of keys, then the trackpad."
+- **Aa sizes a window** (review fix): the Mac ignores a viewport's scale for the Desktop, and the
+  first picture is the Desktop, so the row says whose text it is.
 - **Spoken, where it differs from the screen:** `laptop`'s first row reads "Command, Option,
   Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.", as
   the key row's own caps are named (PortraitStreamScreen.swift:342-355).
 - **Under VoiceOver** (the run leaves out `touch` and `laptop`'s trackpad rows, §6.5), the rows
   that name a gesture say VoiceOver's instead, and none says tap, touch and hold, slide or drag:
   - `bar`: "Each window has actions: close, minimize, full screen, and move left or right. Swipe up
-    or down to hear them." and "Text size makes the text on ‹Mac› larger or smaller. Swipe up or
-    down on it."; the Keyboard row as written.
+    or down to hear them." and "Text size makes a window’s text on ‹Mac› larger or smaller. Swipe up
+    or down on it."; the Keyboard row as written.
   - `laptop`: "Command, Option, Control and Shift stay on for the next key: Command, then C,
     copies." and the keyboard key's row as written.
 - **Buttons:** "Skip", "Next", "Done". Skip's hint: "Ends the tour. Take the Tour in Settings shows
@@ -734,6 +770,8 @@ tour: carried to bar (portrait → landscape)
 tour: put aside for a pairing link; back at bar after it
 tour: done (saved: touch, bar, settings)
 tour: skipped (saved)
+tour: closed (Take the Tour; nothing more saved)          (Skip in Take the Tour, review fix)
+tour: the automatic reconnect's session keeps the last one's decision (decided in: landscape)
 tour: not this session: used within a second of the picture
 tour: not this session: the Apps list was open
 tour: INPUT SENT WHILE THE TOUR SHOWED: …        (the tripwire; see §6.6)
@@ -756,11 +794,12 @@ tour: INPUT SENT WHILE THE TOUR SHOWED: …        (the tripwire; see §6.6)
 
 | Case | Behaviour |
 |---|---|
-| The session ends during the tour (Sill.app quits, a notice, the network goes) | The tour goes with the stream screen. Steps passed stay passed; the next session starts at the first step owed, with its own beat and decision |
+| The session ends during the tour (Sill.app quits, a notice, the network goes) | The tour goes with the stream screen. Steps passed stay passed; the next session starts at the first step owed, with its own beat and decision (the automatic reconnect's too, since a run was on screen) |
+| The session ends after its decision, and the automatic reconnect brings the picture back (a Wi-Fi drop, the Mac waking, an eviction after 4 s in another app, Sill.app relaunched) | The reconnect's session goes on with the last one's decision: no tour where it was decided; in a layout it never decided in, only what that layout has alone, a beat after the new picture. A session the person starts decides afresh |
 | A Mac refuses this device's version (the floor) | Never shows: no window list, no picture (§4.1) |
 | The first session is remote, or over the cable | The same rule; the tour does not care how the session came |
 | Pairing at home (after `home-pairing` lands) | The card on the connect screen, "Paired with Mac mini.", then the session: the tour follows its picture. Over the cable, "Paired with Mac mini over the cable." then the same |
-| An outside `sill://pair` link during the tour | The tour is put aside (not closed, nothing saved); the pairing overlay shows; when it closes and the session still streams, the tour comes back at the same step |
+| An outside `sill://pair` link during the tour | The tour is put aside (not closed, nothing saved); the pairing overlay shows; when it closes and the session still streams, the tour comes back at the same step. If a turn ends it meanwhile (nothing of it in the new layout), the keyboard stays down under the overlay |
 | An outside link in the beat | The overlay is open at the decision: not this session |
 | The person rotates, resizes (Split View, Stage Manager) or folds the Duo during the tour | §3.2 |
 | The person rotates or folds within the beat | The beat starts again in the new layout, with every step owed there (§4) |
@@ -1079,6 +1118,29 @@ two keys, Skip for good, Take the Tour last in Settings, and the Debug rule.
     rows) and speaks the rest VoiceOver's way. The alternative: keep `touch`, teaching VoiceOver's
     pass-through (double-tap and hold, then the gesture), which has not been tried on the stream's
     input view.
+17. **What counts as someone starting, under assistive technology** (the review). Default: **any
+    control used by any means** (VoiceOver's double tap, Switch Control, Voice Control, Full
+    Keyboard Access), **not VoiceOver's swipes that only move its focus**: those are reading, like a
+    look around the screen, and VoiceOver moves its focus by itself as the stream screen or a layout
+    comes, which would pass the tour for no one's action. The alternative: count every focus move
+    too (UIAccessibility's element-focused notification), as the review suggested; then a VoiceOver
+    user who explores the bar in the first second never gets the tour, and a turn's own refocus may
+    pass the upright card.
+18. **A card at large text on a small screen** (the review). Default: **beside its targets, its
+    words scrolling there**, so the lit control and its ring stay in view (only a room under 200 pt
+    makes it cover them, and then without a ring). The alternative, the plan's first rule: grow over
+    its targets, showing more words at once but hiding the control it is about.
+19. **Take the Tour's Skip.** Default: **"Skip" as in the automatic tour, closing the run** without
+    turning the automatic tour off. The alternative: label it "Close" in Take the Tour.
+20. **The automatic reconnect** (the review). Default: **it goes on with the last session's
+    decision** for the app's run, and a run cut short comes back at its picture. The alternative:
+    every connection decides afresh (as built first), which can dim the screen over someone at work
+    a second after their picture comes back.
+21. **A phone held upright** (main's new layout, merged after this plan). Default: **`bar` lights the
+    thumbnails with Aa and Keyboard, as sideways**; since the strip spans the row, the cutout takes in
+    rows 1 and 2 whole (Apps, Desktop and Settings too). A bar or Settings card that does not fit
+    above the rows goes under them. The alternative: a cutout of several shapes (only the three
+    controls), which the dim does not draw yet.
 
 ---
 
@@ -1193,10 +1255,104 @@ default.
   the same simulator, and gone after). The iPad and iPhone SE photos above were taken one commit
   before it, on 2x screens, which never showed it; the slack moves a card by under 2 pt.
 
+### Review fixes (2026-09-27)
+
+A review of the build (its findings came with probes: an injected library turning the accessibility
+runtime on, scrolling a card or activating a control as VoiceOver does, and pure replays against
+TourPolicy) found eight things. Each was checked here before it was fixed, one commit each:
+
+1. **Next kept the last card's scroll** (Reduce Motion off: the card keeps its identity as it
+   slides, and so did its scroll view): at a size where the words scroll, a card scrolled to its end
+   opened the next mid-text (offset 486 of 974.5 at 710x500, the largest size). Each step scrolls
+   the words to their top and flashes the indicators. The same probe after it: 0 of 974.5 on the
+   iPad at 710x500, and 0 of 574 on an iPhone upright after a bar card scrolled to 847.
+2. **Skip in Take the Tour saved the permanent skip,** so the upright card and every later topic
+   were lost for someone who only closed a tour they had asked for. `TourPolicy.skip`: in Take the
+   Tour it closes the run and saves nothing (open question 19). In the mock: the automatic tour
+   through Done, Take the Tour and Skip ("closed (Take the Tour; nothing more saved)"), then upright
+   the laptop card still came; the automatic tour's Skip still saves it.
+3. **Assistive technology's actions did not count as someone starting:** an accessibility
+   activation of a thumbnail 0.8 s into the beat picked it, and the tour came over it at 1.15 s.
+   `StreamClient.lastActionAt` (a person's pick, launch, window command or move in the bar, a
+   settings change, and the bar's own buttons, whatever drove them) now counts; the device's own
+   Desktop request does not; VoiceOver's focus moves do not (open question 17). The probe after it:
+   a thumbnail, and Desktop, activated in the beat give "not this session: used within a second of
+   the picture"; with accessibility on and nothing activated the tour still comes.
+4. **Every automatic reconnect decided afresh,** so someone at work got the dim a second after a
+   dropped picture came back. What a session decided (`TourSession`) lives on StreamClient and the
+   automatic reconnect's session goes on with it (open question 20), unless the last one ended
+   before its decision or mid-run. Live, on loopback through the remote door (`SillHost --synthetic
+   --remote=PORT` with its identity kept in a scratch folder, the app paired at launch; the first
+   host killed, a second on the same port and identity, the app's own automatic redial 4.1–4.2 s
+   after the loss): a first session that passed (a stand-in touch), the reconnect's session kept
+   the decision and showed nothing; a first session cut at its second card, the reconnect's
+   session showed the tour again from the first step not passed, 1.02 s after its picture; a first
+   session through Done with fresh memory, the reconnect's session showed nothing, where the build
+   before (f8bf1ec, the same run) showed the tour again 1.07 s after its picture.
+5. **The bar card taught Aa over the Desktop,** which Aa does not resize (the Mac fits only a
+   window to a viewport's scale): the row says a window's text now (§7).
+6. **At accessibility sizes a card covered the controls it lit,** with slivers of its ring beside
+   it (500x710 and phones upright). A card now stays beside its targets and its words scroll there
+   (§6.3, open question 18); only a room under 200 pt makes it cover them, without a cutout or ring.
+7. **A put-aside run ended by a turn put the keyboard back up under a link's confirmation,** where
+   hardware keys reach the Mac. It now stays down under the overlay.
+8. **A new frame size sent a pointer move under Take the Tour,** once the Pencil or the trackpad
+   had shown the drawn pointer. The move waits for the tour's end (`StreamClient.inputPaused`).
+
+Found while verifying them: the tour's delayed work (the beat's wait, Take the Tour's start, the
+DEBUG stand-ins) acted on a stream screen that had gone with its session; in the live run a
+stand-in pressed Next on a gone card and saved its step. It now goes ahead only in the session it
+began in. The DEBUG `-SillTourActivityAt` touches in the app run's first session only, so a live run
+can show a reconnect keeping its decision.
+
+### Merged with main at 5c6a850 (PRs #29, the disk image, and #30, the iPhone's portrait layout)
+
+PR #30 gives a phone held upright its own arrangement (§3.1). The merge put the targets on its
+views; `TourLayout.phone` gives the tour its rules there: `bar` lights the strip with Aa and
+Keyboard, and its card has the Keyboard row; the laptop card has no keyboard key row; the hints say
+where the rows are (§7); a card too tall for the short picture pane stands 12 pt over its targets,
+and a bar or Settings card that does not fit above the rows goes under them (§6.3; open question 21).
+At the default size on an 18 Pro Max the bar card (273 pt, 269 of room above the rows) sits under
+the thumbnails. `Tests/checks/tour` compiles `PhonePortraitLayout.swift` and places cards against
+its rects.
+
+### Verified after the review and the merge
+
+- `Tests/checks/tour`: 43,784 checks (34,059 before: Skip, sessions, the carried decision, the
+  phone's steps, copy and carry, cards beside their targets, phone pins at 440x894, 402x812, 375x647
+  and 500x710, and the grid over every phone size), 63 of 63 mutants (35 before); `run-all.sh`,
+  all 18 checks.
+- iOS Debug and Release for the simulator and Debug for a generic device (unsigned), each commit's
+  state building, only the known StreamClient capture warning; `swift build -c release`.
+- Harness photos on a private iPad Pro 13-inch, before the merge: every step at the four Duo sizes
+  and the iPad's two at the default size, pixel for pixel the build before's (the same simulator)
+  but the bar card's new words and what differs between two runs of either build (the home
+  indicator, a thumbnail strip's end); the largest size and accessibility-extra-large at 500x710,
+  710x500, 710x1000 and 1000x710, every bar, Settings and laptop card beside its targets with its
+  tail. After it: the phone's arrangement (`-SillIdiom phone`) at 440x894, 402x812, 375x647 and
+  500x710, and at two larger sizes; the harness's other states (no tour) against main's build,
+  equal but the Settings panel's last row and its scroll indicator, and what differs between two
+  runs of main's own build; and, on the iPhone simulator, the halves (710x1000, and 500x710 as an
+  iPad draws it, `-SillIdiom pad`) and both landscape sizes, each card anchored and tailed where it
+  was before the merge (its height differs only by the 3x screen's rounding and the iPhone's
+  words).
+- On a private iPhone 18 Pro Max: the harness at 440x894 and 956x440 with the iPhone's words (no
+  Pencil row), and live against `SillHost --synthetic` (the guard before each host, a watchdog on
+  Sill.log during, each host under 30 s, none left running): every step upright (440x894 under the
+  Dynamic Island) and sideways (832x440), at the default size and accessibility-extra-large, each
+  ring on its controls under the real safe areas. The tripwire never fired in any live run.
+
 ### Untested, for Noah
 
 §13's P1–P11 on the iPad mini and the iPhone 15 Pro, and the taps themselves: no tap could be made
 here, so Next, Skip, Done, a tap on the dim (the nudge, and whether any tap is lost to it: §6.1's
 fallback) and the touch watcher on a device (a touch in the first second leaves the session
-alone) are for the devices.
+alone) are for the devices. After the review, also: P12 on the iPhone upright, the new arrangement's
+cards (the bar card under the thumbnails, the laptop card standing on the keys); P13 start at once,
+then let the connection drop (Wi-Fi off and on, or the Mac asleep and awake): no tour when the
+picture comes back; and with the tour on screen at the drop, it comes back; P14 with VoiceOver on,
+double-tap a thumbnail within the first second: no tour this session; P15 Settings › Take the
+Tour, Skip at its first card, then hold the device upright: the laptop card still comes; P16 at
+the largest text size, each bar, Settings and laptop card beside the controls it lights, their
+ring whole, the words scrolling.
 
