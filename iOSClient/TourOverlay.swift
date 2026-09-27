@@ -575,6 +575,8 @@ private struct TourCard: View {
     // MARK: Footer
 
     /// Skip, the dots and Next or Done on one line while it fits; else Next over Skip, full width.
+    /// The buttons' words never wrap (fixed size), so the line is measured as it would draw, and a
+    /// line that would squeeze them gives way to the stack.
     private var footer: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
@@ -600,6 +602,8 @@ private struct TourCard: View {
             Text(TourPolicy.skipTitle)
                 .font(.body)
                 .foregroundStyle(Palette.accent)
+                .lineLimit(1)
+                .fixedSize()
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -613,6 +617,8 @@ private struct TourCard: View {
             Text(run.isLast ? TourPolicy.doneTitle : TourPolicy.nextTitle)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.black)
+                .lineLimit(1)
+                .fixedSize()
                 .padding(.vertical, 4)
                 .frame(minWidth: 88, minHeight: 44)
                 .frame(maxWidth: wide ? .infinity : nil)
