@@ -29,14 +29,15 @@ another topic does not stop the agents again.
 read-only survey of `/Users/noah/Downloads/winstream-gestures` (branch `trackpad-gestures` from
 `origin/main` at 8b0d418) and read-only probes on this Mac (macOS 27.0, 26A428), then revised the
 same day by a critique against the code, a simulator rig and this Mac's own settings (the list
-after "Reading of it"; the evidence is in §2 and §14). Line numbers are at 8b0d418. Main has since
-moved to 150f781 (PRs #20 and #21): `StreamCoordinator.swift` is one line longer past its line 228,
-and CI's mutants matrix gained two encoder checks. **No gesture, key, click, drag or text was
-posted to the Mac. No CGEvent was posted, no event tap was created, and the pointer was never
-moved.** Both passes only read: the window server's symbolic-hotkey table through its getters,
-preferences with `defaults read`, and files. The critique's rig drove the real `TrackpadView.swift`
-and `InputOverlay.swift` with synthesized touches in a simulator of its own, deleted afterwards
-(§2.1); nothing it did reached the Mac.
+after "Reading of it"; the evidence is in §2 and §14). Line numbers are at 6678ca3, the branch with
+main at 5c6a850 (PRs #20 to #30) merged in; §14 keeps the numbers the critique checked at 8b0d418.
+Since 8b0d418 `TrackpadView.swift` gained the phone's vertical span and a DEBUG input test (PR
+#30), `PortraitStreamScreen.swift` the phone's layout, and CI's mutants matrix four checks. **No
+gesture, key, click, drag or text was posted to the Mac. No CGEvent was posted, no event tap was
+created, and the pointer was never moved.** Both passes only read: the window server's
+symbolic-hotkey table through its getters, preferences with `defaults read`, and files. The
+critique's rig drove the real `TrackpadView.swift` and `InputOverlay.swift` with synthesized
+touches in a simulator of its own, deleted afterwards (§2.1); nothing it did reached the Mac.
 
 **Noah's request (2026-09-23), in his own words:** "I also want to be able to use full macos
 gestures on the touchpad, so far only 1 or 2 finger gestures are working. Would that be possible?"
@@ -123,19 +124,19 @@ through (§6.4).
 ### 2.1 What the glass sees, and what today's code sends for three and four fingers
 
 From the code:
-- Both surfaces set `isMultipleTouchEnabled = true` (`TrackpadView.swift:164`,
+- Both surfaces set `isMultipleTouchEnabled = true` (`TrackpadView.swift:178`,
   `InputOverlay.swift:48`), so every contact arrives.
 - The portrait trackpad has five recognizers: the one-finger tracker (`FingerTracker`, a long press
-  with no delay and unbounded movement that only watches, set up at `:169-174`, class at
-  `:459-485`), a pan for one or two fingers (`:179-183`), a tap (`:185-188`), a two-finger tap
-  (`:190-193`) and a 0.45 s long press (`:198-202`). The tracker, the pan and the long press have
-  the view as delegate, whose answer lets each of them recognize beside any other (`:207-208`); the
+  with no delay and unbounded movement that only watches, set up at `:183-188`, class at
+  `:476-502`), a pan for one or two fingers (`:193-197`), a tap (`:199-202`), a two-finger tap
+  (`:204-207`) and a 0.45 s long press (`:212-216`). The tracker, the pan and the long press have
+  the view as delegate, whose answer lets each of them recognize beside any other (`:221-222`); the
   taps have none.
 - The landscape overlay has a tap (`:61-64`), a 0.45 s long press (`:66-69`) and a pan for one or
   two fingers (`:72-76`), all direct-touch only (`:53`), and a hover recognizer (`:79-80`). One
   finger scrolls here (the pan's minimum is 1); there is no two-finger tap.
 - `FingerTracker` counts a second finger from the view's own touches (`sawSecondFinger`,
-  `:472-479`).
+  `:489-496`).
 - Neither pan sets `allowedScrollTypesMask`; both read 0 (below).
 
 **The critique's rig** (§14 has how): a scratch app for the iOS 27 simulator that compiles the real
@@ -189,7 +190,7 @@ the table on the iPad.
   and never reach another window's recognizer (an attempt through UIKit's own HID entry point,
   `_enqueueHIDEvent:`, delivered nothing). So `.none` on `InputOverlayView` is the defence and P6 is
   the proof. It belongs there only: `InputOverlayView` is the one responder Sill makes first, in
-  both layouts (the portrait stream pane is the same overlay, `PortraitStreamScreen.swift:216-233`),
+  both layouts (the portrait picture pane is the same overlay, `PortraitStreamScreen.swift:375-390`),
   and with a hardware keyboard it stays first responder to forward keys. `TrackpadSurface` never
   becomes first responder, so an override there does nothing, and while the keyboard is up in
   portrait the overlay's `.none` is the one iPadOS reads. Deciding at lift (§6.1) makes a lost race
@@ -203,7 +204,7 @@ the table on the iPad.
   in the rig), so trackpad and wheel scrolling make no pan callbacks; its pointer (hover) and its
   clicks (indirect touches, `InputOverlay.swift:223-269`) do reach Sill. Unchanged here; a later
   change could set `.continuous`.
-- `INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES` (`project.pbxproj:378,410`).
+- `INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES` (`project.pbxproj:382,414`).
 - A finger that lands on the bottom edge starts the Home indicator's gesture, as it does for any
   stroke today.
 
@@ -264,7 +265,7 @@ stored signature (`CGEventFlags` bits).
   windows only (`VirtualStage.swift:343-344`, `:488-489`). Mission Control, App Exposé, Apps and
   Show Desktop are drawn over the display by the system, so only the Desktop source shows them —
   the reason the Spotlight key exists only there (`showSpotlight`,
-  `PortraitStreamScreen.swift:338-340`). After a Space switch, a window stream still shows its
+  `PortraitStreamScreen.swift:578-580`). After a Space switch, a window stream still shows its
   window. → §3's Desktop rule.
 - **No public CGEvent constructor makes a gesture.** `CGEventTypes.h` has a public `CGGesturePhase`
   enum (`kCGGesturePhaseBegan = 1`, …) for **reading** magnify and rotate events, and the private
@@ -276,10 +277,10 @@ stored signature (`CGEventFlags` bits).
 
 ### 2.4 The host's key path, and a hazard for tests
 
-- A `.key` goes through `raiseIfInteracting` and `deliver` (`StreamCoordinator.swift:604-608`,
-  `:1078-1155`): a key-down while a window streams activates that window's app through
+- A `.key` goes through `raiseIfInteracting` and `deliver` (`StreamCoordinator.swift:605-609`,
+  `:1079-1156`): a key-down while a window streams activates that window's app through
   Accessibility when it is not frontmost, makes the window key, and holds all input up to 0.6 s
-  (`activationTimeout`, `:1076`) until the app is up. A Mission Control chord sent as a key would
+  (`activationTimeout`, `:1077`) until the app is up. A Mission Control chord sent as a key would
   first bring the streamed app forward and wait for it.
 - `InputInjector.key` posts only the HID usages its table knows (`virtualKeys`,
   `InputInjector.swift:366-416`): keycodes 160 and 131 have none. It sets the flags from five bits
@@ -289,7 +290,7 @@ stored signature (`CGEventFlags` bits).
   the last action with it).
 - **Tests must not send input to a host on this Mac.** A synthetic host still injects: `.input`
   goes to `InputInjector` with `currentSourceRect()`, which for the Desktop is the real display's
-  frame (`StreamCoordinator.swift:673-678`), and the processes agents run here hold Accessibility
+  frame (`StreamCoordinator.swift:674-679`), and the processes agents run here hold Accessibility
   (`AXIsProcessTrusted()` is true, §5). The old H4 ("send, from a scratch client, a `.key(hidUsage:
   0x52, …)`") would have opened Mission Control on Noah's Mac. `sillclient.py` sends no input
   today; §9 keeps it that way and gives gestures a test path that cannot post (§7.4).
@@ -334,7 +335,8 @@ as on a Mac: the content follows the fingers, so fingers moving **left** bring t
 - **The Desktop first.** While this device streams a window, a gesture first selects the Desktop, as
   the Desktop button does (§6.3), because none of these views is in a window's capture (§2.3).
 - **A latched modifier** is ignored and stays latched: a gesture is not a keystroke (the Spotlight
-  cap ignores latches too, `PortraitStreamScreen.swift:399-406`, though its tap spends them).
+  cap ignores latches too, `Spotlight.press` at `StreamScreen.swift:601-605`, though its tap spends
+  them, `PortraitStreamScreen.swift:670-673`).
 
 ---
 
@@ -523,7 +525,7 @@ struct TrackpadGestures {
   trackpad; on the overlay, `.scrollGesture(.ended)` with `scrollGestureOpen` cleared and no
   `startMomentum`. Deltas already sent stay (they moved less than `chordTravel`), and the host posts
   nothing for a gesture that carried none.
-- **A stroke that never arms is untouched:** `silent` is false and every handler runs as at 8b0d418.
+- **A stroke that never arms is untouched:** `silent` is false and every handler runs as at 6678ca3.
   H7 proves it.
 - **The switch off** stops only the send (§6.3): three-finger strokes stay silent, so the stray
   clicks, drags and right-clicks of §2.1 are gone either way.
@@ -620,7 +622,7 @@ package struct GestureChords {
 
 ### 7.4 In the coordinator
 
-- `case .gesture:` in `handle` (`StreamCoordinator.swift:571`): decode `TrackpadGesture`; at most 4
+- `case .gesture:` in `handle` (`StreamCoordinator.swift:572`): decode `TrackpadGesture`; at most 4
   a second per connection (the excess dropped, with one line a minute, as `RefusalSummary` does);
   then `resolve` with the table just read.
 - **No `raiseIfInteracting`:** these views act on the whole Mac, and App Exposé on the frontmost
@@ -634,7 +636,7 @@ package struct GestureChords {
 - **A host that does not advertise never posts a chord** (the synthetic CLI, the bare app with
   `--synthetic`): it logs the line with "(not posted: a test host)" and counts `in.gestureDry`. That
   is what lets H8 test the wire without touching the session.
-- The window list gains `gestures: 1` (`listMessage`, `StreamCoordinator.swift:1572-1576`).
+- The window list gains `gestures: 1` (`listMessage`, `StreamCoordinator.swift:1574-1578`).
 
 ---
 
@@ -731,8 +733,8 @@ a synthetic host that cannot post them.** A synthetic host injects input into th
 | H3 | **`gestures`** and its mutants (§9.1) | Every case; every mutant caught |
 | H4 | **`gesture-chords`** and its mutants (§9.1), pure: nothing is posted | Every case; every mutant caught |
 | H5 | **Grep hard rules** | No `IOHIDEventCreate`, `tapCreate`, `addGlobalMonitorForEvents` or a `CGEventType` of 29 or 30 in `Sources/` or `iOSClient/` (Tier 2 not built); both pans still `maximumNumberOfTouches = 2`; `flags(from:)` unchanged; `sillclient.py` sends no kind 8; each existing handler's only change is its first-line guard |
-| H6 | **Compatibility** (swiftc) | 8b0d418's `StreamMessage.swift` maps 28 to `.unknown`; its `Switcher.swift` decodes a new window list; a window list from 8b0d418 decodes with `gestures` nil; the device's send decision with it nil sends nothing |
-| H7 | **The touch rig** (§9.2), with 8b0d418's surfaces and this branch's | One- and two-finger strokes: the same events as 8b0d418's, one for one (times masked). Each three-finger stroke of §2.1: one gesture and no other event after the third finger; armed with a scroll open: one `.scrollGesture(.ended)` and no momentum; cancelled: nothing; four: one gesture with `fingers` 4; five: nothing; the switch off: nothing at all |
+| H6 | **Compatibility** (swiftc) | 6678ca3's `StreamMessage.swift` maps 28 to `.unknown`; its `Switcher.swift` decodes a new window list; a window list from 6678ca3 decodes with `gestures` nil; the device's send decision with it nil sends nothing |
+| H7 | **The touch rig** (§9.2), with 6678ca3's surfaces and this branch's | One- and two-finger strokes: the same events as 6678ca3's, one for one (times masked). Each three-finger stroke of §2.1: one gesture and no other event after the third finger; armed with a scroll open: one `.scrollGesture(.ended)` and no momentum; cancelled: nothing; four: one gesture with `fingers` 4; five: nothing; the switch off: nothing at all |
 | H8 | **The wire, dry.** `sillclient.py PORT 8 desktop --gesture=swipeUp@3 --gesture=swipeDown@4` (a new option) against `SillHost --synthetic`, only under §10's idle guards (a dry path that failed would open and then close Mission Control) | Two lines: swipe up → Mission Control (shortcut 108), then swipe down → Mission Control again (the reversal), each "(not posted: a test host)"; `in.gestureDry` 2, `in.gesture` 0 |
 | H9 | **The Mac's UI unchanged.** `-SillRenderPreviews` from the bundle against `origin/main`'s | Identical |
 
