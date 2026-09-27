@@ -26,6 +26,10 @@ final class WindowCatalog {
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
+    /// Fires after every poll's window-list read (each `pollInterval` while a client is connected),
+    /// changed or not: the Desktop's menus follow the frontmost app, and an app's menus that did
+    /// not answer are read again (StreamCoordinator's `menusPolled`).
+    var onPolled: (@MainActor () -> Void)?
     /// A fresh thumbnail for one window.
     var onThumbnail: ((UInt32, Data) -> Void)?
     /// An icon we have not announced yet (running or installed app). Only fires while a client is
@@ -201,6 +205,7 @@ final class WindowCatalog {
             passOwed = false
             await refreshWindows()
             if Task.isCancelled { break }
+            onPolled?()
             if thumbnailsWanted { await refreshThumbnails() }
             if Task.isCancelled { break }
             if passOwed { continue }

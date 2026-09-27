@@ -117,6 +117,7 @@ swift run -c release SillHost --remote --internet    # also admit paired devices
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
 swift run -c release SillHost --encoder-selftest     # is the hardware encoder alive? 5 s, then it exits
 swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it
+swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device would get for an app (a pid, or its name), read once
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
@@ -177,9 +178,10 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    below) keeps its way in until it ends.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
-changed from the device, and Disconnect at the bottom. Its last group, This
-iPad (or iPhone), is the device's own: Three-Finger Gestures (below, Trackpad
-gestures), on unless turned off, and never sent to the Mac.
+changed from the device, and Disconnect at the bottom. After the Mac's settings
+come the device's own: This iPad (or iPhone), with Three-Finger Gestures
+(below, Trackpad gestures), on unless turned off and never sent to the Mac,
+and last Take the Tour.
 
 On a phone held upright (and on the Duo's outer display) the picture sits in
 a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
@@ -191,6 +193,23 @@ Spotlight key there: Spotlight is cmd, then space on the keyboard. The
 trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
+
+The first time a Mac's picture shows on a device, and nothing is touched, sent,
+used (by any means, VoiceOver's double tap included) or opened in the second
+after it, a short tour dims the screen and lights one part at a time: the
+picture (tap, hold, drag), the thumbnails with Aa (and Keyboard, sideways and
+on a phone upright), Settings, and upright the key row and the trackpad. A card
+stays beside what it lights at every text size, its words scrolling there. Skip
+ends it for good on that device (in Take the Tour it only closes it); a step
+passed stays passed; the automatic reconnect's session keeps the decision the
+last one made; after a tour taken sideways, the upright card comes the first
+time the device is held upright and left alone for a second. Settings › Take
+the Tour, the panel's last row, shows it again. Nothing reaches the Mac while it shows, and it sends
+nothing. What it remembers is two keys in the app's own defaults,
+`Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
+uninstall`, to see it afresh). Debug builds show it by themselves only with
+`-SillTourState` (the harness below). docs/first-run-walkthrough-plan.md has
+the rules; `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
 
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
@@ -258,9 +277,9 @@ shortcut changed there is followed and one turned off does nothing. While a
 window streams, a gesture shows the Desktop first, since none of these views is
 in a window's picture; the opposite gesture closes what one opened (a swipe
 down after Mission Control, a pinch after Show Desktop), until a click, a key or
-text from a device, a window picked or an app launched from one, or the last
-device leaving; a view closed with the Mac's own keyboard comes back with the
-same gesture made twice more. Four fingers do the same where iPadOS lets them
+text from a device, a window picked, an app launched or one of the Mac's menu
+items chosen from one, or the last device leaving; a view closed with the Mac's
+own keyboard comes back with the same gesture made twice more. Four fingers do the same where iPadOS lets them
 through (Settings › Multitasking & Gestures); a Magic Keyboard trackpad's own
 three- and four-finger gestures stay with iPadOS. VoiceOver keeps three-finger
 gestures for itself, so with it on the rows of Settings › This iPad do them
@@ -279,6 +298,34 @@ logs the shortcut it would post with "(not posted: a test host)", so
 `python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
 without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
 such a host a table of its own instead of this Mac's shortcuts.
+
+## The Mac's menus on the device
+
+The app a device streams keeps its menu bar on the Mac, and the device shows
+it: on an iPad with iPadOS 26 or later in the iPad's own menu bar (move the
+pointer to the top edge, or swipe down from it), and behind the Menus button in
+Sill's bar, between the window thumbnails and Aa (on a phone held upright, at
+the end of the thumbnails' row). A window too narrow for the button and a whole
+thumbnail beside it (a Slide Over) leaves the button out. With two Sill windows
+open, the iPad's menu bar shows none of the Mac's menus, since nothing says
+which window's session a choice there would reach; each window's Menus button
+still has its own. With the Desktop streaming, the menus are the frontmost
+app's, as the Mac's own menu bar shows. Each menu is read from the Mac as it
+opens, so what is checked, dimmed or listed (Open Recent, the Window menu) is
+what the Mac shows then; an item chosen on the device is chosen on the Mac, as
+if clicked there. The Mac's keyboard shortcuts show under the items, as text:
+typed on a hardware keyboard they reach the Mac as keys, as before, never the
+device's menus. The Apple menu and Sill's own are never shown.
+
+It needs Accessibility for Sill on the Mac, as the device's clicks do; without
+it the button shows where to allow it. Opening a menu of a window streamed on
+its own makes its app active on the Mac, as a click from the device does, since
+an app's menus read differently while it is in the background (Copy, Close and
+Minimize dimmed). A Mac from before this change sends no menus, and the device
+then shows no Menus button; a device from before it never asks, and the Mac
+reads nothing for it. An app that draws its menus in its own window (Blender's
+File and Edit) has there only what its menu bar lists; tap the rest in the
+picture.
 
 ## Direct Wireless Connection
 
@@ -394,12 +441,13 @@ tests of Direct Wireless Connection and remote access.
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
-encoder session, the device floor, how a session ends, the update check, the
-disk image's window, where everything goes on a phone held upright, which
-three-finger strokes are gestures and what the Mac does with one) on their own
-with a check each, and runs them: about two minutes, no device, permission
-or encoder. `--mutants` also checks that each check fails when its file is
-changed in one place (most of an hour).
+encoder session, the device floor, how a session ends, how the device reads the
+Mac's messages, the update check, the disk image's window, where everything goes
+on a phone held upright, the Mac's menus on both ends, which three-finger
+strokes are gestures and what the Mac does with one) on their own with a check
+each, and runs them: about two minutes, no device, permission or encoder.
+`--mutants` also checks that each
+check fails when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -415,7 +463,8 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 ```
 
 Its docstring lists every flag: timed changes and picks, stats as a named
-device, the remote door with pairing, and more. It checks every argument
+device, the remote door with pairing, the Mac's menus (`--menus`, `--fetch`,
+`--press`), and more. It checks every argument
 before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
@@ -426,6 +475,35 @@ input flags, only to a `--synthetic` host on this Mac, which posts nothing.
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
 slows or cuts the link. TLS passes through.
+
+### The pacing harness
+
+`Scripts/pacing/run.sh` measures how the host paces a session away from home,
+this tree's StreamServer.swift against origin/main's (`--base REF` for
+another), with no encoder, Screen Recording or device: the host fed fake frames
+of chosen sizes, a shaped path (a rate, a delay, a queue, a dip, a dead path)
+and a stand-in device that reads, pings and judges liveness as the app does,
+all on 127.0.0.1. It prints each case against its gate
+(docs/remote-bundle-plan.md §11): about 18 minutes, `--full` about 40, and it
+waits while the Mac is busy (a load average of 20 or more), since a busy Mac
+makes a stalled path of any link. `--list` shows the cases.
+
+### The menus' test app
+
+`Scripts/menufixture.swift` is a small AppKit app with menus of known contents
+(marks, shortcuts, a dimmed item, one retitled at every look, a slow action,
+submenus three deep, 300 and 600 items) that can never come to the front, and
+whose one window is off every display. Signals change its menus the way apps
+do: SIGUSR1 and SIGUSR2 give Probe › Rebuilt a new menu, SIGHUP inserts an item
+at the top of Probe in place, and SIGALRM gives Probe itself a new menu. A
+synthetic host started with `SILL_TEST_MENU_PID=<its pid>` streams the test
+pattern with the fixture's menus, so the menus are read and chosen without
+touching a real app; the fetches and choices of `sillclient.py` refuse to run
+without that variable (a fetch carries the title its menu was shown under, as a
+device's does: the host reads a menu only under that title).
+`Scripts/menu-check/run.sh` runs the host's menu reader and mirror against the
+fixture without a host (it needs Accessibility for whatever runs it). The
+file's header says how to build and run it.
 
 ### Test arguments for the bare app
 
@@ -488,6 +566,28 @@ simulator:
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
+- `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
+  mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
+  `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
+  `-SillMenuPress 'File/Save'` chooses that item. Live, both act only on the
+  test app's menus through a test host (dialled by `-SillConnect` to a loopback
+  address, no host version, menufixture's top level) and print "refused"
+  otherwise. `-SillMenusAt <s>` opens the pull-down `s` seconds after the
+  button shows, and `-SillMenusCloseAfter <s>` closes it `s` seconds later. On
+  an iPad, `-SillMenuDump 1` prints the main menu after each build,
+  `-SillMenuBarLayout perMenu|replace|one` moves the Mac's menus in it, and
+  `-SillSecondWindow 1` opens a second window 2 s after launch (the bar then
+  gets none of the Mac's menus).
+- The first-run tour, in the mock, under `-SillLive 1` and in the normal app:
+  `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour
+  on (a Debug build never shows it by itself otherwise; `saved` reads and
+  writes the real keys, the others last one run), `-SillTour
+  touch|bar|settings|laptop` starts it at that step, and the stand-ins
+  `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`, `-SillTakeTourAt S`
+  and `-SillTourVoiceOver 1` press, touch, take it from Settings and speak as
+  VoiceOver would. `-SillOrientation landscape` turns the normal app sideways
+  in a phone simulator. The console's `tour:` lines say what happened;
+  ContentView's comment has the whole contract.
 
 ### The touch rig
 
@@ -694,8 +794,10 @@ record field by field.
   disk image, and the tool that lays out its window), `release-ios.sh` (the
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
-  link, for tests) and `sillfeed.py` (a stand-in for GitHub's releases feed,
-  for the update check's tests).
+  link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
+  for the update check's tests), `pacing/` (the pacing harness, above), and
+  `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
+  reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy

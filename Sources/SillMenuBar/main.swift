@@ -18,6 +18,9 @@ HostLog.shared.configure(keepLines: 5_000, fileURL: DebugHooks.logFileURL)
 if CommandLine.arguments.contains("--encoder-selftest") {
     EncoderSelfTest.run()
 }
+if let menuApp = MenuSelfTest.requested(in: CommandLine.arguments) {
+    MenuSelfTest.run(app: menuApp)   // `Sill --menu-selftest[=APP]`: read-only, as the CLI's
+}
 // CoreGraphics must be initialized on the main thread before ScreenCaptureKit touches it.
 _ = CGMainDisplayID()
 if CommandLine.arguments.contains("--virtual-display-selftest") {

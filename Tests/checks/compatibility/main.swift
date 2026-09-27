@@ -160,7 +160,7 @@ check(!json(list).contains("gestures"), "a list without them leaves the key out:
 check(decodedOld != nil && decodedOld?.gestures == nil, "an older host's list decodes, gestures nil")
 check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.gestures == 1, "gestures round-trips")
 check(StreamMessageKind.gesture.rawValue == 28 && StreamMessageKind(rawValue: 28) == .gesture, "kind 28 is gesture")
-check(StreamMessageKind(rawValue: 27) == nil && StreamMessageKind(rawValue: 29) == nil, "27 and 29 are not this build's")
+check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 29) == nil, "27 is the menus' fetch, 29 not this build's")
 let gestureMessage = StreamMessage(kind: .gesture, timestamp: 1, isKeyframe: false, payload: Wire.encode(gesture)).serialized()
 check(StreamMessage.parseHeader(gestureMessage)?.kind == .gesture, "the gesture's header parses")
 check(gestureMessage.count == StreamMessage.headerLength + Wire.encode(gesture).count, "one header, then the JSON")

@@ -120,6 +120,9 @@ struct StreamScreen: View {
     /// The keyboard was up (the overlay first responder) when the panel opened: closing the panel
     /// puts it back.
     @State private var keyboardBeforeSettings = false
+    /// The Menus pull-down closed the Settings panel, which had taken the keyboard down: it comes
+    /// back when the pull-down goes (`menusClosed`).
+    @State private var keyboardAfterMenus = false
     /// Pair This iPad… (the panel's Away from home group): the pairing overlay covers the stream.
     /// Up here, like the panel, so a rotation keeps it. An outside sill://pair link shows the same
     /// overlay with its confirmation.
@@ -133,6 +136,34 @@ struct StreamScreen: View {
     /// The viewport send waiting out its debounce, if any.
     @State private var pendingViewport: Task<Void, Never>? = nil
 
+    // The first-run tour (TourPolicy, TourOverlay; docs/first-run-walkthrough-plan.md). One stream
+    // screen is one session. What the session decided is `client.tourSession`, which outlives the
+    // screen: the automatic reconnect's session goes on with it (TourPolicy.nextSession).
+    /// The tour on screen, if any. While it shows the layouts take no touch and the keyboard is down.
+    @State private var tour: TourRun? = nil
+    /// Where the tour's targets are, as the layout on screen reports them.
+    @State private var tourTargets: [TourTarget: CGRect] = [:]
+    /// This session's first picture (the Mac's name, a frame size, a source), systemUptime.
+    @State private var pictureAt: Double? = nil
+    /// The layout on screen (nil until the screen has a size), and when it began.
+    @State private var tourLayout: TourLayout? = nil
+    @State private var layoutAt: Double = ProcessInfo.processInfo.systemUptime
+    /// The decision waiting out its beat.
+    @State private var tourWait: Task<Void, Never>? = nil
+    /// Every touch on the screen, taken by none.
+    @State private var touches = TouchWatch()
+    @State private var tourStore = TourStore()
+    /// The keyboard comes back when the tour ends: it was up when the tour came, or when the
+    /// Settings panel that started it opened.
+    @State private var tourKeyboardAfter = false
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    #if DEBUG
+    /// The console says once when a decision starts to wait.
+    @State private var tourWaitLogged: Double? = nil
+    /// `-SillTourPress skip@S` skips once.
+    @State private var tourSkipPressed = false
+    #endif
+
     #if DEBUG
     /// DEBUG only, for the layout harness: start on a given state so a posture can be photographed
     /// with the drawer already open. `StreamScreen(client:)` still means exactly what it did.
@@ -145,6 +176,9 @@ struct StreamScreen: View {
         _scaleOpen = State(initialValue: scaleOpen)
         _textScale = State(initialValue: textScale)
         _settingsOpen = State(initialValue: settingsOpen)
+        // The panel open over the keyboard, as in a session: it took the keyboard down, and closing
+        // it puts it back (`-SillSettings 1 -SillKeyboard 1`).
+        _keyboardBeforeSettings = State(initialValue: settingsOpen && keyboardShown)
         _pairingOverlay = State(initialValue: pairingOverlay)
         self.scannerOverride = scannerOverride
     }
@@ -154,26 +188,37 @@ struct StreamScreen: View {
         // Which layout, and at which size — see `DuoLayout` for the thresholds and the Duo posture
         // behind each one.
         GeometryReader { geo in
+            let duo = DuoLayout.of(geo.size)
+            let layout: TourLayout = duo == .innerLandscape || duo == .outerLandscape ? .landscape
+                : (DuoLayout.drawsPhone(geo.size) ? .phone : .portrait)
             ZStack {
                 Group {
-                    switch DuoLayout.of(geo.size) {
+                    switch duo {
                     case .innerLandscape:
-                        landscape(bar: .regular)
+                        landscape(bar: .regular, width: geo.size.width)
                     case .outerLandscape:
-                        landscape(bar: .compact)
+                        landscape(bar: .compact, width: geo.size.width)
                     case .innerPortrait:
                         portrait(metrics: .regular)
                     case .outerPortrait:
                         portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact)
                     }
                 }
-                // Under the pairing overlay nothing takes a touch: not the bar, and not the
-                // stream's UIKit input view.
-                .allowsHitTesting(!overlayShown)
+                // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
+                // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
+                .allowsHitTesting(!overlayShown && tour == nil)
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
                 .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
+                }
+                // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
+                // outside link puts the tour aside until the overlay has closed.
+                if let run = tour, !overlayShown {
+                    TourOverlay(run: run, copy: tourCopy(run, layout), layout: layout, targets: tourTargets,
+                                screen: geo.size, bottomInset: geo.safeAreaInsets.bottom,
+                                next: tourNext, skip: tourSkip)
+                        .transition(.opacity)
                 }
                 // A sibling in the same stack, not an `.overlay`: over the stream's UIKit input
                 // view, only a sibling drawn after it received the touches (measured on the
@@ -183,6 +228,10 @@ struct StreamScreen: View {
                                    close: { withAnimation(.easeOut(duration: 0.2)) { pairingOverlay = false } })
                 }
             }
+            .coordinateSpace(.named(TourSpace.name))
+            .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
+            .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
+            .background(TouchWatcher(watch: touches))
         }
         .background(Color.black)
         .overlayPreferenceValue(WindowMenuAnchorKey.self) { anchor in
@@ -237,6 +286,23 @@ struct StreamScreen: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.modeDidChangeNotification).receive(on: RunLoop.main)) { _ in
             sendViewport(after: 0.25)
+        }
+        // The tour: the first picture starts its beat; an outside link puts it aside and back.
+        .onChange(of: pictureReady, initial: true) { _, ready in if ready { pictureCame() } }
+        // The bar's own controls used, by a tap or by VoiceOver, Switch Control, Voice Control or
+        // Full Keyboard Access (none of which makes a touch): something happening, for its rule.
+        .onChange(of: drawerOpen) { _, _ in client.noteAction() }
+        .onChange(of: settingsOpen) { _, _ in client.noteAction() }
+        .onChange(of: keyboardShown) { _, _ in client.noteAction() }
+        .onChange(of: scaleOpen) { _, _ in client.noteAction() }
+        .onChange(of: textScale) { _, _ in client.noteAction() }
+        .onChange(of: tourCard, initial: true) { _, card in tourCardChanged(card) }
+        .onChange(of: tourVoiceOver) { _, _ in carryTour(reason: "VoiceOver") }
+        // The session is over: a decision still waiting out its beat must not land in the next
+        // session's `client.tourSession`.
+        .onDisappear {
+            tourWait?.cancel()
+            tourWait = nil
         }
     }
 
@@ -384,6 +450,304 @@ struct StreamScreen: View {
         }
     }
 
+    /// The Menus pull-down opened: the drawer, a thumbnail's lights and the Settings panel go, one
+    /// thing open at a time; the keyboard stays as it is (the plan's §7.5). The panel had taken it
+    /// down, so it comes back, but only when the pull-down goes: raised now, the software keyboard
+    /// would come up, and key focus move, under the open menu.
+    private func menusOpened() {
+        keyboardAfterMenus = settingsOpen && keyboardBeforeSettings
+        #if DEBUG
+        if settingsOpen { print("menus: the pull-down opened over the Settings panel, which closes; the keyboard " + (keyboardAfterMenus ? "comes back when the pull-down goes" : "was down before it")) }
+        #endif
+        setSettings(false, restoreKeyboard: false)
+        windowMenu = nil
+        withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+    }
+
+    private func menusClosed() {
+        #if DEBUG
+        if keyboardAfterMenus { print("menus: the pull-down went; the keyboard back up, as before the Settings panel") }
+        #endif
+        if keyboardAfterMenus { overlay.setKeyboard(shown: true) }
+        keyboardAfterMenus = false
+    }
+
+    // MARK: The tour
+
+    /// The picture, as the tour counts it: the Mac's first window list, a frame size and a source
+    /// that streams. A Mac that refuses this device, or cannot capture, never gets here.
+    private var pictureReady: Bool {
+        !client.macName.isEmpty && client.videoSize != .zero && client.active != .none
+    }
+
+    /// The tour is on screen (not put aside under the pairing overlay).
+    private var tourOnScreen: Bool { tour != nil && !overlayShown }
+
+    /// Whether the session a piece of the tour's delayed work began in (`client.connectedAt` then) is
+    /// still the one on screen. A stream screen that has gone keeps its last state, and work it left
+    /// waiting would act on it (a DEBUG stand-in pressed a card's Next after its session ended), and
+    /// now write the next session's `client.tourSession`.
+    private func sameSession(_ mark: Date?) -> Bool { client.connected && client.connectedAt == mark }
+    /// The card on screen, if any.
+    private var tourCard: TourTopic? { tourOnScreen ? tour?.at : nil }
+
+    private var tourVoiceOver: Bool {
+        #if DEBUG
+        if TourDebug.current.voiceOver { return true }
+        #endif
+        return voiceOverEnabled
+    }
+
+    /// What is open at the decision, if anything (the rule's `busy`), in the console's words.
+    private var tourBusy: String? {
+        if drawerOpen { return "the Apps list was open" }
+        if settingsOpen { return "Settings was open" }
+        if windowMenu != nil { return "a window's lights were open" }
+        if scaleOpen { return "the Aa ruler was open" }
+        if keyboardShown { return "the keyboard was up" }
+        if overlayShown { return "the pairing overlay was open" }
+        // UIKit's word, not the scene phase: in a headless simulator the environment's scenePhase
+        // stays inactive for an app that is active and on screen.
+        if UIApplication.shared.applicationState != .active { return "the app was not active" }
+        return nil
+    }
+
+    private func tourCopy(_ run: TourRun, _ layout: TourLayout) -> TourCopy {
+        TourPolicy.copy(run.at, layout, mac: client.macName, device: StreamClient.deviceWord,
+                        voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun)
+    }
+
+    private func tourLog(_ line: @autoclosure () -> String) {
+        #if DEBUG
+        print("tour: " + line())
+        #endif
+    }
+
+    /// The first picture: once per session. Its decision comes a beat later.
+    private func pictureCame() {
+        guard pictureAt == nil else { return }
+        pictureAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        let debug = TourDebug.current
+        let mark = client.connectedAt
+        if let step = debug.start {
+            // A turn later, once the screen has said which layout it is.
+            Task { @MainActor in
+                guard sameSession(mark) else { return }
+                startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver, from: step))
+            }
+        }
+        if let s = debug.activityAt, !TourDebug.touchedOnce {
+            TourDebug.touchedOnce = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(s))
+                guard sameSession(mark) else { return }
+                touches.lastTouchAt = ProcessInfo.processInfo.systemUptime
+                tourLog("a stand-in touch \(s) s after the picture")
+                considerTour()
+            }
+        }
+        if let s = debug.takeTourAt {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(s))
+                guard sameSession(mark) else { return }
+                tourLog("a stand-in for Settings, then Take the Tour")
+                setSettings(true)
+                try? await Task.sleep(for: .seconds(1))
+                guard sameSession(mark) else { return }
+                takeTour()
+            }
+        }
+        #endif
+        considerTour()
+    }
+
+    /// Portrait or landscape changed (a rotation, a resize, the Duo folding), or the screen came.
+    /// A turn after the picture's decision gets one of its own; a run on screen follows the layout.
+    private func layoutChanged(to layout: TourLayout) {
+        let changed = tourLayout != nil && layout != tourLayout
+        tourLayout = layout
+        if changed {
+            layoutAt = ProcessInfo.processInfo.systemUptime
+            carryTour(reason: "a turn")
+        }
+        considerTour()
+    }
+
+    /// The run on screen as the layout (or VoiceOver) now has it; it ends, nothing more saved,
+    /// when nothing of it is left here.
+    private func carryTour(reason: String) {
+        guard let run = tour, let layout = tourLayout else { return }
+        guard let carried = TourPolicy.carry(run, to: layout, voiceOver: tourVoiceOver, memory: tourStore.memory) else {
+            tourLog("ended by \(reason): nothing of it here (\(layout.rawValue))")
+            endTour()
+            return
+        }
+        // Shown in this layout now: a later turn back into it offers nothing again this session.
+        client.tourSession.offered.insert(layout)
+        guard carried != run else { return }
+        tourLog("carried to \(carried.at.rawValue) (\(carried.index + 1) of \(carried.count), \(layout.rawValue))")
+        tour = carried
+    }
+
+    /// The automatic tour's rule (TourPolicy.automatic), asked at the picture, at a layout change
+    /// and when a wait runs out. One decision per session and layout.
+    private func considerTour() {
+        tourWait?.cancel()
+        tourWait = nil
+        guard tour == nil, let layout = tourLayout else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        // A touch anywhere, input sent to the Mac, or a control used by any means. VoiceOver's
+        // swipes that only move its focus are reading, as a look around the screen is, and are not
+        // counted; VoiceOver also moves its focus by itself as a screen or a layout comes.
+        let activity = [touches.lastTouchAt, client.lastInputAt, client.lastActionAt].compactMap { $0 }.max()
+        let session = client.tourSession
+        let moment = TourMoment(now: now, pictureAt: pictureAt, layoutAt: layoutAt, decided: session.decided,
+                                lastActivityAt: activity, touchesDown: touches.down, busy: tourBusy != nil,
+                                offered: session.offered.contains(layout), voiceOver: tourVoiceOver,
+                                enabled: tourStore.automatic)
+        switch TourPolicy.automatic(moment, layout, tourStore.memory) {
+        case .wait(let until):
+            guard let until else { return }
+            #if DEBUG
+            if tourWaitLogged != until {
+                tourWaitLogged = until
+                let owed = TourPolicy.owed(layout, voiceOver: tourVoiceOver, tourStore.memory)
+                tourLog("owed here: \(Self.names(owed.map(\.rawValue))) (\(layout.rawValue); seen: \(Self.names(tourStore.memory.names)))")
+                tourLog("waiting until 1.0 s after the \(session.decided && layoutAt > (pictureAt ?? 0) ? "turn" : "picture")")
+            }
+            #endif
+            let mark = client.connectedAt
+            tourWait = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(max(0.01, until - ProcessInfo.processInfo.systemUptime)))
+                if !Task.isCancelled, sameSession(mark) { considerTour() }
+            }
+        case .pass(let reason):
+            // A pass before the picture (the tour off) or once decided changes nothing.
+            guard pictureAt != nil, moment.enabled, !moment.offered else { return }
+            let since = session.decided && layoutAt > (pictureAt ?? 0) ? "the turn" : "the picture"
+            client.tourSession.offered.insert(layout)
+            client.tourSession.decided = true
+            switch reason {
+            case .nothingOwed:
+                tourLog("nothing owed here (\(layout.rawValue); seen: \(Self.names(tourStore.memory.names))\(tourStore.memory.skipped ? "; skipped" : ""))")
+            case .used:
+                tourLog("not this session: used within a second of \(since)")
+            case .busy:
+                tourLog("not this session: \(touches.down > 0 ? "a touch was down" : tourBusy ?? "something was open")")
+            }
+        case .show(let steps):
+            startTour(TourPolicy.run(owed: steps))
+        }
+    }
+
+    private static func names(_ list: [String]) -> String {
+        list.isEmpty ? "none" : list.joined(separator: ", ")
+    }
+
+    /// Starts a run: what could be open goes away (as for the pairing overlay), the keyboard goes
+    /// down, and so hardware keys stop reaching the Mac. `keyboardAfter` is whether it comes back at
+    /// the end (Take the Tour: whether it was up before Settings opened).
+    private func startTour(_ run: TourRun?, keyboardAfter: Bool? = nil) {
+        guard let run else { return }
+        tourWait?.cancel()
+        tourWait = nil
+        if let layout = tourLayout { client.tourSession.offered.insert(layout) }
+        client.tourSession.decided = true
+        client.tourSession.running = true
+        let keyboard = keyboardAfter ?? keyboardShown
+        putAwayForOverlay()
+        tourKeyboardAfter = keyboard
+        withAnimation(.easeOut(duration: 0.25)) { tour = run }
+    }
+
+    /// Next, or Done on the last card: the step is saved as passed.
+    private func tourNext() {
+        guard let run = tour else { return }
+        tourStore.save(TourPolicy.passed(run.at, tourStore.memory))
+        tourLog("passed \(run.at.rawValue)")
+        if let next = TourPolicy.next(run) {
+            let motion: Animation = reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.1)
+            withAnimation(motion) { tour = next }
+        } else {
+            tourLog("done (saved: \(Self.names(tourStore.memory.names))\(tourStore.writes ? "" : "; this run only"))")
+            endTour()
+        }
+    }
+
+    /// Skip (Esc, VoiceOver's escape gesture): the automatic tour is off for good on this device;
+    /// in Take the Tour it only closes the run (TourPolicy.skip).
+    private func tourSkip() {
+        guard let run = tour else { return }
+        let memory = TourPolicy.skip(run, tourStore.memory)
+        if memory != tourStore.memory { tourStore.save(memory) }
+        tourLog(run.replay ? "closed (Take the Tour; nothing more saved)" : "skipped (saved\(tourStore.writes ? "" : "; this run only"))")
+        endTour()
+    }
+
+    /// The run ends: Done, Skip, or a turn with nothing of it left. Put aside under the pairing
+    /// overlay (an outside link), it ends there too, and the keyboard stays down under that
+    /// overlay, as the overlay leaves it at its own close.
+    private func endTour() {
+        let onScreen = tourOnScreen
+        withAnimation(.easeOut(duration: 0.2)) { tour = nil }
+        client.tourSession.running = false
+        if tourKeyboardAfter && !overlayShown { overlay.setKeyboard(shown: true) }
+        tourKeyboardAfter = false
+        // VoiceOver reads the stream screen afresh (not from under the pairing overlay).
+        if onScreen { AccessibilityNotification.ScreenChanged().post() }
+    }
+
+    /// Settings › Take the Tour: the panel closes without putting the keyboard back (the tour does,
+    /// at its end, if it was up before the panel opened), then every step of the layout on screen.
+    private func takeTour() {
+        let keyboard = keyboardBeforeSettings
+        setSettings(false, restoreKeyboard: false)
+        tourLog("Take the Tour")
+        let mark = client.connectedAt
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.18))      // the panel's close
+            guard sameSession(mark) else { return }         // the session ended meanwhile
+            startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver), keyboardAfter: keyboard)
+        }
+    }
+
+    /// A card came on screen (the tour's first, the next, or the same one back from under the
+    /// pairing overlay), or the tour went or was put aside under that overlay.
+    private func tourCardChanged(_ card: TourTopic?) {
+        // Nothing reaches the Mac as input while a card shows (StreamClient.inputPaused).
+        client.inputPaused = card != nil
+        guard let run = tour else { return }
+        if card != nil {
+            let since = pictureAt.map { String(format: ", %.2f s after the picture", ProcessInfo.processInfo.systemUptime - $0) } ?? ""
+            tourLog("showing \(run.at.rawValue) (\(run.index + 1) of \(run.count))\(since)")
+            tourPressLater(run)
+        } else {
+            tourLog("put aside for the pairing overlay, at \(run.at.rawValue)")
+        }
+    }
+
+    /// DEBUG `-SillTourPress`: presses a card's Next (or Skip, once) a while after it appears.
+    private func tourPressLater(_ run: TourRun) {
+        #if DEBUG
+        guard let press = TourDebug.current.press else { return }
+        let seconds: Double
+        let skip: Bool
+        switch press {
+        case .next(let s): seconds = s; skip = false
+        case .skip(let s): seconds = s; skip = !tourSkipPressed
+        }
+        if skip { tourSkipPressed = true }
+        let mark = client.connectedAt
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard sameSession(mark), tour?.at == run.at, tourOnScreen else { return }
+            tourLog("a stand-in presses \(skip ? "Skip" : run.isLast ? "Done" : "Next")")
+            if skip { tourSkip() } else { tourNext() }
+        }
+        #endif
+    }
+
     /// Grows from the Settings button's corner, the way a popover would; a plain fade under Reduce
     /// Motion. `anchor` is the panel's top-trailing corner as a point of the view the transition is
     /// attached to. In landscape that view is the content area, whose corner is within a few
@@ -393,14 +757,18 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
-    private func landscape(bar: BarMetrics) -> some View {
+    private func landscape(bar: BarMetrics, width: CGFloat) -> some View {
         VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
+                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
+                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
+                                                gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
-                   setSettings: { setSettings($0, restoreKeyboard: $1) })
+                   setSettings: { setSettings($0, restoreKeyboard: $1) },
+                   menusOpened: menusOpened, menusClosed: menusClosed)
             contentArea(bar: bar)
         }
     }
@@ -412,9 +780,11 @@ struct StreamScreen: View {
                              latched: $latched, overlay: overlay,
                              settingsOpen: settingsOpen,
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
+                             menusOpened: menusOpened, menusClosed: menusClosed,
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
-                             pairThisDevice: openPairingOverlay)
+                             pairThisDevice: openPairingOverlay,
+                             takeTour: takeTour)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -440,6 +810,7 @@ struct StreamScreen: View {
             .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
             .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
+            .tourTarget(.stream)
             .padding(8)
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
@@ -469,7 +840,8 @@ struct StreamScreen: View {
                     .onTapGesture { setSettings(false) }
                     .accessibilityHidden(true)
 
-                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay)
+                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay,
+                                  takeTour: takeTour)
                     .frame(width: bar.settingsWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)
@@ -529,10 +901,15 @@ private struct TopBar: View {
     @Binding var scaleOpen: Bool
     @Binding var windowMenu: UInt32?
     let settingsOpen: Bool
+    /// Whether the bar holds the Menus button and still a whole thumbnail (`MacMenuButton.fits`).
+    let menusFit: Bool
     let toggleKeyboard: () -> Void
     /// Opens or closes the Settings panel; the second argument says whether closing puts the
     /// keyboard back (see `StreamScreen.setSettings`).
     let setSettings: (_ open: Bool, _ restoreKeyboard: Bool) -> Void
+    /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
+    let menusOpened: () -> Void
+    let menusClosed: () -> Void
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -548,6 +925,18 @@ private struct TopBar: View {
                         pad: metrics.thumbPad, fade: metrics.thumbFade, menuFor: $windowMenu)
                 .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
+
+            // The Mac's menus of the streamed app, next to the thumbnails because they are the picked
+            // window's app's. Only while the Mac sent some, and where the bar holds it: with none the
+            // strip takes its room back.
+            if client.menus.hasMenus, menusFit {
+                MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                              spacing: metrics.buttonSpacing, onOpen: menusOpened, onClose: menusClosed)
+                    .opacity(scaleOpen ? 0 : 1)    // under the Aa ruler, as the buttons after Aa
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
 
             // Text size: the host sizes the Mac window to the panel divided by this scale, so a
             // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
@@ -555,12 +944,14 @@ private struct TopBar: View {
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              pointsPerStep: metrics.buttonHeight >= 60 ? 44 : 40)
+                .tourTarget(.textSize)
 
             button(open: keyboardShown, symbol: "keyboard", label: "Keyboard",
                    accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
                    action: { setSettings(false, false); toggleKeyboard() })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.keyboard)
 
             button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
                    accessibilityLabel: "Show the full Mac desktop",
@@ -574,8 +965,10 @@ private struct TopBar: View {
                    action: { setSettings(!settingsOpen, true) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.settings)
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
+        .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
         .frame(height: metrics.height)
         .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.
@@ -840,6 +1233,11 @@ struct WindowStrip: View {
     /// offers its menu. Keep holding and move: the submenu goes, the thumbnail lifts and drags
     /// into a new slot. The arrangement is the device's own, persisted per Mac. A tap selects.
     static let holdToOpen: TimeInterval = 1.5
+    /// What the tour lights of the strip: its thumbnails' band (the strip is as tall as its bar),
+    /// with the active halo's 5 pt above and the app badge's 6 pt below.
+    static func tourBand(pad: CGFloat) -> EdgeInsets {
+        EdgeInsets(top: max(0, pad - 5), leading: 0, bottom: max(0, pad - 6), trailing: 0)
+    }
     @State private var lifted: UInt32? = nil
     @State private var liftOffset: CGFloat = 0
     @State private var liftStartIndex = 0

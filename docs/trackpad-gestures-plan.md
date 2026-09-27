@@ -1143,3 +1143,81 @@ Everything on glass and on the real Mac, §9.5's P1–P13, above all P2 (whether
 their views when posted, whether ⌃→ switches Spaces or tiles the front window, and whether the key
 up's flags leave no modifier set: no "modifier keys still read" line) and P6 (the editing overlay
 under `.none`). §10's probe, before any Tier 2.
+
+### Merged with main after PRs #34, #35 and #36 (2026-09-27)
+
+Noah tried PR #38 on his devices (2026-09-27): "The gestures work amazing. Please merge that code."
+Main had moved on meanwhile, to 59c4ec8 with PR #35 (the first-run tour) and PR #36 (the Mac's
+menus: kinds 24, 25 and 27), and during this merge to 643af6b with PR #34 (remote pacing); PRs #30
+and #31 were already here. The merge takes main at 643af6b in one merge commit, never a rebase:
+59c4ec8 stopped in eleven files, and #34 then in four more: three documents and CI's matrix.
+Where the features meet:
+
+1. **The wire.** `StreamMessageKind` has the menus' 24, 25 and 27, the pointer's 26 and the
+   gesture's 28; the gesture's comment no longer calls 24, 25 and 27 held. `SillProtocol` stays 1
+   (both are additive), Compatibility.swift's doc names 28 beside the menus' kinds, and CLAUDE.md's
+   compatibility floor keeps kinds 0–28 and Gesture's JSON.
+2. **The coordinator** dispatches both: kind 8 feeds `GestureChords.input`, is delivered, then goes
+   to the menus' `desktopInputMayActivate`; kind 28 keeps its four a second and its queue; kinds 27
+   and 25 go to `MenuMirror`, with its own rates. Both init blocks (the dry run and the TEST ONLY
+   table; the mirror and its TEST ONLY hook) and both cleanups when a device leaves are kept.
+   **New:** a menu item chosen from a device (kind 25) forgets the view a gesture opened
+   (`gestureChords.forget()` before `menus.press`), as a click does: the item acts as a click on it
+   would and may bring a window forward (§7.2's rule, for a way in that did not exist when it was
+   written). Not changed: a gesture does not ask the menus to look at the Desktop's frontmost app
+   again, as a click or a key does (`desktopInputMayActivate` reads kind 8 only); under Sill.app's
+   AppKit loop the menus follow an activation at once (NSWorkspace), so a Space switched by a
+   gesture shows its app's menus straight away there, and on the CLI at the catalog's next poll
+   (2 s).
+3. **The checks.** `protocol` reads 24, 25 and 27 as the menus', 26 as the pointer's, 28 as the
+   gesture's and 29 as unknown (189 checks); `menus`' "28 unknown" is now "28 the trackpad gesture;
+   29 unknown"; `pointer-control`'s kind table lists 24 to 28 (156 checks); `compatibility`'s "27
+   and 29 are not this build's" is now "27 is the menus' fetch, 29 not this build's". Four mutants
+   renumbered a kind onto one that is now taken, which no longer compiles: `menus`' "the fetch at
+   28", `pointer-control`'s "kind 26 numbered 28" and "… 29", and `compatibility`'s "kind 28 as 27";
+   they use free numbers now (29; 29 and 30; 29). CI's mutants matrix lists all 25 checks that have
+   mutants (#34's `message-reader` too), and the checks' README has the new counts.
+4. **The device.** The Settings panel ends with This iPad's gestures and then Take the Tour, both
+   the device's own; the tour's row no longer adds 10 pt above itself while the Mac's settings load,
+   since it always follows the gestures' footnote now. The portrait trackpad keeps `sendGesture` and
+   the tour's `.tourTarget(.trackpad)`. The Menus button, the phone's portrait layout and the tour's
+   hooks are main's; the stream's overlay and the trackpad are this branch's.
+5. **sillclient.py** takes both sides' flags: `--menus`, `--fetch`, `--press`, `--raw25`, `--raw27`
+   and `--expect-menus`; `--gesture` and `--raw28`.
+6. **The project file**: A701/F701 (TrackpadGestures) beside main's A040–A044/F040–F044 (the menus),
+   A401/A402/F401/F402 (the tour) and A020/F020 (#34's MessageReader); every iOS source once in the
+   Sources phase, no ID twice.
+7. **Remote pacing** (#34: the host's send side for the remote door, the device's `MessageReader`)
+   touches nothing of the gestures: its StreamServer and StreamClient changes merged by themselves.
+
+Verified on the merge (with 59c4ec8, then again with 643af6b where #34's files reach it), without a
+device and with nothing posted to the Mac:
+- `swift build -c release` from clean (a scratch build path): only the CaptureProbe warning. iOS
+  Debug and Release for the simulator (arm64) and Debug for a generic device, unsigned: only the old
+  `StreamClient` capture warning.
+- `Tests/checks/run-all.sh`: all 26 (214 s). The mutants of the 15 checks that compile a file the
+  merge changed (StreamProtocol, GestureChords.swift, or the check itself), every one caught:
+  compatibility 19 of 19, protocol 20 of 20, menus 43 of 43, menu-state 29 of 29, pointer-control 33
+  of 33, pointer-watch 40 of 40, device-gate 14 of 14, goodbye 16 of 16, update-policy 18 of 18,
+  addresses 15 of 15, pairing-address 35 of 35, remote-rules 35 of 35, fence 32 of 32,
+  gesture-chords 33 of 33 and message-reader 17 of 17 (#34 changed none of the files the first
+  fourteen compile).
+- A loopback synthetic host (`SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SillHost
+  --synthetic`, the merge's build, both times), sillclient with nothing picked: the menus
+  subscription answered (no menus: that host has no fixture); a swipe up (Mission Control), a swipe
+  down ("closes Mission Control"), a swipe up, a kind 25 (refused, nothing read or pressed), a swipe
+  down: App Exposé; a four-finger pinch (Apps), an unknown name (nothing); every gesture "(not
+  posted: a test host)".
+- The app in a private simulator (deleted after), its real client dialled to that host, both
+  times: its hello, the catalog, its menus subscription ("menus: none"), the test pattern on the
+  software encoder (read by #34's MessageReader the second time), and four gestures from
+  `-SillInputScript` through `sendGesture`, each named by the host, none posted.
+- Photos (screenshots on that simulator, deleted after): the panel's end at 1000×710 (the gestures'
+  rows, then Take the Tour), an older Mac's panel (This iPad, then Take the Tour, loading and after),
+  the phone's panel end, and the tour's laptop step at 710×1000 lighting the key row and the
+  trackpad.
+
+Not run at the merge: the touch rig (its files, TrackpadView, InputOverlay, PointerPresence,
+TrackpadGestures, Input and the portrait screen's keys, are the branch's byte for byte), and the
+menus' gates against their fixture app (MenuMirror, the reader and the device's menu files are
+main's byte for byte; kinds 25 and 27 reached the mirror through the synthetic host above).

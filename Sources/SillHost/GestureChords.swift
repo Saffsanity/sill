@@ -6,7 +6,8 @@ import Foundation
 // shortcut changed there is followed and one turned off does nothing: never another action's
 // shortcut, never a guess. It also remembers the view its last gesture opened, so the opposite
 // gesture closes it, as on a Mac's trackpad, until something that can close the view comes from a
-// device (a click, a key, text, a window picked, an app launched) or the last device leaves.
+// device (a click, a key, text, a window picked, an app launched, one of the Mac's menu items
+// chosen) or the last device leaves.
 //
 // Pure: Foundation only, checked on its own with swiftc (Tests/checks/gesture-chords; its
 // `package` access needs -package-name). Nothing here posts anything: the coordinator posts the
@@ -108,8 +109,8 @@ package struct GestureChords: Sendable {
     /// The view Sill's last gesture opened (Mission Control, App Exposé, Apps or Show Desktop), which
     /// its opposite gesture closes; nil when none is open, as far as Sill knows. The Mac's own
     /// keyboard and trackpad are not seen, so a view closed there still counts as open until a
-    /// device's click, key or text (`input`), a device's pick (`forget`), or the gesture that opened
-    /// it made twice more (`repeated`).
+    /// device's click, key or text (`input`), a device's pick or menu choice (`forget`), or the
+    /// gesture that opened it made twice more (`repeated`).
     package private(set) var open: GestureAction?
     /// The gesture that opened `open` came again and did nothing, since the view is open. Made once
     /// more, straight after, Sill takes it that the view was closed where it cannot see (the Mac's own
@@ -183,8 +184,9 @@ package struct GestureChords: Sendable {
     }
 
     /// A device picked a window or launched an app (either comes forward on the Mac and closes the
-    /// view), or pressed a window's button, or the last device left (whoever comes next did not
-    /// open it): nothing counts as open any more.
+    /// view), pressed a window's button or chose one of the Mac's menu items (as a click on it
+    /// would), or the last device left (whoever comes next did not open it): nothing counts as open
+    /// any more.
     package mutating func forget() {
         open = nil
         repeated = false

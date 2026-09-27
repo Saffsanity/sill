@@ -15,10 +15,10 @@ import StreamProtocol
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
-/// only. Errors show inline, never in alerts. The last group, This iPad (or iPhone), is the device's
-/// own: its switch is a preference here (`StreamClient.gesturesKey`) and sends nothing to the Mac;
-/// its rows, as accessibility actions, do their gestures (`client.sendGesture`), since VoiceOver
-/// keeps three fingers for itself.
+/// only. Errors show inline, never in alerts. The last groups, This iPad (or iPhone) and Take the
+/// Tour, are the device's own: the gestures' switch is a preference here (`StreamClient.gesturesKey`)
+/// and sends nothing to the Mac; their rows, as accessibility actions, do their gestures
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -26,6 +26,8 @@ struct HostSettingsPanel: View {
     /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
     /// pairing overlay.
     var pairThisDevice: () -> Void = {}
+    /// Take the Tour: the stream screen puts the panel away and shows the tour of its layout.
+    var takeTour: () -> Void = {}
 
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
@@ -42,7 +44,7 @@ struct HostSettingsPanel: View {
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
-    /// screen shows the last groups (Direct Wireless, Away from home, This iPad).
+    /// screen shows the last groups (Direct Wireless, Away from home, This iPad, Take the Tour).
     private static var startsAtEnd: Bool {
         #if DEBUG
         return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
@@ -291,9 +293,29 @@ struct HostSettingsPanel: View {
                 .padding(.horizontal, 4)
             }
             // After everything of the Mac's, whatever state its settings are in: while they load, and
-            // for a Mac without them too.
+            // for a Mac without them too. Both are this device's own: its gestures, then the tour.
             thisDevice
+            tour
         }
+    }
+
+    /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
+    /// whatever the Mac is (while settings load, and for a Mac without them). It sends nothing. It
+    /// comes after This iPad's gestures, under their footnote, so it needs no space of its own above
+    /// it even while the Mac's settings load.
+    @ViewBuilder private var tour: some View {
+        Rows {
+            Button(action: takeTour) {
+                Text(TourPolicy.takeTourTitle)
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(TourPolicy.takeTourHint(device: device))
+            .rowFrame()
+        }
+        Footnote(text: TourPolicy.takeTourFootnote(device: device))
     }
 
     /// Most-changed first, so the compact halves' 259 pt shows Quality, Resolution and Frame Rate
@@ -386,9 +408,9 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// The last group: this device's own switch for three-finger gestures, and what each does when
-    /// the Mac takes them. Last because it is the least changed, and the compact halves' 259 pt show
-    /// the Mac's rows first. The switch reaches nothing; a row, activated by VoiceOver, Voice Control
+    /// This device's own group, after the Mac's: its switch for three-finger gestures, and what each
+    /// does when the Mac takes them (Take the Tour follows it). After the Mac's rows because it is
+    /// the least changed, and the compact halves' 259 pt show the Mac's rows first. The switch reaches nothing; a row, activated by VoiceOver, Voice Control
     /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the
     /// switch, the Mac's `gestures`, the Desktop first while a window streams).
     @ViewBuilder private var thisDevice: some View {
