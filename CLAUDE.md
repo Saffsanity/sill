@@ -9,7 +9,8 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
-c564142, PR #39, stacked on PR #34; PR B of docs/remote-bundle-plan.md,
+c564142, PR #39, stacked on PR #34, which merged during its review: retarget
+it to main once main is merged in (nine files conflict); PR B of docs/remote-bundle-plan.md,
 whose "Results: PR B" has every number).** Items 2–4 of the away-from-home
 bundle, on PR A's pacing: an away session starts low, the Mac says when the
 link cannot carry the quality, and a session away comes home by itself. Home

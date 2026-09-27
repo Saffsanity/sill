@@ -1598,7 +1598,12 @@ commit per step: the wire (340f98b), the host's away quality and per-connection 
 each device's link (98290b6), Sill.app (0e5d4ce), the device's panel, callout and line (6222d7c),
 the move home (2e40673) and these docs, then the review (below), and after the pull request the
 adversarial review's two fixes (f882291, a67dc48). It stacks on PR A: its
-pull request, #39, is against `remote-pacing`, and GitHub moves it to main once PR A merges.
+pull request, #39, is against `remote-pacing`, to be retargeted to main once PR A merges (GitHub does
+that by itself only when the merge deletes the branch). PR A merged on 2026-09-27 (643af6b) while the
+adversarial review ran, with main's #35 and #36 merged into it first, so this branch must take main
+before it goes to main: a test merge conflicts in CLAUDE.md, ci.yml, sillclient.py,
+StreamCoordinator.swift, Tests/checks/README.md, DEVELOPMENT.md, PortraitStreamScreen.swift,
+StreamClient.swift and StreamScreen.swift.
 
 ### Defaults taken
 
