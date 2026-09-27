@@ -50,12 +50,18 @@
 // second one: each old connection is handed back for closing once, when what waited has gone out).
 // review-moves-b: newsession and newsessionhold (a new session while a hand-over's fence, or a hold,
 // stands: what waited for the old session never reaches the Mac; see the mode below).
+// pointer-visibility (2026-09-26, docs/pointer-visibility-plan.md §3.3), SessionLink's count of the input
+// messages (kind 8) meant for the session's connection, which the Mac's pointer reports (kind 26) are
+// judged by: in every mode above, once the stand-in has read every connection to its end, the count must
+// equal the inputs it read on the session's last connection; and count (a script of sends and connection
+// changes on one thread, no senders, pings or read loops, so each fence ends only where the script ends
+// it: the count after every step, then what each of eleven connections delivered, read to its end).
 //   (the old SessionLink needs $SP/review/fencecheck/oldshim.swift, which gives Released its `waiting`)
 import Foundation
 import Network
 
 let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
-             "holdfence", "holdadopt", "newsession", "newsessionhold"]
+             "holdfence", "holdadopt", "newsession", "newsessionhold", "count"]
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ok"
 if !modes.contains(mode) { print("unknown mode \(mode); modes: \(modes.joined(separator: " "))"); exit(2) }
 let slow = 0.12
@@ -151,6 +157,7 @@ final class Stub {
     var muted: Set<Int> = []
     var finished: Set<Int> = []                   // read to their end, through their line
     var arrived: [UInt32] = []
+    var inputsOn: [Int: Int] = [:]                // the inputs (kind 8) read on each connection
     var ready = DispatchSemaphore(value: 0)
 
     init() throws {
@@ -204,7 +211,9 @@ final class Stub {
         guard !closed.contains(i), !muted.contains(i) else { return }
         switch h.kind {
         case .ping: c.send(content: message(.pong, payload), completion: .contentProcessed { _ in })
-        case .input: arrived.append(payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) })
+        case .input:
+            arrived.append(payload.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(as: UInt32.self)) })
+            inputsOn[i, default: 0] += 1
         default: break
         }
     }
@@ -292,8 +301,117 @@ func ended(_ c: NWConnection) {
     stateLock.lock(); sawEnd.insert(ObjectIdentifier(c)); stateLock.unlock()
 }
 
+/// The stand-in's index of the client's connection `c`: the stand-in numbers them in the order made.
+func stubIndex(of c: NWConnection) -> Int? { connections.firstIndex { $0 === c } }
+
+/// Mode count: SessionLink.inputsOnSession through a script on this one thread.
+func countMode(_ c0: NWConnection) -> Never {
+    var bad = 0
+    var seq: UInt32 = 0
+    func expect(_ what: String, _ want: Int) {
+        let got = link.inputsOnSession
+        print("count: \(what): \(got)\(got == want ? "" : ", want \(want)")")
+        if got != want { bad += 1 }
+    }
+    func inputs(_ n: Int) { for _ in 0..<n { seq += 1; link.send(message(.input, be32(seq))) } }
+    func notInput() { link.send(message(.viewport, Data(#"{"width":1,"height":1}"#.utf8))) }
+    func fence(_ from: NWConnection, _ to: NWConnection) -> Data {
+        let nonce = randomNonce()
+        link.handOver(from: from, to: to, fencePing: message(.ping, nonce), nonce: nonce)
+        return nonce
+    }
+    expect("a new session's connection", 0)
+    inputs(3); notInput()
+    expect("three inputs and a viewport on it", 3)
+    let c1 = connect()
+    let n1 = fence(c0, c1)
+    expect("a hand-over with nothing waiting restarts at 0", 0)
+    inputs(2); notInput()
+    expect("two inputs kept for the fence", 2)
+    _ = link.fenceReturned(n1, on: c0)
+    expect("the fence down: what waited went out on the connection it was counted for", 2)
+    inputs(1)
+    expect("one more, sent at once", 3)
+    _ = link.hold(c1)
+    inputs(2)
+    expect("two held", 5)
+    let c2 = connect()
+    _ = link.adopt(c2)
+    expect("adopt restarts at the two held, which go out on the new connection first", 2)
+    inputs(1)
+    expect("one more on it", 3)
+    _ = link.hold(c2)
+    inputs(2)
+    expect("two held on it", 5)
+    _ = link.unhold(c2)
+    expect("unhold leaves it: what was held goes out on the connection it was counted for", 5)
+    let c3 = connect()
+    let n3 = fence(c2, c3)
+    inputs(2)
+    expect("a second hand-over, two kept", 2)
+    let c4 = connect()
+    _ = fence(c3, c4)
+    expect("a hand-over while an earlier fence stands restarts at the two still waiting", 2)
+    inputs(1)
+    _ = link.hold(c4)
+    inputs(1)
+    expect("one more kept and one held", 4)
+    let c5 = connect()
+    _ = link.adopt(c5)
+    expect("adopt with both fences up: all four wait for them, then go out on it", 4)
+    _ = link.fenceReturned(n3, on: c2)
+    expect("the first fence down", 4)
+    _ = link.release(c3)
+    expect("the second let go: the four go out", 4)
+    inputs(1)
+    expect("one more", 5)
+    let c6 = connect()
+    _ = fence(c5, c6)
+    inputs(3)
+    expect("three kept for a fence", 3)
+    link.connection = nil
+    expect("the session's connection gone: they still wait", 3)
+    _ = link.dropHandOver()
+    expect("a new session drops the hand-over, and what waited never goes out", 0)
+    inputs(1)
+    expect("an input with no connection goes nowhere", 0)
+    let c7 = connect()
+    link.connection = c7
+    expect("a new session's connection", 0)
+    inputs(2)
+    expect("two on it", 2)
+    let c8 = connect()
+    let n8 = fence(c7, c8)
+    inputs(1)
+    let c9 = connect()
+    link.connection = c9
+    expect("the setter while a fence stands restarts at the one waiting, which goes out on the connection set", 1)
+    _ = link.fenceReturned(n8, on: c7)
+    inputs(1)
+    expect("the fence down, one more", 2)
+    link.connection = nil
+    expect("the session's connection gone, nothing waiting: nothing counted", 0)
+    let c10 = connect()
+    link.connection = c10
+    inputs(1)
+    expect("a new session's connection, one input on it", 1)
+    // Every connection closed after what it carries, and read by the stand-in to its end, as the modes do.
+    let script = [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
+    clientQueue.sync {
+        for c in script { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
+    }
+    require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
+    let want = [3, 3, 5, 0, 0, 5, 0, 2, 0, 2, 1]
+    let got = script.map { c in stubIndex(of: c).map { i in stub.queue.sync { stub.inputsOn[i] ?? 0 } } ?? -1 }
+    print("count: the stand-in read \(got) inputs on the eleven connections, want \(want)")
+    if got != want { bad += 1 }
+    print(bad == 0 ? "PASS" : "FAIL")
+    exit(bad == 0 ? 0 : 1)
+}
+
 let old = connect()
 link.connection = old
+if mode == "count" { countMode(old) }
 readLoop(old)
 let slowLine = stub.line(0)
 
@@ -552,6 +670,10 @@ send()
 senderA.cancel()
 senderB.cancel()
 pinger.cancel()
+// Every input has gone to the link: what it counted for the session's connection, which the Mac's pointer
+// reports are judged by, and which connection that is.
+let sessionIndex = link.connection.flatMap(stubIndex)
+let sessionCount = link.inputsOnSession
 slowLine.resume()
 clientQueue.sync {
     for c in connections { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
@@ -644,6 +766,10 @@ case "adoptfence":
 default:
     ok = false
 }
-ok = ok && (clearOK || mode == "nofence") && closeOK && staleOK
+// The count: every input meant for the session's last connection, and only those, as the Mac read them.
+let readOnSession = stub.queue.sync { sessionIndex.map { stub.inputsOn[$0] ?? 0 } }
+let countOK = readOnSession == sessionCount
+print("count: \(sessionCount) inputs counted for the session's connection (#\(sessionIndex.map(String.init) ?? "?")), the stand-in read \(readOnSession.map(String.init) ?? "none")")
+ok = ok && (clearOK || mode == "nofence") && closeOK && staleOK && countOK
 print(ok ? "PASS" : "FAIL")
 exit(ok ? 0 : 1)

@@ -61,13 +61,36 @@ struct ContentView: View {
 /// Only a launch argument turns it on. The whole contract:
 ///
 /// * `-SillLayout 1000x710` — required; the fake screen's size in points.
-/// * `-SillDrawer 1` — start with the app drawer open.
+/// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
+///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
+///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
 /// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
 ///   `-SillScale 1.5` sets the scale it opens at.
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
-/// * `-SillKeyboard 1` — start with the software keyboard shown.
+/// * `-SillKeyboard 1` — start with the software keyboard shown: in the mock only the Keyboard
+///   button lights (a real keyboard upsets the fake screen); under `-SillLive 1` and in the normal
+///   app (with `-SillConnect`) the input view takes first responder half a second after the stream
+///   screen shows, so the keyboard really comes up. A simulator shows it only with no hardware
+///   keyboard connected to it (booted headless, or I/O › Keyboard › Connect Hardware Keyboard off).
+/// * `-SillKeyboardToggle <s>[,<s>…]` — at each of these seconds after the stream screen shows, the
+///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
+///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
+///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
+/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, [::1] or
+///   localhost), once per launch, in the portrait key row's and trackpad's own code: the key row
+///   taps cmd, esc, shift and ctrl through its caps' action 1.0, 1.4, 1.8 and 2.0 s after it shows
+///   (⌘esc goes out; shift and ctrl stay latched), then the trackpad checks that a touch at its
+///   centre lands on it and strokes 60 pt right and 40 down (2.6 s), taps with shift and ctrl held
+///   around the click (3.2 s) and scrolls five 8 pt steps (3.8 s). Each event goes out as the
+///   controls send it, and the console says what ran ("input test: …"). A synthetic host counts
+///   what it gets as `in.dry` and posts nothing; a real host (Sill.app, SillHost without
+///   `--synthetic`) posts it on this Mac, and the test does not check which it reached: point it
+///   only at a synthetic host, or put a relay that drops kind 8 (input) in front of the host.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
+///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
+///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app.
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
 ///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
@@ -150,6 +173,21 @@ struct ContentView: View {
 ///   root after each build, on the console), `-SillMenuBuildTwice 1` (the insertion made twice in
 ///   one build: the second inserts nothing) and `-SillMenuNoView 1` (View removed before the
 ///   insertion). The console's "menus: …" and "menubar: …" lines say what happened.
+/// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
+///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
+///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
+///   in every layout), `device@0.62,0.55` (this device's trackpad: its arrow in portrait only),
+///   `hidden` (the Mac has it, off the stream: none) or `pencil@0.50,0.50` (this device's Pencil:
+///   none, unless `-SillPencilPointer 1`, Q2's flip, draws it in every layout). Ignored with
+///   `-SillLive 1`, whose session shows the real thing.
+/// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
+///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
+///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
+///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
+///   row). The console says "input script: …" at each. It runs only when the session was dialled
+///   by `-SillConnect` to a loopback address and the host's first window list has no version
+///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
+///   …" and nothing is sent. Point it only at `--synthetic` hosts.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -184,7 +222,17 @@ struct ContentView: View {
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
-/// (`sips -r 270 shot.png`). Touches follow the rotation.
+/// (`sips -r 270 shot.png`). Touches follow the rotation. One that fits neither way (the Duo's
+/// 710×1000 on an iPhone) is drawn scaled down to fit, upright or turned, whichever is larger
+/// (`Fit`); only the drawing shrinks, the stream screen still lays out at the fake size, and the
+/// console says so ("harness: 710x1000 drawn at 0.62"). A fake screen that reaches into the
+/// simulator's own safe area (a phone's whole container on that phone: 440x894 on an iPhone 18 Pro
+/// Max, 402x812 on an 18 Pro) passes the stream screen the simulator's bottom inset, which it
+/// ignores, so the trackpad runs past the fake screen's bottom edge: photograph such a size on a
+/// larger simulator, or in the normal app.
+///
+/// Console lines for the gates, in the harness and the normal app alike: `viewport: 386×241 pt,
+/// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen).
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -213,6 +261,10 @@ struct LayoutHarness: View {
         let scanOverlay: Bool
         /// The mock Mac's menus. Ignored when `live`, whose session has the Mac's own.
         let macMenu: MockCatalog.MenuCase
+        /// The mock's pointer state (`-SillPointer`), and Q2's flip (`-SillPencilPointer 1`). Ignored
+        /// when `live`.
+        let pointer: String?
+        let pencilPointer: Bool
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -232,7 +284,9 @@ struct LayoutHarness: View {
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
                         connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
                         scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
-                        macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code)
+                        macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code,
+                        pointer: defaults.string(forKey: "SillPointer"),
+                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -255,13 +309,13 @@ struct LayoutHarness: View {
         self.live = live
         _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
-                                                      menus: spec.live ? nil : spec.macMenu))
+                                                      menus: spec.live ? nil : spec.macMenu,
+                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer))
     }
 
     var body: some View {
         GeometryReader { geo in
-            let fits = spec.size.width <= geo.size.width && spec.size.height <= geo.size.height
-            let turned = !fits && spec.size.height <= geo.size.width && spec.size.width <= geo.size.height
+            let fit = Fit(screen: spec.size, room: geo.size)
             ZStack {
                 Color.black
                 screen
@@ -269,9 +323,17 @@ struct LayoutHarness: View {
                     .clipped()
                     .padding(1)
                     .background(Color(hex: 0x333333))
-                    .rotationEffect(.degrees(turned ? 90 : 0))
+                    .rotationEffect(.degrees(fit.turned ? 90 : 0))
+                    // Only the drawing shrinks: the stream screen still lays out at the fake size.
+                    .scaleEffect(fit.scale)
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .onAppear {
+                if fit.scale < 1 {
+                    print("harness: \(Int(spec.size.width))x\(Int(spec.size.height)) drawn at "
+                          + String(format: "%.2f", fit.scale) + (fit.turned ? ", turned" : ""))
+                }
+            }
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
@@ -283,6 +345,27 @@ struct LayoutHarness: View {
                 live.startBrowsing()
                 live.startRemote()
                 live.connectFromLaunchArgument()
+            }
+        }
+    }
+
+    /// How the fake screen goes on the simulator's: as it is when it fits, a quarter turn when it
+    /// fits only on its side, and otherwise scaled down, upright or turned, whichever is larger (the
+    /// Duo's and the iPad's sizes on an iPhone simulator). The ring is counted in the scaled case.
+    struct Fit: Equatable {
+        let turned: Bool
+        let scale: CGFloat
+        init(screen: CGSize, room: CGSize) {
+            if screen.width <= room.width && screen.height <= room.height {
+                turned = false; scale = 1
+            } else if screen.height <= room.width && screen.width <= room.height {
+                turned = true; scale = 1
+            } else {
+                let w = screen.width + 2, h = screen.height + 2
+                let upright = min(room.width / w, room.height / h)
+                let onItsSide = min(room.width / h, room.height / w)
+                turned = onItsSide > upright
+                scale = max(0.01, max(upright, onItsSide))
             }
         }
     }
@@ -315,6 +398,137 @@ struct LayoutHarness: View {
                          settingsOpen: spec.settingsOpen,
                          pairingOverlay: spec.scanOverlay, scannerOverride: .placeholder)
         }
+    }
+}
+
+/// `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`): input for the simulator gates of
+/// docs/pointer-visibility-plan.md (S2–S5), which cannot put a finger on the simulator. `t` is
+/// seconds since the session's first window list; a step is
+/// * `down` — a finger lands on the portrait pad: a stroke starts, its cursor from the anchor;
+/// * `pad DX,DY` — that finger moves DX, DY points (a stroke starts first if none is down);
+/// * `lift` — it comes up;
+/// * `click` — a tap on the pad: a click where its cursor is;
+/// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
+/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays.
+/// The pad and the overlay register themselves as they join a window, and each step calls their
+/// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
+/// console prints "input script: t=… <step>" as each runs. Once per launch.
+///
+/// Only against a test host on this Mac (`refusal`): the steps send real input, and Sill.app, whose
+/// home door admits loopback, would post it, clicking, typing and moving the Mac's real pointer. So
+/// the session must have been dialled to a loopback address, and its first window list must carry
+/// no `hostVersion` (Sill.app always sends one; SillHost and the bare SillMenuBar never do). The
+/// gates start only `--synthetic` hosts, which post nothing; SillHost or the bare SillMenuBar without
+/// `--synthetic` would post the input, so never point a script at one.
+enum InputScript {
+    enum Step: Equatable, CustomStringConvertible {
+        case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+
+        var description: String {
+            switch self {
+            case .down: return "down"
+            case .pad(let dx, let dy): return "pad \(dx),\(dy)"
+            case .lift: return "lift"
+            case .click: return "click"
+            case .tap(let x, let y): return "tap \(x),\(y)"
+            case .key(let usage): return "key \(usage)"
+            case .row(let usage): return "row \(usage)"
+            }
+        }
+    }
+
+    /// The portrait pad and the stream's overlay now in a window (TrackpadSurface, InputOverlayView).
+    static weak var pad: TrackpadSurface?
+    static weak var overlay: InputOverlayView?
+    private static var started = false
+
+    /// The steps of a script, in its order; nil when a step does not read.
+    static func parse(_ text: String) -> [(at: Double, step: Step)]? {
+        var steps: [(at: Double, step: Step)] = []
+        for item in text.split(separator: ";") {
+            let words = item.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard words.count >= 2, let at = Double(words[0]), at.isFinite, at >= 0 else { return nil }
+            let pair = words.count == 3 ? words[2].split(separator: ",").compactMap { Double($0) } : []
+            let step: Step
+            switch (words[1], words.count) {
+            case ("down", 2): step = .down
+            case ("lift", 2): step = .lift
+            case ("click", 2): step = .click
+            case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
+            case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
+            case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
+            default: return nil
+            }
+            steps.append((at, step))
+        }
+        return steps
+    }
+
+    /// Why the script must not run against this session, or nil when it may: it runs only when the
+    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT` or
+    /// `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is) and the host's
+    /// first window list carries no `hostVersion`, which Sill.app always sends. (`[::1]:PORT` never
+    /// arrives: UserDefaults reads a launch argument that starts with `[` as a property list, and
+    /// drops it.)
+    static func refusal(endpoint: NWEndpoint?, hostVersion: String?) -> String? {
+        guard let endpoint, isLoopback(endpoint) else {
+            return "the session was not dialled to a loopback address (-SillConnect 127.0.0.1:PORT)"
+        }
+        if let hostVersion { return "the host says it is Sill \(hostVersion), which posts input to this Mac" }
+        return nil
+    }
+
+    /// An address on this Mac's loopback: 127.0.0.0/8, ::1 (also as an IPv4-mapped address), or
+    /// the name localhost.
+    static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address): return address.isLoopback
+        case .ipv6(let address): return address.isLoopback || address.asIPv4?.isLoopback == true
+        case .name(let name, _): return name.lowercased() == "localhost"
+        @unknown default: return false
+        }
+    }
+
+    /// The session's first window list is in (StreamClient): the script starts, once per launch,
+    /// if `refusal` lets it.
+    static func sessionListed(_ client: StreamClient) {
+        let defaults = UserDefaults.standard
+        guard !started, defaults.bool(forKey: "SillLive"), let text = defaults.string(forKey: "SillInputScript") else { return }
+        started = true
+        if let why = refusal(endpoint: client.connection?.endpoint, hostVersion: client.hostVersion) {
+            print("input script: refused: \(why)")
+            return
+        }
+        guard let steps = parse(text) else {
+            print("input script: cannot read it: \(text)")
+            return
+        }
+        print("input script: \(steps.count) steps")
+        for (at, step) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak client] in
+                guard let client else { return }
+                run(step, at: at, client: client)
+            }
+        }
+    }
+
+    private static func run(_ step: Step, at: Double, client: StreamClient) {
+        var done = true
+        switch step {
+        case .down: if let pad { pad.scriptDown() } else { done = false }
+        case .pad(let dx, let dy): if let pad { pad.scriptMove(dx: dx, dy: dy) } else { done = false }
+        case .lift: if let pad { pad.scriptLift() } else { done = false }
+        case .click: if let pad { pad.scriptClick() } else { done = false }
+        case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
+        case .row(let usage):
+            client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
+            client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        }
+        print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }
 }
 #endif

@@ -136,6 +136,10 @@ final class VirtualStage {
     private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
+    /// Called just before the stage warps the cursor home (`releaseWindow`): that motion is Sill's,
+    /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
+    /// after, for the reason InputInjector's `watch` gives. Main actor.
+    var onWarp: (() -> Void)?
 
     let sizer: WindowSizer
     let catalog: WindowCatalog
@@ -654,6 +658,7 @@ final class VirtualStage {
         // (or to the middle of the main display) so it is not stranded on a screen about to vanish.
         if let d = display, d.isAlive, let here = CGEvent(source: nil)?.location, CGDisplayBounds(d.displayID).contains(here) {
             let main = CGDisplayBounds(CGMainDisplayID())
+            onWarp?()
             CGWarpMouseCursorPosition(cursorBefore ?? CGPoint(x: main.midX, y: main.midY))
         }
         cursorBefore = nil

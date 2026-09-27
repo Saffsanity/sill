@@ -42,6 +42,19 @@ a menu's items ("menu 4 v3 (answering 2) at …: 4.0 Set Label A ⌥⌘A | — |
 --fetch, --press, --raw25 and --raw27 open and choose the menus of whatever app the host has in front,
 so they run only with SILL_TEST_MENU_PID set in this script's own environment, as for the host started
 against the fixture (Scripts/menufixture.swift); without it they exit 2.
+The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
+  --pointer          print each kind 26 as "pointer at 1.234s x=0.5000 y=0.5000 inside=1 seen=0"
+                     (inside=0 without x and y): where the Mac's pointer is while this client is not
+                     moving it, and how many input messages (kind 8) the host had read from it
+  --move=X,Y@T       a pointer move (kind 8) to the frame fractions X, Y, T seconds in
+  --tap=X,Y@T        a move there, a left down and a left up: three kind 8 messages
+  --key=USAGE@T      a key down and up (a USB HID usage, no modifiers): two kind 8 messages
+  --input=JSON@T     this literal kind 8 payload T seconds in (split on the last @), as written: an
+                     input the flags above do not make, such as a scroll or a scroll gesture's phase
+                     ({"scrollGesture":{"_0":"began","x":0.5,"y":0.5}}); one kind 8 message
+                     --move, --tap, --key and --input go only to a --synthetic host on this Mac (the
+                     process listening on PORT, by lsof and ps), which never posts input: anything
+                     else exits 2
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -66,18 +79,20 @@ its arrival time; dw= is Direct Wireless
 (1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
-with status 2 (--raw17 goes out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
+with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
 # What --set may send: HostSettingsChange's six fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
+         "move", "tap", "key", "input")
+INPUT = ("move", "tap", "key", "input")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "expect-menus")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -111,6 +126,34 @@ def pairs(body, keys, flag):
         if k not in keys: raise ValueError(f"{flag}: unknown key {k!r} (keys: {', '.join(sorted(keys))})")
         out[k] = value(k, v)
     return out
+
+def fractions(text, flag):
+    """X,Y for --move and --tap: two finite numbers, frame fractions (outside 0…1 is allowed)."""
+    x, comma, y = text.partition(",")
+    if not comma: raise ValueError(f"{flag}: expected X,Y, got {text!r}")
+    xy = (number(x, f"{flag}'s X", float), number(y, f"{flag}'s Y", float))
+    if not all(v == v and abs(v) != float("inf") for v in xy): raise ValueError(f"{flag}: X and Y must be finite")
+    return xy
+
+def usage(text):
+    """--key's USB HID usage, 0 to 65535."""
+    u = number(text, "--key")
+    if not 0 <= u <= 65535: raise ValueError(f"--key: a HID usage from 0 to 65535, got {u}")
+    return u
+
+def synthetic_listener(port):
+    """Whether every process listening on this Mac's TCP `port` is a --synthetic host (lsof, ps): the only
+    hosts that never post input, whatever their launcher may do. Nothing listening is not one."""
+    try:
+        pids = subprocess.run(["/usr/sbin/lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                              capture_output=True, text=True, timeout=10).stdout.split()
+        if not pids: return False
+        for pid in set(pids):
+            args = subprocess.run(["/bin/ps", "-o", "args=", "-p", pid], capture_output=True, text=True, timeout=10).stdout.split()
+            if "--synthetic" not in args: return False
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 def unescape(text):
     """\\n, \\t, \\r, \\\\, \\xHH and \\uXXXX in a --device value, so a test can send control and bidi characters."""
@@ -282,12 +325,14 @@ try:
                 parsed = (pid_, ptitle if comma else None)
             else:
                 parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
-                          else number(text, "--fps-after") if name == "fps-after" else text)
+                          else number(text, "--fps-after") if name == "fps-after"
+                          else fractions(text, f"--{name}") if name in ("move", "tap")
+                          else usage(text) if name == "key" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus") and not a.startswith(("--fps=", "--expect=")):
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
@@ -317,8 +362,15 @@ try:
         hv, _, hp = hello_arg.partition(",")
         if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
         if hp: number(hp, "--hello's protocol")
+    # Input reaches only a host that never posts it: a --synthetic host on this Mac (every one is a
+    # dry run). A variable in this client's environment would say nothing about the host it reaches;
+    # the listener's own arguments do (neither Sill.app nor a real SillHost carries --synthetic).
+    if any(e[2] in INPUT for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--move, --tap, --key and --input only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
+show_pointer = "--pointer" in flags
 stats = "--stats" in flags or device is not None
 device = device if device is not None else "sillclient"
 # The hello (kind 23), the first message of the session when asked for: a device from 2026-09-25 on.
@@ -372,6 +424,11 @@ if "--junk" in flags:
     # Kinds this host does not know: it must skip their payloads and keep serving.
     s.sendall(msg(200, b"hello") + msg(201) + msg(6, json.dumps(sel).encode()))
     print("  sent two unknown-kind messages (200 with 5 bytes, 201 empty)")
+def pointer_input(action, x, y):
+    """A kind 8 pointer event, as the Swift InputEvent encodes it."""
+    return msg(8, json.dumps({"pointer": {"_0": action, "x": x, "y": y}}).encode())
+def key_input(hid, down):
+    return msg(8, json.dumps({"key": {"down": down, "hidUsage": hid, "modifiers": 0}}).encode())
 def viewport(fps):
     return msg(9, json.dumps({"width": 1117, "height": 642, "scale": None, "fps": fps}).encode())
 if fps_now is not None:
@@ -440,6 +497,15 @@ def fire(e, now):
         print(f"  sent press {mid} {body.get('title')!r} (v{menu_version}, token {token - 1}) at {at}")
     elif name in ("raw25", "raw27"):
         s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
+    elif name == "move":
+        s.sendall(pointer_input("move", *parsed)); print(f"  sent move {text} at {at}")
+    elif name == "tap":
+        s.sendall(pointer_input("move", *parsed) + pointer_input("leftDown", *parsed) + pointer_input("leftUp", *parsed))
+        print(f"  sent tap {text} (move, down, up) at {at}")
+    elif name == "key":
+        s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
+    elif name == "input":
+        s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
@@ -471,7 +537,7 @@ while time.time() - t0 < dur:
         if len(buf) < 14 + ln: break
         payload = buf[14:14+ln]; buf = buf[14+ln:]
         name = KIND.get(kind, str(kind)); bump(name); served = True
-        if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13): first_kinds.append(kind)
+        if len(first_kinds) < 400 and kind not in (0, 1, 3, 11, 13, 26): first_kinds.append(kind)
         if kind == 1:
             frames += 1; kb += ln / 1024; kb_sec += ln / 1024
             ages.append((time.time() - ts) * 1000)       # the host's clock is this Mac's: a true age
@@ -492,6 +558,14 @@ while time.time() - t0 < dur:
                   f"remoteAccess={1 if i.get('remoteAccess') else 0} port={i.get('remotePort')} internet={1 if i.get('internet') else 0} addresses=[{addrs}]")
         elif kind == 20:
             print(f"  pairResult at {time.time()-t0:.3f}s: {payload.decode(errors='replace')}")
+        elif kind == 26 and show_pointer:
+            try:
+                d = json.loads(payload)
+            except ValueError:
+                print(f"  pointer at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
+            where = (f"x={d['x']:.4f} y={d['y']:.4f} inside=1" if d.get("inside") and isinstance(d.get("x"), (int, float))
+                     and isinstance(d.get("y"), (int, float)) else "inside=0")
+            print(f"  pointer at {time.time()-t0:.3f}s {where} seen={d.get('seen') or 0}")
         elif kind == 22:
             g = json.loads(payload)
             extra = "".join(f"; {k}: {json.dumps(g[k], ensure_ascii=False)}" for k in ("message", "minimumVersion", "reconnect") if k in g)

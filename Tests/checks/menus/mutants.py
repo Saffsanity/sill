@@ -11,7 +11,7 @@ PATHS = {
 }
 MUTANTS = [
     # The wire (MacMenu.swift, StreamMessage.swift)
-    ("the fetch takes the pointer's 26", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 26"),
+    ("the fetch at 28", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 28"),
     ("stale set from pressed", "MacMenu.swift", "self.pressed = pressed; self.stale = stale", "self.pressed = pressed; self.stale = pressed"),
     ("a press's token dropped", "MacMenu.swift", "self.title = title; self.token = token", "self.title = title; self.token = nil"),
     # The shortcut (MenuFormat.swift)

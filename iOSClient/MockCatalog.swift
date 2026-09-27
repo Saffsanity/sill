@@ -57,7 +57,7 @@ enum MockCatalog {
     /// draw it. `.none` is the state a fresh connection starts in — nothing picked yet, so the app
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
     static func client(active: StreamSource = .window(102), settings: SettingsCase = .default,
-                       menus: MenuCase? = .code) -> StreamClient {
+                       menus: MenuCase? = .code, pointer: String? = nil, pencilPointer: Bool = false) -> StreamClient {
         let client = StreamClient()
         // Never browses, not even after the panel's Disconnect, when a remembered Mac would look
         // missing from a network the mock never looked at.
@@ -85,7 +85,19 @@ enum MockCatalog {
         seed(client, settings: settings)
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
         if let menus { client.showMockMenus(macMenus(menus)) }
+        if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
+    }
+
+    /// `-SillPointer <state>`: the mock's pointer in one of the plan's states (see the harness's
+    /// contract in ContentView and `StreamClient.debugSeedPointer`), over the mock's frame, which the
+    /// display view is told of since no parameter sets ever arrive; `pencilPointer` is Q2's flip.
+    private static func seedPointer(_ client: StreamClient, _ state: String, pencilPointer: Bool) {
+        guard client.debugSeedPointer(state, pencilShows: pencilPointer) else {
+            print("-SillPointer \(state): not a state (mac@X,Y, device@X,Y, hidden or pencil@X,Y)")
+            return
+        }
+        client.displayView.debugFrameSize(client.videoSize)
     }
 
     // MARK: - The Mac's menus
