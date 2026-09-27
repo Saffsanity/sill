@@ -179,16 +179,16 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
 
-On a phone held upright (and on the Duo's outer display, or an iPad window
-narrower than 600 pt) the picture sits in a fixed 16:10 pane at the top: a
-16:9 window gets black bars above and below it, and nothing under it moves.
-Under it come Apps, Aa, Keyboard, Desktop and Settings, as wide as the row;
-the window thumbnails; esc, tab, ctrl, opt, cmd and shift; and the trackpad
-in the rest. The Keyboard button stays above the software keyboard, so it
-always takes it down. There are no arrow keys or Spotlight key there:
-Spotlight is cmd, then space on the keyboard. The trackpad counts a stroke
-down it as far as the same stroke across a 16:10 picture, however tall it
-is. On its side, and on an iPad, everything is as it was.
+On a phone held upright (and on the Duo's outer display) the picture sits in
+a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
+it, and nothing under it moves. Under it come Apps, Aa, Keyboard, Desktop and
+Settings, as wide as the row; the window thumbnails; esc, tab, ctrl, opt, cmd
+and shift; and the trackpad in the rest. The Keyboard button stays above the
+software keyboard, so it always takes it down. There are no arrow keys or
+Spotlight key there: Spotlight is cmd, then space on the keyboard. The
+trackpad counts a stroke down it as far as the same stroke across a 16:10
+picture, however tall it is. On its side, and on an iPad (a narrow window
+included), everything is as it was.
 
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
@@ -430,6 +430,10 @@ simulator:
   on this Mac, so put a relay that drops input in front of it.
 - The console prints `viewport: 386×241 pt, scale none, 60 fps` for each
   viewport the stream screen sends the Mac.
+- `-SillIdiom pad`: a screen taller than wide and narrower than 600 pt is
+  drawn as an iPad draws such a window (the compact halves), not as a phone
+  does, so an iPhone simulator can photograph it; `phone` the other way
+  round.
 
 ## Measuring latency
 
