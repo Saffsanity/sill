@@ -20,8 +20,15 @@ final class MenuReader: @unchecked Sendable {
     static let timeout: Float = 1.0
     /// The bar's menus read, the Apple menu not counted.
     static let maxMenus = 32
-    /// Items read of one menu; `total` counts the rest.
+    /// Items read of one menu; `unread` counts the rest.
     static let maxItems = 500
+    /// Seconds for one menu's items. A menu costs a call per item, two for a submenu item, and every
+    /// request waits behind it (MenuMirror serves one at a time): 500 items at Blender's 6 ms a call
+    /// would take 3 s or more, near or past a device's 4 s wait. Past it the read stops after the
+    /// item in hand and `unread` counts the rest; one call can take up to `timeout`, so a read ends
+    /// by about 2.5 s. Blender's 42-item Window menu (290 ms), the slowest the probe timed, stays far
+    /// inside it.
+    static let readBudget = 1.5
 
     /// One item (or one of the bar's menus) as read, with its index among its menu's children and
     /// its element, which the mirror keeps for presses and for reading its submenu.
@@ -46,8 +53,11 @@ final class MenuReader: @unchecked Sendable {
 
     struct Menu: @unchecked Sendable {
         let reads: [Read]
-        /// All the menu's children, the ones past `maxItems` included.
+        /// All the menu's children.
         let total: Int
+        /// The children not read: past `maxItems`, or left when `readBudget` ran out. A device is
+        /// told how many more the Mac has.
+        let unread: Int
         let ms: Double
     }
 
@@ -101,7 +111,8 @@ final class MenuReader: @unchecked Sendable {
     /// The items of the menu at `path`: `parent` is its bar item or submenu item as kept from an
     /// earlier read, else (or when that one no longer answers) the path is walked from the bar. One
     /// `AXUIElementCopyMultipleAttributeValues` per item, no action names (every AXMenuItem has
-    /// AXPress), and one more AXRole read of a titled item's first child.
+    /// AXPress), and one more AXRole read of a titled item's first child. At most `maxItems`, and
+    /// no more once `readBudget` has passed since the call began.
     func items(pid: pid_t, of parent: AXUIElement?, path: MenuPath) -> Result<Menu, Failure> {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return .failure(.notTrusted) }
@@ -127,27 +138,39 @@ final class MenuReader: @unchecked Sendable {
         }
         let all = kids ?? []
         var reads: [Read] = []
+        var examined = 0
         for (i, item) in all.prefix(Self.maxItems).enumerated() {
-            switch values(of: item, Self.itemAttributes, pid: pid) {
+            switch read(item, index: i, pid: pid) {
             case .failure(let f): return .failure(f)
-            case .success(let v):
-                guard (v[0] as? String) == kAXMenuItemRole else { continue }    // a menu lists only items; anything else is not one
-                let children = (v[9] as? [AXUIElement]) ?? []
-                var raw = RawMenuItem(title: v[1] as? String, description: v[2] as? String, enabled: v[3] as? Bool,
-                                      mark: v[4] as? String, char: v[5] as? String, modifiers: (v[6] as? NSNumber)?.intValue,
-                                      virtualKey: (v[7] as? NSNumber)?.intValue, glyph: (v[8] as? NSNumber)?.intValue,
-                                      childCount: children.count)
-                if let first = children.first, !MenuFormat.displayTitle(title: raw.title, description: raw.description).isEmpty {
-                    AXUIElementSetMessagingTimeout(first, Self.timeout)
-                    switch value(of: first, kAXRoleAttribute, pid: pid) {
-                    case .success(let role): raw.firstChildRole = role as? String
-                    case .failure(let f): return .failure(f)
-                    }
-                }
-                reads.append(Read(item: raw, index: i, element: item))
+            case .success(let r): if let r { reads.append(r) }       // nil: not an AXMenuItem (its index still counts)
+            }
+            examined = i + 1
+            if CFAbsoluteTimeGetCurrent() - started >= Self.readBudget { break }
+        }
+        return .success(Menu(reads: reads, total: all.count, unread: all.count - examined, ms: ms(since: started)))
+    }
+
+    /// One child of a menu, or nil when it is not an AXMenuItem (a menu lists only items).
+    private func read(_ item: AXUIElement, index i: Int, pid: pid_t) -> Result<Read?, Failure> {
+        let v: [CFTypeRef?]
+        switch values(of: item, Self.itemAttributes, pid: pid) {
+        case .success(let got): v = got
+        case .failure(let f): return .failure(f)
+        }
+        guard (v[0] as? String) == kAXMenuItemRole else { return .success(nil) }
+        let children = (v[9] as? [AXUIElement]) ?? []
+        var raw = RawMenuItem(title: v[1] as? String, description: v[2] as? String, enabled: v[3] as? Bool,
+                              mark: v[4] as? String, char: v[5] as? String, modifiers: (v[6] as? NSNumber)?.intValue,
+                              virtualKey: (v[7] as? NSNumber)?.intValue, glyph: (v[8] as? NSNumber)?.intValue,
+                              childCount: children.count)
+        if let first = children.first, !MenuFormat.displayTitle(title: raw.title, description: raw.description).isEmpty {
+            AXUIElementSetMessagingTimeout(first, Self.timeout)
+            switch value(of: first, kAXRoleAttribute, pid: pid) {
+            case .success(let role): raw.firstChildRole = role as? String
+            case .failure(let f): return .failure(f)
             }
         }
-        return .success(Menu(reads: reads, total: all.count, ms: ms(since: started)))
+        return .success(Read(item: raw, index: i, element: item))
     }
 
     // MARK: Pressing

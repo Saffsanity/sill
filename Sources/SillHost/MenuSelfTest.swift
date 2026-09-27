@@ -39,7 +39,7 @@ package enum MenuSelfTest {
             switch reader.queue.sync(execute: { reader.items(pid: pid, of: read.element, path: path) }) {
             case .success(let got):
                 let items = got.reads.compactMap { r in path.child(r.index).flatMap { MenuFormat.item(r.item, id: $0.id) } }
-                let more = got.total > MenuReader.maxItems ? " | … \(got.total - MenuReader.maxItems) more" : ""
+                let more = got.unread > 0 ? " | … \(got.unread) more" : ""
                 print("  \(read.index) \(menu.title ?? ""), \(items.count) items in \(ms(got.ms)) ms: "
                       + items.map(describe).joined(separator: " | ") + more)
             case .failure(let f):

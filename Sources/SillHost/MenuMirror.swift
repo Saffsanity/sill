@@ -256,7 +256,7 @@ final class MenuMirror {
                     elements[childPath] = Kept(element: read.element, title: item.title ?? "")
                 }
             }
-            let more = max(0, menu.total - MenuReader.maxItems)
+            let more = menu.unread
             cache.store(path.id, MenuCache.Entry(items: items, more: more, at: CFAbsoluteTimeGetCurrent(), appWasFrontmost: frontmost))
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: items, more: more > 0 ? more : nil))
         case .failure(.notAnswering):
