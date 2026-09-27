@@ -16,7 +16,9 @@ import StreamProtocol
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
 /// only. Errors show inline, never in alerts. The last group, This iPad (or iPhone), is the device's
-/// own: its switch is a preference here (`StreamClient.gesturesKey`) and sends nothing to the Mac.
+/// own: its switch is a preference here (`StreamClient.gesturesKey`) and sends nothing to the Mac;
+/// its rows, as accessibility actions, do their gestures (`client.sendGesture`), since VoiceOver
+/// keeps three fingers for itself.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -33,6 +35,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
+    /// its rows do the gestures instead.
+    @State private var voiceOver = HostSettingsPanel.voiceOverRunning
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -56,6 +61,14 @@ struct HostSettingsPanel: View {
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
+    /// photos of the group's VoiceOver footnote.
+    static var voiceOverRunning: Bool {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "SillVoiceOver") { return true }
+        #endif
+        return UIAccessibility.isVoiceOverRunning
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,6 +115,9 @@ struct HostSettingsPanel: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
             powerState += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification).receive(on: RunLoop.main)) { _ in
+            voiceOver = Self.voiceOverRunning
         }
     }
 
@@ -372,7 +388,9 @@ struct HostSettingsPanel: View {
 
     /// The last group: this device's own switch for three-finger gestures, and what each does when
     /// the Mac takes them. Last because it is the least changed, and the compact halves' 259 pt show
-    /// the Mac's rows first. Nothing in it reaches the Mac.
+    /// the Mac's rows first. The switch reaches nothing; a row, activated by VoiceOver, Voice Control
+    /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the
+    /// switch, the Mac's `gestures`, the Desktop first while a window streams).
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
@@ -390,7 +408,9 @@ struct HostSettingsPanel: View {
             if gesturesOn, macTakesGestures {
                 ForEach(Self.gestureRows, id: \.gesture) { row in
                     RowDivider()
-                    GestureRow(symbol: row.symbol, gesture: row.gesture, action: row.action)
+                    GestureRow(symbol: row.symbol, gesture: row.gesture, action: row.action, does: row.does) {
+                        _ = client.sendGesture($0, fingers: 3)
+                    }
                 }
             }
         }
@@ -400,21 +420,26 @@ struct HostSettingsPanel: View {
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
     private var macTakesGestures: Bool { (client.hostGestures ?? 0) >= TrackpadGesture.generation }
 
-    /// What each gesture does on the Mac. The pinch opens Launchpad on macOS 14 and 15, from the same
-    /// key.
-    private static let gestureRows: [(symbol: String, gesture: String, action: String)] = [
-        ("arrow.up", "Swipe Up", "Mission Control"),
-        ("arrow.down", "Swipe Down", "App Exposé"),
-        ("arrow.left.and.right", "Swipe Left or Right", "Spaces"),
-        ("arrow.down.right.and.arrow.up.left", "Pinch", "Apps"),
-        ("arrow.up.left.and.arrow.down.right", "Spread", "Show Desktop"),
+    /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
+    /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
+    /// Space on the right). The pinch opens Launchpad on macOS 14 and 15, from the same key.
+    private static let gestureRows: [(symbol: String, gesture: String, action: String, does: [GestureRow.Action])] = [
+        ("arrow.up", "Swipe Up", "Mission Control", [GestureRow.Action(name: "Mission Control", gesture: .swipeUp)]),
+        ("arrow.down", "Swipe Down", "App Exposé", [GestureRow.Action(name: "App Exposé", gesture: .swipeDown)]),
+        ("arrow.left.and.right", "Swipe Left or Right", "Spaces", [GestureRow.Action(name: "Space on the Right", gesture: .swipeLeft),
+                                                                   GestureRow.Action(name: "Space on the Left", gesture: .swipeRight)]),
+        ("arrow.down.right.and.arrow.up.left", "Pinch", "Apps", [GestureRow.Action(name: "Apps", gesture: .pinch)]),
+        ("arrow.up.left.and.arrow.down.right", "Spread", "Show Desktop", [GestureRow.Action(name: "Show Desktop", gesture: .spread)]),
     ]
 
     /// Under the switch: where the gestures go and what they do, or why nothing happens.
     private var gesturesFooter: String {
         guard gesturesOn else { return "Three-finger strokes do nothing while this is off." }
         guard macTakesGestures else { return "Update Sill on \(mac) to use these." }
-        var text = "Three fingers on the trackpad or over the stream. While a window streams, a gesture shows the Desktop first, and the opposite gesture closes what one opened. \(mac) does these with its own keyboard shortcuts: one turned off in its Keyboard settings does nothing."
+        // VoiceOver keeps three-finger swipes and taps for itself, and no touch of them reaches Sill.
+        var text = voiceOver ? "VoiceOver keeps three-finger gestures for itself, so the rows above do them on \(mac) instead."
+            : "Three fingers on the trackpad or over the stream."
+        text += " While a window streams, a gesture shows the Desktop first, and the opposite gesture closes what one opened. \(mac) does these with its own keyboard shortcuts: one turned off in its Keyboard settings does nothing."
         if device == "iPad" { text += " Four-finger swipes and a Magic Keyboard trackpad’s gestures stay with iPadOS." }
         return text
     }
@@ -563,16 +588,30 @@ private struct AdaptiveRow<Control: View>: View {
     private var label: some View { RowTitle(title: title, since: since).accessibilityHidden(true) }
 }
 
-/// One gesture and what it does on the Mac: read-only, the words side by side when they fit and
-/// stacked when larger text leaves no room, never cut off; one VoiceOver element ("Swipe Up,
-/// Mission Control").
+/// One gesture and what it does on the Mac: the words side by side when they fit and stacked when
+/// larger text leaves no room, never cut off; one VoiceOver element ("Swipe Up, Mission Control").
+/// A touch does nothing here; activated by VoiceOver, Voice Control or Switch Control (which cannot
+/// make three-finger strokes, or keep them) it does its gesture: a button for one, a named action
+/// each way for the Spaces.
 private struct GestureRow: View {
+    struct Action { let name: String; let gesture: TrackpadGestures.Gesture }
     let symbol: String
     let gesture: String
     let action: String
+    let does: [Action]
+    let perform: (TrackpadGestures.Gesture) -> Void
     /// Measured afresh when the text size changes, as `AdaptiveRow` is.
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
+        if let only = does.first, does.count == 1 {
+            row.accessibilityAddTraits(.isButton).accessibilityAction { perform(only.gesture) }
+        } else {
+            row.accessibilityActions {
+                ForEach(does, id: \.name) { item in Button(item.name) { perform(item.gesture) } }
+            }
+        }
+    }
+    private var row: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 icon

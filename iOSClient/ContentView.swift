@@ -153,6 +153,9 @@ struct ContentView: View {
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
 ///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
+///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
+///   accessibility actions whether or not it is on).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 /// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
 ///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
