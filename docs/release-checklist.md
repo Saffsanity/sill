@@ -402,6 +402,9 @@ screens of each set, the capture commands and what may appear in the picture. Th
       Clock, Calculator or TextEdit with sample text), and disconnect every other device.
 - [ ] iPhone 6.9" (the iPhone 18 Pro Max simulator, 1320 × 2868), then iPad 13" (iPad Pro 13-inch
       (M5), 2064 × 2752): five each, the app in use first, JPEG without alpha.
+- [ ] On a fresh install the first-run tour dims the screen about a second after the Mac's
+      picture, unless something is touched: take it once (or click the picture at once) before
+      the first screenshot.
 - [ ] Never `simctl io … recordVideo` while Sill.app streams: the recorder takes the video encoder
       from Sill (screenshots are fine).
 - [ ] Upload them on the version page (iPhone 6.9" Display, iPad 13" Display) with the rest of

@@ -179,6 +179,20 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom.
 
+The first time a Mac's picture shows on a device, and nothing is touched, sent
+or opened in the second after it, a short tour dims the screen and lights one
+part at a time: the picture (tap, hold, drag), the thumbnails with Aa (and
+Keyboard, sideways), Settings, and upright the key row and the trackpad. Skip
+ends it for good on that device; a step passed stays passed; after a tour
+taken sideways, the upright card comes the first time the device is held
+upright and left alone for a second. Settings › Take the Tour, the panel's
+last row, shows it again. Nothing reaches the Mac while it shows, and it sends
+nothing. What it remembers is two keys in the app's own defaults,
+`Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
+uninstall`, to see it afresh). Debug builds show it by themselves only with
+`-SillTourState` (the harness below). docs/first-run-walkthrough-plan.md has
+the rules; `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
+
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
@@ -402,6 +416,16 @@ simulator:
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
 - `-SillConnect 127.0.0.1:PORT`: connect by address, also in the normal app.
+- The first-run tour, in the mock, under `-SillLive 1` and in the normal app:
+  `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour
+  on (a Debug build never shows it by itself otherwise; `saved` reads and
+  writes the real keys, the others last one run), `-SillTour
+  touch|bar|settings|laptop` starts it at that step, and the stand-ins
+  `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`, `-SillTakeTourAt S`
+  and `-SillTourVoiceOver 1` press, touch, take it from Settings and speak as
+  VoiceOver would. `-SillOrientation landscape` turns the normal app sideways
+  in a phone simulator. The console's `tour:` lines say what happened;
+  ContentView's comment has the whole contract.
 
 ## Measuring latency
 
