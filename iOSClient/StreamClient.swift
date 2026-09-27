@@ -246,6 +246,18 @@ final class StreamClient: ObservableObject {
     /// than with the stream screen, which goes with its session, so the automatic reconnect's
     /// session can go on with it. StreamScreen reads and writes it. Main thread.
     var tourSession = TourSession()
+
+    /// A session is connected: the automatic reconnect's goes on with the last one's tour decision
+    /// (TourPolicy.nextSession), any other decides afresh. Main thread.
+    func startTourSession(reconnected: Bool) {
+        tourSession = TourPolicy.nextSession(after: tourSession, reconnected: reconnected)
+        #if DEBUG
+        if tourSession.decided {
+            let layouts = [TourLayout.landscape, .portrait].filter { tourSession.offered.contains($0) }.map(\.rawValue)
+            print("tour: the automatic reconnect's session keeps the last one's decision (decided in: \(layouts.joined(separator: ", ")))")
+        }
+        #endif
+    }
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -959,7 +971,7 @@ final class StreamClient: ObservableObject {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
                     // The automatic reconnect's session (its `reconnect` is kept until now; a tap
                     // clears it) goes on with the last session's tour decision.
-                    self.tourSession = TourPolicy.nextSession(after: self.tourSession, reconnected: self.reconnect != nil)
+                    self.startTourSession(reconnected: self.reconnect != nil)
                     self.reconnect = nil
                     self.connected = true
                     self.connectedDirectly = direct

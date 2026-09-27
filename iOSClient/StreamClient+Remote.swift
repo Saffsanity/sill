@@ -330,7 +330,7 @@ extension StreamClient {
         afterPairingWatch?.cancel()
         afterPairingWatch = nil
         // The automatic reconnect's remote dial goes on with the last session's tour decision.
-        tourSession = TourPolicy.nextSession(after: tourSession, reconnected: s.why == .automatic)
+        startTourSession(reconnected: s.why == .automatic)
         reconnect = nil
         connected = true
         remoteRoute = r

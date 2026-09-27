@@ -387,10 +387,6 @@ struct StreamScreen: View {
         guard pictureAt == nil else { return }
         pictureAt = ProcessInfo.processInfo.systemUptime
         #if DEBUG
-        if client.tourSession.decided {
-            let offered = [TourLayout.landscape, .portrait].filter { client.tourSession.offered.contains($0) }.map(\.rawValue)
-            tourLog("the automatic reconnect's session: the last one's decision holds (decided in: \(Self.names(offered)))")
-        }
         let debug = TourDebug.current
         if let step = debug.start {
             // A turn later, once the screen has said which layout it is.
