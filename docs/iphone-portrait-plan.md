@@ -538,7 +538,13 @@ Verified (2026-09-27, 04:40–05:10; private simulators of the iPhone 18 Pro Max
   retakes show the base doing against itself: the held thumbnail's wiggle in the 14 lights photos
   (the menu where it was), and Δ1–2 anti-aliasing in three drawers, three rulers and one Settings
   panel, each photo reproduced exactly by a retake of the other build (the Settings panel at
-  710x500 renders its footnote one of two ways from either build).
+  710x500 draws its footnote one of two ways, Δ1 apart, from either build: on a fresh simulator
+  the base drew the new build's way three times running, then its own).
+- After the merge with main at 676b362 (PR #29, the disk image; nothing in `iOSClient` or
+  `Sources` changed): `Tests/checks/run-all.sh`, all 17; `swift build -c release`, only the
+  CaptureProbe warning; H1, iOS Debug and Release for the simulator and Debug for a generic
+  device, from clean, only the `StreamClient` capture warning; the phone at 393x793 pixel for
+  pixel the build's before the merge.
 - S1, 60 harness photos at 402x812, 393x793 (the 15 Pro), 390x797, 375x762, 375x647, 320x548 and
   500x710, measured by a tool compiled with `PhonePortraitLayout.swift`: every button, cap, the
   strip's first thumbnail and the trackpad within a pixel at 3x of the rule; row 1's label ink

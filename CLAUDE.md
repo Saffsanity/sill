@@ -113,6 +113,11 @@ display unchanged; no wire change.
   for pixel the same as at 16:10, with the keyboard up and at AX-XL,
   `-SillInputTest` (every event dropped at the relay); on the 18 Pro 386×241,
   374×331 and 56 pt; on the 17e 374×233, 362×324 and 49 pt; S3's text sizes.
+  Merged with main at 676b362 (PR #29, the disk image; merge e73f231): only
+  ci.yml's mutants matrix and CLAUDE.md conflicted. After it
+  `Tests/checks/run-all.sh`, all 17; `swift build -c release` (only the
+  CaptureProbe warning); iOS Debug and Release for the simulator and Debug for
+  a generic device, from clean (only the `StreamClient` capture warning).
 - For the other branches: `pointer-visibility` changes the picture pane's
   `InputOverlay` and the `Trackpad`'s closures once (both arrangements share
   them now) and keeps both edits to `TrackpadSurface.moveCursor` (its
