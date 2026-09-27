@@ -41,11 +41,27 @@ struct ContentView: View {
             client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
             client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
+            Self.orientFromLaunchArgument()      // -SillOrientation landscape|portrait
             #endif
         }
         // sill://pair from the Camera, Messages or `xcrun simctl openurl`: a confirmation first.
         .onOpenURL { client.handleOpenURL($0) }
     }
+
+    #if DEBUG
+    /// `-SillOrientation landscape|portrait`: the normal app asks its window scene for that
+    /// orientation at launch, so a phone simulator shows the real layout sideways, its safe areas
+    /// included, with no hand on the simulator (the harness's fake screen has no insets).
+    private static func orientFromLaunchArgument() {
+        guard let raw = UserDefaults.standard.string(forKey: "SillOrientation") else { return }
+        let mask: UIInterfaceOrientationMask = raw == "portrait" ? .portrait : .landscapeRight
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                print("orientation: \(raw) refused: \(error.localizedDescription)")
+            }
+        }
+    }
+    #endif
 }
 
 #if DEBUG
@@ -194,6 +210,24 @@ struct ContentView: View {
 /// * Versions, in the normal app too: `-SillHelloVersion <v>` is the version this device's hello
 ///   (kind 23) gives, for a host's device floor under test (`SILL_TEST_MIN_DEVICE_VERSION`);
 ///   `-SillAppStoreURL <https url>` is the App Store link's address while SillLinks has none.
+/// * The first-run tour (TourPolicy, TourOverlay), in the mock, under `-SillLive 1` and in the
+///   normal app. Without one of these no Debug build ever shows it by itself, so every other photo
+///   and live test looks as it did; Release and TestFlight builds always follow its rule.
+///   `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour on: `fresh` is
+///   nothing seen, `landscape` the three sideways steps seen (an upright size shows the laptop
+///   card), `done` all of it, `skipped` Skip tapped, each for this run only and never written;
+///   `saved` reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, as a Release build does. In
+///   the mock the picture counts from launch. `-SillTour touch|bar|settings|laptop` starts the tour
+///   at that step as Take the Tour shows it (every step of the layout, from that one; a step the
+///   layout lacks starts at the first), with no beat, at the first picture. Stand-ins for what the
+///   gates may not do: `-SillTourPress next@S|skip@S` presses Next (Done on the last card) S
+///   seconds after each card appears, or Skip once; `-SillTourActivityAt S` is a touch S seconds
+///   after the picture of the app run's first session (the automatic reconnect's session after
+///   it gets none); `-SillTakeTourAt S` opens the Settings panel S seconds after the picture and
+///   presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its words
+///   as under VoiceOver. The console says what happened ("tour: …").
+/// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
+///   orientation at launch (a phone simulator sideways, with its real safe areas).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
