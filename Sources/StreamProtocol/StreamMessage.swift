@@ -45,6 +45,11 @@ public enum StreamMessageKind: UInt8 {
                              // name). The first message of every session connection, before anything else, so a
                              // host can judge the device before it sends anything (DeviceGate). Never on a
                              // pairing connection
+    // Trackpad gestures (Gesture.swift). 24 to 27 are held by the plans that took them (the Mac menu bar
+    // 24, 25 and 27; the Mac's pointer 26). Older hosts map it to `.unknown` and skip it.
+    case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
+                             // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
+                             // Apps…). Only to a host whose window list says `gestures` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 
