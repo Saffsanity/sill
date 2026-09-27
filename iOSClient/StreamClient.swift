@@ -2570,6 +2570,7 @@ final class StreamClient: ObservableObject {
                     self.followBestPath()
                     #if DEBUG
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
+                    SettingsScript.sessionListed(self)   // -SillSettingsScript: and this one's
                     #endif
                 }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
@@ -2817,12 +2818,39 @@ extension StreamClient {
 
     /// A state from the Mac: a broadcast, or the answer to one of this device's picks. Main thread.
     private func receiveSettings(_ state: HostSettingsState) {
+        #if DEBUG
+        let linkBefore = settings.host?.link
+        #endif
         let refused = settings.receive(state)
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
         rememberDirectWireless(state)
+        #if DEBUG
+        logLink(from: linkBefore, to: state.link)
+        #endif
     }
+
+    #if DEBUG
+    /// The console's link lines (docs/remote-bundle-plan.md §6.8), on a change of the Mac's report
+    /// only: "link: behind (cannot carry Pro; suggesting Low · Standard)", "link: stalled (…)",
+    /// "link: keeping up".
+    private func logLink(from old: LinkReport?, to new: LinkReport?) {
+        guard old?.state != new?.state || old?.suggestedBitrate != new?.suggestedBitrate
+                || old?.suggestedCaptureScale != new?.suggestedCaptureScale else { return }
+        guard let new else {
+            print("link: keeping up")
+            return
+        }
+        let quality = QualityPreset.name(forBitrate: new.bitrate)
+        guard new.isBehind else {
+            print("link: \(new.state) (cannot carry \(quality); the Mac's alone: nothing shown)")
+            return
+        }
+        let suggesting = AwayCopy.suggestion(new).map { "suggesting \($0.title)" } ?? "nothing lower to suggest"
+        print("link: behind (cannot carry \(quality); \(suggesting))")
+    }
+    #endif
 
     /// Direct Wireless as this Mac last reported it, for discovery (DiscoveryPolicy.remember): every
     /// state carries it. Keyed by the Bonjour name this connection was made to, which is what the

@@ -122,12 +122,20 @@ struct HostSettingsPanel: View {
                             Text("Connected \(r.phrase.replacingOccurrences(of: " ", with: "\u{00A0}"))\u{00A0}· \(Self.rttText(client.linkStats))")
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        // Away from home (docs/remote-bundle-plan.md §5.8): which quality this
+                        // connection's Mac runs for it, from the Mac's word. Its own line, wrapping
+                        // like the readout; the quality kept whole.
+                        if let line = AwayCopy.headerLine(state.away) {
+                            Text(line.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Self.spokenReadout(state.stream, route: client.route, remote: remoteRoute,
-                                                           rttMs: client.linkStats?.rtt?.median))
+                                                           rttMs: client.linkStats?.rtt?.median)
+                                        + (AwayCopy.headerLine(state.away)?.spoken ?? ""))
                 }
             }
             Spacer(minLength: 8)
@@ -182,13 +190,22 @@ struct HostSettingsPanel: View {
                 if let problem = client.settingsProblem {
                     Callout(text: problem)
                 }
-                // Away from home on a slow link: what helps. It goes when the link recovers, and
-                // with the panel.
-                if remoteRoute != nil, client.slowLink {
+                // The link cannot carry the quality (the Mac's own judgement, docs/remote-bundle-plan.md
+                // §6.7): what it recommends, with a button that picks it. From an older Mac, which
+                // judges nothing, the round-trip test away from home as before.
+                if let callout = AwayCopy.callout(link: state.link, away: state.away, mac: mac) {
+                    Callout(text: callout.text, button: callout.button.map { b in
+                        Callout.Action(title: b.title, spoken: b.spoken) { client.changeSettings(b.change) }
+                    })
+                } else if AwayCopy.showsRttCallout(away: state.away, remote: remoteRoute != nil, slowLink: client.slowLink) {
                     Callout(text: "The picture is arriving slowly from \(mac). Choose Low quality or Standard resolution.")
                 }
                 streamRows(shown)
                 Footnote(text: streamFooter)
+                // Which quality these rows set, away from home or at home.
+                if let note = AwayCopy.footnote(state.away, mac: mac, remoteAccessOn: client.macInfo?.remoteAccess == true) {
+                    Footnote(text: note, top: 0)
+                }
                 // As in the Mac's Settings › Streaming: its own group, the Mac's name for it, and
                 // what it trades away.
                 Rows {
@@ -520,9 +537,11 @@ private struct PendingSpinner: View {
 }
 
 /// A group's footer: small, muted, from the leading edge; orange with a warning sign for a problem.
+/// `top` 0 continues the footer above it.
 private struct Footnote: View {
     let text: String
     var warning = false
+    var top: CGFloat = 6
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             if warning { Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true) }
@@ -533,25 +552,49 @@ private struct Footnote: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
-        .padding(.top, 6)
+        .padding(.top, top)
         .padding(.bottom, 12)
     }
 }
 
-/// Something to know before touching anything: the Mac did not answer, or its hardware encoder
-/// is down. Above the groups.
+/// Something to know before touching anything: the Mac did not answer, its hardware encoder is
+/// down, or the link cannot carry the quality, with a button that picks what the Mac recommends
+/// (at least 44 pt tall, like the rows). Above the groups.
 private struct Callout: View {
+    struct Action {
+        let title: String
+        let spoken: String
+        let perform: () -> Void
+    }
     let text: String
+    var button: Action? = nil
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
-            Text(text).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+                Text(text).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            if let button {
+                Button(action: button.perform) {
+                    Text(button.title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Palette.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.control))
+                .accessibilityLabel(button.spoken)
+            }
         }
         .font(.footnote)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.orange.opacity(0.14)))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .padding(.bottom, 10)
     }
 }

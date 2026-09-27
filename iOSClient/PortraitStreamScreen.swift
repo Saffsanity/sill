@@ -178,6 +178,9 @@ struct PortraitStreamScreen: View {
     let onPanelSize: (CGSize) -> Void
     /// Pair This iPad… in the panel (see `StreamScreen.openPairingOverlay`).
     var pairThisDevice: () -> Void = {}
+    /// The line over the stream while the link cannot carry the quality, as StreamScreen shows it
+    /// (docs/remote-bundle-plan.md §6.7); nil for none.
+    var linkLine: String? = nil
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
@@ -384,6 +387,7 @@ struct PortraitStreamScreen: View {
                          onModifiersConsumed: { latched = [] })
         }
         .background(Palette.panel)
+        .overlay(alignment: .top) { LinkLineView(text: linkLine) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)
