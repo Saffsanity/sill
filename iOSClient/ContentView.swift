@@ -63,7 +63,15 @@ struct ContentView: View {
 /// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
 ///   `-SillScale 1.5` sets the scale it opens at.
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
-/// * `-SillKeyboard 1` — start with the software keyboard shown.
+/// * `-SillKeyboard 1` — start with the software keyboard shown: in the mock only the Keyboard
+///   button lights (a real keyboard upsets the fake screen); under `-SillLive 1` and in the normal
+///   app (with `-SillConnect`) the input view takes first responder half a second after the stream
+///   screen shows, so the keyboard really comes up. A simulator shows it only with no hardware
+///   keyboard connected to it (booted headless, or I/O › Keyboard › Connect Hardware Keyboard off).
+/// * `-SillKeyboardToggle <s>[,<s>…]` — at each of these seconds after the stream screen shows, the
+///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
+///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
+///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
@@ -159,7 +167,13 @@ struct ContentView: View {
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
-/// (`sips -r 270 shot.png`). Touches follow the rotation.
+/// (`sips -r 270 shot.png`). Touches follow the rotation. One that fits neither way (the Duo's
+/// 710×1000 on an iPhone) is drawn scaled down to fit, upright or turned, whichever is larger
+/// (`Fit`); only the drawing shrinks, the stream screen still lays out at the fake size, and the
+/// console says so ("harness: 710x1000 drawn at 0.62").
+///
+/// Console lines for the gates, in the harness and the normal app alike: `viewport: 386×241 pt,
+/// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen).
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -231,8 +245,7 @@ struct LayoutHarness: View {
 
     var body: some View {
         GeometryReader { geo in
-            let fits = spec.size.width <= geo.size.width && spec.size.height <= geo.size.height
-            let turned = !fits && spec.size.height <= geo.size.width && spec.size.width <= geo.size.height
+            let fit = Fit(screen: spec.size, room: geo.size)
             ZStack {
                 Color.black
                 screen
@@ -240,9 +253,17 @@ struct LayoutHarness: View {
                     .clipped()
                     .padding(1)
                     .background(Color(hex: 0x333333))
-                    .rotationEffect(.degrees(turned ? 90 : 0))
+                    .rotationEffect(.degrees(fit.turned ? 90 : 0))
+                    // Only the drawing shrinks: the stream screen still lays out at the fake size.
+                    .scaleEffect(fit.scale)
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .onAppear {
+                if fit.scale < 1 {
+                    print("harness: \(Int(spec.size.width))x\(Int(spec.size.height)) drawn at "
+                          + String(format: "%.2f", fit.scale) + (fit.turned ? ", turned" : ""))
+                }
+            }
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
@@ -252,6 +273,27 @@ struct LayoutHarness: View {
                 live.startBrowsing()
                 live.startRemote()
                 live.connectFromLaunchArgument()
+            }
+        }
+    }
+
+    /// How the fake screen goes on the simulator's: as it is when it fits, a quarter turn when it
+    /// fits only on its side, and otherwise scaled down, upright or turned, whichever is larger (the
+    /// Duo's and the iPad's sizes on an iPhone simulator). The ring is counted in the scaled case.
+    struct Fit: Equatable {
+        let turned: Bool
+        let scale: CGFloat
+        init(screen: CGSize, room: CGSize) {
+            if screen.width <= room.width && screen.height <= room.height {
+                turned = false; scale = 1
+            } else if screen.height <= room.width && screen.width <= room.height {
+                turned = true; scale = 1
+            } else {
+                let w = screen.width + 2, h = screen.height + 2
+                let upright = min(room.width / w, room.height / h)
+                let onItsSide = min(room.width / h, room.height / w)
+                turned = onItsSide > upright
+                scale = max(0.01, max(upright, onItsSide))
             }
         }
     }

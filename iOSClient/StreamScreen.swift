@@ -173,6 +173,9 @@ struct StreamScreen: View {
             sendViewport()
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
+            #if DEBUG
+            runKeyboardArguments()
+            #endif
         }
         .onChange(of: client.active) { _, source in
             if source != .none { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
@@ -210,12 +213,52 @@ struct StreamScreen: View {
                 if Task.isCancelled { return }
             }
             guard client.connected, panelSize.width > 0, panelSize.height > 0 else { return }
+            let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
+            #if DEBUG
+            print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
+                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+            #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: StreamClient.wantedFPS(remote: client.awayCapsFrameRate)))
+                                         fps: fps))
         }
     }
+
+    #if DEBUG
+    /// A length for the console: whole points as whole numbers (within a hundredth: a scaled harness
+    /// screen measures 693.99…), anything else to a tenth.
+    private static func points(_ value: CGFloat) -> String {
+        abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
+    }
+
+    /// The harness's keyboard arguments (ContentView's contract), once per launch: `-SillKeyboard 1`
+    /// brings the software keyboard up for real in a live session (the mock only lights the button,
+    /// from its init), and `-SillKeyboardToggle <s>[,<s>…]` toggles it at those seconds as the
+    /// Keyboard button does, a stand-in for a tap.
+    private func runKeyboardArguments() {
+        guard !Self.keyboardArgumentsRan else { return }
+        Self.keyboardArgumentsRan = true
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "SillKeyboard"), !client.mockDiscovery {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("keyboard: -SillKeyboard 1, the input view takes first responder")
+                overlay.setKeyboard(shown: true)
+            }
+        }
+        let times = (defaults.string(forKey: "SillKeyboardToggle") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 >= 0 }
+        for time in times {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) {
+                print("keyboard: toggled at \(Self.points(CGFloat(time))) s, as the Keyboard button does (it was "
+                      + (keyboardShown ? "up" : "down") + ")")
+                setSettings(false, restoreKeyboard: false)
+                overlay.toggleKeyboard()
+            }
+        }
+    }
+    private static var keyboardArgumentsRan = false
+    #endif
 
     private func closeWindowMenu() { windowMenu = nil }
 
