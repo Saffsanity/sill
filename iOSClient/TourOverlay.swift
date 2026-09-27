@@ -299,7 +299,11 @@ private struct TourCardLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         for card in subviews {
             let g = card[TourGeometryKey.self]
-            let wanted = card.sizeThatFits(ProposedViewSize(width: g.width, height: nil)).height
+            // A point of slack over the words' own height: offered exactly that, a card on a 3x
+            // screen missed its words' fit test by a rounding, took the scrolling variant and faded
+            // its last row (seen on an iPhone 18 Pro Max, the Settings card upright). The card
+            // itself stays as tall as its words.
+            let wanted = card.sizeThatFits(ProposedViewSize(width: g.width, height: nil)).height.rounded(.up) + 1
             let p = g.place(height: wanted)
             card.place(at: CGPoint(x: bounds.minX + p.card.minX, y: bounds.minY + p.card.minY), anchor: .topLeading,
                        proposal: ProposedViewSize(width: p.card.width, height: p.card.height))
