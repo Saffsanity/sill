@@ -50,6 +50,9 @@ final class MenuMirror {
     /// with `note`, until a read (each catalog poll) succeeds again.
     private var stale = false
     private var note: String?
+    /// The top level was refused for Accessibility: read again at each catalog poll, so a grant
+    /// shows the menus without a pick.
+    private var untrusted = false
     /// The element of every item read in this version, for presses and for reading its submenu,
     /// with its title (the host's own, for the log). This version only; at most `maxKept`.
     private struct Kept { let element: AXUIElement; let title: String }
@@ -61,7 +64,7 @@ final class MenuMirror {
     /// The last top level broadcast to the subscribers (never an answer): sent again only changed.
     private var lastSent: MacMenu?
     private var chain: Task<Void, Never>?
-    private var staleRetryQueued = false
+    private var retryQueued = false
 
     var hasSubscribers: Bool { !subscribers.isEmpty }
 
@@ -156,18 +159,23 @@ final class MenuMirror {
         }
     }
 
-    /// Each catalog poll (every 2 s while a device is connected): while the app is shown as not
-    /// answering, read its top level again; a read that succeeds clears that and sends the top level.
+    /// Each catalog poll (every 2 s while a device is connected and someone subscribes), one read
+    /// at a time: the top level is read again while the app is shown as not answering (a read that
+    /// succeeds clears that and sends the top level), while this version's top level is unread (its
+    /// read failed with a passing error, and nothing was sent for it), and while it was refused for
+    /// Accessibility (a grant then shows the menus within a poll, without a pick).
     func catalogPolled() {
-        guard stale, hasSubscribers, target != nil, !staleRetryQueued else { return }
-        staleRetryQueued = true
+        guard hasSubscribers, target != nil, !retryQueued, needsRetry else { return }
+        retryQueued = true
         let v = version
         enqueue {
-            self.staleRetryQueued = false
-            guard self.stale, await self.readTop(version: v) else { return }
+            self.retryQueued = false
+            guard v == self.version, self.needsRetry, await self.readTop(version: v) else { return }
             self.publishTop()
         }
     }
+
+    private var needsRetry: Bool { stale || !topRead || untrusted }
 
     // MARK: Serving, one request at a time
 
@@ -345,6 +353,7 @@ final class MenuMirror {
             Stats.shared.bump("menu.top")
             if stale { print("Menus of \(label(t.app)) answering again.") }
             setTop(Self.level(of: got.titles), got.titles.compactMap { MenuFormat.topItem($0.item, index: $0.index) }, note: nil)
+            untrusted = false
         case .failure(.notAnswering):
             Stats.shared.bump("menu.axTimeout")
             becomeStale(t)
@@ -352,10 +361,14 @@ final class MenuMirror {
             targetGone()
         case .failure(.notTrusted):
             setTop(TopLevel(titles: [], enabled: []), [], note: MenuRefusal.noAccessNote)
+            untrusted = true
         case .failure(.noMenuBar):
             setTop(TopLevel(titles: [], enabled: []), [], note: nil)
+            untrusted = false
         case .failure(.failed):
-            break      // a passing error: what was read stays, and the next read tries again
+            // A passing error: what was read stays. A top level never read stays unread, so nothing
+            // is sent for it (never an empty one in between), and each catalog poll reads again.
+            break
         }
     }
 
@@ -396,6 +409,7 @@ final class MenuMirror {
         topLevel = nil
         stale = false
         note = nil
+        untrusted = false
     }
 
     private func topMessage(answering: Int?) -> MacMenu {
@@ -404,8 +418,11 @@ final class MenuMirror {
                        stale: stale ? true : nil, note: note)
     }
 
-    /// The top level to every subscriber (but `except`), when it differs from the last one sent.
+    /// The top level to every subscriber (but `except`), when it differs from the last one sent:
+    /// no menus for no target, else only once this version's top level has been read or the app
+    /// was found not answering. A top level whose read failed is never sent empty in its place.
     private func publishTop(except: ObjectIdentifier? = nil) {
+        guard target == nil || topRead || stale else { return }
         let m = topMessage(answering: nil)
         guard m != lastSent else { return }
         lastSent = m
