@@ -155,18 +155,19 @@ if [ "$release" = 1 ]; then
     group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' "$ents")"
     if [ -f "$profile" ]; then
         # What macOS checks at every launch of an app with a profile (taskgated, then AMFI), checked
-        # here instead, so a build it would kill is never written: every entitlement the app is signed
-        # with is one the profile grants (the same value, or for a keychain group a pattern that covers
-        # it: a Developer ID profile grants "9B2KKVM937.*"), the certificate that signs it is one the
-        # profile lists, and the profile has not expired. Each refusal takes the stage with it.
+        # here instead, so a build it would kill is never written: every entitlement the app is
+        # signed with is one the profile grants (the same value, or for each element of a list such
+        # as the keychain groups the same name or a pattern that covers it: a Developer ID profile
+        # grants "9B2KKVM937.*"), the certificate that signs it is one the profile lists, and the
+        # profile has not expired. Each refusal takes the stage with it.
         prof_dir="$(mktemp -d)"; trap 'rm -rf "$prof_dir"' EXIT
         refuse_profile() {
             rm -rf "$stage"
             echo "error: the provisioning profile '$profile' $1 (docs/release-checklist.md, Part 1 §5)." >&2
             exit 1
         }
-        # Whether the profile's keychain group $2 covers the group $1: the same name, or a pattern
-        # ending in * whose prefix $1 starts with.
+        # Whether the profile's list element $2 (a keychain group) covers the one asked for, $1: the
+        # same name, or a pattern ending in * whose prefix $1 starts with.
         group_covered() {
             case "$2" in
                 *\*) [ -z "${2%\*}" ] || [ "${1#"${2%\*}"}" != "$1" ] ;;
@@ -176,26 +177,49 @@ if [ "$release" = 1 ]; then
         if ! security cms -D -i "$profile" -o "$prof_dir/prof.plist" 2>/dev/null; then
             refuse_profile "could not be decoded"
         fi
-        for key in com.apple.application-identifier application-identifier com.apple.developer.team-identifier; do
-            # PlistBuddy prints a missing key's error on stdout: its output counts only when it succeeds.
-            if wanted="$(/usr/libexec/PlistBuddy -c "Print :$key" "$ents" 2>/dev/null)"; then
+        # Every entitlement the file asks for, by the file's own list of them, so one added later is
+        # checked too: an app signed with one the profile does not grant is killed at launch like
+        # the rest (taskgated "Unsatisfied entitlements: com.apple.developer.icloud-services",
+        # measured 2026-09-27, when this check named only the keys it knew and wrote that app). One
+        # value (the application identifier, the team) must be the profile's own; each element of a
+        # list (the keychain groups) one the profile grants. Stricter than taskgated, which passes
+        # an entitlement no profile restricts: this file holds only what the profile grants. plutil
+        # lists the keys, one a line, of a dictionary under a key (it has no key path for a plist's
+        # own top level, hence the wrapper); PlistBuddy reads the values, since its ":" key paths
+        # keep the dots in the names, and prints a missing key's error on stdout, so its output
+        # counts only when it succeeds.
+        if ! plutil -create xml1 "$prof_dir/ents.plist" >/dev/null 2>&1 \
+            || ! plutil -insert e -xml "$(plutil -convert xml1 -o - "$ents")" "$prof_dir/ents.plist" >/dev/null 2>&1 \
+            || ! wanted_keys="$(plutil -extract e raw -o - "$prof_dir/ents.plist" 2>/dev/null)"; then
+            rm -rf "$stage"; echo "error: $ents is not a property list of entitlements." >&2; exit 1
+        fi
+        for key in $wanted_keys; do
+            if /usr/libexec/PlistBuddy -c "Print :$key:0" "$ents" >/dev/null 2>&1; then
+                i=0
+                while wanted="$(/usr/libexec/PlistBuddy -c "Print :$key:$i" "$ents" 2>/dev/null)"; do
+                    covered=0; j=0; patterns=""
+                    while pattern="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:$key:$j" "$prof_dir/prof.plist" 2>/dev/null)"; do
+                        if group_covered "$wanted" "$pattern"; then covered=1; fi
+                        patterns="$patterns ${pattern}"; j=$((j + 1))
+                    done
+                    if [ "$covered" != 1 ]; then
+                        refuse_profile "grants $key [${patterns# }], none of them '$wanted'; an app signed with it would be killed at launch"
+                    fi
+                    i=$((i + 1))
+                done
+            else
+                wanted="$(/usr/libexec/PlistBuddy -c "Print :$key" "$ents" 2>/dev/null)" || wanted=""
+                case "$wanted" in
+                    ""|"Array {"*|"Dict {"*)
+                        rm -rf "$stage"
+                        echo "error: $ents asks for $key as an empty value, an empty list or a dictionary, which make-app.sh can't compare with a profile; leave it out or teach this check." >&2
+                        exit 1 ;;
+                esac
                 granted="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:$key" "$prof_dir/prof.plist" 2>/dev/null)" || granted=""
                 if [ "$granted" != "$wanted" ]; then
                     refuse_profile "grants $key '${granted:-nothing}', not the '$wanted' $ents asks for; an app signed with it would be killed at launch"
                 fi
             fi
-        done
-        i=0
-        while wanted="$(/usr/libexec/PlistBuddy -c "Print :keychain-access-groups:$i" "$ents" 2>/dev/null)"; do
-            covered=0; j=0; patterns=""
-            while pattern="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:keychain-access-groups:$j" "$prof_dir/prof.plist" 2>/dev/null)"; do
-                if group_covered "$wanted" "$pattern"; then covered=1; fi
-                patterns="$patterns ${pattern}"; j=$((j + 1))
-            done
-            if [ "$covered" != 1 ]; then
-                refuse_profile "grants the keychain groups [${patterns# }], none of them '$wanted'; an app signed with it would be killed at launch"
-            fi
-            i=$((i + 1))
         done
         # The profile must not be expired. Gatekeeper evaluates a Developer ID profile's validity at
         # every launch (developer.apple.com/support/developer-id), so an app that embeds an expired
@@ -214,11 +238,13 @@ if [ "$release" = 1 ]; then
         elif [ "$prof_exp" -lt "$(( now + 2592000 ))" ]; then
             echo "warning: the provisioning profile '$profile' expires on ${prof_exp_iso} (UTC), within 30 days; renew it soon (docs/release-checklist.md)." >&2
         fi
-        # -X: the profile's bytes without the download's extended attributes (the developer site's
-        # address in kMDItemWhereFroms, com.apple.macl), which would otherwise ship in the app. macOS
-        # puts the quarantine flag back on any copy of a quarantined file; on this file inside a
-        # bundle that is not quarantined it stops nothing (the app launched with it, 2026-09-27).
-        cp -X "$profile" "$stage/Contents/embedded.provisionprofile"
+        # The profile's bytes alone, none of the download's extended attributes, which would
+        # otherwise ship in the app: the developer site's address (kMDItemWhereFroms), com.apple.macl
+        # and the quarantine flag. cp -X drops the first two, but its copy of a quarantined file gets
+        # the flag back, and ditto then keeps it in the zip and the disk image (an AppleDouble
+        # ._embedded.provisionprofile with the download's quarantine record); a file cat writes gets
+        # none of them (measured 2026-09-27).
+        cat "$profile" > "$stage/Contents/embedded.provisionprofile"
         codesign --force --options runtime --timestamp --entitlements "$ents" --sign "$identity" "$stage"
         # After signing: the certificate that signed it must be one the profile lists. A profile
         # names the certificates it covers, so a renewed Developer ID certificate needs the profile

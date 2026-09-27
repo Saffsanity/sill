@@ -8,8 +8,8 @@ fixes, settles whether the profile can be made from this Mac without Noah, and r
 path. §1–§8 assessed the question and recommended the move; §9 is now what the branch implemented
 (the pure rule, the store, make-app.sh and release.sh, the checks), §9a its review, §9b the proof with
 the real provisioning profile once Noah had made it (2026-09-27: two fixes, then the build, its
-launch and the keychain itself), and §10 is what is left for Noah (the checks only his devices and
-a notarized build can make).
+launch and the keychain itself, and an adversarial pass that re-ran them and fixed two more), and
+§10 is what is left for Noah (the checks only his devices and a notarized build can make).
 
 Short answer: **yes, move to the data‑protection keychain, but do it as its own well‑tested change
 that lands in or right after home pairing, before the first public build writes any keys — so
@@ -273,11 +273,12 @@ attributes, and one code path is easier to keep sound than two.
   codesign's AMFI entitlement parser rejects a comment in a file that carries restricted
   entitlements; §9a). `make-app.sh --release`: **with** a profile at
   `Packaging/embedded.provisionprofile` (or `SILL_PROVISION_PROFILE`) it checks what macOS checks at
-  every launch (§9b): the profile grants each of those entitlements (the application identifier and
-  the team the same, the group by its name or a pattern such as `9B2KKVM937.*`), lists the
-  certificate that signed the build, and **has not expired**; a profile that fails any of them is
-  refused before an app macOS would kill is written. It embeds the profile (without the download's
-  extended attributes), signs with the release entitlements, and verifies the signed app carries the
+  every launch (§9b): the profile grants every entitlement the file asks for, one added later too
+  (the application identifier and the team the same, the group by its name or a pattern such as
+  `9B2KKVM937.*`), lists the certificate that signed the build, and **has not expired**; a profile
+  that fails any of them is refused before an app macOS would kill is written. It embeds the
+  profile's bytes alone (none of the download's extended attributes, its quarantine flag included;
+  §9b), signs with the release entitlements, and verifies the signed app carries the
   group and the application identifier; **without** a profile it signs as before (no keychain
   entitlements — a valid, notarizable Developer ID app on the login keychain) and says so in the
   log. Every build's last line names the identity keychain. `release.sh`'s `check_signature`
@@ -372,15 +373,16 @@ names it `com.apple.application-identifier`.
 - Fixed: `SillRelease.entitlements` uses `com.apple.application-identifier`. make-app.sh checks what
   taskgated checks: that the profile grants each of the file's entitlements (the application
   identifier and the team the same, each keychain group by its name or a pattern such as
-  `9B2KKVM937.*`), that it lists the certificate that signed the build (right after signing: an
+  `9B2KKVM937.*`; since the adversarial pass below, every key the file holds, not only these), that
+  it lists the certificate that signed the build (right after signing: an
   Apple Development-signed probe with the same profile and entitlements was killed at launch,
   "Unsatisfied entitlements: com.apple.developer.team-identifier, keychain-access-groups", so a
   profile covers only the certificates it names, and the Developer ID certificate ends on
-  2027-02-01), and, as before, that it has not expired. It copies the profile with `cp -X`, so the
-  download's kMDItemWhereFroms (the developer site's download address) and com.apple.macl stay out
-  of the app (macOS puts the quarantine flag back on any copy of a quarantined file; inside a
-  bundle that is not quarantined it stopped nothing). `release.sh`'s `check_signature` also
-  requires `com.apple.application-identifier` (the draft's probe fails it, the fixed one passes).
+  2027-02-01), and, as before, that it has not expired. It embeds the profile's bytes alone, so the
+  download's extended attributes stay out of the app: kMDItemWhereFroms (the developer site's
+  download address), com.apple.macl and, since the adversarial pass, the quarantine flag (the
+  proof's `cp -X` dropped the first two only). `release.sh`'s `check_signature` also requires
+  `com.apple.application-identifier` (the draft's probe fails it, the fixed one passes).
   Each refusal checked with throwaway CMS profiles (only the iOS key, another application
   identifier, another team, another team's group, another certificate, no certificate, an entry
   that is not a certificate, expired, undecodable): exit 1, the stage removed, no app written; the
@@ -443,6 +445,51 @@ names it `com.apple.application-identifier`.
   download's first launch and a real Sill.app's first hardened launch, which would make the real
   identity and so was never run here.
 
+**The adversarial pass (2026-09-27, after the proof; scratch `keychain/proof/verify`).** The proof
+re-run from the committed branch, not taken from its logs, and more:
+- The build (the three entitlements, the profile byte for byte, the runtime, the timestamp, the
+  signing certificate the one the profile lists, `--verify --deep --strict`), `check_signature`
+  (which refuses a copy of the app re-signed with the draft's key), `release.sh --dry-run` (exit 0
+  in 13 s; Gatekeeper "Unnotarized Developer ID") and the launch as above: exit 0, 124 previews,
+  taskgated's "allowing", no connection to the keychain daemons, Sill's defaults and Sill.log
+  untouched.
+- A negative control the proof lacked: the probe with the release's entitlements and no embedded
+  profile is killed at launch ("Disallowing me.saffer.sill.mac because no eligible provisioning
+  profiles found"), although the profile sits in Xcode's Provisioning Profiles folder on this Mac:
+  the launch rests on the embedded copy, which a user's Mac gets too.
+- A new probe built from the branch's own `KeychainIdentityStore.swift` (only the three name
+  constants changed), `IdentityStorePlan.swift` and `AppModel.entitledKeychainAccessGroup()`
+  verbatim, with user interaction disallowed (no prompt could show), signed four ways:
+  - as the release (its entitlements file and the profile): the plan picks the data-protection
+    store, whose four items land in the group (`cku`, `sync` 0); a query without the group finds
+    them under it; a query pinned to the login keychain (`kSecUseDataProtectionKeychain` false and
+    `kSecMatchSearchList`) and `security find-generic-password` find none of them, while the pinned
+    query does find a control item put in the login keychain; a rebuild (another cdhash) loads the
+    same key and values;
+  - ad hoc, Developer ID without entitlements, and as the development build (Apple Development,
+    hardened, get-task-allow): the plan picks the login keychain; reading, adding, updating and
+    deleting in the group are refused (-34018), no key can be planted there, and the release-shaped
+    items stay as they were;
+  - the development shape's store writes its four items to the login keychain (the pinned query and
+    `security find-generic-password` find them; only the private key is stored), and with those
+    same-named items there the release-shaped store loads its own key and values: no legacy item is
+    adopted;
+  - before the pass and after it the group held no item of any class, so nothing of the proof's
+    probe remained and no identity was made there, and no test name of any probe of this branch is
+    in either keychain.
+- Found and fixed: make-app.sh checked only the entitlements it knew by name. With
+  `com.apple.developer.icloud-services` added to the file it wrote the app, and a probe signed so
+  was killed at launch ("Unsatisfied entitlements: com.apple.developer.icloud-services"); it now
+  checks every key the file holds, and refuses one it cannot compare (an empty list, a dictionary).
+  And `cp -X`'s copy of the quarantined download got the quarantine flag back, which ditto keeps: in
+  a zip made as release.sh makes it (an AppleDouble `._embedded.provisionprofile` holding the
+  download's quarantine record) and in a copy made as make-dmg.sh puts the app on the image.
+  make-app.sh now writes the profile's bytes with `cat`, whose file gets none, and the app launched
+  with it as before. After the fixes: the real profile builds as above; the
+  extra entitlement, the draft's key, get-task-allow, an empty list, a dictionary, another team and
+  another team's group are refused with no app written; a second group under the profile's pattern
+  is accepted; the proof's eleven throwaway profiles get the verdicts they got before.
+
 ## 10. For Noah
 
 The code is in place (§9, §9a) and proven with the real profile (§9b): the release builds hardened,
@@ -496,3 +543,9 @@ changed, and `StoreShim.swift`, its protocol and types copied from HostIdentity.
 `make-bundle.sh` (the probe app: bundle ID, profile, entitlements, signature), the throwaway
 profiles in `profiles/`, and every run's log. With the draft's `application-identifier` the probe
 was killed at launch; with `com.apple.application-identifier` it ran.
+
+`keychain/proof/verify` (2026-09-27, §9b's adversarial pass): `probe/` (`main.swift`, the probe
+`kcverify`, compiled with `KIS.swift`, the branch's store with only its three name constants
+changed, `Plan.swift`, `Entitled.swift`, extracted from AppModel, and `Shim.swift`; `mkbundle.sh`
+signs it each way, `run.sh` runs it under a 30 s watchdog), `mktests.sh` (make-app.sh against
+entitlement variants and the throwaway profiles), and every run's log.

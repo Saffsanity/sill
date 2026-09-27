@@ -206,10 +206,10 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       `make-app.sh --release` prints `identity keychain: data-protection keychain (access group
       9B2KKVM937.me.saffer.sill.mac)`. It refuses, before it writes an app that macOS would kill
       at launch, a profile that doesn't grant what `Packaging/SillRelease.entitlements` asks for
-      (the application identifier, the team, the keychain group), doesn't list the certificate
-      that signed the build, has expired, or doesn't decode. Proved with this profile on
-      2026‑09‑27 (docs/keychain-plan.md §9b): the build launches, and only an entitled build reads
-      the group.
+      (the application identifier, the team, the keychain group, and any entitlement added to
+      that file later), doesn't list the certificate that signed the build, has expired, or
+      doesn't decode. Proved with this profile on 2026‑09‑27 (docs/keychain-plan.md §9b): the
+      build launches, and only an entitled build reads the group.
 - [ ] **By 2027‑02‑01: the certificate, then the profile.** The profile outlives the certificate it
       lists: the Developer ID Application certificate ends on 2027‑02‑01, with the Apple CA that
       issued it ("Developer ID Certification Authority", 2012–2027). Apple says a build signed with a

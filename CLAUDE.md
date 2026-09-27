@@ -100,10 +100,11 @@ Sill.app is affected (the CLI is memory, iOS is already data-protection).
   137, taskgated "Unsatisfied entitlements: application-identifier", AMFI "No
   matching profile found"). Now the entitlements use
   `com.apple.application-identifier`; make-app.sh checks what taskgated checks
-  (each entitlement granted by the profile, the group by name or `TEAM.*`, the
-  signing certificate among the profile's — an Apple Development-signed probe
-  with this profile was killed too — and not expired) and copies the profile
-  with `cp -X`; `check_signature` requires `com.apple.application-identifier`.
+  (every entitlement the file holds granted by the profile, the group by name or
+  `TEAM.*`, the signing certificate among the profile's — an Apple
+  Development-signed probe with this profile was killed too — and not expired)
+  and embeds the profile's bytes alone (`cat`); `check_signature` requires
+  `com.apple.application-identifier`.
   Proven: `make-app.sh --release` prints the data-protection line, embeds the
   profile byte for byte, carries exactly the three entitlements, the hardened
   runtime and a timestamp, and verifies `--deep --strict`; `release.sh
@@ -125,6 +126,27 @@ Sill.app is affected (the CLI is memory, iOS is already data-protection).
   the profile-free release as before; `Tests/checks/run-all.sh` all 28.
   Also corrected: "two teams" (both certificates are team 9B2KKVM937;
   HG877AGTQ7 is the Apple Development certificate's member ID).
+- **The adversarial pass (2026-09-27, §9b's last part):** all of the above
+  re-run from the commit, and more. The probe with the release's entitlements
+  and no embedded profile is killed at launch though the profile sits in
+  Xcode's folder here (the launch rests on the embedded copy). A new probe built
+  from the branch's own store, plan and entitlement reader, with user
+  interaction disallowed: as the release, its four items land in the group
+  (`cku`, `sync` 0) and a query pinned to the login keychain and `security
+  find-generic-password` find none (a control item there is found); ad hoc,
+  Developer ID without entitlements and the development build's shape are
+  refused (-34018) reading, adding, updating and deleting in the group; the
+  development shape's store writes the login keychain, and with those
+  same-named items there the release-shaped store loads its own (no adoption);
+  the group held no item of any class before and after, and no test name is in
+  either keychain. Two fixes: make-app.sh checked only the entitlements it knew
+  (an added `com.apple.developer.icloud-services` was signed in, and a probe so
+  signed was killed at launch; now every key is checked), and `cp -X`'s copy of
+  the quarantined download kept the quarantine flag, which ditto carries into
+  the zip and the image (now `cat`, none). Rechecked after: the build, `release.sh
+  --dry-run` (13 s, "Unnotarized Developer ID"), the launch, and the refusals
+  (the proof's eleven profiles as before, plus the extra entitlement, the iOS
+  key, get-task-allow, an empty list, a dictionary, another team and its group).
 - **For Noah (still device work, `docs/keychain-plan.md` §10,
   release-checklist.md Part 1 §5):** remote access with the Mac locked and you
   away (the items are `AfterFirstUnlockThisDeviceOnly`, proved `cku`, but never
