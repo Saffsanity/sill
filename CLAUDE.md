@@ -10,18 +10,18 @@ Formerly winstream; the folder still carries the old name.
 
 **The Mac's menus on the device (2026-09-26/27, branch `menu-bar-mirror` from
 main at 150f781, main merged in at cf05a78, 676b362, ed7f8c6 (PRs #30–#32) and
-2b38179 (#33), never rebased; the plan, its critique, the review and every
-result are in `docs/menu-bar-plan.md`, "Results").** Noah: "For apps used in
-Window mode, how can we access the menu bar options? Is there a way we can add
-that menu and submenu?" (2026-09-25), item 10 of "Work on 5-12 as well please"
-(2026-09-26). The streamed app's menu bar (the Desktop's: the frontmost app's,
-as the Mac's own bar shows) reaches the device: on an iPad with iPadOS 26 in
-the iPad's own menu bar, and behind a Menus button in the bar. Each menu is
-read from the Mac when it opens, and an item chosen there is pressed on the Mac
-through Accessibility. The Mac's shortcuts show as text, never as key commands
-(⌘S typed still reaches the Mac as a key). Never the Apple menu, never Sill's
-own. Built, reviewed (eleven findings, all fixed) and checked; the pull
-request waits on Noah's device tests (below).
+2b38179 (#33), never rebased, PR #36; the plan, its critique, the review and
+every result are in `docs/menu-bar-plan.md`, "Results").** Noah: "For apps used
+in Window mode, how can we access the menu bar options? Is there a way we can
+add that menu and submenu?" (2026-09-25), item 10 of "Work on 5-12 as well
+please" (2026-09-26). The streamed app's menu bar (the Desktop's: the frontmost
+app's, as the Mac's own bar shows) reaches the device: on an iPad with
+iPadOS 26 in the iPad's own menu bar, and behind a Menus button in the bar.
+Each menu is read from the Mac when it opens, and an item chosen there is
+pressed on the Mac through Accessibility. The Mac's shortcuts show as text,
+never as key commands (⌘S typed still reaches the Mac as a key). Never the
+Apple menu, never Sill's own. Built, reviewed (eleven findings, all fixed) and
+checked; PR #36 waits on Noah's device tests (below).
 - Wire (additive; `MacMenu.swift`; the compatibility floor below): kind 24
   `macMenu` (host → device: a top level, or the answer to one request), 25
   `pressMenuItem`, 27 `fetchMenu` (one menu's items; without an id, the
