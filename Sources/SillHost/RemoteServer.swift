@@ -225,7 +225,7 @@ final class RemoteServer {
         // The origin before the connection starts: once started, TLS answers a ClientHello that is
         // already waiting with the whole server flight, the Mac's certificate included, before any
         // state callback could refuse it. A source the internet switch does not admit gets no byte.
-        if let a = server.arrivalBeforeStart(of: c), !OriginPolicy.remoteAdmits(a.origin, internetAccess: trust.snapshot.internetAccess) {
+        if let a = server.arrivalBeforeStart(of: c, remoteDoor: true), !OriginPolicy.remoteAdmits(a.origin, internetAccess: trust.snapshot.internetAccess) {
             c.cancel()
             refusals.count("internet")
             countFailure(source, now)
@@ -272,7 +272,7 @@ final class RemoteServer {
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id] else { return false }
         if p.origin == nil {
-            let (origin, interface) = server.arrival(of: c)
+            let (origin, interface) = server.arrival(of: c, remoteDoor: true)
             p.origin = origin
             p.interface = interface
             pending[id] = p

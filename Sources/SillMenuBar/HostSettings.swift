@@ -104,6 +104,7 @@ final class HostSettings {
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
                             bitrate: defaults.integer(forKey: Key.bitrate),
+                            awayBitrate: standard.awayBitrate, awayCaptureScale: standard.awayCaptureScale,
                             prioritizeSpeed: defaults.bool(forKey: Key.prioritizeSpeed),
                             virtualDisplay: defaults.bool(forKey: Key.virtualDisplay),
                             directWireless: defaults.bool(forKey: Key.directWireless),

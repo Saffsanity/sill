@@ -104,12 +104,23 @@ package struct HostStatusSnapshot: Equatable {
     package var synthetic = false
     /// Remote access, on a host with an identity (Sill.app, SillHost --remote); nil otherwise.
     package var remote: RemoteStatus?
+    /// Away from home (docs/remote-bundle-plan.md §5): at least one device is connected and every
+    /// connected device is away, so the away quality is the target. The menu's Quality subtitle
+    /// and the Streaming pane say so.
+    package var away = false
 
     /// Devices connected through the remote door: while any is, the app keeps the Mac from idle
     /// sleep (it could not be woken from away).
     package var remoteDeviceCount: Int { devices.filter { $0.remoteRoute != nil }.count }
 
     package init() {}
+}
+
+extension HostStatusSnapshot.Stream {
+    /// The running pipeline as a device sees it (kind 16's `stream`).
+    var wire: RunningStream {
+        RunningStream(width: width, height: height, fps: fps, mbps: mbps, onVirtualDisplay: onVirtualDisplay)
+    }
 }
 
 /// The remote door as the Mac's pane and menu show it. Never a pairing code or secret: those reach

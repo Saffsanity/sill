@@ -16,7 +16,9 @@ import StreamProtocol
 /// as one on peer-to-peer Wi-Fi, so turning Direct Wireless off disconnects it: a link-local test
 /// client on en0 stands in for a device on awdl0, which no test can reach.
 /// `SILL_TEST_ORIGIN=vpn|internet` makes loopback sources classify as that origin, so the origin
-/// gate can refuse a test client. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
+/// gate can refuse a test client; `SILL_TEST_REMOTE_ORIGIN=vpn|internet` does so at the remote door
+/// alone, so one loopback host serves a device away from home (the remote door) beside one at home
+/// (the home door, where loopback stays loopback): docs/remote-bundle-plan.md's H8 and S4. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
 /// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
 /// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
 /// tests). `SILL_TEST_LOOPBACK=1` makes both doors listen on 127.0.0.1 alone, so a test host takes
@@ -436,20 +438,32 @@ final class StreamServer {
         return OriginPolicy.Origin(rawValue: value)
     }()
 
+    /// TEST ONLY: SILL_TEST_REMOTE_ORIGIN (see the type's doc comment), SILL_TEST_ORIGIN's twin for
+    /// the remote door alone. Read once, and only by a host that does not advertise.
+    static let testRemoteOrigin: OriginPolicy.Origin? = {
+        guard let value = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_ORIGIN"], !value.isEmpty else { return nil }
+        guard value == "vpn" || value == "internet" else {
+            print("SILL_TEST_REMOTE_ORIGIN=\(value) ignored: vpn or internet.")
+            return nil
+        }
+        return OriginPolicy.Origin(rawValue: value)
+    }()
+
     /// Where `c` comes from: its endpoint's address (and the interface a link-local one is scoped
     /// to), the local address it arrived at (`currentPath.localEndpoint`, which names the
     /// interface through `InterfaceSnapshot`; `availableInterfaces` listed en0 and lo0 for one
     /// loopback connection, so it is not used), classified by OriginPolicy. On a test host,
-    /// SILL_TEST_ORIGIN turns a loopback source into that origin. On `queue`, at `.preparing` or
-    /// later (the path exists from then on).
+    /// SILL_TEST_ORIGIN turns a loopback source into that origin (and SILL_TEST_REMOTE_ORIGIN, at the
+    /// remote door: `remoteDoor`). On `queue`, at `.preparing` or later (the path exists from then on).
     func origin(of c: NWConnection) -> OriginPolicy.Origin { arrival(of: c).origin }
 
     /// `origin(of:)` with the interface it arrived on (the scope, else the owner of the local
     /// address), which names a VPN route ("through Tailscale").
-    func arrival(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?) {
+    func arrival(of c: NWConnection, remoteDoor: Bool = false) -> (origin: OriginPolicy.Origin, interface: String?) {
         guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, scope) = Self.addressText(host)
-        return arrival(remote: remote, scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"), local: Self.pathLocal(c))
+        return arrival(remote: remote, scope: scope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)"), local: Self.pathLocal(c),
+                       remoteDoor: remoteDoor)
     }
 
     /// The same before `c` starts: the remote door's check, because a started TLS connection
@@ -459,7 +473,7 @@ final class StreamServer {
     /// has its path already in `newConnectionHandler` (measured on loopback the same day); should
     /// one not, the local address is the one the kernel's route back to the peer sends from. Nil
     /// when neither is known: `.preparing` judges it then, as before.
-    func arrivalBeforeStart(of c: NWConnection) -> (origin: OriginPolicy.Origin, interface: String?)? {
+    func arrivalBeforeStart(of c: NWConnection, remoteDoor: Bool = false) -> (origin: OriginPolicy.Origin, interface: String?)? {
         guard case .hostPort(let host, _) = c.endpoint else { return (.internet, nil) }
         let (remote, endpointScope) = Self.addressText(host)
         let scope = endpointScope ?? OriginPolicy.scope(ofEndpoint: "\(c.endpoint)")
@@ -468,7 +482,7 @@ final class StreamServer {
             guard let routed = InterfaceSnapshot.routeSource(to: source) else { return nil }
             local = IPBytes.text(routed)
         }
-        return arrival(remote: remote, scope: scope, local: local)
+        return arrival(remote: remote, scope: scope, local: local, remoteDoor: remoteDoor)
     }
 
     /// The local address of `c`'s path, where it arrived; nil while it has no path.
@@ -477,10 +491,10 @@ final class StreamServer {
         return addressText(host).text
     }
 
-    private func arrival(remote: String, scope: String?, local: String?) -> (origin: OriginPolicy.Origin, interface: String?) {
+    private func arrival(remote: String, scope: String?, local: String?, remoteDoor: Bool) -> (origin: OriginPolicy.Origin, interface: String?) {
         let interfaces = InterfaceSnapshot.shared.interfaces()
         var o = OriginPolicy.classify(remote: remote, localAddress: local, scope: scope, interfaces: interfaces)
-        if testHost, o == .loopback, let t = Self.testOrigin { o = t }
+        if testHost, o == .loopback, let t = (remoteDoor ? Self.testRemoteOrigin : nil) ?? Self.testOrigin { o = t }
         return (o, OriginPolicy.arrivalInterface(localAddress: local, scope: scope, interfaces: interfaces))
     }
 
@@ -1161,6 +1175,21 @@ final class StreamServer {
             for client in clients.values {
                 client.needsKeyframe = true
                 client.awaitingFirstKeyframe = true
+            }
+        }
+    }
+
+    /// Each connection its own message (the devices' settings states, kind 16, one per connection):
+    /// a registered, ready connection gets its own; any other is skipped without a word, as
+    /// `broadcast` skips it, where `send(_:to:)` would print "send: no client for …" (a state can be
+    /// built for a connection the server has just forgotten, before the coordinator hears it left).
+    /// Thread-safe.
+    func send(each messages: [(NWConnection, StreamMessage)]) {
+        let items = messages.map { (ObjectIdentifier($0.0), $0.1.serialized()) }
+        queue.async { [self] in
+            for (id, data) in items {
+                guard let client = clients[id], client.connection.state == .ready else { continue }
+                send(data, to: client)
             }
         }
     }
