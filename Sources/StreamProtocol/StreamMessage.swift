@@ -45,8 +45,14 @@ public enum StreamMessageKind: UInt8 {
                              // name). The first message of every session connection, before anything else, so a
                              // host can judge the device before it sends anything (DeviceGate). Never on a
                              // pairing connection
-    // Trackpad gestures (Gesture.swift). 24 to 27 are held by the plans that took them (the Mac menu bar
-    // 24, 25 and 27; the Mac's pointer 26). Older hosts map it to `.unknown` and skip it.
+    // The Mac's pointer (Pointer.swift). 24 and 25 are held for the Mac menu bar (sketched 2026-09-25, not
+    // built), which would put an optional third kind at 27, so this one is 26. Older readers map it to
+    // `.unknown` and skip it.
+    case macPointer = 26     // host → device: JSON MacPointer — where the Mac's pointer is while this device is not the
+                             // one moving it (the Mac's own mouse, or another device). Only when it changed, at most once
+                             // per sample per device: each 30 ms tick, and at the stream's frame rate while it moves
+    // Trackpad gestures (Gesture.swift). 24, 25 and 27 stay held for the Mac menu bar's plan. Older hosts map
+    // it to `.unknown` and skip it.
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
