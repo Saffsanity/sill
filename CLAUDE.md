@@ -56,15 +56,15 @@ the Mac.
   editing gestures. Settings' last group, This iPad (or iPhone): Three-Finger
   Gestures (`Sill.trackpadGestures`, on by default, never sent), the five
   mappings while the Mac takes them, and a footnote.
-- Verified (§15): gestures 105 checks and 29 of 29 mutants; gesture-chords
+- Verified (§15): gestures 108 checks and 31 of 31 mutants; gesture-chords
   106 and 21 of 21; compatibility 92 and 19 of 19; `Tests/checks/run-all.sh`,
   all 22; swift build -c release and the three iOS builds with only the known
   warnings; the CLI idle and with a Desktop client against main's, masked and
   sorted: identical; the app's 100 previews against main's: identical but the
   General pane's "Running from" path; the merge commit's StreamProtocol reads
-  kind 28 as unknown and the new list; the touch rig, 84 of 84 (one- and
-  two-finger strokes unchanged, every three- to five-finger stroke one gesture
-  or nothing); dry runs on loopback synthetic hosts (every gesture, the
+  kind 28 as unknown and the new list; the touch rig, 84 of 84 on an iPad's
+  and an iPhone's simulator (one- and two-finger strokes unchanged, every
+  three- to five-finger stroke one gesture or nothing); dry runs on loopback synthetic hosts (every gesture, the
   reversal, fallbacks, bad payloads, the rate cap); the app in a private
   simulator against such a host (eleven gestures, none with the switch off,
   none to main's host); photos of the group at the Duo's, an iPad mini's and

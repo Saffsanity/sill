@@ -539,8 +539,9 @@ struct InputOverlay: UIViewRepresentable {
 /// every direct touch and never recognizes (it stays possible, so UIKit ends it with the last
 /// finger), takes none (`cancelsTouchesInView` off), delays none, can neither prevent another
 /// recognizer nor be prevented by one, and is its own delegate so it runs beside all of them.
-/// Direct touches only: a Pencil is the mouse, and a Magic Keyboard trackpad's click is one
-/// indirect touch.
+/// Only direct touches are fingers: a Pencil is the mouse, and a Magic Keyboard trackpad's click is
+/// one indirect touch. Those only end a finished stroke's silence (`otherTouch`), since the
+/// portrait trackpad's recognizers take them too.
 final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     private var strokes = TrackpadGestures()
     /// From arming until the next stroke's first touch: the surface sends nothing.
@@ -561,7 +562,6 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
         cancelsTouchesInView = false
         delaysTouchesBegan = false
         delaysTouchesEnded = false
-        allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         delegate = self
     }
 
@@ -581,6 +581,7 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in ordered(touches) {
+            guard touch.type == .direct else { strokes.otherTouch(); continue }
             let id = nextID
             nextID += 1
             ids[ObjectIdentifier(touch)] = id

@@ -941,7 +941,10 @@ documents. Every §12 default was taken. Nothing was pushed.
    Mac's `gestures` at least 1, the Desktop first over a window), pure and checked;
    `StreamClient.sendGesture` runs it.
 8. **`StrokeObserver`** is its own delegate (so the overlay, which has none, needs no change), and its
-   `reset` counts a touch it never saw end as cancelled.
+   `reset` counts a touch it never saw end as cancelled. It sees every touch type, but only direct
+   touches are fingers: a Pencil's or the iPad's own pointer's touch only ends a finished stroke's
+   silence (`TrackpadGestures.otherTouch`), since the portrait trackpad's recognizers take those too
+   and would otherwise ignore a Pencil used right after a gesture (the review's fix).
 9. **DEBUG**: `-SillInputScript`'s `gesture NAME[,FINGERS]` step (PR #31's script, with its refusal of
    any host but a test host on this Mac) instead of a new argument; `-SillSettingsScroll gestures`
    opens the panel at the group, whose rows a long footnote pushes out of `-SillSettingsEnd`'s view.
@@ -959,11 +962,11 @@ documents. Every §12 default was taken. Nothing was pushed.
 - H2: the CLI (`SILL_TEST_LOOPBACK=1 SillHost --synthetic`), idle 35 s (8 lines) and with a client
   streaming the Desktop for 5 s (17 lines up to its leaving), against main's at 2b38179, digits masked
   and sorted: identical. (A stats line after the client leaves follows the timer's phase in both.)
-- H3: `gestures`, 105 checks (each swipe at, under and over its distances; the flick; the axis at
+- H3: `gestures`, 108 checks (each swipe at, under and over its distances; the flick; the axis at
   exactly 1.3 both ways; pinch and spread exactly at 0.75 and 1.25 on a 3-4-5 triangle; arming at
   exactly 0.15 s and 24 pt; a button; two fingers; a late third; four; five; cancels; one decision; a
-  swipe taken back; silence to the next stroke; the send rule; 5,000 random strokes against a model),
-  29 of 29 mutants.
+  swipe taken back; silence to the next stroke, which a Pencil's touch also starts; the send rule;
+  5,000 random strokes against a model), 31 of 31 mutants.
 - H4: `gesture-chords`, 106 checks (each gesture on macOS 27's table, fallbacks, rebound shortcuts and
   their bits, every reversal pair, the same gesture twice, the Spaces, other input, unknown names, the
   line, the TEST ONLY table, 5,000 random sequences against a model), 21 of 21 mutants. `protocol`
@@ -975,8 +978,9 @@ documents. Every §12 default was taken. Nothing was pushed.
 - H6: 6678ca3's StreamProtocol maps 28 to `.unknown` and reads exactly its payload's length, and
   decodes a window list with `gestures`; this build decodes 6678ca3's list with `gestures` nil; the
   device's send rule sends nothing to it.
-- H7: the touch rig on the surfaces before (HEAD at 487ec26) and after, and after with the switch off:
-  84 of 84. One- and two-finger strokes, and a third finger that joins a scroll after 133 ms, send what
+- H7: the touch rig on the surfaces before (487ec26) and after, and after with the switch off: 84 of
+  84, on an iPad Pro 11-inch (M5) simulator and again, after the review's fix, on an iPhone 17 Pro
+  Max's. One- and two-finger strokes, and a third finger that joins a scroll after 133 ms, send what
   they sent before; every other three-, four- and five-finger stroke sends one gesture or nothing after
   its third finger (before: a pinch clicked, a rest dragged on the trackpad and right-clicked on the
   stream, four fingers moved the pointer or scrolled, five scrolled); with the switch off the same,

@@ -414,6 +414,23 @@ do {
     check("a cancelled stroke stays silent until the next stroke's first touch", wasSilent && !g.silent)
 }
 
+// MARK: - A touch that is not a finger
+
+do {
+    var g = G()
+    _ = run(swipe(dx: 0, dy: -60), &g)
+    let wasSilent = g.silent
+    g.otherTouch()
+    check("a Pencil after a finished gesture ends its silence", wasSilent && !g.silent)
+    var h = G()
+    let three = Array(swipe(dx: 0, dy: -60).prefix(3 + 3 * 5))
+    _ = run(three, &h)
+    h.otherTouch()
+    check("a Pencil while the gesture's fingers are down leaves it silent", h.silent)
+    let rest = run(Array(swipe(dx: 0, dy: -60).dropFirst(3 + 3 * 5)), &h)
+    check("and the gesture still decides at the lift", rest.outputs == [.gesture(.swipeUp, fingers: 3)])
+}
+
 // MARK: - Sending (StreamClient.sendGesture's rule)
 
 func sending(on: Bool = true, up: Bool = true, takes: Int?, window: Bool = false) -> (Bool, Bool) {

@@ -146,6 +146,13 @@ struct TrackpadGestures {
         return output
     }
 
+    /// A touch that is not a finger (a Pencil, the iPad's own trackpad or mouse) lands. It is never
+    /// part of a stroke, but with no finger down it starts something new: the last stroke's silence
+    /// ends, so a Pencil on the portrait trackpad right after a gesture is not ignored.
+    mutating func otherTouch() {
+        if fingersDown.isEmpty { silent = false }
+    }
+
     /// The system took a touch (an iPadOS gesture, an alert): nothing is decided for this stroke,
     /// and one that has not armed never will; an armed one stays silent.
     mutating func cancelled(_ id: Int) {

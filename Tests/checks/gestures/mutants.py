@@ -42,6 +42,8 @@ MUTANTS = {
                                     "guard switchOn, connected, let takes = hostGestures, takes == generation else"),
     "M27 sent with the switch off": ("guard switchOn, connected, let takes", "guard connected, let takes"),
     "M28 the Desktop never first": ("return (true, windowStreams)", "return (true, false)"),
+    "M30 a Pencil never ends the silence": ("        if fingersDown.isEmpty { silent = false }\n    }", "    }"),
+    "M31 a Pencil ends a gesture's silence mid-stroke": ("        if fingersDown.isEmpty { silent = false }\n    }", "        silent = false\n    }"),
     "M29 an older Mac sent to": ("guard switchOn, connected, let takes = hostGestures, takes >= generation else { return (false, false) }",
                                  "guard switchOn, connected, (hostGestures ?? generation) >= generation else { return (false, false) }"),
 }
