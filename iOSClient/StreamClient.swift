@@ -221,6 +221,14 @@ final class StreamClient: ObservableObject {
     /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
     /// tour's rule reads it when it decides. Main thread.
     var lastInputAt: Double?
+    /// When the person last used one of the stream screen's controls, by whatever means: a tap, or
+    /// VoiceOver's double tap, Switch Control, Voice Control or Full Keyboard Access, none of which
+    /// makes a touch (a pick, a launch, a window's command or place in the bar, a settings change;
+    /// StreamScreen stamps its own buttons with `noteAction`). systemUptime, not @Published: the
+    /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
+    /// connection's start) are not the person's and leave it alone. Main thread.
+    private(set) var lastActionAt: Double?
+    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
     #if DEBUG
     /// The tour is on screen (StreamScreen): `sendInput` says so if input goes out meanwhile.
     var tourShowing = false
@@ -2128,8 +2136,17 @@ final class StreamClient: ObservableObject {
 
     // MARK: - Client → host
 
-    /// Ask the host to stream this source. The host answers with a fresh window list.
+    /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
+    /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        noteAction()
+        request(source)
+    }
+
+    /// Asks the host to stream this source: the person's pick (`select`), or this device's own
+    /// request (the Desktop on a connection's first list, a pick made again after a move), which
+    /// is not the person's doing.
+    private func request(_ source: StreamSource) {
         choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
@@ -2140,6 +2157,7 @@ final class StreamClient: ObservableObject {
 
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
+        noteAction()
         send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
@@ -2155,6 +2173,7 @@ final class StreamClient: ObservableObject {
 
     /// Moves a window to `index` of the arranged bar (a drag in progress). Main thread.
     func moveWindow(_ id: UInt32, to index: Int) {
+        noteAction()
         var order = orderedWindows.map(\.id)
         guard let from = order.firstIndex(of: id), index >= 0, index < order.count, from != index else { return }
         order.remove(at: from)
@@ -2181,6 +2200,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
@@ -2373,7 +2393,7 @@ final class StreamClient: ObservableObject {
                         #if DEBUG
                         print("path: nothing streams on the new connection: picking \(pick) again")
                         #endif
-                        self.select(pick)
+                        self.request(pick)
                         return
                     }
                 }
@@ -2385,7 +2405,7 @@ final class StreamClient: ObservableObject {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
-                        self.select(.desktop)
+                        self.request(.desktop)
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
@@ -2399,7 +2419,7 @@ final class StreamClient: ObservableObject {
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
-                            self.select(.desktop)
+                            self.request(.desktop)
                         }
                     default:
                         break
@@ -2587,6 +2607,7 @@ extension StreamClient {
     /// shown, and nothing before this connection's first state (an older Mac never sends one).
     /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
     func changeSettings(_ change: HostSettingsChange) {
+        noteAction()
         guard let out = settings.pick(change, token: settingsToken, now: ProcessInfo.processInfo.systemUptime) else { return }
         settingsToken += 1
         settingsProblem = nil

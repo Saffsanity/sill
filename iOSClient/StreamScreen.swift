@@ -241,6 +241,13 @@ struct StreamScreen: View {
         }
         // The tour: the first picture starts its beat; an outside link puts it aside and back.
         .onChange(of: pictureReady, initial: true) { _, ready in if ready { pictureCame() } }
+        // The bar's own controls used, by a tap or by VoiceOver, Switch Control, Voice Control or
+        // Full Keyboard Access (none of which makes a touch): something happening, for its rule.
+        .onChange(of: drawerOpen) { _, _ in client.noteAction() }
+        .onChange(of: settingsOpen) { _, _ in client.noteAction() }
+        .onChange(of: keyboardShown) { _, _ in client.noteAction() }
+        .onChange(of: scaleOpen) { _, _ in client.noteAction() }
+        .onChange(of: textScale) { _, _ in client.noteAction() }
         .onChange(of: tourCard, initial: true) { _, card in tourCardChanged(card) }
         .onChange(of: tourVoiceOver) { _, _ in carryTour(reason: "VoiceOver") }
     }
@@ -439,7 +446,10 @@ struct StreamScreen: View {
         tourWait = nil
         guard tour == nil, let layout = tourLayout else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let activity = [touches.lastTouchAt, client.lastInputAt].compactMap { $0 }.max()
+        // A touch anywhere, input sent to the Mac, or a control used by any means. VoiceOver's
+        // swipes that only move its focus are reading, as a look around the screen is, and are not
+        // counted; VoiceOver also moves its focus by itself as a screen or a layout comes.
+        let activity = [touches.lastTouchAt, client.lastInputAt, client.lastActionAt].compactMap { $0 }.max()
         let moment = TourMoment(now: now, pictureAt: pictureAt, layoutAt: layoutAt, decided: tourDecided,
                                 lastActivityAt: activity, touchesDown: touches.down, busy: tourBusy != nil,
                                 offered: tourOffered.contains(layout), voiceOver: tourVoiceOver,
