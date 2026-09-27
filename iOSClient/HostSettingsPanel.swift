@@ -10,8 +10,8 @@ import StreamProtocol
 /// size class, which is unknown for the Duo; the layout harness draws a fake Duo screen inside an
 /// iPad window, which a system presentation would escape; and a tall sheet or a flipped popover
 /// could cross the half-folded crease. Its height follows its content; only the middle scrolls,
-/// where the room under the bar is short (275 pt on an iPhone SE on its side, the least anywhere;
-/// 323 pt on it upright), so the header and Disconnect are always in reach.
+/// where the room under the bar is short (259 pt in the compact halves at 500×710, an iPad window
+/// that narrow; 275 on an iPhone SE on its side), so the header and Disconnect are always in reach.
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
@@ -217,10 +217,10 @@ struct HostSettingsPanel: View {
                 Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment.")
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
-                // changed row with the longest footer (a phone on its side, 275 pt on an SE, shows
-                // the rest first). Disabled only away from home (the Mac refuses it from a remote
-                // connection): off from a directly connected device is allowed, as on the Mac, and
-                // its consequence is written beside it. No row for a host without it.
+                // changed row with the longest footer (the compact halves' 259 pt shows the rest
+                // first). Disabled only away from home (the Mac refuses it from a remote connection):
+                // off from a directly connected device is allowed, as on the Mac, and its consequence
+                // is written beside it. No row for a host without it.
                 if let direct = shown.directWireless {
                     Rows {
                         Toggle(isOn: binding(direct) { HostSettingsChange(directWireless: $0) }) {
@@ -259,8 +259,8 @@ struct HostSettingsPanel: View {
         }
     }
 
-    /// Most-changed first, so a phone on its side (275 pt on an SE) shows Quality, Resolution and
-    /// Frame Rate before anything scrolls.
+    /// Most-changed first, so the compact halves' 259 pt shows Quality, Resolution and Frame Rate
+    /// before anything scrolls.
     private func streamRows(_ shown: StreamSettings) -> some View {
         Rows {
             AdaptiveRow(title: "Quality", since: client.settings.pendingSince(.bitrate)) {

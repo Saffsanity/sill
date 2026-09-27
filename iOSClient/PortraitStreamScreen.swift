@@ -72,8 +72,14 @@ enum HIDKey {
 
 // MARK: - Screen
 
-/// Everything the portrait layouts size: the inner display's halves (`.regular`) and a phone held
-/// upright (`.compact`, `phone`), whose rects come from `PhonePortraitLayout`.
+/// Everything the portrait layouts size: the halves at the inner display's size (`.regular`) and at
+/// the outer display's (`.compact`), which an iPad window narrower than 600 pt keeps, and a phone
+/// held upright (`.phone`), whose rects come from `PhonePortraitLayout`.
+///
+/// The compact halves are the same screen as the inner display's, not a different one: same 50/50
+/// split, same three rows in the same order. They are only 500 pt wide, so the numbers shrink — but
+/// nothing shrinks below a 44 pt touch target, which is what forces the one real change: twelve caps
+/// do not fit across 472 pt at 44 pt each, so the key row folds into two rows of six.
 struct PortraitMetrics {
     let padTop: CGFloat
     let padSide: CGFloat
@@ -97,8 +103,13 @@ struct PortraitMetrics {
 
     let capHeight: CGFloat
     let keyGap: CGFloat
+    let keyRowGap: CGFloat
+    /// Whether the key row folds into two.
+    let splitKeys: Bool
     /// The phone's arrangement (`PhonePortraitLayout`) rather than the halves.
     let phone: Bool
+
+    var keyBlockHeight: CGFloat { splitKeys ? capHeight * 2 + keyRowGap : capHeight }
 
     /// The Laptop board at the inner display's 710×1000.
     static let regular = PortraitMetrics(
@@ -107,12 +118,22 @@ struct PortraitMetrics {
         buttonIcon: 22, buttonSpacing: 3,
         thumbWidth: 92, thumbHeight: 58, thumbRadius: 9, thumbSpacing: 14, thumbPad: 10,
         thumbFade: 0.88, badge: 24,
-        capHeight: 48, keyGap: 8, phone: false)
+        capHeight: 48, keyGap: 8, keyRowGap: 8, splitKeys: false, phone: false)
 
-    /// A phone held upright, and the Duo's outer display upright (500×710): the styles (radii,
-    /// symbol and thumbnail sizes, the badge, the fade). The sizes that place things are
-    /// `PhonePortraitLayout`'s, and a button's width is its share of the row at the screen's width.
+    /// The same thing on the outer display's 500×710: an iPad window narrower than 600 pt held
+    /// upright (Slide Over, a narrow Split View), as before the phone's arrangement.
     static let compact = PortraitMetrics(
+        padTop: 10, padSide: 14, padBottom: 16, rowGap: 10,
+        barHeight: 62, buttonWidth: 56, buttonHeight: 50, buttonRadius: 14,
+        buttonIcon: 20, buttonSpacing: 3,
+        thumbWidth: 80, thumbHeight: 50, thumbRadius: 8, thumbSpacing: 12, thumbPad: 6,
+        thumbFade: 0.88, badge: 22,
+        capHeight: 44, keyGap: 8, keyRowGap: 8, splitKeys: true, phone: false)
+
+    /// A phone held upright, and the Duo's outer display upright (500×710): the compact styles
+    /// (radii, symbol and thumbnail sizes, the badge, the fade). The sizes that place things are
+    /// `PhonePortraitLayout`'s, and a button's width is its share of the row at the screen's width.
+    static let phone = PortraitMetrics(
         padTop: PhonePortraitLayout.underPicture, padSide: PhonePortraitLayout.side,
         padBottom: PhonePortraitLayout.bottom, rowGap: PhonePortraitLayout.rowGap,
         barHeight: PhonePortraitLayout.stripHeight, buttonWidth: 0,
@@ -121,17 +142,23 @@ struct PortraitMetrics {
         thumbWidth: 80, thumbHeight: 50, thumbRadius: 8, thumbSpacing: 12,
         thumbPad: (PhonePortraitLayout.stripHeight - 50) / 2,
         thumbFade: 0.88, badge: 22,
-        capHeight: PhonePortraitLayout.capHeight, keyGap: PhonePortraitLayout.gap, phone: true)
+        capHeight: PhonePortraitLayout.capHeight, keyGap: PhonePortraitLayout.gap,
+        keyRowGap: PhonePortraitLayout.gap, splitKeys: false, phone: true)
+
+    /// Row 1's symbols sit in a box this tall on the phone, so their labels share one line whatever
+    /// each symbol's height (the keyboard's is 15 pt, the gear's 21), as a tab bar's do; Aa's text
+    /// gets the same box (`TextScaleControl.iconBox`).
+    static let phoneIconBox: CGFloat = 24
 }
 
-/// Portrait, in two arrangements. The inner display's is the "Laptop mode, half folded" board: the
-/// upper half is the streamed window on its own, touched directly like in landscape; the lower half
-/// is the machine you drive it with (window bar, key row, trackpad), the way a folded laptop's
-/// bottom half carries them. A phone's (Noah, 2026-09-27) puts the picture in a fixed 16:10 pane at
-/// the top and gives the rest to the controls: row 1 (Apps, Aa, Keyboard, Desktop, Settings), the
-/// thumbnails, six keys and a taller trackpad (`PhonePortraitLayout`). The picture pane, the key
-/// row, the trackpad, the drawer and the Settings panel are the same views in both; each
-/// arrangement places them.
+/// Portrait, in two arrangements. The halves (the inner display's, and an iPad window's) are the
+/// "Laptop mode, half folded" board: the upper half is the streamed window on its own, touched
+/// directly like in landscape; the lower half is the machine you drive it with (window bar, key
+/// row, trackpad), the way a folded laptop's bottom half carries them. A phone's (Noah, 2026-09-27)
+/// puts the picture in a fixed 16:10 pane at the top and gives the rest to the controls: row 1
+/// (Apps, Aa, Keyboard, Desktop, Settings), the thumbnails, six keys and a taller trackpad
+/// (`PhonePortraitLayout`). The picture pane, the key row, the trackpad, the drawer and the Settings
+/// panel are the same views in both; each arrangement places them.
 struct PortraitStreamScreen: View {
     @ObservedObject var client: StreamClient
     var metrics: PortraitMetrics = .regular
@@ -164,7 +191,7 @@ struct PortraitStreamScreen: View {
         }
     }
 
-    // MARK: The inner display: two halves
+    // MARK: Two halves: the inner display, an iPad window
 
     private func halves(_ size: CGSize) -> some View {
         let half = (size.height / 2).rounded()
@@ -266,13 +293,19 @@ struct PortraitStreamScreen: View {
         ZStack(alignment: .topLeading) {
             Color.black
 
-            // In reading order, which is also top to bottom.
+            // In reading order, which is also top to bottom. While the drawer is open VoiceOver
+            // skips what it dims (a double-tap there would reach the Mac, where a tap only closes
+            // the drawer): row 1, then the drawer. The drawer and the Settings panel cover the strip
+            // but for its first thumbnail's badge, which sticks out past row 1's leading edge; the
+            // strip goes while either is open, so nothing cut shows beside them.
             PhoneRows(layout: layout) {
-                picturePane
+                picturePane.accessibilityHidden(drawerOpen)
                 phoneRow1(layout)
                 windowStrip
-                keyRow(.phone)
-                trackpad(verticalSpan: layout.trackpadSpan)
+                    .opacity(drawerOpen || settingsOpen ? 0 : 1)
+                    .accessibilityHidden(drawerOpen)
+                keyRow(.phone).accessibilityHidden(drawerOpen)
+                trackpad(verticalSpan: layout.trackpadSpan).accessibilityHidden(drawerOpen)
             }
 
             if drawerOpen {
@@ -311,7 +344,8 @@ struct PortraitStreamScreen: View {
 
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: width, height: layout.row1.height,
-                             radius: metrics.buttonRadius, pointsPerStep: layout.rulerStep)
+                             radius: metrics.buttonRadius, pointsPerStep: layout.rulerStep,
+                             iconBox: PortraitMetrics.phoneIconBox, iconSpacing: metrics.buttonSpacing)
 
             barButton(open: keyboardShown, symbol: "keyboard", label: "Keyboard", width: width,
                       accessibilityLabel: keyboardShown ? "Hide the keyboard" : "Show the keyboard",
@@ -423,22 +457,42 @@ struct PortraitStreamScreen: View {
                   action: { setSettings(!settingsOpen, true) })
     }
 
-    /// A bar button at the board's size, or at `width` (the phone's share of its row). The phone's
-    /// labels stay on one line, shrinking a little before they would wrap (Bold Text at 320 pt).
+    /// A bar button at the board's size, or at `width` (the phone's share of its row). On the phone
+    /// the symbol sits in a fixed box, so the five labels share one line, and the labels stay on one
+    /// line, shrinking a little before they would wrap (Bold Text at 320 pt); the row does not grow
+    /// with the text size, so at the accessibility sizes a long press shows the button large.
+    @ViewBuilder
     private func barButton(open: Bool, symbol: String, label: String, width: CGFloat? = nil,
                            accessibilityLabel: String, action: @escaping () -> Void) -> some View {
-        BarButton(open: open, width: width ?? metrics.buttonWidth, height: metrics.buttonHeight,
-                  radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
-                  action: action) {
-            VStack(spacing: metrics.buttonSpacing) {
-                Image(systemName: symbol)
-                    .font(.system(size: metrics.buttonIcon))
-                    .foregroundStyle(open ? Palette.accent : Palette.text)
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(open ? Palette.accent : Palette.barLabel)
-                    .lineLimit(metrics.phone ? 1 : nil)
-                    .minimumScaleFactor(metrics.phone ? 0.85 : 1)
+        if metrics.phone {
+            BarButton(open: open, width: width ?? metrics.buttonWidth, height: metrics.buttonHeight,
+                      radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
+                      action: action) {
+                VStack(spacing: metrics.buttonSpacing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: metrics.buttonIcon))
+                        .foregroundStyle(open ? Palette.accent : Palette.text)
+                        .frame(height: PortraitMetrics.phoneIconBox)
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .accessibilityShowsLargeContentViewer { Label(label, systemImage: symbol) }
+        } else {
+            BarButton(open: open, width: width ?? metrics.buttonWidth, height: metrics.buttonHeight,
+                      radius: metrics.buttonRadius, accessibilityLabel: accessibilityLabel,
+                      action: action) {
+                VStack(spacing: metrics.buttonSpacing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: metrics.buttonIcon))
+                        .foregroundStyle(open ? Palette.accent : Palette.text)
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+                }
             }
         }
     }
@@ -481,7 +535,7 @@ private extension View {
 
 // MARK: - Key row
 
-/// One cap in the key row, as data, so each layout can pick its own set.
+/// One cap in the key row, as data, so each layout can pick its own set and fold it.
 private enum Key {
     /// A key that types itself: the cap's text, its HID usage, its accessibility label.
     case press(String, UInt16, String)
@@ -505,12 +559,13 @@ private enum Key {
     #endif
 }
 
-/// The keys a Mac needs that a software keyboard does not offer. On the inner display (`.full`):
-/// escape, tab, the four modifiers, the four arrows, the keyboard itself and Spotlight, twelve equal
-/// caps across the screen at 48 pt tall, ≈49 pt wide at 710 pt. On a phone (`.phone`): escape, tab
-/// and the four modifiers, six caps across the row; the Keyboard button is in row 1, and Spotlight
-/// is cmd then space on the keyboard (a latched ⌘ turns a typed space into ⌘Space). Arrows there come
-/// from a hardware keyboard.
+/// The keys a Mac needs that a software keyboard does not offer. In the halves (`.full`): escape,
+/// tab, the four modifiers, the four arrows, the keyboard itself and Spotlight, twelve equal caps
+/// across the screen at 48 pt tall, ≈49 pt wide at 710 pt — or, in the compact halves where twelve
+/// 44 pt caps do not fit across 472 pt, six and then six, 72 pt wide at 500 pt. On a phone
+/// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
+/// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
+/// ⌘Space). Arrows there come from a hardware keyboard.
 private struct KeyRow: View {
     enum Keys { case full, phone }
 
@@ -549,13 +604,26 @@ private struct KeyRow: View {
         }
     }
 
+    /// One row, or the compact halves' split: the six that name a key, then the four arrows, the
+    /// keyboard and Spotlight. The break falls where the row changes job, not merely where it runs
+    /// out of width.
+    private var rows: [[Key]] {
+        guard metrics.splitKeys else { return [shown] }
+        return [Array(shown.prefix(6)), Array(shown.dropFirst(6))]
+    }
+
     var body: some View {
-        HStack(spacing: metrics.keyGap) {
-            ForEach(shown.indices, id: \.self) { index in
-                key(shown[index])
+        VStack(spacing: metrics.keyRowGap) {
+            ForEach(rows.indices, id: \.self) { row in
+                HStack(spacing: metrics.keyGap) {
+                    ForEach(rows[row].indices, id: \.self) { index in
+                        key(rows[row][index])
+                    }
+                }
+                .frame(height: metrics.capHeight)
             }
         }
-        .frame(height: metrics.capHeight)
+        .frame(height: metrics.keyBlockHeight)
         #if DEBUG
         .onAppear(perform: runInputTest)
         #endif
@@ -564,7 +632,7 @@ private struct KeyRow: View {
     @ViewBuilder private func key(_ key: Key) -> some View {
         switch key {
         case .press(let title, _, let label):
-            cap(open: false, label: label, action: { tap(key) }) { text(title) }
+            cap(open: false, label: label, largeContent: title, action: { tap(key) }) { text(title) }
         case .arrow(let symbol, _, let label):
             cap(open: false, label: label, action: { tap(key) }) {
                 Image(systemName: symbol)
@@ -608,10 +676,14 @@ private struct KeyRow: View {
 
     // MARK: Caps
 
-    private func cap<Content: View>(open: Bool, label: String, action: @escaping () -> Void,
+    /// `largeContent`: the cap's text, which the phone's caps (fixed in size, as the row is) show
+    /// large on a long press at the accessibility text sizes.
+    @ViewBuilder
+    private func cap<Content: View>(open: Bool, label: String, largeContent: String? = nil,
+                                    action: @escaping () -> Void,
                                     @ViewBuilder content: () -> Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
-        return Button(action: action) {
+        let button = Button(action: action) {
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(shape.fill(open ? Palette.controlOpen : Palette.control))
@@ -619,6 +691,11 @@ private struct KeyRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        if keys == .phone, let largeContent {
+            button.accessibilityShowsLargeContentViewer { Text(largeContent) }
+        } else {
+            button
+        }
     }
 
     private func text(_ title: String) -> some View {
@@ -632,7 +709,7 @@ private struct KeyRow: View {
         let on = latched.contains(flag)
         return cap(open: on,
                    label: on ? "\(label), held. Tap to release." : "\(label), hold for the next key",
-                   action: { tap(key) }) {
+                   largeContent: title, action: { tap(key) }) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(on ? Palette.accent : Palette.text)

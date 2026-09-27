@@ -84,6 +84,9 @@ struct ContentView: View {
 ///   what it gets on this Mac: put a relay that drops kind 8 (input) in front of it.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
+/// * `-SillIdiom pad` — draw a screen taller than wide and narrower than 600 pt as an iPad draws
+///   such a window (the compact halves), not as a phone does (`DuoLayout.phoneArrangement`), so an
+///   iPhone simulator can photograph it; `phone` the other way round. Also in the normal app.
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the
 ///   simulator can connect to a Mac over Bonjour at a Duo size. Not connected yet shows the normal
 ///   connect screen inside the frame. Without it nothing touches the network, exactly as before.
