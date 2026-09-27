@@ -933,7 +933,8 @@ It runs on StreamServer's queue. It is owned by `RemoteAccess` and hands admitte
      - the drain backstop at 15 s, with a 15 s grace. On a 2 Mbps uplink a 1.5 MB keyframe takes
        6 s to hand off, so the 4 s rule would evict live devices.
 6. **Keyframe pacing** in `broadcast`, remote clients only (home clients keep today's logic byte for
-   byte). For each frame message and remote client:
+   byte). Superseded by docs/remote-bundle-plan.md §3: since 2026-09-26 a remote client's queue is
+   counted in bytes, not messages (the keyframe livelock). For each frame message and remote client:
    - **`needsKeyframe`:**
      - a delta → skip it (`net.waitKey`); if `keyframeWanted` and `inflight ≤ 2` and 2 s have
        passed since the last forced request made for a remote client, request one

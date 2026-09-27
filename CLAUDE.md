@@ -8,6 +8,79 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Remote pacing (2026-09-27, branch `remote-pacing` from main at 150f781, with
+main at cf05a78 merged in; PR A of docs/remote-bundle-plan.md, whose "Results:
+PR A" has every number).** Item 1 of the away-from-home bundle Noah decided on
+2026-09-25 ("a proven keyframe livelock"), its own PR ahead of items 2–4 (the
+away quality, the link report, the move home: PR B, not started).
+- The livelock (Sill.log 2026-09-25 14:13–14:36, the iPad on the iPhone's
+  hotspot through Tailscale at Extreme, then Pro · Retina): `paceRemote`
+  dropped any frame while more than two messages were unacknowledged, so a
+  keyframe the hotspot took in about half a second counted against the deltas
+  right behind it. One or two went out, the next was dropped, and every later
+  delta waited for a keyframe asked for 2 s later, which blocked its own
+  followers the same way: 1.5–1.9 fps with the link idle in between.
+- Host (StreamServer.swift, remote clients only): what a remote client has
+  queued is counted in bytes its connection has not taken (`pendingBytes`,
+  every message but ticks). Behind a keyframe still being taken, frames go out
+  until more than `remoteHoldCap` (512 KB) waits beyond it; otherwise a frame
+  is dropped only when the backlog is over both `remoteBacklogBudget` (256 KB)
+  and what the last keyframe left behind it plus `remoteBacklogSlack` (128 KB).
+  A client that lost a frame asks for a keyframe only once at most
+  `remoteIdleBytes` (16 KB) waits, so the keyframe leads the queue; the spacing
+  (2 s alone, 4 s beside a home client) is unchanged, and the keyframe it waits
+  for goes out once the backlog fits the budget (the first one at once). The
+  home branch of `broadcast`, eviction, the wire and every print are unchanged;
+  no Stats key.
+- Device (`MessageReader`, new; Layout): each header, then the payload in pieces
+  of at most 256 KB, every piece stamping `lastReceivedAt`, so liveness is "no
+  byte for max(6 s, 4 × the worst rtt)" as remote-access-plan §7.6 says (it
+  was "no complete message", and a 1.6 MB keyframe on 2 Mbit/s ended a live
+  session every ~10 s). The caps and the "closing: the host announced …" and
+  "read error" lines as before; an end that comes with a message's last bytes
+  is a clean end (the old reader then printed ENODATA as a read error),
+  reported only while the connection is still read; the move's probe keeps its
+  own reads. `Tests/checks/message-reader` (46 checks, 17 mutants; CI runs
+  both).
+- `Scripts/pacing/` (Layout, Build and run): the plan's encoder-free harness,
+  base against new: the real StreamServer.swift fed fake frames, a shaped path
+  (bottleneck.py, or Scripts/sillrelay.py for the remote door's slow link), a
+  device stand-in and a table with each case's gate, all on 127.0.0.1. Not a
+  pure check: it runs for minutes and waits while the Mac is busy.
+- Verified, before the merge and on it (the plan's Results has the tables):
+  the harness against origin/main, every gate passing: the livelock on main's
+  pacing and gone on this one (kf25m32, 2.5 MB keyframes on 32 Mbit/s: 1.4–1.5
+  fps against 60.1, three runs each; real24, the hotspot's loop at Retina size:
+  7.7–39.0 fps with 15–28 drops a minute against 56.6–59.4 and none; bigkf8
+  1.6–7.3 against 59.8–59.9), ext120 at 120.0 fps with nothing dropped (main
+  5.7 drops a minute), the remote door's slow link (sillrelay.py at 2 Mbit/s
+  and +150 ms for 90 s: no loss, eviction or frameless second; a blackhole
+  dropped 13.1 s after connecting on both builds), slowkfB's liveness by bytes
+  (64.8 fps, no loss, where the old rule lost slowkf 5 times on either host),
+  and home, low and fastbig unchanged; S2 on a private iPad mini simulator
+  against the harness's host through 2 Mbit/s: main's app lost the session
+  7.2–7.3 s after connecting ("connection silent for 6 s") while 1.8 MB came
+  through, this branch's never in 60 s (60 fps at a 40 ms frame age once the
+  1.7 MB keyframe had crossed); clean builds (the Swift package, and the iOS
+  app for the simulator, Debug and Release: only the known warnings); all 16
+  pure checks; the reader's 17 mutants.
+- Not run, and why (the plan's Results): no synthetic host, because its doors
+  listen on every interface and its stream shares the hardware encoder with
+  Sill.app. So H2 was argued from the code (every change is inside
+  `paceRemote` or an `if remote`, which the CLI's clients never reach without
+  `--remote`), H4 ran in the harness, and there is no
+  `SILL_TEST_SOFTWARE_ENCODER` hook yet: PR B's gates need one, and a
+  synthetic host on loopback only.
+- **Untested, for Noah:** the plan's P1 (on the hotspot through Tailscale, Pro
+  and then Extreme · Retina on a busy window, two minutes each: Sill.log has no
+  "net.dropped 1 net.sent 3 net.waitKey 5x" every 2 s, and the `client iPad`
+  lines stay near what the hotspot carries), P2 (Network Link Conditioner on
+  the iPad at 1 Mbit/s and 100 ms, Connect Remotely at Pro · Retina: slow
+  frames, never "connection silent for 6 s"), P3 (home Wi‑Fi at Extreme:
+  `net.dropped` and frame age as before) and P14 (Extreme · Retina through the
+  remote door on Tailscale's LAN path: no `net.dropped`, 60 fps; from a 120 Hz
+  device by address, 120).
+
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and
@@ -2615,6 +2688,8 @@ good.
   (`--encoder-selftest`), `CursorShapeWatcher` (NSCursor.currentSystem →
   `.cursorShape`), `StreamServer` (Network.framework + Bonjour `_sill._tcp`, both
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
+  a remote client's frames paced by the bytes its connection has not taken
+  (`paceRemote`, docs/remote-bundle-plan.md §3);
   the listener built with or without peer-to-peer and replaced live when Direct
   Wireless changes, and turned off, the devices on peer-to-peer Wi-Fi
   disconnected; the test-only SILL_TEST_SERVICE_TYPE, SILL_TEST_SWAP_FAIL and
@@ -2711,7 +2786,18 @@ good.
   before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
-  through).
+  through). `Scripts/pacing/` is the remote pacing harness
+  (docs/remote-bundle-plan.md §3 and §11): `build.sh [BASE]` makes two
+  throwaway packages under `.build/pacing`, BASE's StreamServer.swift (default
+  origin/main) and the working tree's, each with its neighbours and fed fake
+  frames by `main.swift` (no encoder: a binary that links a media framework is
+  refused); `run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]`
+  runs each case on both, host → `bottleneck.py` (a downlink rate on a virtual
+  clock, a delay, a finite queue, rate changes) or `Scripts/sillrelay.py` →
+  `device.py` (the device's reader, pings, stats and liveness;
+  `--liveness-bytes` for MessageReader's rule), everything on 127.0.0.1 and
+  each run only while the load average is under 20; `summarize.py` prints the
+  table and each case's gate.
   `Scripts/encoder-check/` holds the encoder's checks ("The 33 fps plateau"):
   `run.sh` builds and runs those that never touch an encoder (the probe and
   encoder checks, which run in real time with tight bounds and so stay out of
@@ -2752,7 +2838,10 @@ good.
   generic `send`), `SessionLink` (the session's connection and the one door out
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
   off a lost path: `handOver`, `hold`, `adopt`, `unhold`; Foundation and
-  Network only, checked with swiftc),
+  Network only, checked with swiftc), `MessageReader` (the session's reader:
+  each header, then the payload in pieces of at most 256 KB, every piece a sign
+  of life for the liveness check; Network and StreamProtocol only, checked with
+  swiftc),
   `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
   the session's route word for the Settings panel,
   when a reconnect may take a Direct row, when a session over AWDL moves to
@@ -2848,17 +2937,15 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `encoder-mailbox`, `encoder-slowstate`, `fence`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
-  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
-  [-v] [name…]` runs them and exits
-  `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
-  `run-all.sh [--mutants] [-v] [name…]` runs them and exits
-  with the number that failed (a folder whose `run.sh` is not executable
-  fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
-  compiles and the checks that belong to open branches. A change to a checked
-  file updates its check (and a mutant's pattern) in the same commit.
+  `compatibility`, `device-gate`, `encoder-mailbox`, `encoder-slowstate`,
+  `fence`, `goodbye`, `ledger`, `message-reader`, `origin`, `pairing-address`,
+  `policy`, `protocol`, `remote-rules`, `update-policy` (the two encoder checks
+  refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v]
+  [name…]` runs them and exits with the number that failed (a folder whose
+  `run.sh` is not executable fails); `common.sh` is sourced by each `run.sh`;
+  `README.md` lists what each compiles and the checks that belong to open
+  branches. A change to a checked file updates its check (and a mutant's
+  pattern) in the same commit.
 
 ## Build and run
 
@@ -2876,6 +2963,7 @@ swift run -c release SillHost --remote --internet   # also admit paired devices 
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
+Scripts/pacing/run.sh                   # remote pacing, this tree against origin/main, no encoder, all on loopback (~15 min; --full ~40; --list)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
