@@ -9,7 +9,8 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **First-run tour (2026-09-27, branch `first-run-walkthrough` from main at
-cf05a78; the plan, its critique and the results are in
+cf05a78, merged with main at 5c6a850 and 2b38179, not rebased, PR #35; the
+plan, its critique and the results are in
 `docs/first-run-walkthrough-plan.md`).** Noah (2026-09-26): "Add to feature
 list, app usage walkthrough first time after pairing/connecting". The device
 only: no wire change, nothing sent to the Mac, two UserDefaults keys.
