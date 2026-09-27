@@ -279,12 +279,12 @@ in a window's picture; the opposite gesture closes what one opened (a swipe
 down after Mission Control, a pinch after Show Desktop), until a click, a key or
 text from a device, a window picked, an app launched or one of the Mac's menu
 items chosen from one, or the last device leaving; a view closed with the Mac's
-own keyboard comes back with the same gesture made twice more. Four fingers do the same where iPadOS lets them
-through (Settings › Multitasking & Gestures); a Magic Keyboard trackpad's own
-three- and four-finger gestures stay with iPadOS. VoiceOver keeps three-finger
-gestures for itself, so with it on the rows of Settings › This iPad do them
-instead (each row is an accessibility action, for Voice Control and Switch
-Control too).
+own keyboard comes back with the same gesture made twice more. Four fingers do
+the same where iPadOS lets them through (Settings › Multitasking & Gestures); a
+Magic Keyboard trackpad's own three- and four-finger gestures stay with iPadOS.
+VoiceOver keeps three-finger gestures for itself, so with it on the rows of
+Settings › This iPad do them instead (each row is an accessibility action, for
+Voice Control and Switch Control too).
 
 Sill's log names what each gesture did: "Gesture from iPad (iPad14,1): swipe up
 → Mission Control (shortcut 108: key 160, fn)", or "… pinch → nothing: no

@@ -1221,3 +1221,28 @@ Not run at the merge: the touch rig (its files, TrackpadView, InputOverlay, Poin
 TrackpadGestures, Input and the portrait screen's keys, are the branch's byte for byte), and the
 menus' gates against their fixture app (MenuMirror, the reader and the device's menu files are
 main's byte for byte; kinds 25 and 27 reached the mirror through the synthetic host above).
+
+Checked again after the push (0c8d5a6, 2026-09-27), the merge read against both parents and run
+with what the first pass lacked:
+- Each side's changes since the merge base (2b38179) are all in the merge (StreamCoordinator,
+  StreamMessage, HostSettingsPanel and PortraitStreamScreen line by line against both parents, and
+  every other file both sides changed); beyond them it changes only the kind 25 rule, the tour
+  row's padding, the checks' kinds and mutants, and words. CI's mutants matrix lists every check
+  with a mutants script (all but `ledger`).
+- A loopback synthetic host on the software encoder with the menus' fixture
+  (`Scripts/menufixture.swift`, run by `Scripts/menu-check/fixture.py`) and a scripted pointer
+  (`SILL_TEST_POINTER_PATH`): sillclient's fetch of Probe answered in 6 ms with the fixture's 20
+  items, 48 kind 26s along the path, and four gestures, each logged "(not posted: a test host)". The
+  app in a private simulator (deleted after): the fixture's top level ("menufixture, 4 menus"),
+  Probe opened from the Menus pull-down (18 items in 101 ms), kind 26 heard ("the Mac has it"), the
+  pointer the device's after a dry-run tap and the Mac's again as the scripted pointer moved on
+  (`ptr.mac 1`), and four gestures through `sendGesture`, each named by the host, none posted. The
+  fixture's label stayed "none" (nothing pressed). The guard saw the front app change only between
+  Chrome and the Claude app, neither of which the run starts.
+- Photos, deleted after: the tour's touch card at 1000×710 and laptop card at 710×1000, the phone's
+  bar card, the panel's end at 1000×710 and on a phone, an older Mac's panel.
+- `Tests/checks/run-all.sh`, all 26 (265 s); `swift build -c release` from `git archive` (only the
+  CaptureProbe warning); iOS Debug and Release for the simulator and Debug for a generic device
+  (only the old `StreamClient` capture warning).
+- Fixed then, comments only: the panel's doc had Take the Tour's row doing a gesture, and a doc
+  comment of the panel and a paragraph of docs/DEVELOPMENT.md were left unwrapped.

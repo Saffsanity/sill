@@ -15,10 +15,10 @@ import StreamProtocol
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
-/// only. Errors show inline, never in alerts. The last groups, This iPad (or iPhone) and Take the
-/// Tour, are the device's own: the gestures' switch is a preference here (`StreamClient.gesturesKey`)
-/// and sends nothing to the Mac; their rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself.
+/// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
+/// This iPad (or iPhone), whose switch is a preference here (`StreamClient.gesturesKey`) and sends
+/// nothing to the Mac, and whose rows, as accessibility actions, do their gestures
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -410,9 +410,10 @@ struct HostSettingsPanel: View {
 
     /// This device's own group, after the Mac's: its switch for three-finger gestures, and what each
     /// does when the Mac takes them (Take the Tour follows it). After the Mac's rows because it is
-    /// the least changed, and the compact halves' 259 pt show the Mac's rows first. The switch reaches nothing; a row, activated by VoiceOver, Voice Control
-    /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the
-    /// switch, the Mac's `gestures`, the Desktop first while a window streams).
+    /// the least changed, and the compact halves' 259 pt show the Mac's rows first. The switch
+    /// reaches nothing; a row, activated by VoiceOver, Voice Control or Switch Control, does its
+    /// gesture on the Mac as three fingers would (`sendGesture`: the switch, the Mac's `gestures`,
+    /// the Desktop first while a window streams).
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
