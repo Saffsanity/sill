@@ -8,6 +8,36 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Pairing at home (2026-09-25 to 27, branch `home-pairing`; the plan, each
+step's results and the hand-off are in `docs/home-pairing-plan.md`).** Noah:
+"Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy
+to do but still secure, similar to how Tailscale is being paired. Wired should
+still pair automatically." The home door speaks TLS 1.3 with both keys pinned
+in Sill.app (and SillHost --pairing): a device pairs once, with the pairing
+window's QR code or code, or over the USB cable by itself, and one trust list
+serves Wi-Fi, Direct, the cable and remote access (Settings › Devices, Require
+pairing, Remove). Steps 0 to 5 of the plan's §12 are done and verified; the
+security review and Noah's device tests (§11) are next.
+- Merged with main (2026-09-27, d11aa60 of main at cf05a78: PRs #16 to #28),
+  not rebased. As the Compatibility floor below says, the device gate went
+  into `Door` (home pairing landed second): `Door.admitSession` runs
+  `StreamServer.gate` for both TLS doors, the hello first inside TLS, then
+  `serve(_:route:hello:admitted:)`; a session the gate held is judged again by
+  `DoorPolicy.afterGate` (remote: removed, remoteOff, internetOff, busy, as
+  main's stillAdmits; home: removed, pairingRequired; and Direct Wireless off),
+  with the lines of each change's own close. `Goodbye` has main's fields and
+  "update" beside "pairingRequired", which GoodbyePolicy knows. The device
+  sends its hello first on every session connection (a tap's, a reconnect's,
+  a move's, a remote winner's), over TLS at a TLS door. Both sides had taken
+  A01E/F01E in project.pbxproj: StreamClient+Home.swift is A301/F301 now.
+  `SillProtocol` 1 is 1.0's TLS home door with ALPN `sill/1`. This branch's
+  pure checks moved into `Tests/checks` (`door-policy`, `cable-link`,
+  `ask-limits`, `home-records`, `home-device`, `home-txt`, `home-model`, and
+  `home.swift` in `policy` and `remote-rules`), and into CI's mutants matrix.
+  Verified: the plan's Results, "The merge with main".
+- **Untested, for Noah:** the plan's §11 device tests (P1 to P16), with the
+  install order: the iPad build first, then Sill.app.
+
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and

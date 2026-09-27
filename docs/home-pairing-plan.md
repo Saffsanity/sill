@@ -1,6 +1,6 @@
 # Pairing at home: Wi‑Fi, Direct and the cable — the plan
 
-## Status and hand-off (2026-09-26 05:20)
+## Status and hand-off (2026-09-27 02:38)
 
 Stopped by Noah at 99 % of the week's usage, at the end of build step 5 of 5 (§12), before the
 review phase. Branch `home-pairing` (worktree `/Users/noah/Downloads/winstream-pairing`, main merged
@@ -17,16 +17,23 @@ builds, every pure check with its mutants, S1's photos and the Settings cases at
 sizes, S7, and S2 with S5's end live, 18 of 18, every test listener on loopback (the first session's
 run; the second's found Noah's iPad streaming from Sill.app throughout).
 
-Next agent, in order: (1) verify step 5 (§11's gates for it; the mutants; iOS Debug, Release and
-device builds; the sheets): done, above; (2) merge main (cf05a78 or later: PRs #16–#28; the update
-notice's `DeviceGate` and hello meet this branch at the door and in `SessionLink`/`StreamClient`; the
-update-notice plan says the gate moves into this branch's `Door`, one place for both doors) and
-rerun every check; (3) the security review the workflow planned (three lenses: the wire and TLS,
-pairing's rules and limits, the device UI), fixes; (4) the PR with Noah's device tests (§11) and
-the install order: the iPad build first, then Sill.app. Quote Noah's authorization in the prompt:
-"Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy to do but still
-secure, similar to how Tailscale is being paired. Wired should still pair automatically." (2026-09-25)
-and this resumption.
+2026-09-27 02:38: main merged in at cf05a78 (PRs #16–#28; d11aa60, one merge commit, not a rebase),
+with the device gate in `Door` for both TLS doors and `DoorPolicy.afterGate`, `SillProtocol` 1
+settled as this door's `sill/1`, and this branch's pure checks moved into `Tests/checks` and CI
+(Results, "The merge with main"). Every check passes and every mutant of the checks the merge
+touched is caught; the host gates of both plans that the merge could break pass live, on the
+software encoder with every listener on loopback. Not pushed.
+
+Next agent, in order: (1) verify step 5: done, above; (2) merge main and rerun every check: done,
+above; (3) the security review the workflow planned (three lenses: the wire and TLS, pairing's
+rules and limits, the device UI), fixes; (4) the docs of §12's step 6 that are still to write
+(CLAUDE.md's Layout and Build and run for pairing at home's files, flags and TEST ONLY variables,
+and the README's Pairing section; the merge wrote only CLAUDE.md's Current step entry, its
+Compatibility floor and its Tests/checks and sillclient lines); (5) the PR with Noah's device
+tests (§11) and the install order: the iPad build first, then Sill.app. Quote Noah's authorization
+in the prompt: "Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy to
+do but still secure, similar to how Tailscale is being paired. Wired should still pair
+automatically." (2026-09-25) and this resumption.
 
 
 2026-09-25. It stands alone: the implementer needs no other design document, though it builds on
@@ -2581,3 +2588,135 @@ ran everything again but the live gates. Nothing failed and no code changed.
   read the saved Mac's "(p=1)" and the row after the removal.
 - Not verified, as before: taps, VoiceOver, the live scanner, the real cable at both ends, Noah's
   devices (P1–P16).
+
+### The merge with main (2026-09-27)
+
+`$SP` here is `scratchpad/home-pairing-finish/merge` in the session's scratchpad: the host gates
+(`gates.py`, their logs in `gates/`, the last run's output in `gates-final.out`), the CLI's parity
+(`parity.py`, `parity/`), the rig's source (`rig/`: `GateRig-main.swift`, one more executable target
+in `Package.swift`, built in a scratch copy of the tree, never committed), the previews
+(`previews/`) and the builds' and mutants' logs (`logs/`). The copies built from `git archive` (the
+rig's tree, both parents, the final tree's clean build) and every DerivedData were deleted after. Main was at cf05a78, about 100 commits ahead of this branch's base (1f3072a): PRs #16
+(the best path's follow-ups), #17 (GitHub Actions, `Tests/checks`), #18 (the update notice: kind 23's
+hello, `DeviceGate`, kind 22's new fields, the update check), #19 (iOS 1.0), #20 (the 33 fps plateau),
+#21, #22 (CI's fence fix), #23 (TestFlight tooling), #24 and #25 (the public sweep), #26, #27 (the App
+Store address) and #28. One merge commit (d11aa60), not a rebase; git stopped in 13 files, each
+resolved by reading both sides.
+
+**What landed.**
+- The device gate in `Door`, one place for both TLS doors, as CLAUDE.md's Compatibility floor had
+  it for whichever of update-notice and this branch landed second. Once `.ready` admits a `sill/1`
+  key (`DoorPolicy.atReady`), `Door.admitSession` hands the connection to `StreamServer.gate`: with
+  the floor at "0" (every build) it registers at once, as before; above it the first message inside
+  TLS must be a hello the floor admits, and any other device gets kind 22 "update" and is never
+  registered (main's gate, its Refused and count lines and its loop slowdown unchanged, counted per
+  source across every door). Then `serve(_:route:hello:admitted:)` registers the session, prints the
+  door's line ("Client connected", "Remote client connected") and then the hello's; `serve` runs no
+  gate of its own now. The plain home door (the CLI without `--pairing`) keeps main's gate at
+  `.ready`. A pairing connection never meets the gate: pairing is not refused for age.
+- `DoorPolicy.afterGate` (pure): what changed while the gate held a session (up to 2 s, neither
+  pending nor a client, so no `closeSessions` reached it) is judged again from the snapshot as the
+  gate admits it: at the remote door main's `stillAdmits` (removed, remoteOff, internetOff for an
+  origin the internet switch now refuses, busy at 8 sessions, in that order); at home a key paired at
+  `.ready` and removed since ("removed", with Require pairing on or off) or an unpaired key once
+  Require pairing is on ("pairingRequired"); a key paired meanwhile is admitted. `Door` sends that
+  goodbye with the line that change's own close prints ("Removed ‹name›: disconnecting it at …",
+  "Require pairing: disconnecting … which isn’t paired.", "Remote access off: …", "Internet access
+  off: …"; busy counted in the minute's summary), with main's `closeWithGoodbye` (a FIN and a drain,
+  never a reset before the goodbye). At home it also drops a connection accepted over peer-to-peer
+  Wi-Fi when Direct Wireless went off meanwhile (`droppedForDirectWireless`, main's rule, now shared
+  by both kinds of home door; `Door.accept` takes the accepting listener's flag). `readyArrived`'s
+  own goodbyes (remoteOff, busy) close the same way, as main's remote door did.
+- The test hooks: `SILL_TEST_MIN_DEVICE_VERSION` and `SILL_TEST_GOODBYE` follow this branch's test
+  host (`DoorPolicy.isTestHost`: not advertising and not Sill.app's own executable), and TestHooks
+  prints one "ignored" line for each elsewhere, beside the door's other hooks.
+- `Goodbye` has main's fields and "update" beside "pairingRequired". GoodbyePolicy (main's) knows
+  "pairingRequired" (its words as `HomeCopy.pairingRequired`, no reconnect, not a notice), so a TLS
+  home session that hears it still ends through `homeSessionEnded`; main's goodbye check had used
+  "pairingRequired" as its example of a reason the device does not know.
+- The device's hello, first on every session connection, over TLS at a TLS door: `connect(to:)`
+  (this branch's session parameters: TLS pinned, or plain for a plain door in DEBUG), `startMove`
+  (`moveParameters`) and `adopt`. A send made before `.ready` waits for the handshake, so the hello
+  is the first message inside TLS. Main's `connectionParameters` is gone (`DeviceTLS.plain` is the
+  same). `sessionEnded`: main's notice first (GoodbyePolicy), then a remote dial's failure, then
+  `homeSessionEnded` (removed, pairingRequired, another key), then GoodbyePolicy's outcome, with this
+  branch's revoking of a saved Mac after "removed".
+- `project.pbxproj`: both sides had taken A01E/F01E, for GoodbyePolicy.swift and
+  StreamClient+Home.swift; the auto-merge kept both, and the build lost GoodbyePolicy.
+  StreamClient+Home.swift is A301/F301 now (a block of its own, as App Store readiness took A201).
+- Sill.app: `StreamCoordinator(…, homePairing:, testHooks:, hostVersion:)`; both sides' settings
+  notes, panes (General's update section beside the Devices tab), menu entries and debug hooks;
+  main's `-SillPrintMenuAfter` is among the timed hooks Sill.app itself ignores, while the update
+  check's feed, version, interval and check-now arguments stay in the app (they bear on no door).
+- `SillProtocol` settled (Compatibility.swift, CLAUDE.md, docs/update-notice-plan.md §3.2, §4.6 and
+  open question 14): protocol 1 is 1.0's TLS home door with ALPN `sill/1`, as the remote door is;
+  pairing on the home door is no longer an example of what raises it; a later generation raises
+  both (`sill/2`, offered beside `sill/1` while older peers are served).
+- This branch's pure checks in `Tests/checks`, and in CI's mutants matrix: `door`, `cable`,
+  `asklimits`, `records`, `device`, `hometxt` and `home` are `door-policy`, `cable-link`,
+  `ask-limits`, `home-records`, `home-device`, `home-txt` and `home-model`, built by
+  `Tests/checks/module.py` (the scratch folder's `lib.py`) from each folder's `module.txt`; the
+  step-4 additions to `policy` and `remote-rules` are each folder's `home.swift`. `door-policy`
+  gained `afterGate`'s cases (a 10,240-case grid against an oracle, the order of the remote changes,
+  and that it admits exactly what `.ready` and the origin gate would admit now) and 8 mutants.
+- `sillclient.py --hello-delay=S`: the hello S seconds after the connection is up, for a change made
+  while a host's gate holds it.
+
+**Verified** (2026-09-27, 01:20–02:38). A device streamed from Noah's Sill.app throughout
+(`no-device.sh`: "1 client" every second), so nothing here used the hardware encoder: every host ran with
+`SILL_TEST_SOFTWARE_ENCODER=1` (never probed) and started no stream (the clients picked nothing),
+and every listener was on `::1` (`loopback.dylib`, `lsof` by the host's PID before any client), one
+host at a time, another session's host waited for first.
+- Builds: `swift build -c release` (only the old CaptureProbe warning in a clean build of the final
+  tree from `git archive`); iOS Debug and Release for the simulator (signed ad hoc) and Debug for
+  `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, each with fresh DerivedData: only the old
+  `StreamClient` capture warning (`StreamClient.swift:2572` now). The built Info.plists: Debug
+  `_sill._tcp` and `_silltest._tcp`, Release `_sill._tcp`, all with `ITSAppUsesNonExemptEncryption`
+  false, version 0.5 (main's) and `PrivacyInfo.xcprivacy`; none of the harness's arguments is in the
+  Release binary. The first iOS build of the merge failed on the pbxproj IDs above.
+- `Tests/checks/run-all.sh`: all 22 pass: addresses 41, ask-limits 27, cable-link 40, clientlink
+  89, compatibility 75, device-gate 58, door-policy 116, encoder-mailbox 38,256, encoder-slowstate
+  1,207, fence 14 modes, goodbye 45, home-device 128, home-model 34, home-records 30, home-txt 39,
+  ledger 90, origin 66, pairing-address 80, policy 336, protocol 188 and its 8 cross-checks,
+  remote-rules 102, update-policy 124. Before its update, goodbye failed 2 of 42: its later reason
+  was "pairingRequired".
+- The mutants of every check whose sources the merge changed from either side, every one caught:
+  addresses 15, ask-limits 15, cable-link 20, compatibility 13, device-gate 14, door-policy 49 (41
+  and afterGate's 8), goodbye 18 (16 and pairingRequired's 2), home-device 79, home-model 11,
+  home-records 16, home-txt 19, origin 10, pairing-address 35, policy 105, protocol 20,
+  remote-rules 52, update-policy 18. Not run again: clientlink, encoder-mailbox,
+  encoder-slowstate and fence, whose sources (ClientLink, EncoderMailbox, EncoderSlowState,
+  SessionLink, StreamMessage) are main's byte for byte, and ledger, which has none.
+- The host gates (`gates.py`, 47 of 47, on the final build): G1, the plain home door at floor "0":
+  a hello logged after "Client connected", a device without one served. G2, the plain door at floor
+  1.2: an older hello, no hello, and a hello later than 2 s each hear kind 22 "update" (the message
+  names the device and the Mac, `"minimumVersion":"1.2"`, `"reconnect":false`) and are never
+  registered; one at the floor is served. G3, the TLS home door (`--pairing`, floor "0"): pairing by
+  the link, a pinned session, pairing by an ask (the window open: `shown`) and the code, the hello
+  logged inside TLS, a plain device refused in the handshake with no goodbye. G4, both TLS doors at
+  floor 1.2: pairing is not refused for age; an older pinned session hears "update" inside TLS at
+  home and at the remote door, with its Refused line and no connected line; the key paired at home
+  is served at the remote door; nine remote sessions whose hellos the gate held at once: 8 served,
+  the 9th "busy" (`afterGate`), counted once in the remote door's minute; one "Client left" per
+  session served, none for the refused. G5 and G6, the rig (the merged host with the Mac's changes
+  on stdin, `sillclient --hello-delay` holding the hello): at home, Require pairing turned on while
+  an unpaired key's hello is held gives "pairingRequired" and "Require pairing: disconnecting iPad
+  (iPad14,1) at …, which isn’t paired."; a paired key removed meanwhile gives "removed" and "Removed
+  …: disconnecting it at …", and its next session is refused in the handshake; at the remote door
+  (loopback counted as the internet) internet access off, Remote Access off and Remove each give
+  their goodbye and line, never "Remote client connected". Direct Wireless turned off during a hold
+  was not run: its stand-in client must be on en0, beyond loopback.
+- The CLI's stdout without `--pairing` (`parity.py`) against this branch before the merge (1215f9b
+  from `git archive`), each number masked, sorted: idle for 35 s identical (6 lines); with a client
+  (a hello, picking nothing) identical but for main's "Client hello: …" line. Main's own CLI was not
+  run: its launch probe uses the hardware encoder.
+- Sill.app's previews (the bare binary's `-SillRenderPreviews`, each build run from the same path)
+  against both parents from `git archive`: 124 files, the union of home-pairing's 104 and main's 100
+  (80 names shared); 39 equal to both, 60 to this branch's, 22 to main's; three to neither, as
+  expected: `menu.txt` (this branch's samples with main's `update-available` added) and the
+  `pairing-longname` pair (this branch's window words with main's made-up Tailscale name).
+- Found after the merge commit and fixed: the harness's `notice` case and the compatibility check
+  used "pairingRequired" as a reason the device does not know; both use "pairAgain" now (the case
+  would have shown pairing at home's own words, not a Mac's message).
+- Not run: the simulator (S1–S7) and Noah's devices (P1–P16); main's parity and hardware gates
+  (V1–V7, the encoder's) that need the hardware encoder or his devices.

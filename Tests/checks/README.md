@@ -12,8 +12,8 @@ the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pu
 pushes to `main`.
 
 ```
-Tests/checks/run-all.sh                   every check, about three minutes on an M-series Mac
-Tests/checks/run-all.sh policy fence      only these
+Tests/checks/run-all.sh                   # every check, about three minutes on an M-series Mac
+Tests/checks/run-all.sh policy fence      # only these
 Tests/checks/policy/run.sh                # one check, with its whole output
 Tests/checks/run-all.sh --mutants         # also the mutants: well over an hour
 ```
