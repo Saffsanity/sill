@@ -18,21 +18,22 @@ func choose(_ a: [MacAddress], lan: String?, port: Int = D) -> C {
 }
 func show(_ c: C) -> String { "\(c.primary) | \(c.secondary ?? "nil")" }
 
-// MARK: Noah's store (scutil and the probe, 2026-09-24): utun0–3 link-local and nameless,
-// Tailscale on utun4 (100.65.142.55, fd7a:115c:a1e0::453a:8e38, MagicDNS tailc94091.ts.net), the
-// CoreDevice tunnel's ULA on utun5, en0 10.128.0.34 with a deprecated ULA.
+// MARK: Noah's store (scutil and the probe, 2026-09-24), Tailscale's name and addresses made up:
+// utun0–3 link-local and nameless, Tailscale on utun4 (100.88.123.45, fd7a:115c:a1e0::abcd:ef01,
+// MagicDNS tail5678.ts.net), the CoreDevice tunnel's ULA on utun5, en0 10.128.0.34 with a
+// deprecated ULA.
 let noah: [S] = [
     S(id: "u0", name: "", interface: "utun0", ipv4: [], ipv6: [V6(address: "fe80::a1", flags: 0)]),
     S(id: "u1", name: "", interface: "utun1", ipv4: [], ipv6: [V6(address: "fe80::a2", flags: 0)]),
     S(id: "u2", name: "", interface: "utun2", ipv4: [], ipv6: [V6(address: "fe80::a3", flags: 0)]),
     S(id: "u3", name: "", interface: "utun3", ipv4: [], ipv6: [V6(address: "fe80::a4", flags: 0)]),
-    S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.65.142.55"],
-      ipv6: [V6(address: "fd7a:115c:a1e0::453a:8e38", flags: 0), V6(address: "fe80::dc68:1", flags: 0)], matchDomains: ["", "tailc94091.ts.net."]),
+    S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.88.123.45"],
+      ipv6: [V6(address: "fd7a:115c:a1e0::abcd:ef01", flags: 0), V6(address: "fe80::dc68:1", flags: 0)], matchDomains: ["", "tail5678.ts.net."]),
     S(id: "cd", name: "", interface: "utun5", ipv4: [], ipv6: [V6(address: "fdab:cdef:1234::1", flags: 0)]),
     S(id: "wifi", name: "Wi-Fi", interface: "en0", ipv4: ["10.128.0.34"],
       ipv6: [V6(address: "fe80::869:a388:779d:7833", flags: 1024), V6(address: "fd4e:4f6b:37dc:4a0f:1083:aa29:4357:c7a9", flags: 1104)]),
 ]
-let magic = "noahs-macbook-pro.tailc94091.ts.net"
+let magic = "lab-macbook-pro.tail5678.ts.net"
 var input = AddressList.Input(services: noah, primaryInterface: "en0", tunnels: [], magicDNS: ["ts": magic])
 // With the internet switch on too: an address name, the router's address, a stable global IPv6.
 var withInternet = input
@@ -44,28 +45,28 @@ let noahList = AddressList.build(input)
 let noahInternet = AddressList.build(withInternet)
 let lan = AddressList.lanAddress(input)
 check("the store as AddressList builds it: name, v4, v6 (vpn), LAN (\(noahList.map { "\($0.host)/\($0.kind)" }))",
-      noahList.map { "\($0.host)/\($0.kind)" } == ["\(magic)/vpn", "100.65.142.55/vpn", "fd7a:115c:a1e0::453a:8e38/vpn", "10.128.0.34/lan"])
+      noahList.map { "\($0.host)/\($0.kind)" } == ["\(magic)/vpn", "100.88.123.45/vpn", "fd7a:115c:a1e0::abcd:ef01/vpn", "10.128.0.34/lan"])
 check("with the internet switch: also the address name, the router, the IPv6 (internet)",
       noahInternet.filter { $0.kind == MacAddress.internet }.map(\.host) == ["home.example.net", "203.0.113.9", "2001:db8::20"])
 check("Noah's store: the MagicDNS name, the Tailscale IPv4 under it (\(show(choose(noahList, lan: lan))))",
-      choose(noahList, lan: lan) == C(primary: magic, secondary: "100.65.142.55"))
+      choose(noahList, lan: lan) == C(primary: magic, secondary: "100.88.123.45"))
 check("…the same with the internet switch on: no router or address name in the window",
-      choose(noahInternet, lan: lan) == C(primary: magic, secondary: "100.65.142.55"), show(choose(noahInternet, lan: lan)))
+      choose(noahInternet, lan: lan) == C(primary: magic, secondary: "100.88.123.45"), show(choose(noahInternet, lan: lan)))
 check("…on port 7456: both with :7456",
-      choose(noahList, lan: lan, port: 7456) == C(primary: "\(magic):7456", secondary: "100.65.142.55:7456"), show(choose(noahList, lan: lan, port: 7456)))
+      choose(noahList, lan: lan, port: 7456) == C(primary: "\(magic):7456", secondary: "100.88.123.45:7456"), show(choose(noahList, lan: lan, port: 7456)))
 check("…on port 17455 with the internet switch: both with :17455, not the address name's port",
-      choose(noahInternet, lan: lan, port: 17455) == C(primary: "\(magic):17455", secondary: "100.65.142.55:17455"))
+      choose(noahInternet, lan: lan, port: 17455) == C(primary: "\(magic):17455", secondary: "100.88.123.45:17455"))
 check("…on the default port: no port", !choose(noahList, lan: lan).primary.contains(":") && choose(noahList, lan: lan).secondary?.contains(":") == false)
 
 // MagicDNS not kept (the name did not resolve to the tunnel's address): the IPv4 alone.
 var noName = input; noName.magicDNS = [:]
 check("no MagicDNS name: the Tailscale IPv4 alone (\(show(choose(AddressList.build(noName), lan: lan))))",
-      choose(AddressList.build(noName), lan: lan) == C(primary: "100.65.142.55", secondary: nil))
+      choose(AddressList.build(noName), lan: lan) == C(primary: "100.88.123.45", secondary: nil))
 // Tailscale with IPv4 turned off: IPv6 only.
 var v6Only = noName; v6Only.services[4].ipv4 = []
 check("Tailscale IPv6 only, no name: that IPv6 alone, in brackets (\(show(choose(AddressList.build(v6Only), lan: lan))))",
-      choose(AddressList.build(v6Only), lan: lan) == C(primary: "[fd7a:115c:a1e0::453a:8e38]", secondary: nil))
-check("…on port 7456: [v6]:7456", choose(AddressList.build(v6Only), lan: lan, port: 7456).primary == "[fd7a:115c:a1e0::453a:8e38]:7456")
+      choose(AddressList.build(v6Only), lan: lan) == C(primary: "[fd7a:115c:a1e0::abcd:ef01]", secondary: nil))
+check("…on port 7456: [v6]:7456", choose(AddressList.build(v6Only), lan: lan, port: 7456).primary == "[fd7a:115c:a1e0::abcd:ef01]:7456")
 var v6Named = input; v6Named.services[4].ipv4 = []
 check("VPN name and IPv6 only: the name alone (an IPv6 is never the line under it)",
       choose(AddressList.build(v6Named), lan: lan) == C(primary: magic, secondary: nil), show(choose(AddressList.build(v6Named), lan: lan)))
@@ -93,12 +94,12 @@ let many = AddressList.Input(services: more, primaryInterface: "en0", tunnels: [
 let manyList = AddressList.build(many)
 check("WireGuard's 10.99.0.2 is the first VPN IPv4 in dial order (\(manyList.map(\.host)))",
       manyList.first { $0.kind == MacAddress.vpn && $0.host.hasPrefix("10.") }?.host == "10.99.0.2"
-      && manyList.firstIndex { $0.host == "10.99.0.2" }! < manyList.firstIndex { $0.host == "100.65.142.55" }!)
+      && manyList.firstIndex { $0.host == "10.99.0.2" }! < manyList.firstIndex { $0.host == "100.88.123.45" }!)
 check("WireGuard beside Tailscale: Tailscale's name with Tailscale's IPv4, never WireGuard's",
-      choose(manyList, lan: lan) == C(primary: magic, secondary: "100.65.142.55"), show(choose(manyList, lan: lan)))
+      choose(manyList, lan: lan) == C(primary: magic, secondary: "100.88.123.45"), show(choose(manyList, lan: lan)))
 var manyNoName = many; manyNoName.magicDNS = [:]
 check("several VPNs, no name: Tailscale's IPv4 alone, though WireGuard's comes first in dial order",
-      choose(AddressList.build(manyNoName), lan: lan) == C(primary: "100.65.142.55", secondary: nil), show(choose(AddressList.build(manyNoName), lan: lan)))
+      choose(AddressList.build(manyNoName), lan: lan) == C(primary: "100.88.123.45", secondary: nil), show(choose(AddressList.build(manyNoName), lan: lan)))
 let tunnelOnly = AddressList.Input(services: [noah[6]], primaryInterface: "en0", tunnels: [AddressList.Tunnel(interface: "utun9", ipv4: ["10.8.0.6"])])
 check("a point-to-point tunnel, VPN (utun9), beside the LAN: this network's address, the tunnel's IPv4 under it",
       choose(AddressList.build(tunnelOnly), lan: AddressList.lanAddress(tunnelOnly)) == C(primary: "10.128.0.34", secondary: "10.8.0.6"),
@@ -119,8 +120,8 @@ check("…whatever order their IPv4 come in", choose(twoNamesSwapped, lan: nil) 
 // Beside Wi-Fi 192.168.1.20. A privacy VPN's address answers from nowhere: NordLynx gives every
 // client 10.5.0.2 and WARP 172.16.0.2, so this network's address stays first and theirs goes under it.
 let wifi = S(id: "wifi", name: "Wi-Fi", interface: "en0", ipv4: ["192.168.1.20"], ipv6: [V6(address: "fe80::1", flags: 0)])
-let tailscale = S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.65.142.55"],
-                  ipv6: [V6(address: "fd7a:115c:a1e0::453a:8e38", flags: 0)], matchDomains: ["tailc94091.ts.net."])
+let tailscale = S(id: "ts", name: "Tailscale", interface: "utun4", ipv4: ["100.88.123.45"],
+                  ipv6: [V6(address: "fd7a:115c:a1e0::abcd:ef01", flags: 0)], matchDomains: ["tail5678.ts.net."])
 let nord = S(id: "nord", name: "NordVPN", interface: "utun6", ipv4: ["10.5.0.2"], ipv6: [])
 let mullvad = S(id: "mv", name: "Mullvad VPN", interface: "utun6", ipv4: ["10.64.12.34"], ipv6: [V6(address: "fc00:bbbb:bbbb:bb01::1:c23", flags: 0)])
 let warp = S(id: "warp", name: "Cloudflare WARP", interface: "utun7", ipv4: ["172.16.0.2"], ipv6: [V6(address: "2606:4700:110:8a36::2", flags: 0)])
@@ -148,26 +149,26 @@ check("two other VPNs: the first IPv4 in dial order under this network's address
 for (name, vpnService) in [("Mullvad", mullvad), ("Cloudflare WARP", warp), ("a work VPN (Acme)", work), ("NordVPN", nord)] {
     let c = window([wifi, vpnService, tailscale])
     check("Tailscale without its name beside \(name), whose name sorts first: Tailscale's IPv4 alone (\(show(c)))",
-          c == C(primary: "100.65.142.55", secondary: nil))
+          c == C(primary: "100.88.123.45", secondary: nil))
 }
 check("Tailscale with its name beside Mullvad: the name, Tailscale's IPv4 under it",
-      window([wifi, mullvad, tailscale], names: ["ts": magic]) == C(primary: magic, secondary: "100.65.142.55"))
+      window([wifi, mullvad, tailscale], names: ["ts": magic]) == C(primary: magic, secondary: "100.88.123.45"))
 check("open-source tailscaled (an unnamed utun, no service, no name): its IPv4 alone",
-      window([wifi], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.65.142.55"])]) == C(primary: "100.65.142.55", secondary: nil),
-      show(window([wifi], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.65.142.55"])])))
+      window([wifi], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.88.123.45"])]) == C(primary: "100.88.123.45", secondary: nil),
+      show(window([wifi], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.88.123.45"])])))
 check("open-source tailscaled beside NordVPN: its IPv4 alone",
-      window([wifi, nord], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.65.142.55"])]) == C(primary: "100.65.142.55", secondary: nil))
+      window([wifi, nord], tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.88.123.45"])]) == C(primary: "100.88.123.45", secondary: nil))
 check("a Tailscale exit node on this Mac (its tunnel the primary): the name, its IPv4 under it",
-      window([wifi, tailscale], primary: "utun4", names: ["ts": magic]) == C(primary: magic, secondary: "100.65.142.55"))
+      window([wifi, tailscale], primary: "utun4", names: ["ts": magic]) == C(primary: magic, secondary: "100.88.123.45"))
 var tailscaleV6 = tailscale; tailscaleV6.ipv4 = []
 check("Tailscale IPv6 only, no name, beside WireGuard's IPv4: Tailscale's IPv6 alone",
-      window([wifi, wgMesh, tailscaleV6]) == C(primary: "[fd7a:115c:a1e0::453a:8e38]", secondary: nil), show(window([wifi, wgMesh, tailscaleV6])))
+      window([wifi, wgMesh, tailscaleV6]) == C(primary: "[fd7a:115c:a1e0::abcd:ef01]", secondary: nil), show(window([wifi, wgMesh, tailscaleV6])))
 
 // MARK: Tailscale's ranges, by the parsed address
 func vpnAt(_ host: String, via: String = "X") -> C { choose([MacAddress(host: host, kind: "vpn", via: via)], lan: home) }
 for (host, shown) in [("100.64.0.0", "100.64.0.0"), ("100.127.255.255", "100.127.255.255"), ("100.101.102.103", "100.101.102.103"),
                       ("fd7a:115c:a1e0::", "[fd7a:115c:a1e0::]"), ("fd7a:115c:a1e0:ffff:ffff:ffff:ffff:ffff", "[fd7a:115c:a1e0:ffff:ffff:ffff:ffff:ffff]"),
-                      ("FD7A:115C:A1E0:0:0:0:0:1", "[fd7a:115c:a1e0::1]"), ("::ffff:100.65.142.55", "100.65.142.55")] {
+                      ("FD7A:115C:A1E0:0:0:0:0:1", "[fd7a:115c:a1e0::1]"), ("::ffff:100.88.123.45", "100.88.123.45")] {
     check("\(host) is Tailscale's: alone (\(show(vpnAt(host))))", vpnAt(host) == C(primary: shown, secondary: nil))
 }
 for (host, shown) in [("100.63.255.255", "100.63.255.255"), ("100.128.0.0", "100.128.0.0"), ("10.100.64.1", "10.100.64.1"),
@@ -202,20 +203,20 @@ check("an IPv4 is preferred to an IPv6 whatever the order",
       choose([MacAddress(host: "fd7a::1", kind: "vpn", via: "X"), MacAddress(host: "10.99.0.2", kind: "vpn", via: "Y")], lan: nil)
         == C(primary: "10.99.0.2", secondary: nil))
 check("a name of kind lan is not a VPN name",
-      choose([MacAddress(host: "mac.example.net", kind: "lan", via: "Wi-Fi"), MacAddress(host: "100.65.142.55", kind: "vpn", via: "Tailscale")], lan: "10.128.0.34")
-        == C(primary: "100.65.142.55", secondary: nil))
+      choose([MacAddress(host: "mac.example.net", kind: "lan", via: "Wi-Fi"), MacAddress(host: "100.88.123.45", kind: "vpn", via: "Tailscale")], lan: "10.128.0.34")
+        == C(primary: "100.88.123.45", secondary: nil))
 check("an internet address name is not a VPN name",
-      choose([MacAddress(host: "100.65.142.55", kind: "vpn", via: "Tailscale"), MacAddress(host: "home.example.net", port: 17455, kind: "internet", via: "Address name")], lan: "10.128.0.34")
-        == C(primary: "100.65.142.55", secondary: nil))
+      choose([MacAddress(host: "100.88.123.45", kind: "vpn", via: "Tailscale"), MacAddress(host: "home.example.net", port: 17455, kind: "internet", via: "Address name")], lan: "10.128.0.34")
+        == C(primary: "100.88.123.45", secondary: nil))
 check("an unknown kind is not a VPN",
-      choose([MacAddress(host: "x.tail9.ts.net", kind: "future", via: "Tailscale"), MacAddress(host: "100.65.142.55", kind: "vpn", via: "Tailscale")], lan: nil)
-        == C(primary: "100.65.142.55", secondary: nil))
+      choose([MacAddress(host: "x.tail9.ts.net", kind: "future", via: "Tailscale"), MacAddress(host: "100.88.123.45", kind: "vpn", via: "Tailscale")], lan: nil)
+        == C(primary: "100.88.123.45", secondary: nil))
 check("a VPN IP that looks like a name is not one: a ts.net-looking host of kind lan is skipped, 100.x of kind vpn taken",
-      choose([MacAddress(host: "noahs-macbook-pro.tailc94091.ts.net", kind: "lan", via: "Wi-Fi"), MacAddress(host: "100.65.142.55", kind: "vpn", via: "Tailscale")], lan: nil)
-        == C(primary: "100.65.142.55", secondary: nil))
+      choose([MacAddress(host: "lab-macbook-pro.tail5678.ts.net", kind: "lan", via: "Wi-Fi"), MacAddress(host: "100.88.123.45", kind: "vpn", via: "Tailscale")], lan: nil)
+        == C(primary: "100.88.123.45", secondary: nil))
 check("a VPN host the parser refuses is never shown",
-      choose([MacAddress(host: "bad host", kind: "vpn", via: "X"), MacAddress(host: "1.2.3", kind: "vpn", via: "X"), MacAddress(host: "100.65.142.55", kind: "vpn", via: "X")], lan: nil)
-        == C(primary: "100.65.142.55", secondary: nil))
+      choose([MacAddress(host: "bad host", kind: "vpn", via: "X"), MacAddress(host: "1.2.3", kind: "vpn", via: "X"), MacAddress(host: "100.88.123.45", kind: "vpn", via: "X")], lan: nil)
+        == C(primary: "100.88.123.45", secondary: nil))
 check("under this network's address, another VPN's IPv4 before its IPv6, whatever the order",
       choose([MacAddress(host: "fd99::2", kind: "vpn", via: "W"), MacAddress(host: "10.99.0.2", kind: "vpn", via: "W")], lan: home)
         == C(primary: home, secondary: "10.99.0.2"))
@@ -268,10 +269,10 @@ func tailnet(_ p: ParsedAddress) -> Bool {
 }
 struct RNG { var s: UInt64; mutating func next(_ n: Int) -> Int { s = s &* 6364136223846793005 &+ 1442695040888963407; return Int((s >> 33) % UInt64(n)) } }
 var rng = RNG(s: 20260925)
-let hosts = ["noahs-macbook-pro.tailc94091.ts.net", "mac-mini.tail1234.ts.net", "100.65.142.55", "100.101.102.103", "10.99.0.2",
-             "fd7a:115c:a1e0::453a:8e38", "fd99::2", "10.128.0.34", "192.168.1.20", "127.0.0.1", "home.example.net", "203.0.113.9",
+let hosts = ["lab-macbook-pro.tail5678.ts.net", "mac-mini.tail1234.ts.net", "100.88.123.45", "100.101.102.103", "10.99.0.2",
+             "fd7a:115c:a1e0::abcd:ef01", "fd99::2", "10.128.0.34", "192.168.1.20", "127.0.0.1", "home.example.net", "203.0.113.9",
              "2001:db8::20", "bad host", "1.2.3", "Mixed.Case.Example", "10.5.0.2", "172.16.0.2", "100.63.255.255", "100.128.0.1",
-             "fd7a:115c:a1e1::1", "FD7A:115C:A1E0::9", "::ffff:100.65.142.55", "10.8.0.6"]
+             "fd7a:115c:a1e1::1", "FD7A:115C:A1E0::9", "::ffff:100.88.123.45", "10.8.0.6"]
 let kinds = ["vpn", "vpn", "lan", "internet", "future"]
 let vias = ["Tailscale", "Home WireGuard", "VPN (utun9)", "Wi-Fi", "Router", "Address name", "NordVPN"]
 let ports = [7455, 7455, 7456, 17455, 65535]
@@ -330,7 +331,7 @@ for _ in 0..<5_000 {
             let t = typed(a.host, own: a.port, port: port)
             let shown = c.primary == t || c.secondary == t
             // The same address listed again (a LAN value, or another kind, maybe in another form:
-            // ::ffff:100.65.142.55 is 100.65.142.55) may be shown for that entry.
+            // ::ffff:100.88.123.45 is 100.88.123.45) may be shown for that entry.
             let alsoOtherwise = lanValue.map { typed($0, own: nil, port: port) } == t
                 || list.contains { $0.kind != MacAddress.internet && typed($0.host, own: $0.port, port: port) == t }
             if shown && !alsoOtherwise { fail("P6 an internet address shown although a VPN or the LAN was there") }

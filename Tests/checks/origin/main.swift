@@ -11,7 +11,7 @@ var ifs = P.Interfaces()
 for (n, k) in [("en0", P.InterfaceKind.lan), ("en14", .lan), ("awdl0", .peerToPeer), ("llw0", .peerToPeer), ("utun0", .tunnel),
                ("utun4", .tunnel), ("wg0", .tunnel), ("lo0", .loopback), ("bridge0", .lan), ("gif0", .other)] { ifs.kind[n] = k }
 ifs.owner[b("192.168.1.20")] = "en0"; ifs.owner[b("fd4e:4f6b:37dc:4a0f::20")] = "en0"; ifs.owner[b("2001:db8:1::20")] = "en0"
-ifs.owner[b("100.65.142.55")] = "utun4"; ifs.owner[b("fd7a:115c:a1e0::453a:8e38")] = "utun4"; ifs.owner[b("10.99.0.2")] = "wg0"
+ifs.owner[b("100.88.123.45")] = "utun4"; ifs.owner[b("fd7a:115c:a1e0::abcd:ef01")] = "utun4"; ifs.owner[b("10.99.0.2")] = "wg0"
 ifs.owner[b("169.254.172.122")] = "en14"; ifs.owner[b("127.0.0.1")] = "lo0"; ifs.owner[b("::1")] = "lo0"
 ifs.owner[b("203.0.113.20")] = "bridge0"
 ifs.prefixes = [("en0", b("192.168.1.0"), 24), ("en0", b("fd4e:4f6b:37dc:4a0f::"), 64), ("en0", b("2001:db8:1::"), 64),
@@ -32,10 +32,10 @@ expect("fe80::1 scoped llw0", c("fe80::1", scope: "llw0"), .direct)
 expect("fe80::1 scoped en0", c("fe80::47b:5945:e0aa:d0ac", local: "fe80::2", scope: "en0"), .lan)
 expect("fe80::1 scoped anri0 (USB)", c("fe80::18fe:abff:febb:459f", scope: "anri0"), .lan)
 // 5 tunnels
-expect("100.84.3.2 arriving at the Tailscale address (utun4)", c("100.84.3.2", local: "100.65.142.55"), .vpn)
-expect("fd7a:115c:a1e0::1 arriving on utun4", c("fd7a:115c:a1e0::1", local: "fd7a:115c:a1e0::453a:8e38"), .vpn)
-expect("the Mac itself at its Tailscale address", c("100.65.142.55", local: "100.65.142.55"), .vpn)
-expect("ULA on utun (a VPN's own range)", c("fd00:aaaa::5", local: "fd7a:115c:a1e0::453a:8e38"), .vpn)
+expect("100.84.3.2 arriving at the Tailscale address (utun4)", c("100.84.3.2", local: "100.88.123.45"), .vpn)
+expect("fd7a:115c:a1e0::1 arriving on utun4", c("fd7a:115c:a1e0::1", local: "fd7a:115c:a1e0::abcd:ef01"), .vpn)
+expect("the Mac itself at its Tailscale address", c("100.88.123.45", local: "100.88.123.45"), .vpn)
+expect("ULA on utun (a VPN's own range)", c("fd00:aaaa::5", local: "fd7a:115c:a1e0::abcd:ef01"), .vpn)
 expect("RFC 1918 on wg0", c("10.99.0.9", local: "10.99.0.2"), .vpn)
 expect("a link-local source on a tunnel is still vpn", c("fe80::9", scope: "utun4"), .vpn)
 for n in ["ipsec0", "ppp0", "tun0", "tap0", "wg1", "feth3", "zt5", "utun9"] {

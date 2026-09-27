@@ -62,8 +62,11 @@ These texts are only true once these are:
   stapled, and opens on a Mac that never had it.
 - The build carries `PrivacyInfo.xcprivacy` and the export compliance key
   (section 6).
-- `MARKETING_VERSION` is 1.0 in both configurations of the Sill target
-  (it is 0.1 today), so the build attaches to the 1.0 version record.
+- The version record's Version is the build's: the first App Store version
+  is 0.5 (Noah, 2026-09-26; `MARKETING_VERSION` in both configurations of
+  the Sill target since PR #19). App Store Connect names a new app's first
+  version 1.0, and only a build whose version matches can be added to it, so
+  set the record's Version to 0.5 (section 5).
 - Every claim in the description has been seen working on a device. Still
   open: the USB cable on an iPhone (verified on the iPad mini only; if it
   fails, write "a USB cable (iPad)"), Apple Pencil hover, and 120 frames per
@@ -85,7 +88,7 @@ Apps › + › New App:
 | Field | Value |
 |---|---|
 | Platforms | iOS |
-| Name | `Sill` (see section 2 if it is refused) |
+| Name | `Sill – Mac Streaming` (Noah’s pick on 2026-09-26; "Sill" was taken in App Store Connect; section 2) |
 | Primary Language | English (U.S.) |
 | Bundle ID | `me.saffer.sill` (Xcode's automatic signing on team 9B2KKVM937 should have registered it; if the menu lacks it, add it under Certificates, Identifiers & Profiles. It can't change after the first upload.) |
 | SKU | `sill-ios` (never shown; can't change) |
@@ -106,8 +109,11 @@ refuses it, use this (2 to 30 characters, no Apple product name in the name
 itself):
 
 ```text
-Sill – Window Streaming
+Sill – Mac Streaming
 ```
+
+(Noah chose "Sill – Mac Streaming" on 2026-09-26; "Sill – Window Streaming" was the
+fallback this file first proposed.)
 
 The dash is an en dash (U+2013). The Home Screen label stays "Sill" whatever
 the store name is (`CFBundleDisplayName`). Keep other apps' names, Sidecar
@@ -179,12 +185,12 @@ one who skips the EU, and Apple can't decide it for you.
 - Price: Free.
 - Availability: all countries and regions. The export compliance answer needs
   no French declaration (section 6).
-- iPhone and iPad Apps on Apple Silicon Macs: **uncheck** "Make this app
+- iPhone and iPad Apps on Apple Silicon Mac: **uncheck** "Make this app
   available". Otherwise the iPad app shows up in the Mac App Store, where
   people look for Sill for Mac, and on a Mac it would only stream that Mac to
   itself.
-- Apple Vision Pro: **uncheck** "Make this app available". Nobody has tried it
-  there.
+- iPhone and iPad Apps on Apple Vision Pro: **uncheck** "Make this app
+  available on Apple Vision Pro". Nobody has tried it there.
 
 ## 4. App Privacy
 
@@ -221,7 +227,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. Version 1.0
+## 5. The first version (0.5)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -308,9 +314,9 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 1.0 |
+| Version | 0.5 (App Store Connect proposes 1.0 for a new app; the build says 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
-| App Previews | None for 1.0. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
+| App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
 | Build | The Release archive with the privacy manifest and the export compliance key |
