@@ -26,6 +26,7 @@
 		A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F013 /* HostSettingsPanel.swift */; };
 		A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
 		A1000001000000000000A015 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
+		A1000001000000000000A020 /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F020 /* MessageReader.swift */; };
 		A1000001000000000000A301 /* PointerPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F301 /* PointerPresence.swift */; };
 		A1000001000000000000A201 /* SillLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F201 /* SillLinks.swift */; };
 		A1000001000000000000A01D /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01D /* DeviceIdentity.swift */; };
@@ -67,6 +68,7 @@
 		A1000001000000000000F013 /* HostSettingsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsPanel.swift; sourceTree = "<group>"; };
 		A1000001000000000000F014 /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F015 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
+		A1000001000000000000F020 /* MessageReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReader.swift; sourceTree = "<group>"; };
 		A1000001000000000000F301 /* PointerPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointerPresence.swift; sourceTree = "<group>"; };
 		A1000001000000000000F201 /* SillLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SillLinks.swift; sourceTree = "<group>"; };
 		A1000001000000000000F01D /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 				A1000001000000000000F012 /* HostSettingsLedger.swift */,
 				A1000001000000000000F014 /* DiscoveryPolicy.swift */,
 				A1000001000000000000F015 /* SessionLink.swift */,
+				A1000001000000000000F020 /* MessageReader.swift */,
 				A1000001000000000000F301 /* PointerPresence.swift */,
 				A1000001000000000000F004 /* HEVCDisplayView.swift */,
 				A1000001000000000000F009 /* InputOverlay.swift */,
@@ -250,6 +253,7 @@
 				A1000001000000000000A012 /* HostSettingsLedger.swift in Sources */,
 				A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */,
 				A1000001000000000000A015 /* SessionLink.swift in Sources */,
+				A1000001000000000000A020 /* MessageReader.swift in Sources */,
 				A1000001000000000000A301 /* PointerPresence.swift in Sources */,
 				A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */,
 				A1000001000000000000A008 /* InputOverlay.swift in Sources */,

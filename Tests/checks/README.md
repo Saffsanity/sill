@@ -3,7 +3,7 @@
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
 video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
-session ends, what the update check makes of GitHub's answer, who moves the Mac's pointer and what
+session ends, how the device reads the Mac's messages, what the update check makes of GitHub's answer, who moves the Mac's pointer and what
 the device's pointer sprite shows, how the Mac download's disk image lays out its window, where
 everything goes on a phone held upright, what the Mac sends of its menus and what the device makes
 of it) are plain Swift files that compile on their own. Each folder here compiles one or a few of
@@ -39,6 +39,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `menu-state` | `iOSClient/MacMenuState.swift` with `Sources/StreamProtocol` (`build.sh`) | the device's view of the Mac's menus (docs/menu-bar-plan.md §7.2): the top level, fetches joined, answered, refused, timed out, a new tree and a move's hand-over, choices and their refusals, stale menus, a bar menu built from an older top level keeping its id only while the menu there has its title (another session's versions included), every fetch carrying the title it was shown under, the rows and sections (a note a section of its own); then 5,000 random sessions in which every opened menu's completion is settled exactly once | 122 and 5,000 sessions | 29 |
 | `menus` | `Sources/SillHost/MenuFormat.swift` and `MenuPolicy.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | kinds 24, 25 and 27 and MacMenu.swift's JSON (a fetch's title); the Mac's shortcuts as it draws them (modifiers, special and function keys, glyphs); items, ids and paths; the 1 s cache, only under the title it was read under, and the wait after an app is brought forward; the title shown; the request rates; a request's deadline from its device's wait; the submenus a version has read at their places (one tree per version); the press decision (only a leaf whose title now is the one shown); the refusals' words and the log's path | 309 | 43 |
+| `message-reader` | `iOSClient/MessageReader.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's reader against a stand-in Mac on loopback: 2,000 random messages in random chunks delivered byte for byte and in order, payloads read in pieces of at most 256 KB with every piece reported (liveness counts bytes), the end mid-message and with the last bytes, the caps, and a stop between messages, mid-payload and at a message the end came with | 46 | 17 |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
 | `phone-portrait` | `iOSClient/PhonePortraitLayout.swift` | where everything goes on a phone held upright: the picture's 16:10 pane, row 1's five buttons in their band, the strip, the six caps, the trackpad and its span, the Aa ruler, the drawer and the Settings panel across row 1, and the dim, and the Menus button ending the strip's row; the plan's tables phone by phone (the keyboard's too, and the Duo's outer display's), the approved mockup's numbers, and every width from 300 to 599 pt at every height to 1,400 | 152 | 31 |
@@ -57,9 +58,10 @@ two encoder checks' are those of the encoder-two-in-flight branch that brought t
 its merge with main at 32d532b, `dmg-layout`'s and `phone-portrait`'s those of the `mac-dmg` and
 `iphone-portrait` branches that brought them, `fence`'s main's at cf05a78 (ci-fence-fix's) with the
 `pointer-visibility` branch's count on top, `pointer-control`, `pointer-presence` and
-`pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md), and `menus`' and
+`pointer-watch`'s that branch's after its review (docs/pointer-visibility-plan.md), `menus`' and
 `menu-state`'s those of the `menu-bar-mirror` branch after its review, which also added the menus'
-kinds to `pointer-control`'s (152 before) and the Menus button to `phone-portrait`'s (149 and 28).
+kinds to `pointer-control`'s (152 before) and the Menus button to `phone-portrait`'s (149 and 28),
+and `message-reader`'s the `remote-pacing` branch's (docs/remote-bundle-plan.md, H5).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -111,7 +113,9 @@ a permission, a device or the network, and never anything that links VideoToolbo
   (`mailbox` with its mutants, `probe`, `encoder`; `Scripts/encoder-check/run.sh`), which refuse to
   run any binary that links VideoToolbox. When it merges, move them here (or call that script from
   `ci.yml`).
-- `home-pairing` and `remote-bundle` are plans so far, without checks.
+- `home-pairing` and the rest of `remote-bundle` (items 2–4) are plans so far, without checks. Its
+  item 1's host side is measured by the pacing harness (`Scripts/pacing/run.sh`), which needs no
+  encoder but runs for minutes and on loopback at up to 600 Mbit/s, so it is not a pure check.
 - `trackpad-gestures` (kind 28): `protocol`, `menus` and `pointer-control` expect 28 to read as
   `.unknown`, and three mutants renumber a kind onto 28 or 29 (`menus`' "the fetch at 28",
   `pointer-control`'s "kind 26 numbered 28" and "… 29"); that branch flips the cases and moves the

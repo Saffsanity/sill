@@ -395,10 +395,11 @@ tests of Direct Wireless Connection and remote access.
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
-encoder session, the device floor, how a session ends, the update check, the
-disk image's window, where everything goes on a phone held upright, the Mac's
-menus on both ends) on their own with a check each, and runs them: about two
-minutes, no device, permission or encoder. `--mutants` also checks that each
+encoder session, the device floor, how a session ends, how the device reads the
+Mac's messages, the update check, the disk image's window, where everything goes
+on a phone held upright, the Mac's menus on both ends) on their own with a check
+each, and runs them: about two minutes, no device, permission or encoder.
+`--mutants` also checks that each
 check fails when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
@@ -424,6 +425,18 @@ how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
 slows or cuts the link. TLS passes through.
+
+### The pacing harness
+
+`Scripts/pacing/run.sh` measures how the host paces a session away from home,
+this tree's StreamServer.swift against origin/main's (`--base REF` for
+another), with no encoder, Screen Recording or device: the host fed fake frames
+of chosen sizes, a shaped path (a rate, a delay, a queue, a dip, a dead path)
+and a stand-in device that reads, pings and judges liveness as the app does,
+all on 127.0.0.1. It prints each case against its gate
+(docs/remote-bundle-plan.md §11): about 18 minutes, `--full` about 40, and it
+waits while the Mac is busy (a load average of 20 or more), since a busy Mac
+makes a stalled path of any link. `--list` shows the cases.
 
 ### The menus' test app
 
@@ -714,8 +727,9 @@ record field by field.
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
   link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
-  for the update check's tests), and `menufixture.swift` and `menu-check/`
-  (the menus' test app, and the menu reader's checks against it).
+  for the update check's tests), `pacing/` (the pacing harness, above), and
+  `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
+  reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
