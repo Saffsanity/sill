@@ -58,6 +58,10 @@ enum DuoLayout {
         if size.width > size.height, size.height < outerMaxHeight { return .outerLandscape }
         return size.width > size.height ? .innerLandscape : .innerPortrait
     }
+
+    /// The laptop layout, inner or outer: stream on top, the key row and the trackpad below. Only
+    /// there does the device draw its own pointer, for the trackpad (PointerPresence).
+    var isPortrait: Bool { self == .innerPortrait || self == .outerPortrait }
 }
 
 // MARK: - Screen
@@ -136,6 +140,11 @@ struct StreamScreen: View {
                 // Under the pairing overlay nothing takes a touch: not the bar, and not the
                 // stream's UIKit input view.
                 .allowsHitTesting(!overlayShown)
+                // The pointer sprite follows the layout: the trackpad's arrow shows only in the
+                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
+                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                    client.setPointerLayout(portrait: portrait)
+                }
                 // A sibling in the same stack, not an `.overlay`: over the stream's UIKit input
                 // view, only a sibling drawn after it received the touches (measured on the
                 // simulator: an overlay's buttons were drawn but never tapped).
@@ -322,7 +331,7 @@ struct StreamScreen: View {
                 // Same frame as the video, so a touch maps straight onto the streamed frame.
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
-                             setLocalPointer: { client.localPointer = $0 },
+                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,

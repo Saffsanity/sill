@@ -125,6 +125,18 @@ struct ContentView: View {
 ///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
 ///   and `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
+/// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
+///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
+///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
+///   in every layout), `device@0.62,0.55` (this device's trackpad: its arrow in portrait only),
+///   `hidden` (the Mac has it, off the stream: none) or `pencil@0.50,0.50` (this device's Pencil:
+///   none, unless `-SillPencilPointer 1`, Q2's flip, draws it in every layout). Ignored with
+///   `-SillLive 1`, whose session shows the real thing.
+/// * `-SillInputScript '<t> <step>; …'` — with `-SillLive 1` only: input for the simulator gates,
+///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
+///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
+///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
+///   row). The console says "input script: …" at each.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -186,6 +198,10 @@ struct LayoutHarness: View {
         let connectCase: MockCatalog.ConnectCase?
         /// The stream screen under the pairing overlay.
         let scanOverlay: Bool
+        /// The mock's pointer state (`-SillPointer`), and Q2's flip (`-SillPencilPointer 1`). Ignored
+        /// when `live`.
+        let pointer: String?
+        let pencilPointer: Bool
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -204,7 +220,9 @@ struct LayoutHarness: View {
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
                         connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
-                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"))
+                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
+                        pointer: defaults.string(forKey: "SillPointer"),
+                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -226,7 +244,8 @@ struct LayoutHarness: View {
         self.spec = spec
         self.live = live
         _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
-                                ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase))
+                                ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
+                                                      pointer: spec.pointer, pencilPointer: spec.pencilPointer))
     }
 
     var body: some View {
@@ -284,6 +303,99 @@ struct LayoutHarness: View {
                          settingsOpen: spec.settingsOpen,
                          pairingOverlay: spec.scanOverlay, scannerOverride: .placeholder)
         }
+    }
+}
+
+/// `-SillInputScript '<t> <step>; …'` (with `-SillLive 1`): input for the simulator gates of
+/// docs/pointer-visibility-plan.md (S2–S5), which cannot put a finger on the simulator. `t` is
+/// seconds since the session's first window list; a step is
+/// * `down` — a finger lands on the portrait pad: a stroke starts, its cursor from the anchor;
+/// * `pad DX,DY` — that finger moves DX, DY points (a stroke starts first if none is down);
+/// * `lift` — it comes up;
+/// * `click` — a tap on the pad: a click where its cursor is;
+/// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
+/// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
+/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays.
+/// The pad and the overlay register themselves as they join a window, and each step calls their
+/// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
+/// console prints "input script: t=… <step>" as each runs. Once per launch.
+enum InputScript {
+    enum Step: Equatable, CustomStringConvertible {
+        case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+
+        var description: String {
+            switch self {
+            case .down: return "down"
+            case .pad(let dx, let dy): return "pad \(dx),\(dy)"
+            case .lift: return "lift"
+            case .click: return "click"
+            case .tap(let x, let y): return "tap \(x),\(y)"
+            case .key(let usage): return "key \(usage)"
+            case .row(let usage): return "row \(usage)"
+            }
+        }
+    }
+
+    /// The portrait pad and the stream's overlay now in a window (TrackpadSurface, InputOverlayView).
+    static weak var pad: TrackpadSurface?
+    static weak var overlay: InputOverlayView?
+    private static var started = false
+
+    /// The steps of a script, in its order; nil when a step does not read.
+    static func parse(_ text: String) -> [(at: Double, step: Step)]? {
+        var steps: [(at: Double, step: Step)] = []
+        for item in text.split(separator: ";") {
+            let words = item.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard words.count >= 2, let at = Double(words[0]), at.isFinite, at >= 0 else { return nil }
+            let pair = words.count == 3 ? words[2].split(separator: ",").compactMap { Double($0) } : []
+            let step: Step
+            switch (words[1], words.count) {
+            case ("down", 2): step = .down
+            case ("lift", 2): step = .lift
+            case ("click", 2): step = .click
+            case ("pad", 3) where pair.count == 2: step = .pad(dx: pair[0], dy: pair[1])
+            case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
+            case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
+            case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
+            default: return nil
+            }
+            steps.append((at, step))
+        }
+        return steps
+    }
+
+    /// The session's first window list is in (StreamClient): the script starts, once per launch.
+    static func sessionListed(_ client: StreamClient) {
+        let defaults = UserDefaults.standard
+        guard !started, defaults.bool(forKey: "SillLive"), let text = defaults.string(forKey: "SillInputScript") else { return }
+        started = true
+        guard let steps = parse(text) else {
+            print("input script: cannot read it: \(text)")
+            return
+        }
+        print("input script: \(steps.count) steps")
+        for (at, step) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak client] in
+                guard let client else { return }
+                run(step, at: at, client: client)
+            }
+        }
+    }
+
+    private static func run(_ step: Step, at: Double, client: StreamClient) {
+        var done = true
+        switch step {
+        case .down: if let pad { pad.scriptDown() } else { done = false }
+        case .pad(let dx, let dy): if let pad { pad.scriptMove(dx: dx, dy: dy) } else { done = false }
+        case .lift: if let pad { pad.scriptLift() } else { done = false }
+        case .click: if let pad { pad.scriptClick() } else { done = false }
+        case .tap(let x, let y): if let overlay { overlay.scriptTap(x: x, y: y) } else { done = false }
+        case .key(let usage): if let overlay { overlay.scriptKey(usage) } else { done = false }
+        case .row(let usage):
+            client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
+            client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        }
+        print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }
 }
 #endif

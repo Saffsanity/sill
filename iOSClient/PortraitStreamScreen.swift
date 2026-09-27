@@ -218,7 +218,7 @@ struct PortraitStreamScreen: View {
             StreamView(client: client)
             InputOverlay(videoSize: client.videoSize,
                          send: { client.sendInput($0) },
-                         setLocalPointer: { client.localPointer = $0 },
+                         setOwnPointer: { client.setOwnPointer($0, from: $1) },
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
@@ -237,13 +237,15 @@ struct PortraitStreamScreen: View {
     private var controls: some View {
         VStack(spacing: metrics.rowGap) {
             windowBar
+            // A key row key keeps what the sprite shows (StreamClient.sendFromKeyRow).
             KeyRow(metrics: metrics, latched: $latched, keyboardShown: keyboardShown,
-                   send: { client.sendInput($0) },
+                   send: { client.sendFromKeyRow($0) },
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    showSpotlight: client.active == .desktop)
             Trackpad(send: { client.sendInput($0) },
-                     setLocalPointer: { client.localPointer = $0 },
-                     currentLocalPointer: { client.localPointer },
+                     setPointer: { client.setOwnPointer($0, from: .trackpad) },
+                     feed: { let f = client.pointerFeedState; return (f.anchor, f.takeovers) },
+                     onFingers: { client.trackpadFingers($0) },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })
         }
