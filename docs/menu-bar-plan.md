@@ -1,6 +1,6 @@
 # The Mac's menu bar on the device — the plan
 
-## Status and hand-off (2026-09-26 03:50; critiqued 2026-09-27; the host finished 2026-09-27)
+## Status and hand-off (2026-09-26 03:50; critiqued 2026-09-27; the host finished 2026-09-27; the device and the docs 2026-09-27)
 
 Stopped by Noah at about 95 % of the week's usage, in the middle of the host build ("Stop trackpad
 gestures and menu bar mirror for now. Mark down next steps for agents that will pick up the task.").
@@ -192,6 +192,108 @@ Found, for the review (step 5):
 - `Tests/checks/README.md` on main repeats three paragraphs (a merge's leftovers); the menus row and
   ci.yml's mutants matrix entry are step 4's.
 
+**The device, Sill.app and the docs (2026-09-27, 04:04–05:30).** On top of ad29791, one commit
+each:
+- 4c58246, `MacMenuState` (§7.2) and `Tests/checks/menu-state`: 118 cases and 5,000 random
+  sessions (296,935 events) in which every opened menu's completion is settled exactly once, a kind
+  27 goes out once per waiting menu and nothing outlives its timeout; 26 of 26 mutants (run again on
+  the final tree). Where it departs from §7.2: a submenu's fetch carries the version its row came
+  in, and a row of another version is settled at once ("The menus changed…") instead of being asked
+  with the current version, where its id could name another item; a choice carries its row's
+  version, for the Mac to refuse; a choice while stale is refused on the device with the note;
+  `connectionReplaced` settles what was asked on the connection a move left, whose answers the
+  session no longer reads, and keeps the top level; the top level keeps at most 32 menus with
+  unique one-part ids, since the bar makes an identifier of each.
+- 0f07340, the rest of §7: `MacMenuElements`, `MacMenuHub` with `KeyWindowObserver`,
+  `SillAppDelegate` with `MacMenuBar`, `MacMenuButton` with `MacMenuTrigger`, the adaptor in
+  `SillApp`, `StreamClient`'s part, the two bars, the harness (`-SillMacMenu`'s nine cases,
+  `-SillMenusOpen`, `-SillMenuDump`, `-SillMenuBarLayout`, `-SillMenuBuildTwice`,
+  `-SillMenuNoView`), and the five files' pbxproj entries (A040–A044, F040–F044). Beyond §7.8, for
+  a run that cannot tap: `-SillMenusOpen 'File/Open Recent'` opens the pull-down on that menu (each
+  level fetched on the way), `-SillMenuPress 'File/Save'` chooses an item, both in the mock and
+  live; and the harness prints where a tap on the button's centre would land. In the bar, a
+  disabled or stale Mac menu stays a menu (its deferred element then shows the note or the Mac's
+  dimmed items), so the bar never changes shape; in the pull-down it is a dimmed row, as §7.2 rule 7
+  says. The console's top-level line is "menus: none (version 5)" or "menus: Code, 10 menus
+  (version 3)"; a wait that ran out, "menus: File (2) after 4160 ms: ‹the words›".
+- 13a139d, found by the photos: UIKit's automatic order turned a pull-down that opens upward (the
+  portrait bars, low on the screen) upside down, Help first and File from Save As… to New; the
+  button asks for `.fixed` now. And a menu cuts a long title at its third line, which took "System
+  Settings › Privacy & Security › Accessibility" off the no-Accessibility note: a note that ends in
+  a parenthesis shows it as the row's subtitle.
+- ab0d876, main at 676b362 merged (PR #29, the disk image), without a conflict.
+- The docs: CLAUDE.md's Current step, Layout and Build and run; docs/DEVELOPMENT.md (the menus for
+  a user of a source build, the CLI's self-test, the test app, the harness); `Tests/checks/README.md`
+  (the two checks, and the kinds 26 and 28 of other branches); ci.yml's mutants matrix
+  (`menu-state`, `menus`).
+
+Checked:
+- H1: iOS Debug and Release for the simulator and Debug for a device, only the old
+  `StreamClient` capture warning (at 2415 now, 2383 on main); `swift build -c release`, and
+  `Scripts/make-app.sh` without `--install`. H3: `Tests/checks/run-all.sh`, all 18 on the merge
+  (156 s); `menus` 279 and 33 of 33 mutants, `menu-state` as above. H13's iOS greps: no
+  `UIKeyCommand(` or `UICommand(` in the new files, every `insertElements` and `remove(menu:)`
+  after a `menu(for:)`, no `assumeIsolated`.
+- In a private simulator set (an iPad Pro 13" named "Sill menubar", then an iPhone 15 Pro of the
+  same name; iOS 27.0, the only runtime installed), screenshots with `simctl io` only:
+  - S1: the button between the strip and Aa at 1000x710, 710x1000, 500x710 and 710x500; faded under
+    the Aa ruler at 1000x710 and 500x710; `-SillMacMenu none` pixel for pixel main's own build
+    (cf05a78, built from `git archive`) at all four. Also the iPad mini (744x1133, 1133x744), the
+    iPad Pro 13" (1032x1376, 1376x1032) and the iPhone 15 Pro (393x852, 852x393).
+  - S2: the pull-down at the four sizes, in the Mac's order; File (subtitles, sections, ✓, a dimmed
+    item), Open Recent, Code › Settings ▸ Themes three deep, View › Appearance (✓ and the mixed
+    "–"), Run (dimmed items, F-keys); `slow`: the placeholder at 1.6 s, the items at 4 s (the answer
+    1.58 s after the fetch); `timeout`: "Mac mini didn’t answer. Open the menu again." at 4.16 s;
+    `stale`: the note, then each menu dimmed, and File holding the note alone; `noaccess`: the note
+    whole, as a title and subtitle; `blender`; `long`: Window's 302 rows scroll, History 500 and "100
+    more on the Mac"; xxLarge text at 1000x710 and 500x710; a choice ("menus: chose Save (2.9)") and
+    a refused one (the console's refusal; the announcement is VoiceOver's, P11). `-SillMenuPress`
+    against `stale` finds nothing to choose (a stale menu shows no rows), so the device's own
+    refusal of a choice made before the app went stale is the pure check's (rule 8).
+  - S3, the main menu's root (`-SillMenuDump 1`), iPad: `code`, the ten after View as
+    `me.saffer.sill.macmenu.1`…`10`, each one deferred element, no key command or command in them;
+    `replace`: File, Edit and View gone (the root has no Format), the ten before Window; `one`: one
+    "Code" menu holding the ten; `-SillMenuBuildTwice 1`: "nothing inserted (already in this build)"
+    the second time, the ten once, no exception; `-SillMenuNoView 1`: the ten before Window;
+    `stale`: the ten, each still one deferred element; `none` and `noaccess`: nothing inserted. The
+    iPhone: "nothing inserted (not an iPad on iPadOS 26)" at every build. An iOS 17 or 18 runtime:
+    none installed, not run.
+  - S4, live against a synthetic host with the fixture (the rig of the host step: `no-device.sh`
+    before and after, `lsappinfo front` every 0.2 s, one host under 40 s), on the iPad at 1000x710:
+    the pull-down with menufixture, File, Edit and Probe; Probe's 18 items through the host (Set
+    Label A ⌥⌘A, Set Label B ⌃⇧B, ✓ Checked, – Mixed, Unavailable dimmed, F5, ⌘⌫, ⌃⌘↑, ⎋);
+    `-SillMenuPress 'Probe/Set Label A'`: "menus: chose Set Label A (4.0)", the host's "Menu from
+    Sill menubar (iPad17,4 simulator): menufixture › Probe › Set Label A", the fixture's label "A".
+    On the iPhone at 393x852: the same four, Probe, Probe › Deep (4.19) › Level 2 level by level, and
+    Set Label B pressed ("B"). The front never changed in either run.
+  - The dump, live: a top level that arrived after the window became key was not in the bar until a
+    focus change (no rebuild in the 6 s that followed; opening the pull-down rebuilt it, with the fixture's four menus
+    after View). §7.2 rule 11 is there for this; whether showing the bar rebuilds it stays P8's.
+  - S5: the host stopped under an open pull-down: "127.0.0.1:P disconnected…", the button gone, and
+    the next build "nothing inserted (the session has no menus)". `simctl openurl` with a well-formed
+    `sill://pair` link brought the system's "Open in “Sill”?" over the connect screen, as on main
+    (the Build and run note); the app's own confirmation is past a tap, which a headless run cannot
+    give.
+  - The harness's hit test: "a tap on the Menus button's centre reaches the button" in every layout
+    photographed.
+- Sill.app (§6): `.build/Sill.app/Contents/MacOS/Sill --menu-selftest=<the fixture's pid>
+  -SillLogFile <scratch>` read the fixture's four menus (the top level in 23 ms) and exited 0, the
+  front unchanged, and the lines reached the log file that Show Log… reads. The NSWorkspace
+  observer runs only when an app is activated on the Mac, which no gate may do: P5.
+
+Not run in this step:
+- H13's previews: Sill.app's sources differ from main only in main.swift's `--menu-selftest`
+  branch, before NSApplication, and nothing the previews draw changed; the bare app takes the front
+  when started from a shell.
+- Taps (the rules allow only `simctl io` screenshots): a real tap on the button, the bar itself, a
+  choice's VoiceOver announcement.
+
+Found, for Noah and the review:
+- A phone held upright (393 pt, main's compact window bar): with the button, the strip keeps only a
+  sliver of its first thumbnail (one whole thumbnail without it). `iphone-portrait` gives phones a
+  row of their own for the strip, and its row 1 of five equal buttons then needs the Menus button:
+  whichever lands second.
+
 Next agent, in order:
 1. (Done) Merge main: cf05a78 at 53522ab. Main has not changed StreamCoordinator, StreamClient,
    StreamMessage or the pbxproj since 150f781, so this plan's line numbers still hold there.
@@ -199,11 +301,8 @@ Next agent, in order:
    `Scripts/menu-check/run.sh` (no host; safe while Sill.app streams), and H2 and H4–H11 once no
    device is on Sill.app (the session scratchpad's `menubar-finish/tools/gates.py` and `h2.py`, or by
    hand from §10).
-3. The iOS side, §7: the files and their four pbxproj entries by hand, `MacMenuState` checked with
-   swiftc and mutants, the iPadOS 26 menu bar, the Menus button, `StreamClient`, the harness cases
-   of §7.8; photos at the four Duo sizes and on an iPhone.
-4. Sill.app, §6; the docs (CLAUDE.md's Layout, Build and run and Current step, docs/DEVELOPMENT.md,
-   `Tests/checks/README.md`'s table and ci.yml's mutants matrix for `menus`, `Scripts/menu-check`).
+3. (Done) The iOS side, §7 (above).
+4. (Done) Sill.app, §6, and the docs (above).
 5. Review (wire and hard rules, the AX reader's queue and timeouts, the device UI and its hazards in
    §7.3, the fetch finding above), then a PR against main with Noah's device tests.
 Rules the build must keep: the reader presses nothing in any test but the fixture; no XCUITest or
