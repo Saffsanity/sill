@@ -13,8 +13,10 @@ import Foundation
 //
 // Pure: Foundation only, so it is checked on its own with swiftc.
 
-/// The wire's generation. 1: the 14-byte header, kinds 0–23 and the JSON rules of HostSettings.swift,
-/// inside TLS 1.3 with both keys pinned at both doors, whose session protocol is the ALPN `sill/1`
+/// The wire's generation. 1: the 14-byte header, kinds 0–23, and any later kind an older peer can
+/// skip (24, 25 and 27, the Mac's menus: MacMenu.swift; 26, the Mac's pointer: Pointer.swift; 28,
+/// the trackpad gesture: Gesture.swift), and the JSON rules of HostSettings.swift, inside TLS 1.3
+/// with both keys pinned at both doors, whose session protocol is the ALPN `sill/1`
 /// (RemoteTLS.sessionALPN): the home door pairs as the remote door does, as the first public builds
 /// ship it (docs/home-pairing-plan.md; the plain home door is development builds' and the CLI's).
 /// Raised only by a change an older peer cannot skip (a new transport, a kind or rule it cannot

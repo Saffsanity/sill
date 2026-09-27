@@ -57,7 +57,7 @@ enum MockCatalog {
     /// draw it. `.none` is the state a fresh connection starts in — nothing picked yet, so the app
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
     static func client(active: StreamSource = .window(102), settings: SettingsCase = .default,
-                       pointer: String? = nil, pencilPointer: Bool = false) -> StreamClient {
+                       menus: MenuCase? = .code, pointer: String? = nil, pencilPointer: Bool = false) -> StreamClient {
         let client = StreamClient()
         // Never browses, not even after the panel's Disconnect, when a remembered Mac would look
         // missing from a network the mock never looked at.
@@ -97,6 +97,8 @@ enum MockCatalog {
             default: break
             }
         }
+        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
+        if let menus { client.showMockMenus(macMenus(menus)) }
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
     }
@@ -110,6 +112,149 @@ enum MockCatalog {
             return
         }
         client.displayView.debugFrameSize(client.videoSize)
+    }
+
+    // MARK: - The Mac's menus
+
+    /// `-SillMacMenu`: the Mac's menus in the harness (docs/menu-bar-plan.md §7.8). The mock Mac
+    /// answers a menu 0.2 s after it opens and a choice 0.2 s after it is made, unless a case says
+    /// otherwise.
+    enum MenuCase: String {
+        case code       // VS Code's ten menus: File with shortcuts, sections, a ✓, a disabled item and Open Recent ▸; Code › Settings ▸ Themes ▸ three deep; View › Appearance with ✓s and a mixed mark; Run with disabled items
+        case blender    // only Blender and Window, as Blender's menu bar reads over Accessibility
+        case long       // a Window menu of 300 windows, and a History of 600 (500 sent, and "100 more on the Mac")
+        case stale      // Code not answering on the Mac: every menu disabled under the note
+        case noaccess   // no Accessibility for Sill on the Mac: the note, no menus
+        case none       // no menus (nothing streams, Sill itself frontmost): no Menus button
+        case slow       // code's menus, each answered after 1.5 s (UIKit's placeholder meanwhile)
+        case timeout    // code's menus, never answered: "Mac mini didn’t answer. Open the menu again." after 4 s
+        case refuse     // code's menus, every choice refused: "The menus changed. Open the menu again."
+    }
+
+    /// What the mock Mac sends: its top level, every menu's items by id, and how it answers.
+    struct MacMenus {
+        let topLevel: MacMenu
+        let tree: [String: [MacMenuItem]]
+        /// How long a fetch waits for its answer; nil: for ever (`timeout`).
+        let fetchDelay: Double?
+        let refusesChoices: Bool
+
+        /// The answer to a kind 27, as a host sends it: at most 500 items, `more` for the rest.
+        func answer(_ r: FetchMenu) -> MacMenu {
+            let items = tree[r.id ?? ""] ?? []
+            let sent = Array(items.prefix(500))
+            return MacMenu(version: topLevel.version, answering: r.token, menu: r.id, items: sent,
+                           more: items.count > sent.count ? items.count - sent.count : nil)
+        }
+
+        /// The answer to a kind 25.
+        func answer(_ r: PressMenuItem) -> MacMenu {
+            refusesChoices
+                ? MacMenu(version: topLevel.version, answering: r.token, pressed: false, note: MacMenuState.changedNote)
+                : MacMenu(version: topLevel.version, answering: r.token, pressed: true)
+        }
+    }
+
+    static func macMenus(_ c: MenuCase) -> MacMenus {
+        func top(_ titles: [String], app: String?, bundleID: String? = nil, stale: Bool? = nil, note: String? = nil) -> MacMenu {
+            MacMenu(version: 3, app: app, bundleID: bundleID,
+                    menus: titles.enumerated().map { MacMenuItem(id: "\($0.offset + 1)", title: $0.element, submenu: true) },
+                    stale: stale, note: note)
+        }
+        let codeTitles = ["Code", "File", "Edit", "Selection", "View", "Go", "Run", "Terminal", "Window", "Help"]
+        let vscode = "com.microsoft.VSCode"
+        switch c {
+        case .code, .slow, .timeout, .refuse, .stale:
+            let stale = c == .stale
+            return MacMenus(topLevel: top(codeTitles, app: "Code", bundleID: vscode, stale: stale ? true : nil,
+                                          note: stale ? "Code isn’t responding." : nil),
+                            tree: codeTree,
+                            fetchDelay: c == .slow ? 1.5 : c == .timeout ? nil : 0.2,
+                            refusesChoices: c == .refuse)
+        case .blender:
+            return MacMenus(topLevel: top(["Blender", "Window"], app: "Blender", bundleID: "org.blenderfoundation.blender"),
+                            tree: ["1": items("1", ["About Blender", "—", "Preferences… | ⌘,", "—", "Services ▸", "—",
+                                                    "Hide Blender | ⌘H", "Hide Others | ⌥⌘H", "Show All", "—", "Quit Blender | ⌘Q"]),
+                                   "1.4": items("1.4", ["!No Services Apply"]),
+                                   "2": items("2", ["Minimize | ⌘M", "Zoom", "—", "Toggle Window Fullscreen | ⌃⌘F", "Toggle System Console",
+                                                    "—", "Bring All to Front", "—", "✓untitled.blend"])],
+                            fetchDelay: 0.2, refusesChoices: false)
+        case .long:
+            let windows = (1...300).map { "Window \($0) — notes-\($0).md" }
+            let history = (1...600).map { "Visited page \($0)" }
+            return MacMenus(topLevel: top(["Code", "File", "Window", "History"], app: "Code", bundleID: vscode),
+                            tree: ["1": codeTree["1"] ?? [], "2": codeTree["2"] ?? [],
+                                   "3": items("3", ["Minimize | ⌘M", "Zoom", "—"] + windows),
+                                   "4": items("4", history)],
+                            fetchDelay: 0.2, refusesChoices: false)
+        case .noaccess:
+            return MacMenus(topLevel: MacMenu(version: 3, app: "Code", bundleID: vscode, menus: [],
+                                              note: "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security › Accessibility)."),
+                            tree: [:], fetchDelay: 0.2, refusesChoices: false)
+        case .none:
+            return MacMenus(topLevel: MacMenu(version: 3, menus: []), tree: [:], fetchDelay: 0.2, refusesChoices: false)
+        }
+    }
+
+    /// VS Code's menus as a Mac with this build reads them (a selection of each).
+    private static let codeTree: [String: [MacMenuItem]] = [
+        "1": items("1", ["About Visual Studio Code", "—", "Settings ▸", "—", "Services ▸", "—", "Hide Visual Studio Code | ⌘H",
+                         "Hide Others | ⌥⌘H", "Show All", "—", "Quit Visual Studio Code | ⌘Q"]),
+        "1.2": items("1.2", ["Settings | ⌘,", "Extensions | ⇧⌘X", "Keyboard Shortcuts [⌘K ⌘S]", "Snippets", "Tasks", "—",
+                             "Themes ▸", "—", "Backup and Sync Settings…", "Online Services Settings"]),
+        "1.2.6": items("1.2.6", ["Color Theme [⌘K ⌘T]", "File Icon Theme", "Product Icon Theme"]),
+        "1.4": items("1.4", ["!No Services Apply", "—", "Services Settings"]),
+        "2": items("2", ["New Text File | ⌘N", "New File… | ⌃⌥⌘N", "—", "Open Recent ▸", "Open… | ⌘O", "Open Folder…",
+                         "New Window | ⇧⌘N", "—", "Save Workspace As…", "Save | ⌘S", "Save As… | ⇧⌘S", "—",
+                         "✓Auto Save", "—", "!Revert File", "Close Editor | ⌘W", "Close Window | ⇧⌘W"]),
+        "2.3": items("2.3", ["Reopen Closed Editor | ⇧⌘T", "—", "~/Downloads/winstream", "~/Code/site", "~/Notes/trip.md", "—",
+                             "More… | ⌃R", "—", "Clear Recently Opened"]),
+        "3": items("3", ["Undo | ⌘Z", "Redo | ⇧⌘Z", "—", "Cut | ⌘X", "Copy | ⌘C", "Paste | ⌘V", "—", "Find | ⌘F",
+                         "Replace | ⌥⌘F", "—", "Find in Files | ⇧⌘F", "Replace in Files | ⇧⌘H", "—",
+                         "Toggle Line Comment | ⌘/", "Toggle Block Comment | ⌥⇧A", "—", "Start Dictation… | fn D",
+                         "Emoji & Symbols | fn E"]),
+        "4": items("4", ["Select All | ⌘A", "Expand Selection | ⌃⇧⌘→", "Shrink Selection | ⌃⇧⌘←", "—", "Copy Line Up | ⌥⇧↑",
+                         "Copy Line Down | ⌥⇧↓", "Move Line Up | ⌥↑", "Move Line Down | ⌥↓", "—",
+                         "Add Cursor Above | ⌥⌘↑", "Add Cursor Below | ⌥⌘↓", "—", "Column Selection Mode"]),
+        "5": items("5", ["Command Palette… | ⇧⌘P", "Open View…", "—", "Appearance ▸", "Editor Layout ▸", "—",
+                         "Explorer | ⇧⌘E", "Search | ⇧⌘F", "Source Control | ⌃⇧G", "Run | ⇧⌘D", "Extensions | ⇧⌘X", "—",
+                         "Problems | ⇧⌘M", "Output | ⇧⌘U", "Terminal | ⌃`", "—", "✓Word Wrap | ⌥Z"]),
+        "5.3": items("5.3", ["Full Screen | ⌃⌘F", "Zen Mode [⌘K Z]", "Centered Layout", "—", "✓Primary Side Bar | ⌘B",
+                             "Secondary Side Bar | ⌥⌘B", "✓Status Bar", "~Minimap", "✓Panel | ⌘J"]),
+        "5.4": items("5.4", ["Split Up", "Split Down", "Split Left", "Split Right", "—", "Single", "Two Columns", "Three Columns"]),
+        "6": items("6", ["Back | ⌃-", "Forward | ⌃⇧-", "Last Edit Location [⌘K ⌘Q]", "—", "Go to File… | ⌘P",
+                         "Go to Symbol in Workspace… | ⌘T", "—", "Go to Symbol in Editor… | ⇧⌘O", "Go to Definition | F12",
+                         "Go to Line/Column… | ⌃G"]),
+        "7": items("7", ["Start Debugging | F5", "Run Without Debugging | ⌃F5", "!Stop Debugging | ⇧F5",
+                         "!Restart Debugging | ⇧⌘F5", "—", "Open Configurations", "Add Configuration…", "—",
+                         "!Step Over | F10", "!Step Into | F11", "!Step Out | ⇧F11", "—", "Toggle Breakpoint | F9"]),
+        "8": items("8", ["New Terminal | ⌃⇧`", "Split Terminal | ⌘\\", "—", "Run Task…", "Run Build Task… | ⇧⌘B",
+                         "Run Active File", "Run Selected Text"]),
+        "9": items("9", ["Minimize | ⌘M", "Zoom", "Fill | fn ⌃F", "Center | fn ⌃C", "—", "Bring All to Front", "—",
+                         "✓stream.py — winstream", "index.html — site"]),
+        "10": items("10", ["Welcome", "Show All Commands | ⇧⌘P", "Documentation", "Editor Playground", "Show Release Notes", "—",
+                           "Keyboard Shortcuts Reference [⌘K ⌘R]", "Video Tutorials", "Tips and Tricks", "—", "Report Issue",
+                           "—", "View License", "Privacy Statement", "—", "Toggle Developer Tools | ⌥⌘I"]),
+    ]
+
+    /// A menu's items from one line each: "—" a separator, "Title ▸" a submenu, "Title | ⌘S" a
+    /// shortcut, and a first "!" (disabled), "✓" (on) or "~" (mixed). Ids from `parent`, 0-based,
+    /// separators counted, as the Mac numbers them.
+    private static func items(_ parent: String, _ lines: [String]) -> [MacMenuItem] {
+        lines.enumerated().map { index, line in
+            let id = "\(parent).\(index)"
+            if line == "—" { return MacMenuItem(separator: true) }
+            var text = Substring(line)
+            var enabled: Bool?
+            var mark: String?
+            if text.hasPrefix("!") { enabled = false; text = text.dropFirst() }
+            if text.hasPrefix("✓") { mark = "✓"; text = text.dropFirst() } else if text.hasPrefix("~") && !text.hasPrefix("~/") { mark = "-"; text = text.dropFirst() }
+            let parts = text.components(separatedBy: " | ")
+            if parts[0].hasSuffix(" ▸") {
+                return MacMenuItem(id: id, title: String(parts[0].dropLast(2)), enabled: enabled, submenu: true)
+            }
+            return MacMenuItem(id: id, title: parts[0], enabled: enabled, mark: mark, key: parts.count > 1 ? parts[1] : nil)
+        }
     }
 
     // MARK: - The Mac's settings
@@ -171,6 +316,9 @@ enum MockCatalog {
         case .noroute, .remote, .remoteinternet, .remoteslow: client.route = nil
         default: client.route = .wifi
         }
+        // A Mac from this build takes the trackpad gestures (its window list says so); an older one
+        // does not, and its Settings panel says to update it.
+        client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,

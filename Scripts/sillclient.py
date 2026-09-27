@@ -24,6 +24,11 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+  --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
+                     swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
+  --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
+                     --gesture and --raw28 go only to a --synthetic host on this Mac, as input does:
+                     it logs the shortcut it would post and posts nothing; any other host posts it
   --hello=VER[,PROTO] send a hello (kind 23) first, before the select, as a device from 2026-09-25 on does:
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
@@ -31,6 +36,22 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --hello-delay=S    with --hello: send it S seconds after the connection is up (TLS included), and
                      nothing before it: a device whose hello a host's device gate waits for while the
                      Mac changes something (its gate gives up after 2 s)
+The Mac's menus (kinds 24, 25 and 27; docs/menu-bar-plan.md). Tokens are shared with --set's: 1, 2, 3...
+in send order. Each kind 24 is printed on one line: a top level ("menus v3 at 1.234s: File ▸ | …"),
+a menu's items ("menu 4 v3 (answering 2) at …: 4.0 Set Label A ⌥⌘A | — | …"), a press's answer
+("press 4.0 v3 (answering 3) at …: pressed=1"), with note=, stale=1 and more= when sent:
+  --menus            a kind 27 without an id right after the select: the subscription (a top level is
+                     read on the Mac, nothing is activated)
+  --fetch=ID[xN][,TITLE]@T  N kind 27s for menu ID back to back (default 1), with the last top level's
+                     version and TITLE, the title the menu was shown under (default: the one the last top
+                     level or answer listed for ID; the host reads a menu only under its title)
+  --press=ID[,TITLE]@T  a kind 25 for item ID; TITLE defaults to the one the last answer listed for ID
+  --raw25=JSON@T, --raw27=JSON@T   these literal payloads (split on the last @)
+  --expect-menus=TITLE[,TITLE...]  at exit, the last top level's titles in order: EXPECT-MENUS ok or
+                     EXPECT-MENUS FAIL, exits 1 on failure
+--fetch, --press, --raw25 and --raw27 open and choose the menus of whatever app the host has in front,
+so they run only with SILL_TEST_MENU_PID set in this script's own environment, as for the host started
+against the fixture (Scripts/menufixture.swift); without it they exit 2.
 The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
   --pointer          print each kind 26 as "pointer at 1.234s x=0.5000 y=0.5000 inside=1 seen=0"
                      (inside=0 without x and y): where the Mac's pointer is while this client is not
@@ -90,18 +111,23 @@ with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP 
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",26:"pointer"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
 # What --set may send: HostSettingsChange's six fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "move", "tap", "key", "input")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
+         "move", "tap", "key", "input", "gesture", "raw28")
 INPUT = ("move", "tap", "key", "input")
+# What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
+GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "hello-delay", "then-code",
-          "pair-hold", "expect-pair", "pair-v")
+          "pair-hold", "expect-pair", "pair-v", "expect-menus")
 PAIR_RESULTS = ("ok", "cable", "shown", "openOnMac", "locked", "closed", "code", "busy", "expired", "stopped")
+# Sends that read or press the host's menus: only against a host started with the fixture's pid.
+MENU_SENDS = ("fetch", "press", "raw25", "raw27")
 
 def msg(kind, payload=b"", key=False):
     return struct.pack(">BdBI", kind, time.time(), 1 if key else 0, len(payload)) + payload
@@ -132,6 +158,13 @@ def pairs(body, keys, flag):
         if k not in keys: raise ValueError(f"{flag}: unknown key {k!r} (keys: {', '.join(sorted(keys))})")
         out[k] = value(k, v)
     return out
+
+def gesture(text):
+    name, _, fingers = text.partition(",")
+    if name not in GESTURES: raise ValueError(f"--gesture: not a gesture: {name!r} ({', '.join(GESTURES)})")
+    n = number(fingers, "--gesture's fingers") if fingers else 3
+    if n not in (3, 4): raise ValueError(f"--gesture: 3 or 4 fingers, not {n}")
+    return {"gesture": name, "fingers": n}
 
 def fractions(text, flag):
     """X,Y for --move and --tap: two finite numbers, frame fractions (outside 0…1 is allowed)."""
@@ -398,15 +431,29 @@ try:
             text, at, t = body.rpartition("@")
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
             if name in ("stop-ping", "stop-read", "pairing-wanted") and text: raise ValueError(f"--{name}@T takes no value")
-            parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
-                      else number(text, "--fps-after") if name == "fps-after"
-                      else fractions(text, f"--{name}") if name in ("move", "tap")
-                      else usage(text) if name == "key" else text)
+            if name in MENU_SENDS and not os.environ.get("SILL_TEST_MENU_PID"):
+                raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
+                                 "run them against a host started with SILL_TEST_MENU_PID.")
+            if name == "fetch":
+                idpart, comma, ftitle = text.partition(",")
+                m = re.fullmatch(r"(.+?)(?:x(\d+))?", idpart)
+                if not m: raise ValueError(f"--fetch: ID[xN][,TITLE], got {text!r}")
+                parsed = (m.group(1), int(m.group(2) or 1), ftitle if comma else None)
+            elif name == "press":
+                pid_, comma, ptitle = text.partition(",")
+                if not pid_: raise ValueError(f"--press: ID[,TITLE], got {text!r}")
+                parsed = (pid_, ptitle if comma else None)
+            else:
+                parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
+                          else number(text, "--fps-after") if name == "fps-after"
+                          else fractions(text, f"--{name}") if name in ("move", "tap")
+                          else gesture(text) if name == "gesture"
+                          else usage(text) if name == "key" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--pointer", "--pair-ask", "--pair-ask=cable",
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--pair-ask", "--pair-ask=cable",
                        "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -445,6 +492,8 @@ try:
         if damm(pair_code) != 0: raise ValueError("--pair-code: the check digit does not match (a typo)")
     if pin_arg and pin_arg != "none" and len(b64u_decode(pin_arg)) != 32: raise ValueError("--pin: a base64url SHA-256 or none")
     hello_arg = valued("hello")
+    expect_menus = valued("expect-menus")
+    expect_menus = expect_menus.split(",") if expect_menus is not None else None
     if hello_arg is not None and hello_arg != "none":
         hv, _, hp = hello_arg.partition(",")
         if not hv: raise ValueError("--hello: VERSION[,PROTOCOL] or none")
@@ -458,6 +507,11 @@ try:
     if any(e[2] in INPUT for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--move, --tap, --key and --input only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
+    # A gesture likewise: a --synthetic host logs the shortcut it would post and posts nothing
+    # (docs/trackpad-gestures-plan.md §7.4); any other host would post it on this Mac.
+    if any(e[2] in ("gesture", "raw28") for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--gesture and --raw28 only go to a --synthetic host on this Mac, which posts no gesture; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -538,6 +592,9 @@ try:
             time.sleep(hello_delay)
         s.sendall(msg(23, json.dumps(hello).encode())); print(f"  sent hello {json.dumps(hello)}" + (f" after {hello_delay:g} s" if hello_delay else ""))
     s.sendall(msg(6, json.dumps(sel).encode()))
+    if "--menus" in flags:
+        # The subscription (kind 27 without an id); its token is the first of the shared counter.
+        s.sendall(msg(27, json.dumps({"token": 1}).encode())); print("  sent menus subscription (token 1)")
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
 if big_payload:
@@ -572,7 +629,18 @@ def describe(d):
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
-token = 1; last_state = None; settings_msgs = 0
+token = 2 if "--menus" in flags else 1; last_state = None; settings_msgs = 0
+# The Mac's menus: the last top level (its version and titles), every title an answer listed by id,
+# and what each token asked for (a fetch's id, a press's id).
+menu_version = None; menu_top = None; menu_titles = {}; menu_asked = {1: ("menus", None)} if "--menus" in flags else {}
+def menu_line(it):
+    if it.get("separator"): return "—"
+    t = f"{it.get('id')} {it.get('title')}"
+    if it.get("submenu"): t += " ▸"
+    if it.get("key"): t += f" {it['key']}"
+    if it.get("mark"): t += f" {it['mark']}"
+    if it.get("enabled") is False: t += " (off)"
+    return t
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
@@ -595,6 +663,22 @@ def fire(e, now):
         global reading; reading = False; print(f"  stopped reading at {at}")
     elif name == "pairing-wanted":
         s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
+    elif name == "fetch":
+        mid, n, ftitle = parsed
+        ftitle = ftitle if ftitle is not None else menu_titles.get(mid)
+        for _ in range(n):
+            body = {"version": menu_version, "id": mid, "title": ftitle, "token": token}
+            menu_asked[token] = ("fetch", mid); token += 1
+            s.sendall(msg(27, json.dumps({k: v for k, v in body.items() if v is not None}).encode()))
+        print(f"  sent fetch {mid} {ftitle!r}{f' x{n}' if n > 1 else ''} (v{menu_version}, tokens {token - n}–{token - 1}) at {at}")
+    elif name == "press":
+        mid, ptitle = parsed
+        body = {"version": menu_version, "id": mid, "title": ptitle if ptitle is not None else menu_titles.get(mid), "token": token}
+        menu_asked[token] = ("press", mid); token += 1
+        s.sendall(msg(25, json.dumps({k: v for k, v in body.items() if v is not None}).encode()))
+        print(f"  sent press {mid} {body.get('title')!r} (v{menu_version}, token {token - 1}) at {at}")
+    elif name in ("raw25", "raw27"):
+        s.sendall(msg(int(name[3:]), text.encode())); print(f"  sent raw kind {name[3:]} {text} at {at}")
     elif name == "move":
         s.sendall(pointer_input("move", *parsed)); print(f"  sent move {text} at {at}")
     elif name == "tap":
@@ -604,6 +688,10 @@ def fire(e, now):
         s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
     elif name == "input":
         s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
+    elif name == "gesture":
+        s.sendall(msg(28, json.dumps(parsed).encode())); print(f"  sent gesture {json.dumps(parsed)} at {at}")
+    elif name == "raw28":
+        s.sendall(msg(28, text.encode())); print(f"  sent raw kind 28 {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
@@ -668,6 +756,27 @@ while time.time() - t0 < dur:
             g = json.loads(payload)
             extra = "".join(f"; {k}: {json.dumps(g[k], ensure_ascii=False)}" for k in ("message", "minimumVersion", "reconnect") if k in g)
             print(f"  goodbye at {time.time()-t0:.3f}s: {g.get('reason')}{extra}")
+        elif kind == 24:
+            try:
+                d = json.loads(payload)
+            except ValueError:
+                print(f"  menu at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
+            v = d.get("version"); ans = d.get("answering")
+            ans_text = f" (answering {ans})" if ans is not None else ""
+            extra = (f" more={d['more']}" if d.get("more") else "") + (" stale=1" if d.get("stale") else "") + (f" note={d['note']!r}" if d.get("note") else "")
+            asked = menu_asked.get(ans, (None, None)) if ans is not None else (None, None)
+            for it in (d.get("menus") or []) + (d.get("items") or []):
+                if it.get("id") is not None and it.get("title") is not None: menu_titles[it["id"]] = it["title"]
+            if "menus" in d:
+                menu_version = v; menu_top = [it.get("title") for it in d["menus"]]
+                print(f"  menus v{v}{ans_text} at {time.time()-t0:.3f}s: " + " | ".join(f"{it.get('title')} ▸" + (" (off)" if it.get("enabled") is False else "") for it in d["menus"])
+                      + f" ({d.get('app')}, stale={1 if d.get('stale') else 0})" + (f" note={d['note']!r}" if d.get("note") else ""))
+            elif "pressed" in d:
+                print(f"  press {asked[1]} v{v}{ans_text} at {time.time()-t0:.3f}s: pressed={1 if d['pressed'] else 0}" + extra)
+            else:
+                items = d.get("items") or []
+                print(f"  menu {d.get('menu', asked[1])} v{v}{ans_text} at {time.time()-t0:.3f}s: {len(items)} items: "
+                      + " | ".join(menu_line(it) for it in items) + extra)
         elif kind == 16:
             settings_msgs += 1
             try:
@@ -700,6 +809,10 @@ windows = [window_frames.get(w, 0) for w in range(int(dur // 5))]
 print(f"LINK rtt p50 {pct(rtts, .5):.1f} p95 {pct(rtts, .95):.1f} max {max(rtts) if rtts else float('nan'):.1f} ms over {len(rtts)} pongs; "
       f"keyframes at {key_times}; frames per 5 s {windows}; frame age p50 {pct(ages, .5):.2f} p95 {pct(ages, .95):.2f} ms")
 s.close()
+menus_failed = False
+if expect_menus is not None:
+    menus_failed = menu_top != expect_menus
+    print("EXPECT-MENUS ok" if not menus_failed else f"EXPECT-MENUS FAIL: want {expect_menus}, got {menu_top}")
 if expect is not None:
     problems = []
     if last_state is None:
@@ -711,3 +824,4 @@ if expect is not None:
             if not same: problems.append(f"{k}: want {want}, got {got}")
     print("EXPECT ok" if not problems else "EXPECT FAIL " + "; ".join(problems))
     if problems: sys.exit(1)
+if menus_failed: sys.exit(1)

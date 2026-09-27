@@ -147,6 +147,7 @@ package final class StreamCoordinator {
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
+            menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
         }
     }
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
@@ -169,6 +170,27 @@ package final class StreamCoordinator {
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
     private var settingsIgnoredLineAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
     static let settingsPerSecond = 4
+    /// Trackpad gestures (kind 28, docs/trackpad-gestures-plan.md §7): the view Sill's last gesture
+    /// opened, which the opposite gesture closes (GestureChords), and each connection's gestures of
+    /// the last second: `gesturesPerSecond` a second, the rest dropped with one line a minute.
+    private var gestureChords = GestureChords()
+    private var gestureArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
+    static let gesturesPerSecond = 4
+    private lazy var gestureDrops = RefusalSummary(queue: .main, categories: ["gestures"]) { counts in
+        "Gestures ignored: \(counts["gestures"] ?? 0) in a minute, from devices sending more than \(StreamCoordinator.gesturesPerSecond) a second."
+    }
+    /// Gestures waiting for a switch in flight to finish, in arrival order, and the task posting them.
+    private var pendingGestures: [(gesture: TrackpadGesture, device: String)] = []
+    private var gestureDrain: Task<Void, Never>?
+    /// A host that does not advertise (the synthetic test hosts, which tests reach by port) posts no
+    /// gesture's chord: it logs the one it would post, "(not posted: a test host)", and counts
+    /// `in.gestureDry`, so a test can send gestures without touching this Mac.
+    private let gesturesDry: Bool
+    /// TEST ONLY: a test host's SILL_TEST_HOTKEYS table (GestureChords.testTable), used instead of
+    /// this Mac's Keyboard Shortcuts; nil on every other host.
+    private let testHotKeys: [Int: HotKey]?
+    /// This macOS had no getters for its Keyboard Shortcuts at a gesture: said once.
+    private var saidHotKeysMissing = false
     /// A viewport that came in mid-switch, when `active` still names the old source: applied once
     /// the switch is done, so a rotation during a restart is not lost.
     private var viewportArrivedWhileSwitching = false
@@ -194,6 +216,21 @@ package final class StreamCoordinator {
     private var routes: [ObjectIdentifier: ClientRoute] = [:]
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
+    /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
+    /// MenuMirror). Reads and presses nothing for a device that never asked.
+    let menus: MenuMirror
+    /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
+    /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
+    /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
+    /// prints about it, only when the variable is set.
+    private let testMenuPID: pid_t?
+    private let testMenuLine: String?
+    /// The Desktop's frontmost app is looked at again 0.3 s after a device's click or key, at most
+    /// once per 0.5 s (a click on another app's window activates it 50–200 ms later).
+    private var menuFrontCheckAt: CFAbsoluteTime = 0
+    private var menuFrontCheckPending = false
+    /// Under the AppKit loop, while a device subscribes: app activations on the Mac.
+    private var frontmostObserver: NSObjectProtocol?
 
     /// `config` is validated, and its virtual display forced off without the AppKit loop, which
     /// the display needs (VirtualDisplay.swift, "Event loop"). `appKitLoop`: see the property.
@@ -231,6 +268,16 @@ package final class StreamCoordinator {
         server = try StreamServer(advertise: !synthetic, home: home, testHooks: testHooks)
         server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
         TestHooks.reportIgnored(testHost: server.isTestHost)
+        // A host that does not advertise, `--synthetic` in the CLI and in the app alike (as
+        // `injector.dryRun` below), not `server.isTestHost`, which also leaves out Sill.app's own
+        // executable: that narrowing is for the door and pairing hooks (TestHooks), and a gesture's
+        // chord must never be posted from the test pattern.
+        gesturesDry = synthetic                            // a test host never posts a gesture (§7.4)
+        testHotKeys = synthetic ? Self.testHotKeyTable() : nil
+        menus = MenuMirror(server: server)
+        let hook = Self.testMenuHook(synthetic: synthetic)
+        testMenuPID = hook.pid
+        testMenuLine = hook.line
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
@@ -252,6 +299,10 @@ package final class StreamCoordinator {
         // the once-a-second stats send nothing). One before `server.start()` reaches nobody, and
         // every device gets a fresh state in `sendCatalog`, so early calls are harmless.
         status.onChange = { [weak self] in self?.publishSettings() }
+        menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
+        menus.currentTarget = { [weak self] in self?.menuTarget() }
+        menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
+        catalog.onPolled = { [weak self] in self?.menusPolled() }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -287,8 +338,10 @@ package final class StreamCoordinator {
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
+                self.gestureArrivals[ObjectIdentifier(connection)] = nil
                 self.routes[ObjectIdentifier(connection)] = nil
                 self.lastPairingWanted[ObjectIdentifier(connection)] = nil
+                self.menus.clientLeft(connection)
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate.
                 if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps { await self.select(self.active) }
@@ -301,6 +354,7 @@ package final class StreamCoordinator {
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
                 if count > 0 {
@@ -391,6 +445,9 @@ package final class StreamCoordinator {
                     $0.devices[i].frameAgeMs = stats.frameAgeMs
                     $0.devices[i].rttMs = stats.rttMs
                 }
+                // How long this device waits for a menu (the second's worst round trip; the median
+                // from an older device): a request whose turn comes later is not read.
+                self?.menus.clientStats(connection, rttMs: stats.rttMaxMs ?? stats.rttMs)
             }
         }
         Stats.shared.onTick = { [weak self] counts in
@@ -470,6 +527,7 @@ package final class StreamCoordinator {
         if config.directWireless {
             print("Direct wireless connection on: also advertised over peer-to-peer Wi-Fi (AWDL), which takes this Mac's Wi-Fi off its channel for up to ~100 ms twice a second.")
         }
+        if let testMenuLine { print(testMenuLine) }   // TEST ONLY, and only with SILL_TEST_MENU_PID set
         server.start()
         remote?.apply(config)        // the remote door, when Remote Access is on (or a pairing window opens later)
         if promptForPermissions || CGPreflightScreenCaptureAccess() { await catalog.refreshWindows() }
@@ -645,6 +703,9 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            // A window picked comes forward on the Mac, which closes a view a gesture opened; the
+            // Desktop picked (as a device does before a gesture made over a window) leaves it.
+            if case .window = source { gestureChords.forget() }
             // A pick from the device's switcher: the device never selects a window by itself (its
             // automatic requests are for the Desktop only).
             await handlePick(source)
@@ -652,6 +713,7 @@ package final class StreamCoordinator {
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
             guard let cmd = Wire.decode(WindowCommand.self, from: message.payload) else { return }
+            gestureChords.forget()              // a window's own button: a view a gesture opened is left behind
             let done: Bool
             if virtualDisplay, let p = stage.placement, p.windowID == cmd.id {
                 done = WindowSizer.perform(cmd.action, element: p.element)
@@ -666,6 +728,7 @@ package final class StreamCoordinator {
         case .launchApp:
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
+            gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
             pendingLaunch = req.bundleID
             let config = NSWorkspace.OpenConfiguration()
             // The launch itself takes no focus on the Mac. Its first window is then picked for the
@@ -677,10 +740,29 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload),
                   let rect = currentSourceRect() else { return }
+            // A click, a key or text may close a view a gesture opened; a move or a scroll does not.
+            gestureChords.input(Self.gestureInput(event))
             // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
             // activates and raises nothing either.
             if !synthetic { raiseIfInteracting(event) }
             deliver(event, in: rect)
+            desktopInputMayActivate(event)
+        case .gesture:
+            // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
+            // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
+            // stroke makes one, so more is a runaway or hostile client.
+            guard let gesture = Wire.decode(TrackpadGesture.self, from: message.payload) else { return }
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            var recent = (gestureArrivals[id] ?? []).filter { now - $0 < 1 }
+            guard recent.count < Self.gesturesPerSecond else {
+                gestureArrivals[id] = recent
+                gestureDrops.count("gestures")
+                return
+            }
+            recent.append(now)
+            gestureArrivals[id] = recent
+            queueGesture(gesture, from: deviceName(connection))
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
             viewport = v
@@ -746,6 +828,17 @@ package final class StreamCoordinator {
             // Exactly one answer, to this device alone: the settings as they now stand, so a
             // refused or ignored field goes back to the Mac's value on the device.
             server.send(settingsMessage(settingsState(answering: change.token)), to: connection)
+        case .fetchMenu:
+            // The Mac's menus (MenuMirror): no `await` here either; the mirror schedules its reads
+            // and answers this device alone. JSON that does not decode has no token to answer.
+            guard let r = Wire.decode(FetchMenu.self, from: message.payload) else { return }
+            menus.fetch(r, from: connection, who: deviceName(connection))
+        case .pressMenuItem:
+            guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
+            // One of the Mac's menu items chosen from a device acts as a click on it would, and may
+            // bring a window forward: a view a gesture opened is left behind, as after a click.
+            gestureChords.forget()
+            menus.press(r, from: connection, who: deviceName(connection))
         default:
             break
         }
@@ -949,7 +1042,13 @@ package final class StreamCoordinator {
         await syntheticCapture.stop()
         capture.onFrame = nil; syntheticCapture.onFrame = nil   // both queues drained: let the old encoder go
         rectCache = nil
-        heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
+        // Input held for the old source must not replay into the new one. A gesture's chord held
+        // behind it acts on the whole Mac, not on the source: it goes now.
+        let heldChords = heldInput.compactMap { item -> (UInt16, UInt64)? in
+            if case .chord(let keyCode, let flags) = item { return (keyCode, flags) } else { return nil }
+        }
+        heldInput = []; holdUntil = 0
+        for (keyCode, flags) in heldChords { injector.chord(keyCode: keyCode, flags: flags) }
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
         // New settings take effect here, between pipelines, before the rate, the scale and the
@@ -1182,14 +1281,17 @@ package final class StreamCoordinator {
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
     private var lastActivationAt: CFAbsoluteTime = 0
-    private var heldInput: [(InputEvent, CGRect)] = []
+    /// Input held for an activation, replayed in order once the app is up; a gesture's chord that
+    /// arrives meanwhile waits behind it, so a click just before the gesture lands first.
+    private enum Held { case input(InputEvent, CGRect), chord(keyCode: UInt16, flags: UInt64) }
+    private var heldInput: [Held] = []
     private var holdUntil: CFAbsoluteTime = 0
     /// How long held input waits for the app to become frontmost before it is replayed anyway.
     private static let activationTimeout: TimeInterval = 0.6
 
     private func deliver(_ event: InputEvent, in rect: CGRect) {
         // Queue while holding, and while anything is still queued, so order is never inverted.
-        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append((event, rect)); return }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append(.input(event, rect)); return }
         logClick(event, in: rect)
         injector.apply(event, in: rect)
     }
@@ -1198,7 +1300,12 @@ package final class StreamCoordinator {
         holdUntil = 0
         let held = heldInput
         heldInput = []
-        for (event, rect) in held { logClick(event, in: rect); injector.apply(event, in: rect) }
+        for item in held {
+            switch item {
+            case .input(let event, let rect): logClick(event, in: rect); injector.apply(event, in: rect)
+            case .chord(let keyCode, let flags): injector.chord(keyCode: keyCode, flags: flags)
+            }
+        }
     }
 
     private func raiseIfInteracting(_ event: InputEvent) {
@@ -1367,6 +1474,145 @@ package final class StreamCoordinator {
         let app = w.owningApplication?.applicationName ?? "?"
         let title = w.title ?? ""
         return title.isEmpty ? app : "\(app) — \(title)"
+    }
+
+    // MARK: The Mac's menus (MenuMirror; docs/menu-bar-plan.md §4.5)
+    //
+    // Which app's menus a device is shown: the streamed window's, or on the Desktop the frontmost
+    // app's (never Sill's own: a device's "Quit Sill" would end the host). The mirror hears of a
+    // change only while a device subscribes; with none, `menuTargetChanged` is one comparison.
+
+    /// The app behind the current source, for the menus: nil for nothing streaming and for Sill.
+    private func menuTarget() -> MenuMirror.Target? {
+        switch active {
+        case .none:
+            return nil
+        case .window(let id):
+            if virtualDisplay, let p = stage.placement, p.windowID == id {
+                return p.pid == WindowCatalog.ownPID ? nil : Self.menuTarget(pid: p.pid, window: id)
+            }
+            guard let app = catalog.window(id: id)?.owningApplication, app.processID != WindowCatalog.ownPID else { return nil }
+            return Self.menuTarget(pid: app.processID, window: id)
+        case .desktop:
+            return desktopMenuTarget()
+        }
+    }
+
+    /// The Desktop's: the frontmost app (AppKit's under its loop, else the owner of the topmost
+    /// window; see `activePID`). A synthetic host has none, but for the TEST ONLY hook's process.
+    private func desktopMenuTarget() -> MenuMirror.Target? {
+        if synthetic {
+            guard let pid = testMenuPID, MenuReader.alive(pid) else { return nil }
+            return Self.menuTarget(pid: pid)
+        }
+        guard let pid = Self.activePID(trustAppKit: appKitLoop), pid != WindowCatalog.ownPID else { return nil }
+        return Self.menuTarget(pid: pid)
+    }
+
+    /// One name for an app whichever source names it (the window list's and AppKit's can differ).
+    private static func menuTarget(pid: pid_t, window: CGWindowID? = nil) -> MenuMirror.Target {
+        let app = NSRunningApplication(processIdentifier: pid)
+        return MenuMirror.Target(pid: pid, app: app?.localizedName ?? "pid \(pid)", bundleID: app?.bundleIdentifier, window: window)
+    }
+
+    /// The source, or the Desktop's frontmost app, may have changed.
+    private func menuTargetChanged() {
+        guard menus.hasSubscribers else { return }
+        menus.setTarget(menuTarget())
+    }
+
+    /// Every catalog poll (2 s) while a device is connected.
+    private func menusPolled() {
+        guard menus.hasSubscribers else { return }
+        if active == .desktop { menuTargetChanged() }
+        menus.catalogPolled()
+    }
+
+    /// A device's click or key on the Desktop can bring another app forward (50–200 ms later): its
+    /// menus are looked at again 0.3 s after, at most once per 0.5 s.
+    private func desktopInputMayActivate(_ event: InputEvent) {
+        guard active == .desktop, menus.hasSubscribers, !menuFrontCheckPending else { return }
+        switch event {
+        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }
+        case .key(_, let down, _): guard down else { return }
+        default: return
+        }
+        menuFrontCheckPending = true
+        let wait = max(0.3, menuFrontCheckAt + 0.5 - CFAbsoluteTimeGetCurrent())
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(wait))
+            self.menuFrontCheckPending = false
+            self.menuFrontCheckAt = CFAbsoluteTimeGetCurrent()
+            if self.active == .desktop { self.menuTargetChanged() }
+        }
+    }
+
+    /// Under the AppKit loop (Sill.app, the CLI's --virtual-display), while a device subscribes:
+    /// the Desktop's menus follow an app activated on the Mac at once, not at the next poll.
+    private func watchFrontmostApp(_ on: Bool) {
+        guard appKitLoop else { return }
+        if on, frontmostObserver == nil {
+            frontmostObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.active == .desktop else { return }
+                    self.menuTargetChanged()
+                }
+            }
+        } else if !on, let observer = frontmostObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            frontmostObserver = nil
+        }
+    }
+
+    /// Before a menu of a window source is read or one of its items pressed: its app active and the
+    /// window key, as a click from the device makes them (`raiseIfInteracting`: Accessibility only,
+    /// one activation attempt per 2 s, never Launch Services). An inactive app's states differ (its
+    /// Copy, Close and Minimize read disabled: the probe), and a press must act on the streamed
+    /// window, not another of the app's. No raise: a menu needs the app active, not the window
+    /// uncovered. True when the app is frontmost as this returns. The Desktop's app is frontmost
+    /// already, and a synthetic host's hook is never activated: true at once for both and for
+    /// nothing. During a switch (`active` still names the old source) nothing is activated.
+    private func focusForMenus() async -> Bool {
+        guard case .window(let id) = active else { return true }
+        let staged = virtualDisplay && stage.isStaged
+        guard let pid = staged ? stage.placement?.pid : catalog.window(id: id)?.owningApplication?.processID else { return false }
+        let frontmost = Self.activePID(trustAppKit: appKitLoop) == pid
+        if switching { return frontmost }
+        var answered = true
+        if !frontmost {
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - lastActivationAt > 2 else { return false }
+            lastActivationAt = now
+            answered = activate(pid: pid)
+        }
+        // An app that let the activation run into its timeout gets no more AX calls from here.
+        guard answered else { return false }
+        if staged, let element = stage.placement?.element {
+            WindowSizer.makeKey(element)
+        } else if let w = catalog.window(id: id), let element = sizer.element(for: w) {
+            WindowSizer.makeKey(element)
+        }
+        if frontmost { return true }
+        let deadline = CFAbsoluteTimeGetCurrent() + Self.activationTimeout
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            if Self.activePID(trustAppKit: appKitLoop) == pid { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return Self.activePID(trustAppKit: appKitLoop) == pid
+    }
+
+    /// TEST ONLY: `SILL_TEST_MENU_PID`, honoured only by a --synthetic host (which does not
+    /// advertise), with the one line `start` prints about it. Nothing, and no line, without it.
+    private static func testMenuHook(synthetic: Bool) -> (pid: pid_t?, line: String?) {
+        guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_MENU_PID"] else { return (nil, nil) }
+        let shown = SafeText.label(raw, limit: 32)
+        guard synthetic else { return (nil, "SILL_TEST_MENU_PID=\(shown) ignored: only a --synthetic host takes it.") }
+        guard let pid = pid_t(raw), pid > 0, MenuReader.alive(pid) else {
+            return (nil, "SILL_TEST_MENU_PID=\(shown) ignored: not a running process.")
+        }
+        let name = NSRunningApplication(processIdentifier: pid)?.localizedName.map { SafeText.label($0) } ?? "no app name"
+        return (pid, "Test menus: the test pattern's menus are pid \(pid)'s (\(name)); read and pressed without activating it.")
     }
 
     // MARK: Virtual display lifecycle
@@ -1682,12 +1928,97 @@ package final class StreamCoordinator {
     private var encoderWidth: Int { encoder?.width ?? 0 }
     private var encoderHeight: Int { encoder?.height ?? 0 }
 
+    // MARK: Trackpad gestures
+
+    /// Posts gestures in arrival order, once a switch in flight is done (at most 2 s later): a
+    /// gesture made while a window streamed comes right after the device's Desktop pick, the
+    /// window may be on its way home from the virtual display, and the view should open over the
+    /// Desktop, which is the only source that shows it.
+    private func queueGesture(_ gesture: TrackpadGesture, from device: String) {
+        pendingGestures.append((gesture, device))
+        guard gestureDrain == nil else { return }
+        gestureDrain = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let deadline = CFAbsoluteTimeGetCurrent() + 2
+            while self.switching, CFAbsoluteTimeGetCurrent() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            while !self.pendingGestures.isEmpty {
+                let next = self.pendingGestures.removeFirst()
+                self.performGesture(next.gesture, from: next.device)
+            }
+            self.gestureDrain = nil
+        }
+    }
+
+    /// One gesture: the Mac's shortcut for it as its Keyboard Shortcuts are now (GestureChords),
+    /// one line saying what it did, and the chord posted, behind input held for an activation; on
+    /// a host that does not advertise, only counted. Nothing is raised or activated first: these
+    /// views act on the whole Mac (App Exposé on the app in front), as they do from its keyboard.
+    private func performGesture(_ gesture: TrackpadGesture, from device: String) {
+        guard !shuttingDown else { return }
+        let outcome = gestureChords.resolve(gesture.gesture, table: hotKeyTable())
+        print(GestureChords.line(device: device, gesture: gesture.gesture, fingers: gesture.fingers,
+                                 outcome: outcome, dryRun: gesturesDry))
+        guard case .chord(_, _, let keyCode, let flags) = outcome else { return }
+        if gesturesDry {
+            Stats.shared.bump("in.gestureDry")
+            return
+        }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil {
+            heldInput.append(.chord(keyCode: keyCode, flags: flags))
+            return
+        }
+        injector.chord(keyCode: keyCode, flags: flags)
+    }
+
+    /// A device's input as `GestureChords` weighs it: whether it can close a view a gesture opened.
+    static func gestureInput(_ event: InputEvent) -> GestureChords.Input {
+        switch event {
+        case .pointer(let action, _, _):
+            switch action {
+            case .move: return .pointerMove
+            case .leftDown, .rightDown: return .buttonDown
+            case .leftUp, .rightUp: return .buttonUp
+            }
+        case .scroll, .scrollGesture: return .scroll
+        case .key(_, let down, _): return down ? .keyDown : .keyUp
+        case .text: return .text
+        }
+    }
+
+    /// This Mac's Keyboard Shortcuts for the gestures, read now (SymbolicHotKeys); macOS 27's own
+    /// when this macOS has no getters for them (said once); a test host's SILL_TEST_HOTKEYS table.
+    private func hotKeyTable() -> [Int: HotKey] {
+        if let testHotKeys { return testHotKeys }
+        if let table = SymbolicHotKeys.read(GestureChords.hotKeyIDs) { return table }
+        if !saidHotKeysMissing {
+            saidHotKeysMissing = true
+            print("Gestures: this macOS does not say what its keyboard shortcuts are; using macOS 27's own.")
+        }
+        return GestureChords.defaults
+    }
+
+    /// TEST ONLY: SILL_TEST_HOTKEYS, read once by a host that does not advertise: "defaults", or
+    /// `ID=off` and `ID=KEYCODE:MODIFIERS` entries over them (GestureChords.testTable). A value that
+    /// does not parse is ignored with one line.
+    private static func testHotKeyTable() -> [Int: HotKey]? {
+        guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_HOTKEYS"], !raw.isEmpty else { return nil }
+        guard let table = GestureChords.testTable(raw) else {
+            print("SILL_TEST_HOTKEYS=\(raw) ignored: \"defaults\", or ID=off and ID=KEYCODE:MODIFIERS entries.")
+            return nil
+        }
+        print("TEST: gestures use SILL_TEST_HOTKEYS=\(raw), not this Mac's keyboard shortcuts.")
+        return table
+    }
+
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current)))
+                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
+                                                      gestures: TrackpadGesture.generation)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

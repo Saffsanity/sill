@@ -36,16 +36,38 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Tells MacMenuHub which window shows this session: the iPad's menu bar shows its menus while
+        // it is the app's one window.
+        .background(WindowSessionObserver(client: client))
         .onAppear {
+            #if DEBUG
+            SecondWindow.openFromLaunchArgument()   // -SillSecondWindow 1
+            #endif
             client.startBrowsing()
             client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
             #if DEBUG
             client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
+            Self.orientFromLaunchArgument()      // -SillOrientation landscape|portrait
             #endif
         }
         // sill://pair from the Camera, Messages or `xcrun simctl openurl`: a confirmation first.
         .onOpenURL { client.handleOpenURL($0) }
     }
+
+    #if DEBUG
+    /// `-SillOrientation landscape|portrait`: the normal app asks its window scene for that
+    /// orientation at launch, so a phone simulator shows the real layout sideways, its safe areas
+    /// included, with no hand on the simulator (the harness's fake screen has no insets).
+    private static func orientFromLaunchArgument() {
+        guard let raw = UserDefaults.standard.string(forKey: "SillOrientation") else { return }
+        let mask: UIInterfaceOrientationMask = raw == "portrait" ? .portrait : .landscapeRight
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                print("orientation: \(raw) refused: \(error.localizedDescription)")
+            }
+        }
+    }
+    #endif
 }
 
 #if DEBUG
@@ -136,7 +158,10 @@ struct ContentView: View {
 ///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
-///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home).
+///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
+///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
+///   short screen).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -150,6 +175,13 @@ struct ContentView: View {
 ///   the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired), `noroute`
 ///   (none, as a connection whose path says nothing), and `remote`, `remoteinternet` and
 ///   `remoteslow` (none: the route line under it says how instead).
+/// * `-Sill.trackpadGestures 0` — not a harness argument either: this device's switch for
+///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
+///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
+///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
+///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
+///   accessibility actions whether or not it is on).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 ///   `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: the line under its title over a
 ///   session at home that speaks TLS, as the Mac's answer to the overlay's ask sets it
@@ -157,6 +189,36 @@ struct ContentView: View {
 ///   the live session as soon as it connects, and asks its Mac as Pair This iPad… does.
 /// * `-SillNoAutoDesktop 1` — (also in the normal app) the device never picks the Desktop by
 ///   itself: a live gate's session streams nothing, so no host encodes while it runs.
+/// * `-SillMacMenu <case>` — the mock Mac's menus (docs/menu-bar-plan.md §7.8; see
+///   `MockCatalog.MenuCase`): `code` (the default: VS Code's ten, File with shortcuts, sections, a ✓,
+///   a disabled item and Open Recent ▸, Code › Settings ▸ Themes ▸ three deep, View › Appearance
+///   with a mixed mark), `blender` (Blender and Window), `long` (a Window menu of 300 windows, and a
+///   History of 600: 500 rows and "100 more on the Mac"), `stale` (every menu disabled under "Code
+///   isn’t responding."), `noaccess` (the Accessibility note, no menus), `none` (no Menus button),
+///   `slow` (each menu answered after 1.5 s, UIKit's placeholder meanwhile), `timeout` (never
+///   answered: "Mac mini didn’t answer. Open the menu again." after 4 s) or `refuse` (every choice
+///   refused). The mock answers a menu and a choice 0.2 s after it is asked. Ignored with
+///   `-SillLive 1`, whose session has the Mac's own menus.
+/// * `-SillMenusOpen 1` — the Menus button's pull-down opens after launch, as a tap opens it
+///   (`performPrimaryAction`, iOS 17.4); `-SillMenusOpen 'File'` or `'Code/Settings'` opens it on
+///   that menu's own items instead, each level fetched on the way as a tap on it would fetch it;
+///   `-SillMenusAt <s>` opens it `s` seconds after the button shows (not 0.8), and
+///   `-SillMenusCloseAfter <s>` dismisses it `s` seconds later, as a tap outside it would.
+///   `-SillMenuPress 'File/Save'` chooses that item once the first top level is in, as a tap would
+///   (the menus on the way fetched, the kind 25 sent). Both run once per launch, in the normal app
+///   and under `-SillLive 1` too, but only on the mock's menus or the test app's: against a
+///   synthetic host started with SILL_TEST_MENU_PID, dialled by `-SillConnect` to a loopback
+///   address, whose window list gives no version and whose top level is menufixture's
+///   (`-SillMenuPress 'Probe/Set Label A'`; `StreamClient.menuHarnessRefusal`). Against anything
+///   else they print "refused" and open and choose nothing: on a real Mac a choice would be made in
+///   whatever app it streams. A headless run cannot tap; these stand in for the taps.
+/// * The iPad's menu bar (iPadOS 26), in the normal app too: `-SillMenuBarLayout perMenu|replace|one`
+///   (where the Mac's menus go, the plan's Q1, for one run), `-SillMenuDump 1` (the main menu's
+///   root after each build, on the console), `-SillMenuBuildTwice 1` (the insertion made twice in
+///   one build: the second inserts nothing), `-SillMenuNoView 1` (View removed before the
+///   insertion) and `-SillSecondWindow 1` (a second window opens 2 s after launch: with two, the bar
+///   gets none of the Mac's menus). The console's "menus: …" and "menubar: …" lines say what
+///   happened.
 /// * `-SillPointer <state>` — the pointer sprite in one of docs/pointer-visibility-plan.md's states,
 ///   over the mock's 2800×1800 frame, drawn as a dim rectangle so a photo shows where the frame is
 ///   (the mock never streams): `mac@0.40,0.30` (the Mac has the pointer, over the stream: its arrow
@@ -220,6 +282,24 @@ struct ContentView: View {
 /// * Versions, in the normal app too: `-SillHelloVersion <v>` is the version this device's hello
 ///   (kind 23) gives, for a host's device floor under test (`SILL_TEST_MIN_DEVICE_VERSION`);
 ///   `-SillAppStoreURL <https url>` is the App Store link's address while SillLinks has none.
+/// * The first-run tour (TourPolicy, TourOverlay), in the mock, under `-SillLive 1` and in the
+///   normal app. Without one of these no Debug build ever shows it by itself, so every other photo
+///   and live test looks as it did; Release and TestFlight builds always follow its rule.
+///   `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour on: `fresh` is
+///   nothing seen, `landscape` the three sideways steps seen (an upright size shows the laptop
+///   card), `done` all of it, `skipped` Skip tapped, each for this run only and never written;
+///   `saved` reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, as a Release build does. In
+///   the mock the picture counts from launch. `-SillTour touch|bar|settings|laptop` starts the tour
+///   at that step as Take the Tour shows it (every step of the layout, from that one; a step the
+///   layout lacks starts at the first), with no beat, at the first picture. Stand-ins for what the
+///   gates may not do: `-SillTourPress next@S|skip@S` presses Next (Done on the last card) S
+///   seconds after each card appears, or Skip once; `-SillTourActivityAt S` is a touch S seconds
+///   after the picture of the app run's first session (the automatic reconnect's session after
+///   it gets none); `-SillTakeTourAt S` opens the Settings panel S seconds after the picture and
+///   presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its words
+///   as under VoiceOver. The console says what happened ("tour: …").
+/// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
+///   orientation at launch (a phone simulator sideways, with its real safe areas).
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -260,6 +340,8 @@ struct LayoutHarness: View {
         let connectCase: MockCatalog.ConnectCase?
         /// The stream screen under the pairing overlay.
         let scanOverlay: Bool
+        /// The mock Mac's menus. Ignored when `live`, whose session has the Mac's own.
+        let macMenu: MockCatalog.MenuCase
         /// The mock's pointer state (`-SillPointer`), and Q2's flip (`-SillPencilPointer 1`). Ignored
         /// when `live`.
         let pointer: String?
@@ -283,6 +365,7 @@ struct LayoutHarness: View {
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
                         connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
                         scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
+                        macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code,
                         pointer: defaults.string(forKey: "SillPointer"),
                         pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
         }
@@ -307,6 +390,7 @@ struct LayoutHarness: View {
         self.live = live
         _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
                                 ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
+                                                      menus: spec.live ? nil : spec.macMenu,
                                                       pointer: spec.pointer, pencilPointer: spec.pencilPointer))
     }
 
@@ -335,7 +419,10 @@ struct LayoutHarness: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
+        // The iPad's menu bar follows the client this frame shows, as the app's does.
+        .background(WindowSessionObserver(client: spec.live ? live : mock))
         .onAppear {
+            SecondWindow.openFromLaunchArgument()   // -SillSecondWindow 1
             if spec.live {
                 live.startBrowsing()
                 live.startRemote()
@@ -406,7 +493,11 @@ struct LayoutHarness: View {
 /// * `click` — a tap on the pad: a click where its cursor is;
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
-/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays.
+/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
+/// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
+///   `StreamClient.sendGesture` as a surface's decision goes (the switch, the Mac's `gestures`, the
+///   Desktop first while a window streams): swipeUp, swipeDown, swipeLeft, swipeRight, pinch or
+///   spread; the console says whether it went ("input script: t=… gesture swipeUp: sent").
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
@@ -420,6 +511,7 @@ struct LayoutHarness: View {
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case gesture(TrackpadGestures.Gesture, fingers: Int)
 
         var description: String {
             switch self {
@@ -430,6 +522,7 @@ enum InputScript {
             case .tap(let x, let y): return "tap \(x),\(y)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
+            case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
             }
         }
     }
@@ -455,6 +548,12 @@ enum InputScript {
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
+            case ("gesture", 3):
+                let parts = words[2].split(separator: ",").map(String.init)
+                guard let g = TrackpadGestures.Gesture(rawValue: parts[0]), parts.count <= 2 else { return nil }
+                let fingers = parts.count == 2 ? Int(parts[1]) : 3
+                guard let fingers, fingers == 3 || fingers == 4 else { return nil }
+                step = .gesture(g, fingers: fingers)
             default: return nil
             }
             steps.append((at, step))
@@ -523,6 +622,10 @@ enum InputScript {
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        case .gesture(let g, let fingers):
+            let went = client.sendGesture(g, fingers: fingers)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))
+            return
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }

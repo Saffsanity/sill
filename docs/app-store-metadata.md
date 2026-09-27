@@ -213,8 +213,9 @@ developer can't reach:
 - Taps, pointer moves, scrolls, keys, typed text and the panel size go to the
   same Mac. The Mac sends back the picture, window titles, thumbnails, app
   icons and its name.
-- Kept on the device only: each Mac's thumbnail order and the names of Macs
-  seen with Direct Wireless Connection on. With Remote Access: the device's
+- Kept on the device only: each Mac's thumbnail order, the names of Macs
+  seen with Direct Wireless Connection on, and which steps of the first-run
+  tour were seen (or that it was skipped). With Remote Access: the device's
   key and the saved Macs' addresses (Keychain and app storage), and camera
   frames, which are read for the pairing code and never saved or sent.
 - No analytics, crash reporting, ads, third-party SDKs or servers, and no
@@ -408,6 +409,7 @@ CONNECT
 6. The Mac appears under "Connect to a Mac" within a few seconds. Tap it. The Mac's desktop appears.
 
 WHAT TO TRY
+- The first time your Mac's picture shows, a short tour points out the controls. Take the Tour in Settings shows it again.
 - Apps (magnifying glass): pick an open window, or search the list and open an app.
 - Tap to click. Drag to scroll. Touch and hold to right-click. Apple Pencil works as a mouse.
 - Keyboard: type into the window. A hardware keyboard works too, with shortcuts.
@@ -524,7 +526,10 @@ screenshots.
 
 4. In Simulator, click the Mac's row, then set up each screen with the mouse.
    Device › Rotate Left (⌘←) turns it to landscape. I/O › Keyboard › Toggle
-   Software Keyboard (⌘K) shows the on-screen keyboard.
+   Software Keyboard (⌘K) shows the on-screen keyboard. On a fresh install the
+   first-run tour dims the screen about a second after the Mac's picture shows,
+   unless something is touched: click the picture at once to go without it, or
+   take the tour once, before the screenshots.
 5. Capture each one and turn it into a JPEG without alpha:
 
    ```sh
