@@ -122,6 +122,9 @@ struct TourTail: Equatable {
 struct TourPlacement: Equatable {
     var card: CGRect
     var tail: TourTail?
+    /// The card covers its step's lit part (a room too small beside it): the dim then has no cutout
+    /// and no ring, since what is left of them would peek out beside the card as slivers.
+    var coversTargets = false
 }
 
 // MARK: - The words
@@ -283,6 +286,9 @@ enum TourPolicy {
     static let tailReach: CGFloat = 48
     /// The cutout is this much larger than its targets all round.
     static let cutoutOutset: CGFloat = 4
+    /// The least room beside its targets a card takes: its footer and a line or two of words at the
+    /// largest text size. Only a smaller room (a tiny window) makes a card cover its targets.
+    static let minimumRoom: CGFloat = 200
 
     /// The card's width: 360 pt; 480 on a screen held sideways that is under 520 pt tall (a phone,
     /// the Duo's outer display), where height is what runs out; 560 at accessibility text sizes;
@@ -321,15 +327,20 @@ enum TourPolicy {
     /// words want there; `targets` the union of what its step lights (nil before they are
     /// measured: centred in the picture); `stream` the picture's panel.
     ///
-    /// - The picture's step: centred in the picture.
-    /// - Sideways, a bar step: 12 pt below its targets, centred on them, with a tail up.
+    /// - The picture's step: centred in the picture. Too tall for the picture, it grows toward the
+    ///   top margin, then, upright without a crease, toward the bottom margin.
+    /// - Sideways, a bar step: 12 pt below its targets, centred on them, with a tail up; too tall
+    ///   for the room down to the bottom margin, as tall as that room, its words scrolling.
     /// - Upright: in the picture's half, so it never covers the laptop half it is about and never
     ///   crosses the crease; a lower step's bottom 12 pt above the picture's bottom, with a tail
-    ///   down only when its targets begin within 48 pt and no crease lies between.
-    /// - Too tall for that: it grows toward the top margin, then, upright without a crease, toward
-    ///   the bottom margin, over its own targets if it must, and has no tail. Past the whole screen
-    ///   less its margins (with a crease, the upper half), it is as tall as the room, and its words
-    ///   scroll.
+    ///   down only when its targets begin within 48 pt and no crease lies between. Too tall for
+    ///   that: it grows toward the top margin, then down to 12 pt above its targets (with a crease,
+    ///   the picture's half), the same tail rule, its words scrolling past that.
+    /// - A card never covers its own step's targets, so the lit control stays in view at every text
+    ///   size; only a room beside them smaller than `minimumRoom` makes it grow over them (toward
+    ///   the top sideways, toward the bottom margin upright), with no tail, `coversTargets`.
+    /// - Past the whole screen less its margins (with a crease, the upper half), a card is as tall
+    ///   as the room, and its words scroll.
     static func place(card: CGSize, targets: CGRect?, isStream: Bool, screen: CGSize, layout: TourLayout,
                       stream: CGRect, bottomInset: CGFloat) -> TourPlacement {
         let w = card.width
@@ -362,26 +373,42 @@ enum TourPolicy {
         }
 
         let cardX = x(centredOn: t.midX)
+        let lit = t.insetBy(dx: -cutoutOutset, dy: -cutoutOutset)
         if layout == .landscape {
-            // Below the bar's targets while it fits there; else it grows toward the top, over them.
+            // Below the bar's targets, as tall as its words or as the room down to the bottom
+            // margin; only a room too small for a card makes it grow toward the top, over them.
             let below = t.maxY + gap
-            if below + h <= bottom {
-                let rect = CGRect(x: cardX, y: below, width: w, height: h)
+            let room = bottom - below
+            if h <= room || room >= minimumRoom {
+                let rect = CGRect(x: cardX, y: below, width: w, height: min(h, room))
                 return TourPlacement(card: rect, tail: TourTail(edge: .up, x: tip(rect, t.midX)))
             }
             let y = max(top, bottom - h)
-            return TourPlacement(card: CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y)), tail: nil)
+            let rect = CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y))
+            return TourPlacement(card: rect, tail: nil, coversTargets: rect.intersects(lit))
         }
 
-        // Upright: its bottom 12 pt above the picture's bottom while it fits in the picture's half.
-        if pictureBottom - h >= top {
-            let rect = CGRect(x: cardX, y: pictureBottom - h, width: w, height: h)
+        // Upright: a tail down only at targets that begin within 48 pt, with no crease between.
+        func tailDown(_ rect: CGRect) -> TourTail? {
             let reaches = t.minY >= rect.maxY && t.minY - rect.maxY <= tailReach
             let noFold = fold.map { !(rect.maxY <= $0 && $0 <= t.minY) } ?? true
-            return TourPlacement(card: rect, tail: reaches && noFold ? TourTail(edge: .down, x: tip(rect, t.midX)) : nil)
+            return reaches && noFold ? TourTail(edge: .down, x: tip(rect, t.midX)) : nil
         }
-        let reach = fold == nil ? bottom : pictureBottom
-        return TourPlacement(card: CGRect(x: cardX, y: top, width: w, height: min(h, reach - top)), tail: nil)
+        // Its bottom 12 pt above the picture's bottom while it fits in the picture's half.
+        if pictureBottom - h >= top {
+            let rect = CGRect(x: cardX, y: pictureBottom - h, width: w, height: h)
+            return TourPlacement(card: rect, tail: tailDown(rect))
+        }
+        // Too tall: from the top margin down to 12 pt above its targets (with a crease, the
+        // picture's half); only a room too small for a card makes it grow toward the bottom
+        // margin, over them.
+        let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom
+        if fold != nil || h <= above - top || above - top >= minimumRoom {
+            let rect = CGRect(x: cardX, y: top, width: w, height: min(h, above - top))
+            return TourPlacement(card: rect, tail: tailDown(rect))
+        }
+        let rect = CGRect(x: cardX, y: top, width: w, height: min(h, bottom - top))
+        return TourPlacement(card: rect, tail: nil, coversTargets: rect.intersects(lit))
     }
 
     // MARK: The words (§7)

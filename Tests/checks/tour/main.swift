@@ -303,42 +303,59 @@ func oracle(_ s: Screen, _ topic: TourTopic, height h: CGFloat, width w: CGFloat
         return TourPlacement(card: CGRect(x: centred(s.stream.midX), y: top, width: w, height: min(h, reach - top)), tail: nil)
     }
     let t = s.union(topic)!
+    let lit = t.insetBy(dx: -4, dy: -4)
     let x = centred(t.midX)
     let tip = max(x + 28, min(t.midX, x + w - 28))
+    // Sideways: under its targets, as tall as its words or as the room to the bottom margin, where
+    // its words scroll; over them (toward the top, no tail) only when that room is under 200 pt.
     if s.layout == L {
-        if t.maxY + 12 + h <= bottom { return TourPlacement(card: CGRect(x: x, y: t.maxY + 12, width: w, height: h), tail: TourTail(edge: .up, x: tip)) }
+        let room = bottom - (t.maxY + 12)
+        if h <= room || room >= 200 { return TourPlacement(card: CGRect(x: x, y: t.maxY + 12, width: w, height: min(h, room)), tail: TourTail(edge: .up, x: tip)) }
         let y = max(top, bottom - h)
-        return TourPlacement(card: CGRect(x: x, y: y, width: w, height: min(h, bottom - y)), tail: nil)
+        let card = CGRect(x: x, y: y, width: w, height: min(h, bottom - y))
+        return TourPlacement(card: card, tail: nil, coversTargets: card.intersects(lit))
     }
-    if halfBottom - h >= top {
-        let near = t.minY - halfBottom <= 48 && t.minY >= halfBottom
-        let across = crease.map { halfBottom <= $0 && $0 <= t.minY } ?? false
-        return TourPlacement(card: CGRect(x: x, y: halfBottom - h, width: w, height: h), tail: near && !across ? TourTail(edge: .down, x: tip) : nil)
+    // Upright: a tail down only within 48 pt of its targets, and never across the crease.
+    func down(_ card: CGRect) -> TourTail? {
+        let near = t.minY - card.maxY <= 48 && t.minY >= card.maxY
+        let across = crease.map { card.maxY <= $0 && $0 <= t.minY } ?? false
+        return near && !across ? TourTail(edge: .down, x: tip) : nil
     }
-    return TourPlacement(card: CGRect(x: x, y: top, width: w, height: min(h, (crease == nil ? bottom : halfBottom) - top)), tail: nil)
+    // In the picture's half; too tall for it, from the top margin down to 12 pt above its targets
+    // (with a crease, the half); past that its words scroll. Over its targets, down to the bottom
+    // margin, only when the room above them is under 200 pt and there is no crease.
+    if halfBottom - h >= top { let card = CGRect(x: x, y: halfBottom - h, width: w, height: h); return TourPlacement(card: card, tail: down(card)) }
+    let above = crease == nil ? min(bottom, max(top, t.minY - 12)) : halfBottom
+    if crease != nil || h <= above - top || above - top >= 200 {
+        let card = CGRect(x: x, y: top, width: w, height: min(h, above - top))
+        return TourPlacement(card: card, tail: down(card))
+    }
+    let card = CGRect(x: x, y: top, width: w, height: min(h, bottom - top))
+    return TourPlacement(card: card, tail: nil, coversTargets: card.intersects(lit))
 }
 func place(_ s: Screen, _ topic: TourTopic, height h: CGFloat, width w: CGFloat, inset: CGFloat = 0) -> TourPlacement {
     TourPolicy.place(card: CGSize(width: w, height: h), targets: s.union(topic), isStream: topic == .touch, screen: s.size,
                      layout: s.layout, stream: s.stream, bottomInset: inset)
 }
-func pinned(_ s: Screen, _ topic: TourTopic, _ h: CGFloat, _ expected: CGRect, tail: TourTail?, line: Int = #line) {
+func pinned(_ s: Screen, _ topic: TourTopic, _ h: CGFloat, _ expected: CGRect, tail: TourTail?, covers: Bool = false, line: Int = #line) {
     let w = TourPolicy.width(screen: s.size, layout: s.layout, accessibilityText: false)
     let p = place(s, topic, height: h, width: w)
-    check(p == TourPlacement(card: expected, tail: tail), "\(s.size) \(topic) h \(h): \(p.card) tail \(String(describing: p.tail)), expected \(expected) \(String(describing: tail))", line: line)
+    check(p == TourPlacement(card: expected, tail: tail, coversTargets: covers),
+          "\(s.size) \(topic) h \(h): \(p.card) tail \(String(describing: p.tail)) covers \(p.coversTargets), expected \(expected) \(String(describing: tail)) covers \(covers)", line: line)
     check(p == oracle(s, topic, height: h, width: w), "\(s.size) \(topic) h \(h) against the oracle", line: line)
 }
 // 1000×710, the Duo flat: 360 pt; the bar's card 12 pt under the strip's band (82), tail up.
 pinned(duoInner, .touch, 262, CGRect(x: 320, y: 267, width: 360, height: 262), tail: nil)
 pinned(duoInner, .bar, 230, CGRect(x: 281, y: 94, width: 360, height: 230), tail: TourTail(edge: .up, x: 461))
 pinned(duoInner, .settings, 200, CGRect(x: 624, y: 88, width: 360, height: 200), tail: TourTail(edge: .up, x: 945))
-pinned(duoInner, .bar, 640, CGRect(x: 281, y: 54, width: 360, height: 640), tail: nil)      // grows over the bar
+pinned(duoInner, .bar, 640, CGRect(x: 281, y: 94, width: 360, height: 600), tail: TourTail(edge: .up, x: 461))   // under the bar still: its words scroll
 pinned(duoInner, .touch, 900, CGRect(x: 320, y: 16, width: 360, height: 678), tail: nil)    // the screen less its margins: scrolls
 // 710×500, the outer display on its side: 480 pt wide, below the compact bar (74).
 pinned(duoOuter, .touch, 230, CGRect(x: 115, y: 174, width: 480, height: 230), tail: nil)
 pinned(duoOuter, .bar, 230, CGRect(x: 77, y: 86, width: 480, height: 230), tail: TourTail(edge: .up, x: 317))
 pinned(duoOuter, .settings, 230, CGRect(x: 214, y: 80, width: 480, height: 230), tail: TourTail(edge: .up, x: 664))
-pinned(duoOuter, .settings, 420, CGRect(x: 214, y: 64, width: 480, height: 420), tail: nil)
-pinned(duoOuter, .bar, 520, CGRect(x: 77, y: 16, width: 480, height: 468), tail: nil)
+pinned(duoOuter, .settings, 420, CGRect(x: 214, y: 80, width: 480, height: 404), tail: TourTail(edge: .up, x: 664))   // scrolls, the button in view
+pinned(duoOuter, .bar, 520, CGRect(x: 77, y: 86, width: 480, height: 398), tail: TourTail(edge: .up, x: 317))
 // 710×1000, upright or half-folded: in the top half, its bottom at 480, no tail across the crease.
 pinned(duoUp, .touch, 262, CGRect(x: 175, y: 119, width: 360, height: 262), tail: nil)
 pinned(duoUp, .bar, 230, CGRect(x: 137, y: 250, width: 360, height: 230), tail: nil)
@@ -352,24 +369,34 @@ pinned(duoOuterUp, .bar, 230, CGRect(x: 36, y: 105, width: 360, height: 230), ta
 pinned(duoOuterUp, .settings, 200, CGRect(x: 124, y: 135, width: 360, height: 200), tail: TourTail(edge: .down, x: 456))
 pinned(duoOuterUp, .laptop, 300, CGRect(x: 70, y: 35, width: 360, height: 300), tail: nil)
 pinned(duoOuterUp, .laptop, 330, CGRect(x: 70, y: 16, width: 360, height: 330), tail: nil)   // grows down over the window bar
-pinned(duoOuterUp, .bar, 800, CGRect(x: 36, y: 16, width: 360, height: 678), tail: nil)
-// 667×375, the iPhone SE sideways: 480 pt wide; the bar card fits under the bar at 230.
+pinned(duoOuterUp, .bar, 800, CGRect(x: 36, y: 16, width: 360, height: 338), tail: TourTail(edge: .down, x: 216))   // down to 12 pt above the bar
+// 667×375, the iPhone SE sideways: 480 pt wide; the bar card fits under the bar at 230, and scrolls there when taller.
 pinned(seSide, .touch, 200, CGRect(x: 93.5, y: 126.5, width: 480, height: 200), tail: nil)
 pinned(seSide, .bar, 230, CGRect(x: 55.5, y: 86, width: 480, height: 230), tail: TourTail(edge: .up, x: 295.5))
 pinned(seSide, .settings, 230, CGRect(x: 171, y: 80, width: 480, height: 230), tail: TourTail(edge: .up, x: 621))
-pinned(seSide, .bar, 300, CGRect(x: 55.5, y: 59, width: 480, height: 300), tail: nil)
-pinned(seSide, .settings, 500, CGRect(x: 171, y: 16, width: 480, height: 343), tail: nil)
-// 375×667, the iPhone SE upright: 343 pt, down to the window bar; laptop grows over it.
+pinned(seSide, .bar, 300, CGRect(x: 55.5, y: 86, width: 480, height: 273), tail: TourTail(edge: .up, x: 295.5))   // under the bar, scrolling
+pinned(seSide, .settings, 500, CGRect(x: 171, y: 80, width: 480, height: 279), tail: TourTail(edge: .up, x: 621))
+// 375×667, the iPhone SE upright: 343 pt, down to the window bar; laptop grows over it, never over the keys.
 pinned(seUp, .touch, 262, CGRect(x: 16, y: 36, width: 343, height: 262), tail: nil)
 pinned(seUp, .bar, 230, CGRect(x: 16, y: 84, width: 343, height: 230), tail: TourTail(edge: .down, x: 153.5))
 pinned(seUp, .settings, 200, CGRect(x: 16, y: 114, width: 343, height: 200), tail: TourTail(edge: .down, x: 331))
 pinned(seUp, .laptop, 330, CGRect(x: 16, y: 16, width: 343, height: 330), tail: nil)
-pinned(seUp, .laptop, 700, CGRect(x: 16, y: 16, width: 343, height: 635), tail: nil)
+pinned(seUp, .laptop, 700, CGRect(x: 16, y: 16, width: 343, height: 388), tail: TourTail(edge: .down, x: 187.5))   // never over the keys
+// A window too small for a card beside its targets (under 200 pt of room): only then over them, with
+// no tail, and the dim then has no cutout or ring (coversTargets).
+let tinySide = model(600, 290), tinyUp = model(330, 420)
+pinned(tinySide, .settings, 190, CGRect(x: 104, y: 80, width: 480, height: 190), tail: TourTail(edge: .up, x: 554))   // fits: under it
+pinned(tinySide, .settings, 250, CGRect(x: 104, y: 24, width: 480, height: 250), tail: nil, covers: true)             // 194 pt of room: over it
+pinned(tinySide, .touch, 250, CGRect(x: 60, y: 24, width: 480, height: 250), tail: nil)                               // the picture's card: never "covers"
+pinned(tinyUp, .bar, 180, CGRect(x: 16, y: 16, width: 298, height: 180), tail: TourTail(edge: .down, x: 131))       // grown, above the bar still
+pinned(tinyUp, .bar, 250, CGRect(x: 16, y: 16, width: 298, height: 250), tail: nil, covers: true)                    // 193 pt above it: over it
 // The home indicator's inset is the bottom margin's floor.
 let phoneSide = model(832, 440)
 let insetPlaced = place(phoneSide, .bar, height: 330, width: 480, inset: 20)
-check(insetPlaced == TourPlacement(card: CGRect(x: 138, y: 74, width: 480, height: 330), tail: nil), "832×440 less 20: the card grows up, above the home indicator: \(insetPlaced)")
-check(place(phoneSide, .bar, height: 300, width: 480, inset: 20).tail != nil, "and one that fits keeps its tail")
+check(insetPlaced == TourPlacement(card: CGRect(x: 138, y: 86, width: 480, height: 318), tail: TourTail(edge: .up, x: 378)),
+      "832×440 less 20: under the bar, down to the home indicator's margin, its words scrolling: \(insetPlaced)")
+check(place(phoneSide, .bar, height: 300, width: 480, inset: 20) == TourPlacement(card: CGRect(x: 138, y: 86, width: 480, height: 300), tail: TourTail(edge: .up, x: 378)),
+      "and one that fits is as tall as its words")
 check(insetPlaced == oracle(phoneSide, .bar, height: 330, width: 480, inset: 20), "the inset, against the oracle")
 // Targets not measured yet: centred in the picture.
 check(TourPolicy.place(card: CGSize(width: 360, height: 200), targets: nil, isStream: false, screen: duoInner.size, layout: L,
@@ -414,20 +441,31 @@ for w0 in widths {
                             if s.layout == L && (tail.edge != .up || c.minY != t.maxY + 12) { check(false, "\(label): a landscape tail not up from its place"); continue }
                             if s.layout == P && (tail.edge != .down || t.minY - c.maxY > 48 || t.minY < c.maxY) { check(false, "\(label): a portrait tail too far"); continue }
                         }
+                        if topic != .touch {
+                            // Never over its own targets while the room beside them holds the card,
+                            // or any card (200 pt): the lit control stays in view at every text size.
+                            let room = s.layout == L ? bottom - (t.maxY + 12) : (crease != nil ? .infinity : min(bottom, t.minY - 12) - 16)
+                            if c.intersects(lit) && (room >= 200 || h <= room) { check(false, "\(label): over its targets with \(room) pt beside them"); continue }
+                            if p.coversTargets != c.intersects(lit) { check(false, "\(label): coversTargets \(p.coversTargets) for \(c)"); continue }
+                        } else if p.coversTargets {
+                            check(false, "\(label): the picture's card hides its ring"); continue
+                        }
                         if topic != .touch && s.layout == L {
-                            let fits = t.maxY + 12 + h <= bottom
-                            // Beside its targets whenever it fits there, never above them.
-                            if fits && (c.minY != t.maxY + 12 || p.tail == nil) { check(false, "\(label): fits below, placed at \(c)"); continue }
-                            // Else it grows toward the top, over its targets only then.
-                            if !fits && (c.maxY != bottom || p.tail != nil) { check(false, "\(label): grew wrongly to \(c)"); continue }
-                            if c.intersects(lit) && fits { check(false, "\(label): over its targets while it fits"); continue }
+                            let room = bottom - (t.maxY + 12)
+                            let holds = h <= room || room >= 200
+                            // Under its targets with a tail up, as tall as its words or as the room.
+                            if holds && (c.minY != t.maxY + 12 || c.height != min(h, room) || p.tail?.edge != .up) { check(false, "\(label): not under its targets: \(c)"); continue }
+                            // Only a room too small for a card makes it grow toward the top, tail-less.
+                            if !holds && (c.maxY != bottom || p.tail != nil) { check(false, "\(label): grew wrongly to \(c)"); continue }
                         }
                         if topic != .touch && s.layout == P {
                             let halfBottom = min(s.stream.maxY - 12, (crease ?? 10_000) - 16)
-                            // In the picture's half while it fits; over the laptop half only without a crease.
+                            // In the picture's half while it fits; past it only down to its targets' top,
+                            // and without a crease.
                             if h <= halfBottom - 16 && c.maxY != halfBottom { check(false, "\(label): not at the picture's bottom"); continue }
                             if c.maxY > halfBottom + 0.001 && crease != nil { check(false, "\(label): past the picture's half with a crease"); continue }
                             if h > halfBottom - 16 && c.minY != 16 { check(false, "\(label): grew, but not from the top"); continue }
+                            if !p.coversTargets && c.maxY > t.minY - 12 + 0.001 { check(false, "\(label): closer than 12 pt to its targets: \(c)"); continue }
                         }
                         if abs(c.width - w) > 0.001 { check(false, "\(label): width \(c.width) not \(w)"); continue }
                         // The card draws its tail from the height it was laid out at: placed again at

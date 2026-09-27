@@ -226,8 +226,10 @@ struct TourOverlay: View {
     var body: some View {
         let g = geometry
         ZStack(alignment: .topLeading) {
-            TourDim(cutout: TourPolicy.cutout(stepTargets, screen: screen), radius: TourPolicy.radius(run.at),
-                    card: card?.frame, step: run.at, nudge: nudge)
+            // A card that had to cover its targets (a room too small beside them) leaves no cutout
+            // and no ring: what showed of them would be slivers beside the card.
+            TourDim(cutout: card?.coversTargets == true ? nil : TourPolicy.cutout(stepTargets, screen: screen),
+                    radius: TourPolicy.radius(run.at), card: card?.frame, step: run.at, nudge: nudge)
                 // Reduce Motion: the lit part cross-fades to the next instead of travelling.
                 .id(reduceMotion ? run.at.rawValue : "dim")
                 .transition(.opacity)
@@ -257,11 +259,13 @@ struct TourOverlay: View {
     private func nudge() { nudges += 1 }
 
     #if DEBUG
-    /// "screen 1000×710 (landscape); card 281,94 360×230, tail up at 461"
+    /// "screen 1000×710 (landscape); card 281,94 360×230, tail up at 461" (", over its targets"
+    /// when it had to cover them).
     static func describe(_ r: TourCardReport, screen: CGSize, layout: TourLayout) -> String {
         func n(_ v: CGFloat) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
         let tail = r.tail.map { ", tail \($0.edge.rawValue) at \(n($0.x))" } ?? ", no tail"
-        return "screen \(n(screen.width))×\(n(screen.height)) (\(layout.rawValue)); card \(n(r.frame.minX)),\(n(r.frame.minY)) \(n(r.frame.width))×\(n(r.frame.height))" + tail
+        return "screen \(n(screen.width))×\(n(screen.height)) (\(layout.rawValue)); card \(n(r.frame.minX)),\(n(r.frame.minY)) \(n(r.frame.width))×\(n(r.frame.height))"
+            + tail + (r.coversTargets ? ", over its targets" : "")
     }
     #endif
 }
@@ -311,10 +315,11 @@ private struct TourCardLayout: Layout {
     }
 }
 
-/// The card's frame on the screen and its tail, as placed.
+/// The card's frame on the screen and its tail, as placed, and whether it covers its targets.
 struct TourCardReport: Equatable {
     var frame: CGRect
     var tail: TourTail?
+    var coversTargets = false
 }
 
 private struct TourCardReportKey: PreferenceKey {
@@ -689,7 +694,8 @@ private struct TourCard: View {
                 }
             }
             .frame(width: g.size.width, height: g.size.height)
-            .preference(key: TourCardReportKey.self, value: TourCardReport(frame: placed.card, tail: placed.tail))
+            .preference(key: TourCardReportKey.self,
+                        value: TourCardReport(frame: placed.card, tail: placed.tail, coversTargets: placed.coversTargets))
         }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
