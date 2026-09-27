@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Remote pacing (2026-09-27, branch `remote-pacing` from main at 150f781, with
-main at cf05a78 and 676b362 merged in, PR #34; PR A of
+main at cf05a78, 676b362 and 2b38179 merged in, PR #34; PR A of
 docs/remote-bundle-plan.md, whose "Results: PR A" has every number).** Item 1
 of the away-from-home bundle Noah decided on 2026-09-25 ("a proven keyframe
 livelock"), its own PR ahead of items 2–4 (the away quality, the link report,
@@ -71,7 +71,9 @@ the move home: PR B, not started).
   once the 1.7 MB keyframe had crossed); clean builds (the Swift package, and
   the iOS app for the simulator, Debug and Release: only the known warnings);
   every pure check (16, and 17 once main brought `dmg-layout`); the reader's
-  17 mutants.
+  17 mutants. On the merge with main at 2b38179 (dc471fa), again: the builds,
+  all 21 pure checks, the harness's gate cases and home (every gate passing)
+  and S2 (no loss in 60 s).
 - Review fixes (2026-09-27; the plan's "Review": an adversarial pass over the
   pacing's arithmetic and edge cases, starvation and bufferbloat, home
   sessions and the reader). Two faults, each with a harness case that fails on

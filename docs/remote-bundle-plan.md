@@ -1380,9 +1380,10 @@ after PR A or with PR A's commits first. Cherry-pick this plan's commit.
 Built on `remote-pacing`, from main at 150f781 (2026-09-26): the host (72d469c), the harness
 (5e8255b; review fixes 1e2e649, 556cc7c, d8dcf2a, 5d18b11), the device's reader (c5326df; review
 fix e3a49ef), a comment (911202e), then main at cf05a78 merged in (7e577c5) and these docs
-(b0fd105), main at 676b362 merged in (07fe32f, no source of the host or the device changed), and
-the review's two cases (a81a58f) and fixes (24dee3c, a933a4f). Items 2–4 (PR B) are not
-started.
+(b0fd105), main at 676b362 merged in (07fe32f, no source of the host or the device changed), the
+review's two cases (a81a58f) and fixes (24dee3c, a933a4f), and main at 2b38179 merged in (dc471fa:
+PRs #30–#33, the Mac's pointer among them, whose reports go out like ticks, outside `send`). Items
+2–4 (PR B) are not started.
 
 ### Defaults taken
 
@@ -1554,6 +1555,15 @@ On this Mac (an M2 Pro), 2026-09-27, with no device, simulator recording or vide
   59–60 fps at a frame age of 40–46 ms, nobody evicted.
 - **The pure checks** (`Tests/checks/run-all.sh`): all 16 pass, before the merge and on it; all 17
   after the review (`dmg-layout` came with main at 676b362).
+- **On the merge with main at 2b38179** (dc471fa; PRs #30–#33, the Mac's pointer among them):
+  `swift build -c release` from clean and the iOS app for the simulator, Debug and Release, with
+  only the known warnings; all 21 pure checks (main's four new ones among them); the harness's gate
+  cases and home against origin/main at 2b38179, one run each, every gate passing (real24 27.5 →
+  59.3 fps, kf25m32 1.5 → 60.1, bigkf8 7.8 → 59.8, restartkf 1.6 → 60.1, stillend 0 → 3 of 3 still
+  spells, slowkfB 0.5 → 64.8, ext120 119.9 → 120.0, dip back at 45 ms 6.0 s after it, relay2 61.4
+  → 62.4 with no loss, the blackhole dropped at 13.1 s on both, home 60.0 on both); and S2 once
+  more, this branch's app against the merged host: no loss in 60 s, its first frames 9 s in, then
+  about 60 fps at a 40 ms frame age.
 
 ### Not verified here, for Noah
 
