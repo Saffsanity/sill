@@ -493,6 +493,16 @@ private enum Key {
     case keyboard
     /// Spotlight on the Mac: always exactly ⌘Space, whatever is latched.
     case spotlight
+
+    #if DEBUG
+    /// What the cap says, for `-SillInputTest` to find it by.
+    var title: String? {
+        switch self {
+        case .press(let title, _, _), .modifier(let title, _, _): return title
+        case .arrow, .keyboard, .spotlight: return nil
+        }
+    }
+    #endif
 }
 
 /// The keys a Mac needs that a software keyboard does not offer. On the inner display (`.full`):
@@ -546,6 +556,9 @@ private struct KeyRow: View {
             }
         }
         .frame(height: metrics.capHeight)
+        #if DEBUG
+        .onAppear(perform: runInputTest)
+        #endif
     }
 
     @ViewBuilder private func key(_ key: Key) -> some View {
@@ -633,4 +646,23 @@ private struct KeyRow: View {
         send(.key(hidUsage: usage, down: false, modifiers: latched.rawValue))
         latched = []
     }
+
+    #if DEBUG
+    /// DEBUG `-SillInputTest 1` (ContentView's contract), the key row's half: once per launch, taps
+    /// cmd, esc, shift and ctrl through `tap`, as the caps do, 1.0, 1.4, 1.8 and 2.0 s after the row
+    /// shows: ⌘esc goes out and spends the ⌘ latch, and shift and ctrl stay latched for the
+    /// trackpad's tap (TrackpadSurface's half).
+    private func runInputTest() {
+        guard InputTest.claim("key row") else { return }
+        for (time, title) in [(1.0, "cmd"), (1.4, "esc"), (1.8, "shift"), (2.0, "ctrl")] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + time) {
+                guard let key = shown.first(where: { $0.title == title }) else {
+                    print("input test: no \(title) cap in this key row"); return
+                }
+                tap(key)
+                print("input test: the key row's \(title) tapped; latched now " + InputTest.describe(latched))
+            }
+        }
+    }
+    #endif
 }

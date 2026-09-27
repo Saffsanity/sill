@@ -72,6 +72,14 @@ struct ContentView: View {
 ///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
 ///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
+/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, [::1] or
+///   localhost), once per launch, in the portrait key row's and trackpad's own code: the key row
+///   taps cmd, esc, shift and ctrl through its caps' action 1.0, 1.4, 1.8 and 2.0 s after it shows
+///   (⌘esc goes out; shift and ctrl stay latched), then the trackpad checks that a touch at its
+///   centre lands on it and strokes 60 pt right and 40 down (2.6 s), taps with shift and ctrl held
+///   around the click (3.2 s) and scrolls five 8 pt steps (3.8 s). Each event goes out as the
+///   controls send it, and the console says what ran ("input test: …"). A synthetic host posts
+///   what it gets on this Mac: put a relay that drops kind 8 (input) in front of it.
 /// * `-SillActive none` — start with nothing streaming (also `desktop`, or a window ID like `104`).
 ///   The mock otherwise starts on Code's window, as the boards draw it.
 /// * `-SillLive 1` — host the app's *real* `StreamClient` in the frame instead of the mock, so the

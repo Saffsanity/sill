@@ -397,6 +397,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             momentum.stop()
         } else {
             adoptSharedPointer()
+            #if DEBUG
+            runInputTest()
+            #endif
         }
     }
 
@@ -497,3 +500,79 @@ private final class FingerTracker: UILongPressGestureRecognizer {
         sawSecondFinger = false
     }
 }
+
+#if DEBUG
+
+// MARK: - Input test (DEBUG)
+
+/// DEBUG `-SillInputTest 1` (ContentView's contract): a scripted run through the key row's and the
+/// trackpad's own code, once per launch, so a gate can see what they send without anything driving
+/// the UI. Only for a session `-SillConnect` dialed on this Mac's loopback, and even there each
+/// event reaches the Mac's host, which a synthetic host posts on this Mac: put a relay that drops
+/// kind 8 (input) in front of it. The key row taps cmd, esc, shift and ctrl (KeyRow.runInputTest);
+/// the trackpad then strokes, taps and scrolls (`TrackpadSurface.runInputTest`).
+enum InputTest {
+    static let enabled: Bool = {
+        guard UserDefaults.standard.bool(forKey: "SillInputTest") else { return false }
+        let host = (UserDefaults.standard.string(forKey: "SillConnect") ?? "").lowercased()
+        guard host.hasPrefix("127.0.0.1:") || host.hasPrefix("[::1]:") || host.hasPrefix("localhost:") else {
+            print("input test: not run: -SillInputTest needs a session -SillConnect dials on this Mac's loopback")
+            return false
+        }
+        return true
+    }()
+    private static var claimed: Set<String> = []
+
+    /// True the first time `part` asks, while the test is on.
+    static func claim(_ part: String) -> Bool {
+        guard enabled, !claimed.contains(part) else { return false }
+        claimed.insert(part)
+        return true
+    }
+
+    static func describe(_ m: KeyModifiers) -> String {
+        let names = [(KeyModifiers.control, "ctrl"), (.option, "opt"), (.command, "cmd"), (.shift, "shift")]
+            .filter { m.contains($0.0) }.map(\.1)
+        return names.isEmpty ? "nothing" : names.joined(separator: "+")
+    }
+}
+
+extension TrackpadSurface {
+    /// The trackpad's half of `InputTest`, 2.6 s after the pad joins a window (after the key row's
+    /// taps): a touch at the pad's centre is checked to land on the pad itself, then a stroke of 12
+    /// moves (60 pt right and 40 down, through `moveCursor`, which the tracker and the pan call),
+    /// a tap (`click`: the latched shift and ctrl go down around it and the latch is spent), and a
+    /// two-finger scroll of five 8 pt steps down with its begin and end, no coast.
+    fileprivate func runInputTest() {
+        guard InputTest.claim("trackpad") else { return }
+        let start = DispatchTime.now()
+        func at(_ seconds: Double, _ step: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: start + seconds, execute: step)
+        }
+        at(2.6) { [weak self] in
+            guard let self, let window = self.window else { return }
+            let centre = self.convert(CGPoint(x: self.bounds.midX, y: self.bounds.midY), to: window)
+            let hit = window.hitTest(centre, with: nil)
+            let reached = hit === self ? "the pad" : hit.map { String(describing: type(of: $0)) } ?? "nothing"
+            print("input test: the pad is " + String(format: "%.0f×%.0f pt", self.bounds.width, self.bounds.height)
+                  + String(format: ", its vertical span %.1f pt; a touch at its centre reaches ", self.ySpan) + reached)
+            for _ in 0..<12 { self.moveCursor(dx: 5, dy: 40.0 / 12) }
+            print("input test: stroke done, the pointer at " + String(format: "(%.3f, %.3f)", self.cursor.x, self.cursor.y))
+        }
+        at(3.2) { [weak self] in
+            guard let self else { return }
+            print("input test: tap with " + InputTest.describe(self.latchedModifiers) + " latched")
+            self.handleTap()
+        }
+        at(3.8) { [weak self] in
+            guard let self else { return }
+            self.beginScroll()
+            for _ in 0..<5 {
+                self.send(.scroll(x: self.cursor.x, y: self.cursor.y, dx: 0, dy: 8 / self.ySpan))
+            }
+            self.endScroll(momentumVelocity: nil)
+            print("input test: two-finger scroll done (5 steps of 8 pt down)")
+        }
+    }
+}
+#endif
