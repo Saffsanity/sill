@@ -128,9 +128,9 @@ final class StreamServer {
     /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
-    /// The Mac's pointer (PointerWatch): who moves it, sampled at each tick and, while it moves, at
-    /// the stream's frame rate; every device that is not moving it is sent where it is (kind 26).
-    /// Set before `start()`.
+    /// The Mac's pointer (PointerWatch): who moves it, sampled at each tick and, while it moves over
+    /// the source and a device is sent it, at the stream's frame rate; every device that is not
+    /// moving it is sent where it is (kind 26). Set before `start()`.
     var pointerWatch: PointerWatch?
 
     /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
@@ -155,10 +155,12 @@ final class StreamServer {
     //
     // The tick also samples the Mac's pointer (PointerWatch) and sends where it is (kind 26) to every
     // device that is not moving it, when that changed; a kind 26 stands in for that device's tick.
-    // While the pointer moves and a device is sent it, the frame-rate sampler samples it at the
-    // stream's rate instead (docs/pointer-visibility-plan.md Q4, decided 2026-09-26), so the device
-    // draws it as smoothly as the picture, and the tick only keeps the link awake. Without a
-    // geometry (nothing streams, or a synthetic host without its scripted pointer) nothing is read.
+    // While the pointer moves over the source and a device is sent it, the frame-rate sampler
+    // samples it at the stream's rate instead (docs/pointer-visibility-plan.md Q4, decided
+    // 2026-09-26), so the device draws it as smoothly as the picture, and the tick only keeps the
+    // link awake; at 33 fps and below the tick samples as often, and no sampler runs
+    // (PointerWatch.samplerInterval). Without a geometry (nothing streams, or a synthetic host
+    // without its scripted pointer) nothing is read.
     private var tickTimer: DispatchSourceTimer?
     private var lastInputAt: TimeInterval = 0
     private var streaming = false
@@ -206,8 +208,9 @@ final class StreamServer {
 
     // MARK: The Mac's pointer (kind 26)
 
-    /// The frame-rate sampler: while the pointer moves and a device is sent it, the pointer is
-    /// sampled every frame interval of the stream instead of at the tick. On `queue`.
+    /// The frame-rate sampler: while the pointer moves over the source and a device is sent it, the
+    /// pointer is sampled every frame interval of the stream instead of at the tick, when that is
+    /// more often (PointerWatch.samplerInterval). On `queue`.
     private var pointerSampler: DispatchSourceTimer?
     private var pointerSamplerInterval = 0.0
 
@@ -216,10 +219,12 @@ final class StreamServer {
     /// a change, sent as the tick is (not counted in `inflight`, so it can never make a slow link
     /// drop frames). A device that moves it is sent nothing and its last report is forgotten, so
     /// the next one goes out once it stops. Starts the frame-rate sampler while the pointer moves
-    /// and a device is sent it, and stops it otherwise. Returns the devices sent one.
+    /// over the source and a device is sent it, faster than the tick, and stops it otherwise
+    /// (PointerWatch.samplerInterval). Returns the devices sent one.
     @discardableResult
     private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
-        guard let watch = pointerWatch, let reading = watch.sample() else {
+        let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
+        guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
             setPointerSampler(interval: nil)
             return []
         }
@@ -239,7 +244,9 @@ final class StreamServer {
             Stats.shared.bump("ptr.sent")
             sent.insert(id)
         }
-        setPointerSampler(interval: reading.moving && watched ? watch.frameInterval : nil)
+        let every = PointerWatch.samplerInterval(moving: reading.moving, inside: reading.inside, watched: watched,
+                                                 frameInterval: watch.frameInterval, tickInterval: Self.tickInterval)
+        setPointerSampler(interval: every)
         return sent
     }
 

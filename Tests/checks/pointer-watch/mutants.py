@@ -18,10 +18,13 @@ MUTANTS = [
     # Sill's own motion
     ("sillMoved opens no settle", "        control.sillMoved(now: now)\n", ""),
     # The window's re-read
-    ("a re-read at every sample", "if !rereading, (moved && since >= rereadAfterMove) || since >= rereadAnyway {", "if !rereading {"),
-    ("no re-read after a move", "(moved && since >= rereadAfterMove) || since >= rereadAnyway", "since >= rereadAnyway"),
-    ("no re-read while the pointer is still", "(moved && since >= rereadAfterMove) || since >= rereadAnyway", "(moved && since >= rereadAfterMove)"),
-    ("a re-read after a move without the gap", "(moved && since >= rereadAfterMove)", "(moved)"),
+    ("a re-read at every sample", "if !rereading, (moved && watched && since >= rereadAfterMove) || since >= rereadAnyway {", "if !rereading {"),
+    ("no re-read after a move", "(moved && watched && since >= rereadAfterMove) || since >= rereadAnyway", "since >= rereadAnyway"),
+    ("no re-read while the pointer is still", "(moved && watched && since >= rereadAfterMove) || since >= rereadAnyway",
+     "(moved && watched && since >= rereadAfterMove)"),
+    ("a re-read after a move without the gap", "(moved && watched && since >= rereadAfterMove)", "(moved && watched)"),
+    ("a re-read after the moves of a device driving alone", "(moved && watched && since >= rereadAfterMove)", "(moved && since >= rereadAfterMove)"),
+    ("any device counts as watching", "let watched = devices.contains { control.controller != .client($0) }", "let watched = !devices.isEmpty"),
     ("a second re-read while one runs", "        if rereading { rereadOwed = true; return nil }\n", ""),
     ("no owed re-read", "            if rereadOwed, let w = window { again = startRereadLocked(w.id) }\n", ""),
     ("an answer for another window kept", "            if let w = window, w.id == id {\n                // Gone", "            if let w = window {\n                // Gone"),
@@ -33,8 +36,17 @@ MUTANTS = [
      "if let w = window, w.id == id { onScreen = w.state.onScreen }"),
     ("no re-read when a window geometry is set", "            reread = startRereadLocked(id)\n        } else {\n            window = nil",
      "            reread = nil\n        } else {\n            window = nil"),
-    # The frame interval
+    # The frame interval, and the frame-rate sampler's
     ("a rate of 0 kept", "self.fps = max(1, fps)", "self.fps = fps"),
+    ("the sampler off the source", "guard moving, inside, watched, frameInterval < tickInterval else { return nil }",
+     "guard moving, watched, frameInterval < tickInterval else { return nil }"),
+    ("the sampler at any frame rate", "guard moving, inside, watched, frameInterval < tickInterval else { return nil }",
+     "guard moving, inside, watched else { return nil }"),
+    ("the sampler at the tick's own interval", "frameInterval < tickInterval else { return nil }", "frameInterval <= tickInterval else { return nil }"),
+    ("the sampler with nobody sent it", "guard moving, inside, watched, frameInterval < tickInterval else { return nil }",
+     "guard moving, inside, frameInterval < tickInterval else { return nil }"),
+    ("the sampler while still", "guard moving, inside, watched, frameInterval < tickInterval else { return nil }",
+     "guard inside, watched, frameInterval < tickInterval else { return nil }"),
     # The scripted pointer
     ("a step always wins over a newer move", "            if at >= testPointAt {", "            if true {"),
     ("a dry run's move moves nothing", "        if let p, path != nil {\n            testPoint = p\n", "        if let p, path != nil {\n"),

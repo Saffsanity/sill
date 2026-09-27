@@ -107,9 +107,9 @@ struct PointerControl {
     }
 
     /// Whether the pointer is moving, whoever moves it: a read differed from the one before it in the
-    /// last `stillAfter` seconds. While it moves the host samples at the stream's frame rate, not only
-    /// at the 30 ms tick (the plan's Q4, decided 2026-09-26), so the devices watching see it as
-    /// smoothly as the picture.
+    /// last `stillAfter` seconds. While it moves over the source the host samples at the stream's
+    /// frame rate, not only at the 30 ms tick (the plan's Q4, decided 2026-09-26), so the devices
+    /// watching see it as smoothly as the picture (PointerWatch.samplerInterval).
     func isMoving(now: Double) -> Bool {
         now - changedAt <= Self.stillAfter
     }

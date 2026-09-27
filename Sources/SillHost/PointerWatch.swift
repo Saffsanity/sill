@@ -7,9 +7,10 @@ import StreamProtocol
 /// synthetic host the TEST ONLY scripted pointer that stands in for the real one.
 ///
 /// Threads. `sample` runs on the network queue (StreamServer's `sill.net`), at each link tick and,
-/// while the pointer moves, at the stream's frame rate; `inputArrived` and `clientLeft` run there
-/// too. `setGeometry` and `sillMoved` come from the main actor (the coordinator, InputInjector,
-/// VirtualStage). Every method holds the lock briefly and waits for nothing but the pointer's own
+/// while the pointer moves over the source and a device is sent it, at the stream's frame rate
+/// (`samplerInterval`); `inputArrived` and `clientLeft` run there too. `setGeometry` and
+/// `sillMoved` come from the main actor (the coordinator, InputInjector, VirtualStage). Every
+/// method holds the lock briefly and waits for nothing but the pointer's own
 /// location (`CGEvent(source: nil)`, about a microsecond, no permission): a regular-mode window's
 /// bounds are re-read on `sill.pointer`, a utility queue of its own, never on the network queue,
 /// where a window-server round trip would sit in front of frames and pongs, and a sample uses the
@@ -48,7 +49,8 @@ final class PointerWatch: @unchecked Sendable {   // every stored var is under `
         let inside: Bool
         let controller: PointerControl.Controller
         /// The pointer is moving, whoever moves it (PointerControl.isMoving): the host then samples
-        /// at the stream's frame rate while a device is sent it.
+        /// at the stream's frame rate while it is over the source and a device is sent it
+        /// (`samplerInterval`).
         let moving: Bool
 
         /// The kind 26 for the device `client`, whose input messages the host has read `seen` of:
@@ -60,7 +62,8 @@ final class PointerWatch: @unchecked Sendable {   // every stored var is under `
     }
 
     /// A regular-mode window's bounds are re-read at most this often after a sample whose read
-    /// moved (the pointer's next move follows a window that moved under a still pointer)…
+    /// moved, while some device is sent the pointer (the pointer's next move follows a window that
+    /// moved under a still pointer)…
     let rereadAfterMove: Double
     /// …and at least this often whatever the pointer does, as the catalog polls (a window moved
     /// while the pointer stays still: up to this late).
@@ -171,11 +174,29 @@ final class PointerWatch: @unchecked Sendable {   // every stored var is under `
         return 1 / Double(fps)
     }
 
+    /// How often the host samples the pointer after a sample that read this (StreamServer, the
+    /// plan's Q4): every frame interval of the stream while the pointer moves over the source and
+    /// some device is sent it (`watched`), when that is more often than the link tick; nil
+    /// otherwise, and the tick samples. Off the source every device is told the same `inside:
+    /// false`, so sampling faster there sends nothing: the sample that sees the pointer leave still
+    /// tells them, and the next tick sees it come back. At a frame rate the tick keeps up with (33
+    /// fps and below), a sampler would sample less often than the tick.
+    static func samplerInterval(moving: Bool, inside: Bool, watched: Bool, frameInterval: Double,
+                                tickInterval: Double) -> Double? {
+        guard moving, inside, watched, frameInterval < tickInterval else { return nil }
+        return frameInterval
+    }
+
     /// One sample: one read of the pointer (the scripted one on a synthetic host), judged by
     /// PointerControl and placed in the source's rectangle. Nil, and no read, without a geometry,
     /// and on a synthetic host before the scripted pointer's first step. Counts `ptr.mac` when the
     /// read hands the pointer to the Mac. Never waits for the window server beyond the read.
-    func sample() -> Reading? {
+    /// `devices`: those the host would send the pointer to (every ready one). A regular-mode
+    /// window's bounds are re-read after a move only while one of them is not the one moving the
+    /// pointer, since the re-read places the pointer for those that are sent it: a device driving
+    /// alone moves it at every input and is sent nothing. The re-read every `rereadAnyway` seconds
+    /// runs whoever is there.
+    func sample(devices: [ObjectIdentifier]) -> Reading? {
         lock.lock()
         guard let geometry else { lock.unlock(); return nil }
         let now = clock()
@@ -189,6 +210,7 @@ final class PointerWatch: @unchecked Sendable {   // every stored var is under `
         let moved = lastRead.map { $0 != p } ?? true
         lastRead = p
         let handedOver = control.read(p, now: now)
+        let watched = devices.contains { control.controller != .client($0) }
         var rect: CGRect
         var onScreen = true
         var reread: CGWindowID?
@@ -199,7 +221,7 @@ final class PointerWatch: @unchecked Sendable {   // every stored var is under `
             rect = r
             if let w = window, w.id == id { rect = w.state.bounds; onScreen = w.state.onScreen }
             let since = now - rereadStartedAt
-            if !rereading, (moved && since >= rereadAfterMove) || since >= rereadAnyway {
+            if !rereading, (moved && watched && since >= rereadAfterMove) || since >= rereadAnyway {
                 reread = startRereadLocked(id)
             }
         }
