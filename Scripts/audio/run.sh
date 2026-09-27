@@ -18,15 +18,17 @@
 #   home-off   the same with Send Audio off: no sound, and the picture's net.sent, net.dropped and
 #              frame age as with it (H5), the host's CPU (H12)
 #   home1024   H5 with 1024-frame chunks (SILL_TEST_AUDIO_CHUNK): 93.75 packets a second
-#   segments   H8 on two devices: each tone paused 50 ms at 3 s and 500 ms at 6 s after it starts, the source changed at
-#              12 s: a segment start at each resumed chunk, placed by its stamp (the clicks), nothing
-#              more than 40 ms after its stamp, a new epoch with its format first on each device
+#   segments   H8 on two devices: each tone paused 50 ms at 3 s and 500 ms at 6 s after it starts, the
+#              source changed at 12 s: a segment start at each resumed chunk, placed by its stamp (the
+#              clicks), nothing more than 40 ms after its stamp, a new epoch with its format first on
+#              each device
 #   away8      H6: the remote door (TLS) through an 8 Mbit/s bottleneck, 70 ms, 1.5 MB keyframes and
 #              30 KB deltas (more than the link): frames dropped, the sound never; packets no later
 #              than the frames + 20 ms; away8-off the same without sound
 #   away4      the same at 4 Mbit/s
 #   dip        H6: Low-sized frames on 8 Mbit/s with 0.5 from 20 s to 32 s: sound and frames late
-#              together, the sound's age back 2 s after
+#              together (the packets no later than the frames + 20 ms and the sound's own time before
+#              it goes out), and back together (the sound's age back in the second the frames' is)
 #   relay2     H6: the remote door's slow link (sillrelay.py, 2 Mbit/s, +150 ms), the synthetic host's
 #              frame sizes: no eviction, the sound never dropped
 set -uo pipefail

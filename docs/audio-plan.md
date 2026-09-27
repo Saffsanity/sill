@@ -1554,6 +1554,10 @@ in; main at da43f6b, PR #38 the trackpad gestures, merged in at 2b114e1):
 - 4001e8e: Host: Send Audio, the sound's stream and its send path.
 - 5dc5a2e: Sill.app: Send Audio.
 
+After them: main's merge (2b114e1), a source's start failure in one line (bdb5775), these docs
+(88026b3), and the sound in a device's stats line (f7303b7, §4.10's ", sound 42 ms behind, 3
+late", the late packets summed since the line before).
+
 Steps 6 and 7 (the device's playout model, its output, the Sound button and the panel's rows) come
 next. Until they land, no device plays the sound: no device's hello lists a codec, so no host sends
 kind 29. Step 8's docs are done as far as these steps go: BRIEF.md and CLAUDE.md record Noah's
