@@ -199,7 +199,7 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop() }
+        if window == nil { momentum.stop(); releaseForwardedKeys() }
         #if DEBUG
         if window != nil {
             InputScript.overlay = self
@@ -379,7 +379,10 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        if resigned { onKeyboardShownChange?(false) }
+        if resigned {
+            releaseForwardedKeys()
+            onKeyboardShownChange?(false)
+        }
         return resigned
     }
 
@@ -393,31 +396,26 @@ final class InputOverlayView: UIView, UIKeyInput {
     //     which is exactly what we want to send as `.text`.
     //
     //   • Raw path (`.key`) owns only what the text path never delivers: the arrows, escape, the
-    //     function keys, home/end/page up/down, forward delete, and *any* key while command,
-    //     control or option is held, because those combinations are shortcuts (⌘S, ⌃A, ⌥←) and
-    //     never reach `insertText`. Shift alone is not in that list: shift makes characters.
+    //     function keys, home/end/page up/down, forward delete, ⌘, ⌃ and ⌥ themselves, and *any* key
+    //     while command, control or option is held, because those combinations are shortcuts (⌘S,
+    //     ⌃A, ⌥←) and never reach `insertText`. Shift alone is not in that list: shift makes
+    //     characters. (ForwardedKeys.goesAsKey.)
     //
-    // Presses we do not take are handed to super so the text input system still sees them.
+    // Which path a key takes is decided when it goes down, and its up takes the same one whatever the
+    // flags say by then (ForwardedKeys): ⌘'s own release and a key let go after ⌘ reach the Mac, and
+    // a key the text system took never sends a stray up. Presses we do not take are handed to super
+    // so the text input system still sees them.
 
-    private static let rawUsages: Set<UIKeyboardHIDUsage> = [
-        .keyboardUpArrow, .keyboardDownArrow, .keyboardLeftArrow, .keyboardRightArrow,
-        .keyboardEscape, .keyboardDeleteForward,
-        .keyboardHome, .keyboardEnd, .keyboardPageUp, .keyboardPageDown,
-        .keyboardF1, .keyboardF2, .keyboardF3, .keyboardF4, .keyboardF5, .keyboardF6,
-        .keyboardF7, .keyboardF8, .keyboardF9, .keyboardF10, .keyboardF11, .keyboardF12
-    ]
-
-    private func isRawKey(_ key: UIKey) -> Bool {
-        if !key.modifierFlags.intersection([.command, .control, .alternate]).isEmpty { return true }
-        return Self.rawUsages.contains(key.keyCode)
-    }
+    /// The hardware keys down on the Mac, so each one's up follows its down.
+    private var forwarded = ForwardedKeys()
 
     private func forward(_ presses: Set<UIPress>, down: Bool) -> Set<UIPress> {
         var unhandled: Set<UIPress> = []
         for press in presses {
-            guard let key = press.key, isRawKey(key) else { unhandled.insert(press); continue }
-            send(.key(hidUsage: UInt16(key.keyCode.rawValue), down: down,
-                      modifiers: UInt64(key.modifierFlags.rawValue)))
+            guard let key = press.key else { unhandled.insert(press); continue }
+            let usage = UInt16(key.keyCode.rawValue)
+            let event = down ? forwarded.began(usage, modifiers: UInt64(key.modifierFlags.rawValue)) : forwarded.ended(usage)
+            if let event { send(event) } else { unhandled.insert(press) }
         }
         return unhandled
     }
@@ -432,6 +430,20 @@ final class InputOverlayView: UIView, UIKeyInput {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         let unhandled = forward(presses, down: false)
         if !unhandled.isEmpty { super.pressesEnded(unhandled, with: event) }
+    }
+
+    /// A press cancelled (the app going to the background, the keyboard disconnected): its key comes
+    /// up on the Mac as if released, so neither it nor a modifier stays down there.
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled = forward(presses, down: false)
+        if !unhandled.isEmpty { super.pressesCancelled(unhandled, with: event) }
+    }
+
+    /// Every hardware key still down on the Mac comes up: this view no longer takes keys (the Settings
+    /// panel took the keyboard, the tour showed) or is leaving the screen, and UIKit sends it no
+    /// release for them.
+    private func releaseForwardedKeys() {
+        for up in forwarded.releaseAll() { send(up) }
     }
 }
 

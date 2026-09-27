@@ -429,6 +429,16 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         if window == nil {
             // This device's pointer is left alone: it outlives this view across a rotation.
             momentum.stop()
+            // A drag the view is taken away in the middle of (a rotation) ends here: the Mac's button
+            // comes up where the cursor is, then the modifiers held around it, so neither stays down
+            // there. The latch is spent on the next turn (this can run inside a SwiftUI update, where
+            // the binding must not be written); the long press's own end, if it comes, finds no drag.
+            if dragging {
+                dragging = false
+                send(.pointer(.leftUp, x: cursor.x, y: cursor.y))
+                releaseModifiers()
+                DispatchQueue.main.async { [weak self] in self?.consumeLatch() }
+            }
             #if DEBUG
             if InputScript.pad === self { InputScript.pad = nil }
             #endif

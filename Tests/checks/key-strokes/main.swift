@@ -488,6 +488,13 @@ do {
 }
 
 // MARK: Random sessions
+//
+// Two devices sending what devices from before this fix send: shortcuts as one key down and up with
+// random modifiers, the trackpad's modified clicks and drags, a hardware keyboard judged again at
+// each release (so a modifier's release is lost, or carries its own flag), text, taps and scrolls;
+// with connections ending (the device back on a new one) and sessions moving to a new connection
+// while the old one lingers. The invariant after every event; at the end, once the host has quit or
+// every device has left, nothing down and no modifier set.
 
 /// SplitMix64: the same runs every time.
 struct Rng {
@@ -614,6 +621,277 @@ for run in 0..<3000 {
 }
 check(brokenRuns == 0, "random sessions: \(brokenRuns) of \(runs) broke the invariant")
 print("random: \(runs) sessions, \(events) events posted")
+
+// MARK: - The device (iOSClient/KeyChords.swift)
+//
+// What this device sends: a shortcut with the modifiers' own keys pressed around it, as a keyboard
+// does and as the trackpad already did around a modified click, and a hardware key's up whenever
+// its down went. Put through this Mac's rule and through the rule of every Mac before this fix (a
+// key's flags exactly as the device sent them), which a device must keep working with (CLAUDE.md,
+// "Compatibility floor"): on both, nothing is left held.
+
+/// A Mac from before this fix (Sill.app 0.3.x, SillHost before 2026-09-27): each key event carries
+/// exactly the device's modifiers; text goes out with none; a device leaving lets go of nothing.
+struct OldMac {
+    var table: UInt64 = 0
+    var down: [UInt16: UInt64] = [:]
+    var log: [Mac.Event] = []
+    var accounted: UInt64 { down.reduce(0) { $0 | (macModifiers[$1.key] ?? $1.value) } }
+    mutating func input(_ e: InputEvent) {
+        switch e {
+        case .key(let usage, let isDown, let modifiers):
+            guard let k = KeyStrokes.virtualKeys[usage] else { return }
+            let f = KeyStrokes.flags(fromDevice: modifiers)
+            log.append(.key(k, isDown, f)); table = f
+            if isDown { down[k] = f } else { down[k] = nil }
+        case .text: log.append(.text); table = 0
+        case .pointer, .scroll, .scrollGesture: log.append(.pointer(table))
+        }
+    }
+    mutating func send(_ events: [InputEvent]) { for e in events { input(e) } }
+}
+
+let ksCommand = KeyModifiers.command.rawValue, ksShift = KeyModifiers.shift.rawValue
+let ksControl = KeyModifiers.control.rawValue, ksOption = KeyModifiers.option.rawValue
+check(ksCommand == command && ksShift == shift && ksControl == control && ksOption == option,
+      "the device's modifier bits are the Mac's")
+
+// The Spotlight key: ⌘'s own key down, Space down and up with command, ⌘ up with nothing.
+check(KeyChord.spotlight == [key(uLCmd, true, command), key(uSpace, true, command), key(uSpace, false, command), key(uLCmd, false, 0)],
+      "the Spotlight key sends \(KeyChord.spotlight)")
+// A key with nothing latched: the key alone, as before.
+check(KeyChord.press(uEsc, with: []) == bare(uEsc, 0), "escape with nothing latched: \(KeyChord.press(uEsc, with: []))")
+// Two latched: each modifier's key down in the trackpad's order with the flags so far, the key, the
+// modifiers' keys up in reverse with the flags left.
+check(KeyChord.press(uRight, with: [.control, .shift]) == [key(uLCtrl, true, control), key(uLShift, true, control | shift),
+                                                          key(uRight, true, control | shift), key(uRight, false, control | shift),
+                                                          key(uLShift, false, control), key(uLCtrl, false, 0)],
+      "⌃⇧→: \(KeyChord.press(uRight, with: [.control, .shift]))")
+check(KeyChord.modifiersDown([.command, .shift]) == [key(uLShift, true, shift), key(uLCmd, true, shift | command)]
+      && KeyChord.modifiersUp([.command, .shift]) == [key(uLCmd, false, shift), key(uLShift, false, 0)],
+      "the trackpad's ⌘⇧ around a click, as before")
+check(KeyChord.modifiersDown([]).isEmpty && KeyChord.modifiersUp([]).isEmpty, "nothing latched: no modifier keys")
+check([(uLCtrl, KeyModifiers.control), (uLShift, .shift), (uLOpt, .option), (uLCmd, .command),
+       (uRCtrl, .control), (uRShift, .shift), (uROpt, .option), (uRCmd, .command)].allSatisfy { KeyModifiers.flag(forKey: $0.0) == $0.1 }
+      && KeyModifiers.flag(forKey: uSpace) == nil && KeyModifiers.flag(forKey: 0x39) == nil,
+      "the eight modifier keys' modifiers, and none for Space or caps lock")
+
+// Every latched combination with a few keys, on this Mac and on one from before this fix: the key
+// goes out with its modifiers, and nothing is held after.
+do {
+    var combos = 0
+    for bits in 0..<16 {
+        var latched: KeyModifiers = []
+        if bits & 1 != 0 { latched.insert(.control) }
+        if bits & 2 != 0 { latched.insert(.shift) }
+        if bits & 4 != 0 { latched.insert(.option) }
+        if bits & 8 != 0 { latched.insert(.command) }
+        for u in [uSpace, uEsc, uS, uLeft, uReturn] {
+            var mac = Mac(), old = OldMac(); let a = Conn()
+            let events = KeyChord.press(u, with: latched) + tap
+            mac.send(events, from: a); old.send(events)
+            let k = KeyStrokes.virtualKeys[u]!
+            let sent = mac.log.contains(.key(k, true, latched.rawValue))
+            check(sent && mac.table == 0 && mac.down.isEmpty && mac.broken.isEmpty,
+                  "\(u) with \(names(latched.rawValue)) on this Mac: \(mac.log)")
+            check(old.log.contains(.key(k, true, latched.rawValue)) && old.table == 0 && old.down.isEmpty
+                  && !old.log.contains(where: { if case .pointer(let f) = $0 { return f != 0 }; return false }),
+                  "\(u) with \(names(latched.rawValue)) on a Mac from before this fix: \(old.log)")
+            combos += 1
+        }
+    }
+    check(combos == 80, "80 combinations")
+}
+// The Spotlight key on a Mac from before this fix: the older device's ⌘Space left command there (the
+// bug), this device's leaves nothing.
+do {
+    var old = OldMac()
+    old.send(bare(uSpace, command) + tap)
+    check(old.table == command && old.log.last == .pointer(command), "an older device's Spotlight key leaves command on an older Mac")
+    var fixed = OldMac()
+    fixed.send(KeyChord.spotlight + tap)
+    check(fixed.table == 0 && fixed.log.last == .pointer(0), "this device's Spotlight key leaves nothing on an older Mac: \(fixed.log)")
+}
+
+// MARK: The device's hardware keyboard (ForwardedKeys)
+
+/// A hardware keyboard on this device and what UIKit tells InputOverlayView: the modifiers held after
+/// each change, or, `before`, from before it (so a modifier's release still carries its own flag and
+/// its press does not yet).
+struct Keyboard {
+    var physical: [UInt16] = []
+    var before = false
+    var forwarded = ForwardedKeys()
+    var flags: UInt64 { physical.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
+    /// A key pressed: its down if it goes to the Mac as a key, else a character typed (the text
+    /// system; a modifier alone types nothing). Unseen (the overlay not taking keys), nothing.
+    mutating func press(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
+        guard !physical.contains(u) else { return [] }
+        let was = flags
+        physical.append(u)
+        guard seen else { return [] }
+        if let e = forwarded.began(u, modifiers: before ? was : flags) { return [e] }
+        return KeyModifiers.flag(forKey: u) == nil ? [.text("x")] : []
+    }
+    mutating func release(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
+        guard let i = physical.firstIndex(of: u) else { return [] }
+        let was = flags
+        physical.remove(at: i)
+        guard seen else { return [] }
+        _ = was   // UIKit's flags at a release: the up carries the modifier keys down on the Mac instead
+        return forwarded.ended(u).map { [$0] } ?? []
+    }
+    /// A press cancelled: the same up.
+    mutating func cancel(_ u: UInt16) -> [InputEvent] {
+        guard let i = physical.firstIndex(of: u) else { return [] }
+        physical.remove(at: i)
+        return forwarded.ended(u).map { [$0] } ?? []
+    }
+}
+
+// Which keys go to the Mac as keys: the ones the text system never delivers, ⌘, ⌃ and ⌥ themselves,
+// and any key while ⌘, ⌃ or ⌥ is held; shift alone makes characters.
+check([uLeft, uRight, 0x51, 0x52, uEsc, 0x4C, 0x4A, 0x4D, 0x4B, 0x4E, 0x3A, 0x45, uLCmd, uRCmd, uLCtrl, uRCtrl, uLOpt, uROpt]
+        .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0) },
+      "arrows, escape, forward delete, home, end, page up and down, F1 and F12, ⌘, ⌃, ⌥: as keys")
+check(![uS, uSpace, uReturn, 0x2A, 0x2B, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+      "letters, space, return, delete, tab, shift and caps lock with shift: to the text system")
+check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command) && ForwardedKeys.goesAsKey($0, modifiers: option)
+                                                  && ForwardedKeys.goesAsKey($0, modifiers: control) },
+      "any key while ⌘, ⌃ or ⌥ is held: as a key")
+
+// ⌘C, ⌘ let go last: the ⌘ key's up goes to the Mac although UIKit no longer says command.
+for before in [false, true] {
+    var kb = Keyboard(); kb.before = before
+    let events = kb.press(uLCmd) + kb.press(uC) + kb.release(uC) + kb.release(uLCmd)
+    check(events == [key(uLCmd, true, command), key(uC, true, command), key(uC, false, before ? command : command), key(uLCmd, false, 0)],
+          "⌘C (UIKit's flags \(before ? "before" : "after") each change): \(events)")
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events + tap, from: a); old.send(events + tap)
+    check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "⌘C leaves nothing on either Mac")
+    check(kb.forwarded.down.isEmpty, "nothing forwarded is down")
+}
+// ⌘ let go before C: C's up still goes (its down did), with what UIKit says then.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLCmd) + kb.press(uC) + kb.release(uLCmd) + kb.release(uC)
+    check(events == [key(uLCmd, true, command), key(uC, true, command), key(uLCmd, false, 0), key(uC, false, 0)], "⌘ let go before C: \(events)")
+}
+// C pressed alone goes to the text system, and its up too, even while ⌘ is held by then.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uC) + kb.press(uLCmd) + kb.release(uC) + kb.release(uLCmd)
+    check(events == [.text("x"), key(uLCmd, true, command), key(uLCmd, false, 0)], "C, then ⌘, C up, ⌘ up: \(events)")
+}
+// Shift held before ⌘ (shift alone is the text system's): the shortcut's down has both, but ⌘'s own
+// key and every up carry only the modifier keys down on the Mac, so an older Mac is left no shift.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLShift) + kb.press(uLCmd) + kb.press(uS) + kb.release(uS) + kb.release(uLCmd) + kb.release(uLShift)
+    check(events == [key(uLCmd, true, command), key(uS, true, shift | command), key(uS, false, command), key(uLCmd, false, 0)],
+          "⇧, then ⌘S: \(events)")
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events + tap, from: a); old.send(events + tap)
+    check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "⇧⌘S leaves nothing on either Mac")
+}
+// ⌘ let go before S while shift is still held: S's up carries nothing (shift is the text system's),
+// so an older Mac is left no shift either.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLShift) + kb.press(uLCmd) + kb.press(uS) + kb.release(uLCmd) + kb.release(uS) + kb.release(uLShift)
+    check(events == [key(uLCmd, true, command), key(uS, true, shift | command), key(uLCmd, false, 0), key(uS, false, 0)],
+          "⇧⌘S, ⌘ let go first: \(events)")
+    var old = OldMac()
+    old.send(events + tap)
+    check(old.table == 0 && old.log.last == .pointer(0), "an older Mac is left nothing: \(old.log)")
+}
+// Left and right ⌘: the left's up keeps command while the right is down.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLCmd) + kb.press(uRCmd) + kb.release(uLCmd) + kb.release(uRCmd)
+    check(events == [key(uLCmd, true, command), key(uRCmd, true, command), key(uLCmd, false, command), key(uRCmd, false, 0)],
+          "left and right ⌘: \(events)")
+}
+// A press cancelled (the app going to the background with ⌘ and C held): C's up with command, then ⌘'s.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLCmd) + kb.press(uC) + kb.cancel(uC) + kb.cancel(uLCmd)
+    check(events == [key(uLCmd, true, command), key(uC, true, command), key(uC, false, command), key(uLCmd, false, 0)],
+          "⌘C cancelled: \(events)")
+    check(kb.cancel(uS).isEmpty, "a press never made: nothing")
+}
+// The overlay no longer taking keys (the Settings panel, the tour) while ⌥, ⌘ and ← are down: every
+// key down on the Mac goes up, the last pressed first; releases after that are the text system's.
+do {
+    var kb = Keyboard()
+    _ = kb.press(uLOpt) + kb.press(uLCmd) + kb.press(uLeft)
+    let ups = kb.forwarded.releaseAll()
+    check(ups == [key(uLeft, false, option | command), key(uLCmd, false, option), key(uLOpt, false, 0)], "releaseAll: \(ups)")
+    check(kb.forwarded.down.isEmpty && kb.forwarded.releaseAll().isEmpty, "then nothing is down")
+    check(kb.release(uLCmd).isEmpty, "a release after that: nothing")
+}
+
+// Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
+// clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go), text
+// and taps. This Mac keeps the invariant after every event; a Mac from before this fix holds no
+// modifier whenever nothing is pressed on the device, and at the end.
+do {
+    var rng = Rng(state: 0xDE71_CE5E)
+    var sessions = 0, oldBroken = 0, newBroken = 0
+    for run in 0..<2000 {
+        var mac = Mac(), old = OldMac(); let a = Conn()
+        var kb = Keyboard(); kb.before = rng.chance(40)
+        var drag: KeyModifiers? = nil
+        var overlay = true
+        var oldHeld: String? = nil
+        func latched() -> KeyModifiers { KeyModifiers(rawValue: rng.modifiers() & modifierBits) }
+        func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
+        for _ in 0..<(20 + rng.below(60)) {
+            switch rng.below(12) {
+            case 0: send(KeyChord.press(rng.pick([uSpace, uEsc, uS, uLeft, uRight, uReturn]), with: latched()))
+            case 1: send(KeyChord.spotlight)
+            case 2:
+                let m = latched()
+                send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.5, y: 0.5), .pointer(.leftUp, x: 0.5, y: 0.5)] + KeyChord.modifiersUp(m))
+            case 3:
+                if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)); drag = nil }
+                else { let m = latched(); send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.2, y: 0.2)]); drag = m }
+            case 4, 5, 6:
+                send(kb.press(rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace]), seen: overlay))
+            case 7, 8:
+                if !kb.physical.isEmpty { send(kb.release(kb.physical[rng.below(kb.physical.count)], seen: overlay)) }
+            case 9:
+                if !kb.physical.isEmpty, overlay { send(kb.cancel(kb.physical[rng.below(kb.physical.count)])) }
+            case 10:
+                // The overlay stops taking keys, or takes them again.
+                if overlay { send(kb.forwarded.releaseAll()) }
+                overlay.toggle()
+            default: send([.text("y")] + tap)
+            }
+            if kb.physical.isEmpty, drag == nil, old.table & modifierBits != 0 {
+                oldHeld = "nothing pressed, yet an older Mac holds \(names(old.table & modifierBits))"
+                break
+            }
+        }
+        if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)) }
+        for u in kb.physical { send(kb.release(u, seen: overlay)) }
+        if oldHeld == nil, old.table & modifierBits != 0 || !old.down.filter({ macModifiers[$0.key] != nil }).isEmpty {
+            oldHeld = "at the end an older Mac holds \(names(old.table & modifierBits)), down \(old.down.keys.sorted())"
+        }
+        if let oldHeld {
+            oldBroken += 1; if oldBroken <= 3 { print("FAIL: device run \(run): \(oldHeld)") }
+        }
+        mac.leave(a)
+        mac.judge("at the end")
+        if !mac.broken.isEmpty || mac.table & modifierBits != 0 {
+            newBroken += 1; if newBroken <= 3 { print("FAIL: device run \(run): \(mac.broken.first ?? "the table holds \(names(mac.table))")") }
+        }
+        sessions += 1
+    }
+    check(newBroken == 0, "device sessions on this Mac: \(newBroken) of \(sessions) broke the invariant")
+    check(oldBroken == 0, "device sessions on a Mac from before this fix: \(oldBroken) of \(sessions) left a modifier held")
+    print("device: \(sessions) sessions")
+}
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")
 exit(failures == 0 ? 0 : 1)

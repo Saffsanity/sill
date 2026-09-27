@@ -1,8 +1,10 @@
-"""Mutants of KeyStrokes.swift (Sources/SillHost): each changes it in one place, is compiled with the
-check by build.sh and must make the check fail. usage: mutants.py WORKTREE"""
+"""Mutants of KeyStrokes.swift (Sources/SillHost) and KeyChords.swift (iOSClient): each changes one
+file in one place, is compiled with the check by build.sh and must make the check fail.
+usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 STROKES = "Sources/SillHost/KeyStrokes.swift"
+CHORDS = "iOSClient/KeyChords.swift"
 UP = "        } else {\n            down[usage] = nil\n            flags = heldFlags\n        }\n"
 MOD = "            down[usage] = isDown ? device : nil\n            flags = heldFlags\n"
 MUTANTS = [
@@ -68,6 +70,41 @@ MUTANTS = [
     ("the left command key is the right one's keycode", STROKES, "0xE3: 55,   // Left Command", "0xE3: 54,   // Left Command"),
     ("the names out of the Mac's order", STROKES, '(capsLock, "caps lock"), (control, "control"), (option, "option"),\n                                         (shift, "shift"), (command, "command")]',
      '(capsLock, "caps lock"), (shift, "shift"), (control, "control"),\n                                         (option, "option"), (command, "command")]'),
+    # The device: its shortcuts
+    ("a shortcut without its modifiers' keys going down", CHORDS, "        modifiersDown(modifiers)\n            + [.key(", "        [.key("),
+    ("a shortcut without its modifiers' keys coming up", CHORDS, "\n            + modifiersUp(modifiers)\n", "\n"),
+    ("the Spotlight key sends ⌘Space as one key down and up (as before)", CHORDS,
+     "static let spotlight: [InputEvent] = press(0x2C, with: .command)",
+     "static let spotlight: [InputEvent] = [.key(hidUsage: 0x2C, down: true, modifiers: KeyModifiers.command.rawValue), .key(hidUsage: 0x2C, down: false, modifiers: KeyModifiers.command.rawValue)]"),
+    ("the Spotlight key is ⌥Space", CHORDS, "press(0x2C, with: .command)", "press(0x2C, with: .option)"),
+    ("a modifier's key goes down with the flags from before it", CHORDS,
+     "            held.insert(key.flag)\n            return .key(hidUsage: key.usage, down: true, modifiers: held.rawValue)",
+     "            let before = held\n            held.insert(key.flag)\n            return .key(hidUsage: key.usage, down: true, modifiers: before.rawValue)"),
+    ("the modifiers' keys come up in the order they went down", CHORDS, "return modifiers.keys.reversed().map { key in", "return modifiers.keys.map { key in"),
+    ("a modifier's key comes up with its own flag", CHORDS,
+     "            held.remove(key.flag)\n            return .key(hidUsage: key.usage, down: false, modifiers: held.rawValue)",
+     "            let before = held\n            held.remove(key.flag)\n            return .key(hidUsage: key.usage, down: false, modifiers: before.rawValue)"),
+    ("the right command key is no modifier", CHORDS, "case 0xE3, 0xE7: return .command", "case 0xE3: return .command"),
+    ("the shift keys are control", CHORDS, "case 0xE1, 0xE5: return .shift", "case 0xE1, 0xE5: return .control"),
+    # The device: its hardware keyboard
+    ("an up whose down the text system had goes to the Mac", CHORDS,
+     "        guard let i = down.firstIndex(of: usage) else { return nil }\n        down.remove(at: i)",
+     "        guard let i = down.firstIndex(of: usage) else { return .key(hidUsage: usage, down: false, modifiers: held) }\n        down.remove(at: i)"),
+    ("a key's up carries the modifier keys from before it", CHORDS,
+     "        down.remove(at: i)\n        return .key(hidUsage: usage, down: false, modifiers: held)",
+     "        let before = held\n        down.remove(at: i)\n        return .key(hidUsage: usage, down: false, modifiers: before)"),
+    ("a modifier's own key carries what UIKit says", CHORDS, "modifiers: isModifier ? held : modifiers)", "modifiers: modifiers)"),
+    ("a key's down carries only the modifier keys down on the Mac", CHORDS, "modifiers: isModifier ? held : modifiers)", "modifiers: held)"),
+    ("⌘, ⌃ and ⌥ go to the text system on their own", CHORDS,
+     "        0xE0, 0xE2, 0xE3, 0xE4, 0xE6, 0xE7,                                       // control, option, command, left and right\n", ""),
+    ("escape goes to the text system", CHORDS, "        0x29, 0x4C,", "        0x4C,"),
+    ("shift makes shortcuts", CHORDS, "modifiers & KeyModifiers.shortcutMakers.rawValue != 0",
+     "modifiers & (KeyModifiers.shortcutMakers.rawValue | KeyModifiers.shift.rawValue) != 0"),
+    ("letting go of the keys sends nothing", CHORDS, "        while let usage = down.last, let up = ended(usage) { ups.append(up) }\n", ""),
+    ("letting go of the keys, the first pressed first", CHORDS, "while let usage = down.last, let up", "while let usage = down.first, let up"),
+    ("the right-hand keys hold nothing on the device", CHORDS,
+     "private var held: UInt64 { down.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }",
+     "private var held: UInt64 { down.reduce(0) { $0 | ($1 < 0xE4 ? KeyModifiers.flag(forKey: $1)?.rawValue ?? 0 : 0) } }"),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
