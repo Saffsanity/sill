@@ -445,6 +445,12 @@ struct StreamScreen: View {
 
     /// The tour is on screen (not put aside under the pairing overlay).
     private var tourOnScreen: Bool { tour != nil && !overlayShown }
+
+    /// Whether the session a piece of the tour's delayed work began in (`client.connectedAt` then) is
+    /// still the one on screen. A stream screen that has gone keeps its last state, and work it left
+    /// waiting would act on it (a DEBUG stand-in pressed a card's Next after its session ended), and
+    /// now write the next session's `client.tourSession`.
+    private func sameSession(_ mark: Date?) -> Bool { client.connected && client.connectedAt == mark }
     /// The card on screen, if any.
     private var tourCard: TourTopic? { tourOnScreen ? tour?.at : nil }
 
@@ -486,9 +492,11 @@ struct StreamScreen: View {
         pictureAt = ProcessInfo.processInfo.systemUptime
         #if DEBUG
         let debug = TourDebug.current
+        let mark = client.connectedAt
         if let step = debug.start {
             // A turn later, once the screen has said which layout it is.
             Task { @MainActor in
+                guard sameSession(mark) else { return }
                 startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver, from: step))
             }
         }
@@ -496,6 +504,7 @@ struct StreamScreen: View {
             TourDebug.touchedOnce = true
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(s))
+                guard sameSession(mark) else { return }
                 touches.lastTouchAt = ProcessInfo.processInfo.systemUptime
                 tourLog("a stand-in touch \(s) s after the picture")
                 considerTour()
@@ -504,9 +513,11 @@ struct StreamScreen: View {
         if let s = debug.takeTourAt {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(s))
+                guard sameSession(mark) else { return }
                 tourLog("a stand-in for Settings, then Take the Tour")
                 setSettings(true)
                 try? await Task.sleep(for: .seconds(1))
+                guard sameSession(mark) else { return }
                 takeTour()
             }
         }
@@ -569,9 +580,10 @@ struct StreamScreen: View {
                 tourLog("waiting until 1.0 s after the \(session.decided && layoutAt > (pictureAt ?? 0) ? "turn" : "picture")")
             }
             #endif
+            let mark = client.connectedAt
             tourWait = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(max(0.01, until - ProcessInfo.processInfo.systemUptime)))
-                if !Task.isCancelled { considerTour() }
+                if !Task.isCancelled, sameSession(mark) { considerTour() }
             }
         case .pass(let reason):
             // A pass before the picture (the tour off) or once decided changes nothing.
@@ -655,9 +667,10 @@ struct StreamScreen: View {
         let keyboard = keyboardBeforeSettings
         setSettings(false, restoreKeyboard: false)
         tourLog("Take the Tour")
+        let mark = client.connectedAt
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(0.18))      // the panel's close
-            guard client.connected else { return }          // the session ended meanwhile
+            guard sameSession(mark) else { return }         // the session ended meanwhile
             startTour(TourPolicy.replay(tourLayout ?? .landscape, voiceOver: tourVoiceOver), keyboardAfter: keyboard)
         }
     }
@@ -688,9 +701,10 @@ struct StreamScreen: View {
         case .skip(let s): seconds = s; skip = !tourSkipPressed
         }
         if skip { tourSkipPressed = true }
+        let mark = client.connectedAt
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
-            guard tour?.at == run.at, tourOnScreen else { return }
+            guard sameSession(mark), tour?.at == run.at, tourOnScreen else { return }
             tourLog("a stand-in presses \(skip ? "Skip" : run.isLast ? "Done" : "Next")")
             if skip { tourSkip() } else { tourNext() }
         }
