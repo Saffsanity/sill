@@ -270,7 +270,7 @@ Each menu is read from the Mac when it opens, and an item chosen there is
 pressed on the Mac through Accessibility. The Mac's shortcuts show as text,
 never as key commands (⌘S typed still reaches the Mac as a key). Never the
 Apple menu, never Sill's own. Built, reviewed (eleven findings, all fixed) and
-checked; PR #36 waits on Noah's device tests (below).
+checked; PR #36 merged (59c4ec8), and Noah's device tests below are still open.
 - Wire (additive; `MacMenu.swift`; the compatibility floor below): kind 24
   `macMenu` (host → device: a top level, or the answer to one request), 25
   `pressMenuItem`, 27 `fetchMenu` (one menu's items; without an id, the
@@ -376,10 +376,10 @@ checked; PR #36 waits on Noah's device tests (below).
   (Q2): on a phone the button ends the thumbnails' row (row 1's five kept; the
   key row is the other place), and a window too narrow for it leaves it out,
   so before iPadOS 26 a Slide Over has no menus.
-- For the other branches: kind 28 (`trackpad-gestures`) flips
-  `Tests/checks/protocol`'s, `menus`' and `pointer-control`'s "28 unknown",
-  and the three mutants that renumber a kind onto 28 or 29 move to free
-  numbers (Tests/checks/README.md); the pbxproj block A040–A044/F040–F044;
+- For the other branches: kind 28 (`trackpad-gestures`, merged since: PR #38)
+  flipped `Tests/checks/protocol`'s, `menus`' and `pointer-control`'s "28
+  unknown", and the three mutants that renumber a kind onto 28 or 29 moved to
+  free numbers (Tests/checks/README.md); the pbxproj block A040–A044/F040–F044;
   StreamClient's `handle` gains `.macMenu`, its first window list the
   subscription, a move's `finishMove` `menusMoved()` and `tearDown`
   `resetMenus()`; `TopBar`, the portrait `windowBar` and the phone's
@@ -569,13 +569,14 @@ on the desktop on Sill. When Sill is controlling the Mac, continue to hide
 the real pointer and only render the client side one in portrait mode when
 the trackpad is used" (2026-09-25); the plan's defaults, but Q4: the pointer
 is sampled at the stream's frame rate while it moves. Built, reviewed and
-checked; PR #31 waits on Noah's device tests (P1–P12, below).
+checked; PR #31 merged (35f7cde), and Noah's device tests (P1–P12, below) are
+still open.
 - Wire: kind 26 `macPointer`, host → device, JSON `MacPointer`
   (`Pointer.swift`): where the Mac's pointer is in the streamed frame (`x`,
   `y` as fractions to 4 places, left out off the stream), `inside`, and `seen`,
   the input messages (kind 8) the host had read on that connection, so a device
   drops a report built before the host read its latest input. Every field
-  optional; older readers skip 26. 24, 25 and 27 stay held for the Mac menu bar.
+  optional; older readers skip 26. 24, 25 and 27 are the Mac's menus (PR #36).
 - Host: one controller, the Mac or the device whose input the host read last
   (`PointerControl`, pure). Any kind 8 hands the pointer to its device; a
   pointer or scroll input, and Sill's own post or warp (noted just before it),
@@ -798,7 +799,9 @@ display unchanged; no wire change.
   `Tests/checks/run-all.sh`, all 17; `swift build -c release` (only the
   CaptureProbe warning); iOS Debug and Release for the simulator and Debug for
   a generic device, from clean (only the `StreamClient` capture warning).
-- For the other branches: `pointer-visibility` changes the picture pane's
+- For the other branches (`pointer-visibility`, `first-run-walkthrough` and
+  `trackpad-gestures` have merged this since, PRs #31, #35 and #38):
+  `pointer-visibility` changes the picture pane's
   `InputOverlay` and the `Trackpad`'s closures once (both arrangements share
   them now) and keeps both edits to `TrackpadSurface.moveCursor` (its
   `setOwnPointer`, this branch's `ySpan` on the `cursor.y` line);
@@ -1398,7 +1401,7 @@ has both ways out: go public, or publish in sill-site). Added:
   then $0.062 a minute with a payment method on file, and nothing without one.
 
 **Public README (2026-09-25, branch `public-readme` from main at b50e224,
-draft PR #15).** For the repository going public at launch: `README.md` is the
+PR #15, merged at 1f3072a).** For the repository going public at launch: `README.md` is the
 public front page, everything the old README said is in `docs/DEVELOPMENT.md`
 (word for word but for local paths, cross-references and two notes on the iOS
 project, plus the two cable sentences main's README gained from
@@ -1417,7 +1420,8 @@ plainly.
   LICENSE and the README's License section before the repository is public);
   the App Store badge and the sentence under the README's links, as the
   listing and the first notarized Sill for Mac come out.
-- Merging: main gained follow-best-path (PR #12, cea195c) after this branch
+- Merging (done: PR #15 merged at 1f3072a, and every branch named here has
+  merged since): main gained follow-best-path (PR #12, cea195c) after this branch
   began, so PR #15 conflicts in README.md and CLAUDE.md: take this branch's
   README.md (DEVELOPMENT.md's step 3 of The iOS app already has PR #12's
   cable sentences) and keep both Current step entries. The open branches that
@@ -1505,7 +1509,8 @@ Apple's sources and every text to paste into App Store Connect;
   real app on the iPhone simulator (Bonjour listed this Mac; nothing
   connected): the footer above the home indicator, at both text sizes.
 - Main moved on while this ran: PR #11 (encoder recovery) is b50e224, not
-  merged here; it overlaps this branch only in CLAUDE.md and README.md.
+  merged here then (the branch took it with main at cea195c in 11e01cd, and PR #14
+  merged at 2df7ad6); it overlaps this branch only in CLAUDE.md and README.md.
 - **Untested, for Noah:** the decisions: the domain, the contact address, and
   whether 1.0 keeps Remote Access, which main has had since ba91136 (the
   audit advised a 1.0 without it before it merged; the metadata's switch lists
@@ -2507,7 +2512,8 @@ its open questions and the results are in `docs/remote-access-plan.md`).** Bring
 your own VPN (Tailscale, WireGuard into the home network) or, behind a switch
 of its own, a port forward: a device paired once reaches the Mac from anywhere.
 Every open question took its default. Steps 1–8 are committed, and so are the
-fixes of step 9's first review round (below); the rest of step 9 is next.
+fixes of step 9's first review round (below); the branch merged as PR #13
+(ba91136), with its merge and review in the entry above.
 - Two doors. The home door (today's plain TCP listener, Bonjour, unchanged for
   old iOS builds) now admits only this Mac's own networks, loopback and Direct
   Wireless (`OriginPolicy`), with caps (1 MiB messages, 4 kind-17 changes a
