@@ -148,6 +148,8 @@ struct PortraitStreamScreen: View {
     let onPanelSize: (CGSize) -> Void
     /// Pair This iPad… in the panel (see `StreamScreen.openPairingOverlay`).
     var pairThisDevice: () -> Void = {}
+    /// Take the Tour in the panel (see `StreamScreen.takeTour`).
+    var takeTour: () -> Void = {}
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
@@ -193,7 +195,8 @@ struct PortraitStreamScreen: View {
                         .onTapGesture { setSettings(false, true) }
                         .accessibilityHidden(true)
 
-                    HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice)
+                    HostSettingsPanel(client: client, close: { setSettings(false, true) }, pairThisDevice: pairThisDevice,
+                                      takeTour: takeTour)
                         .frame(width: min(360, geo.size.width - 2 * metrics.padSide))
                         .frame(maxHeight: .infinity, alignment: .top)
                         .padding(.top, top)

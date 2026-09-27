@@ -23,6 +23,8 @@ struct HostSettingsPanel: View {
     /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
     /// pairing overlay.
     var pairThisDevice: () -> Void = {}
+    /// Take the Tour: the stream screen puts the panel away and shows the tour of its layout.
+    var takeTour: () -> Void = {}
 
     @AccessibilityFocusState private var headerFocused: Bool
     /// Two seconds on this connection and still no state: the Mac runs a Sill without settings.
@@ -256,7 +258,26 @@ struct HostSettingsPanel: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 4)
             }
+            tour
         }
+    }
+
+    /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
+    /// whatever the Mac is (while settings load, and for a Mac without them). It sends nothing.
+    @ViewBuilder private var tour: some View {
+        Rows {
+            Button(action: takeTour) {
+                Text(TourPolicy.takeTourTitle)
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(TourPolicy.takeTourHint(device: device))
+            .rowFrame()
+        }
+        .padding(.top, client.settings.host == nil ? 10 : 0)
+        Footnote(text: TourPolicy.takeTourFootnote(device: device))
     }
 
     /// Most-changed first, so the outer display's 259 pt shows Quality, Resolution and Frame Rate

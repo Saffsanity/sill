@@ -602,7 +602,8 @@ struct StreamScreen: View {
                              setSettings: { setSettings($0, restoreKeyboard: $1) },
                              settingsTransition: { settingsTransition(anchor: $0) },
                              onPanelSize: { panelSize = $0 },
-                             pairThisDevice: openPairingOverlay)
+                             pairThisDevice: openPairingOverlay,
+                             takeTour: takeTour)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -657,7 +658,8 @@ struct StreamScreen: View {
                     .onTapGesture { setSettings(false) }
                     .accessibilityHidden(true)
 
-                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay)
+                HostSettingsPanel(client: client, close: { setSettings(false) }, pairThisDevice: openPairingOverlay,
+                                  takeTour: takeTour)
                     .frame(width: bar.settingsWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 8)
