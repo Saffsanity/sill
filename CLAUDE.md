@@ -89,7 +89,8 @@ never Sill's own. Not pushed; no PR yet (the review is next).
   inserts nothing; a `sill://pair` link reaches the system's "Open in Sill?",
   past which only a tap goes); the bundle's `--menu-selftest` against the
   fixture; a tap's hit test at the button's centre reaches the button in every
-  layout. Found and fixed by the photos: UIKit's automatic order turned a
+  run that opened the pull-down (the Duo's four sizes, the iPads and the phone
+  upright). Found and fixed by the photos: UIKit's automatic order turned a
   pull-down that opens upward upside down, and cut the Accessibility note at
   its third line.
 - Observed: iOS 27 rebuilds the main menu lazily, as the plan measured on 26:

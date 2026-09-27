@@ -274,8 +274,9 @@ Checked:
     `sill://pair` link brought the system's "Open in “Sill”?" over the connect screen, as on main
     (the Build and run note); the app's own confirmation is past a tap, which a headless run cannot
     give.
-  - The harness's hit test: "a tap on the Menus button's centre reaches the button" in every layout
-    photographed.
+  - The harness's hit test: "a tap on the Menus button's centre reaches the button" in every run
+    that opened the pull-down (the Duo's four sizes, the iPad mini and iPad Pro upright, the iPhone
+    upright; the harness turns a landscape iPad, and UIKit's menus are not turned with it).
 - Sill.app (§6): `.build/Sill.app/Contents/MacOS/Sill --menu-selftest=<the fixture's pid>
   -SillLogFile <scratch>` read the fixture's four menus (the top level in 23 ms) and exited 0, the
   front unchanged, and the lines reached the log file that Show Log… reads. The NSWorkspace
