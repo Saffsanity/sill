@@ -504,8 +504,13 @@ extension StreamClient {
             homeAsk = nil
             guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: PairResult.cable, name: ask.name,
                                             bonjourName: Self.bonjourName(ask.target.fallback ?? ask.target.endpoint)) else { return }
-            status = DiscoveryPolicy.HomeCopy.pairedOverCable(mac: displayName(id))
+            // The session's dial first, then the pairing's words: the dial sets "Connecting to…" in
+            // this same turn, and a status line set twice in one turn is drawn and spoken once, as
+            // the last. So "Paired with Mac mini over the cable." stays on screen, and VoiceOver says
+            // it, until the session comes ("Connected to…") or its dial says otherwise. (It was set
+            // first, and never shown: the security review, 2026-09-27.)
             sessionAfterHomePairing(id, target: ask.target)
+            status = DiscoveryPolicy.HomeCopy.pairedOverCable(mac: displayName(id))
         case .shown:
             ask.phase = .shown
             ask.askedKey = w.fingerprint
