@@ -338,12 +338,10 @@ tests of Direct Wireless Connection and remote access.
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
-encoder session) on their own with a check each, and runs them: about two
-minutes, no device, permission or encoder. `--mutants` also checks that each check fails
-which door, the device floor, how a session ends, the update check) on their
-own with a check each, and runs them: about two minutes,
-no device, permission or encoder. `--mutants` also checks that each check fails
-when its file is changed in one place (most of an hour).
+encoder session, the device floor, how a session ends, the update check, the
+disk image's window) on their own with a check each, and runs them: about two
+minutes, no device, permission or encoder. `--mutants` also checks that each
+check fails when its file is changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -531,7 +529,12 @@ included. `--dry-run` needs only the identity, makes the zip and a disk image
 signed with it, and stops before anything goes to Apple; it builds any
 commit, and only warns that HEAD lacks the tag.
 `Scripts/make-dmg.sh --sign - .build/Sill.app /tmp/Sill.dmg` makes an ad hoc
-image of any build, to look at its window.
+image of any build, to look at its window. The window is 660 x 432 points: its
+picture (`design/DMGBackground.svg`, 660 x 400, white to every edge) and
+macOS 27's 32-point title bar, so the whole picture shows there, with a strip
+of white below it under macOS 14's and 15's 28-point bar;
+`Tests/checks/dmg-layout` checks the `.DS_Store` and the background's alias
+that the layout tool writes.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
@@ -542,7 +545,9 @@ The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
 Actions"). Its checkout is that tag, so there `--publish` checks the local
 tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
 `--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
-on, let that run publish instead.
+on, let that run publish instead. Apple's answers and logs for both
+submissions are the run's artifact `notary-v<version>` for 30 days: when the
+job's log says a notary log lists issues, read them there.
 
 The iOS app goes to App Store Connect (TestFlight, then the App Store) from
 `Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic

@@ -84,12 +84,15 @@ shell.
 - [ ] Look at the disk image once, on this Mac (it isn't notarized, so nowhere else): double-click
       `.build/Sill-<version>.dmg`. Its window should show Sill on the left and Applications on the
       right with the arrow between them and "To install Sill, drag it to Applications." under it,
-      no toolbar or sidebar, the whole picture in view, and the Sill disk in the Finder's sidebar
-      with Sill's icon. Switch the Mac to Dark Mode (System Settings › Appearance) and look again:
-      the names under the two icons must still be readable on the light picture (if the Finder
-      draws them white there, design/DMGBackground.svg needs a change before the page links the
-      image). Eject it, and don't drag this copy to Applications: a Developer ID build asks for
-      Screen Recording and Accessibility again (part 1 §1).
+      no toolbar or sidebar, all white to the window's edges, and the Sill disk in the Finder's
+      sidebar with Sill's icon. The window is sized for macOS 27's 32-point title bar
+      (`DMGLayout.titleBar`): after a two-finger scroll inside it, everything should settle back
+      where it was (a window a few points too short for its picture stays scrolled by those
+      points). Switch the Mac to Dark Mode (System Settings › Appearance) and look again: the
+      names under the two icons must still be readable on the white picture (if the Finder draws
+      them white there, design/DMGBackground.svg needs a change before the page links the image).
+      Eject it, and don't drag this copy to Applications: a Developer ID build asks for Screen
+      Recording and Accessibility again (part 1 §1).
 
 ### 3. The website
 
@@ -519,9 +522,13 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
   `Scripts/release.sh --publish` runs with `SILL_RELEASE_TAG` set: it builds, notarizes, staples,
   checks a copy unpacked from the zip the way Gatekeeper will, makes, notarizes, staples and checks
   the disk image, and creates the GitHub Release with `Sill.dmg`, `Sill.zip` and their `.sha256`
-  files. Apple's notary logs (the zip's and the image's) are kept as an artifact for 30 days. The last
-  step deletes the keychain and the key files whatever happened. The runner image already carries
-  Apple's Developer ID intermediate certificate.
+  files. Apple's answers and logs for both submissions (the zip's and the image's) are the run's
+  artifact `notary-v<version>` for 30 days: when the job's log says a notary log lists issues, read
+  them there, since the run has published the release by then. (The step needs
+  `include-hidden-files: true`: without it upload-artifact skips everything under `.build` and
+  keeps nothing, as it did before the disk image.) The last step deletes the keychain and the key
+  files whatever happened. The runner image already carries Apple's Developer ID intermediate
+  certificate.
 - Then the rest of part 2 as usual: try the disk image on another Mac, and for the first release
   that carries it, move the download page to it.
 - A failed run can be re-run from its page. A version that is already released is refused
@@ -618,9 +625,9 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   runs on Free. Each push to a pull request (drafts too) is a run, so a busy day of pushes can
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
-  Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all. The mutants (CI started by hand with "mutants" ticked) take about two hours of
-  macOS time across their twelve jobs: some 1,200 included minutes, more than half of Free's
-  month, or about $7.50.
+  Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
+  The mutants (CI started by hand with "mutants" ticked) take about two hours of macOS time across
+  their fifteen jobs: some 1,200 included minutes, more than half of Free's month, or about $7.50.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.
