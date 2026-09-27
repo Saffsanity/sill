@@ -1399,10 +1399,16 @@ The others are PR B's.
   eviction rule), where the harness first used that listener.
 - **No synthetic host ran:** a synthetic host's doors listen on every interface, and its stream
   shares the hardware encoder with Noah's Sill.app. So:
-  - **H2 was not run.** The CLI opens no remote door without `--remote`, and every change here is
-    inside `paceRemote` or an `if remote` in `send`, which only a remote client reaches, and the
-    new `Client` fields are touched nowhere else. The harness's `home` case shows the home branch
-    unchanged against the base.
+  - **H2 ran only after the merge with main at 2b38179,** whose `SILL_TEST_LOOPBACK` and
+    `SILL_TEST_SOFTWARE_ENCODER` (PR #31) let a synthetic host listen on 127.0.0.1 alone and never
+    touch the hardware encoder. Before that it was argued from the code: the CLI opens no remote
+    door without `--remote`, every change here is inside `paceRemote`, an `if remote` in `send` or
+    the remote sweep, which only a remote client reaches, and the new `Client` fields are touched
+    nowhere else. Run then (main's CLI against this branch's, both from clean builds, both hooks
+    on, one run each): idle for 35 s, identical masked and sorted (7 lines); with `sillclient.py
+    PORT 5 desktop`, identical (18 lines), and the client's own output identical but for the order
+    its tally lists the kinds it met (a pong or the window list first). The `--direct-wireless`
+    runs were left out: the listener is not this branch's.
   - **H4 ran in the harness:** `relay2` and `blackhole` put Scripts/sillrelay.py (2 Mbit/s,
     +150 ms) between the harness's host, the same StreamServer.swift, and its device, instead of a
     paired `SillHost --synthetic --remote`, at a synthetic host's sizes (100 KB keyframes, 2 KB
@@ -1544,7 +1550,11 @@ On this Mac (an M2 Pro), 2026-09-27, with no device, simulator recording or vide
     through a 64 KB buffer as in the remote plan's H14: the pong's round trip at p95 was 1.2 s on
     the new build and 1.3–1.4 s on the base, on the merge and after the review.
 - **H5, the reader** (`Tests/checks/message-reader`): 46 checks, and 17 of 17 mutants caught (the
-  plan's five among them), before the merge, on it and after the review.
+  plan's five among them), before the merge, on it and after the review. The pull request's first
+  CI run failed its slow case on GitHub's macOS runner ("delivered (15.0 s)"): the stand-in wrote
+  each 4 KB 16 ms after the last was taken, so every late timer slowed the frame. Its writers now
+  keep to the clock (4ca5124); with every timer 44 ms late the old pacing failed as CI did and the
+  new one delivered in 4.2 s, and here the check passed 40 runs in a row, 17 of 17 mutants caught.
 - **S2, the reader live,** on a private iPad mini simulator (iOS 27.0), origin/main's app and then
   this branch's against the same harness host: origin/main's lost the session 7.3 s after
   connecting ("connection silent for 6 s: lost"; 7.2 s on the merge's run) while 1.8 MB came

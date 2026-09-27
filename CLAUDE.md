@@ -101,13 +101,15 @@ the move home: PR B, not started).
     reader. bottleneck.py's comment on its 64 KB receive buffer was wrong
     (macOS keeps loopback buffers at 340–590 KB whatever SO_RCVBUF says) and
     now says so; the relay is unchanged.
-- Not run, and why (the plan's Results): no synthetic host, because its doors
-  listen on every interface and its stream shares the hardware encoder with
-  Sill.app. So H2 was argued from the code (every change is inside
-  `paceRemote` or an `if remote`, which the CLI's clients never reach without
-  `--remote`), H4 ran in the harness, and there is no
-  `SILL_TEST_SOFTWARE_ENCODER` hook yet: PR B's gates need one, and a
-  synthetic host on loopback only.
+- H2 and H4 (the plan's Results): until main brought `SILL_TEST_LOOPBACK` and
+  `SILL_TEST_SOFTWARE_ENCODER` (PR #31) no synthetic host could run here (its
+  doors listened on every interface, its stream shared the hardware encoder
+  with Sill.app), so H4 ran in the harness. H2 ran on the merge with both
+  hooks: main's CLI against this branch's, idle 35 s and with a test client,
+  identical masked and sorted. PR B's gates can use the same two hooks.
+- The pull request's first CI run failed the reader check's slow case on
+  GitHub's runner (its stand-in paced each write off a timer that fired late
+  there); its writers now keep to the clock (4ca5124).
 - **Untested, for Noah:** the plan's P1 (on the hotspot through Tailscale, Pro
   and then Extreme · Retina on a busy window, two minutes each: Sill.log has no
   "net.dropped 1 net.sent 3 net.waitKey 5x" every 2 s, and the `client iPad`
