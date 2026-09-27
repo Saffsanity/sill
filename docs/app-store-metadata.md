@@ -260,7 +260,7 @@ Made for touch
 • Apple Pencil works as a mouse, with hover on iPad models that support it.
 • Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below.
 • Type with the on-screen keyboard or a hardware keyboard. Shortcuts work too.
-• Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26, use the menu bar at the top of the screen.
+• Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26 or later, use the menu bar at the top of the screen.
 • Switch windows from live thumbnails in the bar. Touch and hold one to close, minimize or go full screen. Drag it to reorder.
 • When the mouse moves on your Mac, its pointer shows on your iPhone or iPad too.
 • Aa makes text larger or smaller.
@@ -334,10 +334,10 @@ company's name.
 ### What's New
 
 App Store Connect doesn't show this field for an app's first version; it is
-required from the second on. This was build 0.5 (1)'s "What to Test" on
-TestFlight, and is the pattern for the site and for 1.1. TestFlight asks for
-What to Test for every build (the build › Test Details): for a later build,
-say what changed since the build before, as the release notes do.
+required from the second on. Use it as the pattern for a TestFlight build's
+"What to Test", the site and 1.1. TestFlight asks for What to Test for every
+build (the build › Test Details): for a later build, say what changed since
+the build before, as the release notes do.
 
 ```text
 The first version of Sill. Use any window on your Mac, or the whole desktop, on your iPhone or iPad, with touch, a trackpad, a keyboard or Apple Pencil. Connect over Wi-Fi or a USB cable, directly when you share no network, or through your own VPN once paired.
@@ -424,7 +424,7 @@ WHAT TO TRY
 - Apps (magnifying glass): pick an open window, or search the list and open an app.
 - Tap to click. Drag to scroll. Touch and hold to right-click. Apple Pencil works as a mouse.
 - Keyboard: type into the window. A hardware keyboard works too, with shortcuts.
-- Menus (in the bar; on iPad with iPadOS 26 also the menu bar at the top of the screen): the menus of the app on the Mac. Choose an item and the Mac does it.
+- Menus (in the bar; on iPad with iPadOS 26 or later also the menu bar at the top of the screen): the menus of the app on the Mac. Choose an item and the Mac does it.
 - Move the mouse on the Mac: its pointer shows on the device too.
 - Aa: touch and slide to change the text size.
 - Window thumbnails in the bar: tap to switch. Touch and hold for the window's close, minimize and full screen buttons. Keep holding and drag to reorder.
@@ -615,9 +615,9 @@ Safe:
   Mac's pointer (PR #31) joined the description and the review notes, with
   another script (it reads the blocks as 0.3.1 had them 3 to 6 lower than
   the counts above: description 2,056, review notes 3,550; keywords and
-  What's New the same): description 2,323 (local-only 2,167) of 4,000
-  characters; review notes 3,897 bytes (local-only 3,190) of 4,000, all
-  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 103
+  What's New the same): description 2,332 (local-only 2,176) of 4,000
+  characters; review notes 3,906 bytes (local-only 3,199) of 4,000, all
+  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 94
   bytes left, or the notes lose words elsewhere.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
