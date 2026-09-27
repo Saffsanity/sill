@@ -34,8 +34,9 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
 - The link (`LinkJudge`, pure; StreamServer's sweep closes every client's
   second, at home too; the home branch only counts): short = ≥ 3 frames
   withheld and ≥ a tenth; behind at 3 short of 5, fine after 5 clean, stalled
-  after 3 s with bytes waiting, none taken and nothing heard; a restart resets
-  it (no line); the carried rate is the mean over seconds ending with ≥ 16 KB
+  after 3 s with bytes waiting, none taken and nothing heard; a restart at
+  another quality (bitrate, rate, resolution), or none, resets it (no line),
+  and one that keeps it (a window picked, a rotation) keeps it; the carried rate is the mean over seconds ending with ≥ 16 KB
   waiting (3 needed), reported again when it moves 25 %; the suggestion is the
   highest preset under 70 % of it at the stream's fps (Low when none fits, one
   step down without a measure, Standard with Low from Retina). The
@@ -54,8 +55,8 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   Low · Standard is recommended." / "Use Low · Standard", 44 pt), nothing for
   stalled, the old round-trip callout only for a Mac without `away`; a line
   over the stream while nothing is open over it ("The link can’t keep up with
-  Pro. Lower it in Settings."), gone 2 s after the report clears, announced
-  once a spell.
+  Pro. Lower it in Settings."), gone 2 s after the report clears (at once when
+  it clears while something is open over it), announced once a spell.
 - The move home (`DiscoveryPolicy.moveHome`, StreamClient on PR #12's moves,
   `MoveKind.fromRemote`): a remote session (not Connect Remotely) whose saved
   Mac the network lists by Mac ID for 2 s moves to the home door: the home
@@ -71,7 +72,7 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   `-SillLinkLine behind` and seven settings cases; `sillclient.py`'s `away=`,
   `link=` and `--expect` keys; the pacing harness's link verdicts and cases.
 - Verified (the plan's Results): every pure check (25), the new ones' mutants
-  (away-wire 9, away-quality 16, link-judge 22, away-copy 16) and policy's
+  (away-wire 9, away-quality 16, link-judge 26, away-copy 17) and policy's
   (76, with H15's) and fence's (32 over 17 modes); H2 against origin/main's
   CLI; the pacing matrix against origin/main (every pacing gate, and the
   link's with the dip's and the stopped downlink's measured from the host's
@@ -85,14 +86,41 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   than 3 short in any 5: at 1.8 times over the link, 8 s to report (the gate
   was 6); on a milder one maybe never. The carried rate often goes unmeasured
   then, and the suggestion is one step down.
+- Adversarial review (2026-09-27, after the pull request; the plan's "The
+  adversarial review"), on a move home that races a loss, a Mac that
+  relaunches, two Macs with one name, the away pair never reaching the saved
+  home one, the notice's hysteresis, VoiceOver and copy. Two fixes, each with
+  a check that fails without it: a restart that keeps the quality keeps the
+  link's judgement (f882291: every window picked or rotation cleared the report
+  and it came back 2.5–3 s later, after the line's 2 s linger, so the line
+  returned and was spoken again; the pacing harness's `linkrestart` and an end
+  to end run through a relay showed it; `LinkJudge.judgedAfresh`,
+  `StreamServer.resetLinks`, the coordinator's `judgeLinks`); and a line whose
+  report cleared off screen never comes back (a67dc48: the callout's button,
+  then Done within 2 s, brought the cleared line up and VoiceOver said it). A
+  new simulator run of a move home whose remote path dies 0.5 s in, with a
+  panel pick meanwhile: carried over the move, no connect screen, the pick not
+  sent, the host never changing a setting (9 of 9). Left, in the plan: the
+  move home's kind 18 floor against a broadcast in the same milliseconds, the
+  callout's "·" for VoiceOver (P8), and open question 15 (a still window counts
+  as keeping up, so the line goes and comes back between reading and
+  scrolling). Every gate again on the final build (the plan's numbers): H1,
+  the 25 pure checks and the two changed checks' mutants, H2 14 of 14, the full
+  pacing matrix (ext60 once one drop in its last second, then 3 of 3 clean),
+  H7, H8, H9, H12, H16, H17, S3 at 2 Mbit/s 18 of 18 (at the plan's 3 Mbit/s it
+  failed while another checkout's mutant run loaded the Mac and the software
+  encoder kept 3 to 7 frames a second), S4 and S5 but the check the software
+  encoder's watchdog restarts broke under that load, and S1 at two sizes.
 - **Untested, for Noah:** the plan's P4–P13 (P1–P3 and P14 are PR A's and
   still open): away starts at Low · Standard with `bitrate` untouched (P4);
   the away choice saved and kept (P5); mixed home and away, one restart each
   way (P6); Settings › Streaming and the menu's subtitle (P7); the link at
   Extreme away, the callout, the line, one announcement, the card's row, the
-  button's one restart (P8); a dip (P9); coming home on Wi‑Fi and by the cable,
-  drag and type through the move, the Mac's card once (P10, P11); Connect
-  Remotely at home stays remote (P12); mixed builds (P13).
+  button's one restart, and with the line up a window picked and a rotation
+  (the line stays, not spoken again) and the button then Done at once (no
+  line, nothing spoken) (P8); a dip (P9); coming home on Wi‑Fi and by the
+  cable, drag and type through the move, the Mac's card once (P10, P11);
+  Connect Remotely at home stays remote (P12); mixed builds (P13).
 
 **Remote pacing (2026-09-27, branch `remote-pacing` from main at 150f781, with
 main at cf05a78, 676b362 and 2b38179 merged in, PR #34; PR A of
@@ -3206,7 +3234,8 @@ good.
   counts as away, when the away quality is the target, its two lines; pure,
   `Tests/checks/away-quality`), `LinkJudge` (each device's link judged once a
   second from the sweep: fine, behind, stalled, the carried rate, the
-  suggestion, the host's lines; pure, `Tests/checks/link-judge`),
+  suggestion, the host's lines, and which restarts judge afresh
+  (`judgedAfresh`); pure, `Tests/checks/link-judge`),
   `HostStatus` (the snapshot the app shows, pushed on events; `onChange`
   publishes the devices' settings state), `DeviceSettings` (what a device may
   set, `HostConfig` ↔ wire), `HostLog` (the print shadow, the app's ring and
@@ -3230,7 +3259,8 @@ good.
   directions, keepalive, dead-client eviction, ping echo, client-stats print;
   a remote client's frames paced by the bytes its connection has not taken
   (`paceRemote`, docs/remote-bundle-plan.md §3); one sweep a second closing
-  every client's second into its LinkJudge (`onClientLinkChanged`);
+  every client's second into its LinkJudge (`onClientLinkChanged`), the judges
+  reset only at another quality (`resetLinks`, apart from `resetForNewStream`);
   `send(each:)`, kind 16 per connection; the test-only
   SILL_TEST_REMOTE_ORIGIN;
   the listener built with or without peer-to-peer and replaced live when Direct

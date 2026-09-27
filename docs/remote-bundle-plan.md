@@ -1596,7 +1596,8 @@ the hardware encoder or a real path: the harness sends over loopback, whose kern
 Built on `remote-away`, from `remote-pacing` at c564142 (PR A, #34, open) on 2026-09-27, one
 commit per step: the wire (340f98b), the host's away quality and per-connection states (934f997),
 each device's link (98290b6), Sill.app (0e5d4ce), the device's panel, callout and line (6222d7c),
-the move home (2e40673) and these docs, then the review (below). It stacks on PR A: its
+the move home (2e40673) and these docs, then the review (below), and after the pull request the
+adversarial review's two fixes (f882291, a67dc48). It stacks on PR A: its
 pull request, #39, is against `remote-pacing`, and GitHub moves it to main once PR A merges.
 
 ### Defaults taken
@@ -1798,6 +1799,109 @@ actor, and the device's UI and the move (fences, the kind 18 check, the back-off
   - Settings › Streaming's footer and the menu's subtitle follow the away target (`away` in the
     snapshot), which the restart makes true within a moment.
 
+### The adversarial review (2026-09-27, after the pull request)
+
+Six places to push on: a move home that races a loss, a Mac that relaunches, two Macs with one name,
+the away quality never reaching the saved home settings, the notice's hysteresis, and VoiceOver and
+copy. Two defects were proven and fixed, each with a check that fails without its fix; the rest held,
+one of them live in a new simulator run.
+
+- **Fixed: a restart that keeps the quality keeps the link's judgement** (a departure from §6.1,
+  which cleared it at every restart). Every restart reset every device's judge, so a link that could
+  not carry the quality was cleared at each window picked, rotation or resize and reported again
+  2.5–3 s later, after the device's line had gone (its linger is 2 s): the line came back, VoiceOver
+  said it again, the callout and the Mac's card flickered, and the Mac logged the link again at every
+  restart. The pacing harness's new `linkrestart` case (over8's stream on its 8 Mbit/s link, restarted
+  twice at the same sizes) read `B@3.0 Fr@20.5 B@23.0 Fr@30.2 B@33.0` before and `B@3.0` alone after.
+  End to end (h12r, in the session's scratch: H12's noise host away behind sillrelay.py at 5 Mbit/s,
+  the away quality raised to Balanced, the Desktop picked again at 14 and 20 s, Low at 28 s), kind 16
+  lost its report at each restart and had it back 2.8–3.0 s later, with three "cannot carry Balanced"
+  lines, before; after, the report stood through both restarts, one line, and the pick of Low still
+  cleared it at once, 8 of 8. The judges are now reset only when the stream comes back at another
+  quality (its bitrate per 60 fps, its rate or its resolution: the one the reports and suggestions
+  were made for) or not at all: `LinkJudge.judgedAfresh`, the coordinator's `judgeLinks` at `select`'s
+  commit and when a `select` ends with nothing streaming, and `StreamServer.resetLinks`, apart from
+  `resetForNewStream`. The harness's `--sizes-at` (a settings change) resets them, `--restart-at` does
+  not. `Tests/checks/link-judge`: 82 checks, 26 of 26 mutants (four new: every restart afresh, the
+  bitrate alone compared, a stop keeping the judgement, the resolution ignored).
+- **Fixed: a line whose report cleared off screen never comes back** (§6.7's linger now holds only a
+  line on screen). The stream screen's line lingered 2 s after its report cleared even while the
+  Settings panel covered it, so the callout's button ("Use Low · Standard") and then Done within 2 s
+  brought the line up with the report that had just gone, and VoiceOver announced "The link can’t keep
+  up with Pro. Lower it in Settings." right after the quality was lowered. The away-copy check on the
+  old `LinkLine` announced the cleared line (`Optional("A")` where nil was wanted); now a report that
+  clears while something is open over the stream, or a lingering line that something covers, ends its
+  spell at once. `Tests/checks/away-copy`: 74 checks, 17 of 17 mutants (one new).
+- **A move home that races a loss, live** (S4race, in the session's scratch). The remote session
+  through one relay, the home door behind another that holds 2.5 s each way, so the probe takes
+  seconds; the remote relay killed 0.5 s into the move (the hotspot dropping as the home Wi‑Fi
+  joins); a panel pick of High made while the move carried the session. The console: "the remote
+  connection went while the move home is under way: the move carries the session", the pick 1.1 s
+  later, "the session carried on over the move home" 0.9 s after it, the held messages on the home
+  connection; no connect screen; the host: no settings change at all, one "Home quality again", the
+  home quality running (9 of 9).
+- **The away quality never reaches the saved home settings.** A pick lands by its connection's route,
+  set before the connection's catalog and never changed, read in kind 17's handler before any await;
+  the answer shows the pair it set; Sill.app saves only the keys that changed (H9); a fenced hand-over
+  resets the ledger in the same main-thread turn, so a pick after it is made against the home
+  connection's state and goes out there; while a move carries a dead remote session, a pick is not
+  sent (S4race above).
+- **Two Macs with one name.** Rows match a saved Mac by its Mac ID (the TXT tag its recognition key
+  resolves), never by name. Two Macs sharing a name on different links make one row (the rows are by
+  name); a dial of it that reaches the other Mac is refused at its window list (the launch ID) or its
+  kind 18 (the saved key), and that listing is not tried again while it lasts (S4's `other:`).
+- **A Mac that relaunches.** Its remote session ends with it (the goodbye, or the reset); a move home
+  that reaches the new launch is refused at its window list, and the session's own end reconnects as
+  ever; a refusal is kept per listing within one session, so the relaunched Mac's new listing, or the
+  next session, is tried afresh. The host starts with the away flag off and takes it at the first
+  device, and Sill.app keeps the away pair across the relaunch (H9).
+- **Looked at and left:**
+  - The move home's kind 18 must be at least as new as the remote session's last one, and a kind 18
+    the Mac broadcasts when its addresses change reaches the remote connection too: one read there
+    after the home door's catalog was signed and before the probe is judged refuses that listing for
+    as long as it lasts, and the session stays remote. It needs the Mac's addresses to change within
+    milliseconds of the move and the remote path to be as quick as the home one. Comparing with the
+    kind 18 the session had when the move started would close it.
+  - A still window counts as keeping up (§6.1, H10), so a link that was behind reads "keeping up
+    again" after 5 s still, and the next motion reports it again 3 s later: the line goes and comes
+    back, spoken again, between reading and scrolling. Open question 15.
+  - The callout's words keep the "·" of "Low · Standard is recommended." for VoiceOver, as the
+    footnote's do; the header line and the button have spoken forms ("Low, Standard"). P8 on the device
+    says how VoiceOver reads it.
+- **Every gate again on the final build** (a67dc48; no device, no hardware encoder, no Sill.app;
+  hosts on loopback, killed by PID; the Mac kept awake for the runs, and for the simulator's runs
+  shared with another checkout's simulator and mutant run, which held its load between 100 and 535 at
+  times):
+  - H1: `swift build -c release` of `git archive` from clean, only the CaptureProbe warning; the iOS
+    app for the simulator, Debug (signed ad hoc) and Release, only the old `StreamClient` warning.
+  - Every pure check (25), link-judge's 26 mutants and away-copy's 17.
+  - H2: 14 of 14 against origin/main (2b38179), the software encoder on both.
+  - H3 and H11 (`run.sh --full --base origin/main`): every gate passed but ext60 once, with one drop in
+    the last second of its run; again three times, 60.0 fps with nothing dropped each. real24
+    24.8/18.8/50.6 → 59.3/59.4/59.3 fps, kf25m32 1.5 → 60.1 (×3), bigkf8 1.5/1.5/12.6 →
+    59.9/59.8/59.9, restartkf 1.6 → 60.0, ext120 120.0 (base 2.9 drops a minute, new none), slowkfB
+    0.4 → 64.8, stillend 3 of 3, dip 50.2 → 52.8. The link: real24, slowkfB, linkstill and home never
+    behind; over8 behind at 3.0 s, 7.3 Mbit/s carried, Low suggested; the dip behind 2.3 s after the
+    host's first second withholding frames and fine 6.0 s after its end; the stopped downlink behind
+    2.3 s after it, never stalled; the dead path stalled 5.0 s after the blackhole; linkrestart behind
+    at 3.0 s and through both restarts. stillend, a stream the link cannot carry with 8 s still spells,
+    shows open question 15: `B@3.0 F@17.0 B@24.0 F@32.0 B@39.0 F@47.0 B@54.0`.
+  - H7 12 of 12, H8 and H13 24 of 24, H9 13 of 13 (the domain emptied after), H12 14 of 14 at 5
+    Mbit/s (behind 4.5 s after the pick) and at 6 (5.3 s), h12r 8 of 8, H16's 106 previews byte for
+    byte the build's, H17's greps.
+  - S3 at the plan's 3 Mbit/s failed its run A three times while the other checkout's run loaded the
+    Mac (the software encoder kept 3 to 7 frames a second beside the simulator, against 4 to 11 in the
+    build's run, so the link was behind late or never); at 2 Mbit/s with the button at 30 s, 18 of 18:
+    the line announced once, the button's pick, "link: keeping up" as its answer came through the
+    queue, a new spell at Low announced once.
+  - S4 and S5 19 of 20, and the main case again 12 of 13: moved 2.1 s after the listing, the fence down
+    by its pong, one "Home quality again" and one restart at the home quality; `refused` at 2.0, 12.2,
+    32.4 and 72.7 s; `other:` refused once; Connect Remotely no move in 30 s. The one check missed
+    both times was the software encoder's watchdog restarting the away stream at 4 Mbps before the
+    move under that load: every extra restart came right after its "returned nothing for 1500 ms".
+  - S4race 9 of 9 (above); S1 again at 1000x710 and 710x1000: 17 of 18 photos byte for byte the
+    build's below the status bar, the 18th (linkstalled) the same to the eye.
+
 ### Where home pairing meets this (branch `home-pairing`, PR #37)
 
 When both have landed, whichever merges second:
@@ -1825,7 +1929,7 @@ When both have landed, whichever merges second:
 - **Connect Remotely at home** stays remote on both (`DialReason.connectRemotely`); home pairing's
   cable pairing and asks never go through the remote door, so no move home starts from them.
 
-### Open question for Noah
+### Open questions for Noah
 
 14. **A link only a little too slow.** Behind needs 3 short seconds of 5, and under PR A's pacing
     a link that carries most of the stream loses frames in rounds (drop, drain, keyframe, a second
@@ -1833,6 +1937,12 @@ When both have landed, whichever merges second:
     and no callout comes. Default: **the plan's rule, as built.** The alternative adds "or at least
     a fifth of the last 5 seconds' frames withheld", which would have reported H12's 6 Mbit/s runs
     at about 4 s.
+15. **A still window and the link's line** (found by the adversarial review). A second without frames
+    counts as keeping up (§6.1), so on a link that cannot carry the quality, 5 s of reading ends the
+    spell ("keeping up again") and the next scroll starts another 3 s later, announced again. Default:
+    **the plan's rule, as built.** The alternative counts a second without frames as neither short
+    nor clean, so the line stays up while nothing moves and goes only after 5 seconds of frames that
+    kept up.
 
 ### Not verified here, for Noah
 
@@ -1842,5 +1952,9 @@ restart each way, the iPad's header (P6); Settings › Streaming's section and t
 (P7); the link at Extreme away: the callout, the line, one announcement, the card's row, the
 button's one restart (P8); a dip (P9); coming home on Wi‑Fi and by the cable, dragging and typing
 through the move (P10, P11); Connect Remotely at home staying remote (P12); mixed builds (P13).
-Nothing here ran on a device, a real path or the hardware encoder: the link's timing on a hotspot,
-the move's on a real network, and VoiceOver on a device are all untested.
+With the adversarial review's fixes, P8 also: while the line is up, pick another window and rotate
+the iPad: the line and the callout stay, and VoiceOver does not say it again; and tap the callout's
+button, then Done at once: no line comes up and nothing is spoken; and how VoiceOver reads the
+callout's "Low · Standard". Nothing here ran on a device, a real path or the hardware encoder: the
+link's timing on a hotspot, the move's on a real network, and VoiceOver on a device are all
+untested.
