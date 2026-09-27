@@ -111,6 +111,7 @@ swift run -c release SillHost                        # nothing streams until a d
 swift run -c release SillHost Safari                 # optional: preselect a matching window
 swift run -c release SillHost --virtual-display      # each streamed window on its own HiDPI display; Ctrl-C restores it
 swift run -c release SillHost --direct-wireless      # also over peer-to-peer Wi-Fi, for a device with no shared network
+swift run -c release SillHost --audio                # Send Audio for this run: devices that play it get the streamed app's sound
 swift run -c release SillHost --synthetic            # the Desktop streams a test pattern; no Screen Recording needed
 swift run -c release SillHost --remote               # the remote door for this run, on any free port (--remote=PORT)
 swift run -c release SillHost --remote --internet    # also admit paired devices from the internet
@@ -128,7 +129,8 @@ too; `SillHost` saves nothing, so a change lasts until it quits, and the
 device's panel says so. Its Virtual Display switch works only when `SillHost`
 runs with `--virtual-display`. `--direct-wireless` starts it with Direct
 Wireless Connection on (see Direct Wireless Connection below); it is off by
-default here too.
+default here too. `--audio` starts it with Send Audio on (The Mac's sound
+below), off by default too; with `--synthetic` the sound is a test tone.
 
 `--virtual-display` (off by default, 2026-09-22) moves the picked window onto a
 virtual HiDPI display created with a private CoreGraphics API and captures that
@@ -255,6 +257,26 @@ device, and a streaming setting restarts the stream for a moment. To put one
 setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`,
 `prioritizeSpeed`, `virtualDisplay` or `directWireless`) and open Sill again.
+
+## The Mac's sound
+
+Send Audio (off by default; Sill.app's status menu and Settings › Streaming,
+the CLI's `--audio`, and a device's settings change, whose row in the device's
+Settings panel comes with its playback) sends the sound of what streams
+to every connected device that plays it: the streamed window's app (every window
+of it: macOS captures sound per app), or every app but Sill for the Desktop.
+The Mac keeps playing it too. It comes from a second, audio-only
+ScreenCaptureKit stream, so rotating, Aa, a quality change or the encoder's
+fallback never interrupt it, and it needs no permission beyond Screen
+Recording. AAC-ELD at 128 kbps, 10 ms packets, as kind 29 on the session's own
+connection, only to a device whose hello lists the codec (a device from before
+2026-09-27 is sent none); away from home the sound's bytes count in remote
+pacing's backlog, which drops frames and never the sound. The log says what
+the sound is of ("Audio: capturing Safari's sound (every window of it).") and
+why it stops; the stats line gains `aud.in`, `aud.out`, `aud.sent`, `aud.drop`
+and `aud.gap` while it runs. `defaults delete me.saffer.sill.mac sendAudio`
+puts it back to off. docs/audio-plan.md has the design; the device's playback
+is the next step.
 
 ## Trackpad gestures
 
@@ -487,6 +509,20 @@ all on 127.0.0.1. It prints each case against its gate
 (docs/remote-bundle-plan.md §11): about 18 minutes, `--full` about 40, and it
 waits while the Mac is busy (a load average of 20 or more), since a busy Mac
 makes a stalled path of any link. `--list` shows the cases.
+
+### The sound harness
+
+`Scripts/audio/run.sh` checks the Mac's sound end to end with no encoder,
+capture, speaker or device (docs/audio-plan.md H5, H6, H8): the real
+StreamServer and the sound's host files with the test tone (440 Hz and a click
+at each whole second of the wall clock) and fake frames, both doors on
+127.0.0.1, and `Scripts/audiocheck.swift`, a device that decodes every packet
+and finds each click where its stamp says; at home, 1024-frame chunks, pauses
+and a source change on two devices, and away through Scripts/pacing's
+bottleneck and the relay. About 7 minutes; `--cases` and `--list` as for the
+pacing harness. `Scripts/pacing/run.sh --sound` runs the pacing cases without
+and with the sound (the host's and the stand-in device's `--audio`), so its
+gates judge the run with sound.
 
 ### The menus' test app
 
@@ -795,8 +831,9 @@ record field by field.
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
   link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
-  for the update check's tests), `pacing/` (the pacing harness, above), and
-  `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
+  for the update check's tests), `pacing/` (the pacing harness, above),
+  `audio/` and `audiocheck.swift` (the sound harness and its device, above),
+  and `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
   reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.

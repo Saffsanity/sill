@@ -1541,3 +1541,161 @@ spotlight-modifier-fix among them. Nothing was built or run. Changed in place:
 Left as they were: the codec and its numbers, the time stamps, the playout's rules and constants
 (but for rules 2 and 7 above), the host's sources (but for the app's lookup), packetizer, encoder
 and pipeline, the costs (but for TLS), and the P-list (but for P8 and P15).
+
+---
+
+## Results: the wire, the host and Sill.app (2026-09-27)
+
+Steps 1 to 5 of §12, one commit each, on branch `audio` (from main at 643af6b with the plan merged
+in; main at da43f6b, PR #38 the trackpad gestures, merged in at 2b114e1):
+- 91ce847: Protocol: kind 29, the Mac's sound.
+- 6d1695b: Host: the sound's blocks and stamps.
+- 5d0ef5c: Host and device: the AAC-ELD encoder and decoder.
+- 4001e8e: Host: Send Audio, the sound's stream and its send path.
+- 5dc5a2e: Sill.app: Send Audio.
+
+Steps 6 and 7 (the device's playout model, its output, the Sound button and the panel's rows) come
+next. Until they land, no device plays the sound: no device's hello lists a codec, so no host sends
+kind 29. Step 8's docs are done as far as these steps go: BRIEF.md and CLAUDE.md record Noah's
+decision, and CLAUDE.md, DEVELOPMENT.md, Tests/checks/README.md and `ci.yml` cover the new files.
+The README, the App Store text and the privacy policy wait for the release that carries the sound.
+
+**Where the build departs from the plan, and why:**
+1. **The away cap is 1,500 messages (15 s), not 300.** 15 s is the drain backstop, `remoteDeadAfter`.
+   In the harness (H6), a 4 Mbit/s link with 1.5 MB keyframes had remote pacing holding the picture
+   5–7 s behind: the keyframe, the 512 KB hold and the budget. The 300-message cap skipped 945 of
+   4,479 packets and left 19 seq gaps. With the new cap nothing is skipped: the sound waits with the
+   picture, and a device that has really stopped taking is dropped by the drain backstop first. At
+   8 Mbit/s the picture ran 2.8–3.2 s behind, and 10 s behind in the dip. Home keeps 100 (1 s).
+2. **"2 s after the dip the packets' age is back"** is judged as "back in the same second as the
+   frames'". Remote pacing drains its own queue first: the picture took 6 s after the dip ended,
+   and the sound came back in the same second.
+3. **"Every packet's age at most the frames' + 20 ms"** also allows the sound's own time before it
+   goes out. That is its buffer and the codec's priming: 10–17 ms here. A frame stamped at
+   encode-out has no such time. In the harness the gap never passed 20 ms on top of it.
+4. **SILL_TEST_AUDIO_PAUSE applies to every tone.** After H8's source change the second tone pauses
+   too, so there are four gaps, not two.
+5. **The encoder takes 48 kHz stereo only.** Another rate or channel count is refused with one line
+   and the note, not resampled as the plan's "any rate" would. ScreenCaptureKit delivers what it is
+   asked for (48 kHz stereo is its default, and set explicitly), and P2's first-buffer line records
+   what it actually sends. Mono and integer samples are converted (`PCMLayout`).
+6. **A synthetic host never captures a real window's sound.** A window picked on a test host plays
+   no sound. Only its Desktop, the test pattern, has one: the test tone.
+7. **The log lines.** A source's line prints as it starts, before its first buffer and the encoder's
+   line. A failure then says so after it. The Desktop's line reads "(every app but Sill)" in the CLI
+   too: `excludesCurrentProcessAudio` leaves the host's own sound out there.
+8. **`AudioDecoder` knows nothing of the wire.** It takes the packet size and the cookie, and gives
+   a buffer per channel. With a cookie, AudioToolbox's ELD decoder reads the frame length from it;
+   without one, from the format. Dropping either alone was an equivalent mutant.
+9. **H12 is not met.** With sound the harness host's CPU was 4.33 % of a core against 1.25 % without:
+   +3.1 points, measured as CPU time over 30 s of steady state, twice each. `ps`'s average said
+   +2.1 in the gate run. The plan allows 1.5. Where the time goes:
+   - AAC-ELD itself: about 1 point on the test tone (82–101 µs a packet, measured in memory; 53 µs
+     on a busy signal, 63 on a music-like one).
+   - Each packet's own send: about 1 point. On loopback, `sendmsg` also delivers to the reader.
+   - The rest: the tone's generation (which the real host does not have) and the queues.
+
+   Codec quality Low (`kAudioConverterCodecQuality`, 32 against the default 64) would save about
+   0.6 points (28–33 µs a packet), at 3–9 dB less SNR on tonal sound: 31.9 → 22.8 dB on the tone,
+   19.8 → 17.1 on the music-like signal, 11.1 → 10.7 on the busy one. Not taken: the sound's quality
+   against 0.6 % of one core of a Mac. Noah's call (Q16 below). The real host adds
+   ScreenCaptureKit's own sound stream on top (P13).
+
+**Verified (2026-09-27, 17:24–19:05)** (no ScreenCaptureKit audio against any app, no sound made, no
+device; test hosts on 127.0.0.1 and the software encoder, `no-device.sh` before each):
+- **H0.** Redone on this Mac (macOS 27.0, Xcode 27.0):
+  - ELD 480 and 512 have 240 and 256 frames of priming, the same after `AudioConverterReset`.
+  - End to end with 480-frame chunks, 15.0 and 25.3 ms.
+  - A late join: the first packet −4.6 to −6.3 dB, the second about −42, the third about −65, the
+    fourth exact.
+  - Kind 29 was still free on every ref and worktree, and AA01–AA03 in every project file (A901 went
+    to `spotlight-modifier-fix`).
+- **H1.** `swift build -c release` of each commit's state: only the CaptureProbe warning. On the
+  merge, iOS Debug and Release for the simulator and Debug for a generic device all build, with only
+  the known `StreamClient` capture warning. `AudioDecoder.swift` is not yet in the project.
+- **H3.**
+  - `audio-packetizer`: 89 checks and 27 of 27 mutants.
+  - `audio-codec` (H4): 21 checks and 9 of 9. The clicks landed 0 frames from their second, at 480
+    and 512 frames a packet and after gaps of 50 ms and 0.5 s. A segment's first packet was within
+    −28 dB of the tone (both ends reset). A busy signal ran at 130.2 kbps. Nothing but AudioToolbox
+    is linked.
+  - `compatibility`: 130 checks and 31 of 31 (the sound's 12 mutants among them).
+  - `protocol`: 218 + 8 and 30 of 30 (the sound's 10). It covers the plan's example bytes, every
+    malformed payload, and 2,000 random and damaged payloads that never trap.
+  - `menus`: 309 and 43 of 43. `pointer-control`: 157 and 33 of 33, with the renumbering mutants
+    on 250–254.
+  - The playout, `phone-portrait` and `tour` cases belong to the device's steps.
+- **H5, H6, H8** in the harness (`Scripts/audio/run.sh`, on the merged tree; every gate but H12
+  passed):
+  - At home: 100.02 packets a second, no seq gap, 60 of 60 clicks within 1 ms (0.0–0.3 ms). The
+    picture with and without sound: net.sent 59.5 a second both, net.dropped 0 both, frame age
+    p50/p95 0.1/0.2 against 0.2/0.3 ms.
+  - 1024-frame chunks: 93.84 a second, 30 of 30 clicks.
+  - Pauses and a source change on two devices:
+    - epochs 1 and 2, each format before its epoch's first packet;
+    - 6 and 5 segment starts (the second device joined a second late);
+    - no seq gap, every click within 1 ms, nothing more than 40 ms after its stamp;
+    - `aud.gap` 4.
+  - Away (TLS) through 8 Mbit/s and 70 ms with 1.5 MB keyframes: 22 frames dropped and no packet
+    skipped. The packets' p95/max age was 2,981/3,220 ms against the frames' 3,056/3,203.
+  - The same at 4 Mbit/s: 12 dropped and no packet skipped, 6,465/6,921 against 6,697/6,908.
+  - In the dip to 0.5 Mbit/s: the packets' per-second maxima were 13–20 ms over the frames' all the
+    way to 9.8 s behind. Both were back at 38 s (the dip ended at 32).
+  - Through `sillrelay.py` at 2 Mbit/s and +150 ms: no eviction, no packet skipped.
+  - The pacing harness's own gate cases with sound (`Scripts/pacing/run.sh --sound`): the same build
+    without and with it, every gate passed, fps and drops as without:
+
+    | Case | fps without / with | Drops a minute without / with |
+    |---|---|---|
+    | real24 | 59.3 / 59.3 | 0 / 0 |
+    | kf25m32 | 60.1 / 60.1 | 0 / 0 |
+    | restartkf | 60.1 / 60.1 | 0 / 0 |
+    | stillend, three runs each | 5.5–6.3 / 6.2–6.8 | 17.6–18.8 / 17.6 |
+
+    In restartkf the keyframe asked for at the idle mark was not held back (0 waitKey after the
+    first keyframe). stillend is a stream far bigger than its 16 Mbit/s link: there the median of
+    each second's slowest pong was 102–700 ms with sound against 75–86 without, over three runs each.
+    The pong waits behind what the link is still taking, and with sound flowing the queue is empty
+    less often. Its still spells ended with the last frame shown, 3 of 3, within 2.2 s either way.
+- **H7.** A synthetic SillHost started without `--audio`; `sillclient.py --audio
+  --set=sendAudio=1@3 --set=sendAudio=0@8 --expect=sendAudio=0`:
+  - both answers carried the change;
+  - the first packet came 23 ms after the first answer, and the last before the second answer;
+  - "Settings from sillclient: send audio off → on" and "… on → off", then "Audio stopped: Send
+    Audio is off.";
+  - one "Streaming" line: the picture never restarted.
+- **H9.** Main's `sillclient.py` against an `--audio` host: no kind 29 in its `kinds=`, and the
+  sound never started (no device played it). This branch's client, playing sound, against main's
+  host: `audio=-` in its settings, and no kind 29. Main's StreamProtocol (da43f6b) read everything:
+  - a kind 29 header, as unknown with its length (skipped whole);
+  - this host's kind 16 with `sendAudio` and `audioNote`;
+  - a hello with codecs;
+  - stats with the sound's fields;
+  - a Send Audio change (read as an empty change).
+- **H2.** Main's SillHost (da43f6b) against this branch's, both `--synthetic` on loopback and the
+  software encoder, digits masked and sorted, twice each:
+  - idle 35 s, with and without `--direct-wireless`;
+  - a client picking the Desktop;
+  - a client whose hello lists "aac-eld".
+
+  8 of the 12 pairs are identical line for line. In the other 4, the same lines appear on both
+  sides, and only the number of once-a-second stats lines around the run's end differs (one or two
+  more on either side, from when the host was stopped). There is no `Audio` line, no `aud.` key, and
+  no kind 29 in any client's `kinds=`.
+- **H10.** The bare app's previews from main's build and this branch's, rendered from the same
+  path (the General pane shows it): only menu.txt (Send Audio in every sample's menu, the new
+  `sound` sample), the Streaming and Permissions panes, and the new `card-sound` differ.
+- **H11:**
+  - no microphone, process tap, `updateConfiguration` or `assumeIsolated` in the new host files;
+  - no `UIBackgroundModes`;
+  - `standard` has `sendAudio: false`;
+  - the sound's send path calls `connection.send` directly and touches neither `inflight` nor the
+    keyframes' bookkeeping;
+  - no AVFoundation or CoreMedia import in the encoder, packetizer, pipeline, tone or synthetic
+    source.
+
+**Open question added:**
+
+16. **The encoder's CPU.** Default: **codec quality Medium** (AudioToolbox's default), about 1 point
+    of a core on a tonal signal. The alternative is Low: 0.6 points less, 3–9 dB less SNR on tonal
+    sound.

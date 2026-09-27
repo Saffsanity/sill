@@ -8,6 +8,117 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The Mac's sound on the device: the wire, the host and Sill.app (2026-09-27,
+branch `audio` from main at 643af6b with the plan merged in from `audio-plan`
+(1fb9b71, 6e852ef) and refreshed (51520dd), main at da43f6b (PR #38) merged in
+at 2b114e1, never rebased; the plan, its critique, the refresh and the results
+are in `docs/audio-plan.md`).** Noah (2026-09-27), first in what he wants
+worked on: "Audio: the plan is done and parked as a v2 feature by your earlier
+decision". So the sound is in scope now (docs/BRIEF.md, the decisions below),
+and every open question takes its default (Send Audio off by default, AAC-ELD
+at 128 kbps, per device mute, and so on). Built here: the plan's steps 1 to 5.
+The device's playout, output, Sound button and panel rows (steps 6 and 7) come
+next. Until then no device plays the sound: its hello lists no codec, so no
+host sends it kind 29.
+- Wire (additive; `Audio.swift`): kind 29, host → device. Type 1 is a JSON
+  `AudioFormat`: codec "aac-eld", 48 kHz stereo, 480 or 512 frames a packet,
+  the priming, the bitrate, the epoch, the cookie and what the sound is of.
+  Type 2 is `AudioPackets`: epoch, seq, the segment flag and 1–255
+  length-prefixed packets, with the header's stamp on the wall clock of the
+  first decoded sample. A host sends it only to a device whose hello lists a
+  codec it makes (`Hello.audio`; `AudioCodec.choose` takes the first of the
+  device's list). Kinds 16 and 17 gain `sendAudio` (nil from a host without
+  sound), the state gains `audioNote`, and ClientStats gains `audioBehindMs`
+  and `audioLate`. `SillProtocol` stays 1.
+- Host: Send Audio (`HostConfig.sendAudio`) is off in `standard` and comes
+  from kinds 16 and 17 through either door. It is not in `restartNeeded`, so
+  the picture never restarts for it.
+  - `AudioPipeline` follows the source from `active`'s didSet, where the
+    pointer and the menus follow it. The same app keeps its stream through
+    every restart of the picture. Another app, the Desktop or the test tone is
+    a new stream and epoch. One that ended or failed is tried again at most
+    every 10 s. A failure prints one line and sets the note; the picture never
+    notices.
+  - `AudioCapture` is a second, audio-only SCStream per app (the Desktop: every
+    app but Sill's) at 48 kHz stereo with `excludesCurrentProcessAudio`. Its 2×2
+    picture is thrown away, start and stop are bounded to 2 s, and each
+    buffer's layout is read, never assumed. No test runs it.
+  - `SyntheticAudio` (`--synthetic`) plays the test tone: 440 Hz at −30 dBFS
+    with a 4 ms 2 kHz click at each whole second of the stamps' clock. A
+    synthetic host never captures a real window's sound.
+  - The packetizer makes blocks stamped at input frame n·F − P from each
+    chunk's anchor. A gap ends a segment, with nothing flushed or filled.
+  - The encoder is AAC-ELD at 128 kbps, AudioToolbox only.
+  - StreamServer keeps each device's codec from its hello and sends the
+    epoch's format before the epoch's first packet. The sound has a send path
+    of its own: never `inflight`, the drain eviction or the keyframes'
+    bookkeeping. Away from home its bytes count in `pendingBytes`, and
+    `paceRemote` still drops only frames. It sets `lastSentAt`, so remote ticks
+    pause while it flows. A packet is skipped only past 1 s untaken at home,
+    or 15 s away (the drain backstop). The plan's 3 s skipped a fifth of the
+    sound at 4 Mbit/s with 1.5 MB keyframes, where remote pacing already held
+    the picture 5–7 s behind.
+  - Log lines and the `aud.*` stats appear only while Send Audio is on (the
+    plan's §4.10).
+- The CLI's `--audio` adds one startup line; without it the output is main's.
+- Sill.app: Send Audio in the status menu after Resolution ("The Mac keeps
+  playing it too") and in Settings › Streaming, with its footer and an orange
+  line while it fails. Also the Permissions pane's words, " · sound" on the
+  card's source row, `-SillSetAfter sendAudio=1`, and the `sound` preview.
+- iOSClient/AudioDecoder.swift is not yet in the Xcode project. It serves the
+  `audio-codec` check and the harness's device.
+- Checks:
+  - `audio-packetizer`: 89 checks, 27 of 27 mutants.
+  - `audio-codec`: 21 checks, 9 of 9 mutants. Each click lands at its whole
+    second, 0 frames off, at 480 and 512 frames a packet and across gaps. A
+    busy signal runs at 130.2 kbps.
+  - `compatibility`: 130 checks, 31 of 31 mutants. `protocol`: 218 + 8, 30 of
+    30.
+  - The kind checks say 28 gesture, 29 audio, 30 unknown. The mutants that
+    renumber a kind use 250–254.
+  - H0 again on this Mac: ELD 480 and 512 have 240 and 256 frames of priming,
+    the same after a reset. They take 15.0 and 25.3 ms end to end. A late
+    join's fourth packet decodes exactly.
+- The harness (`Scripts/audio/run.sh`) on the merged tree passed every gate
+  but H12:
+  - At home: 100.02 packets a second, no seq gap, and 60 of 60 clicks within
+    1 ms of their second. The picture's net.sent, net.dropped and frame age
+    were as without sound. With 1024-frame chunks: 93.84 a second.
+  - Pauses and a source change on two devices: segments at their stamps, each
+    epoch's format first, nothing over 40 ms late.
+  - Away through 8 and 4 Mbit/s with 1.5 MB keyframes: no packet skipped while
+    frames were, and packets never later than the frames + 20 ms. In a dip to
+    0.5 Mbit/s they were late with the picture and back in the same second.
+  - Through the relay at 2 Mbit/s and +150 ms: no eviction.
+  - The pacing harness's own gate cases with sound (`Scripts/pacing/run.sh
+    --sound`) passed, with fps and drops as without. In stillend, a stream far
+    past its link, the median of each second's slowest pong was 102–700 ms
+    against 75–86 without.
+  - H7: a device turned Send Audio on and off. The first packet came 23 ms
+    after the answer, the last before the second answer, and the picture
+    never restarted.
+  - H9: main's client and StreamProtocol read or skip everything new, and
+    this branch's client gets no sound from main's host.
+  - H10: only the Streaming and Permissions panes, menu.txt and the new card
+    differ from main's previews.
+  - The iOS app builds (Debug and Release for the simulator, Debug for a
+    device) with only the known warning.
+  - H2: the CLI's stdout (digits masked) against main's, idle, picking the
+    Desktop, and with a hello that lists the codec, with and without
+    `--direct-wireless`, twice each: every run printed the same lines. 4 of the
+    12 differed only in how many once-a-second stats lines came before the host
+    was stopped. There was no `Audio` line, no `aud.` key and no kind 29.
+  - H12 was not met. The harness host used +2.1 to +3.1 points of a core with
+    sound, against the plan's 1.5. AAC-ELD itself takes about 1 point on the
+    test tone (82–101 µs a packet; 53 on a busy signal), and each packet's
+    own send on loopback about 1. Codec quality Low would save 0.6 points but
+    lose 3–9 dB of SNR on tonal sound, so it was not taken; the plan's Results
+    leave it to Noah.
+- **Untested, for Noah:** nothing yet on the devices. P1–P16 need the device's
+  step. Sill.app's menu and Settings rows can be looked at (previews), and
+  `defaults read me.saffer.sill.mac sendAudio` is absent (off) until it is
+  first set.
+
 **Three-finger trackpad gestures (2026-09-27, branch `trackpad-gestures` from
 main at 8b0d418, with main merged in at 5c6a850 (6678ca3), at 2b38179, PR #31
 the Mac's pointer among it (5e6ddaa), and at 643af6b, PRs #35 the tour, #36
@@ -3543,7 +3654,12 @@ good.
   messages the host had read on the connection). `Gesture.swift` —
   `TrackpadGesture` (kind 28, device → host: a three- or four-finger gesture
   by name, and its fingers), sent only to a host whose `WindowList.gestures`
-  is 1 or more.
+  is 1 or more. `Audio.swift` — the Mac's sound (kind 29, host → device):
+  `AudioMessage`, type 1 a JSON `AudioFormat` (codec, rate, channels, packet
+  size, priming, bitrate, epoch, cookie, what it is of), type 2 binary
+  `AudioPackets` (epoch, seq, the segment flag, 1–255 packets); `AudioCodec`
+  ("aac-eld", and `choose`: the first of a device's `Hello.audio` the host
+  makes); only to a device whose hello lists one.
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -3652,6 +3768,19 @@ good.
   input, and on a host that does not advertise posts none (`in.gestureDry`);
   `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
   state table's flags from before it (`in.gestureModifiersLeft` if some stay).
+  The Mac's sound (docs/audio-plan.md): `AudioPipeline` (the source it follows
+  from `active`'s didSet, one transition at a time; on `sill.audio` the
+  packetizer, the encoder, the epochs and the stamps; the status and kind 16's
+  note), `AudioCapture` (ScreenCaptureKit's audio-only stream of one app, or of
+  every app but Sill's, bounded start and stop; never run by a test),
+  `SyntheticAudio` (a synthetic host's test tone; the TEST ONLY
+  `SILL_TEST_AUDIO_CHUNK` and `SILL_TEST_AUDIO_PAUSE`), `TestTone` (440 Hz and a
+  click at each whole second of the stamps' clock; pure), `AudioPacketizer`
+  (blocks, stamps and segments, `AudioSourceRule`, `PCMLayout`,
+  `AudioBufferTally`; pure, `Tests/checks/audio-packetizer`) and `AudioEncoder`
+  (AAC-ELD, AudioToolbox only; `Tests/checks/audio-codec`). StreamServer sends
+  kind 29 to the devices that play it on a send path of its own
+  (`broadcastAudio`: never `inflight`; away in `pendingBytes`).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -3766,7 +3895,15 @@ good.
   Probe a new NSMenu; `menufixture label PID` reads its label over
   Accessibility. `Scripts/menu-check/run.sh` runs the real MenuReader and
   MenuMirror against it with no host and no encoder (safe while Sill.app
-  streams; it needs Accessibility for whatever runs it). `Scripts/sillrelay.py` is a
+  streams; it needs Accessibility for whatever runs it). `Scripts/audio/` is the
+  encoder-free sound harness (docs/audio-plan.md H5, H6, H8): `build.sh` makes
+  `.build/audio/host` (the working tree's StreamServer and the sound's host
+  files with `main.swift`: fake frames, the test tone, both doors on
+  127.0.0.1) and `.build/audio/audiocheck` (`Scripts/audiocheck.swift`, the
+  harness's device: every kind 29 decoded with iOSClient/AudioDecoder.swift and
+  each click found at its stamp), refusing a binary that links a media
+  framework but AudioToolbox; `run.sh [--cases a,b]` runs the gate cases and
+  `summarize.py` judges them. `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
   through). `Scripts/pacing/` is the remote pacing harness
@@ -3919,6 +4056,10 @@ good.
   every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
   (targets, the rule's inputs, the layer above the layouts and under the
   pairing overlay, Take the Tour from the Settings panel's last row).
+  `AudioDecoder` (AAC-ELD to a buffer per channel, one packet at a time;
+  AudioToolbox only) is here for the device's playback to come, and not yet in
+  the Xcode project: the host's `audio-codec` check and the sound harness's
+  device compile it.
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -3978,7 +4119,9 @@ good.
   (compiles the app's files it names with swiftc into `.build/checks/<name>/`
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
-  sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
+  sources with `import StreamProtocol` stripped): `addresses`, `audio-codec`
+  (the host's AAC-ELD encoder, packetizer and tone with the device's decoder,
+  in memory; AudioToolbox only), `audio-packetizer`, `clientlink`,
   `compatibility`, `device-gate`, `dmg-layout` (Scripts/dmg-layout's
   `.DS_Store` and alias writer, against Finder's own layout of the file,
   make-dmg.sh's layout arguments and the SVG's size and edge),
@@ -4014,6 +4157,9 @@ swift run -c release SillHost --encoder-selftest   # is the hardware encoder ali
 swift run -c release SillHost --virtual-display   # picked windows stream from their own HiDPI display (off by default)
 swift run -c release SillHost --virtual-display-selftest   # create/destroy one display, report what sees it
 swift run -c release SillHost --direct-wireless   # also over peer-to-peer Wi-Fi (AWDL): devices without a shared network (off by default)
+swift run -c release SillHost --audio       # Send Audio for this run: the streamed app's sound to devices that play it (with --synthetic, a test tone; off by default)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 .build/release/SillHost --synthetic --audio   # the test tone on loopback; sillclient.py PORT 8 desktop --hello=0.6 --audio counts it
+Scripts/audio/run.sh                        # the encoder-free sound harness and its gates (~7 min; no encoder, capture, speaker or device)
 swift run -c release SillHost --remote      # the remote door for this run on any free port (--remote=PORT), a throwaway identity; the code and link print here
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
@@ -4046,7 +4192,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, updateCheck; the update check keeps
+virtualDisplay, directWireless, sendAudio, updateCheck; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
@@ -4296,7 +4442,11 @@ device keeps working with Macs from the first public build on, or each says why
   `title`, `separator`, `enabled`, `mark`, `key`, `submenu`; FetchMenu's and PressMenuItem's
   `version`, `id`, `title`, `token`); a trackpad gesture (kind 28, Gesture.swift) goes only to a
   host whose window list says `gestures` 1 or more, as one of its six names with `fingers`, and a
-  later generation of gestures says 2 and goes only to a host that says so.
+  later generation of gestures says 2 and goes only to a host that says so; the Mac's sound (kind
+  29, Audio.swift), if it ships in the first public builds: its two types (a JSON AudioFormat, then
+  packets whose layout never changes: a new layout is a new type), AudioFormat's fields, the
+  hello's `audio`, `sendAudio` and `audioNote`, and kind 29 only to a device whose hello lists a
+  codec the host makes.
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
@@ -4346,4 +4496,6 @@ device keeps working with Macs from the first public build on, or each says why
 - Native feel is the bar: Flighty-level polish, iOS conventions, Duo layouts.
 - License: Apache-2.0, LICENSE since PR #15 (MPL-2.0 only if Noah switches
   before the repository is public; paid plan is gone, so no GPL/CLA needed).
-- v1 out of scope: hole punching, multi-window, layout customization, audio.
+- v1 out of scope: hole punching, multi-window, layout customization. Audio is in since 2026-09-27
+  (Noah: "Audio: the plan is done and parked as a v2 feature by your earlier decision", first in
+  what he wanted worked on; docs/audio-plan.md, docs/BRIEF.md).
