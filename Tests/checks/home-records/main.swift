@@ -125,5 +125,36 @@ check("forgettingHomeTLS (-SillForgetHomeTLS 1): every homeTLS cleared, nothing 
       && forgotten.count == 2 && SavedMacs.encode([forgotten[1]]) == sansTLS(other) && forgotten[0] == macs[0])
 check("forgettingHomeTLS: the record encodes as from before homeTLS", SavedMacs.encode([forgotten[0]]) == oldText)
 
+// MARK: Require pairing's stored record (the security review, 2026-09-27)
+
+// Off only with this Mac's own signature: a record another process of this user wrote first (the
+// keychain item did not exist, and it listed Sill as allowed to read it) cannot turn pairing off.
+if let keyM = RemoteKey.generate(), let mac = HostIdentity(privateKey: keyM, recognitionKey: Data(repeating: 7, count: 32)),
+   let keyX = RemoteKey.generate(), let other = HostIdentity(privateKey: keyX, recognitionKey: Data(repeating: 8, count: 32)) {
+    func read(_ record: Data?, as m: HostIdentity = mac) -> Bool {
+        guard let record else { return true }
+        return RequirePairingValue.decode(record, macID: m.macID, verify: { m.verifyRecord($0, signature: $1) })
+    }
+    let off = RequirePairingValue.encode(false, macID: mac.macID, sign: { mac.signRecord($0) })
+    let onRecord = RequirePairingValue.encode(true, macID: mac.macID, sign: { mac.signRecord($0) })
+    check("require pairing: on is \"1\" and reads on; nothing saved reads on", onRecord == Data("1".utf8) && read(onRecord) && read(nil))
+    check("require pairing: off, signed by this Mac's key, reads off (and is \"0.\" and the signature)",
+          off.map { String(decoding: $0, as: UTF8.self).hasPrefix("0.") } == true && !read(off))
+    check("require pairing: a plain \"0\" (as written before the review, or by another app) reads on", read(Data("0".utf8)))
+    let otherOff = RequirePairingValue.encode(false, macID: mac.macID, sign: { other.signRecord($0) })
+    check("require pairing: off signed by another key reads on", otherOff != nil && read(otherOff))
+    check("require pairing: this Mac's off record read as another Mac's reads on", read(off, as: other))
+    check("require pairing: another Mac's own off record reads on here",
+          read(RequirePairingValue.encode(false, macID: other.macID, sign: { other.signRecord($0) })))
+    let garbled = ["", "0.", "0.!!!!", "0 ", "off", "0.AAAA", "1.xyz", "\u{0}"].map { Data($0.utf8) }
+    check("require pairing: anything else reads on", garbled.allSatisfy { read($0) })
+    check("require pairing: a key that cannot sign saves nothing", RequirePairingValue.encode(false, macID: mac.macID, sign: { _ in nil }) == nil
+          && RequirePairingValue.encode(false, macID: mac.macID, sign: { _ in Data() }) == nil)
+    check("require pairing: the signed message names the purpose and the Mac",
+          String(decoding: RequirePairingValue.offMessage(macID: mac.macID), as: UTF8.self) == "sill-require-pairing-off-v1\n\(mac.macID)")
+} else {
+    check("require pairing: two P-256 keys and their identities", false)
+}
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

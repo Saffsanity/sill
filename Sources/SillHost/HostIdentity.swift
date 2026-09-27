@@ -75,6 +75,18 @@ package final class HostIdentity: @unchecked Sendable {
         SignedMacInfo.signing(info, with: remote.privateKey)
     }
 
+    /// An ECDSA P-256 / SHA-256 signature (DER) by the Mac's key over `data`: a record only this Mac
+    /// could have written (RequirePairingValue). Nil when the key cannot sign.
+    package func signRecord(_ data: Data) -> Data? {
+        SecKeyCreateSignature(remote.privateKey, .ecdsaSignatureMessageX962SHA256, data as CFData, nil) as Data?
+    }
+
+    /// Whether `signature` is the Mac's key's over `data` (`signRecord`).
+    package func verifyRecord(_ data: Data, signature: Data) -> Bool {
+        guard let publicKey = SecKeyCopyPublicKey(remote.privateKey) else { return false }
+        return SecKeyVerifySignature(publicKey, .ecdsaSignatureMessageX962SHA256, data as CFData, signature as CFData, nil)
+    }
+
     /// A fresh TXT record for one Bonjour registration: `r` = a new tag, and `p` (HomeDoorTXT) when
     /// the home door speaks TLS: "1" pairing required, "0" open. A plain door carries no `p`.
     package func txtRecord(homeDoor p: String? = nil) -> NWTXTRecord? {
@@ -104,11 +116,13 @@ package protocol IdentityStore: AnyObject {
     func loadPaired() throws -> [PairedDevice]
     func savePaired(_ devices: [PairedDevice]) throws
     /// Require pairing (docs/home-pairing-plan.md §4.8), kept beside the trust list and never in
-    /// UserDefaults: true when it was never saved, so a missing item only ever turns pairing on. A
-    /// read that fails throws (the caller then counts it as on). Its own item, not a field of the
-    /// trust list: an older Sill reading a changed list would call it damaged and lose its identity.
-    func loadRequirePairing() throws -> Bool
-    func saveRequirePairing(_ on: Bool) throws
+    /// UserDefaults, as the record RemoteAccess writes and judges (RequirePairingValue: off only
+    /// with the Mac's own signature): nil when none was ever saved, which reads as on, so a missing
+    /// item only ever turns pairing on. A read that fails throws (the caller then counts it as on).
+    /// Its own item, not a field of the trust list: an older Sill reading a changed list would call
+    /// it damaged and lose its identity.
+    func loadRequirePairing() throws -> Data?
+    func saveRequirePairing(_ record: Data) throws
     /// TEST ONLY: a directory where a test hook may leave the current pairing link and code (the
     /// file store's own, 0700); nil for every other store.
     var testDirectory: URL? { get }
@@ -147,9 +161,9 @@ package final class MemoryIdentityStore: IdentityStore {
     package func loadPaired() throws -> [PairedDevice] { paired }
     package func savePaired(_ devices: [PairedDevice]) throws { paired = devices }
 
-    private var requirePairing = true
-    package func loadRequirePairing() throws -> Bool { requirePairing }
-    package func saveRequirePairing(_ on: Bool) throws { requirePairing = on }
+    private var requirePairing: Data?
+    package func loadRequirePairing() throws -> Data? { requirePairing }
+    package func saveRequirePairing(_ record: Data) throws { requirePairing = record }
 
     static func randomBytes(_ n: Int) throws -> Data {
         var b = [UInt8](repeating: 0, count: n)
@@ -162,9 +176,9 @@ package final class MemoryIdentityStore: IdentityStore {
 /// identity and trust list in a directory of mode 0700, each file 0600, so a test can pair, restart
 /// the host and find the same Mac ID and pairings, without the login keychain.
 /// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`,
-/// `require-pairing` ("0" off; anything else, or no file, on), and `.lock`, which one host holds
-/// for as long as it uses the directory: two hosts sharing it would each save their own list over
-/// the other's.
+/// `require-pairing` (RequirePairingValue's record; no file reads as on), and `.lock`, which one
+/// host holds for as long as it uses the directory: two hosts sharing it would each save their own
+/// list over the other's.
 package final class FileIdentityStore: IdentityStore {
     package let directory: URL
     /// The open `.lock`, flock'ed exclusively; closing it (or the process ending) lets it go.
@@ -238,13 +252,12 @@ package final class FileIdentityStore: IdentityStore {
         try Self.writePrivate(try encoder.encode(devices), to: directory.appendingPathComponent("paired.json"))
     }
 
-    package func loadRequirePairing() throws -> Bool {
-        guard let data = try Self.read(directory.appendingPathComponent("require-pairing")) else { return true }
-        return RequirePairingValue.decode(data)
+    package func loadRequirePairing() throws -> Data? {
+        try Self.read(directory.appendingPathComponent("require-pairing"))
     }
 
-    package func saveRequirePairing(_ on: Bool) throws {
-        try Self.writePrivate(RequirePairingValue.encode(on), to: directory.appendingPathComponent("require-pairing"))
+    package func saveRequirePairing(_ record: Data) throws {
+        try Self.writePrivate(record, to: directory.appendingPathComponent("require-pairing"))
     }
 
     /// Writes `data` with mode 0600 from its creation, replacing the file atomically. Also the
@@ -259,11 +272,37 @@ package final class FileIdentityStore: IdentityStore {
     }
 }
 
-/// Require pairing's stored bytes, in every store: "0" off, "1" on; anything else reads as on, the
-/// safe side.
+/// Require pairing's stored record, in every store: "1" on; off only as "0." and a signature by
+/// this Mac's own key over `offMessage` (HostIdentity.signRecord), which names the Mac. Anything
+/// else reads as on, the safe side: a missing record (Sill saves one only when the switch changes),
+/// a plain "0", a signature by another key or for another Mac, bytes that are not a record. Any
+/// process of this user can create the keychain item before Sill has ever saved it, with Sill among
+/// the apps its access control lets read it without asking, and a plain "0" there turned pairing off
+/// behind Sill's back: every app on this Mac could then reach the home door over loopback and use
+/// Sill's Screen Recording and Accessibility (the security review, 2026-09-27). It cannot sign with
+/// the Mac's key, which the keychain keeps for Sill alone.
 enum RequirePairingValue {
-    static func encode(_ on: Bool) -> Data { Data((on ? "1" : "0").utf8) }
-    static func decode(_ data: Data) -> Bool { data != Data("0".utf8) }
+    static let on = Data("1".utf8)
+
+    /// What the Mac's key signs to turn pairing off: the purpose and the Mac ID, so a record never
+    /// stands for another thing or another Mac.
+    static func offMessage(macID: String) -> Data { Data("sill-require-pairing-off-v1\n\(macID)".utf8) }
+
+    /// The record for `on`: "1", or "0." and base64url of `sign(offMessage)`; nil when `sign` gives
+    /// nothing (the key could not sign), and then nothing is saved.
+    static func encode(_ on: Bool, macID: String, sign: (Data) -> Data?) -> Data? {
+        if on { return Self.on }
+        guard let signature = sign(offMessage(macID: macID)), !signature.isEmpty else { return nil }
+        return Data(("0." + Base64URL.encode(signature)).utf8)
+    }
+
+    /// Whether a stored record means on: true for anything but "0." and a signature `verify` takes
+    /// for this Mac's off message.
+    static func decode(_ data: Data, macID: String, verify: (_ message: Data, _ signature: Data) -> Bool) -> Bool {
+        guard let text = String(data: data, encoding: .utf8), text.hasPrefix("0."),
+              let signature = Base64URL.decode(String(text.dropFirst(2))), !signature.isEmpty else { return true }
+        return !verify(offMessage(macID: macID), signature)
+    }
 }
 
 /// What both doors' verify blocks and admission read on the network queue: immutable, replaced

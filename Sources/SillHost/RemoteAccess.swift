@@ -272,21 +272,34 @@ package final class RemoteAccess {
         }
     }
 
-    /// Require pairing as the identity store keeps it (docs/home-pairing-plan.md §6.5): on when it
-    /// was never saved, and on, with a line, when it cannot be read.
+    /// Require pairing as the identity store keeps it (docs/home-pairing-plan.md §6.5): off only
+    /// when the record carries this Mac's own signature (RequirePairingValue); on when it was never
+    /// saved, on, with a line, when it cannot be read, and on, with a line, when it is not this
+    /// Mac's own (another app may have made the item: the security review, 2026-09-27).
     package func storedRequirePairing() -> Bool {
-        guard let store else { return true }
-        do { return try store.loadRequirePairing() } catch {
+        guard let store, let identity else { return true }
+        let record: Data?
+        do { record = try store.loadRequirePairing() } catch {
             print("Require pairing: couldn’t read it \(keyPlace) (\(error)); pairing stays required.")
             return true
         }
+        guard let record else { return true }
+        let on = RequirePairingValue.decode(record, macID: identity.macID, verify: { identity.verifyRecord($0, signature: $1) })
+        if on, record != RequirePairingValue.on {
+            print("Require pairing: the setting \(keyPlace) isn’t signed by this Mac’s key; pairing stays required.")
+        }
+        return on
     }
 
-    /// Saves Require pairing with the trust list. Nil when saved; otherwise why not, and the
-    /// caller keeps it as it was.
+    /// Saves Require pairing with the trust list, off signed by this Mac's key. Nil when saved;
+    /// otherwise why not, and the caller keeps it as it was.
     package func saveRequirePairing(_ on: Bool) -> String? {
-        guard let store else { return identityProblem ?? "no identity" }
-        do { try store.saveRequirePairing(on); return nil } catch {
+        guard let store, let identity else { return identityProblem ?? "no identity" }
+        guard let record = RequirePairingValue.encode(on, macID: identity.macID, sign: { identity.signRecord($0) }) else {
+            print("Require pairing: couldn’t sign it with this Mac’s key \(keyPlace).")
+            return "this Mac’s key couldn’t sign it"
+        }
+        do { try store.saveRequirePairing(record); return nil } catch {
             print("Require pairing: couldn’t save it \(keyPlace) (\(error)).")
             return "\(error)"
         }

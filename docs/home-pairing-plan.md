@@ -233,7 +233,11 @@ Each such pairing is logged, listed as "over the USB cable" and shown in a notic
   and never lights the menu (§4.2, step 4), so an app on the Mac cannot simply ask and read its
   own code; one that can record the screen and can also ask from another address still can (What
   stays open). Nor can an app turn pairing off behind Sill's back: Require pairing is kept with the
-  trust list, not in UserDefaults, and a Sill.app started with test hooks ignores them (§4.3, §6.5).
+  trust list, not in UserDefaults, and off only with this Mac's own signature, so an app that made
+  the keychain item before Sill ever saved it (listing Sill as allowed to read it) cannot turn it
+  off either; the trust list is made, empty, at Sill's first launch, so none can be planted before
+  the first pairing (the security review, 2026-09-27); and a Sill.app started with test hooks
+  ignores them (§4.3, §6.5).
   This closes the three exposures the remote plan left open until M5: the café LAN,
   radio range, and the loopback confused deputy that could borrow Sill's Screen Recording and
   Accessibility grants, the last down to an app that already records the screen.
@@ -279,7 +283,12 @@ Each such pairing is logged, listed as "over the USB cable" and shown in a notic
   - Remote Access's own switches (remote access, internet access, the port) and Direct Wireless
     stay in UserDefaults, where any process of this user can flip them: that widens who reaches a
     door, never lets an unpaired key in. Require pairing is the one switch that would, so it is
-    kept with the trust list (§6.5);
+    kept with the trust list (§6.5), off only signed by the Mac's key;
+  - a process of this user that ran before Sill's first launch could have made every keychain
+    item Sill uses, the Mac's key included, each listing Sill as allowed to read it: Sill would
+    then use a key, a trust list and a Require pairing that process chose. The legacy keychain
+    Sill.app uses (the data-protection one needs an entitlement and so a provisioning profile)
+    does not say who made an item;
   - the CLI's default door stays plain and open: a development host, reached only by development
     builds (§5, §7.3).
 
@@ -862,7 +871,15 @@ enum CableLink {
   so another app gets the keychain's prompt; a missing item reads as on, so deleting it only turns
   pairing on), in the memory store a variable, in the test directory a file `require-pairing`.
   Its own item, not a field of `paired-devices`: an older Sill.app reading a changed trust list
-  would call it damaged and lose its identity.
+  would call it damaged and lose its identity. Since the security review (2026-09-27) the store
+  keeps a record RemoteAccess writes and judges (`RequirePairingValue`): "1" on, and off only as
+  "0." and an ECDSA signature by the Mac's key over "sill-require-pairing-off-v1\n‹Mac ID›"
+  (`HostIdentity.signRecord`); anything else reads as on, with a line ("Require pairing: the
+  setting in the keychain isn’t signed by this Mac’s key; pairing stays required."). A missing
+  item was the hole: Sill saves one only when the switch changes, and another process of this
+  user could create it first with a plain "0" and Sill among the apps allowed to read it, turning
+  pairing off behind Sill's back. The keychain store also makes the trust list, empty, at the
+  first launch that finds none, for the same reason.
 
 #### 4.9 `StreamCoordinator.swift`
 

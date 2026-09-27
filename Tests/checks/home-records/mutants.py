@@ -30,5 +30,17 @@ M = [
      "        guard list.contains(where: { $0.macID == id }) else { return nil }"),
     ("forgettingHomeTLS sets false", S, "            next.homeTLS = nil\n", "            next.homeTLS = false\n"),
     ("forgettingHomeTLS forgets nothing", S, "            next.homeTLS = nil\n", ""),
+    # Require pairing's stored record, off only signed by this Mac's key (the security review, 2026-09-27).
+    ("require pairing: a plain \"0\" reads off (as before the review)", H,
+     "        guard let text = String(data: data, encoding: .utf8), text.hasPrefix(\"0.\"),",
+     "        if data == Data(\"0\".utf8) { return false }\n        guard let text = String(data: data, encoding: .utf8), text.hasPrefix(\"0.\"),"),
+    ("require pairing: any signature reads off", H, "        return !verify(offMessage(macID: macID), signature)\n", "        return false\n"),
+    ("require pairing: the off message does not name the Mac", H,
+     "    static func offMessage(macID: String) -> Data { Data(\"sill-require-pairing-off-v1\\n\\(macID)\".utf8) }",
+     "    static func offMessage(macID: String) -> Data { Data(\"sill-require-pairing-off-v1\".utf8) }"),
+    ("require pairing: off saved unsigned", H, "        return Data((\"0.\" + Base64URL.encode(signature)).utf8)\n",
+     "        return Data(\"0\".utf8)\n"),
+    ("require pairing: an empty signature saved", H, "        guard let signature = sign(offMessage(macID: macID)), !signature.isEmpty else { return nil }",
+     "        guard let signature = sign(offMessage(macID: macID)) else { return nil }"),
 ]
 sys.exit(0 if module.mutate("home-records", M, sys.argv[1]) else 1)
