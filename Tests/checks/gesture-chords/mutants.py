@@ -7,6 +7,7 @@ OUT = os.path.join(ROOT, ".build", "checks", "gesture-chords")   # the mutants' 
 os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(ROOT, "Sources/SillHost/GestureChords.swift")
 orig = open(SRC).read()
+INPUT = "case .buttonDown, .keyDown, .text: forget()\n        case .pointerMove, .buttonUp, .scroll, .keyUp: break"
 MUTANTS = {
     "M1 32 before 108": (".missionControl: [108, 32],", ".missionControl: [32, 108],"),
     "M2 a shortcut that is off still used": ("guard let key = table[id], key.enabled, key.keyCode != HotKey.unbound else { continue }",
@@ -19,9 +20,9 @@ MUTANTS = {
                                     "package static let deviceIndependentBits: UInt64 = 0x007F_0000"),
     "M6 Mission Control closed by its own swipe": ('.missionControl: "swipeDown", .appExpose: "swipeUp"', '.missionControl: "swipeUp", .appExpose: "swipeUp"'),
     "M7 a close that forgets nothing": ("if case .chord = outcome { self.open = nil }", "if case .chord = outcome { }"),
-    "M8 the same gesture again posts again": ("        if let open, open == base {\n            return .nothing(base, reason: \"\\(base.title) is already open\")\n        }\n", ""),
+    "M8 the same gesture again posts again": ("        if let open, open == base, !again {\n            repeated = true\n            return .nothing(base, reason: \"\\(base.title) is already open\")\n        }\n", ""),
     "M9 a Space remembered as a view": ("if case .chord = outcome, base.isView { open = base }", "if case .chord = outcome { open = base }"),
-    "M10 other input forgets nothing": ("    package mutating func otherInput() {\n        open = nil\n    }", "    package mutating func otherInput() {\n    }"),
+    "M10 forgetting forgets nothing": ("    package mutating func forget() {\n        open = nil\n        repeated = false\n    }", "    package mutating func forget() {\n        repeated = false\n    }"),
     "M11 left and right swapped": ('case "swipeLeft": return .nextSpace\n        case "swipeRight": return .previousSpace',
                                    'case "swipeLeft": return .previousSpace\n        case "swipeRight": return .nextSpace'),
     "M12 pinch and spread swapped": ('case "pinch": return .apps\n        case "spread": return .showDesktop',
@@ -39,6 +40,22 @@ MUTANTS = {
     "M20 the Spaces counted as views": ("package var isView: Bool { self != .nextSpace && self != .previousSpace }", "package var isView: Bool { true }"),
     "M21 a close of a view that could not close forgets it": ("            let outcome = Self.chord(for: open, table: table)\n            if case .chord = outcome { self.open = nil }",
                                                                "            let outcome = Self.chord(for: open, table: table)\n            self.open = nil"),
+    # The review's fixes (2026-09-27): what input forgets (F6), the repeat that opens again (F7), the modifiers a chord
+    # must not leave behind (F5).
+    "M22 a scroll forgets (the review's F6)": (INPUT, "case .buttonDown, .keyDown, .text, .scroll: forget()\n        case .pointerMove, .buttonUp, .keyUp: break"),
+    "M23 a button going down leaves the view open": (INPUT, "case .keyDown, .text: forget()\n        case .pointerMove, .buttonDown, .buttonUp, .scroll, .keyUp: break"),
+    "M24 a key going down leaves the view open": (INPUT, "case .buttonDown, .text: forget()\n        case .pointerMove, .keyDown, .buttonUp, .scroll, .keyUp: break"),
+    "M25 typed text leaves the view open": (INPUT, "case .buttonDown, .keyDown: forget()\n        case .pointerMove, .text, .buttonUp, .scroll, .keyUp: break"),
+    "M26 a key coming up forgets": (INPUT, "case .buttonDown, .keyDown, .text, .keyUp: forget()\n        case .pointerMove, .buttonUp, .scroll: break"),
+    "M27 never opened again (the review's F7)": ("if let open, open == base, !again {", "if let open, open == base {"),
+    "M28 the repeat never noted": ("            repeated = true\n", ""),
+    "M29 the repeat outlives another gesture": ("        let again = repeated\n        repeated = false\n", "        let again = repeated\n"),
+    "M30 forgetting keeps the repeat": ("        open = nil\n        repeated = false\n    }", "        open = nil\n    }"),
+    "M31 caps lock among the modifiers left behind": ("package static let modifierBits: UInt64 = 0x020000 | 0x040000 | 0x080000 | 0x100000 | 0x800000",
+                                                      "package static let modifierBits: UInt64 = 0x010000 | 0x020000 | 0x040000 | 0x080000 | 0x100000 | 0x800000"),
+    "M32 fn not among them": ("package static let modifierBits: UInt64 = 0x020000 | 0x040000 | 0x080000 | 0x100000 | 0x800000",
+                              "package static let modifierBits: UInt64 = 0x020000 | 0x040000 | 0x080000 | 0x100000"),
+    "M33 no modifier named as nothing": ('return held.isEmpty ? "none" : held.joined(separator: " + ")', 'return held.isEmpty ? "" : held.joined(separator: " + ")'),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

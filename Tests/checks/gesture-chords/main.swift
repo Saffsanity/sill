@@ -1,10 +1,12 @@
 // H4 (docs/trackpad-gestures-plan.md §9.1): Sources/SillHost/GestureChords.swift on its own, the Mac's
 // half of the trackpad gestures: each gesture to the Mac's own shortcut for its action (the first
 // that is on and bound, its device-independent modifier bits only, never another action's), the
-// reversal (the opposite gesture closes what Sill opened; the same gesture again does nothing; the
-// Spaces leave a view open; other input forgets), unknown names, the log line and the TEST ONLY
-// table. Then 5,000 random sequences of gestures, other input and random tables against a model
-// written here from the plan, not from the file. Pure: nothing is posted anywhere.
+// reversal (the opposite gesture closes what Sill opened; the same gesture again does nothing, and
+// once more opens it again; the Spaces leave a view open; a click, a key or text forgets, a move, a
+// scroll or a button or key coming up does not; a pick, a launch, a window's button or the last
+// device leaving forgets), unknown names, the log line, the modifiers a chord must not leave behind
+// and the TEST ONLY table. Then 5,000 random sequences of gestures, input, picks and random tables
+// against a model written here from the plan, not from the file. Pure: nothing is posted anywhere.
 //   swiftc -O -package-name sill Sources/SillHost/GestureChords.swift Tests/checks/gesture-chords/main.swift -o check && ./check
 import Foundation
 
@@ -77,11 +79,22 @@ check("deviceIndependentBits is 16–23", GestureChords.deviceIndependentBits ==
 
 // MARK: - The reversal
 
+/// Gestures by name; "click" (a button down, then up), "key" (down, up), "text", "move", "scroll" (a
+/// scroll gesture's bracket and a delta, as a stroke that scrolled before it became a gesture sends)
+/// and "pick" (a window picked, an app launched, a window's button, the last device gone) are the rest.
 func run(_ steps: [String], _ table: [Int: HotKey] = defaults) -> (GestureChords, [GestureOutcome]) {
     var c = GestureChords()
     var out: [GestureOutcome] = []
     for s in steps {
-        if s == "other" { c.otherInput() } else { out.append(c.resolve(s, table: table)) }
+        switch s {
+        case "click": c.input(.buttonDown); c.input(.buttonUp)
+        case "key": c.input(.keyDown); c.input(.keyUp)
+        case "text": c.input(.text)
+        case "move": c.input(.pointerMove)
+        case "scroll": c.input(.scroll); c.input(.scroll); c.input(.scroll)
+        case "pick": c.forget()
+        default: out.append(c.resolve(s, table: table))
+        }
     }
     return (c, out)
 }
@@ -102,7 +115,30 @@ check("up, down, down: the second down is App Exposé", r.1[2] == chord(.appExpo
 for (g, a) in [("swipeUp", GestureAction.missionControl), ("swipeDown", .appExpose), ("pinch", .apps), ("spread", .showDesktop)] {
     r = run([g, g])
     check("\(g) twice: the second posts nothing", isNothing(r.1[1], a) && reason(r.1[1]) == "\(a.title) is already open")
-    check("\(g) twice: still open", r.0.open == a)
+    check("\(g) twice: still open", r.0.open == a && r.0.repeated)
+    // Once more, straight after: the view was closed where Sill cannot see (the Mac's own keyboard or
+    // trackpad), so its shortcut goes again, and it counts as open.
+    r = run([g, g, g])
+    check("\(g) three times: the third posts its shortcut again", r.1[2] == r.1[0] && r.0.open == a && !r.0.repeated)
+    r = run([g, g, g, g])
+    check("\(g) four times: the fourth posts nothing again", isNothing(r.1[3], a) && r.0.open == a)
+}
+r = run(["swipeUp", "swipeUp", "swipeDown"])
+check("up, up, down: the down still closes Mission Control", r.1[2] == chord(.missionControl, 108, 160, fn) && r.0.open == nil)
+r = run(["swipeUp", "swipeUp", "swipeLeft", "swipeUp"])
+check("up, up, left (a Space), up: not straight after, so nothing again", isNothing(r.1[3], .missionControl) && r.0.open == .missionControl)
+r = run(["swipeUp", "swipeUp", "rotate", "swipeUp"])
+check("up, up, a name this Mac does not know, up: nothing again", isNothing(r.1[3], .missionControl))
+r = run(["swipeUp", "swipeUp", "move", "scroll", "swipeUp"])
+check("up, up, a move and a scroll, up: still straight after, the shortcut again", r.1[2] == chord(.missionControl, 108, 160, fn))
+r = run(["swipeUp", "swipeUp", "pick", "swipeUp"])
+check("up, up, a pick, up: Mission Control afresh", r.1[2] == chord(.missionControl, 108, 160, fn) && r.0.open == .missionControl)
+do {
+    var x = GestureChords()
+    _ = x.resolve("swipeUp", table: defaults)
+    _ = x.resolve("swipeUp", table: defaults)
+    let third = x.resolve("swipeUp", table: with([108: off, 32: off]))
+    check("up, up, up with Mission Control's shortcuts off: nothing, and it still counts as open", isNothing(third, .missionControl) && x.open == .missionControl)
 }
 r = run(["swipeUp", "swipeLeft", "swipeRight"])
 check("up, left: the Space's own shortcut", r.1[1] == chord(.nextSpace, 81, 124, control | fn))
@@ -115,12 +151,37 @@ r = run(["swipeUp", "pinch", "spread"])
 check("up, pinch, spread: the spread closes Apps", r.1[2] == chord(.apps, 173, 131, fn) && r.0.open == nil)
 r = run(["swipeUp", "spread"])
 check("up then spread: Show Desktop, now open", r.1[1] == chord(.showDesktop, 36, 103, fn) && r.0.open == .showDesktop)
-r = run(["swipeUp", "other", "swipeDown"])
-check("up, other input, down: App Exposé, not a close", r.1[1] == chord(.appExpose, 115, 160, control | fn) && r.0.open == .appExpose)
-r = run(["pinch", "other", "pinch"])
-check("pinch, other input, pinch: Apps again", r.1[1] == chord(.apps, 173, 131, fn))
-r = run(["other"])
-check("other input with nothing open", r.0.open == nil)
+// What a device's input does to a view a gesture opened.
+for (step, why) in [("click", "a click"), ("key", "a key"), ("text", "typed text"), ("pick", "a pick, a launch, a window's button, the last device gone")] {
+    r = run(["swipeUp", step, "swipeDown"])
+    check("up, \(why), down: App Exposé, not a close", r.1[1] == chord(.appExpose, 115, 160, control | fn) && r.0.open == .appExpose)
+    r = run(["pinch", step, "pinch"])
+    check("pinch, \(why), pinch: Apps again", r.1[1] == chord(.apps, 173, 131, fn))
+}
+// The review's F6: a stroke that scrolled before it became a gesture sends its scroll's bracket before
+// the gesture; a scroll closes none of these views, so the reversal holds.
+r = run(["swipeUp", "scroll", "swipeDown"])
+check("up, a scroll's bracket, down: the down still closes Mission Control", r.1[1] == chord(.missionControl, 108, 160, fn) && r.0.open == nil)
+r = run(["pinch", "scroll", "spread"])
+check("pinch, a scroll (Apps' pages), spread: the spread still closes Apps", r.1[1] == chord(.apps, 173, 131, fn) && r.0.open == nil)
+r = run(["swipeDown", "move", "swipeUp"])
+check("down, a pointer move, up: the up still closes App Exposé", r.1[1] == chord(.appExpose, 115, 160, control | fn) && r.0.open == nil)
+do {
+    for (input, forgets) in [(GestureChords.Input.pointerMove, false), (.buttonDown, true), (.buttonUp, false), (.scroll, false),
+                             (.keyDown, true), (.keyUp, false), (.text, true)] {
+        var x = GestureChords()
+        _ = x.resolve("spread", table: defaults)
+        x.input(input)
+        check("input \(input): \(forgets ? "forgets Show Desktop" : "leaves it open")", x.open == (forgets ? nil : .showDesktop))
+    }
+    var y = GestureChords()
+    _ = y.resolve("swipeUp", table: defaults)
+    _ = y.resolve("swipeUp", table: defaults)
+    y.forget()
+    check("forget: nothing open and no repeat pending", y.open == nil && !y.repeated)
+}
+r = run(["click"])
+check("a click with nothing open", r.0.open == nil)
 // A view's shortcut turned off while it is open: the close posts nothing and it stays open.
 var c = GestureChords()
 _ = c.resolve("swipeUp", table: defaults)
@@ -172,6 +233,12 @@ check("an unknown name keeps only letters and digits, at most 32", GestureChords
 check("describe: no modifier", GestureChords.describe(keyCode: 103, flags: 0) == "key 103")
 check("describe: command + fn", GestureChords.describe(keyCode: 160, flags: command | fn) == "key 160, command + fn")
 check("describe: every modifier in the Mac's order", GestureChords.describe(keyCode: 1, flags: 0xFF0000) == "key 1, caps lock + control + option + shift + command + fn")
+check("modifierNames: none", GestureChords.modifierNames(0) == "none" && GestureChords.modifierNames(0x200000 | 0x400000) == "none")
+check("modifierNames: control + fn", GestureChords.modifierNames(control | fn) == "control + fn")
+// The modifiers a chord must not leave behind (InputInjector.chord's check): shift, control, option,
+// command and fn; not caps lock, the numeric pad or help.
+check("modifierBits: shift, control, option, command, fn", GestureChords.modifierBits == 0x9E_0000)
+check("modifierBits keep every stored gesture shortcut's modifiers", GestureChords.defaults.values.allSatisfy { $0.modifiers & ~0x9E_0000 & 0xFF_0000 == 0 })
 
 // MARK: - The TEST ONLY table
 
@@ -188,6 +255,8 @@ for bad in ["", "108", "x=off", "108=18", "108=a:1", "108=1:zz", "108=off,,", "-
 
 /// The model: the plan's §7.1 and §7.2 written again, with its own tables.
 struct Model {
+    /// The gesture that opened `open` came again and did nothing; once more, straight after, it opens it.
+    var again = false
     static let prefs: [String: [Int]] = ["missionControl": [108, 32], "appExpose": [115, 33], "nextSpace": [81], "previousSpace": [79],
                                          "apps": [173, 160], "showDesktop": [36, 110]]
     static let base: [String: String] = ["swipeUp": "missionControl", "swipeDown": "appExpose", "swipeLeft": "nextSpace",
@@ -202,13 +271,15 @@ struct Model {
         return (action, nil, 0, 0)
     }
     mutating func step(_ g: String, _ table: [Int: HotKey]) -> (String?, Int?, UInt16, UInt64) {
+        let wasAgain = again
+        again = false
         guard let b = Model.base[g] else { return (nil, nil, 0, 0) }
         if let o = open, Model.closer[o] == g {
             let p = pick(o, table)
             if p.1 != nil { open = nil }
             return p
         }
-        if open == b { return (b, nil, 0, 0) }
+        if open == b && !wasAgain { again = true; return (b, nil, 0, 0) }
         let p = pick(b, table)
         if p.1 != nil, b != "nextSpace", b != "previousSpace" { open = b }
         return p
@@ -235,8 +306,11 @@ func randomTable() -> [Int: HotKey] {
     }
     return t
 }
-let names = ["swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread", "rotate", "other"]
-var randomFailures = 0, steps = 0, chords = 0, reversals = 0
+let names = ["swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread", "rotate",
+             "move", "buttonDown", "buttonUp", "scroll", "keyDown", "keyUp", "text", "pick"]
+let inputs: [String: GestureChords.Input] = ["move": .pointerMove, "buttonDown": .buttonDown, "buttonUp": .buttonUp, "scroll": .scroll,
+                                             "keyDown": .keyDown, "keyUp": .keyUp, "text": .text]
+var randomFailures = 0, steps = 0, chords = 0, reversals = 0, reopens = 0
 for _ in 0..<5_000 {
     var real = GestureChords()
     var model = Model()
@@ -245,26 +319,31 @@ for _ in 0..<5_000 {
         if next() % 7 == 0 { table = randomTable() }
         let g = names[Int(next() % UInt64(names.count))]
         steps += 1
-        if g == "other" {
-            real.otherInput(); model.open = nil
+        if let input = inputs[g] {
+            real.input(input)
+            if ["buttonDown", "keyDown", "text"].contains(g) { model.open = nil; model.again = false }
+        } else if g == "pick" {
+            real.forget(); model.open = nil; model.again = false
         } else {
-            let before = model.open
+            let before = model.open, pending = model.again
             let want = model.step(g, table)
             let got = flatten(real.resolve(g, table: table))
             if got.1 != nil { chords += 1 }
             if let b = before, Model.closer[b] == g { reversals += 1 }
+            if pending, before != nil, before == Model.base[g], got.1 != nil { reopens += 1 }
             if got.0 != want.0 || got.1 != want.1 || got.2 != want.2 || got.3 != want.3 {
                 randomFailures += 1
                 if randomFailures <= 5 { print("  random: \(g) with open \(before ?? "nil"): got \(got), want \(want)") }
             }
         }
-        if real.open?.rawValue != model.open {
+        if real.open?.rawValue != model.open || real.repeated != model.again {
             randomFailures += 1
             if randomFailures <= 5 { print("  random: after \(g) open is \(real.open.map { "\($0)" } ?? "nil"), model \(model.open ?? "nil")") }
         }
     }
 }
-check("5,000 random sequences (\(steps) steps, \(chords) chords, \(reversals) closes): outcome and open as the model", randomFailures == 0)
+check("5,000 random sequences (\(steps) steps, \(chords) chords, \(reversals) closes, \(reopens) opened again at the third try): outcome, open and the repeat as the model",
+      randomFailures == 0 && reopens > 0)
 
 print("\(passes + fails) checks, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

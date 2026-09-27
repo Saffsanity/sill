@@ -303,6 +303,7 @@ package final class StreamCoordinator {
                 self.catalog.clientCount = count          // the catalog idles itself at 0
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
+                if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
                 if count > 0 {
@@ -631,6 +632,9 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            // A window picked comes forward on the Mac, which closes a view a gesture opened; the
+            // Desktop picked (as a device does before a gesture made over a window) leaves it.
+            if case .window = source { gestureChords.forget() }
             // A pick from the device's switcher: the device never selects a window by itself (its
             // automatic requests are for the Desktop only).
             await handlePick(source)
@@ -638,6 +642,7 @@ package final class StreamCoordinator {
             // The bar's long-press menu: the window's own traffic lights, pressed through
             // Accessibility. The staged window's element is already matched; others are looked up.
             guard let cmd = Wire.decode(WindowCommand.self, from: message.payload) else { return }
+            gestureChords.forget()              // a window's own button: a view a gesture opened is left behind
             let done: Bool
             if virtualDisplay, let p = stage.placement, p.windowID == cmd.id {
                 done = WindowSizer.perform(cmd.action, element: p.element)
@@ -652,6 +657,7 @@ package final class StreamCoordinator {
         case .launchApp:
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
+            gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
             pendingLaunch = req.bundleID
             let config = NSWorkspace.OpenConfiguration()
             // The launch itself takes no focus on the Mac. Its first window is then picked for the
@@ -663,8 +669,8 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload),
                   let rect = currentSourceRect() else { return }
-            // Any input but a pointer move may have closed, or left behind, a view a gesture opened.
-            if case .pointer(.move, _, _) = event {} else { gestureChords.otherInput() }
+            // A click, a key or text may close a view a gesture opened; a move or a scroll does not.
+            gestureChords.input(Self.gestureInput(event))
             // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
             // activates and raises nothing either.
             if !synthetic { raiseIfInteracting(event) }
@@ -1731,6 +1737,21 @@ package final class StreamCoordinator {
             return
         }
         injector.chord(keyCode: keyCode, flags: flags)
+    }
+
+    /// A device's input as `GestureChords` weighs it: whether it can close a view a gesture opened.
+    static func gestureInput(_ event: InputEvent) -> GestureChords.Input {
+        switch event {
+        case .pointer(let action, _, _):
+            switch action {
+            case .move: return .pointerMove
+            case .leftDown, .rightDown: return .buttonDown
+            case .leftUp, .rightUp: return .buttonUp
+            }
+        case .scroll, .scrollGesture: return .scroll
+        case .key(_, let down, _): return down ? .keyDown : .keyUp
+        case .text: return .text
+        }
     }
 
     /// This Mac's Keyboard Shortcuts for the gestures, read now (SymbolicHotKeys); macOS 27's own

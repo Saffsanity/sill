@@ -5,7 +5,8 @@ import Foundation
 // from its own Keyboard Shortcuts as they are at that moment (SymbolicHotKeys reads them), so a
 // shortcut changed there is followed and one turned off does nothing: never another action's
 // shortcut, never a guess. It also remembers the view its last gesture opened, so the opposite
-// gesture closes it, as on a Mac's trackpad.
+// gesture closes it, as on a Mac's trackpad, until something that can close the view comes from a
+// device (a click, a key, text, a window picked, an app launched) or the last device leaves.
 //
 // Pure: Foundation only, checked on its own with swiftc (Tests/checks/gesture-chords; its
 // `package` access needs -package-name). Nothing here posts anything: the coordinator posts the
@@ -106,9 +107,15 @@ package struct GestureChords: Sendable {
 
     /// The view Sill's last gesture opened (Mission Control, App Exposé, Apps or Show Desktop), which
     /// its opposite gesture closes; nil when none is open, as far as Sill knows. The Mac's own
-    /// keyboard and trackpad are not seen, so a view closed there still counts as open until the
-    /// next input from a device (`otherInput`).
+    /// keyboard and trackpad are not seen, so a view closed there still counts as open until a
+    /// device's click, key or text (`input`), a device's pick (`forget`), or the gesture that opened
+    /// it made twice more (`repeated`).
     package private(set) var open: GestureAction?
+    /// The gesture that opened `open` came again and did nothing, since the view is open. Made once
+    /// more, straight after, Sill takes it that the view was closed where it cannot see (the Mac's own
+    /// keyboard or trackpad) and opens it again: a view open for real stays open at the second try,
+    /// as on a Mac, and one closed behind Sill's back comes back at the third.
+    package private(set) var repeated = false
 
     package init() {}
 
@@ -134,10 +141,13 @@ package struct GestureChords: Sendable {
 
     /// One gesture: what to post, if anything, with the Mac's table as it is now; `open` follows.
     /// With a view open, its opposite posts that view's shortcut again (each of them toggles) and
-    /// forgets it; the gesture that opened it posts nothing; a Space posts its own shortcut and
-    /// leaves the view open; any other gesture posts its own and remembers its view instead. A
-    /// shortcut that is off posts nothing and changes nothing.
+    /// forgets it; the gesture that opened it posts nothing, and made again right after that,
+    /// posts its shortcut (`repeated`); a Space posts its own shortcut and leaves the view open; any
+    /// other gesture posts its own and remembers its view instead. A shortcut that is off posts
+    /// nothing and changes nothing.
     package mutating func resolve(_ gesture: String, table: [Int: HotKey]) -> GestureOutcome {
+        let again = repeated
+        repeated = false
         guard let base = Self.action(for: gesture) else {
             return .nothing(nil, reason: "not a gesture this Mac knows")
         }
@@ -146,7 +156,8 @@ package struct GestureChords: Sendable {
             if case .chord = outcome { self.open = nil }
             return outcome
         }
-        if let open, open == base {
+        if let open, open == base, !again {
+            repeated = true
             return .nothing(base, reason: "\(base.title) is already open")
         }
         let outcome = Self.chord(for: base, table: table)
@@ -154,10 +165,29 @@ package struct GestureChords: Sendable {
         return outcome
     }
 
-    /// Any other input from any device (a button, a key, text, a scroll; not a pointer move): what
-    /// was open may have been closed or left behind by it, so nothing counts as open any more.
-    package mutating func otherInput() {
+    /// A device's input, as far as a view a gesture opened is concerned.
+    package enum Input: Sendable {
+        case pointerMove, buttonDown, buttonUp, scroll, keyDown, keyUp, text
+    }
+
+    /// A device's input (kind 8): a button or a key going down, or typed text, can close the view or
+    /// act in it (a click in Mission Control picks a window and closes it, Esc closes any of them),
+    /// so nothing counts as open after. Moving the pointer, scrolling (it pages through Apps, and
+    /// closes none of them) and a button or key coming up leave it open, so the opposite gesture
+    /// still closes it after a stroke that scrolled before it became a gesture.
+    package mutating func input(_ input: Input) {
+        switch input {
+        case .buttonDown, .keyDown, .text: forget()
+        case .pointerMove, .buttonUp, .scroll, .keyUp: break
+        }
+    }
+
+    /// A device picked a window or launched an app (either comes forward on the Mac and closes the
+    /// view), or pressed a window's button, or the last device left (whoever comes next did not
+    /// open it): nothing counts as open any more.
+    package mutating func forget() {
         open = nil
+        repeated = false
     }
 
     /// `action`'s first shortcut that is on and has a key, with its stored modifiers'
@@ -215,10 +245,21 @@ package struct GestureChords: Sendable {
 
     /// "key 160, fn", "key 126, control + fn", "key 103" with no modifier.
     package static func describe(keyCode: UInt16, flags: UInt64) -> String {
+        let held = modifierNames(flags)
+        return "key \(keyCode)" + (held == "none" ? "" : ", " + held)
+    }
+
+    /// The modifiers a chord's key down carries that would change a click or a scroll if they stayed
+    /// set after it: shift, control, option, command and fn (CGEventFlags; not caps lock, which a key
+    /// down does not latch, nor the numeric pad and help bits).
+    package static let modifierBits: UInt64 = 0x020000 | 0x040000 | 0x080000 | 0x100000 | 0x800000
+
+    /// "control + fn", in the Mac's order (caps lock, control, option, shift, command, fn); "none".
+    package static func modifierNames(_ flags: UInt64) -> String {
         let names: [(UInt64, String)] = [(0x010000, "caps lock"), (0x040000, "control"), (0x080000, "option"),
                                          (0x020000, "shift"), (0x100000, "command"), (0x800000, "fn")]
         let held = names.filter { flags & $0.0 != 0 }.map(\.1)
-        return "key \(keyCode)" + (held.isEmpty ? "" : ", " + held.joined(separator: " + "))
+        return held.isEmpty ? "none" : held.joined(separator: " + ")
     }
 
     // MARK: TEST ONLY
