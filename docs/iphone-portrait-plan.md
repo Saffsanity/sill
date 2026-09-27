@@ -232,20 +232,24 @@ device's idiom, as `DuoLayout` never has.
 ### The keyboard
 
 With the keyboard up, row 1 is clear of it on every phone, so Keyboard dismisses it; rows 2 and 3
-clear it on the Pros, the 15 Pro and the 17e. Screen coordinates, keyboards with their suggestions
-bar (assumed heights: 346 on the Pro Max, 336 on the other Face ID phones, 260 on the SE):
+clear it too. Screen coordinates, the keyboard as the input view shows it: autocorrection is off,
+so it has no suggestions bar. Measured on the iOS 27 simulators on 2026-09-27 (S2): 320 pt on the
+18 Pro Max, 301 on the 18 Pro and on the 17e; the 15 Pro and the 13 mini taken as the 18 Pro's,
+the SE as the classic 216. (This plan first assumed keyboards with a suggestions bar, 346, 336 and
+260, which put row 3 under the keyboard on the mini and the SE.)
 
 | Phone | Keyboard's top | Row 1 ends | Row 2 ends | Row 3 ends |
 |---|---|---|---|---|
-| 18 Pro Max | 610 | 403 | 475 | 529 (81 clear) |
-| 18 Pro, 17 | 538 | 379 | 451 | 505 (33 clear) |
-| 15 Pro | 516 | 370 | 442 | 496 (20 clear) |
-| 17e | 508 | 356 | 428 | 482 (26 clear) |
-| 13 mini | 476 | 350 | 422 | 476 (at its edge) |
-| SE 3rd gen | 407 | 320 | 392 | 446 (39 under it) |
+| 18 Pro Max | 636 (measured) | 403 | 475 | 529 (107 clear) |
+| 18 Pro, 17 | 573 (measured) | 379 | 451 | 505 (68 clear) |
+| 15 Pro | 551 | 370 | 442 | 496 (55 clear) |
+| 17e | 543 (measured) | 356 | 428 | 482 (61 clear) |
+| 13 mini | 511 | 350 | 422 | 476 (35 clear) |
+| SE 3rd gen | 451 | 320 | 392 | 446 (5 clear) |
 
-On the mini and the SE the key row can be under the keyboard: a latch is set before the keyboard
-comes up and spent by the next typed key, as today (open question 5). The trackpad is under it on
+A keyboard with a candidate bar (an input method's, about 44 pt more) can cover the key row on the
+SE and the mini; row 1 stays clear on every phone. A latch set before the keyboard comes up is
+spent by the next typed key, as today (open question 5). The trackpad is under the keyboard on
 every phone. The layout never moves for the keyboard.
 
 ### VoiceOver and larger text

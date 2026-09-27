@@ -30,8 +30,10 @@ struct Phone {
     let name: String
     let screen: CGSize
     let inset: CGFloat
-    /// The software keyboard's height with its suggestions bar, where the plan assumes one (the
-    /// usual heights; S2 photographs the real ones on the 18 Pro Max, the 18 Pro and the 17e).
+    /// The software keyboard's height as the input view shows it (autocorrection off, so no
+    /// suggestions bar): measured on the iOS 27 simulators for the 18 Pro Max (320), the 18 Pro and
+    /// the 17e (301, both), 2026-09-27; the 15 Pro and the 13 mini taken as the 18 Pro's, the SE
+    /// as the classic 216. A keyboard with a candidate bar (an IME) is about 44 pt taller.
     let keyboard: CGFloat?
     var container: CGSize { CGSize(width: screen.width, height: screen.height - inset) }
 }
@@ -46,12 +48,12 @@ struct Row {
     let panelRoom: CGFloat
 }
 
-let proMax = Phone(name: "iPhone 18 Pro Max", screen: CGSize(width: 440, height: 956), inset: 62, keyboard: 346)
-let pro = Phone(name: "iPhone 18 Pro (and 17)", screen: CGSize(width: 402, height: 874), inset: 62, keyboard: 336)
-let fifteenPro = Phone(name: "iPhone 15 Pro", screen: CGSize(width: 393, height: 852), inset: 59, keyboard: 336)
-let seventeenE = Phone(name: "iPhone 17e", screen: CGSize(width: 390, height: 844), inset: 47, keyboard: 336)
-let mini = Phone(name: "iPhone 13 mini", screen: CGSize(width: 375, height: 812), inset: 50, keyboard: 336)
-let se = Phone(name: "iPhone SE (3rd generation)", screen: CGSize(width: 375, height: 667), inset: 20, keyboard: 260)
+let proMax = Phone(name: "iPhone 18 Pro Max", screen: CGSize(width: 440, height: 956), inset: 62, keyboard: 320)
+let pro = Phone(name: "iPhone 18 Pro (and 17)", screen: CGSize(width: 402, height: 874), inset: 62, keyboard: 301)
+let fifteenPro = Phone(name: "iPhone 15 Pro", screen: CGSize(width: 393, height: 852), inset: 59, keyboard: 301)
+let seventeenE = Phone(name: "iPhone 17e", screen: CGSize(width: 390, height: 844), inset: 47, keyboard: 301)
+let mini = Phone(name: "iPhone 13 mini", screen: CGSize(width: 375, height: 812), inset: 50, keyboard: 301)
+let se = Phone(name: "iPhone SE (3rd generation)", screen: CGSize(width: 375, height: 667), inset: 20, keyboard: 216)
 let duoOuter = Phone(name: "the Duo's outer display (the harness)", screen: CGSize(width: 500, height: 710), inset: 0, keyboard: nil)
 
 let table: [Row] = [
@@ -135,22 +137,23 @@ check("320 wide: the ruler's step 28, its leading edge at the row's", near(narro
 let threeSixty = L(size: CGSize(width: 360, height: 1000))
 check("360 wide: the ruler's step 34", near(threeSixty.rulerStep, 34))
 
-// MARK: - The plan's keyboard table
+// MARK: - The keyboard table
 //
 // With the keyboard up (the layout never moves for it), in the screen's coordinates: row 1 ends
-// above the keyboard's top on every phone, so its Keyboard button can take the keyboard down; rows 2
-// and 3 too on the Pros, the 15 Pro and the 17e; on the 13 mini row 3 ends at its edge; on the SE row
-// 3 is under it (a latch set before the keyboard comes up still works). The trackpad is under it on
-// every phone.
+// above the keyboard's top on every phone, so its Keyboard button can take the keyboard down, and
+// rows 2 and 3 too, on the SE only just (5 pt, with its assumed keyboard). The trackpad is under it
+// on every phone. The plan assumed keyboards with a suggestions bar (346, 336, 260), which put row 3
+// under it on the mini and the SE; the input view has none (the heights above), and a keyboard with
+// a candidate bar still leaves row 1 clear on every phone (the last check).
 
 struct KeyboardRow { let phone: Phone; let top: CGFloat; let row1: CGFloat; let row2: CGFloat; let row3: CGFloat }
 let keyboardTable: [KeyboardRow] = [
-    KeyboardRow(phone: proMax, top: 610, row1: 403, row2: 475, row3: 529),
-    KeyboardRow(phone: pro, top: 538, row1: 379, row2: 451, row3: 505),
-    KeyboardRow(phone: fifteenPro, top: 516, row1: 370, row2: 442, row3: 496),
-    KeyboardRow(phone: seventeenE, top: 508, row1: 356, row2: 428, row3: 482),
-    KeyboardRow(phone: mini, top: 476, row1: 350, row2: 422, row3: 476),
-    KeyboardRow(phone: se, top: 407, row1: 320, row2: 392, row3: 446),
+    KeyboardRow(phone: proMax, top: 636, row1: 403, row2: 475, row3: 529),
+    KeyboardRow(phone: pro, top: 573, row1: 379, row2: 451, row3: 505),
+    KeyboardRow(phone: fifteenPro, top: 551, row1: 370, row2: 442, row3: 496),
+    KeyboardRow(phone: seventeenE, top: 543, row1: 356, row2: 428, row3: 482),
+    KeyboardRow(phone: mini, top: 511, row1: 350, row2: 422, row3: 476),
+    KeyboardRow(phone: se, top: 451, row1: 320, row2: 392, row3: 446),
 ]
 for k in keyboardTable {
     let l = L(size: k.phone.container)
@@ -162,13 +165,17 @@ for k in keyboardTable {
           inset + l.row1.maxY < top)
     check("\(k.phone.name): the trackpad under the keyboard", inset + l.trackpad.maxY > top)
 }
-for p in [proMax, pro, fifteenPro, seventeenE] {
+for p in [proMax, pro, fifteenPro, seventeenE, mini, se] {
     let l = L(size: p.container)
     check("\(p.name): rows 2 and 3 clear of the keyboard too (\(Int(p.screen.height - p.keyboard! - p.inset - l.keys.maxY)) pt)",
           p.inset + l.keys.maxY < p.screen.height - p.keyboard!)
 }
-check("iPhone 13 mini: row 3 ends at the keyboard's edge", mini.inset + L(size: mini.container).keys.maxY == mini.screen.height - mini.keyboard!)
-check("iPhone SE: row 3 ends 39 pt under the keyboard's top", se.inset + L(size: se.container).keys.maxY - (se.screen.height - se.keyboard!) == 39)
+check("measured: 107 pt between row 3 and the keyboard on the 18 Pro Max, 68 on the 18 Pro, 61 on the 17e",
+      [(proMax, 107), (pro, 68), (seventeenE, 61)].allSatisfy { p, gap in
+          p.screen.height - p.keyboard! - p.inset - L(size: p.container).keys.maxY == CGFloat(gap) })
+check("with a candidate bar (44 pt more) row 1 is still clear on every phone",
+      [proMax, pro, fifteenPro, seventeenE, mini, se].allSatisfy { p in
+          p.inset + L(size: p.container).row1.maxY < p.screen.height - p.keyboard! - 44 })
 
 // MARK: - Every width from 300 to 599 pt, every height from the width + 1 to 1,400
 
