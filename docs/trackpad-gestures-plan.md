@@ -11,17 +11,16 @@ and what differs from the plan. **Tier 2 is not built and §10's probe was not r
 posted to the Mac (the workflow's rule while Noah slept), so Tier 2 stays a later PR that starts with
 that probe, run by Noah or with his go-ahead.
 
-Left, in order: a review (the three lenses of §13's step 7), the branch pushed and its PR opened
-once Noah says so in his own words (its body lists P1–P12), and Noah's device tests, §9.5.
+The review (§13's step 7: the stroke gate, the wire and the resolver, the Settings group) found
+seven things, each checked here before it was fixed (§15, "Review fixes"; five reproduced, the
+VoiceOver one read in the code, the chord's inferred, since nothing may be posted): three-finger
+strokes placed slowly or beside a resting thumb clicked, dragged or scrolled; a pinch led by the
+thumb read as a swipe; a brief extra contact decided a swipe as nothing; VoiceOver users were told
+to use three fingers; a chord could leave control or fn set for the next click; a scroll before a
+gesture broke the reversal; and what Sill opened never expired. Left: Noah's device tests, §9.5.
 
-The earlier hand-off (2026-09-26 03:50), for the record: Noah stopped the first build at about 95 %
-of the week's usage ("Stop trackpad gestures and menu bar mirror for now. Mark down next steps for
-agents that will pick up the task.") and resumed it on 2026-09-26 at 23:38 ("Continue working where
-you left off with Opus 5.5 subagents"); his request for the gestures is "Work on 5-12 as well please"
-(2026-09-26, item 8 of that list).
 
-
-2026-09-26. It stands alone: the implementer needs no other design document. Written from a
+The plan, 2026-09-26. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of `/Users/noah/Downloads/winstream-gestures` (branch `trackpad-gestures` from
 `origin/main` at 8b0d418) and read-only probes on this Mac (macOS 27.0, 26A428), then revised the
 same day by a critique against the code, a simulator rig and this Mac's own settings (the list
@@ -193,7 +192,8 @@ the table on the iPad.
   harmless: cancelled touches send nothing.
 - **Accessibility:** with VoiceOver on, three-finger swipes scroll and a three-finger tap speaks;
   with Zoom on, three-finger double taps and drags are Zoom's. Neither surface has
-  `.allowsDirectInteraction`, so these stay the system's, as today.
+  `.allowsDirectInteraction`, so these stay the system's, as today, and the Settings group's rows
+  do the six gestures instead, as accessibility actions (§8).
 - **The Magic Keyboard trackpad:** its three- and four-finger swipes and pinches are iPadOS's
   (Home, the app switcher, switching apps) and never reach an app → glass only. **Correction:** its
   two-finger scroll does not reach Sill either. Both pans leave `allowedScrollTypesMask` at 0 (read
@@ -316,18 +316,21 @@ as on a Mac: the content follows the fingers, so fingers moving **left** bring t
 | Pinch in | Apps | 173 (key 131, fn), else 160 (Show Apps, when bound) |
 | Spread | Show Desktop | 36 (F11, fn), else 110 (key 160, command + fn) |
 
-- **Decided at lift** (§6.1), from the fingers' net travel between the third finger landing and the
-  first finger lifting: a swipe taken back before lifting does nothing, as on a Mac, and a stroke
-  the system cancels sends nothing.
-- **Once per stroke, and nothing else in it.** From the third finger on, a stroke sends no pointer
-  motion, click, button or scroll (§6.2). Motion before the third finger is today's (the tracker's
-  2 pt slop, as before any two-finger scroll).
+- **Decided at lift** (§6.1), from the fingers' net travel between the stroke arming and the first
+  of its three fingers lifting: a swipe taken back before lifting does nothing, as on a Mac, and a
+  stroke the system cancels sends nothing.
+- **Once per stroke, and nothing else in it.** From its third finger down (before any has moved
+  24 pt), a stroke sends no pointer motion, click, button or scroll (§6.2), however slowly the
+  fingers came and whatever rests on the glass. Motion before the third finger is today's (the
+  tracker's 2 pt slop, as before any two-finger scroll).
 - **The opposite gesture closes what Sill opened** (§7.2): a swipe down after Sill's Mission Control
   closes it; a swipe up after its App Exposé closes that; a spread after its Apps closes Apps; a
   pinch after its Show Desktop brings the windows back. The same gesture again does nothing (the
-  view is already open), and the Spaces leave an open view as it is. Any other input from any
-  device (a button, a key, text, a scroll; not a pointer move) forgets what was open. Each of these
-  shortcuts toggles its view, so closing is the same chord again.
+  view is already open) and, made once more straight after, opens it again (it was closed on the
+  Mac itself); the Spaces leave an open view as it is. A click, a key or text from any device, a
+  window picked or an app launched from one, and the last device leaving forget what was open; a
+  pointer move or a scroll does not. Each of these shortcuts toggles its view, so closing is the
+  same chord again.
 - **The Desktop first.** While this device streams a window, a gesture first selects the Desktop, as
   the Desktop button does (§6.3), because none of these views is in a window's capture (§2.3).
 - **A latched modifier** is ignored and stays latched: a gesture is not a keystroke (the Spotlight
@@ -457,44 +460,58 @@ the whole decision and the stroke gate's state, so it is the whole test surface 
 ```
 struct TrackpadGestures {
     enum Gesture: String, Equatable { case swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread }
-    enum Output: Equatable { case none, armed, gesture(Gesture, fingers: Int) }
+    enum Output: Equatable { case none, silenced, gesture(Gesture, fingers: Int) }
 
     // Tunables, in the surface's points and seconds (P1 and P3 tune them on glass).
-    var chordWindow: TimeInterval = 0.15   // the third finger lands within this of the stroke's first…
+    var chordWindow: TimeInterval = 0.15   // the three fingers that arm a stroke land within this of each other…
     var chordTravel: CGFloat = 24          // …before any finger has moved this far from where it landed
     var swipeDistance: CGFloat = 40        // the fingers' centroid, net travel, for a swipe
     var flickDistance: CGFloat = 20        // or this much, moving at flickSpeed over the last 50 ms
     var flickSpeed: CGFloat = 500
     var axisRatio: CGFloat = 1.3           // the dominant axis beats the other by this
+    var swipeShare: CGFloat = 0.5          // each of the three moved this share of the centroid's way along it
     var pinchRatio: CGFloat = 0.25         // the fingers' mean spread changed by this fraction
 
     // Fed every touch of the surface by its StrokeObserver (§6.2).
-    mutating func down(_ id: Int, at point: CGPoint, time: TimeInterval, holding: Bool) -> Output  // .armed once
+    mutating func down(_ id: Int, at point: CGPoint, time: TimeInterval, holding: Bool) -> Output  // .silenced once
     mutating func moved(_ id: Int, to point: CGPoint, time: TimeInterval)
     mutating func up(_ id: Int, at point: CGPoint, time: TimeInterval) -> Output                   // .gesture at most once
-    mutating func cancelled()                         // the system took the touches: nothing is decided
-    private(set) var silent: Bool                     // from arming until the next stroke's first touch
+    mutating func cancelled(_ id: Int)                // the system took the touch: nothing is decided
+    mutating func otherTouch()                        // a Pencil's or the iPad's own pointer's touch
+    private(set) var silent: Bool                     // from three fingers down until the next stroke's first touch
+    var armed: Bool                                   // the stroke can become a gesture
 }
 ```
 
-- **A stroke** runs from its first touch down to its last touch up. It **arms** — becomes a gesture
-  stroke — when its third finger lands within `chordWindow` of its first, before any finger has
-  moved `chordTravel` from where it landed, and while no button it pressed is held (`holding`: the
-  trackpad's press-and-hold drag; redundant while `chordWindow` is under the long press's 0.45 s,
-  kept so a longer window can never arm a drag). A two-finger scroll that a third finger joins late,
-  or after moving, never arms and goes on exactly as today (the rig's "two scroll, a third 133 ms
-  later" had moved 60 pt).
-- **Silence:** from arming until the next stroke's first touch — not until the last lift, because a
-  tap's action runs after its touch has ended — `silent` is true and the surfaces send nothing
-  (§6.2).
-- **The decision**, at the first lift after arming: the centroid of the three fingers that armed the
-  stroke, from where they were at arming to where they are at that lift, and their mean distance
-  from it. A **swipe** when the centroid travelled at least `swipeDistance` (or `flickDistance`
-  while moving at `flickSpeed` or faster over the last 50 ms) and one axis beats the other by
-  `axisRatio`; else a **pinch** or a **spread** when the mean distance changed by `pinchRatio`; else
-  nothing. At most one decision per stroke. A fourth finger does not change it (it makes `fingers`
-  4); a fifth leaves the stroke silent and deciding nothing.
-- **Cancelled** touches (the system took them) decide nothing; the stroke stays silent.
+- **A stroke** runs from its first touch down to its last touch up. It goes **silent** once three
+  fingers are down, before any finger has moved `chordTravel` from where it landed and while no
+  button it pressed is held (`holding`: the trackpad's press-and-hold drag, whose button must still
+  come up), however slowly the fingers came down and whatever else rests on the glass. A two-finger
+  scroll that a third finger joins after moving is never silent and goes on exactly as today (the
+  rig's "two scroll, a third 133 ms later" had moved 60 pt).
+- **Silence** lasts from then until the next stroke's first touch — not until the last lift, because
+  a tap's action runs after its touch has ended — and the surfaces send nothing (§6.2).
+- A silent stroke **arms**, and can become a gesture, when the three fingers that landed last came
+  down within `chordWindow` of each other, before any finger moved `chordTravel`, with no button
+  held, no touch of it cancelled and at most four down. A thumb resting on the glass before neither
+  keeps three fingers from arming nor becomes one of them; three fingers placed more slowly than
+  that are silent and decide nothing.
+- **The decision**, at the first lift of one of the three that armed the stroke (any other finger
+  lifting only leaves the stroke): the centroid of the three, from where they were at arming to
+  where they are at that lift, and their mean distance from it. A **swipe** when the centroid
+  travelled at least `swipeDistance` (or `flickDistance` while moving at `flickSpeed` or faster over
+  the last 50 ms), one axis beats the other by `axisRatio`, and the fingers **moved together**: each
+  of the three at least `swipeShare` of the centroid's travel along the swipe, and no other finger
+  that moved (`chordTravel` or more since arming or landing) that share or more the other way. In a
+  pinch or a spread some digit moves against the others however far the centroid goes: a pinch led
+  by the thumb drags the centroid along with the thumb. Else a **pinch** or a **spread** when the
+  mean distance from the centroid, of the three and of every other finger that moved (a thumb
+  pinching with three fingers), changed by `pinchRatio`; else nothing. At most one decision per
+  stroke. `fingers` counts the three and the other fingers that moved, 4 at most: a thumb resting on
+  the glass does not count, a fourth finger swiping with them does. A fifth finger down leaves the
+  stroke silent and deciding nothing.
+- **Cancelled** touches (the system took them) decide nothing; the stroke stays silent. A touch
+  cancelled before three fingers are down keeps the stroke from arming, not from going silent.
 - Deterministic: the same events give the same outputs, which §9.1 checks with 5,000 random strokes
   and mutants.
 
@@ -516,13 +533,14 @@ struct TrackpadGestures {
   - `InputOverlayView`: `handleTap`, `handleLongPress`, `handlePan`.
   - The Pencil and trackpad-pointer paths (`touchesBegan` … for `.pencil` and `.indirectPointer`,
     `InputOverlay.swift:223-269`) and hover are untouched.
-- **A scroll open when the stroke arms** (the rig's slide: the pan began with one finger and took
-  the second) is closed at once without momentum: `endScroll(momentumVelocity: nil)` on the
-  trackpad; on the overlay, `.scrollGesture(.ended)` with `scrollGestureOpen` cleared and no
-  `startMomentum`. Deltas already sent stay (they moved less than `chordTravel`), and the host posts
-  nothing for a gesture that carried none.
-- **A stroke that never arms is untouched:** `silent` is false and every handler runs as at 6678ca3.
-  H7 proves it.
+- **A scroll open when the stroke goes silent** (`.silenced`, `onSilenced`; the rig's slide: the
+  pan began with one finger and took the second) is closed at once without momentum:
+  `endScroll(momentumVelocity: nil)` on the trackpad; on the overlay, `.scrollGesture(.ended)` with
+  `scrollGestureOpen` cleared and no `startMomentum`. Deltas already sent stay (they moved less than
+  `chordTravel`), and a scroll closes no view the reversal counts on (§7.2).
+- **A stroke that never goes silent is untouched:** `silent` is false and every handler runs as at
+  6678ca3. H7 proves it. No stroke goes silent while the trackpad's drag holds the button, so its
+  `.ended` always sends the button up.
 - **The switch off** stops only the send (§6.3): three-finger strokes stay silent, so the stray
   clicks, drags and right-clicks of §2.1 are gone either way.
 
@@ -542,12 +560,13 @@ struct TrackpadGestures {
 
 ### 6.4 Four fingers (best effort)
 
-The stroke arms at its third finger; a fourth does not change the decision (the first three decide)
-and makes `fingers` 4. With iPadOS's four-finger gestures on, iPadOS takes the stroke, the touches
-are cancelled and nothing goes to the Mac. With them off, or on an iPhone, a four-finger swipe does
-what three do. Deciding at lift is what makes this safe: the old plan fired at 45 pt of travel,
-which could open Mission Control on the Mac while the iPad went Home. A fifth finger: silent,
-nothing.
+The stroke arms at its third finger; a fourth that moves with them makes `fingers` 4, one that
+moves against them (a thumb pinching with three fingers, as on a Mac) makes the stroke a pinch or a
+spread, and one that stays where it is (a thumb resting) changes nothing. With iPadOS's four-finger
+gestures on, iPadOS takes the stroke, the touches are cancelled and nothing goes to the Mac. With
+them off, or on an iPhone, a four-finger swipe does what three do. Deciding at lift is what makes
+this safe: the old plan fired at 45 pt of travel, which could open Mission Control on the Mac while
+the iPad went Home. A fifth finger: silent, nothing.
 
 ### 6.5 The editing interaction
 
@@ -598,12 +617,21 @@ package struct GestureChords {
   or nil. The pairs: Mission Control and a swipe down, App Exposé and a swipe up, Apps and a spread,
   Show Desktop and a pinch.
 - With a view open: its reverse posts that view's chord again (it toggles closed) and forgets it;
-  the gesture that opened it posts nothing ("already open"); a Space posts its own chord and keeps
-  it; any other gesture posts its own action and remembers that view instead.
-- `otherInput()` forgets: the coordinator calls it for every `.input` that is not a pointer move,
-  from any device. The Mac's own keyboard and trackpad are not seen, so a view closed there still
-  counts as open until the next input from a device; its reverse gesture then opens it again (one
-  wrong step, which the next gesture undoes).
+  the gesture that opened it posts nothing ("already open", as on a Mac) and, made once more
+  straight after, posts its chord again (`repeated`: the view was closed where Sill cannot see); a
+  Space posts its own chord and keeps it; any other gesture posts its own action and remembers that
+  view instead.
+- `input(_:)`, for every `.input` from any device: a button or a key going down, or typed text, can
+  close the view or act in it, so it forgets; a pointer move, a scroll (it pages through Apps and
+  closes none of them) and a button or key coming up do not. A stroke that scrolled before it
+  became a gesture sends its scroll's bracket first (§6.2), so a scroll forgetting would have made
+  that stroke's reverse gesture open the other view.
+- `forget()`: a window picked (kind 6; the Desktop picked, as a device does before a gesture made
+  over a window, keeps it), an app launched (kind 7), a window's button pressed (kind 15), and the
+  last device leaving (whoever comes next did not open it).
+- The Mac's own keyboard and trackpad are not seen, so a view closed there still counts as open: its
+  reverse gesture then opens it again, or the same gesture made twice more does (one wrong step
+  either way).
 
 ### 7.3 Reading the table, posting the chord
 
@@ -612,9 +640,20 @@ package struct GestureChords {
   `dlsym`, getters only, read at each gesture (microseconds), so a shortcut changed while connected
   is followed. With the symbols missing, `GestureChords.defaults`, and one line at the first
   gesture. Private, like the `CGVirtualDisplay` the host already uses; read-only.
-- `InputInjector.chord(keyCode:flags:)`: a key down and a key up from its `hidSystemState` source
-  with exactly those flags, posted at `.cghidEventTap`, counted as `in.gesture`. Accessibility,
-  which input already needs, and nothing more; `remindAboutAccessibilityIfNeeded` runs as for input.
+- `InputInjector.chord(keyCode:flags:)`: a key down from its `hidSystemState` source with exactly
+  those flags and a key up with the flags the HID system's state table held before the chord, posted
+  at `.cghidEventTap`, counted as `in.gesture`. Accessibility, which input already needs, and
+  nothing more; `remindAboutAccessibilityIfNeeded` runs as for input.
+- **The key up's flags.** Events posted from a source leave their flags in its state table
+  (CGEventSource.h), and every pointer and scroll event made from `hidSystemState` afterwards starts
+  from them: a key up with control and fn would make the device's next tap a control-click (a
+  context menu) and its next scroll a control-scroll (a zoom where Accessibility's zoom uses
+  control), as the Spotlight key's ⌘ once reached the text typed after it. The shortcut acts on the
+  key down. A quarter of a second after each posted chord the table is read again (a read, no
+  permission): a modifier of the chord still set that was not set before is counted,
+  `in.gestureModifiersLeft`, and said once a run ("Gestures: after a gesture's shortcut this Mac's
+  modifier keys still read control + fn (not before it); …"), which P2 watches for. Inferred, not
+  observed: nothing was posted while this was built.
 
 ### 7.4 In the coordinator
 
@@ -628,7 +667,8 @@ package struct GestureChords {
   Control opens.
 - **One line per gesture**, for P2: "Gesture from ‹device›: swipe up → Mission Control (shortcut
   108: key 160, fn)", or "… → nothing: no shortcut for Apps is on in Keyboard Shortcuts".
-- `otherInput()` on every `.input` but a pointer move, from any device.
+- `input(_:)` on every `.input`, from any device; `forget()` on a window picked, an app launched, a
+  window's button and the last device leaving (§7.2).
 - **A host that does not advertise never posts a chord** (the synthetic CLI, the bare app with
   `--synthetic`): it logs the line with "(not posted: a test host)" and counts `in.gestureDry`. That
   is what lets H8 test the wire without touching the session.
@@ -658,14 +698,24 @@ the Mac. The surfaces read it at each decision.
   Keyboard settings does nothing." On an iPad, one more sentence: "Four-finger swipes and a Magic
   Keyboard trackpad’s gestures stay with iPadOS." A Mac that does not take them (`hostGestures`
   nil): "Update Sill on \(mac) to use these." Off: "Three-finger strokes do nothing while this is
-  off."
+  off." While VoiceOver runs (`UIAccessibility.isVoiceOverRunning`, followed on
+  `voiceOverStatusDidChangeNotification`), which keeps three-finger swipes and taps for itself so
+  that none reaches Sill (§2.2), the first sentence is "VoiceOver keeps three-finger gestures for
+  itself, so the rows above do them on \(mac) instead."
+- **The rows do the gestures, for assistive technologies.** Each mapping row is an accessibility
+  action, whether or not VoiceOver runs (VoiceOver, Voice Control, Switch Control, none of which
+  makes a three-finger stroke on the glass): a button that does its gesture through
+  `client.sendGesture` (the switch, the Mac's `gestures`, the Desktop first while a window streams),
+  and for the Spaces row two named actions, "Space on the Right" (a swipe left) and "Space on the
+  Left". A touch on a row does nothing, as before.
 - **No `changeSettings`, ever.** The panel's doc comment (`:5-18`: every control "sends through
   `client.changeSettings`") gains a line: this group is the device's own and sends nothing.
 - **Accessibility and layout** follow the panel's groups (`Rows`, `Footnote`, `RowTitle`),
   `dynamicTypeSize(...xxLarge)`, wrapping, never truncating; each mapping row is one VoiceOver
-  element ("Swipe up, Mission Control").
+  element ("Swipe up, Mission Control"), a button (the Spaces row: two actions).
 - **Harness.** The mock window lists carry `gestures: 1` except `legacy`'s; `-Sill.trackpadGestures
-  0` photographs it off (the argument domain overrides the default for one run).
+  0` photographs it off (the argument domain overrides the default for one run); DEBUG
+  `-SillVoiceOver 1` shows the VoiceOver footnote.
 
 The four pbxproj entries for `TrackpadGestures.swift` (build file, file reference, the group's and
 the Sources phase's lines) use **`A1000001000000000000A401` / `…F401`**, not the next pair after
@@ -680,19 +730,26 @@ the Sources phase's lines) use **`A1000001000000000000A401` / `…F401`**, not t
 - **`gestures`**: `iOSClient/TrackpadGestures.swift` with a `main.swift`; at least 90 cases, one
   `ok`/`FAIL` each, and 5,000 random strokes against a small model. Each direction at, just under
   and just over `swipeDistance`; the flick rule; `axisRatio` both ways; pinch and spread at
-  `pinchRatio`; travel winning over spread; arming at exactly `chordWindow` and `chordTravel`; no
-  arming with a button held; two fingers never; a late third finger never; a fifth finger; a
-  fourth not changing the decision; one decision per stroke; cancelled → nothing; a swipe taken
-  back → nothing; `silent` lasting until the next stroke's first touch. Mutants (at least 14): each
-  threshold's comparison flipped; the window, travel and button conditions each dropped; the
-  one-shot dropped; left and right swapped; pinch and spread swapped; deciding at arming instead of
-  at lift; silence ending at the last lift; cancel ignored; a fourth finger re-basing the centroid.
+  `pinchRatio`; travel winning over spread; the fingers moving together at exactly `swipeShare`
+  (a pinch led by the thumb, a grab, the Mac's thumb-and-three-finger pinch either way round, a
+  fourth finger against the swipe at and under the share, and at and under `chordTravel`); silence
+  and arming at exactly `chordWindow` and `chordTravel`; three fingers placed slowly (silent, never
+  armed); a thumb resting before (armed by the three that landed last; not counted; its lift decides
+  nothing); no silence with a button held; two fingers never; a late third finger never; a fifth
+  finger; a still fourth finger not counted; a brief extra contact's lift deciding nothing; one
+  decision per stroke; cancelled → nothing; a swipe taken back → nothing; `silent` lasting until
+  the next stroke's first touch. Mutants (at least 14): each threshold's comparison flipped; the
+  window, travel and button conditions each dropped; the one-shot dropped; left and right swapped;
+  pinch and spread swapped; any lift deciding; silence ending at the last lift, or coming only with
+  arming; the first three to land arming; the together test and the other fingers' dropped; cancel
+  ignored; a fourth finger re-basing the centroid.
 - **`gesture-chords`**: `Sources/SillHost/GestureChords.swift`; at least 70 cases and 5,000 random
   sequences against a model. Each gesture to its chord on the default table; a preferred shortcut
   off or unbound → the next; none → nothing, and never another action's chord; a rebound shortcut
   followed exactly (its keycode, its device-independent bits only); every reversal pair; the same
-  gesture twice; the Spaces keeping `open`; `otherInput` clearing it; unknown names. Mutants (at
-  least 12).
+  gesture twice (nothing) and three times (its chord again); the Spaces keeping `open`; a click, a
+  key and text clearing it and a move, a scroll and a button or key coming up not; `forget`
+  clearing it; unknown names; the modifiers a chord must not leave behind. Mutants (at least 12).
 - **`protocol` and `compatibility`** gain: kind 28 is `gesture` and 29 is `.unknown`;
   `TrackpadGesture`'s JSON both ways; `WindowList.gestures` optional both ways.
 - Both new checks go in `Tests/checks/README.md` ("Adding a check") and in CI's mutants matrix
@@ -741,11 +798,11 @@ Keyboard trackpad if he has one.
 
 | # | Check |
 |---|---|
-| P1 | **Portrait, the Desktop streaming.** Three fingers on the trackpad: swipe up → Mission Control; down → App Exposé; left → the Space on the right; right → the Space on the left; pinch → Apps; spread → Show Desktop. Sill's log names the shortcut each time (§7.4). No pointer jump once the fingers are down, no click; a light haptic on an iPhone, none on the iPad |
-| P2 | **Which shortcut works** (§2.3). Mission Control, App Exposé, Apps and Show Desktop open through 108, 115, 173 and 36; the Space swipes switch Spaces and do not tile the front window (fn control arrows are also Tile Left and Right Half). If a gesture tiles, or does nothing while its log line names a shortcut, note which: the fix is one entry of §7.1's table |
-| P3 | **Landscape.** The same six over the stream, with the Desktop streaming and while a window streams (the device switches to the Desktop first, then the view opens). Two-finger scroll still scrolls; a third finger landing on a scroll already under way leaves it a scroll |
-| P4 | **One and two fingers unchanged**, both layouts: pointer, tap, two-finger tap, press-and-hold drag, long-press right click, two-finger scroll with momentum, haptics. And §2.1 on glass: three fingers resting 0.6 s no longer drag or right-click, a three-finger pinch no longer clicks at the end, four fingers no longer move the pointer or scroll |
-| P5 | **The reversal.** Up then down closes Mission Control; down then up closes App Exposé; spread then pinch brings the windows back; pinch then spread closes Apps. A click in Mission Control between two swipes makes the next swipe down App Exposé |
+| P1 | **Portrait, the Desktop streaming.** Three fingers on the trackpad: swipe up → Mission Control; down → App Exposé; left → the Space on the right; right → the Space on the left; pinch → Apps; spread → Show Desktop. Sill's log names the shortcut each time (§7.4). No pointer jump once the fingers are down, no click; a light haptic on an iPhone, none on the iPad. Pinch and spread led by the thumb (the fingers still, the thumb travelling far) are a pinch and a spread, not a swipe. Right after a swipe left, right or down, a tap selects (no context menu) and a two-finger scroll scrolls (no zoom) |
+| P2 | **Which shortcut works** (§2.3). Mission Control, App Exposé, Apps and Show Desktop open through 108, 115, 173 and 36; the Space swipes switch Spaces and do not tile the front window (fn control arrows are also Tile Left and Right Half). If a gesture tiles, or does nothing while its log line names a shortcut, note which: the fix is one entry of §7.1's table. Sill's log has no "Gestures: after a gesture's shortcut this Mac's modifier keys still read …" line (§7.3; if it has, the key up did not put the table back: note which gesture) |
+| P3 | **Landscape.** The same six over the stream, with the Desktop streaming and while a window streams (the device switches to the Desktop first, then the view opens). Two-finger scroll still scrolls; a third finger landing on a scroll already under way leaves it a scroll. Right after a swipe left, right or down, a tap selects (no context menu) and a two-finger scroll scrolls (no zoom) |
+| P4 | **One and two fingers unchanged**, both layouts: pointer, tap, two-finger tap, press-and-hold drag, long-press right click, two-finger scroll with momentum, haptics. And §2.1 on glass: three fingers resting 0.6 s no longer drag or right-click, a three-finger pinch no longer clicks at the end, four fingers no longer move the pointer or scroll. Also with a thumb resting on the glass first (a swipe or a pinch of the other three: the gesture, no pointer jump, no scroll) and with the three fingers placed slowly, one by one (nothing at all: no click, no scroll, no gesture). A brief touch of a fourth finger or the palm during a swipe does not cancel it |
+| P5 | **The reversal.** Up then down closes Mission Control; down then up closes App Exposé; spread then pinch brings the windows back; pinch then spread closes Apps. A click in Mission Control between two swipes makes the next swipe down App Exposé. A swipe down whose first finger slid a little first (it begins as a scroll) still closes Mission Control. Mission Control closed with the Mac's own Esc: the next swipe up does nothing, the one after opens it; after the iPad reconnects, a swipe up opens it at once |
 | P6 | **The keyboard up.** Software keyboard shown, and again with a hardware keyboard: three-finger swipes and pinches do the Mac's thing, and iPadOS shows no undo, redo, copy or paste (the `.none` of §6.5) |
 | P7 | **Virtual Display on**, a window staged: a gesture switches the device to the Desktop (the window goes home), then the view opens; App Exposé shows the front app's windows |
 | P8 | **The switch.** Settings › This iPad › Three-Finger Gestures off: nothing happens and nothing clicks or drags; the mapping hides. On again: they return. Survives a relaunch |
@@ -753,6 +810,7 @@ Keyboard trackpad if he has one.
 | P10 | **Remote (Tailscale).** A gesture works through the remote door; note any lag |
 | P11 | **Four fingers.** With iPadOS's four-finger gestures on, the iPad goes Home or switches apps and the Mac does nothing; with them off (Settings › Multitasking & Gestures), four fingers do what three do |
 | P12 | **An older Mac.** This iPad against `origin/main`'s Sill.app: the group says to update Sill on the Mac; three fingers send nothing and click nothing |
+| P13 | **VoiceOver.** With VoiceOver on, Settings › This iPad's footnote says VoiceOver keeps three-finger gestures and the rows do them instead; each row is a button ("Swipe Up, Mission Control, button") whose double tap does it on the Mac, and the Spaces row has two actions, Space on the Right and Space on the Left |
 
 ---
 
@@ -1003,8 +1061,85 @@ documents. Every §12 default was taken. Nothing was pushed.
   accessibility-extra-large (the rows stack, nothing truncates): 48 screenshots, kept out of the
   repository.
 
+### Review fixes (2026-09-27)
+
+The review (§13's step 7: the stroke gate against one- and two-finger strokes; the wire, the resolver
+and compatibility; the Settings group) found seven things at 027105e. Each was checked here before
+it was fixed: the recognizer's reproduced in a probe of the real file and the surfaces' in the touch
+rig on the review's own strokes (027105e's surfaces fail 18 of its 74 checks, every one of them on
+those strokes), the reversal's on a loopback synthetic host that posts nothing, the VoiceOver one
+read in the code (nothing there knows VoiceOver), and the chord's inferred, since nothing may be
+posted. Nothing was posted to the Mac.
+
+1. **A stroke of three fingers that missed the window was not gated.** Silence came only with
+   arming, and arming counted from the stroke's first touch, so a thumb resting on the glass, or
+   three fingers placed 100 ms apart, gave back the stray click, pointer jump and coasting scroll of
+   §2.1 (the rig at 027105e: the slow pinch clicked on both surfaces; beside a resting thumb, a swipe
+   threw the pointer ten moves on the trackpad and scrolled with a coast on the stream). Now a stroke
+   is silent from three fingers down before any has moved (§6.1), whatever the timing, and arms on
+   the three that landed last, so a resting thumb neither blocks a gesture nor becomes one of its
+   fingers. Three fingers that take longer than 0.15 s to come down are silent and decide nothing
+   (P4 on glass).
+2. **A pinch or a spread led by the thumb read as a swipe.** With the thumb opposite two fingers the
+   centroid moves with the thumb: 120 pt of the thumb's travel is 40 pt of the centroid's, a swipe
+   (a probe: a thumb-led pinch of 120 and 130 pt, a spread of 120 and 150, a grab of 120 pt each way,
+   and the Mac's own pinch with the thumb landing fourth were swipes). Now a swipe needs the fingers
+   to move together (`swipeShare`, §6.1), and a fourth finger that moved takes part: against the
+   swipe it breaks it, and it joins the pinch or spread measured after.
+3. **The first lift of any contact decided.** A grazing fourth contact that lifted 21 or 33 pt into a
+   slow swipe decided it as nothing, and `fingers` was the most ever down. Now only the lift of one
+   of the three decides; another finger's lift only leaves the stroke, and `fingers` counts the three
+   and the others that moved.
+4. **VoiceOver users were told to use three fingers**, which VoiceOver keeps (§2.2), and nothing
+   else offered the six actions. Now, with VoiceOver on, the footnote says the rows do them, and each
+   row is an accessibility action, for Voice Control and Switch Control too (§8).
+5. **A chord could leave its modifiers set for the next click** (inferred, not observed: nothing may
+   be posted while this is built). The key up carried the chord's control and fn into the HID state
+   table that the next click and scroll start from; the Spotlight key's ⌘ once reached text that way.
+   Now the key up carries the table's flags from before the chord, and a quarter of a second after,
+   a read of the table says so in the log if the chord's modifiers are still set (§7.3, P2).
+6. **A scroll forgot what Sill opened**, so a stroke that began as a scroll before it became the
+   reverse gesture opened the other view (a loopback host at 027105e: a swipe up, a scroll's bracket,
+   then a swipe down gave App Exposé). Now only a click, a key or text forgets (§7.2); the same host
+   run gives "closes Mission Control".
+7. **What Sill opened never expired**: not when the last device left (a second session's swipe up
+   said "Mission Control is already open" at 027105e), not on a window picked or an app launched from
+   a device, and the same gesture repeated never recovered once the view was closed on the Mac itself.
+   Now those forget (§7.2), and the gesture that opened a view, made twice more straight after, opens
+   it again.
+
+Also: `Output.armed` is `.silenced` (it now comes when the stroke goes silent, arming or not), the
+touch rig runs the review's strokes (placed slowly, beside a resting thumb, thumb-led, the Mac's pinch,
+a brief contact) and one- and two-finger strokes made right after a gesture, which `compare.py` holds
+to the same strokes made fresh.
+
+Verified after the fixes, without a device:
+- `gestures` 156 checks and 45 of 45 mutants (14 new: silence only with arming, the first three to
+  land arming, the together test, the other fingers' test and their edges, any lift deciding, the
+  fingers counted); `gesture-chords` 141 and 33 of 33 (12 new: what input forgets, the repeat, the
+  modifiers a chord must not leave); `Tests/checks/run-all.sh`, all 22 (149 s).
+- The touch rig on a private iPad Pro 11-inch (M5) simulator and on an iPhone 17 Pro Max's, each
+  deleted after: 144 of 144 on each against the surfaces before the gestures (487ec26), with the
+  switch on and off (on the phone, the Mac's-pinch stroke first put its thumb below the surface: 150
+  pt under the fingers is outside its half of the window; it is 110 now, on both).
+- On loopback synthetic hosts that post nothing, this build against 027105e's: a swipe up, a scroll's
+  bracket and a swipe down closes Mission Control (027105e: App Exposé); a second session's swipe up
+  opens it (027105e: "already open"); the third swipe up in a row opens it again; a tap, Esc and a
+  pointer move behave alike on both (a click and a key forget, a move does not).
+- H1: `swift build -c release`, and iOS Debug and Release for the simulator and Debug for a device
+  (unsigned), only the old `StreamClient` capture warning. H2: the CLI idle 35 s (7 lines) and with a
+  client streaming the Desktop for 5 s (17 lines), against main's at 2b38179, both on the software
+  encoder, masked and sorted: identical. H5: no private gesture API, event tap or hotkey setter; both
+  pans at two touches; `flags(from:)` unchanged; eight first-line guards. H9: the app's 100 previews
+  against main's: identical but the General pane's "Running from" path.
+- Photos (§9.3; screenshots on a private simulator, deleted after): the group with its VoiceOver
+  footnote (`-SillVoiceOver 1`) and without, at 1000×710, 710×1000, 500×710 and 710×500, at Large and
+  accessibility-extra-large: the footnote wraps, the rows stack at the larger text, and on the short
+  screens the panel's middle scrolls as it did.
+
 ### Not verified
 
-Everything on glass and on the real Mac, §9.5's P1–P12, above all P2 (whether keys 160 and 131 open
-their views when posted, and whether ⌃→ switches Spaces or tiles the front window) and P6 (the editing
-overlay under `.none`). §10's probe, before any Tier 2.
+Everything on glass and on the real Mac, §9.5's P1–P13, above all P2 (whether keys 160 and 131 open
+their views when posted, whether ⌃→ switches Spaces or tiles the front window, and whether the key
+up's flags leave no modifier set: no "modifier keys still read" line) and P6 (the editing overlay
+under `.none`). §10's probe, before any Tier 2.

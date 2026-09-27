@@ -243,24 +243,38 @@ Three fingers on the device's glass, on the portrait trackpad or over the
 stream, are the Mac's own trackpad gestures: swipe up for Mission Control, down
 for App Exposé, left or right for the Space beside (the content follows the
 fingers, as on a Mac), pinch for Apps (Launchpad before macOS 26) and spread for
-Show Desktop. The device decides the gesture when the fingers lift, from how
-far they travelled since the third one landed, and sends only its name (kind
-28); a stroke that becomes a gesture clicks, drags and scrolls nothing, and one-
-and two-finger strokes are what they always were. The Mac presses its own
+Show Desktop. The device decides the gesture when one of the three fingers
+lifts, from how far they travelled together since they came down (a pinch or a
+spread led by the thumb is no swipe, however far the thumb goes), and sends only
+its name (kind 28). From the moment three fingers are down, before any has
+moved, a stroke clicks, drags and scrolls nothing, however slowly they came and
+with a thumb resting on the glass too; three fingers that take longer than
+0.15 s to come down decide nothing, and a thumb resting there is not one of
+the three.
+One- and two-finger strokes are what they always were. The Mac presses its own
 keyboard shortcut for that action, as System Settings › Keyboard › Keyboard
 Shortcuts has it at that moment (Mission Control, and Launchpad & Dock), so a
 shortcut changed there is followed and one turned off does nothing. While a
 window streams, a gesture shows the Desktop first, since none of these views is
 in a window's picture; the opposite gesture closes what one opened (a swipe
-down after Mission Control, a pinch after Show Desktop). Four fingers do the
-same where iPadOS lets them through (Settings › Multitasking & Gestures); a
-Magic Keyboard trackpad's own three- and four-finger gestures stay with iPadOS.
+down after Mission Control, a pinch after Show Desktop), until a click, a key or
+text from a device, a window picked or an app launched from one, or the last
+device leaving; a view closed with the Mac's own keyboard comes back with the
+same gesture made twice more. Four fingers do the same where iPadOS lets them
+through (Settings › Multitasking & Gestures); a Magic Keyboard trackpad's own
+three- and four-finger gestures stay with iPadOS. VoiceOver keeps three-finger
+gestures for itself, so with it on the rows of Settings › This iPad do them
+instead (each row is an accessibility action, for Voice Control and Switch
+Control too).
 
 Sill's log names what each gesture did: "Gesture from iPad (iPad14,1): swipe up
 → Mission Control (shortcut 108: key 160, fn)", or "… pinch → nothing: no
 shortcut for Show Apps is on in Keyboard Shortcuts", which says which shortcut
 to turn on. A Mac from before them gets no gesture, and the device's group says
-to update Sill on it. A synthetic host (`SillHost --synthetic`) posts none: it
+to update Sill on it. Should a gesture's shortcut leave its modifiers set on
+the Mac (a tap after it would be a control-click), the log says "Gestures: after
+a gesture's shortcut this Mac's modifier keys still read …" once. A synthetic
+host (`SillHost --synthetic`) posts none: it
 logs the shortcut it would post with "(not posted: a test host)", so
 `python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
 without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
@@ -471,8 +485,8 @@ simulator:
   does, so an iPhone simulator can photograph it; `phone` the other way
   round.
 - `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
-  one run, and `-SillSettingsScroll gestures` opens the Settings panel at that
-  group. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
+  one run, `-SillSettingsScroll gestures` opens the Settings panel at that
+  group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
   gesture through the app's own path, only to a test host on this Mac.
 
 ### The touch rig
@@ -483,7 +497,9 @@ surfaces with synthesized one- to five-finger touches, and logs every event
 each would send the Mac (nothing leaves the app). `--rev REV` builds the
 surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
 [OFF.log]` checks that one- and two-finger strokes send what they sent before
-and that each three-finger stroke sends one gesture and nothing else. It runs on
+(and the same right after a gesture as made fresh) and that each stroke of three
+or more fingers, placed slowly, beside a resting thumb or with a brief extra
+contact too, sends its one gesture, or nothing, and nothing else. It runs on
 a simulator of its own (`SILL_TOUCHRIG_SIM`, made and deleted when missing),
 never XCUITest or a recording.
 
