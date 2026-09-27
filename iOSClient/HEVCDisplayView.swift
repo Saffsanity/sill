@@ -19,18 +19,24 @@ final class HEVCDisplayView: UIView {
     /// Input needs it: touches are normalized against the video, not against this view.
     var onVideoSize: ((CGSize) -> Void)?
     /// The same event, fired on main right after `onVideoSize`. `StreamClient` owns `onVideoSize`
-    /// (it feeds `videoSize`); `StreamView` owns this one and re-centres the pointer on it. Two
-    /// hooks instead of a chain, so re-hosting after a rotation cannot stack closures.
+    /// (it feeds `videoSize`); `StreamView` owns this one and tells the client's pointer on it
+    /// (`StreamClient.pointerFrameChanged`). Two hooks instead of a chain, so re-hosting after a
+    /// rotation cannot stack closures.
     var onVideoSizeForPointer: ((CGSize) -> Void)?
 
-    // MARK: Client-drawn pointer
+    // MARK: The pointer sprite
     //
-    // The Mac cursor in the video arrives a round trip late and in bursts, so the trackpad and
-    // Pencil hover drive a sprite drawn here instead (`StreamClient.localPointer`), and the host
-    // leaves its cursor out of the video while every client draws its own. All of it main thread.
+    // The Mac's cursor is never in the video (the host captures without it), so every pointer the
+    // device shows is this sprite, in the Mac's live shape (kind 14). It is one of two things
+    // (docs/pointer-visibility-plan.md, "What the device draws"; `StreamClient.renderPointer` decides):
+    // the Mac's own pointer, while the Mac or another device moved it last, placed where kind 26
+    // says it is and moved at the rate those reports come; or this device's own, for the portrait
+    // trackpad (and the Pencil, with Q2's flip), placed at touch rate rather than a network round
+    // trip behind, which is where the Mac's cursor in the video would be. All of it main thread.
 
     private let cursorLayer = HEVCDisplayView.makeCursorLayer()
-    /// Fraction of the video frame, or nil when hidden. Mirrors `StreamClient.localPointer`.
+    /// Where the sprite's tip is, a fraction of the video frame, or nil when hidden: what
+    /// `StreamClient.renderPointer` last handed over.
     private var pointer: CGPoint?
     /// Main-thread copy of the frame size the layer draws. `apply` runs on the network queue and
     /// hops here with it; `clear` zeroes it. Zero hides the sprite: there is no frame to point into.
@@ -77,6 +83,12 @@ final class HEVCDisplayView: UIView {
         super.layoutSubviews()
         placeCursor()   // rotation and letterbox changes move the video rect under it
         #if DEBUG
+        if let debugFrame {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            debugFrame.frame = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+            CATransaction.commit()
+        }
         if let hud {
             // Rotation reparents this view into a new SwiftUI host; keep the readout above anything
             // added since and pinned to the new bounds.
@@ -104,16 +116,34 @@ final class HEVCDisplayView: UIView {
     }
     #endif
 
-    /// Shows the pointer at `p` (a fraction of the video frame) or hides it (nil). Called for every
-    /// `StreamClient.localPointer` write, up to 120 times a second. Returns true when the pointer
-    /// went from hidden to shown or back, which is when the host needs telling. Main thread.
-    @discardableResult
-    func setLocalPointer(_ p: CGPoint?) -> Bool {
-        let flipped = (p == nil) != (pointer == nil)
+    /// Shows the sprite at `p` (a fraction of the video frame) or hides it (nil): the Mac's pointer
+    /// or this device's own, whichever `StreamClient.renderPointer` says. Up to 120 times a second.
+    /// Main thread.
+    func setPointer(_ p: CGPoint?) {
         pointer = p
         placeCursor()
-        return flipped
     }
+
+    #if DEBUG
+    /// The layout harness (`-SillPointer`): the frame size the sprite needs, as the host's parameter
+    /// sets would give it, for a mock that never streams; and a dim rectangle where that frame is
+    /// drawn, so a photo shows what the sprite points into (the mock's picture is black).
+    func debugFrameSize(_ size: CGSize) {
+        pointerVideoSize = size
+        if debugFrame == nil {
+            let frame = CALayer()
+            frame.backgroundColor = UIColor(white: 0.16, alpha: 1).cgColor
+            frame.zPosition = Self.cursorZ - 1
+            layer.addSublayer(frame)
+            debugFrame = frame
+        }
+        setNeedsLayout()
+        placeCursor()
+    }
+
+    /// `debugFrameSize`'s rectangle; nil unless the harness asked for it.
+    private var debugFrame: CALayer?
+    #endif
 
     /// Gives the sprite the Mac's current cursor image (I-beam, hand, resize…) with its hotspot at
     /// the layer's anchor, or falls back to the built-in arrow when nil. Sizes are Mac points, drawn
@@ -304,29 +334,21 @@ struct StreamView: UIViewRepresentable {
         return view
     }
 
-    /// Connects `client.localPointer` to the sprite, with no SwiftUI in between (a re-render per
-    /// move is the lag this avoids). Runs on every re-host, rotation included: both hooks are plain
-    /// assignments, so the newest replaces the last instead of stacking. This is the only place
-    /// that sets `onLocalPointerChange`. Main thread, like everything the closures touch.
+    /// Connects the client's pointer to the sprite, with no SwiftUI in between (a re-render per move
+    /// is the lag this avoids). Runs on every re-host, rotation included: the hooks are plain
+    /// assignments, so the newest replaces the last instead of stacking. This is the only place that
+    /// sets `onPointerChange`. Main thread, like everything the closures touch.
     private func wirePointer(_ view: HEVCDisplayView) {
         let client = self.client
         client.onCursorShapeChange = { [weak view] shape in view?.setCursorShape(shape) }
         view.setCursorShape(client.cursorShape)
-        client.onLocalPointerChange = { [weak view, weak client] p in
-            // Hidden ↔ shown is when the host should take its cursor out of the video or put it
-            // back; `setLocalCursor` debounces that, so hover flapping costs nothing on the wire.
-            guard let view, view.setLocalPointer(p) else { return }
-            client?.setLocalCursor(p != nil)
-        }
-        // A new frame size (another source, an Aa resize) invalidates where the pointer was. If it
-        // is showing, start it in the middle and move the Mac cursor there too, so the two agree.
-        view.onVideoSizeForPointer = { [weak client] _ in
-            guard let client, client.localPointer != nil else { return }
-            client.localPointer = CGPoint(x: 0.5, y: 0.5)
-            client.sendInput(.pointer(.move, x: 0.5, y: 0.5))
-        }
-        // Catch up with a pointer set before this view was hosted; a no-op on re-hosts.
-        client.onLocalPointerChange?(client.localPointer)
+        client.onPointerChange = { [weak view] p in view?.setPointer(p) }
+        // A new frame size (another source, an Aa resize) changes what a fraction means: this
+        // device's own pointer, while it shows, starts again in the middle and the Mac's goes there
+        // too; the Mac's arrow follows the host's next report.
+        view.onVideoSizeForPointer = { [weak client] _ in client?.pointerFrameChanged() }
+        // Catch up with what the sprite shows now (a pointer set before this view was hosted).
+        client.renderPointer()
     }
 
     func updateUIView(_ uiView: HEVCDisplayView, context: Context) {}

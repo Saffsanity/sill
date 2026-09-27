@@ -14,6 +14,10 @@ import StreamProtocol
 ///
 /// Threading: main actor. Input arrives on the network queue and hops here through the
 /// coordinator, and posting CGEvents from the main thread is fine.
+///
+/// Every post of a pointer or scroll event is noted in the PointerWatch just before it happens
+/// (`watch`), so the pointer moving under it reads as Sill's own motion, not the Mac's. A synthetic
+/// host posts nothing (`dryRun`).
 @MainActor
 final class InputInjector {
     /// Two downs of the same button within this time and distance are a double (then triple) click.
@@ -34,10 +38,24 @@ final class InputInjector {
     private var left = ButtonState()
     private var right = ButtonState()
 
+    /// The Mac's pointer (docs/pointer-visibility-plan.md §4.5): told just before each post of a
+    /// pointer or scroll event, never after. The network queue reads the pointer while this posts,
+    /// so a read could fall between the post taking effect and a note made after it, and take
+    /// Sill's own move for the Mac's; that matters most for a held click, posted a second or more
+    /// after it was read, when the arrival's settle is long over. Keys and text note nothing: they
+    /// do not move the pointer.
+    var watch: PointerWatch?
+    /// A synthetic host (the plan's Q10): every event that would be posted is counted (`in.dry`,
+    /// one per post: a pointer or scroll event one, a typed character or a Return two) and none
+    /// reaches the Mac, since the test pattern is not the screen; the per-type counters stay at
+    /// zero and no Accessibility reminder prints. With the TEST ONLY scripted pointer a pointer
+    /// event moves that pointer to its position instead (PointerWatch.sillMoved(to:)).
+    var dryRun = false
+
     // MARK: Entry point
 
     func apply(_ event: InputEvent, in rect: CGRect) {
-        remindAboutAccessibilityIfNeeded()
+        if !dryRun { remindAboutAccessibilityIfNeeded() }
         switch event {
         case .pointer(let action, let x, let y):
             // Jitter probe: how evenly do pointer moves arrive? A Pencil or trackpad drag should
@@ -66,6 +84,17 @@ final class InputInjector {
 
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
         CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+    }
+
+    /// The one place an event reaches the Mac: posted, or in a dry run only counted. True when it
+    /// was posted.
+    private func post(_ event: CGEvent) -> Bool {
+        if dryRun {
+            Stats.shared.bump("in.dry")
+            return false
+        }
+        event.post(tap: .cghidEventTap)
+        return true
     }
 
     // MARK: Pointer
@@ -101,8 +130,8 @@ final class InputInjector {
         if type != .mouseMoved { event.setIntegerValueField(.mouseEventClickState, value: clicks) }
         // One synthetic "finger": a constant event number keeps a down/drag/up sequence coherent.
         event.setIntegerValueField(.mouseEventNumber, value: 0)
-        event.post(tap: .cghidEventTap)
-        Stats.shared.bump("in.pointer")
+        watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
+        if post(event) { Stats.shared.bump("in.pointer") }
     }
 
     private func beginClick(_ state: inout ButtonState, at location: CGPoint) {
@@ -160,7 +189,7 @@ final class InputInjector {
         }
         lastScrollLocation = location
         rearmScrollWatchdog()
-        Stats.shared.bump("in.scroll")
+        if !dryRun { Stats.shared.bump("in.scroll") }
     }
 
     /// Where the scroll gesture in progress is. One at a time: the client has one scroll surface
@@ -298,7 +327,10 @@ final class InputInjector {
             event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase?.rawValue ?? 0))
             event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(momentum?.rawValue ?? 0))
         }
-        event.post(tap: .cghidEventTap)
+        // Whether a scroll event posted with a location moves the cursor is not known: the note
+        // comes first either way (see `watch`).
+        watch?.sillMoved()
+        _ = post(event)
     }
 
     // MARK: Text
@@ -322,10 +354,10 @@ final class InputInjector {
                 // which Spotlight's field ignores (typing into Spotlight did nothing, 2026-09-23).
                 down.flags = []
                 up.flags = []
-                down.post(tap: .cghidEventTap)
-                up.post(tap: .cghidEventTap)
+                _ = post(down)
+                _ = post(up)
             }
-            Stats.shared.bump("in.text")
+            if !dryRun { Stats.shared.bump("in.text") }
         }
     }
 
@@ -333,7 +365,7 @@ final class InputInjector {
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { continue }
             event.flags = []       // plain Return, Tab, Delete: never a leftover modifier
-            event.post(tap: .cghidEventTap)
+            _ = post(event)
         }
     }
 
@@ -346,8 +378,7 @@ final class InputInjector {
         }
         guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { return }
         event.flags = Self.flags(from: modifiers)
-        event.post(tap: .cghidEventTap)
-        Stats.shared.bump("in.key")
+        if post(event) { Stats.shared.bump("in.key") }
     }
 
     /// The client sends UIKeyModifierFlags bits. They sit at the same bit positions as the

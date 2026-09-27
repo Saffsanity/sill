@@ -45,6 +45,12 @@ public enum StreamMessageKind: UInt8 {
                              // name). The first message of every session connection, before anything else, so a
                              // host can judge the device before it sends anything (DeviceGate). Never on a
                              // pairing connection
+    // The Mac's pointer (Pointer.swift). 24 and 25 are held for the Mac menu bar (sketched 2026-09-25, not
+    // built), which would put an optional third kind at 27, so this one is 26. Older readers map it to
+    // `.unknown` and skip it.
+    case macPointer = 26     // host → device: JSON MacPointer — where the Mac's pointer is while this device is not the
+                             // one moving it (the Mac's own mouse, or another device). Only when it changed, at most once
+                             // per sample per device: each 30 ms tick, and at the stream's frame rate while it moves
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

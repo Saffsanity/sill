@@ -19,8 +19,11 @@ import StreamProtocol
 /// gate can refuse a test client. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
 /// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
 /// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
-/// tests). All are honoured only on a test host (DoorPolicy.isTestHost: one that does not advertise
-/// and is not Sill.app's own executable), so a stray variable can never touch a real host.
+/// tests). `SILL_TEST_LOOPBACK=1` makes both doors listen on 127.0.0.1 alone, so a test host takes
+/// no connection from another machine (the Application Firewall never asks) and `lsof` shows it as
+/// `127.0.0.1:PORT`: devices and test clients on this Mac, the simulator included, reach it by
+/// 127.0.0.1. All are honoured only on a test host (DoorPolicy.isTestHost: one that does not
+/// advertise and is not Sill.app's own executable), so a stray variable can never touch a real host.
 ///
 /// The home door (this listener) admits only loopback, link-local (AWDL included) and this Mac's
 /// own networks (OriginPolicy): a refused connection is cancelled with zero bytes from Sill and
@@ -92,6 +95,13 @@ final class StreamServer {
         var acceptedPeerToPeer = false
         /// A hello (kind 23) came on this connection: only the first counts.
         var helloSeen = false
+        /// The input messages (kind 8) read from it. Every kind 26 sent to it carries the count, so the
+        /// device can drop one the host built before it read that device's latest input
+        /// (docs/pointer-visibility-plan.md §3.3).
+        var inputsRead = 0
+        /// The last kind 26 sent to it; nil also while it drives the pointer, so the next one goes out
+        /// whatever it says.
+        var lastPointer: MacPointer?
         init(_ c: NWConnection) { connection = c }
     }
 
@@ -131,6 +141,10 @@ final class StreamServer {
     /// A device's hello (kind 23), the first of its connection, once it is registered. Called on the
     /// network queue.
     var onClientHello: ((NWConnection, Hello) -> Void)?
+    /// The Mac's pointer (PointerWatch): who moves it, sampled at each tick and, while it moves over
+    /// the source and a device is sent it, at the stream's frame rate; every device that is not
+    /// moving it is sent where it is (kind 26). Set before `start()`.
+    var pointerWatch: PointerWatch?
 
     /// The oldest device version served (DeviceGate): the shipped "0" admits every device and
     /// nothing waits for a hello. TEST ONLY: SILL_TEST_MIN_DEVICE_VERSION on a host that does not
@@ -151,6 +165,15 @@ final class StreamServer {
     // the stutter. While a session is live we keep the downlink lightly busy with an empty 14-byte
     // tick every 30 ms (~0.5 KB/s). "Live" = the coordinator says a source is streaming, or a client
     // sent input in the last 3 s. Idle sessions tick nothing and let the radio sleep.
+    //
+    // The tick also samples the Mac's pointer (PointerWatch) and sends where it is (kind 26) to every
+    // device that is not moving it, when that changed; a kind 26 stands in for that device's tick.
+    // While the pointer moves over the source and a device is sent it, the frame-rate sampler
+    // samples it at the stream's rate instead (docs/pointer-visibility-plan.md Q4, decided
+    // 2026-09-26), so the device draws it as smoothly as the picture, and the tick only keeps the
+    // link awake; at 33 fps and below the tick samples as often, and no sampler runs
+    // (PointerWatch.samplerInterval). Without a geometry (nothing streams, or a synthetic host
+    // without its scripted pointer) nothing is read.
     private var tickTimer: DispatchSourceTimer?
     private var lastInputAt: TimeInterval = 0
     private var streaming = false
@@ -173,6 +196,7 @@ final class StreamServer {
             tickTimer = t
         } else if !wanted, let t = tickTimer {
             t.cancel(); tickTimer = nil
+            setPointerSampler(interval: nil)
         }
     }
 
@@ -181,8 +205,12 @@ final class StreamServer {
         let live = streaming || Date().timeIntervalSince1970 - lastInputAt < Self.inputRecency
         guard live, !clients.isEmpty else { updateTicking(); return }
         let now = Date().timeIntervalSince1970
+        // The Mac's pointer, unless the frame-rate sampler has it while it moves.
+        let reported = pointerSampler == nil ? samplePointer(now: now) : []
         let data = StreamMessage(kind: .tick, timestamp: now, isKeyframe: false, payload: Data()).serialized()
-        for client in clients.values where client.connection.state == .ready {
+        for (id, client) in clients where client.connection.state == .ready {
+            // A kind 26 just sent keeps its link awake this turn.
+            if reported.contains(id) { continue }
             // Over TLS every record costs CPU (the remote plan's H20): skip a tick right after
             // anything else went out. The link is busy anyway, so the device's radio stays awake
             // exactly as before. The plain door keeps every tick.
@@ -192,6 +220,71 @@ final class StreamServer {
             client.connection.send(content: data, completion: .contentProcessed { _ in })   // not counted as inflight
         }
         Stats.shared.bump("net.tick")
+    }
+
+    // MARK: The Mac's pointer (kind 26)
+
+    /// The frame-rate sampler: while the pointer moves over the source and a device is sent it, the
+    /// pointer is sampled every frame interval of the stream instead of at the tick, when that is
+    /// more often (PointerWatch.samplerInterval). On `queue`.
+    private var pointerSampler: DispatchSourceTimer?
+    private var pointerSamplerInterval = 0.0
+
+    /// On `queue`: one sample of the Mac's pointer, and to every ready device that is not moving it a
+    /// kind 26 when its report differs from the last one it was sent: at most one a sample, only on
+    /// a change, sent as the tick is (not counted in `inflight`, so it can never make a slow link
+    /// drop frames). A device that moves it is sent nothing and its last report is forgotten, so
+    /// the next one goes out once it stops. Starts the frame-rate sampler while the pointer moves
+    /// over the source and a device is sent it, faster than the tick, and stops it otherwise
+    /// (PointerWatch.samplerInterval). Returns the devices sent one.
+    @discardableResult
+    private func samplePointer(now: TimeInterval) -> Set<ObjectIdentifier> {
+        let ready = clients.compactMap { $0.value.connection.state == .ready ? $0.key : nil }
+        guard let watch = pointerWatch, let reading = watch.sample(devices: ready) else {
+            setPointerSampler(interval: nil)
+            return []
+        }
+        var sent = Set<ObjectIdentifier>()
+        var watched = false
+        for (id, client) in clients where client.connection.state == .ready {
+            guard let report = reading.report(for: id, seen: client.inputsRead) else {
+                client.lastPointer = nil
+                continue
+            }
+            watched = true
+            guard report != client.lastPointer else { continue }
+            client.lastPointer = report
+            let data = StreamMessage(kind: .macPointer, timestamp: now, isKeyframe: false, payload: Wire.encode(report)).serialized()
+            client.connection.send(content: data, completion: .contentProcessed { _ in })   // not counted as inflight
+            client.lastSentAt = now
+            Stats.shared.bump("ptr.sent")
+            sent.insert(id)
+        }
+        let every = PointerWatch.samplerInterval(moving: reading.moving, inside: reading.inside, watched: watched,
+                                                 frameInterval: watch.frameInterval, tickInterval: Self.tickInterval)
+        setPointerSampler(interval: every)
+        return sent
+    }
+
+    /// On `queue`: runs the frame-rate sampler every `interval` seconds, or stops it (nil). A new
+    /// interval (the stream restarted at another rate) restarts it.
+    private func setPointerSampler(interval: Double?) {
+        guard let interval else {
+            pointerSampler?.cancel()
+            pointerSampler = nil
+            return
+        }
+        if pointerSampler != nil, pointerSamplerInterval == interval { return }
+        pointerSampler?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(1))
+        t.setEventHandler { [weak self] in
+            guard let self, self.tickTimer != nil, !self.clients.isEmpty else { self?.setPointerSampler(interval: nil); return }
+            self.samplePointer(now: Date().timeIntervalSince1970)
+        }
+        t.resume()
+        pointerSampler = t
+        pointerSamplerInterval = interval
     }
 
     // MARK: The listener, and Direct Wireless (peer-to-peer Wi-Fi)
@@ -301,7 +394,9 @@ final class StreamServer {
         var door: Door?
         if case .tls(let t) = home { door = Door(.home, queue: queue, identity: t.identity, trust: t.trust, testHost: test) }
         homeDoor = door
-        listener = try Self.makeListener(peerToPeer: false, port: nil, tls: door?.tlsOptions())
+        // TEST ONLY: SILL_TEST_LOOPBACK, on a test host alone (anywhere else TestHooks says it is ignored).
+        if test, Self.testLoopback { print("Test listener: loopback only (SILL_TEST_LOOPBACK); reach this host at 127.0.0.1.") }
+        listener = try Self.makeListener(peerToPeer: false, port: nil, tls: door?.tlsOptions(), loopback: test && Self.testLoopback)
         listener.service = makeService()
         wire(listener)
         door?.server = self
@@ -337,6 +432,20 @@ final class StreamServer {
         }
         return (floor, goodbye)
     }
+
+    /// TEST ONLY: SILL_TEST_LOOPBACK (see the type's doc comment). Read once; "1", anything else
+    /// ignored with one line. Honoured only by a test host (`loopbackOnly`).
+    static let testLoopback: Bool = {
+        guard let value = ProcessInfo.processInfo.environment["SILL_TEST_LOOPBACK"], !value.isEmpty else { return false }
+        guard value == "1" else {
+            print("SILL_TEST_LOOPBACK=\(value) ignored: 1 turns it on.")
+            return false
+        }
+        return true
+    }()
+
+    /// Both doors listen on 127.0.0.1 alone: a test host with SILL_TEST_LOOPBACK=1.
+    var loopbackOnly: Bool { testHost && Self.testLoopback }
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
@@ -434,8 +543,10 @@ final class StreamServer {
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
     /// given (a replacement keeps the port that test clients and resolved devices know), speaking
     /// TLS when `tls` is given (a TLS home door: the Door's options with its verify block), plain
-    /// TCP otherwise, exactly as before.
-    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?, tls: NWProtocolTLS.Options?) throws -> NWListener {
+    /// TCP otherwise, exactly as before; on 127.0.0.1 alone with `loopback` (a test host's
+    /// SILL_TEST_LOOPBACK).
+    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?, tls: NWProtocolTLS.Options?,
+                                     loopback: Bool) throws -> NWListener {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         // A client that vanishes without closing (app killed, Wi-Fi gone) would otherwise stay
@@ -454,13 +565,22 @@ final class StreamServer {
             params.serviceClass = .interactiveVideo   // WMM video class on Wi-Fi: shorter queues, higher priority
             params.includePeerToPeer = peerToPeer     // Direct Wireless Connection only (see the MARK above)
         }
+        if loopback { Self.bindToLoopback(params, port: port); return try NWListener(using: params) }
         if let port { return try NWListener(using: params, on: port) }
         return try NWListener(using: params)
     }
 
-    /// The same, in this door's mode: a replacement speaks as the listener it replaces.
+    /// The same, in this door's mode: a replacement speaks as the listener it replaces, on 127.0.0.1
+    /// alone when that one was (SILL_TEST_LOOPBACK).
     private func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?) throws -> NWListener {
-        try Self.makeListener(peerToPeer: peerToPeer, port: port, tls: homeDoor?.tlsOptions())
+        try Self.makeListener(peerToPeer: peerToPeer, port: port, tls: homeDoor?.tlsOptions(), loopback: loopbackOnly)
+    }
+
+    /// TEST ONLY (SILL_TEST_LOOPBACK): `params` accept only on the loopback interface, bound to
+    /// 127.0.0.1 on `port` (any when nil). Both doors' listeners.
+    static func bindToLoopback(_ params: NWParameters, port: NWEndpoint.Port?) {
+        params.requiredInterfaceType = .loopback
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port ?? .any)
     }
 
     /// The listener's handlers. Each first checks that `l` is still the listener, so the callbacks
@@ -1097,6 +1217,7 @@ final class StreamServer {
     /// connection that was never registered (refused, or failed before it was ready) leaves no line.
     private func unregister(_ id: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: id) else { return }
+        pointerWatch?.clientLeft(id)
         print("Client left: \(client.connection.endpoint)")
         onClientDisconnected?(client.connection)
         onClientCountChanged?(clients.count)
@@ -1151,6 +1272,11 @@ final class StreamServer {
                 if header.kind == .input {
                     self.lastInputAt = Date().timeIntervalSince1970
                     if self.tickTimer == nil { self.updateTicking() }
+                    // This device moves the Mac's pointer now. The count and the controller change
+                    // in the same queue turn as every sample, so no kind 26 carries the new count
+                    // with the old controller (docs/pointer-visibility-plan.md §3.3).
+                    client.inputsRead += 1
+                    self.pointerWatch?.inputArrived(from: ObjectIdentifier(c), movesPointer: PointerControl.movesPointer(payload: payload))
                 }
                 if header.kind == .ping {
                     // Echo straight back from the network queue: the round trip should measure the

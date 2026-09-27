@@ -15,6 +15,9 @@ import StreamProtocol
 ///
 /// Threading: everything here runs on StreamServer's network queue, which the listener, the
 /// connections, their verify blocks and the timers share. Callbacks out are on that queue.
+///
+/// TEST ONLY: StreamServer's SILL_TEST_LOOPBACK=1 puts this listener on 127.0.0.1 alone too, on a
+/// test host.
 final class RemoteServer {
     static let retryInterval: TimeInterval = 30
 
@@ -85,10 +88,16 @@ final class RemoteServer {
         let l: NWListener
         do {
             if port == 0 {
+                if server.loopbackOnly { StreamServer.bindToLoopback(params, port: nil) }   // TEST ONLY
                 l = try NWListener(using: params)
             } else {
                 guard let p = NWEndpoint.Port(rawValue: UInt16(port)) else { failed(.posix(.EINVAL)); return }
-                l = try NWListener(using: params, on: p)
+                if server.loopbackOnly {   // TEST ONLY: SILL_TEST_LOOPBACK (StreamServer)
+                    StreamServer.bindToLoopback(params, port: p)
+                    l = try NWListener(using: params)
+                } else {
+                    l = try NWListener(using: params, on: p)
+                }
             }
         } catch {
             failed(error as? NWError ?? .posix(.EINVAL))
