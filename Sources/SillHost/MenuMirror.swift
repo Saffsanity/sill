@@ -244,13 +244,15 @@ final class MenuMirror {
         }
         guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
         applyTop(topResult, target: t)
+        // What that read found goes to the subscribers first: a changed top level (a new version), the
+        // app gone or not answering, or a top level read here for the first time in this version (its
+        // first read failed; the polls stop retrying once it is read). An unchanged one sends nothing.
+        publishTop()
         guard v == version, target?.pid == t.pid else {
-            publishTop()
             refuse(target == nil ? MenuRefusal.goneNote(label(t.app)) : MenuRefusal.changedNote)
             return
         }
         if stale {
-            publishTop()
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: [], stale: true, note: note))
             return
         }
