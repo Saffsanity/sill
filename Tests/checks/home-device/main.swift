@@ -8,6 +8,7 @@ typealias P = DiscoveryPolicy
 typealias W = DiscoveryPolicy.RowWord
 typealias H = DiscoveryPolicy.HomeDial
 let doors: [P.HomeDoor] = [.plain, .pairingRequired, .open]
+let mini = "Mac mini"
 let methods: [P.Method?] = [nil, .wired, .wifi, .direct]
 
 // MARK: §7.3, every combination against the table
@@ -15,7 +16,7 @@ let methods: [P.Method?] = [nil, .wired, .wifi, .direct]
 func wordOracle(_ door: P.HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool, method: P.Method?, cable: Bool) -> W {
     if door == .plain { return debug && !homeTLS ? .method(method) : .updateSill }        // the last two rows
     if saved && !revoked { return .method(method) }                                      // a saved Mac on a TLS door
-    if !saved && door == .open { return .method(method) }                                // unsaved, p=0
+    if !saved && door == .open { return .openDoor }                                      // unsaved, p=0: Not paired (the review)
     return method == .wired && cable ? .pairsOverCable : .notPaired                      // unsaved or revoked, p=1 (or revoked, p=0)
 }
 var rw = 0, rwOK = 0
@@ -45,7 +46,18 @@ check("§7.3: the cable counts only for a row that says Wired", word(.pairingReq
 check("§7.3: revoked, p=1: Not paired, and Wired over the cable", word(.pairingRequired, saved: true, revoked: true, homeTLS: true, .wifi) == .notPaired
       && word(.pairingRequired, saved: true, revoked: true, homeTLS: true, .wired, cable: true) == .pairsOverCable)
 check("§7.3 (§7.6): revoked on an open door (p=0) also reads Not paired: a tap asks", word(.open, saved: true, revoked: true, .wifi) == .notPaired)
-check("§7.3: unsaved, p=0: its method", word(.open, .wifi) == .method(.wifi) && word(.open, .wired, cable: true) == .method(.wired) && word(.open, nil) == .method(nil))
+check("§7.3: unsaved, p=0: Not paired, over Wi-Fi, the cable or nothing said (the security review: it read as a paired Mac's)",
+      word(.open, .wifi) == .openDoor && word(.open, .wired, cable: true) == .openDoor && word(.open, nil) == .openDoor
+      && word(.open, .direct).word == "Not paired")
+var neverLikePaired = true
+for m in methods { for c in [false, true] { for tls in [false, true] {
+    let unsaved = P.rowWord(door: .open, saved: false, revoked: false, homeTLS: tls, debug: true, method: m, cable: c)
+    for d in [P.HomeDoor.open, .pairingRequired] {
+        let paired = P.rowWord(door: d, saved: true, revoked: false, homeTLS: tls, debug: true, method: m, cable: c)
+        if unsaved == paired || (unsaved.word == paired.word && unsaved.word != nil) || unsaved.label(name: mini) == paired.label(name: mini) { neverLikePaired = false }
+    }
+} } }
+check("§7.3: an unsaved open door's row never reads like a paired Mac's, in its word or its VoiceOver label", neverLikePaired)
 check("§7.3: no p, DEBUG, not homeTLS: its method (a plain door, as today)", word(.plain, debug: true, .wired) == .method(.wired)
       && word(.plain, saved: true, debug: true, .wifi) == .method(.wifi) && word(.plain, debug: true, nil).word == nil)
 check("§7.3: no p, Release: Update Sill, saved or not", word(.plain, .wifi) == .updateSill && word(.plain, saved: true, .wifi) == .updateSill
@@ -57,11 +69,14 @@ check("§7.3: every homeTLS combination without p reads Update Sill", (0..<16).a
                                         method: m, cable: bits & 8 != 0) == .updateSill } })
 
 // Words, labels and hints (VoiceOver, S7).
-let mini = "Mac mini"
 check("words: Not paired, Wired, Update Sill, and the method's own (Wi-Fi with a non-breaking hyphen)",
       W.notPaired.word == "Not paired" && W.pairsOverCable.word == "Wired" && W.updateSill.word == "Update Sill"
       && W.method(.wifi).word == "Wi\u{2011}Fi" && W.method(.direct).word == "Direct" && W.method(nil).word == nil)
 check("label: \"Mac mini, not paired\"", W.notPaired.label(name: mini) == "Mac mini, not paired")
+check("an open door's row: \"Not paired\", \"Mac mini, not paired\", hint \"Connects without pairing: Mac mini lets any device in.\"",
+      W.openDoor.word == "Not paired" && W.openDoor.label(name: mini) == "Mac mini, not paired"
+      && W.openDoor.hint(name: mini, device: "iPad", direct: false) == "Connects without pairing: Mac mini lets any device in."
+      && W.openDoor.hint(name: mini, device: "iPad", direct: true) == "Connects without pairing: Mac mini lets any device in.")
 check("label: \"Mac mini, Wired\" over the cable", W.pairsOverCable.label(name: mini) == "Mac mini, Wired")
 check("label: as today for a method (\"Mac mini, Wi‑Fi\"), and the name alone without one",
       W.method(.wifi).label(name: mini) == "Mac mini, Wi\u{2011}Fi" && W.method(nil).label(name: mini) == "Mac mini")
@@ -134,12 +149,41 @@ for d in doors { for bits in 0..<32 { for m in methods {
     let ok: Bool
     switch w {
     case .notPaired, .pairsOverCable: ok = asks
+    case .openDoor: ok = t == .anyKey
     case .updateSill: ok = t == .updateSill
-    case .method: ok = t == .pinned || t == .anyKey || t == .plain
+    case .method: ok = t == .pinned || t == .plain
     }
     agree += ok ? 1 : 0
 } } }
-check("the word says what a tap does in \(agree) of \(total) combinations (Not paired and Wired-to-pair ask, Update Sill dials nothing, a method connects)", agree == total)
+check("the word says what a tap does in \(agree) of \(total) combinations (Not paired and Wired-to-pair ask, an open door's Not paired connects with any key, Update Sill dials nothing, a method connects pinned or, in DEBUG, plain)", agree == total)
+
+// MARK: Which saved Mac a row is (the security review, 2026-09-27)
+
+// A tap is as strict as the automatic reconnect: a row whose tag names no saved Mac, under the
+// Bonjour name a saved Mac was last reached by, is that Mac, dialed pinned to its key.
+let savedByName: [(macID: String, bonjourName: String?)] = [("RECENT", "Mac mini"), ("OLD", "Mac mini"), ("NONAME", nil), ("STUDIO", "Studio")]
+check("rowMac: a tag this device resolved names the row's Mac, whatever its name", P.rowMac(tagged: "OLD", name: "Studio", saved: savedByName)! == ("OLD", true))
+check("rowMac: no tag of a saved Mac's, a saved Mac's Bonjour name: that Mac, by name alone",
+      P.rowMac(tagged: nil, name: "Studio", saved: savedByName)! == ("STUDIO", false))
+check("rowMac: two saved Macs of that name: the most recently used (the first given)", P.rowMac(tagged: nil, name: "Mac mini", saved: savedByName)! == ("RECENT", false))
+check("rowMac: another name, a renamed \"Mac mini (2)\", or a case change: no saved Mac",
+      P.rowMac(tagged: nil, name: "Office", saved: savedByName) == nil && P.rowMac(tagged: nil, name: "Mac mini (2)", saved: savedByName) == nil
+      && P.rowMac(tagged: nil, name: "mac mini", saved: savedByName) == nil)
+check("rowMac: a saved Mac with no Bonjour name is never a row's by name", P.rowMac(tagged: nil, name: "", saved: [("NONAME", nil)]) == nil)
+check("rowMac: nothing saved, nothing named", P.rowMac(tagged: nil, name: "Mac mini", saved: []) == nil)
+// A look-alike: a tagless row under a saved Mac's name. As that Mac, a tap dials it pinned, never
+// with any key (p=0) or plain (DEBUG, no p, homeTLS): the stranger's key fails the pin.
+func lookAlike(_ d: P.HomeDoor, homeTLS: Bool, debug: Bool) -> H {
+    let named = P.rowMac(tagged: nil, name: "Mac mini", saved: savedByName)
+    return P.homeDial(door: d, saved: named != nil, revoked: false, homeTLS: homeTLS, debug: debug, tap: true)
+}
+check("a look-alike on an open door (p=0): pinned to the saved key, not any key", lookAlike(.open, homeTLS: true, debug: false) == .pinned
+      && lookAlike(.open, homeTLS: false, debug: true) == .pinned)
+check("a look-alike on a door that requires pairing: pinned (the reconnect's rule)", lookAlike(.pairingRequired, homeTLS: true, debug: false) == .pinned)
+check("a look-alike with no p, the saved Mac seen over TLS: nothing dialed (Update Sill), in DEBUG too",
+      lookAlike(.plain, homeTLS: true, debug: true) == .updateSill && lookAlike(.plain, homeTLS: true, debug: false) == .updateSill)
+check("a look-alike's row reads as the saved Mac's does (a tap is the saved Mac's dial), and its word is not an open door's",
+      P.rowWord(door: .open, saved: true, revoked: false, homeTLS: true, debug: false, method: .wifi, cable: false) == .method(.wifi))
 
 // MARK: §7.5, the device's cable check
 

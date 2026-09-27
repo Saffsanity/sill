@@ -626,14 +626,34 @@ enum DiscoveryPolicy {
     /// "0" a TLS door open to any device, anything else a TLS door for paired devices only.
     enum HomeDoor: Hashable { case plain, pairingRequired, open }
 
+    /// The saved Mac a network or Direct row is (§7.3): the one its TXT tag names (`tagged`, the
+    /// tag this device resolved), else, for a row whose tag names none, the saved Mac last reached
+    /// under the row's Bonjour name (`saved`: each saved Mac's ID and that name, most recently used
+    /// first), taken by name alone (`tagNamed` false). The automatic reconnect has always taken
+    /// such a row as that Mac, dialed pinned to its key; a tap does the same (the security review,
+    /// 2026-09-27: a tap dialed a tagless look-alike with any key, or in plain TCP in DEBUG, while
+    /// its row read exactly like the paired Mac's). A host always advertises its tag, so a row
+    /// under a saved Mac's name without it is a stranger's until its key says otherwise: its pin
+    /// then fails (-9808), and nothing of this device reaches it. The price: another Mac of the
+    /// same name, reached only while the saved one is not listed, cannot be tapped until the saved
+    /// one is forgotten.
+    static func rowMac(tagged: String?, name: String, saved: [(macID: String, bonjourName: String?)]) -> (macID: String, tagNamed: Bool)? {
+        if let tagged { return (tagged, true) }
+        return saved.first { $0.bonjourName == name }.map { ($0.macID, false) }
+    }
+
     /// What a network or Direct row of a Mac at home ends in, and what VoiceOver says for it (§7.3).
     enum RowWord: Hashable {
-        /// How the Mac is reachable (`method`), as before: a saved Mac on a TLS door, an unsaved one
-        /// on an open door, a plain door in a DEBUG build. Nil when its interfaces do not say.
+        /// How the Mac is reachable (`method`), as before: a saved Mac on a TLS door, a plain door
+        /// in a DEBUG build. Nil when its interfaces do not say.
         case method(Method?)
         /// Not saved (or it removed this device) and pairing is required: a tap asks, and the Mac
         /// shows a code.
         case notPaired
+        /// Not saved, on an open door (`p=0`: the Mac's Require pairing is off): a tap connects
+        /// without pairing, with any Mac key. "Not paired" too, so it never reads like a paired
+        /// Mac's row (the security review, 2026-09-27: it read "Wi‑Fi" as the paired Mac's did).
+        case openDoor
         /// The same over the USB cable: a tap asks, and the Mac pairs this device by itself. Its
         /// word is "Wired".
         case pairsOverCable
@@ -645,7 +665,7 @@ enum DiscoveryPolicy {
         var word: String? {
             switch self {
             case .method(let m): return m?.word
-            case .notPaired: return "Not paired"
+            case .notPaired, .openDoor: return "Not paired"
             case .pairsOverCable: return Method.wired.word
             case .updateSill: return "Update Sill"
             }
@@ -653,7 +673,7 @@ enum DiscoveryPolicy {
 
         /// VoiceOver's label: "Mac mini, Wired", "Mac mini, not paired"; the name alone without a word.
         func label(name: String) -> String {
-            if self == .notPaired { return "\(name), not paired" }
+            if self == .notPaired || self == .openDoor { return "\(name), not paired" }
             return word.map { "\(name), \($0)" } ?? name
         }
 
@@ -663,14 +683,15 @@ enum DiscoveryPolicy {
             switch self {
             case .method: return direct ? "Connects without a shared Wi\u{2011}Fi network" : ""
             case .notPaired: return "Pairs with a code \(name) shows, then connects."
+            case .openDoor: return "Connects without pairing: \(name) lets any device in."
             case .pairsOverCable: return "Pairs over the USB cable, then connects."
             case .updateSill: return "\(name)\u{2019}s Sill is too old for this \(device)."
             }
         }
     }
 
-    /// A row's word (§7.3). `saved`: the row is a saved Mac (its TXT tag named one, or an automatic
-    /// reconnect took it by its Bonjour name); `revoked`: that Mac removed this device or refused
+    /// A row's word (§7.3). `saved`: the row is a saved Mac (`rowMac`: its TXT tag named one, or,
+    /// without a tag of a saved Mac's, its Bonjour name did); `revoked`: that Mac removed this device or refused
     /// its key (SavedMac.revoked); `homeTLS`: this device has seen that Mac's home door speak TLS
     /// (SavedMac.homeTLS; false for an unsaved Mac); `debug`: a DEBUG build, the only kind that
     /// dials a plain door; `cable`: the row's wired interface carries only link-local addresses on
@@ -683,7 +704,7 @@ enum DiscoveryPolicy {
             return debug && !homeTLS ? .method(method) : .updateSill
         case .pairingRequired, .open:
             if saved && !revoked { return .method(method) }
-            if !saved && door == .open { return .method(method) }
+            if !saved && door == .open { return .openDoor }
             return method == .wired && cable ? .pairsOverCable : .notPaired
         }
     }

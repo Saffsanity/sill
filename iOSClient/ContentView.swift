@@ -141,8 +141,8 @@ struct ContentView: View {
 ///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
 ///   `externalpair` (an outside link's confirmation); or pairing at home's
 ///   (docs/home-pairing-plan.md §7.9): `homerows` (a saved Wi-Fi row, "Not paired", an unpaired
-///   "Wired" over the cable, a Wired row through a USB Ethernet adapter reading "Not paired",
-///   "Update Sill", and long names), `homeasking` (a tap's ask: "Pairing with Mac mini…", the row
+///   "Wired" over the cable, a Wired row through a USB Ethernet adapter reading "Not paired", an
+///   open door's row reading "Not paired", "Update Sill", and long names), `homeasking` (a tap's ask: "Pairing with Mac mini…", the row
 ///   lit), `homecard` (the home card, scanning), `homecode` (its typed path), `homecodeerror` (a
 ///   wrong code), `homelocked`, `homeopenonmac`, `homerevoked`, `homecabledone`, `homeolder` (a tap
 ///   on an "Update Sill" row) or `pairingrequired`. Ignored with `-SillLive 1`. The mock never

@@ -18,6 +18,12 @@ struct FoundMac: Identifiable, Hashable {
     /// The saved Mac this row is: a network or Direct row whose TXT tag this device resolved, or
     /// a Remote row. Nil for any other Mac.
     let macID: String?
+    /// A network or Direct row whose tag names no saved Mac, under the Bonjour name a saved Mac was
+    /// last reached by: that Mac, taken by name alone (DiscoveryPolicy.rowMac). A tap dials it
+    /// pinned to that Mac's key, as the automatic reconnect does, and its word is that Mac's. Not
+    /// a sighting of the saved Mac (its Remote row stays), and no context menu: it may be a
+    /// stranger's until its key says otherwise.
+    let savedByName: String?
     /// How the Mac is reachable, the word at the end of a network or Direct row ("Wired", "Wi-Fi",
     /// "Direct"), or nil when the interfaces it was seen on do not say (DiscoveryPolicy.method), and
     /// for a Remote row. Only shown: which route a tap takes is `route`'s and `wired`'s.
@@ -38,16 +44,18 @@ struct FoundMac: Identifiable, Hashable {
     /// reachable, as before, or "Not paired", "Wired" for an unpaired Mac over the cable, "Update Sill".
     let homeWord: DiscoveryPolicy.RowWord
 
-    init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil,
+    init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil, savedByName: String? = nil,
          method: DiscoveryPolicy.Method? = nil, wired: NWInterface? = nil, wifi: NWInterface? = nil,
          door: DiscoveryPolicy.HomeDoor = .plain, homeWord: DiscoveryPolicy.RowWord? = nil) {
-        self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID
+        self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID; self.savedByName = savedByName
         self.method = method; self.wired = wired; self.wifi = wifi
         self.door = door; self.homeWord = homeWord ?? .method(method)
     }
 
     /// Reached over peer-to-peer Wi-Fi alone: the one kind of row connected with includePeerToPeer.
     var direct: Bool { route == .direct }
+    /// The saved Mac a tap dials this row as: its tag's, else its Bonjour name's (`savedByName`).
+    var savedID: String? { macID ?? savedByName }
     /// A network "Mac mini" and a Remote "Mac mini" are two rows. Names are unique per route
     /// (DiscoveryPolicy.rows lists a name once), Mac IDs among Remote rows.
     var id: String { route == .remote ? "remote:\(macID ?? name)" : "\(route.rawValue):\(name)" }
@@ -180,8 +188,8 @@ final class StreamClient: ObservableObject {
     /// The Cancel of an ask the Mac answered "shown", on its way to the Mac (`withdrawAsk`): kept
     /// here until it is done, beside whatever the next tap dials.
     var homeWithdrawal: HomeDialer?
-    /// Rows the automatic reconnect took by their Bonjour name alone whose key was another's
-    /// (-9808): skipped until a session connects (docs/home-pairing-plan.md §7.3).
+    /// Rows taken by their Bonjour name alone (a tap's or the automatic reconnect's) whose key was
+    /// another's (-9808): the reconnect skips them until a session connects (docs/home-pairing-plan.md §7.3).
     var pinRefusedRows = Set<String>()
     #if DEBUG
     /// `-SillTapRow <prefix>`: the first network or Direct row whose name starts so is tapped once,
@@ -504,11 +512,13 @@ final class StreamClient: ObservableObject {
     struct HomeRow: Equatable {
         /// FoundMac.id.
         let id: String
-        /// Its TXT tag named the saved Mac; a row the automatic reconnect took by its Bonjour name
-        /// alone did not.
+        /// Its TXT tag named the saved Mac; a row taken by its Bonjour name alone (a tap's or the
+        /// automatic reconnect's) did not.
         let tagNamed: Bool
         /// Rows of that Mac whose pin already failed in this dial (§7.6).
         var tried: [String] = []
+        /// A tap dialed it (not the automatic reconnect): a pin that fails there gets words.
+        var tapped = false
     }
 
     /// An automatic reconnect after a session ended on its own (docs/remote-access-plan.md §7.4).
@@ -781,18 +791,24 @@ final class StreamClient: ObservableObject {
         // This device's own addresses: whether a Wired row's interface carries only link-local ones
         // (the USB cable to the Mac) or a network's (a USB Ethernet adapter), for its word.
         let own = Self.ownAddresses()
+        // The saved Macs by the Bonjour name each was last reached under, most recently used first:
+        // a row whose tag names none of them is the one of its name (DiscoveryPolicy.rowMac).
+        let byName = savedMacs.sorted { ($0.lastConnectedAt ?? $0.pairedAt) > ($1.lastConnectedAt ?? $1.pairedAt) }
+            .map { (macID: $0.macID, bonjourName: $0.bonjourName) }
         var next = rows.compactMap { row -> FoundMac? in
             guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
             let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: seen.policy)
             let wifi = DiscoveryPolicy.wifiInterface(direct: row.direct, interfaces: seen.policy)
             let macID = SavedMacs.recognize(tag: seen.tag, in: savedMacs) ?? seen.stands
-            let saved = macID.flatMap { id in savedMacs.first { $0.macID == id } }
+            let named = DiscoveryPolicy.rowMac(tagged: macID, name: row.name, saved: byName)
+            let savedByName = named?.tagNamed == false ? named?.macID : nil
+            let saved = named.flatMap { n in savedMacs.first { $0.macID == n.macID } }
             let method = DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy)
             let word = DiscoveryPolicy.rowWord(door: seen.door, saved: saved != nil, revoked: saved?.revoked == true,
                                                homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, method: method,
                                                cable: wired.map { DiscoveryPolicy.carriesOnlyLinkLocal($0, own: own) } ?? false)
             return FoundMac(name: row.name, endpoint: seen.endpoint, route: row.direct ? .direct : .network,
-                            macID: macID, method: method,
+                            macID: macID, savedByName: savedByName, method: method,
                             wired: wired.flatMap { name in seen.interfaces.first { $0.name == name } },
                             wifi: wifi.flatMap { name in seen.interfaces.first { $0.name == name } },
                             door: seen.door, homeWord: word)
@@ -814,7 +830,8 @@ final class StreamClient: ObservableObject {
             let seen = (mac.direct ? nearby : network).first { $0.name == mac.name }
             let named = seen.map { s in s.interfaces.isEmpty ? s.policy.map { "\($0.name) (\($0.type))" } : s.interfaces.map { "\($0.name) (\($0.type))" } } ?? []
             let door = mac.door == .plain ? "" : " (p=\(mac.door == .open ? "0" : "1")\(mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"))"
-            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(door)")
+            let byName = mac.savedByName.map { " (saved Mac \($0) by its name alone)" } ?? ""
+            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)")
         }
         #endif
         macs = next
@@ -935,7 +952,9 @@ final class StreamClient: ObservableObject {
             dialSaved(id, why: .tap)
             return
         }
-        dial(mac, macID: mac.macID, tap: true)
+        // As strict as the automatic reconnect: a row named like a saved Mac, without a tag of a
+        // saved Mac's, is dialed as that Mac, pinned to its key (FoundMac.savedByName).
+        dial(mac, macID: mac.savedID, tap: true)
     }
 
     /// A network or Direct row's dial, a tap's or the automatic reconnect's (which keeps its
@@ -961,7 +980,7 @@ final class StreamClient: ObservableObject {
             return true
         case .pinned, .anyKey, .plain:
             guard let trust = DiscoveryPolicy.sessionTrust(decision, savedPin: saved?.fingerprintData) else { return false }
-            return dialRow(mac, macID: saved?.macID, trust: trust, tagNamed: mac.macID != nil)
+            return dialRow(mac, macID: saved?.macID, trust: trust, tagNamed: mac.macID != nil, tap: tap)
         }
     }
 
@@ -976,9 +995,10 @@ final class StreamClient: ObservableObject {
     /// (`wiredDial`), else as listed. `tried`: rows of the same saved Mac whose pin already failed
     /// (§7.6). True when it dialed. Main thread.
     @discardableResult
-    func dialRow(_ mac: FoundMac, macID: String?, trust: DiscoveryPolicy.HomeTrust, tagNamed: Bool, tried: [String] = []) -> Bool {
+    func dialRow(_ mac: FoundMac, macID: String?, trust: DiscoveryPolicy.HomeTrust, tagNamed: Bool, tried: [String] = [],
+                 tap: Bool = false) -> Bool {
         guard let endpoint = mac.endpoint else { return false }
-        let row = HomeRow(id: mac.id, tagNamed: tagNamed, tried: tried)
+        let row = HomeRow(id: mac.id, tagNamed: tagNamed, tried: tried, tapped: tap)
         if let wired = wiredDial(for: mac) {
             #if DEBUG
             print("dialing \(mac.name) on \(wired.via)")

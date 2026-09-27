@@ -378,12 +378,16 @@ extension StreamClient {
                 print("home: another key answered at \(s.row?.id ?? "the address"); dialing \(row.name) pinned")
                 #endif
                 tearDown(status: status, restartSearch: false)
-                dialRow(row, macID: mac.macID, trust: .saved(pin: pin), tagNamed: row.macID != nil, tried: tried)
+                dialRow(row, macID: mac.macID, trust: .saved(pin: pin), tagNamed: row.macID != nil, tried: tried, tap: s.row?.tapped ?? false)
                 return true
             }
             guard s.row?.tagNamed ?? true else {
+                // A row taken by its Bonjour name alone is not that Mac: the reconnect skips it from
+                // now on and goes on without it; a tap says what happened, and reconnects nothing.
                 pinRefusedRows.formUnion(tried)
-                return false
+                guard s.row?.tapped == true else { return false }
+                endAtHome(RemoteCopy.dialFailure(.wrongMac, mac: name, candidate: nil, vpnName: nil, device: Self.deviceWord))
+                return true
             }
             endAtHome(RemoteCopy.dialFailure(.wrongMac, mac: name, candidate: nil, vpnName: nil, device: Self.deviceWord))
         }
@@ -397,6 +401,7 @@ extension StreamClient {
     }
 
     /// Each network or Direct row's id and the saved Mac its TXT tag named.
+    /// (Not the rows taken by their Bonjour name: `FoundMac.savedByName`.)
     func homeRows() -> [(id: String, macID: String?)] {
         macs.filter { $0.route != .remote }.map { (id: $0.id, macID: $0.macID) }
     }
@@ -549,6 +554,8 @@ extension StreamClient {
         homeAsk = nil
         if failed.statuses.contains(DiscoveryPolicy.pinRefused), let id = ask.savedID {
             let tried = ask.tried + [ask.target.row].compactMap { $0 }
+            // Rows taken by their Bonjour name alone whose key was another's: not that Mac.
+            pinRefusedRows.formUnion(tried.filter { id in macs.first { $0.id == id }.map { $0.macID == nil } ?? false })
             if let next = DiscoveryPolicy.nextPinnedRow(macID: id, tried: tried, rows: homeRows()),
                let row = macs.first(where: { $0.id == next }) {
                 self.ask(row, savedID: id, tagNamed: ask.tagNamed, tried: tried)

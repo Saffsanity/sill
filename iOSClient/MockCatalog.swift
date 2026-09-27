@@ -233,7 +233,7 @@ enum MockCatalog {
         case camera        // Add a Mac with the camera refused
         case externalpair  // an outside sill://pair link waiting for its confirmation
         // Pairing at home (docs/home-pairing-plan.md §7.3–7.9). Each row's word is DiscoveryPolicy.rowWord's.
-        case homerows        // a saved Wi-Fi row, Not paired, an unpaired Wired (the cable), a Wired row through a USB Ethernet adapter (Not paired), Update Sill, long names
+        case homerows        // a saved Wi-Fi row, Not paired, an unpaired Wired (the cable), a Wired row through a USB Ethernet adapter (Not paired), an open door's (Not paired), Update Sill, long names
         case homeasking      // a tap on a Not paired row: "Pairing with Mac mini…", the row lit
         case homecard        // the Mac shows its code: the home card, scanning (a drawn viewfinder)
         case homecode        // the home card's typed path, empty
@@ -365,6 +365,7 @@ enum MockCatalog {
                            home("Studio", .wifi),
                            home("MacBook Pro", .wired, cable: true),
                            home("Office iMac", .wired, cable: false),
+                           home("Living Room iMac", .wifi, door: .open),
                            home("Mac Studio", .wifi, door: .plain, saved: true, homeTLS: true),
                            home("Noah Saffer’s MacBook Pro in the Studio (2)", .wifi),
                            home("Noah Saffer’s iMac on the Desk by the Window", .wired, door: .plain, saved: true, homeTLS: true)]

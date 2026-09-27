@@ -1161,7 +1161,7 @@ New attention items (first group, orange):
 | a saved Mac, not revoked, on a TLS door | its method, as today: "Wired", "Wi‑Fi", "Direct" | as today |
 | unsaved or revoked, `p=1`, not over a cable | "Not paired" | "Mac mini, not paired"; hint "Pairs with a code Mac mini shows, then connects." |
 | unsaved or revoked, `p=1`, Wired over a cable (its wired interface carries only link-local addresses, §7.5) | "Wired" | "Mac mini, Wired"; hint "Pairs over the USB cable, then connects." |
-| unsaved, `p=0` | its method | as today |
+| unsaved, `p=0` | "Not paired" (`openDoor`; the security review, 2026-09-27: it read its method, "Wi‑Fi", exactly as a paired Mac's row does) | "Mac mini, not paired"; hint "Connects without pairing: Mac mini lets any device in." |
 | no `p`, DEBUG, not `homeTLS` | its method (a plain door, as today) | as today |
 | no `p`, Release; no `p` and `homeTLS` | "Update Sill" | hint "Mac mini’s Sill is too old for this ‹iPad›." |
 
@@ -1170,11 +1170,18 @@ New attention items (first group, orange):
 - **No downgrade.** Once a saved Mac is `homeTLS`, its rows are dialed only over TLS, in DEBUG too;
   a row of it without `p` reads "Update Sill" (its own Sill never goes back to plain; someone may
   be replaying its tag). A Release build never dials plain at all.
-- A row the automatic reconnect takes by its Bonjour name alone (a result without a tag: #13's
-  `reconnectIfListed` matches by name when the row has no Mac ID) counts as that saved Mac for
-  these rules: dialed pinned to its key, and not at all without `p` once it is `homeTLS`, in DEBUG
-  too. A same-named Mac that is not it then fails the pin (-9808) and is skipped without the
-  "This isn’t the Mac mini…" copy, which is for a row its tag named.
+- A row whose tag names no saved Mac, under the Bonjour name a saved Mac was last reached by,
+  counts as that saved Mac for these rules (`DiscoveryPolicy.rowMac`, `FoundMac.savedByName`),
+  for the automatic reconnect (#13's `reconnectIfListed` matches by name when the row has no Mac
+  ID) and, since the security review (2026-09-27), for a tap too: its word is that Mac's, it is
+  dialed pinned to its key, and not at all without `p` once it is `homeTLS`, in DEBUG too. (A tap
+  used to dial such a row with any key, or plain in DEBUG, while it read exactly like the paired
+  Mac's: a look-alike advertising a saved Mac's name without its tag got a session and all it was
+  sent.) A same-named Mac that is not it then fails the pin (-9808): the reconnect skips it from
+  then on (`pinRefusedRows`) without the "This isn’t the Mac mini…" copy, which is for a row its
+  tag named, and a tap, after the Mac's other rows, says that copy (the user asked for that Mac).
+  The price: another Mac of the same name, reached only while the saved one is not listed, cannot
+  be tapped until the saved one is forgotten (its Remote row's menu).
 - Remote rows are unchanged.
 
 #### 7.4 A tap (`DiscoveryPolicy.homeDial`, pure)
@@ -1183,7 +1190,7 @@ New attention items (first group, orange):
 |---|---|
 | saved, not revoked, TLS door | `sill/1` pinned to the saved key; connected at the first window list |
 | saved and revoked; unsaved with `p=1` | the ask (§7.5) |
-| unsaved, `p=0` | `sill/1` with any Mac key; nothing saved |
+| unsaved, `p=0` | `sill/1` with any Mac key; nothing saved (the row reads "Not paired", §7.3) |
 | no `p`, DEBUG, not `homeTLS` | plain, as today |
 | no `p`, otherwise | nothing dialed; status "Mac mini runs an older Sill. Update Sill on the Mac to connect." |
 
@@ -1255,7 +1262,10 @@ New attention items (first group, orange):
   recognised as the same saved Mac is dialed, pinned (a stranger replaying the Mac's tag makes a row
   that looks like it, and the copy below would tell the user to forget the real Mac); only when none
   answers with the saved key, the remote copy, "This isn’t the Mac mini this ‹iPad› paired with. If
-  Sill was set up again on it, forget it here and pair again."; never a plain retry.
+  Sill was set up again on it, forget it here and pair again."; never a plain retry. A row taken by
+  the saved Mac's Bonjour name alone (§7.3) is skipped by the reconnect from then on
+  (`pinRefusedRows`) without that copy; after a tap, which asked for that Mac, the copy follows the
+  Mac's other rows as for a row its tag named.
 - **The panel's Away from home group** (HostSettingsPanel.swift:303; :305 at `cea195c`): the
   saved Mac's row reads "Paired" (was "Paired for remote access"); Pair This ‹iPad›… shows only in
   an unpaired session. As built (step 5, `DiscoveryPolicy.awayFromHome`, pure): under "Paired",
@@ -1310,7 +1320,7 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
 
 #### 7.9 Harness and DEBUG arguments (ContentView.swift's contract comment, and CLAUDE.md)
 
-- `-SillConnectCase` gains `homerows` (a saved Wi‑Fi row, "Not paired", an unpaired "Wired", a
+- `-SillConnectCase` gains `homerows` (a saved Wi‑Fi row, "Not paired", an open door's "Not paired" (since the security review), an unpaired "Wired", a
   Wired row through a USB Ethernet adapter reading "Not paired", "Update Sill", a long name), `homecard`, `homecode`, `homecodeerror`, `homeasking`, `homelocked`,
   `homeopenonmac`, `homerevoked`, `homecabledone` and `pairingrequired`; and, as built (step 5),
   `homeolder` (a tap on an "Update Sill" row: "Mac mini runs an older Sill…").
