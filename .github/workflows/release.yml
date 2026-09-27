@@ -5,14 +5,15 @@
 #
 # - Not set, or anything but true: verify only. It checks the tag against Packaging/Info.plist,
 #   runs the pure checks, builds Sill.app with Scripts/make-app.sh (signed ad hoc: the runner has
-#   no identity) and keeps it, zipped, as this run's artifact for 14 days. It uses no secret and
+#   no identity), makes the disk image with Scripts/make-dmg.sh (signed ad hoc too), and keeps the
+#   app, zipped, and the image as this run's two artifacts for 14 days. It uses no secret and
 #   creates no release.
 # - true: sign and publish. The same checks, then the Developer ID certificate goes into a
 #   temporary keychain, the notary credentials into a profile in it, and Scripts/release.sh
 #   --publish builds Sill.app, has Apple notarize it, staples the ticket, checks a copy the way
-#   Gatekeeper will, and creates the GitHub Release v<version> with Sill.zip and Sill.zip.sha256,
-#   the files the site's Download button links. The keychain is deleted at the end, whatever
-#   happened.
+#   Gatekeeper will, puts the stapled app in the disk image and has Apple notarize that too, and
+#   creates the GitHub Release v<version> with Sill.dmg, Sill.zip and their .sha256 files, the
+#   files the site's download page links. The keychain is deleted at the end, whatever happened.
 #
 # docs/release-checklist.md, "Releasing from GitHub Actions", lists every secret and variable, how
 # to make and rotate them, and what a run costs (free in a public repository; in a private one,
@@ -98,6 +99,21 @@ jobs:
             echo "Sill $version ($build) for $(lipo -archs "$app/Contents/MacOS/Sill"): the checks passed and Sill.app built."
             echo
             echo "The artifact $(basename "$zip") is signed ad hoc, not with Developer ID, and not notarized: for trying out, not for anyone else to download. SHA-256 $(shasum -a 256 "$zip" | awk '{ print $1 }')."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The image a release publishes as Sill.dmg, made the same way from this ad hoc app: its
+      # window, background and volume icon can be looked at before a signed release.
+      - name: Make the disk image (Scripts/make-dmg.sh, signed ad hoc)
+        id: dmg
+        run: |
+          app=.build/Sill.app
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          dmg=".build/Sill-$version-adhoc.dmg"
+          Scripts/make-dmg.sh --sign - "$app" "$dmg"
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          {
+            echo
+            echo "The artifact $(basename "$dmg") is the disk image a release publishes as Sill.dmg, with this Sill.app inside, signed ad hoc and not notarized: for looking at its window, not for anyone else to download. SHA-256 $(shasum -a 256 "$dmg" | awk '{ print $1 }')."
             echo "Nothing was published: the repository variable SILL_SIGN_IN_CI is not true."
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -105,6 +121,15 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           path: ${{ steps.zip.outputs.zip }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      # A second step: with archive false, each upload takes one file.
+      - name: Keep the disk image as this run's artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.dmg.outputs.dmg }}
           archive: false
           retention-days: 14
           if-no-files-found: error
@@ -207,7 +232,12 @@ jobs:
           GH_TOKEN: ${{ secrets.SILL_RELEASE_TOKEN || github.token }}
         run: Scripts/release.sh --publish
 
-      - name: Keep Apple's notary log
+      # Both submissions' answers and logs: the zip's (Sill-<version>-notary*) and the disk image's
+      # (Sill-<version>-dmg-notary*). include-hidden-files: upload-artifact skips every file and folder
+      # whose name starts with a dot, the search's root included, so without it these patterns found
+      # nothing under .build and the step passed without an artifact (it never kept one). No files
+      # is a warning: a run that stopped before Apple answered has none.
+      - name: Keep Apple's notary logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -215,8 +245,9 @@ jobs:
           path: |
             .build/Sill-*-notary.plist
             .build/Sill-*-notary-log.json
+          include-hidden-files: true
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Delete the keychain and the key files
         if: always()

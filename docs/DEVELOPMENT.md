@@ -349,12 +349,11 @@ tests of Direct Wireless Connection and remote access.
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
-encoder session) on their own with a check each, and runs them: about two
-minutes, no device, permission or encoder. `--mutants` also checks that each check fails
-which door, the device floor, how a session ends, the update check) on their
-own with a check each, and runs them: about two minutes,
-no device, permission or encoder. `--mutants` also checks that each check fails
-when its file is changed in one place (most of an hour).
+encoder session, the device floor, how a session ends, the update check, the
+disk image's window, where everything goes on a phone held upright) on their
+own with a check each, and runs them: about two minutes, no device, permission
+or encoder. `--mutants` also checks that each check fails when its file is
+changed in one place (most of an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -535,14 +534,21 @@ Distribution (M6): a release is a commit tagged `v` + Packaging/Info.plist's
 CFBundleShortVersionString (`v0.4.0` for 0.4.0: bump the version, commit, `git
 tag v0.4.0`, `git push origin v0.4.0`), and its GitHub release in
 Saffsanity/sill is published (not a draft, not a prerelease) with the
-notarized zip attached; every Sill.app's update check reads that repository's
-releases alone and compares the tag with the version it runs.
-`Scripts/release.sh` makes the download. It runs `make-app.sh --release`
+notarized disk image and zip attached; every Sill.app's update check reads
+that repository's releases alone and compares the tag with the version it
+runs.
+`Scripts/release.sh` makes the downloads. It runs `make-app.sh --release`
 (which refuses a HEAD without that tag, and any signature but Developer ID),
 zips the app, sends it to Apple's notary service and waits, staples the
 ticket, zips it again so the download carries the ticket, checks a copy
-unpacked from that zip with `stapler validate` and `spctl`, and prints the
-zip's path and SHA-256. With `--publish` it then makes the GitHub Release,
+unpacked from that zip with `stapler validate` and `spctl`, then puts the
+stapled app in the disk image (`Scripts/make-dmg.sh`: Sill.app beside a link
+to Applications over a background with an arrow, the window laid out by a
+`.DS_Store` that `Scripts/dmg-layout` writes without Finder), signs it, has
+Apple notarize it too, staples and checks it (`hdiutil verify`, `stapler
+validate`, `spctl -t open --context context:primary-signature`, the app
+inside), and prints both files' paths and SHA-256. With `--publish` it then
+makes the GitHub Release (Sill.dmg, Sill.zip and their `.sha256` files),
 and refuses to start unless origin has the tag and it names HEAD (gh would
 otherwise make the tag from the default branch); a `SILL_RELEASE_REPO` other
 than Saffsanity/sill gets a warning, since no Sill.app offers a release
@@ -552,8 +558,16 @@ published there. It needs
 store-credentials sill-notary`), and refuses to start without them. Give
 both on the release command itself, never in your shell profile: `make-app.sh`
 signs every build with `SILL_SIGN_IDENTITY` when it is set, `--install`
-included. `--dry-run` needs only the identity and stops before anything goes
-to Apple; it builds any commit, and only warns that HEAD lacks the tag.
+included. `--dry-run` needs only the identity, makes the zip and a disk image
+signed with it, and stops before anything goes to Apple; it builds any
+commit, and only warns that HEAD lacks the tag.
+`Scripts/make-dmg.sh --sign - .build/Sill.app /tmp/Sill.dmg` makes an ad hoc
+image of any build, to look at its window. The window is 660 x 432 points: its
+picture (`design/DMGBackground.svg`, 660 x 400, white to every edge) and
+macOS 27's 32-point title bar, so the whole picture shows there, with a strip
+of white below it under macOS 14's and 15's 28-point bar;
+`Tests/checks/dmg-layout` checks the `.DS_Store` and the background's alias
+that the layout tool writes.
 The one-time setup and each release's steps are in docs/release-checklist.md.
 A Developer ID signature has a different designated requirement, so
 permissions are granted once more.
@@ -564,7 +578,9 @@ The release workflow (`.github/workflows/release.yml`) runs on a pushed tag
 Actions"). Its checkout is that tag, so there `--publish` checks the local
 tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
 `--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
-on, let that run publish instead.
+on, let that run publish instead. Apple's answers and logs for both
+submissions are the run's artifact `notary-v<version>` for 30 days: when the
+job's log says a notary log lists issues, read them there.
 
 The iOS app goes to App Store Connect (TestFlight, then the App Store) from
 `Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
@@ -605,11 +621,12 @@ record field by field.
 - `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
   export options for App Store Connect.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `release-ios.sh` (the iOS app's build for App Store
-  Connect and TestFlight), `sillclient.py` (a wire-format test client),
-  `sillrelay.py` (a relay that slows or cuts the link, for tests) and
-  `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
-  check's tests).
+  disk image and zip people download), `make-dmg.sh` and `dmg-layout/` (the
+  disk image, and the tool that lays out its window), `release-ios.sh` (the
+  iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
+  wire-format test client), `sillrelay.py` (a relay that slows or cuts the
+  link, for tests) and `sillfeed.py` (a stand-in for GitHub's releases feed,
+  for the update check's tests).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
