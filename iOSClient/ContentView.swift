@@ -175,6 +175,13 @@ struct ContentView: View {
 ///   callout's button), `t` seconds after the session's first window list, under `-SillInputScript`'s
 ///   guard (a session dialled to a loopback address whose host sends no version: never Sill.app).
 ///   The console says "settings script: …" (`SettingsScript`).
+/// * `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` — with `-SillDialSaved 1`: a second after the
+///   remote session's first window list, its saved Mac is listed as a network row with its Mac ID
+///   (named "‹Mac› (home test)", so Sill.app's own row on this Mac never hides it), so the move home
+///   runs for real against `SillHost --synthetic --remote` with SILL_TEST_REMOTE_ORIGIN=vpn: `to:`
+///   the host's home door, `refused` port 1 of the remote session's host (each try fails), `other:`
+///   another synthetic host (another launch). `-SillDialSaved remotely` dials the first saved Mac as
+///   Connect Remotely does (a session that never moves home). The console says "remote: …".
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or

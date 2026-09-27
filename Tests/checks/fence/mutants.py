@@ -1,14 +1,14 @@
 """Each mutant of SessionLink's fences, hold, adopt and unhold (follow-best-path and its review fixes), and of its
 count of the inputs meant for the session's connection (pointer-visibility), must fail the fence check in some mode.
 usage: mutants.py"""
-import os, subprocess, sys
+import glob, os, subprocess, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 WT = os.path.abspath(os.path.join(SP, "..", "..", ".."))   # the repository
 OUT = os.path.join(WT, ".build", "checks", "fence")   # the mutants' sources and binaries
 os.makedirs(OUT, exist_ok=True)
 SRC = WT + "/iOSClient/SessionLink.swift"
 orig = open(SRC).read()
-MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count"]
+MODES = ["ok", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves", "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
 ADOPT_END = "        holding = nil\n        return endedLocked(since: h.since)\n    }\n\n    /// Ends the hold on `c`"
 UNHOLD_END = "        guard let h = holding, h.connection === c else { return nil }\n        holding = nil\n        return endedLocked(since: h.since)\n"
 MUTANTS = {
@@ -74,7 +74,7 @@ for name, (old, new) in MUTANTS.items():
     assert orig.count(old) == 1, f"{name}: pattern found {orig.count(old)} times"
     path = os.path.join(OUT, "SessionLink-mutant.swift")
     open(path, "w").write(orig.replace(old, new))
-    b = subprocess.run(["swiftc", "-O", path, WT + "/Sources/StreamProtocol/StreamMessage.swift", os.path.join(SP, "main.swift"),
+    b = subprocess.run(["swiftc", "-O", path, *sorted(glob.glob(WT + "/Sources/StreamProtocol/*.swift")), os.path.join(SP, "main.swift"),
                         "-o", os.path.join(OUT, "mutant")], capture_output=True, text=True)
     if b.returncode != 0:
         print(f"{name}: DOES NOT COMPILE\n{b.stderr[:800]}"); continue

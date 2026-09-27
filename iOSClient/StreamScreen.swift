@@ -242,6 +242,10 @@ struct StreamScreen: View {
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.modeDidChangeNotification).receive(on: RunLoop.main)) { _ in
             sendViewport(after: 0.25)
         }
+        // Away from home the stream rate follows the route (60 fps through a VPN or the internet): a
+        // session that stops being away (the move home) asks for its full rate whatever path it took
+        // (docs/remote-bundle-plan.md §7.3).
+        .onChange(of: client.remoteRoute) { _, _ in sendViewport() }
         // The link's line over the stream (§6.7): a report arriving or clearing, or the panel, the
         // drawer or the pairing overlay opening or closing over it.
         .onChange(of: linkReportLine, initial: true) { _, _ in updateLinkLine() }
