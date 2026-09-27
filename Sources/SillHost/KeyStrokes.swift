@@ -20,7 +20,9 @@ import Foundation
 //     (unless the same modifier's other key is down), whatever the device said;
 //   - a device's key or text saying it no longer holds a modifier lets go of that modifier's key
 //     first (a device from before this fix never sent a hardware ⌘'s release);
-//   - a device that leaves has every key it still holds down let go, and so does the host at its end.
+//   - a device that leaves has every key it still holds down let go, and so does the host at its end;
+//   - a trackpad gesture's shortcut (`chord`) goes down with its own flags and up with those the table
+//     held before it.
 // Pointer and scroll events are made from the source as before, so they start from what is held.
 // Inferred, not observed: nothing may be posted while this is built. Typed text is InputInjector's:
 // it goes out with no flags, after `text` has let go of the device's modifier keys.
@@ -111,6 +113,16 @@ package struct KeyStrokes: Sendable {
             strokes.append(KeyStroke(virtualKey: Self.virtualKeys[usage] ?? 0, down: false, flags: heldFlags))
         }
         return strokes
+    }
+
+    /// A trackpad gesture's shortcut (InputInjector.chord, GestureChords): its key down with exactly
+    /// the flags the Mac stored for it (fn included; no other modifier, or it would be another
+    /// shortcut), and its up with `before`, the flags the HID state table held just before the chord
+    /// (what the devices' modifier keys hold, and the Mac's own keyboard), so the chord leaves none of
+    /// its own. The key is none of a device's, and goes down and up at once.
+    package static func chord(virtualKey: UInt16, flags: UInt64, before: UInt64) -> [KeyStroke] {
+        [KeyStroke(virtualKey: virtualKey, down: true, flags: flags),
+         KeyStroke(virtualKey: virtualKey, down: false, flags: before)]
     }
 
     /// The ups of `device`'s modifier keys down whose flag `keeping` lacks, `except` left alone: from

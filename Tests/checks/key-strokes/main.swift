@@ -27,6 +27,9 @@ let command = KeyStrokes.command, shift = KeyStrokes.shift, control = KeyStrokes
 let option = KeyStrokes.option, capsLock = KeyStrokes.capsLock
 /// The four that change a click or a scroll while they are set.
 let modifierBits: UInt64 = shift | control | option | command
+/// fn (CGEventFlags' maskSecondaryFn), which only a gesture's shortcut carries (GestureChords): held
+/// to the same rule.
+let fn: UInt64 = 0x80_0000
 
 /// The Mac's modifier keycodes (Carbon kVK_*) and the flag each holds: the model's own table.
 let macModifiers: [UInt16: UInt64] = [55: command, 54: command, 56: shift, 60: shift,
@@ -34,9 +37,9 @@ let macModifiers: [UInt16: UInt64] = [55: command, 54: command, 56: shift, 60: s
 
 func names(_ flags: UInt64) -> String {
     let named: [(UInt64, String)] = [(capsLock, "caps lock"), (control, "control"), (option, "option"),
-                                     (shift, "shift"), (command, "command")]
+                                     (shift, "shift"), (command, "command"), (fn, "fn")]
     var held = named.filter { flags & $0.0 != 0 }.map(\.1)
-    let rest = flags & ~(capsLock | modifierBits)
+    let rest = flags & ~(capsLock | modifierBits | fn)
     if rest != 0 { held.append("0x" + String(rest, radix: 16)) }
     return held.isEmpty ? "none" : held.joined(separator: " + ")
 }
@@ -108,7 +111,7 @@ struct Mac {
         judge("after \(log.last!)")
     }
     mutating func judge(_ when: String) {
-        let stray = table & modifierBits & ~accounted
+        let stray = table & (modifierBits | fn) & ~accounted
         if stray != 0 {
             broken.append("\(when): the table holds \(names(stray)) with " + (down.isEmpty ? "nothing" : down.keys.sorted().map(String.init).joined(separator: ", ")) + " down")
         }
@@ -124,12 +127,16 @@ struct Mac {
             judge("after text")
         case .pointer, .scroll, .scrollGesture:
             log.append(.pointer(table))
-            let stray = table & modifierBits & ~accounted
+            let stray = table & (modifierBits | fn) & ~accounted
             if stray != 0 { broken.append("a pointer event carries \(names(stray)), which no key down accounts for") }
         }
     }
     mutating func send(_ events: [InputEvent], from c: Conn) { for e in events { input(e, from: c) } }
     mutating func leave(_ c: Conn) { for s in keys.release(ObjectIdentifier(c)) { post(s) } }
+    /// A trackpad gesture's shortcut (InputInjector.chord): the table read just before it.
+    mutating func gesture(_ keyCode: UInt16, _ flags: UInt64) {
+        for s in KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: table) { post(s) }
+    }
     /// Everything posted since `from`.
     func since(_ from: Int) -> [Event] { Array(log[from...]) }
 }
@@ -473,6 +480,43 @@ do {
     clean(mac, "a move")
 }
 
+// MARK: A trackpad gesture's shortcut (GestureChords, InputInjector.chord)
+
+// Mission Control (the Mission Control key, fn): down with exactly its own flags, up with what the
+// table held before it, nothing; the tap after is plain.
+do {
+    check(KeyStrokes.chord(virtualKey: 160, flags: fn, before: 0) == [KeyStroke(virtualKey: 160, down: true, flags: fn),
+                                                                      KeyStroke(virtualKey: 160, down: false, flags: 0)],
+          "the Mission Control key: down with fn, up with nothing")
+    var mac = Mac(); let a = Conn()
+    mac.gesture(160, fn)
+    mac.send(tap, from: a)
+    expect(mac.log, [.key(160, true, fn), .key(160, false, 0), .pointer(0), .pointer(0), .pointer(0)], "Mission Control, then a tap")
+    clean(mac, "Mission Control")
+}
+// The Space on the right (⌃→ with fn) while a device holds ⌘: the shortcut exactly (no command: that
+// would be another), and its up puts command back.
+do {
+    var mac = Mac(); let a = Conn()
+    mac.send([key(uLCmd, true, command)], from: a)
+    mac.gesture(124, control | fn)
+    mac.send(tap, from: a)
+    expect(mac.log, [.key(kCmd, true, command), .key(kRight, true, control | fn), .key(kRight, false, command),
+                     .pointer(command), .pointer(command), .pointer(command)], "⌃→ while a device holds ⌘")
+    clean(mac, "⌃→ while ⌘ is held")
+}
+// Between an older device's ⌘Space down and up: the gesture's up leaves command for the Space still
+// down, and the Space's up then clears it.
+do {
+    var mac = Mac(); let a = Conn()
+    mac.send([key(uSpace, true, command)], from: a)
+    mac.gesture(103, fn)
+    mac.send([key(uSpace, false, command)] + tap, from: a)
+    expect(mac.log, [.key(kSpace, true, command), .key(103, true, fn), .key(103, false, command), .key(kSpace, false, 0),
+                     .pointer(0), .pointer(0), .pointer(0)], "Show Desktop (F11) inside ⌘Space")
+    clean(mac, "a gesture inside a shortcut")
+}
+
 // MARK: What is down
 
 do {
@@ -554,6 +598,10 @@ struct Device {
     var dragMods: UInt64? = nil                      // a modified drag under way on the trackpad
 }
 
+/// Gestures' shortcuts as macOS 27 has them (GestureChords.defaults): the Mission Control and
+/// Launchpad keys, ⌃ and an arrow with fn, F11, and ⌘ with the Mission Control key.
+let gestureShortcuts: [(key: UInt16, flags: UInt64)] = [(160, fn), (126, control | fn), (125, control | fn), (124, control | fn),
+                                                        (123, control | fn), (131, fn), (103, fn), (160, command | fn)]
 var rng = Rng(state: 0x5111_5EED)
 var runs = 0, events = 0, brokenRuns = 0
 let hardwareKeys: [UInt16] = [0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE7, uC, uS, uLeft, uEsc]
@@ -593,6 +641,10 @@ for run in 0..<3000 {
             mac.leave(c)
             let lingering = d.lingering
             d = Device(); d.keyboard.before = rng.chance(30); d.lingering = lingering
+        case 14 where rng.chance(50):
+            // A trackpad gesture: one of the Mac's shortcuts for it (GestureChords.defaults).
+            let shortcut = rng.pick(gestureShortcuts)
+            mac.gesture(shortcut.key, shortcut.flags)
         case 13:
             // The session moves to a new connection; the old one leaves a few steps later.
             d.lingering.append((d.conn, 1 + rng.below(5)))

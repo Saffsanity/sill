@@ -505,7 +505,8 @@ final class InputInjector {
     /// here either.
     ///
     /// The key up carries the flags the HID system's state table held before the chord, not the
-    /// chord's. Events posted from `source` leave their flags in that table (CGEventSource.h: its
+    /// chord's (KeyStrokes.chord): what the devices' modifier keys hold, and the Mac's own keyboard.
+    /// Events posted from `source` leave their flags in that table (CGEventSource.h: its
     /// "accumulated information on modifier flag state … placed in effect by posting events"), and
     /// every pointer and scroll event made from `source` afterwards starts from them: a key up with
     /// control and fn would make the device's next tap a control-click (a context menu) and its next
@@ -514,17 +515,17 @@ final class InputInjector {
     /// down. `checkModifiersLeft` says so in the log if the table still holds the chord's modifiers.
     func chord(keyCode: UInt16, flags: UInt64) {
         if !dryRun { remindAboutAccessibilityIfNeeded() }
-        let before = CGEventSource.flagsState(.hidSystemState)
+        let before = CGEventSource.flagsState(.hidSystemState).rawValue
+        let strokes = KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: before)
         // Both made before either is posted, so a key never goes down without its up.
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
-        down.flags = CGEventFlags(rawValue: flags)
-        up.flags = before
-        let posted = post(down)
-        _ = post(up)
+        let events = strokes.compactMap { CGEvent(keyboardEventSource: source, virtualKey: $0.virtualKey, keyDown: $0.down) }
+        guard events.count == strokes.count else { return }
+        for (event, stroke) in zip(events, strokes) { event.flags = CGEventFlags(rawValue: stroke.flags) }
+        let posted = post(events[0])
+        _ = post(events[1])
         guard posted else { return }
         Stats.shared.bump("in.gesture")
-        checkModifiersLeft(chord: flags, before: before.rawValue)
+        checkModifiersLeft(chord: flags, before: before)
     }
 
     /// Said once a run: a chord left modifiers set that were not set before it.

@@ -56,6 +56,13 @@ MUTANTS = [
      "package mutating func releaseAll() -> [KeyStroke] { [] }"),
     ("the host going lets go of no one's", STROKES, "package mutating func releaseAll() -> [KeyStroke] { letGoOfKeys { _ in true } }",
      "package mutating func releaseAll() -> [KeyStroke] { letGoOfKeys { _ in false } }"),
+    # A trackpad gesture's shortcut
+    ("a gesture's up carries its own flags (before PR #38's fix)", STROKES,
+     "KeyStroke(virtualKey: virtualKey, down: false, flags: before)", "KeyStroke(virtualKey: virtualKey, down: false, flags: flags)"),
+    ("a gesture's up carries nothing", STROKES,
+     "KeyStroke(virtualKey: virtualKey, down: false, flags: before)", "KeyStroke(virtualKey: virtualKey, down: false, flags: 0)"),
+    ("a gesture's down carries what the table held too", STROKES,
+     "[KeyStroke(virtualKey: virtualKey, down: true, flags: flags),", "[KeyStroke(virtualKey: virtualKey, down: true, flags: flags | before),"),
     # What is down, and the tables
     ("nothing is ever down", STROKES, "package func isDown(_ usage: UInt16) -> Bool { down[usage] != nil }",
      "package func isDown(_ usage: UInt16) -> Bool { false }"),

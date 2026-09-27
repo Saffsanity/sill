@@ -55,20 +55,22 @@ way (2026-09-23) is the one observation.
   go as keys. A trackpad drag whose view goes (a rotation) ends: the button and
   the modifiers around it come up, and the latch is spent a turn later. The
   latch itself was already right (the Spotlight key and the key row spend it).
-- `Tests/checks/key-strokes` (272 checks, 51 mutants; CI's mutants matrix):
-  the exact events of every shortcut, modifier key, lost release, leave, quit,
-  move and two-device case, each latched combination on this Mac and on one
-  from before, the hardware keyboard's paths both ways UIKit may report a
-  modifier, and random sessions: 3,000 of two devices (moves, leaves, a
-  hardware keyboard losing releases) and 2,000 of this device alone, against
+- `Tests/checks/key-strokes` (279 checks, 54 mutants; CI's mutants matrix): the
+  exact events of every shortcut, modifier key, lost release, leave, quit, move
+  and two-device case and of a trackpad gesture's shortcut (PR #38's rule,
+  `KeyStrokes.chord` since the merge), each latched combination on this Mac and
+  on one from before, the hardware keyboard's paths both ways UIKit may report a
+  modifier, and random sessions: 3,000 of two devices (moves, leaves, a hardware
+  keyboard losing releases, gestures) and 2,000 of this device alone, against
   the invariant that whatever modifier the table holds, and every pointer
   event's, is accounted for by a key down on the Mac (and, on a Mac from before,
-  that nothing is held once nothing is pressed). Against 643af6b's rules
-  (bbe43dd's KeyStrokes.swift and f6e5691's KeyChords.swift, the rules
-  extracted unchanged, with 643af6b's hardware forward rule, behind the check's
-  API) 203 of 272 fail and 2,996 of the 3,000 sessions break; main's host with
-  this device 34 (none of its sessions on an older Mac), this host with main's
-  device 94 (1,767 of 2,000 on an older Mac); here all pass.
+  that nothing is held once nothing is pressed). Against main's rules (at
+  da43f6b: bbe43dd's KeyStrokes.swift, the key path extracted unchanged, with
+  #38's gesture chord, and f6e5691's KeyChords.swift with the hardware forward
+  rule, behind the check's API) 205 of 279 fail and all 3,000 sessions break;
+  main's host with this device 36 (none of its sessions on an older Mac), this
+  host with main's device 94 (1,767 of 2,000 on an older Mac); here all pass.
+  (Before the merge, against 643af6b's: 203 of 272.)
 - The dry run (TEST ONLY `SILL_TEST_INPUT_LOG=1`, Build and run; a synthetic
   host posts nothing), sillclient's input against this build: an older
   device's Spotlight key then a tap, "key 49 down (command)", "key 49 up
@@ -87,17 +89,18 @@ way (2026-09-23) is the one observation.
   click with both, then down to none); the scroll after it from none.
 - Merged with main at da43f6b (PR #38, trackpad gestures, which landed while
   this was built; one merge commit, not a rebase). #38's `InputInjector.chord`
-  already put the table back with a gesture's key up (the table read before
-  it), and its `checkModifiersLeft` sits beside `checkKeyModifiersLeft`.
-  Where they met: the coordinator's `Held` keeps the device in `.input`, and a
-  switch's drop sends, in order, #38's held chords and the ups of keys down;
-  the `.input` case keeps a key's up without a source and #38's
-  `gestureChords.input` after it; the touch rig (`Tests/touchrig`) compiles
-  KeyChords.swift where the sources have it; ci.yml's matrix, the checks'
-  README, DEVELOPMENT.md and CLAUDE.md keep both sides.
+  already put the table back with a gesture's key up (the table read before it),
+  and its `checkModifiersLeft` sits beside `checkKeyModifiersLeft`; after the
+  merge its flags come from `KeyStrokes.chord` (the same rule), which the check
+  puts among the devices' keys. Where they met: the coordinator's `Held` keeps
+  the device in `.input`, and a switch's drop sends, in order, #38's held chords
+  and the ups of keys down; the `.input` case keeps a key's up without a source
+  and #38's `gestureChords.input` after it; the touch rig (`Tests/touchrig`)
+  compiles KeyChords.swift where the sources have it; ci.yml's matrix, the
+  checks' README, DEVELOPMENT.md and CLAUDE.md keep both sides.
 - Verified: `swift build -c release`, only the CaptureProbe warning; iOS Debug
   for the simulator, only the StreamClient warning; `Tests/checks/run-all.sh`,
-  all 27 after the merge; the key-strokes mutants, 51 of 51; the CLI
+  all 27 after the merge; the key-strokes mutants, 54 of 54; the CLI
   against main's (from `git archive`), synthetic on the software encoder, idle
   and with a client sending a key, a bare ⌘Space and a tap: against 643af6b
   identical, masked, in order; against da43f6b the same but the second after
@@ -116,6 +119,7 @@ way (2026-09-23) is the one observation.
   log has no "Keys: … still read" line (if it does, a key up's flags do not
   put the table back: note which key); with this iPad build against Sill.app
   0.3.1, the Spotlight key then a tap is a plain click.
+
 **Three-finger trackpad gestures (2026-09-27, branch `trackpad-gestures` from
 main at 8b0d418, with main merged in at 5c6a850 (6678ca3), at 2b38179, PR #31
 the Mac's pointer among it (5e6ddaa), and at 643af6b, PRs #35 the tour, #36
@@ -3764,7 +3768,8 @@ good.
   per connection, waits for a switch in flight, queues the chord behind held
   input, and on a host that does not advertise posts none (`in.gestureDry`);
   `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
-  state table's flags from before it (`in.gestureModifiersLeft` if some stay).
+  state table's flags from before it (`KeyStrokes.chord`;
+  `in.gestureModifiersLeft` if some stay).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
