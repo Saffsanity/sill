@@ -56,7 +56,7 @@ usage: Scripts/release.sh [--dry-run | --publish | --check-tag]
   SILL_SIGN_IDENTITY='Developer ID Application: … (TEAMID)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh
       builds Sill.app with make-app.sh --release, zips it, has Apple notarize it, staples the
       ticket, zips it again, checks the zip's copy with stapler and spctl, and prints the zip's
-      path and SHA-256 for site/download.html.
+      path and SHA-256 (--publish puts it in the release's notes; site/download.html never changes).
   --dry-run
       the same checks, build and first zip; stops before notarytool and prints the rest.
   --publish
@@ -134,7 +134,7 @@ publish_problems() {
     fi
     version="$(plist_value CFBundleShortVersionString Packaging/Info.plist)" || return 0
     if gh release view "v$version" --repo "$repo" >/dev/null 2>&1; then
-        echo "The release v$version already exists in $repo. Bump CFBundleShortVersionString in Packaging/Info.plist, or delete that release (and its tag) first."
+        echo "The release v$version already exists in $repo. Bump CFBundleShortVersionString in Packaging/Info.plist. (Deleting that release and its tag frees the version only if the release isn't immutable: GitHub never lets an immutable release's tag be used again.)"
     fi
 }
 

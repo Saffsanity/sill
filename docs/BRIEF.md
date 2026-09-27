@@ -109,4 +109,8 @@ Costs: $99/yr developer account, domain, optionally a Duo for testing.
 ## Open questions
 
 - Hours per week Noah can really commit.
-- Apache-2.0 vs MPL-2.0.
+- Apache-2.0 vs MPL-2.0: Apache-2.0 unless Noah says otherwise. PR #15 (merged
+  2026-09-25) added its text as LICENSE, and the README says so. It becomes
+  final when the repository goes public, since a grant for published code can't
+  be taken back; MPL-2.0 instead means replacing LICENSE and the README's
+  License section before then.

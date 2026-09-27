@@ -1,0 +1,184 @@
+# TestFlight builds of Sill for iPhone and iPad, only by hand: Actions › TestFlight › Run workflow,
+# on the branch or tag to build. Never on a push, a tag or a pull request.
+#
+# What a run does depends on the repository's secrets and variables (Settings › Secrets and
+# variables › Actions; docs/release-checklist.md, "TestFlight from GitHub Actions"):
+#
+# - Without the App Store Connect API key (the secrets SILL_TESTFLIGHT_KEY_ID,
+#   SILL_TESTFLIGHT_ISSUER_ID and SILL_TESTFLIGHT_KEY_P8): Scripts/release-ios.sh --unsigned. The
+#   Release archive is built without signing and checked (the version and build, the export
+#   compliance key, the Local Network, Bonjour and camera entries, the privacy manifest, the
+#   required-reason APIs), and Sill-<version>-<build>-unsigned.ipa is kept for 14 days: to look
+#   inside, not to install or upload. No secret is read.
+# - With the key: Scripts/release-ios.sh --sign-at-export. The archive is built without signing
+#   (the runner has no development certificate) and the export signs it through the key, with
+#   Apple's cloud-managed Apple Distribution certificate and an App Store profile that Xcode makes
+#   or fetches, so no certificate, private key or profile is kept in this repository's secrets.
+#   That needs a key with the Admin role: any other gets "Cloud signing permission error".
+#   Sill-<version>-<build>.ipa, signed for App Store Connect, is kept for 14 days. Nothing is
+#   uploaded, unless:
+# - the repository variable SILL_TESTFLIGHT_IN_CI is true. Then the same run also uploads the
+#   archive to App Store Connect (--upload), where it becomes a TestFlight build once Apple has
+#   processed it. Its build number is the committed CURRENT_PROJECT_VERSION: on a Mac, run
+#   Scripts/release-ios.sh --bump (or set the number and commit it), push, then run this. An
+#   upload of a number App Store Connect already has is refused.
+#
+# Cost: nothing in a public repository. In a private one (GitHub's prices on 2026-09-25), a run
+# takes about 5 minutes of macOS time, under 10, and each macOS minute counts as ten of the
+# account's included minutes (2,000 a month on GitHub Free: some 40 runs), then $0.062 a minute,
+# and only with a payment method on file. Apple charges nothing for uploads or TestFlight. The
+# artifacts are 2 to 3 MB each. docs/release-checklist.md, "What it costs", has the rest.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every run step under bash -eo pipefail (GitHub leaves pipefail off unless the shell is named).
+defaults:
+  run:
+    shell: bash
+
+# One run per branch or tag at a time; a second one waits rather than cancel an upload midway.
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Archive, export, and upload when asked
+    # As in ci.yml: the image with Xcode 27 (macOS 27, a public preview in September 2026).
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A build for App Store Connect is made with Xcode 27 or not at all (release-ios.sh refuses
+      # any other too).
+      - name: Select Xcode 27
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27'
+          fallback: 'false'
+
+      # An if: can't read secrets, so this step reads them and says which run this is: unsigned,
+      # export or upload.
+      - name: Which run this is
+        id: mode
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+          SILL_TESTFLIGHT_KEY_P8: ${{ secrets.SILL_TESTFLIGHT_KEY_P8 }}
+          SILL_TESTFLIGHT_IN_CI: ${{ vars.SILL_TESTFLIGHT_IN_CI }}
+        run: |
+          set_count=0
+          missing=""
+          for name in SILL_TESTFLIGHT_KEY_ID SILL_TESTFLIGHT_ISSUER_ID SILL_TESTFLIGHT_KEY_P8; do
+            if [ -n "$(printenv "$name")" ]; then set_count=$((set_count + 1)); else missing="$missing $name"; fi
+          done
+          if [ "$set_count" -eq 0 ] && [ "$SILL_TESTFLIGHT_IN_CI" = true ]; then
+            echo "::error::SILL_TESTFLIGHT_IN_CI is true, but the App Store Connect API key is not set:$missing. docs/release-checklist.md, TestFlight from GitHub Actions."
+            exit 1
+          fi
+          if [ "$set_count" -ne 0 ] && [ "$set_count" -ne 3 ]; then
+            echo "::error::Only some of the App Store Connect API key's secrets are set; missing:$missing. Set all three, or none for an unsigned check."
+            exit 1
+          fi
+          if [ "$set_count" -eq 0 ]; then
+            mode=unsigned
+            echo "No App Store Connect API key: the archive is built without signing and checked; nothing is signed or uploaded."
+          elif [ "$SILL_TESTFLIGHT_IN_CI" = true ]; then
+            mode=upload
+            echo "SILL_TESTFLIGHT_IN_CI is true: the archive is signed through the API key, exported, checked and uploaded to App Store Connect."
+          else
+            mode=export
+            echo "The archive is signed through the API key, exported and checked; nothing is uploaded (SILL_TESTFLIGHT_IN_CI is not true)."
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      # In a folder of this run's own, outside the checkout (release-ios.sh refuses a key inside
+      # the repository), deleted by the last step whatever happened.
+      - name: Put the API key in a file
+        if: steps.mode.outputs.mode != 'unsigned'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_KEY_P8: ${{ secrets.SILL_TESTFLIGHT_KEY_P8 }}
+        run: |
+          dir="$RUNNER_TEMP/sill-testflight-key"
+          mkdir -m 700 "$dir"
+          key="$dir/AuthKey_$SILL_TESTFLIGHT_KEY_ID.p8"
+          # Tested inside the if, so a secret that isn't base64 gets this message too: bash -e with
+          # pipefail would otherwise end the step at base64's own complaint.
+          if ! printf '%s' "$SILL_TESTFLIGHT_KEY_P8" | base64 --decode > "$key" 2>/dev/null \
+              || ! grep -q -e '-----BEGIN PRIVATE KEY-----' "$key"; then
+            echo "::error::SILL_TESTFLIGHT_KEY_P8 is not an App Store Connect key file in base64 (base64 -i AuthKey_<Key ID>.p8 | gh secret set SILL_TESTFLIGHT_KEY_P8)."
+            exit 1
+          fi
+          chmod 600 "$key"
+          echo "SILL_TESTFLIGHT_KEY_FILE=$key" >> "$GITHUB_ENV"
+
+      - name: Archive without signing and check it (Scripts/release-ios.sh --unsigned)
+        if: steps.mode.outputs.mode == 'unsigned'
+        run: Scripts/release-ios.sh --unsigned -v
+
+      - name: Archive, sign through the API key, export and check (Scripts/release-ios.sh --sign-at-export)
+        if: steps.mode.outputs.mode == 'export'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+        run: |
+          Scripts/release-ios.sh --sign-at-export -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+            --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+
+      - name: Archive, sign, export, check and upload to App Store Connect (Scripts/release-ios.sh --sign-at-export --upload)
+        if: steps.mode.outputs.mode == 'upload'
+        env:
+          SILL_TESTFLIGHT_KEY_ID: ${{ secrets.SILL_TESTFLIGHT_KEY_ID }}
+          SILL_TESTFLIGHT_ISSUER_ID: ${{ secrets.SILL_TESTFLIGHT_ISSUER_ID }}
+        run: |
+          Scripts/release-ios.sh --sign-at-export --upload -v --api-key "$SILL_TESTFLIGHT_KEY_FILE" \
+            --api-key-id "$SILL_TESTFLIGHT_KEY_ID" --api-issuer "$SILL_TESTFLIGHT_ISSUER_ID"
+
+      - name: Name the .ipa and summarize
+        id: ipa
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          version="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' .build/ios/Sill.xcarchive/Info.plist)"
+          build="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' .build/ios/Sill.xcarchive/Info.plist)"
+          if [ "$MODE" = unsigned ]; then
+            ipa=".build/ios/Sill-$version-$build-unsigned.ipa"
+            cp .build/ios/export/Sill-unsigned.ipa "$ipa"
+          else
+            ipa=".build/ios/Sill-$version-$build.ipa"
+            cp .build/ios/export/Sill.ipa "$ipa"
+          fi
+          echo "path=$ipa" >> "$GITHUB_OUTPUT"
+          {
+            echo "Sill for iPhone and iPad $version ($build), from $(git rev-parse --short HEAD) on $GITHUB_REF_NAME."
+            echo
+            if [ "$MODE" = unsigned ]; then
+              echo "Built without signing and checked. The artifact $(basename "$ipa") is not signed: for looking inside, not for installing or uploading. No App Store Connect API key is set (docs/release-checklist.md, TestFlight from GitHub Actions)."
+            elif [ "$MODE" = export ]; then
+              echo "Signed for App Store Connect and checked; the artifact is $(basename "$ipa"). Nothing was uploaded: the repository variable SILL_TESTFLIGHT_IN_CI is not true."
+            else
+              echo "Uploaded to App Store Connect. It shows under TestFlight once Apple has processed it (usually within 30 minutes, with an email). The artifact $(basename "$ipa") is the same build, exported the same way."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the .ipa as this run's artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.ipa.outputs.path }}
+          archive: false
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Delete the API key file
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/sill-testflight-key"

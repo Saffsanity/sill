@@ -534,6 +534,23 @@ tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
 `--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
 on, let that run publish instead.
 
+The iOS app goes to App Store Connect (TestFlight, then the App Store) from
+`Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
+signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
+checked (the version and build, the export compliance key, the Local Network
+and camera strings, the privacy manifest, an App Store signature and
+profile), and with `--upload` uploaded. `--bump` gives each upload of a
+version the next build number, alone in a commit; both refuse uncommitted
+changes, so every uploaded build is a commit's. It signs and uploads
+through the Apple Account in Xcode › Settings › Accounts, or through an App
+Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
+and it needs Xcode 27.
+`--privacy-report` lists what the archive's privacy manifest declares and the
+required-reason APIs its binary uses. The TestFlight workflow
+(`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.
+docs/release-checklist.md, "TestFlight", has the App Store Connect side, the
+record field by field.
+
 ## Known limitations
 
 - TCP: one lost packet stalls everything behind it. The real transport is UDP
@@ -553,14 +570,16 @@ on, let that run publish instead.
   with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
   `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
-- `Packaging/`: Sill.app's Info.plist and entitlements.
+- `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
+  export options for App Store Connect.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `sillclient.py` (a wire-format test client),
+  zip people download), `release-ios.sh` (the iOS app's build for App Store
+  Connect and TestFlight), `sillclient.py` (a wire-format test client),
   `sillrelay.py` (a relay that slows or cuts the link, for tests) and
   `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
   check's tests).
-- `Tests/checks/`: the pure checks (above). `.github/`: the CI and release
-  workflows, and the Sponsor button.
+- `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
+  TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.

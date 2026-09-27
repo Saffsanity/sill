@@ -16,8 +16,8 @@ import Foundation
 /// the USB cable, and no scope at all over IPv4 ("127.0.0.1:64431"). AWDL carries IPv6 link-local
 /// addresses only, so a device on it always shows its scope. The path is the weaker witness: a
 /// local connection to this Mac's own address lists both en0 and lo0 (the probe, again on
-/// 2026-09-24: to 10.128.0.34, fe80::…%en0 and a global IPv6 address alike, while one to 127.0.0.1
-/// lists lo0 alone).
+/// 2026-09-24: to its Wi-Fi IPv4 address, fe80::…%en0 and a global IPv6 address alike, while one
+/// to 127.0.0.1 lists lo0 alone).
 package enum ClientLink {
     /// The kind of link a device's connection runs over, from this Mac's side: the word the menu
     /// card gives it (StatusText). Each end names its own link, so a device on Wi-Fi streaming

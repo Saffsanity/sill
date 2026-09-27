@@ -3,7 +3,7 @@ import StreamProtocol
 
 /// The address the pairing window gives to type on the device, under "Can’t scan? Tap Enter Code
 /// Instead, and type:" (docs/remote-access-plan.md §6.2). Tailscale's name and IPv4 take this
-/// network's place (Noah, 2026-09-25: from an iPhone's hotspot this network's 10.128.0.34 answered
+/// network's place (Noah, 2026-09-25: from an iPhone's hotspot this network's address answered
 /// nothing, while the Tailscale address and its MagicDNS name both paired). Another VPN's address
 /// never does: it may answer from nowhere (NordVPN's NordLynx gives every Mac 10.5.0.2, Cloudflare
 /// WARP 172.16.0.2), while this network's answers at home and through a VPN into the home network.
@@ -27,11 +27,11 @@ import StreamProtocol
 /// its own with swiftc.
 enum PairingWindowAddress {
     struct Choice: Equatable {
-        /// What to type: "noahs-macbook-pro.tailc94091.ts.net", "100.65.142.55", "192.168.1.20".
+        /// What to type: "mac-mini.tail1234.ts.net", "100.101.102.103", "192.168.1.20".
         var primary: String
         /// The line under it, after "or": the named VPN's own IPv4 under its name ("or
-        /// 100.65.142.55"), or another VPN's address under this network's ("or 10.8.0.6"); nil when
-        /// there is none to show.
+        /// 100.101.102.103"), or another VPN's address under this network's ("or 10.8.0.6"); nil
+        /// when there is none to show.
         var secondary: String?
     }
 
