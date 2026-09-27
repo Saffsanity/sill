@@ -1167,12 +1167,31 @@ default.
   here"; Take the Tour from the Settings panel (`-SillTakeTourAt 2`) showed it again from the
   first step; the app's plist held `Sill.tourSeen` touch, bar, settings and `Sill.tourSkipped`
   false.
-- **Not run: S5 and the phone's live photos.** Every live run needs `SillHost --synthetic`, which
-  uses the hardware video encoder, and `Scripts/encoder-check/no-device.sh` found a device
-  streaming from Noah's Sill.app at every check from 01:17 on, so no host was started. The same
-  sequence ran on the mock with the real keys (above). `-SillOrientation landscape` was seen to
-  turn the normal app sideways in the iPhone 18 Pro Max simulator (its connect screen, which needs
-  no host), so the phone's sideways photos need no harness fallback when they run.
+- **S5, live** (03:28–03:40, once Noah's iPad had left Sill.app: it streamed from 01:17 on, and
+  `Scripts/encoder-check/no-device.sh` blocked every try until then). The normal app on an iPhone
+  18 Pro Max against `SillHost --synthetic` on loopback (`-SillConnect`), one host at a time, the
+  guard before each and a watchdog on Sill.log during, each host under 40 s, none left running:
+  - (a, b) on a fresh install with `-SillTourState saved`, the first connection showed the touch
+    card 1.06 s after the picture (1.10 s in the first run) and, `-SillTourPress next@2` pressing
+    through, saved touch, bar, settings and laptop; the second connection said "nothing owed here
+    (portrait; seen: touch, bar, settings, laptop)"; the third, with `-SillTakeTourAt 2`, opened
+    Settings and its Take the Tour showed the tour from the first step, 3.37 s after the picture.
+  - A session cut at the third card (the host killed; the stand-in had just passed that card) went
+    on at the next connection with what was left: the laptop card alone, 1 of 1, with its
+    subtitle.
+  - (c) a host with `SILL_TEST_MIN_DEVICE_VERSION=99`: the connect screen's update notice, and no
+    `tour:` line.
+  - The phone's real safe areas: every step upright (the stream screen 440x894 under the Dynamic
+    Island) and sideways (`-SillOrientation landscape` turns the normal app; 832x440 between its
+    insets), at the default size and at accessibility-extra-large: each ring on its controls, not
+    an inset away (the critique's §18 item 7), the cards clear of the Dynamic Island and the home
+    indicator, "iPhone" and no Pencil row.
+  - (d) The tripwire never printed.
+- **Found there and fixed:** upright on that 3x screen the Settings card faded its second row as
+  if its words scrolled: offered exactly their height, the words missed their fit test by a
+  rounding. The card is now measured with a point of slack (reproduced in the mock at 440x956 on
+  the same simulator, and gone after). The iPad and iPhone SE photos above were taken one commit
+  before it, on 2x screens, which never showed it; the slack moves a card by under 2 pt.
 
 ### Untested, for Noah
 

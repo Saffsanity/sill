@@ -53,7 +53,8 @@ only: no wire change, nothing sent to the Mac, two UserDefaults keys.
   animation's scale); `-SillTakeTourAt`. Found and fixed: Done wrapping to two
   lines on the iPhone SE at accessibility-extra-large (the footer's line was
   measured with its words free to wrap); a run carried into the other layout
-  left that layout's decision open.
+  left that layout's decision open; a card on a 3x screen fading its last
+  row (below).
 - Verified (the plan's Results): Debug and Release for the simulator and Debug
   for a device, only the known StreamClient warning, and each commit's state
   builds; `Tests/checks/tour` 34,059 checks and 35 of 35 mutants, `run-all.sh`
@@ -69,13 +70,23 @@ only: no wire change, nothing sent to the Mac, two UserDefaults keys.
   of the layouts; the rule in the mock (fresh, landscape, done, skipped, the
   Apps list, a stand-in touch, the pairing overlay, Next through Done); with
   the real keys in the mock, shown, then "nothing owed", then back from
-  Settings. Not run yet: the live runs against `SillHost --synthetic` (the
-  first connection shows it, the second does not, the Settings row brings it
-  back; the phone's real insets on an iPhone 18 Pro Max, upright and with
-  `-SillOrientation landscape`, which turns the normal app in the simulator),
-  because Noah's iPad streamed from Sill.app the whole time
-  (`Scripts/encoder-check/no-device.sh` blocked every check from 01:17 on;
-  the runner is ready in the session's scratchpad, `walkthrough/tools/live.py`).
+  Settings. Live (03:28–03:40, once Noah's iPad had left Sill.app, which it
+  streamed from until then; `SillHost --synthetic` on loopback, the guard
+  before each host and a watchdog on Sill.log during, each host under 40 s,
+  none left running; the normal app on an iPhone 18 Pro Max with
+  `-SillConnect`): on a fresh install the first connection showed the touch
+  card 1.06 s after the picture and, the stand-in pressing Next, saved all
+  four steps; the second connection said "nothing owed here"; the Settings
+  panel's Take the Tour (`-SillTakeTourAt 2`) showed it again from the first
+  step; a session cut at the third card went on next time with what was left
+  (the laptop card alone, with its subtitle); a host refusing this version
+  (`SILL_TEST_MIN_DEVICE_VERSION=99`) gave its notice and no tour; every step
+  upright and sideways (`-SillOrientation landscape` turns the normal app) at
+  the default size and accessibility-extra-large, each ring on its controls
+  under the real safe areas; the tripwire never fired. Found there and fixed:
+  upright on that 3x screen the Settings card faded its second row as if it
+  scrolled (its words missed their fit test by a rounding); the card is
+  measured with a point of slack.
 - **Untested, for Noah (the plan's P1–P11, on the iPad mini and the iPhone 15
   Pro):** the automatic tour needs a Release or TestFlight build on a fresh
   install, or Debug with `-SillTourState fresh` (Xcode's scheme). P1 a second
