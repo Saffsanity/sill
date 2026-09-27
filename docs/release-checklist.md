@@ -280,8 +280,9 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
 - [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date, and
       republish it (part 1 §3) right after the release is published: the pages describe the builds
       people can download, so words for a newer build wait for it, and words for the old one go
-      with it. On 2026-09-27 the published pages were main's `site/` but for the tour's line in
-      privacy.html (PR #35), which waits for the next release.
+      with it. On 2026-09-27 the published pages were main's `site/` as PR #33 left it:
+      privacy.html's lines for the tour (PR #35), the Mac's menus (PR #36) and its pointer (PR
+      #31, whose Mac side 0.3.1 already has) wait for the next release, with that page's date.
 
 ## TestFlight
 
