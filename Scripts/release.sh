@@ -345,10 +345,12 @@ check_disk_image() {
         if [ "$try" = 3 ]; then printf '%s\n' "$output" >&2; fail "hdiutil can't attach $dmg"; fi
         sleep 2
     done
+    # The image's own device (the first /dev/disk line) first, so the way out detaches it whatever
+    # the rest says.
+    dmg_device="$(printf '%s\n' "$output" | awk -F'\t' '$1 ~ /^\/dev\/disk/ { sub(/[ \t]+$/, "", $1); print $1; exit }')"
     line="$(printf '%s\n' "$output" | awk -F'\t' '$2 ~ /Apple_HFS/ { print; exit }')"
-    dmg_device="$(printf '%s' "$line" | awk -F'\t' '{ sub(/[ \t]+$/, "", $1); print $1 }' | sed 's/s[0-9][0-9]*$//')"
     mounted="$(printf '%s' "$line" | awk -F'\t' '{ print $NF }')"
-    [ -n "$dmg_device" ] && [ -d "$mounted/Sill.app" ] || { printf '%s\n' "$output" >&2; fail "$dmg mounted no Sill.app"; }
+    [ -n "$dmg_device" ] && [ -n "$line" ] && [ -d "$mounted/Sill.app" ] || { printf '%s\n' "$output" >&2; fail "$dmg mounted no Sill.app"; }
     check_gatekeeper "$mounted/Sill.app"
     hdiutil detach "$dmg_device" -quiet || hdiutil detach "$dmg_device" -force -quiet
     dmg_device=""

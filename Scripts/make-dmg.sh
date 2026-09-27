@@ -98,17 +98,19 @@ attach() {
     local image="$1" mode="${2:-ro}" output line
     local options=(-nobrowse -noautoopen -noverify -mountrandom "$mounts")
     if [ "$mode" = rw ]; then options+=(-readwrite); else options+=(-readonly); fi
-    # macOS 27's hdiutil warns that attach -nobrowse is deprecated for `diskutil image attach`; the
-    # output keeps the warning only when attaching fails.
+    # The output also holds macOS 27's warning that attach -nobrowse is deprecated for `diskutil
+    # image attach`; only the /dev/disk lines are read.
     output="$(hdiutil_retrying attach "${options[@]}" "$image")" || fail "hdiutil can't attach $image"
+    # The image's own device (the first /dev/disk line, whatever the image holds) is recorded before
+    # anything else is checked, so the way out detaches it even when no HFS+ volume turned up.
+    device="$(printf '%s\n' "$output" | awk -F'\t' '$1 ~ /^\/dev\/disk/ { sub(/[ \t]+$/, "", $1); print $1; exit }')"
+    if [ -n "$device" ]; then attached+=("$device"); fi
     line="$(printf '%s\n' "$output" | awk -F'\t' '$2 ~ /Apple_HFS/ { print; exit }')"
-    device="$(printf '%s' "$line" | awk -F'\t' '{ sub(/[ \t]+$/, "", $1); print $1 }' | sed 's/s[0-9][0-9]*$//')"
     mounted="$(printf '%s' "$line" | awk -F'\t' '{ print $NF }')"
-    if [ -z "$device" ] || [ ! -d "$mounted" ]; then
+    if [ -z "$device" ] || [ -z "$line" ] || [ ! -d "$mounted" ]; then
         printf '%s\n' "$output" >&2
         fail "hdiutil attached $image but mounted no HFS+ volume"
     fi
-    attached+=("$device")
 }
 
 detach() {
