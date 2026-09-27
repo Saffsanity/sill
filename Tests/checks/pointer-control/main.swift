@@ -291,8 +291,11 @@ check(same(frac(pt(1134, 237.25)), (0.75, 0.25, true)), "H4's second step")
 check(same(frac(pt(-40, 474.5)), (-0.0265, 0.5, false)), "H4's third step: off the pattern")
 check(same(frac(pt(378, 711.75)), (0.25, 0.75, true)), "H4's fourth step")
 check(same(frac(pt(0, 0)), (0, 0, true)), "the top-left corner is inside")
-check(same(frac(pt(1512, 949)), (1, 1, true)), "the bottom-right corner is inside")
-check(same(frac(pt(1512, 0)), (1, 0, true)) && same(frac(pt(0, 949)), (0, 1, true)), "the other corners")
+check(same(frac(pt(1511.99, 948.99)), (1, 1, true)), "the last column and row are inside, rounded to 1")
+check(same(frac(pt(1511.99, 0)), (1, 0, true)) && same(frac(pt(0, 948.99)), (0, 1, true)), "the other corners' last points")
+check(same(frac(pt(1512, 949)), (1, 1, false)), "the bottom-right corner itself is outside: the far edges are the next display's")
+check(same(frac(pt(1512, 474.5)), (1, 0.5, false)) && same(frac(pt(756, 949)), (0.5, 1, false)),
+      "the column at maxX and the row at maxY are outside (the review, 2026-09-27)")
 check(!frac(pt(-0.01, 400)).2 && !frac(pt(400, -0.01)).2, "just left of or above the rectangle: outside")
 check(!frac(pt(1512.01, 400)).2 && !frac(pt(400, 949.01)).2, "just right of or below it: outside")
 check(same(frac(pt(1512.02, 400)), (1.0, 0.4215, false)), "outside, x rounds to 1.0 and it is still outside (judged before rounding)")
@@ -300,7 +303,8 @@ check(same(frac(pt(-0.03, 400)), (0, 0.4215, false)) && frac(pt(-0.03, 400)).0.s
       "outside on the left rounds to -0.0, and is still outside")
 let window = CGRect(x: 100, y: 200, width: 400, height: 300)
 check(same(frac(pt(300, 350), window), (0.5, 0.5, true)), "an offset rectangle")
-check(same(frac(pt(100, 200), window), (0, 0, true)) && same(frac(pt(500, 500), window), (1, 1, true)), "its corners")
+check(same(frac(pt(100, 200), window), (0, 0, true)) && same(frac(pt(499.99, 499.99), window), (1, 1, true)), "its corners")
+check(!frac(pt(500, 350), window).2 && !frac(pt(300, 500), window).2, "its right and bottom edges are past it")
 check(same(frac(pt(50, 350), window), (-0.125, 0.5, false)), "left of it")
 check(same(frac(pt(504, 1)), (0.3333, 0.0011, true)) && same(frac(pt(1008, 1)), (0.6667, 0.0011, true)), "rounded to 4 places")
 check(same(frac(pt(0.2, 0)), (0.0001, 0, true)) && same(frac(pt(0.07, 0)), (0, 0, true)), "rounding at the fourth place")
@@ -309,9 +313,13 @@ check(!frac(pt(0, 0), CGRect(x: 0, y: 0, width: 0, height: 949)).2 && !frac(pt(0
       "an empty rectangle is never inside")
 check(!frac(pt(0, 0), .null).2 && !frac(pt(0, 0), .infinite).2 && !frac(pt(0, 0), .zero).2, "null, infinite and zero rectangles")
 check(!frac(pt(.nan, 10)).2 && !frac(pt(10, .infinity)).2, "a non-finite point")
-check(!frac(pt(10, 10), CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10)).2, "a rectangle of infinite width")
+// Halfway down, so only the guard keeps it out: unguarded, x is 10 / ∞ = 0 and y 0.5, inside.
+check(!frac(pt(10, 5), CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10)).2, "a rectangle of infinite width")
+check(!frac(pt(10, 5), CGRect(x: 0, y: 0, width: 10, height: CGFloat.infinity)).2, "a rectangle of infinite height")
 let second = CGRect(x: 1512, y: 0, width: 1920, height: 1080)
 check(!frac(pt(1600, 500)).2 && frac(pt(1600, 500), second).2, "a second display to the right: outside the first, inside itself")
+check(!frac(pt(1512, 474.5)).2 && same(frac(pt(1512, 474.5), second), (0, 0.4394, true)),
+      "the second display's first column: its own, not the first's")
 
 // MARK: Kind 26 (StreamProtocol)
 

@@ -131,14 +131,15 @@ struct PointerControl {
 
     /// Where `p` is in the streamed source's rectangle `r` (both in top-left global points, the
     /// injector's), as the fractions kind 26 carries: rounded to 4 decimal places, and `inside` when
-    /// both are within 0…1, judged before rounding. An empty, infinite or non-finite rectangle, or a
-    /// non-finite point, is never inside.
+    /// both are at least 0 and below 1, judged before rounding. The far edges are out: the column at
+    /// `maxX` is the next display's first (or past a window's edge), and the row at `maxY` the same.
+    /// An empty, infinite or non-finite rectangle, or a non-finite point, is never inside.
     static func fraction(of p: CGPoint, in r: CGRect) -> (x: Double, y: Double, inside: Bool) {
         guard !r.isEmpty, !r.isInfinite,
               [r.minX, r.minY, r.width, r.height, p.x, p.y].allSatisfy({ $0.isFinite }) else { return (0, 0, false) }
         let x = Double((p.x - r.minX) / r.width)
         let y = Double((p.y - r.minY) / r.height)
-        let inside = (0...1).contains(x) && (0...1).contains(y)
+        let inside = x >= 0 && x < 1 && y >= 0 && y < 1
         return (MacPointer.rounded(x), MacPointer.rounded(y), inside)
     }
 }

@@ -115,7 +115,10 @@ do {
     check(r.x == 0 && r.y == 0 && r.inside, "the top-left corner is inside")
     c.now += 0.03; l.point = pt(900, 450)
     r = w.sample()!
-    check(r.x == 1 && r.y == 1 && r.inside, "the bottom-right corner is inside")
+    check(r.x == 1 && r.y == 1 && !r.inside, "the bottom-right corner is outside: the next display's first column and row")
+    c.now += 0.03; l.point = pt(899.99, 449.99)
+    r = w.sample()!
+    check(r.x == 1 && r.y == 1 && r.inside, "the last column and row are inside, rounded to 1")
     c.now += 0.03; l.point = pt(99, 250)
     r = w.sample()!
     check(!r.inside, "a point left of it is outside")

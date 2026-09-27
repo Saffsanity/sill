@@ -40,8 +40,11 @@ MUTANTS = [
      "        case .pointer, .scroll: return true\n        case .text, .key, .scrollGesture: return false\n"),
     ("an undecodable payload moves the pointer", CONTROL, ".map(movesPointer) ?? false", ".map(movesPointer) ?? true"),
     # The fraction
-    ("inside judged after rounding", CONTROL, "let inside = (0...1).contains(x) && (0...1).contains(y)",
-     "let inside = (0...1).contains(MacPointer.rounded(x)) && (0...1).contains(MacPointer.rounded(y))"),
+    ("inside judged after rounding", CONTROL, "let inside = x >= 0 && x < 1 && y >= 0 && y < 1",
+     "let inside = MacPointer.rounded(x) >= 0 && MacPointer.rounded(x) < 1 && MacPointer.rounded(y) >= 0 && MacPointer.rounded(y) < 1"),
+    ("the column at maxX inside", CONTROL, "let inside = x >= 0 && x < 1 && y >= 0 && y < 1", "let inside = x >= 0 && x <= 1 && y >= 0 && y < 1"),
+    ("the row at maxY inside", CONTROL, "let inside = x >= 0 && x < 1 && y >= 0 && y < 1", "let inside = x >= 0 && x < 1 && y >= 0 && y <= 1"),
+    ("the column at minX outside", CONTROL, "let inside = x >= 0 && x < 1 && y >= 0 && y < 1", "let inside = x > 0 && x < 1 && y >= 0 && y < 1"),
     ("y against the width", CONTROL, "let y = Double((p.y - r.minY) / r.height)", "let y = Double((p.y - r.minY) / r.width)"),
     ("x from the rectangle's origin ignored", CONTROL, "let x = Double((p.x - r.minX) / r.width)", "let x = Double(p.x / r.width)"),
     ("a non-finite point or rectangle let through", CONTROL, "[r.minX, r.minY, r.width, r.height, p.x, p.y].allSatisfy({ $0.isFinite })", "true"),
