@@ -155,6 +155,27 @@ package final class StreamCoordinator {
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
     private var settingsIgnoredLineAt: [ObjectIdentifier: CFAbsoluteTime] = [:]
     static let settingsPerSecond = 4
+    /// Trackpad gestures (kind 28, docs/trackpad-gestures-plan.md §7): the view Sill's last gesture
+    /// opened, which the opposite gesture closes (GestureChords), and each connection's gestures of
+    /// the last second: `gesturesPerSecond` a second, the rest dropped with one line a minute.
+    private var gestureChords = GestureChords()
+    private var gestureArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
+    static let gesturesPerSecond = 4
+    private lazy var gestureDrops = RefusalSummary(queue: .main, categories: ["gestures"]) { counts in
+        "Gestures ignored: \(counts["gestures"] ?? 0) in a minute, from devices sending more than \(StreamCoordinator.gesturesPerSecond) a second."
+    }
+    /// Gestures waiting for a switch in flight to finish, in arrival order, and the task posting them.
+    private var pendingGestures: [(gesture: TrackpadGesture, device: String)] = []
+    private var gestureDrain: Task<Void, Never>?
+    /// A host that does not advertise (the synthetic test hosts, which tests reach by port) posts no
+    /// gesture's chord: it logs the one it would post, "(not posted: a test host)", and counts
+    /// `in.gestureDry`, so a test can send gestures without touching this Mac.
+    private let gesturesDry: Bool
+    /// TEST ONLY: a test host's SILL_TEST_HOTKEYS table (GestureChords.testTable), used instead of
+    /// this Mac's Keyboard Shortcuts; nil on every other host.
+    private let testHotKeys: [Int: HotKey]?
+    /// This macOS had no getters for its Keyboard Shortcuts at a gesture: said once.
+    private var saidHotKeysMissing = false
     /// A viewport that came in mid-switch, when `active` still names the old source: applied once
     /// the switch is done, so a rotation during a restart is not lost.
     private var viewportArrivedWhileSwitching = false
@@ -195,6 +216,8 @@ package final class StreamCoordinator {
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
+        gesturesDry = server.isTestHost                    // a test host never posts a gesture (§7.4)
+        testHotKeys = server.isTestHost ? Self.testHotKeyTable() : nil
         self.remote = remote
         // Direct Wireless is the listener's: built with it at start, replaced when it changes (adopt).
         server.setPeerToPeer(config.directWireless)
@@ -238,6 +261,7 @@ package final class StreamCoordinator {
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
+                self.gestureArrivals[ObjectIdentifier(connection)] = nil
                 self.routes[ObjectIdentifier(connection)] = nil
                 self.lastPairingWanted[ObjectIdentifier(connection)] = nil
                 self.status.update { $0.devices.removeAll { $0.id == ObjectIdentifier(connection) } }
@@ -605,8 +629,26 @@ package final class StreamCoordinator {
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload),
                   let rect = currentSourceRect() else { return }
+            // Any input but a pointer move may have closed, or left behind, a view a gesture opened.
+            if case .pointer(.move, _, _) = event {} else { gestureChords.otherInput() }
             raiseIfInteracting(event)
             deliver(event, in: rect)
+        case .gesture:
+            // A three- or four-finger gesture (docs/trackpad-gestures-plan.md §7.4), which the Mac
+            // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
+            // stroke makes one, so more is a runaway or hostile client.
+            guard let gesture = Wire.decode(TrackpadGesture.self, from: message.payload) else { return }
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            var recent = (gestureArrivals[id] ?? []).filter { now - $0 < 1 }
+            guard recent.count < Self.gesturesPerSecond else {
+                gestureArrivals[id] = recent
+                gestureDrops.count("gestures")
+                return
+            }
+            recent.append(now)
+            gestureArrivals[id] = recent
+            queueGesture(gesture, from: deviceName(connection))
         case .viewport:
             guard let v = Wire.decode(Viewport.self, from: message.payload) else { return }
             viewport = v
@@ -838,7 +880,13 @@ package final class StreamCoordinator {
         await syntheticCapture.stop()
         capture.onFrame = nil; syntheticCapture.onFrame = nil   // both queues drained: let the old encoder go
         rectCache = nil
-        heldInput = []; holdUntil = 0          // input held for the old source must not replay into the new one
+        // Input held for the old source must not replay into the new one. A gesture's chord held
+        // behind it acts on the whole Mac, not on the source: it goes now.
+        let heldChords = heldInput.compactMap { item -> (UInt16, UInt64)? in
+            if case .chord(let keyCode, let flags) = item { return (keyCode, flags) } else { return nil }
+        }
+        heldInput = []; holdUntil = 0
+        for (keyCode, flags) in heldChords { injector.chord(keyCode: keyCode, flags: flags) }
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
         // New settings take effect here, between pipelines, before the rate, the scale and the
@@ -1071,14 +1119,17 @@ package final class StreamCoordinator {
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
     private var lastActivationAt: CFAbsoluteTime = 0
-    private var heldInput: [(InputEvent, CGRect)] = []
+    /// Input held for an activation, replayed in order once the app is up; a gesture's chord that
+    /// arrives meanwhile waits behind it, so a click just before the gesture lands first.
+    private enum Held { case input(InputEvent, CGRect), chord(keyCode: UInt16, flags: UInt64) }
+    private var heldInput: [Held] = []
     private var holdUntil: CFAbsoluteTime = 0
     /// How long held input waits for the app to become frontmost before it is replayed anyway.
     private static let activationTimeout: TimeInterval = 0.6
 
     private func deliver(_ event: InputEvent, in rect: CGRect) {
         // Queue while holding, and while anything is still queued, so order is never inverted.
-        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append((event, rect)); return }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil { heldInput.append(.input(event, rect)); return }
         logClick(event, in: rect)
         injector.apply(event, in: rect)
     }
@@ -1087,7 +1138,12 @@ package final class StreamCoordinator {
         holdUntil = 0
         let held = heldInput
         heldInput = []
-        for (event, rect) in held { logClick(event, in: rect); injector.apply(event, in: rect) }
+        for item in held {
+            switch item {
+            case .input(let event, let rect): logClick(event, in: rect); injector.apply(event, in: rect)
+            case .chord(let keyCode, let flags): injector.chord(keyCode: keyCode, flags: flags)
+            }
+        }
     }
 
     private func raiseIfInteracting(_ event: InputEvent) {
@@ -1569,12 +1625,82 @@ package final class StreamCoordinator {
     private var encoderWidth: Int { encoder?.width ?? 0 }
     private var encoderHeight: Int { encoder?.height ?? 0 }
 
+    // MARK: Trackpad gestures
+
+    /// Posts gestures in arrival order, once a switch in flight is done (at most 2 s later): a
+    /// gesture made while a window streamed comes right after the device's Desktop pick, the
+    /// window may be on its way home from the virtual display, and the view should open over the
+    /// Desktop, which is the only source that shows it.
+    private func queueGesture(_ gesture: TrackpadGesture, from device: String) {
+        pendingGestures.append((gesture, device))
+        guard gestureDrain == nil else { return }
+        gestureDrain = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let deadline = CFAbsoluteTimeGetCurrent() + 2
+            while self.switching, CFAbsoluteTimeGetCurrent() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            while !self.pendingGestures.isEmpty {
+                let next = self.pendingGestures.removeFirst()
+                self.performGesture(next.gesture, from: next.device)
+            }
+            self.gestureDrain = nil
+        }
+    }
+
+    /// One gesture: the Mac's shortcut for it as its Keyboard Shortcuts are now (GestureChords),
+    /// one line saying what it did, and the chord posted, behind input held for an activation; on
+    /// a host that does not advertise, only counted. Nothing is raised or activated first: these
+    /// views act on the whole Mac (App Exposé on the app in front), as they do from its keyboard.
+    private func performGesture(_ gesture: TrackpadGesture, from device: String) {
+        guard !shuttingDown else { return }
+        let outcome = gestureChords.resolve(gesture.gesture, table: hotKeyTable())
+        print(GestureChords.line(device: device, gesture: gesture.gesture, fingers: gesture.fingers,
+                                 outcome: outcome, dryRun: gesturesDry))
+        guard case .chord(_, _, let keyCode, let flags) = outcome else { return }
+        if gesturesDry {
+            Stats.shared.bump("in.gestureDry")
+            return
+        }
+        if !heldInput.isEmpty || CFAbsoluteTimeGetCurrent() < holdUntil {
+            heldInput.append(.chord(keyCode: keyCode, flags: flags))
+            return
+        }
+        injector.chord(keyCode: keyCode, flags: flags)
+    }
+
+    /// This Mac's Keyboard Shortcuts for the gestures, read now (SymbolicHotKeys); macOS 27's own
+    /// when this macOS has no getters for them (said once); a test host's SILL_TEST_HOTKEYS table.
+    private func hotKeyTable() -> [Int: HotKey] {
+        if let testHotKeys { return testHotKeys }
+        if let table = SymbolicHotKeys.read(GestureChords.hotKeyIDs) { return table }
+        if !saidHotKeysMissing {
+            saidHotKeysMissing = true
+            print("Gestures: this macOS does not say what its keyboard shortcuts are; using macOS 27's own.")
+        }
+        return GestureChords.defaults
+    }
+
+    /// TEST ONLY: SILL_TEST_HOTKEYS, read once by a host that does not advertise: "defaults", or
+    /// `ID=off` and `ID=KEYCODE:MODIFIERS` entries over them (GestureChords.testTable). A value that
+    /// does not parse is ignored with one line.
+    private static func testHotKeyTable() -> [Int: HotKey]? {
+        guard let raw = ProcessInfo.processInfo.environment["SILL_TEST_HOTKEYS"], !raw.isEmpty else { return nil }
+        guard let table = GestureChords.testTable(raw) else {
+            print("SILL_TEST_HOTKEYS=\(raw) ignored: \"defaults\", or ID=off and ID=KEYCODE:MODIFIERS entries.")
+            return nil
+        }
+        print("TEST: gestures use SILL_TEST_HOTKEYS=\(raw), not this Mac's keyboard shortcuts.")
+        return table
+    }
+
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current)))
+                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
+                                                      gestures: TrackpadGesture.generation)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

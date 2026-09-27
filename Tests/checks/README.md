@@ -2,14 +2,14 @@
 
 The parts of Sill that decide things (when the device looks for a Mac and which path a session
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
-video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
-session ends, what the update check makes of GitHub's answer, how the Mac download's disk image lays
-out its window, where everything goes on a phone held upright) are plain Swift files that compile on
-their own. Each folder here compiles one or a few of those files, exactly as they are in `Sources/`,
-`iOSClient/` and `Scripts/`, together with its own `main.swift`, and runs the result. Nothing here
-needs a device, Screen Recording, Accessibility, the video encoder or any network but loopback, so
-the checks run anywhere Xcode does, and in CI (`.github/workflows/ci.yml`) on pull requests and
-pushes to `main`.
+video encoder and when a stream gets a new encoder session, which device versions a Mac serves, what
+the Mac does with a trackpad gesture, how a session ends, what the update check makes of GitHub's
+answer, how the Mac download's disk image lays out its window, where everything goes on a phone held
+upright) are plain Swift files that compile on their own. Each folder here compiles one or a few of
+those files, exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own
+`main.swift`, and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the
+video encoder or any network but loopback, so the checks run anywhere Xcode does, and in CI
+(`.github/workflows/ci.yml`) on pull requests and pushes to `main`.
 
 ```
 Tests/checks/run-all.sh                   # every check, about two minutes on an M-series Mac
@@ -31,9 +31,10 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `dmg-layout` | `Scripts/dmg-layout/DSStore.swift`, `FinderAlias.swift`, `DMGLayout.swift` (with make-dmg.sh's layout arguments and `design/DMGBackground.svg`) | the `.DS_Store` of Sill.dmg's window byte by byte against Finder's own layout of the file (blocks, free lists, header), the window's bounds (the picture and macOS 27's 32-point title bar), view options and icon places; the background's alias field by field; the encoder and decoder, a two-level tree among them; the volume icon's flag; an alias for a real file where it runs; that make-dmg.sh and the SVG still give that window | 70 | 43 |
 | `encoder-mailbox` | `Sources/SillHost/EncoderMailbox.swift` | HEVCEncoder's frames on their way into VideoToolbox (one inside, the one-slot mailbox, the watchdog's clock, timestamps, keyframe requests, `abandon`, the teardown) through a copy of HEVCEncoder's glue around a stand-in for VideoToolbox, in virtual time; a binary that links VideoToolbox is refused | 38,256 | 27 |
 | `encoder-slowstate` | `Sources/SillHost/EncoderSlowState.swift` | when a hardware stream's session has settled in the encoder's slow state and gets a new one, and how the new one is judged: the rule at its edges, and streams in virtual time against a scripted engine; a binary that links VideoToolbox is refused | 1,207 | 29 |
-| `compatibility` | `Sources/StreamProtocol/*.swift` | `SillVersion` (tags, bundles and the wire's versions, and their order), `SillProtocol`, and the update notice's payloads: kind 23's hello, kind 22's new fields with the five older goodbyes byte for byte, the window list's `hostVersion` and `protocol` | 74 | 13 |
+| `compatibility` | `Sources/StreamProtocol/*.swift` | `SillVersion` (tags, bundles and the wire's versions, and their order), `SillProtocol`, and the update notice's payloads: kind 23's hello, kind 22's new fields with the five older goodbyes byte for byte, the window list's `hostVersion` and `protocol`; kind 28's trackpad gesture and the window list's `gestures` | 92 | 19 |
 | `device-gate` | `Sources/SillHost/DeviceGate.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | the host's device floor: which hello it admits, the refusal's words, the Refused, count and hello lines, the shipped floor "0" | 58 | 14 |
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order, whatever the machine's speed (each step waits for what it needs, not a set time) | 14 modes | 20 |
+| `gesture-chords` | `Sources/SillHost/GestureChords.swift` (`-package-name sill`) | a trackpad gesture from a device (kind 28) as the Mac's own shortcut for its action: the first of its shortcuts that is on and bound, its device-independent modifier bits only, never another action's; the opposite gesture closing what Sill opened, the same gesture again doing nothing, the Spaces leaving a view open, other input forgetting it; unknown names, the log line, the TEST ONLY table; 5,000 random sequences against a model | 106 | 21 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
@@ -48,7 +49,8 @@ The counts are those of main at 1f3072a, where every check passes and every muta
 two encoder checks' are those of the encoder-two-in-flight branch that brought them, the four the
 `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`, `update-policy`) those of
 its merge with main at 32d532b, and `dmg-layout`'s and `phone-portrait`'s those of the `mac-dmg` and
-`iphone-portrait` branches that brought them.
+`iphone-portrait` branches that brought them; `compatibility`'s and `gesture-chords`' are the
+`trackpad-gestures` branch's, which added kind 28's cases to the first and brought the second.
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.

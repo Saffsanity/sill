@@ -350,6 +350,24 @@ final class InputInjector {
         Stats.shared.bump("in.key")
     }
 
+    // MARK: Gestures
+
+    /// A trackpad gesture's shortcut (kind 28, docs/trackpad-gestures-plan.md §7.3): the key down
+    /// and up with exactly the flags the Mac stored for it (GestureChords), fn included, which the
+    /// key path above cannot carry. Keycodes 160 and 131 are the Mission Control and Launchpad keys
+    /// of Apple keyboards, which no HID usage from a device names. Accessibility, as all input.
+    func chord(keyCode: UInt16, flags: UInt64) {
+        remindAboutAccessibilityIfNeeded()
+        // Both made before either is posted, so a key never goes down without its up.
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
+        down.flags = CGEventFlags(rawValue: flags)
+        up.flags = CGEventFlags(rawValue: flags)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        Stats.shared.bump("in.gesture")
+    }
+
     /// The client sends UIKeyModifierFlags bits. They sit at the same bit positions as the
     /// CGEventFlags masks, but build the flags explicitly rather than reinterpreting the number:
     /// anything else in there (numeric pad, iOS-only bits) has no business reaching the Mac.

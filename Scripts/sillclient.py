@@ -24,6 +24,11 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+  --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
+                     swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out). A
+                     host that advertises posts its shortcut on the Mac it runs on: send gestures only
+                     to a --synthetic host, which logs the shortcut and posts nothing
+  --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
   --hello=VER[,PROTO] send a hello (kind 23) first, before the select, as a device from 2026-09-25 on does:
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
@@ -63,7 +68,9 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "gesture", "raw28")
+# What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
+GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello")
 
 def msg(kind, payload=b"", key=False):
@@ -95,6 +102,13 @@ def pairs(body, keys, flag):
         if k not in keys: raise ValueError(f"{flag}: unknown key {k!r} (keys: {', '.join(sorted(keys))})")
         out[k] = value(k, v)
     return out
+
+def gesture(text):
+    name, _, fingers = text.partition(",")
+    if name not in GESTURES: raise ValueError(f"--gesture: not a gesture: {name!r} ({', '.join(GESTURES)})")
+    n = number(fingers, "--gesture's fingers") if fingers else 3
+    if n not in (3, 4): raise ValueError(f"--gesture: 3 or 4 fingers, not {n}")
+    return {"gesture": name, "fingers": n}
 
 def unescape(text):
     """\\n, \\t, \\r, \\\\, \\xHH and \\uXXXX in a --device value, so a test can send control and bidi characters."""
@@ -254,7 +268,7 @@ try:
             if not at: raise ValueError(f"--{name}: no @T (seconds in) in {a!r}")
             if name in ("stop-ping", "stop-read", "pairing-wanted") and text: raise ValueError(f"--{name}@T takes no value")
             parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
-                      else number(text, "--fps-after") if name == "fps-after" else text)
+                      else number(text, "--fps-after") if name == "fps-after" else gesture(text) if name == "gesture" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
@@ -381,6 +395,10 @@ def fire(e, now):
         global reading; reading = False; print(f"  stopped reading at {at}")
     elif name == "pairing-wanted":
         s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
+    elif name == "gesture":
+        s.sendall(msg(28, json.dumps(parsed).encode())); print(f"  sent gesture {json.dumps(parsed)} at {at}")
+    elif name == "raw28":
+        s.sendall(msg(28, text.encode())); print(f"  sent raw kind 28 {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
