@@ -15,8 +15,14 @@ import Foundation
 //   whenever the app whose menus these are changes (to none included), or a re-read finds the top
 //   level's titles, count or enabled flags changed. An id is good only within its version: a kind
 //   25 or 27 with another version is answered at once and never read or pressed.
+// • Within one version an id names one item for every device: an app can add or remove items
+//   above a submenu without changing the top level, and a read that finds another submenu where
+//   one was read before moves the version too. A fetch and a choice carry the title the device
+//   showed, and the host acts only while the item at the id still has it.
 // • Tokens are the device's, strictly increasing per connection, as kind 17's are; the host only
 //   echoes them in `answering`.
+// • Only a connection that asked for the top level (a subscriber) is served a menu or a choice;
+//   any other is answered "The menus changed…" at once.
 //
 // Pure: Foundation only, so it is checked on its own with swiftc (Tests/checks/menus).
 
@@ -90,10 +96,15 @@ public struct FetchMenu: Codable, Hashable, Sendable {
     /// The version the id was shown in; ignored without an id.
     public var version: Int?
     public var id: String?
+    /// The title the device showed for that menu. The host reads it only while the item at `id` still
+    /// has this title (an app can add or remove items above a submenu in place, and an id is a place):
+    /// otherwise, and without a title, the answer is "The menus changed…" and nothing is read. Never
+    /// logged. Ignored without an id.
+    public var title: String?
     public var token: Int?
 
-    public init(version: Int? = nil, id: String? = nil, token: Int? = nil) {
-        self.version = version; self.id = id; self.token = token
+    public init(version: Int? = nil, id: String? = nil, title: String? = nil, token: Int? = nil) {
+        self.version = version; self.id = id; self.title = title; self.token = token
     }
 }
 
@@ -102,8 +113,8 @@ public struct PressMenuItem: Codable, Hashable, Sendable {
     /// The version the id was shown in.
     public var version: Int?
     public var id: String?
-    /// The title the device showed: checked when the host has to find the item again by its path.
-    /// Never logged: the host's lines give its own titles.
+    /// The title the device showed: the item is pressed only while its title is still this one, and
+    /// never without one. Never logged: the host's lines give its own titles.
     public var title: String?
     public var token: Int?
 

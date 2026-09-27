@@ -49,6 +49,14 @@ final class MenuReader: @unchecked Sendable {
         case notAnswering
         /// Any other error, by name (WindowSizer.axErrorName), or an id that names nothing.
         case failed(String)
+        /// The item at the id is not the one the device was shown there: its title now is `found` (""
+        /// for none). Nothing below it was read.
+        case notShown(found: String)
+        /// On the way from the bar to the id, a menu is not the one read there in this version (another
+        /// title, gone, or no menu any more): the app changed the tree in place.
+        case moved
+        /// The read would end after `until`: its answer could not reach the device in time.
+        case late
     }
 
     struct Menu: @unchecked Sendable {
@@ -67,6 +75,8 @@ final class MenuReader: @unchecked Sendable {
             /// AXPress ran into the timeout: the action is running, often a modal dialog.
             case pressedNoAnswer
             case refused(MenuRefusal)
+            /// Found again by its path, a menu on the way was not the one read there in this version.
+            case moved
         }
         let outcome: Outcome
         /// The item's title as read at its path, when it was found again that way.
@@ -108,46 +118,68 @@ final class MenuReader: @unchecked Sendable {
                                          "AXMenuItemMarkChar", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers",
                                          "AXMenuItemCmdVirtualKey", "AXMenuItemCmdGlyph", kAXChildrenAttribute]
 
-    /// The items of the menu at `path`: `parent` is its bar item or submenu item as kept from an
-    /// earlier read, else (or when that one no longer answers) the path is walked from the bar. One
+    /// The items of the menu at `path`, only while the item that opens it has the title the device
+    /// showed (`shown`): an app can add or remove items above a submenu in place, and an id is a
+    /// place. `parent` is that item as kept from an earlier read (its bar item, from the last
+    /// top-level read, for one of the bar's menus), else, or when that one no longer answers, the path
+    /// is walked from the bar, each menu on the way checked against `ancestors` (the titles read there
+    /// in this version; nil: none known, and no walk). The item's title and children come in one call,
+    /// so a menu that is not the one shown is never opened (read) and validated. Then one
     /// `AXUIElementCopyMultipleAttributeValues` per item, no action names (every AXMenuItem has
-    /// AXPress), and one more AXRole read of a titled item's first child. At most `maxItems`, and
-    /// no more once `readBudget` has passed since the call began.
-    func items(pid: pid_t, of parent: AXUIElement?, path: MenuPath) -> Result<Menu, Failure> {
+    /// AXPress), and one more AXRole read of a titled item's first child. At most `maxItems`, and no
+    /// more once `readBudget` has passed since the call began, or once an item as slow as the slowest
+    /// so far would end past `until` (CFAbsoluteTime: when its answer must go out, `RequestDeadline`);
+    /// nothing at all past `until`.
+    func items(pid: pid_t, of parent: AXUIElement?, path: MenuPath, shown: String, ancestors: [String]?,
+               until: Double = .infinity) -> Result<Menu, Failure> {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return .failure(.notTrusted) }
         let started = CFAbsoluteTimeGetCurrent()
-        var kids: [AXUIElement]? = nil
+        guard started < until else { return .failure(.late) }
+        var opener: ItemNow? = nil
         if let parent {
-            switch submenuItems(of: parent, pid: pid) {
-            case .success(let k): kids = k
-            case .failure(.failed): kids = nil          // no longer answering as it was (rebuilt): walk the path
+            switch itemNow(parent, pid: pid) {
+            case .success(let n): opener = n
+            case .failure(.failed): opener = nil          // no longer answering as it was (rebuilt): walk the path
             case .failure(let f): return .failure(f)
             }
         }
-        if kids == nil {
-            let element: AXUIElement
-            switch walk(pid: pid, to: path) {
-            case .success(let e): element = e
-            case .failure(let f): return .failure(f)
-            }
-            switch submenuItems(of: element, pid: pid) {
-            case .success(let k): kids = k
+        if opener == nil {
+            guard let ancestors else { return .failure(.moved) }   // nothing read on the way in this version
+            switch walk(pid: pid, to: path, ancestors: ancestors) {
+            case .success(let e):
+                switch itemNow(e, pid: pid) {
+                case .success(let n): opener = n
+                case .failure(let f): return .failure(f)
+                }
             case .failure(let f): return .failure(f)
             }
         }
-        let all = kids ?? []
+        guard let opener, ShownTitle.matches(now: opener.title, shown: shown) else {
+            return .failure(.notShown(found: opener?.title ?? ""))
+        }
+        let kids: [AXUIElement]
+        switch menuItems(among: opener.children, pid: pid) {
+        case .success(let k): kids = k
+        case .failure(.failed): return .failure(.moved)       // the item shown there opens no menu now
+        case .failure(let f): return .failure(f)
+        }
         var reads: [Read] = []
         var examined = 0
-        for (i, item) in all.prefix(Self.maxItems).enumerated() {
+        // The slowest item so far: the read stops before one as slow would end past `until`.
+        var slowest = 0.0
+        for (i, item) in kids.prefix(Self.maxItems).enumerated() {
+            let itemStarted = CFAbsoluteTimeGetCurrent()
             switch read(item, index: i, pid: pid) {
             case .failure(let f): return .failure(f)
             case .success(let r): if let r { reads.append(r) }       // nil: not an AXMenuItem (its index still counts)
             }
             examined = i + 1
-            if CFAbsoluteTimeGetCurrent() - started >= Self.readBudget { break }
+            let now = CFAbsoluteTimeGetCurrent()
+            slowest = max(slowest, now - itemStarted)
+            if now - started >= Self.readBudget || now + slowest >= until { break }
         }
-        return .success(Menu(reads: reads, total: all.count, unread: all.count - examined, ms: ms(since: started)))
+        return .success(Menu(reads: reads, total: kids.count, unread: kids.count - examined, ms: ms(since: started)))
     }
 
     /// One child of a menu, or nil when it is not an AXMenuItem (a menu lists only items).
@@ -176,14 +208,15 @@ final class MenuReader: @unchecked Sendable {
     // MARK: Pressing
 
     /// AXPress on the kept element, or, when it no longer answers (the app gave the menu a new
-    /// NSMenu), on the item at `path`; either only when its title now is `shownTitle`, it has no
-    /// children and it is enabled (`PressDecision`). AppKit's item elements are positional: after an
-    /// app replaced the items inside the same NSMenu, a kept element answers for whatever item is at
-    /// its place now, and the title decides. An id of one part is one of the bar's menus: never
-    /// pressed (the mirror refuses it first). An AppKit app answers AXPress before it runs the action
-    /// (the fixture: 2–3 ms); one that answers only after holds this queue until the timeout, which
-    /// counts as pressed.
-    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?) -> Pressed {
+    /// NSMenu), on the item at `path`, found again with each menu on the way checked against
+    /// `ancestors` (the titles read there in this version; nil: none known, and no walk); either only
+    /// when its title now is `shownTitle`, it has no children and it is enabled (`PressDecision`).
+    /// AppKit's item elements are positional: after an app replaced the items inside the same NSMenu,
+    /// a kept element answers for whatever item is at its place now, and the title decides. An id of
+    /// one part is one of the bar's menus: never pressed (the mirror refuses it first). An AppKit app
+    /// answers AXPress before it runs the action (the fixture: 2–3 ms); one that answers only after
+    /// holds this queue until the timeout, which counts as pressed.
+    func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?, ancestors: [String]?) -> Pressed {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return Pressed(outcome: .refused(.notTrusted), foundTitle: nil) }
         guard path.indexes.count >= 2 else { return Pressed(outcome: .refused(.changed), foundTitle: nil) }
@@ -199,19 +232,21 @@ final class MenuReader: @unchecked Sendable {
             }
         }
         if !elementValid {
-            switch walk(pid: pid, to: path) {
+            guard let ancestors else { return Pressed(outcome: .refused(.changed), foundTitle: nil) }
+            switch walk(pid: pid, to: path, ancestors: ancestors) {
             case .success(let e):
                 switch itemNow(e, pid: pid) {
                 case .success(let n): target = e; now = n; found = n.title
                 case .failure(.failed): break
                 case .failure(let f): return Pressed(outcome: .refused(Self.refusal(f)), foundTitle: nil)
                 }
+            case .failure(.moved): return Pressed(outcome: .moved, foundTitle: nil)
             case .failure(.failed): break                           // nothing at that path now
             case .failure(let f): return Pressed(outcome: .refused(Self.refusal(f)), foundTitle: nil)
             }
         }
         switch PressDecision.decide(elementValid: elementValid, current: now?.title, shown: shownTitle, enabled: now?.enabled,
-                                    hasChildren: now?.hasChildren ?? false) {
+                                    hasChildren: !(now?.children.isEmpty ?? true)) {
         case .refuse(let why):
             return Pressed(outcome: .refused(why), foundTitle: found)
         case .press, .pressFound:
@@ -226,12 +261,12 @@ final class MenuReader: @unchecked Sendable {
         }
     }
 
-    /// What a press decides on: the item's title as a device is shown it, its enabled flag, and
-    /// whether it has children (a submenu, or a custom view's).
+    /// An item as it is now: its title as a device is shown it, its enabled flag, and its children
+    /// (a submenu's AXMenu, or a custom view's).
     private struct ItemNow {
         let title: String
         let enabled: Bool?
-        let hasChildren: Bool
+        let children: [AXUIElement]
     }
 
     /// [AXTitle, AXDescription, AXEnabled, AXChildren] of one item, in one call. Fresh within a
@@ -240,7 +275,7 @@ final class MenuReader: @unchecked Sendable {
         switch values(of: element, [kAXTitleAttribute, kAXDescriptionAttribute, kAXEnabledAttribute, kAXChildrenAttribute], pid: pid) {
         case .success(let v):
             return .success(ItemNow(title: MenuFormat.displayTitle(title: v[0] as? String, description: v[1] as? String),
-                                    enabled: v[2] as? Bool, hasChildren: !((v[3] as? [AXUIElement]) ?? []).isEmpty))
+                                    enabled: v[2] as? Bool, children: (v[3] as? [AXUIElement]) ?? []))
         case .failure(let f):
             return .failure(f)
         }
@@ -249,7 +284,8 @@ final class MenuReader: @unchecked Sendable {
     static func refusal(_ f: Failure) -> MenuRefusal {
         switch f {
         case .notTrusted: .notTrusted
-        case .noMenuBar: .changed
+        case .noMenuBar, .notShown, .moved: .changed
+        case .late: .tooMany
         case .gone: .gone
         case .notAnswering: .notAnswering
         case .failed(let name): .failed(name)
@@ -275,20 +311,14 @@ final class MenuReader: @unchecked Sendable {
         return .failure(failure(e, started: started, pid: pid))
     }
 
-    /// The bar item's or submenu item's menu (its first AXMenu child), and that menu's children.
-    /// Reading them makes the app validate the menu.
-    private func submenuItems(of element: AXUIElement, pid: pid_t) -> Result<[AXUIElement], Failure> {
-        AXUIElementSetMessagingTimeout(element, Self.timeout)
-        let kids: [AXUIElement]
-        switch children(of: element, pid: pid) {
-        case .success(let k): kids = k
-        case .failure(let f): return .failure(f)
-        }
-        for kid in kids {
+    /// The menu among an item's children (the first AXMenu), and that menu's children. Reading them
+    /// makes the app validate the menu. `.failed` when the item has no menu.
+    private func menuItems(among children: [AXUIElement], pid: pid_t) -> Result<[AXUIElement], Failure> {
+        for kid in children {
             AXUIElementSetMessagingTimeout(kid, Self.timeout)
             switch value(of: kid, kAXRoleAttribute, pid: pid) {
             case .success(let role) where (role as? String) == kAXMenuRole:
-                return children(of: kid, pid: pid)
+                return self.children(of: kid, pid: pid)
             case .success: continue
             case .failure(let f): return .failure(f)
             }
@@ -297,8 +327,11 @@ final class MenuReader: @unchecked Sendable {
     }
 
     /// The element at `path`, from the bar: the bar's child at the first index, then each next index
-    /// among the items of the one before's menu.
-    private func walk(pid: pid_t, to path: MenuPath) -> Result<AXUIElement, Failure> {
+    /// among the items of the one before's menu. Each menu on the way (every part but the last) must
+    /// have the title `ancestors` gives for it, and a menu, or the walk stops with `.moved`: the tree
+    /// is not the one the device was shown, whatever the item at the end is called.
+    private func walk(pid: pid_t, to path: MenuPath, ancestors: [String]) -> Result<AXUIElement, Failure> {
+        guard ancestors.count == path.indexes.count - 1 else { return .failure(.moved) }
         let bar: AXUIElement
         switch menuBar(pid: pid) {
         case .success(let b): bar = b
@@ -311,13 +344,21 @@ final class MenuReader: @unchecked Sendable {
         }
         var element: AXUIElement? = nil
         for (depth, index) in path.indexes.enumerated() {
-            if depth > 0, let parent = element {
-                switch submenuItems(of: parent, pid: pid) {
-                case .success(let k): level = k
+            if depth > 0, let menu = element {
+                switch itemNow(menu, pid: pid) {
+                case .success(let n):
+                    guard ShownTitle.matches(now: n.title, shown: ancestors[depth - 1]) else { return .failure(.moved) }
+                    switch menuItems(among: n.children, pid: pid) {
+                    case .success(let k): level = k
+                    case .failure(.failed): return .failure(.moved)
+                    case .failure(let f): return .failure(f)
+                    }
                 case .failure(let f): return .failure(f)
                 }
             }
-            guard index < level.count else { return .failure(.failed("no item at \(path.id)")) }
+            guard index < level.count else {
+                return .failure(depth < path.indexes.count - 1 ? .moved : .failed("no item at \(path.id)"))
+            }
             element = level[index]
             AXUIElementSetMessagingTimeout(level[index], Self.timeout)
         }

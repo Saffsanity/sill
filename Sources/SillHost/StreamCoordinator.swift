@@ -394,6 +394,9 @@ package final class StreamCoordinator {
                     $0.devices[i].frameAgeMs = stats.frameAgeMs
                     $0.devices[i].rttMs = stats.rttMs
                 }
+                // How long this device waits for a menu (the second's worst round trip; the median
+                // from an older device): a request whose turn comes later is not read.
+                self?.menus.clientStats(connection, rttMs: stats.rttMaxMs ?? stats.rttMs)
             }
         }
         Stats.shared.onTick = { [weak self] counts in

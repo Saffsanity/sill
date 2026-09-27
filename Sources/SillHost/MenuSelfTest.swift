@@ -36,7 +36,9 @@ package enum MenuSelfTest {
         print("  top level, \(menus.count) menus in \(ms(got.ms)) ms: " + menus.map { $0.1.title ?? "" }.joined(separator: ", "))
         for (read, menu) in menus {
             guard let path = MenuPath(indexes: [read.index]) else { continue }
-            switch reader.queue.sync(execute: { reader.items(pid: pid, of: read.element, path: path) }) {
+            // The bar item just read, under the title just read: nothing is walked (no ancestors).
+            let shown = MenuFormat.displayTitle(title: read.item.title, description: nil)
+            switch reader.queue.sync(execute: { reader.items(pid: pid, of: read.element, path: path, shown: shown, ancestors: nil) }) {
             case .success(let got):
                 let items = got.reads.compactMap { r in path.child(r.index).flatMap { MenuFormat.item(r.item, id: $0.id) } }
                 let more = got.unread > 0 ? " | … \(got.unread) more" : ""
@@ -67,6 +69,9 @@ package enum MenuSelfTest {
         case .gone: "the app is no longer running"
         case .notAnswering: "no answer within \(String(format: "%.1f", Double(MenuReader.timeout))) s"
         case .failed(let error): "Accessibility error: \(error)"
+        case .notShown(let found): "the menu is now \(found.isEmpty ? "untitled" : "“\(found)”")"
+        case .moved: "the menu bar changed while it was read"
+        case .late: "out of time"
         }
     }
 

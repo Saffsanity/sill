@@ -34,7 +34,9 @@ a menu's items ("menu 4 v3 (answering 2) at …: 4.0 Set Label A ⌥⌘A | — |
 ("press 4.0 v3 (answering 3) at …: pressed=1"), with note=, stale=1 and more= when sent:
   --menus            a kind 27 without an id right after the select: the subscription (a top level is
                      read on the Mac, nothing is activated)
-  --fetch=ID[xN]@T   N kind 27s for menu ID back to back (default 1), with the last top level's version
+  --fetch=ID[xN][,TITLE]@T  N kind 27s for menu ID back to back (default 1), with the last top level's
+                     version and TITLE, the title the menu was shown under (default: the one the last top
+                     level or answer listed for ID; the host reads a menu only under its title)
   --press=ID[,TITLE]@T  a kind 25 for item ID; TITLE defaults to the one the last answer listed for ID
   --raw25=JSON@T, --raw27=JSON@T   these literal payloads (split on the last @)
   --expect-menus=TITLE[,TITLE...]  at exit, the last top level's titles in order: EXPECT-MENUS ok or
@@ -316,9 +318,10 @@ try:
                 raise ValueError("--fetch and --press would open and choose the menus of whatever app this Mac has in front; "
                                  "run them against a host started with SILL_TEST_MENU_PID.")
             if name == "fetch":
-                m = re.fullmatch(r"(.+?)(?:x(\d+))?", text)
-                if not m: raise ValueError(f"--fetch: ID[xN], got {text!r}")
-                parsed = (m.group(1), int(m.group(2) or 1))
+                idpart, comma, ftitle = text.partition(",")
+                m = re.fullmatch(r"(.+?)(?:x(\d+))?", idpart)
+                if not m: raise ValueError(f"--fetch: ID[xN][,TITLE], got {text!r}")
+                parsed = (m.group(1), int(m.group(2) or 1), ftitle if comma else None)
             elif name == "press":
                 pid_, comma, ptitle = text.partition(",")
                 if not pid_: raise ValueError(f"--press: ID[,TITLE], got {text!r}")
@@ -483,12 +486,13 @@ def fire(e, now):
     elif name == "pairing-wanted":
         s.sendall(msg(21)); print(f"  sent kind 21 (pairing wanted) at {at}")
     elif name == "fetch":
-        mid, n = parsed
+        mid, n, ftitle = parsed
+        ftitle = ftitle if ftitle is not None else menu_titles.get(mid)
         for _ in range(n):
-            body = {"version": menu_version, "id": mid, "token": token}
+            body = {"version": menu_version, "id": mid, "title": ftitle, "token": token}
             menu_asked[token] = ("fetch", mid); token += 1
             s.sendall(msg(27, json.dumps({k: v for k, v in body.items() if v is not None}).encode()))
-        print(f"  sent fetch {mid}{f' x{n}' if n > 1 else ''} (v{menu_version}, tokens {token - n}–{token - 1}) at {at}")
+        print(f"  sent fetch {mid} {ftitle!r}{f' x{n}' if n > 1 else ''} (v{menu_version}, tokens {token - n}–{token - 1}) at {at}")
     elif name == "press":
         mid, ptitle = parsed
         body = {"version": menu_version, "id": mid, "title": ptitle if ptitle is not None else menu_titles.get(mid), "token": token}

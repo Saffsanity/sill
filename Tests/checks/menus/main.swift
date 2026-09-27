@@ -55,7 +55,7 @@ check(MacMenu(version: 1, app: "a", bundleID: "b", menus: [], answering: 2, menu
 check(MacMenuItem(id: "1.2", title: "t", separator: false, enabled: true, mark: "✓", key: "⌘K", submenu: false)
       == Wire.decode(MacMenuItem.self, from: json(#"{"id":"1.2","title":"t","separator":false,"enabled":true,"mark":"✓","key":"⌘K","submenu":false}"#)),
       "MacMenuItem's init sets every field from its own argument")
-check(FetchMenu(version: 4, id: "2", token: 9) == Wire.decode(FetchMenu.self, from: json(#"{"version":4,"id":"2","token":9}"#))
+check(FetchMenu(version: 4, id: "2", title: "File", token: 9) == Wire.decode(FetchMenu.self, from: json(#"{"version":4,"id":"2","title":"File","token":9}"#))
       && PressMenuItem(version: 4, id: "2.9", title: "Save", token: 10)
          == Wire.decode(PressMenuItem.self, from: json(#"{"version":4,"id":"2.9","title":"Save","token":10}"#)),
       "FetchMenu's and PressMenuItem's inits set every field from its own argument")
@@ -65,9 +65,10 @@ let item = MacMenuItem(id: "3.4.1", title: "Save", separator: false, enabled: tr
 check(Wire.decode(MacMenuItem.self, from: Wire.encode(item)) == item, "MacMenuItem: a full one round-trips")
 check(keys(item) == ["id", "title", "separator", "enabled", "mark", "key", "submenu"],
       "MacMenuItem's keys: id title separator enabled mark key submenu")
-let fetch = FetchMenu(version: 3, id: "2", token: 2)
-check(Wire.decode(FetchMenu.self, from: Wire.encode(fetch)) == fetch && keys(fetch) == ["version", "id", "token"],
-      "FetchMenu: round-trips; keys version id token")
+let fetch = FetchMenu(version: 3, id: "2", title: "File", token: 2)
+check(Wire.decode(FetchMenu.self, from: Wire.encode(fetch)) == fetch && keys(fetch) == ["version", "id", "title", "token"],
+      "FetchMenu: round-trips; keys version id title token")
+check(keys(FetchMenu(version: 3, id: "2", token: 2)) == ["version", "id", "token"], "a fetch without a title leaves the key out")
 check(keys(FetchMenu(token: 1)) == ["token"], "the subscription: only token")
 let press = PressMenuItem(version: 3, id: "2.9", title: "Save", token: 3)
 check(Wire.decode(PressMenuItem.self, from: Wire.encode(press)) == press && keys(press) == ["version", "id", "title", "token"],
@@ -253,27 +254,32 @@ check(MenuPath(indexes: [0]) == nil && MenuPath(indexes: []) == nil && MenuPath(
 
 let items1 = [MacMenuItem(id: "4.0", title: "A")]
 var cache = MenuCache()
-cache.store("4", .init(items: items1, more: 0, at: 100, appWasFrontmost: true))
-check(cache.fresh("4", now: 100.99, frontmostNow: true)?.items == items1, "a read made while frontmost: fresh at 0.99 s")
-check(cache.fresh("4", now: 100.99, frontmostNow: false)?.items == items1, "…for an app not frontmost now as well")
-check(cache.fresh("4", now: 101.0, frontmostNow: true) == nil && cache.fresh("4", now: 101.0, frontmostNow: false) == nil,
+cache.store("4", .init(title: "Probe", items: items1, more: 0, at: 100, appWasFrontmost: true))
+check(cache.fresh("4", title: "Probe", now: 100.99, frontmostNow: true)?.items == items1, "a read made while frontmost: fresh at 0.99 s")
+check(cache.fresh("4", title: "Probe", now: 100.99, frontmostNow: false)?.items == items1, "…for an app not frontmost now as well")
+check(cache.fresh("4", title: "Probe", now: 101.0, frontmostNow: true) == nil && cache.fresh("4", title: "Probe", now: 101.0, frontmostNow: false) == nil,
       "not fresh at 1.0 s")
-check(cache.fresh("5", now: 100.1, frontmostNow: true) == nil, "another menu: nothing")
+check(cache.fresh("5", title: "Probe", now: 100.1, frontmostNow: true) == nil, "another menu: nothing")
+check(cache.fresh("4", title: "Edit", now: 100.1, frontmostNow: true) == nil, "the same id asked under another title: nothing (an id is a place)")
+check(cache.fresh("4", title: "", now: 100.1, frontmostNow: true) == nil, "…nor under an empty one")
+var untitled = MenuCache()
+untitled.store("4", .init(title: "", items: items1, more: 0, at: 100, appWasFrontmost: true))
+check(untitled.fresh("4", title: "", now: 100.1, frontmostNow: true) == nil, "an entry read under no title answers nothing")
 check(cache.wait("4", now: 100.3) == 0, "after a read made while frontmost: no wait")
-cache.store("3", .init(items: items1, more: 0, at: 200, appWasFrontmost: false))
-check(cache.fresh("3", now: 200.1, frontmostNow: true) == nil, "a read made while the app was not frontmost never answers a frontmost app")
-check(cache.fresh("3", now: 200.99, frontmostNow: false)?.items == items1,
+cache.store("3", .init(title: "Edit", items: items1, more: 0, at: 200, appWasFrontmost: false))
+check(cache.fresh("3", title: "Edit", now: 200.1, frontmostNow: true) == nil, "a read made while the app was not frontmost never answers a frontmost app")
+check(cache.fresh("3", title: "Edit", now: 200.99, frontmostNow: false)?.items == items1,
       "…but answers while the app is still not frontmost, within the second (AppKit would answer from it)")
-check(cache.fresh("3", now: 201.0, frontmostNow: false) == nil, "…not at 1.0 s")
+check(cache.fresh("3", title: "Edit", now: 201.0, frontmostNow: false) == nil, "…not at 1.0 s")
 check(abs(cache.wait("3", now: 200.3) - 0.75) < 1e-9, "…and, the app brought forward, waits until 1.05 s: 0.75 s at 0.3 s")
 check(abs(cache.wait("3", now: 201.0) - 0.05) < 1e-9, "…0.05 s still at 1.0 s (the probe's 0.83 s got no validation, 1.03 s did)")
 check(cache.wait("3", now: 201.05) == 0 && cache.wait("3", now: 205) == 0, "…no wait from 1.05 s")
 check(cache.wait("9", now: 1) == 0, "nothing read: no wait")
-cache.store("4", .init(items: [], more: 3, at: 300, appWasFrontmost: true))
-check(cache.fresh("4", now: 300.5, frontmostNow: true)?.more == 3 && cache.fresh("4", now: 300.5, frontmostNow: true)?.items == [],
+cache.store("4", .init(title: "Probe", items: [], more: 3, at: 300, appWasFrontmost: true))
+check(cache.fresh("4", title: "Probe", now: 300.5, frontmostNow: true)?.more == 3 && cache.fresh("4", title: "Probe", now: 300.5, frontmostNow: true)?.items == [],
       "a store replaces")
 cache.clear()
-check(cache.fresh("4", now: 300.5, frontmostNow: true) == nil && cache.isEmpty, "clear")
+check(cache.fresh("4", title: "Probe", now: 300.5, frontmostNow: true) == nil && cache.isEmpty, "clear")
 check(MenuCache.lifetime == 1.0 && MenuCache.revalidation == 1.05, "lifetime 1 s, revalidation 1.05 s")
 
 // MARK: - RequestRate
@@ -299,6 +305,66 @@ check(lines.ignoredLineDue(now: 5), "the first ignored line: due")
 check(!lines.ignoredLineDue(now: 5.5), "a second one within the second: not due")
 check(lines.ignoredLineDue(now: 6.0), "a second later: due again")
 check(RequestRate.fetchesPerSecond == 20 && RequestRate.pressesPerSecond == 4, "20 fetches, 4 presses a second")
+
+// MARK: - ShownTitle
+
+check(ShownTitle.matches(now: "Save", shown: "Save"), "the title shown: matches")
+check(!ShownTitle.matches(now: "Save", shown: "save") && !ShownTitle.matches(now: "Save", shown: "Save "), "compared exactly")
+check(!ShownTitle.matches(now: "", shown: "") && !ShownTitle.matches(now: nil, shown: nil) && !ShownTitle.matches(now: "", shown: nil),
+      "an empty or missing title never matches")
+check(!ShownTitle.matches(now: "Save", shown: nil) && !ShownTitle.matches(now: nil, shown: "Save"), "one side missing: no match")
+
+// MARK: - RequestDeadline (the device's wait, MacMenuState rule 6)
+
+check(RequestDeadline.wait(rttMs: nil) == 4 && RequestDeadline.wait(rttMs: -1) == 4 && RequestDeadline.wait(rttMs: 0) == 4
+      && RequestDeadline.wait(rttMs: 1000) == 4, "the device waits 4 s up to a 1 s round trip")
+check(RequestDeadline.wait(rttMs: 1500) == 6 && RequestDeadline.wait(rttMs: 2500) == 10, "…four round trips beyond: 6 s at 1.5 s, 10 s at 2.5 s")
+check(abs(RequestDeadline.answerBy(rttMs: nil) - 3.9) < 1e-9 && abs(RequestDeadline.answerBy(rttMs: 1500) - 4.4) < 1e-9
+      && abs(RequestDeadline.answerBy(rttMs: 200) - 3.7) < 1e-9,
+      "an answer goes out by the wait less a round trip and 0.1 s: 3.9 s, 4.4 s at 1.5 s, 3.7 s at 0.2 s")
+check(!RequestDeadline.expired(waited: 3.89, rttMs: nil) && RequestDeadline.expired(waited: 3.9, rttMs: nil),
+      "a request that waited 3.9 s for its turn (no round trip known): expired, 3.89 s not")
+check(!RequestDeadline.expired(waited: 4.2, rttMs: 1500) && RequestDeadline.expired(waited: 4.4, rttMs: 1500),
+      "with a 1.5 s round trip: 4.2 s not, 4.4 s expired")
+check(RequestDeadline.deviceWait == 4 && RequestDeadline.margin == 0.1, "4 s, 0.1 s")
+
+// MARK: - SubmenuRecord (an id names one item within a version)
+
+typealias Found = (index: Int, title: String, submenu: Bool)
+var rec = SubmenuRecord()
+let recProbe: [Found] = [(0, "Set Label A", false), (18, "Rebuilt", true), (19, "Deep", true), (20, "300 Items", true), (21, "600 Items", true)]
+check(rec.read(menu: "4", found: recProbe, examined: 22) && rec.count == 4, "a first read records its submenus (4), not its leaves")
+check(rec.title(of: "4.19") == "Deep" && rec.title(of: "4.21") == "600 Items" && rec.title(of: "4.0") == nil && rec.title(of: "4") == nil
+      && rec.title(of: "4.99") == nil && rec.title(of: "x") == nil, "title(of:): a submenu's; none for a leaf, a bar menu, an unread place or junk")
+check(rec.read(menu: "4", found: recProbe, examined: 22) && rec.count == 4, "the same read again: consistent, nothing added")
+let recRetitled: [Found] = [(0, "Undo Paste", false), (18, "Rebuilt", true), (19, "Deep", true), (20, "300 Items", true), (21, "600 Items", true)]
+check(rec.read(menu: "4", found: recRetitled, examined: 22), "a leaf retitled: consistent (a choice checks its own title)")
+var recShifted = rec
+let recInserted: [Found] = [(0, "Inserted", false), (1, "Set Label A", false), (19, "Rebuilt", true), (20, "Deep", true), (21, "300 Items", true), (22, "600 Items", true)]
+check(!recShifted.read(menu: "4", found: recInserted, examined: 23), "an item inserted above the submenus: 4.18 (Rebuilt) is none now, 4.19 not Deep: changed")
+var recRetitle = rec
+check(!recRetitle.read(menu: "4", found: [(18, "Rebuilt", true), (19, "Deeper", true)], examined: 20), "a submenu retitled in its place (Deep → Deeper), the rest as read: changed")
+var recPartial = rec
+check(recPartial.read(menu: "4", found: [(0, "Inserted", false)], examined: 1), "a read that covers only the first place judges only it")
+check(!recPartial.read(menu: "4", found: [(18, "Rebuilt", false)], examined: 22), "a submenu turned leaf: changed")
+var recGone = rec
+check(!recGone.read(menu: "4", found: Array(recProbe.prefix(2)), examined: 20), "a submenu gone from a place the read covered (Deep, 4.19, among 20 examined): changed")
+var recBeyond = rec
+check(recBeyond.read(menu: "4", found: Array(recProbe.prefix(2)), examined: 19), "…the same read covering only 19 places: 4.19 not judged")
+var recMore = rec
+check(recMore.read(menu: "4", found: recProbe + [(22, "New Menu", true)], examined: 23) && recMore.title(of: "4.22") == "New Menu" && recMore.count == 5,
+      "a submenu where none was: recorded")
+check(rec.read(menu: "4.19", found: [(0, "Level 2", true)], examined: 1) && rec.title(of: "4.19.0") == "Level 2", "each menu its own places: 4.19.0")
+var recFull = SubmenuRecord()
+let recMany = (0..<SubmenuRecord.limit).map { Found($0 % 500, "M\($0)", true) }
+var recOK = true
+for chunk in 0..<(SubmenuRecord.limit / 500) {
+    recOK = recOK && recFull.read(menu: "\(chunk + 1)", found: Array(recMany[(chunk * 500)..<(chunk * 500 + 500)]), examined: 500)
+}
+check(recOK && recFull.count == SubmenuRecord.limit, "up to \(SubmenuRecord.limit) places")
+check(!recFull.read(menu: "999", found: [(0, "One More", true)], examined: 1), "…one more: changed (the version moves, the record starts again)")
+recFull.clear()
+check(recFull.count == 0 && recFull.title(of: "1.0") == nil && recFull.read(menu: "999", found: [(0, "One More", true)], examined: 1), "clear")
 
 // MARK: - TopLevel
 
@@ -353,6 +419,8 @@ check(R.notAnswering.note(app: "Blender") == "Blender isn’t responding.", "not
 check(R.notTrusted.note(app: "Code") == "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security › Accessibility).", "note: no Accessibility")
 check(R.tooMany.note(app: "Code") == "Too many requests. Open the menu again.", "note: too many")
 check(R.failed("failure").note(app: "Code") == "It isn’t available right now.", "note: another AX error")
+check(R.late(4.62).note(app: "Code") == "Too many requests. Open the menu again." && R.late(4.62).logReason(app: "Code") == "it waited 4.6 s behind other requests",
+      "a late choice: too many requests; the log's reason says how long it waited")
 check(R.changed.logReason(app: "Code") == "the menus changed" && R.disabled.logReason(app: "Code") == "disabled"
       && R.gone.logReason(app: "Code") == "Code is no longer open" && R.notAnswering.logReason(app: "Code") == "Code is not answering Accessibility"
       && R.notTrusted.logReason(app: "Code") == "no Accessibility permission", "the log's reasons (the plan's §4.7)")

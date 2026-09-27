@@ -1,10 +1,12 @@
 // Scripts/menu-check/run.sh mirror: MenuMirror end to end against the fixture, with no host, network
 // or encoder: the real MenuMirror, MenuReader, MenuPolicy, MenuFormat and StreamProtocol, with stubs
 // for the server's send, a connection's state, Stats and print (all recorded). It drives the mirror
-// as the coordinator does (fetch, press, setTarget, catalogPolled, clientLeft) and checks each kind
-// 24 and log line (docs/menu-bar-plan.md §4.4, §4.7; H4–H8's and H10's logic). Presses go only to the
-// fixture whose pid is given; a /bin/sleep it starts stands for an app whose top level cannot be
-// read. usage (fixture.py runs it): mirror PID FIXTURE_LOG FIXTURE_BIN
+// as the coordinator does (fetch, press, setTarget, catalogPolled, clientLeft, clientStats) and checks
+// each kind 24 and log line (docs/menu-bar-plan.md §4.4, §4.7; H4–H8's and H10's logic, and the
+// review's: only subscribers served, a request past its device's wait not read, one top-level read
+// a second, and the tree changed in place under a version). Presses go only to the fixture whose pid
+// is given; a /bin/sleep it starts stands for an app whose top level cannot be read. usage
+// (fixture.py runs it): mirror PID FIXTURE_LOG FIXTURE_BIN
 import Foundation
 import ApplicationServices
 
@@ -84,8 +86,17 @@ func dynamic(_ m: MacMenu?) -> Int { Int(m?.items?.compactMap { $0.title }.first
         return nil
     }
     func broadcasts(_ c: FakeConnection, after t: Double) -> [MacMenu] { server.all().filter { $0.to == c.name && $0.at >= t && $0.m.answering == nil }.map(\.m) }
-    func fetch(_ c: FakeConnection, _ v: Int?, _ id: String?) async -> MacMenu? {
-        let t = next(); mirror.fetch(FetchMenu(version: v, id: id, token: t), from: c, who: c.name); return await answer(c, t)
+    /// The titles a device was shown for each id, from every kind 24: what its fetches carry.
+    func shownTitle(_ id: String) -> String? {
+        for s in server.all().reversed() {
+            if let it = ((s.m.menus ?? []) + (s.m.items ?? [])).first(where: { $0.id == id }) { return it.title }
+        }
+        return nil
+    }
+    func fetch(_ c: FakeConnection, _ v: Int?, _ id: String?, title: String?? = nil) async -> MacMenu? {
+        let t = next()
+        mirror.fetch(FetchMenu(version: v, id: id, title: id == nil ? nil : (title ?? id.flatMap(shownTitle)), token: t), from: c, who: c.name)
+        return await answer(c, t)
     }
     func press(_ c: FakeConnection, _ v: Int?, _ id: String, _ title: String?) async -> (MacMenu?, Double) {
         let t = next(); let t0 = CFAbsoluteTimeGetCurrent()
@@ -178,7 +189,7 @@ func dynamic(_ m: MacMenu?) -> Int { Int(m?.items?.compactMap { $0.title }.first
     await sleep(1.1)
     n = Lines.shared.all().count
     var tokens: [Int] = []
-    for _ in 0..<50 { let t = next(); tokens.append(t); mirror.fetch(FetchMenu(version: v, id: "4", token: t), from: A, who: "A") }
+    for _ in 0..<50 { let t = next(); tokens.append(t); mirror.fetch(FetchMenu(version: v, id: "4", title: "Probe", token: t), from: A, who: "A") }
     var answers: [MacMenu] = []
     for t in tokens { if let m = await answer(A, t) { answers.append(m) } }
     let served = answers.filter { $0.note == nil && ($0.items?.isEmpty == false) }.count, tooMany = answers.filter { $0.note == "Too many requests. Open the menu again." }.count
@@ -228,8 +239,12 @@ func dynamic(_ m: MacMenu?) -> Int { Int(m?.items?.compactMap { $0.title }.first
     let old = await fetch(A, v, "4")
     check(old?.note == "The menus changed. Open the menu again." && old?.items == [], "a fetch with the old version: the menus changed")
     for junk in ["0", "04", "a", "-1", "1.1.1.1.1.1.1.1.1", "4.99"] {
-        let j = await fetch(A, v + 2, junk)
+        let j = await fetch(A, v + 2, junk, title: "Probe")
         check(j?.note == "The menus changed. Open the menu again.", "a fetch of \(junk): the menus changed")
+    }
+    for title in [nil, "", "Edit"] as [String?] {
+        let j = await fetch(A, v + 2, "4", title: .some(title))
+        check(j?.note == "The menus changed. Open the menu again." && j?.items == [], "Probe (4) asked as \(title.map { "\"\($0)\"" } ?? "no title"): the menus changed, unread")
     }
 
     // C5: a target whose top level cannot be read (a process with no Accessibility server: quick
@@ -249,21 +264,147 @@ func dynamic(_ m: MacMenu?) -> Int { Int(m?.items?.compactMap { $0.title }.first
     current = fixtureTarget; mirror.setTarget(fixtureTarget); await sleep(0.5)
     let vF = mirror.version
 
+    // The review's: only subscribers are served. C never subscribed: its fetch and press are
+    // answered at once, nothing read or pressed.
+    let C = FakeConnection("C")
+    n = Lines.shared.all().count
+    let cbC = fixture().count
+    let fc = await fetch(C, vF, "2", title: "File")
+    (a, ms) = await press(C, vF, "4.0", "Set Label A")
+    check(fc?.note == "The menus changed. Open the menu again." && fc?.items == [] && a?.pressed == false
+          && lines(since: n).contains("Menu from C refused: 4.0: the menus changed") && fixture().count == cbC,
+          "a connection that never subscribed: its fetch and press answered at once, the menus changed, nothing read or pressed")
+    // B subscribed: its fetch waits behind a slow activation (A's), and B leaves before its turn: not
+    // read, and its choice, accepted before it left, still made.
+    await sleep(1.1)
+    var prepares = 0
+    let cbFile = fixture().filter { $0.contains("menuNeedsUpdate 'File'") }.count
+    mirror.prepare = { prepares += 1; try? await Task.sleep(for: .seconds(0.6)); return true }
+    let tA = next(); mirror.fetch(FetchMenu(version: vF, id: "3", title: "Edit", token: tA), from: A, who: "A")
+    let tB1 = next(); mirror.fetch(FetchMenu(version: vF, id: "2", title: "File", token: tB1), from: B, who: "B")
+    let tB2 = next(); mirror.press(PressMenuItem(version: vF, id: "4.1", title: "Set Label B", token: tB2), from: B, who: "B")
+    await sleep(0.05)
+    B.state = .cancelled; mirror.clientLeft(B)
+    _ = await answer(A, tA)
+    await sleep(1.0)
+    check(prepares == 2 && label() == "B" && fixture().filter { $0.contains("menuNeedsUpdate 'File'") }.count == cbFile,
+          "B left before its turn: its fetch neither prepared nor read (\(prepares) activations: A's fetch and B's choice), its choice made (the label \(label()))")
+    mirror.prepare = { true }
+    B.state = .ready
+    _ = await fetch(B, nil, nil)
+    // A request past its device's wait: a fetch queued behind a 4.2 s activation is not read, and a
+    // choice behind it is refused as late.
+    await sleep(1.1)
+    mirror.prepare = { try? await Task.sleep(for: .seconds(4.2)); return true }
+    let cbL = fixture().filter { $0.contains("menuNeedsUpdate 'Edit'") }.count
+    n = Lines.shared.all().count
+    let tL1 = next(); mirror.fetch(FetchMenu(version: vF, id: "2", title: "File", token: tL1), from: A, who: "A")
+    let tL2 = next(); mirror.fetch(FetchMenu(version: vF, id: "3", title: "Edit", token: tL2), from: A, who: "A")
+    let tL3 = next(); mirror.press(PressMenuItem(version: vF, id: "4.0", title: "Set Label A", token: tL3), from: A, who: "A")
+    let l1 = await answer(A, tL1, timeout: 8), l2 = await answer(A, tL2, timeout: 8), l3 = await answer(A, tL3, timeout: 8)
+    mirror.prepare = { true }
+    check(l1?.note == "Too many requests. Open the menu again." && l2?.note == "Too many requests. Open the menu again."
+          && fixture().filter { $0.contains("menuNeedsUpdate 'Edit'") }.count == cbL,
+          "fetches past the device's 4 s (the first after its 4.2 s activation, the second before it): too many requests, neither read")
+    check(l3?.pressed == false && l3?.note == "Too many requests. Open the menu again." && label() == "B"
+          && lines(since: n).contains { $0.hasPrefix("Menu from A refused: 4.0: it waited ") && $0.hasSuffix(" s behind other requests") },
+          "a choice past its device's wait: refused, not made, the line saying how long it waited")
+    // A device on a slow link waits longer (four of its worst round trips): with 1.5 s, 6 s, and its
+    // answer can go out until 4.4 s after the fetch arrived (a round trip and 0.1 s before that).
+    mirror.clientStats(A, rttMs: 1500)
+    mirror.prepare = { try? await Task.sleep(for: .seconds(4.0)); return true }
+    let tS1 = next(); mirror.fetch(FetchMenu(version: vF, id: "3", title: "Edit", token: tS1), from: A, who: "A")
+    let s6 = await answer(A, tS1, timeout: 8)
+    mirror.prepare = { true }
+    check(s6?.note == nil && s6?.items?.isEmpty == false, "with a 1.5 s round trip reported, a fetch after a 4.0 s activation: served")
+    mirror.clientStats(A, rttMs: -1)
+    mirror.clientStats(A, rttMs: 0)
+    // One top-level read a second: a sweep across the bar's four menus reads the top level once.
+    await sleep(1.2)
+    _ = Stats.shared.take()
+    let sweep = next()
+    for (i, id) in ["1", "2", "3", "4"].enumerated() {
+        mirror.fetch(FetchMenu(version: vF, id: id, title: shownTitle(id), token: sweep + i), from: A, who: "A")
+    }
+    token = sweep + 3
+    var swept = 0
+    for i in 0..<4 { if let m = await answer(A, sweep + i), m.note == nil, m.items?.isEmpty == false { swept += 1 } }
+    let sweepStats = Stats.shared.take()
+    check(swept == 4 && sweepStats["menu.top"] == 1 && sweepStats["menu.read"] == 4, "a sweep of four menus: four served, one top-level read (\(sweepStats))")
+
+    // The tree changed in place under a version (the review's finding): "Inserted" at the top of
+    // Probe moves every item there down one place and changes no top-level title.
+    await sleep(1.1)
+    let pT = await fetch(A, vF, "4")
+    let sixT = await fetch(A, vF, "4.21")
+    check(pT?.items?.last.map(describe) == "4.21 600 Items ▸" && sixT?.items?.count == 500, "before: Probe ends in 4.21 600 Items, read (500 items)")
+    kill(pid, SIGHUP); await sleep(0.3)
+    // A choice from rows read before the change: its element is 600 Items' own item 5, which did not move.
+    n = Lines.shared.all().count
+    (a, ms) = await press(A, vF, "4.21.5", "Item 6")
+    await sleep(0.2)
+    check(a?.pressed == true && fixture().contains { $0.hasSuffix("PRESS 'Item 6' in '600 Items'") },
+          "a choice from before the change (4.21.5 Item 6): pressed in 600 Items, where it was shown")
+    // The device opens 600 Items again: 4.21 is 300 Items now. Refused, 300 Items not opened, and the
+    // version moves, the same top level going out with it.
+    await sleep(1.1)
+    let cb300 = fixture().filter { $0.contains("'300 Items'") }.count
+    let tC = CFAbsoluteTimeGetCurrent()
+    let again = await fetch(A, vF, "4.21", title: "600 Items")
+    check(again?.note == "The menus changed. Open the menu again." && again?.items == []
+          && fixture().filter { $0.contains("'300 Items'") }.count == cb300,
+          "600 Items asked by its id (4.21, now 300 Items): the menus changed, and 300 Items was not opened")
+    check(mirror.version == vF + 1 && broadcasts(A, after: tC).map { "\($0.version ?? -1) \($0.menus?.count ?? -1)" } == ["\(vF + 1) 4"],
+          "…the version moved (v\(mirror.version)): the same top level sent with it")
+    (a, ms) = await press(A, vF, "4.21.5", "Item 6")
+    check(a?.pressed == false && a?.note == "The menus changed. Open the menu again.", "a choice from before the change, now: refused (another version)")
+    let pN = await fetch(A, vF + 1, "4")
+    let sixN = await fetch(A, vF + 1, "4.22")
+    check(pN?.items?.first.map(describe) == "4.0 Inserted" && pN?.items?.last.map(describe) == "4.22 600 Items ▸" && sixN?.items?.count == 500 && sixN?.more == 100,
+          "Probe at the new version: Inserted first, 600 Items at 4.22, read there (500 and 100 more)")
+    // A walk from the bar past a menu that moved: Rebuilt's leaf, its element gone with a new menu
+    // (SIGUSR1), after another insert (Rebuilt moved from 4.19 to 4.20): Slow Action is at 4.19 now.
+    kill(pid, SIGUSR1); await sleep(0.3)                     // Rebuilt Leaf again (H6 left Renamed Leaf)
+    let vR = mirror.version
+    let rb = await fetch(A, vR, "4.19")
+    check(rb?.items?.map(describe) == ["4.19.0 Rebuilt Leaf"], "Rebuilt (4.19) read: Rebuilt Leaf")
+    kill(pid, SIGUSR1); await sleep(0.2); kill(pid, SIGHUP); await sleep(0.3)
+    n = Lines.shared.all().count
+    let tW2 = CFAbsoluteTimeGetCurrent()
+    (a, ms) = await press(A, vR, "4.19.0", "Rebuilt Leaf")
+    await sleep(0.2)
+    check(a?.pressed == false && label() != "Rebuilt" && lines(since: n).contains { $0.hasPrefix("Menu from A refused:") && $0.hasSuffix(": the menus changed") }
+          && mirror.version == vR + 1 && broadcasts(A, after: tW2).map { $0.version } == [vR + 1],
+          "its leaf found again by walking: Slow Action on the way, not Rebuilt: refused, and the version moved")
+    // A walk that meets the menus read on the way: Probe's items in a new menu (SIGALRM), every
+    // element read there invalid; 600 Items (now 4.23) is found again by walking, and read.
+    let vW = mirror.version
+    let pW = await fetch(A, vW, "4")
+    let sixW = pW?.items?.first { $0.title == "600 Items" }?.id ?? "?"
+    kill(pid, SIGALRM); await sleep(0.3)
+    let sixR = await fetch(A, vW, sixW)
+    check(sixW == "4.23" && sixR?.items?.count == 500 && sixR?.more == 100 && mirror.version == vW,
+          "Probe in a new menu: 600 Items (\(sixW)) found again by walking, read, the version kept")
+
     // H8: the app quits.
     // The runner, the fixture's parent, kills and reaps it: a zombie still answers kill(pid, 0).
+    await sleep(1.1)                                         // no read of Probe left in the cache
     let request = fixtureLog + ".kill"
     FileManager.default.createFile(atPath: request, contents: nil)
     while FileManager.default.fileExists(atPath: request) { await sleep(0.05) }
     check(!MenuReader.alive(pid), "the fixture is gone (killed and reaped by its parent)")
     let tK = CFAbsoluteTimeGetCurrent()
-    let gone = await fetch(A, vF, "4")
+    let vK = mirror.version
+    let gone = await fetch(A, vK, "4")
     let sentK = broadcasts(A, after: tK).map { "\($0.version ?? -1) \($0.menus?.count ?? -1)" }
-    check(gone?.note == "menufixture is no longer open." && sentK == ["\(vF + 1) 0"],
+    check(gone?.note == "menufixture is no longer open." && sentK == ["\(vK + 1) 0"],
           "the fixture killed: the fetch refused (\(gone?.note ?? "no answer")); v+1 with no menus sent (\(sentK))")
 
     // Leaving.
-    mirror.clientLeft(A); check(subscribedEvents == [true], "one subscriber left: nothing")
-    mirror.clientLeft(B); check(subscribedEvents == [true, false] && !mirror.hasSubscribers, "the last left: onSubscribersChanged(false)")
+    let vL = mirror.version
+    mirror.clientLeft(A); check(subscribedEvents == [true] && mirror.version == vL, "one subscriber left: nothing")
+    mirror.clientLeft(B); check(subscribedEvents == [true, false] && !mirror.hasSubscribers && mirror.version == vL + 1,
+                                "the last left: onSubscribersChanged(false), and a new version (what was read is gone)")
     Swift.print("\(checks - failures) of \(checks) checks passed")
     return failures == 0 ? 0 : 1
 }

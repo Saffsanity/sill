@@ -5,13 +5,15 @@ import StreamProtocol
 // checked without Accessibility. Pure: Foundation and StreamProtocol (the cache keeps the items a
 // device is sent), checked on its own with swiftc (Tests/checks/menus).
 
-/// One menu's items as last read, per id. AppKit validates a menu when it is read and throttles
-/// that to about once a second per menu (measured): a read within the second returns the state
-/// computed at the last one. So the cache answers only where a read now would return the same
-/// thing: a read of less than a second ago made while the app was frontmost answers any fetch; one
-/// made while it was not (an inactive app's states) answers only while the app is still not
-/// frontmost. Once the app has been brought forward, the menu is read again when `revalidation` has
-/// passed since that read, so that AppKit validates it anew for an active app.
+/// One menu's items as last read, per id, with the title the menu had then. AppKit validates a menu
+/// when it is read and throttles that to about once a second per menu (measured): a read within the
+/// second returns the state computed at the last one. So the cache answers only where a read now
+/// would return the same thing: a read of less than a second ago made while the app was frontmost
+/// answers any fetch; one made while it was not (an inactive app's states) answers only while the
+/// app is still not frontmost. Once the app has been brought forward, the menu is read again when
+/// `revalidation` has passed since that read, so that AppKit validates it anew for an active app.
+/// And only a fetch that shows the menu under the title it was read under: an id is a place, and
+/// what a device asks for is the menu it was shown there.
 package struct MenuCache {
     /// A read answers fetches for this long.
     package static let lifetime = 1.0
@@ -20,12 +22,14 @@ package struct MenuCache {
     package static let revalidation = 1.05
 
     package struct Entry: Equatable {
+        /// The menu's own title when it was read (the item that opens it, as a device is shown it).
+        package let title: String
         package let items: [MacMenuItem]
         package let more: Int
         package let at: Double
         package let appWasFrontmost: Bool
-        package init(items: [MacMenuItem], more: Int, at: Double, appWasFrontmost: Bool) {
-            self.items = items; self.more = more; self.at = at; self.appWasFrontmost = appWasFrontmost
+        package init(title: String, items: [MacMenuItem], more: Int, at: Double, appWasFrontmost: Bool) {
+            self.title = title; self.items = items; self.more = more; self.at = at; self.appWasFrontmost = appWasFrontmost
         }
     }
 
@@ -38,9 +42,10 @@ package struct MenuCache {
     /// An entry to answer from: read less than `lifetime` ago while the app was frontmost; or while
     /// it was not, when `frontmostNow` is false too (AppKit would answer a read now from that same
     /// validation). Asked with `frontmostNow: true` before the app is brought forward, and again
-    /// after with what that found.
-    package func fresh(_ id: String, now: Double, frontmostNow: Bool) -> Entry? {
-        guard let e = entries[id], now - e.at < Self.lifetime, e.appWasFrontmost || !frontmostNow else { return nil }
+    /// after with what that found. Only for `title`, the one the menu was read under.
+    package func fresh(_ id: String, title: String, now: Double, frontmostNow: Bool) -> Entry? {
+        guard let e = entries[id], ShownTitle.matches(now: e.title, shown: title), now - e.at < Self.lifetime,
+              e.appWasFrontmost || !frontmostNow else { return nil }
         return e
     }
 
@@ -54,6 +59,87 @@ package struct MenuCache {
 
     package mutating func clear() { entries = [:] }
     package var isEmpty: Bool { entries.isEmpty }
+}
+
+/// Whether the item at an id is still the one a device was shown there: its title now (as a device is
+/// shown it, `MenuFormat.displayTitle`) is the one the device showed. An empty or missing title never
+/// matches: no device was shown one. A fetch's menu and a choice's item are judged by this.
+package enum ShownTitle {
+    package static func matches(now: String?, shown: String?) -> Bool {
+        guard let now, !now.isEmpty else { return false }
+        return now == shown
+    }
+}
+
+/// How long a device waits for the answer to a fetch: 4 s, or four of its worst recent round trips
+/// on a slow link (the device's MacMenuState rule 6, as a settings pick waits). The host knows the
+/// round trip from the connection's client stats, once a second. Requests are served one at a time,
+/// so a fetch can wait its turn behind others (a pointer sweeping the iPad's bar opens a menu at a
+/// time, and a slow app takes a while each): one whose answer could no longer reach its device in
+/// time is not read at all, since the device has settled it and drops the answer, and a read stops
+/// in time for its answer to arrive. A choice has no timeout on the device, and one whose turn comes
+/// that late is refused rather than made seconds after it was chosen.
+package enum RequestDeadline {
+    package static let deviceWait = 4.0
+    /// An answer is sent at least this long before it would reach its device too late.
+    package static let margin = 0.1
+
+    /// The device's wait, from the connection's worst round trip of a recent second, in ms (nil or
+    /// negative: none measured yet).
+    package static func wait(rttMs: Int?) -> Double { max(deviceWait, 4 * seconds(rttMs)) }
+
+    /// How long after a request arrived its answer can still go out: the device's wait, less one
+    /// round trip (its clock started half of one before the request arrived, and the answer takes
+    /// the other half) and `margin`.
+    package static func answerBy(rttMs: Int?) -> Double { wait(rttMs: rttMs) - seconds(rttMs) - margin }
+
+    /// Whether a request that has waited `waited` seconds for its turn is past `answerBy`.
+    package static func expired(waited: Double, rttMs: Int?) -> Bool { waited >= answerBy(rttMs: rttMs) }
+
+    private static func seconds(_ rttMs: Int?) -> Double { Double(max(0, rttMs ?? 0)) / 1000 }
+}
+
+/// The submenus read in the current tree version: at each id, the title a device was shown for it.
+/// An id is a place (Accessibility's child indexes), and an app can add or remove items above a
+/// submenu in place, which moves no top-level title: within one version an id must still name one
+/// item for every device (docs/menu-bar-plan.md §3.3), so a read that finds, among the places it
+/// covers, another title where a submenu was read, or no submenu there, means the tree changed under
+/// the version, and the version moves (the mirror's `treeChanged`). Leaves are not recorded: nothing
+/// is read below them, and a choice checks its own title. At most `limit` places: past that the
+/// version moves too, and the record starts again.
+package struct SubmenuRecord {
+    package static let limit = 20_000
+    /// By the menu's id, each submenu's title by its index there.
+    private var byMenu: [String: [Int: String]] = [:]
+    package private(set) var count = 0
+
+    package init() {}
+
+    /// A read of the menu `menu` found these items among its first `examined` children: each one's
+    /// index, the title a device is shown, and whether it opens a menu. False when a submenu recorded
+    /// at one of those places is not there now, or not under its title: the tree changed, and
+    /// nothing is recorded. Otherwise every submenu found is recorded.
+    package mutating func read(menu: String, found: [(index: Int, title: String, submenu: Bool)], examined: Int) -> Bool {
+        let recorded = byMenu[menu] ?? [:]
+        var now: [Int: String] = [:]
+        for f in found where f.submenu && now[f.index] == nil { now[f.index] = f.title }
+        for (index, title) in recorded where index < examined && now[index] != title { return false }
+        let merged = recorded.merging(now) { _, new in new }
+        let added = merged.count - recorded.count
+        guard count + added <= Self.limit else { return false }
+        count += added
+        byMenu[menu] = merged
+        return true
+    }
+
+    /// The title recorded for the submenu at `id` ("4.21"), or nil: none read there in this version
+    /// (or `id` is one of the bar's menus, which the top level has).
+    package func title(of id: String) -> String? {
+        guard let dot = id.lastIndex(of: "."), let index = Int(id[id.index(after: dot)...]) else { return nil }
+        return byMenu[String(id[..<dot])]?[index]
+    }
+
+    package mutating func clear() { byMenu = [:]; count = 0 }
 }
 
 /// Each connection's requests of the last second: at most 20 fetches and 4 presses (a sweep across
@@ -107,6 +193,9 @@ package enum MenuRefusal: Equatable {
     case notTrusted
     /// Over `RequestRate`'s limits.
     case tooMany
+    /// A choice whose turn came this many seconds after it arrived, past its device's wait
+    /// (`RequestDeadline`): refused rather than made so late.
+    case late(Double)
     /// Any other Accessibility error, by its name.
     case failed(String)
 
@@ -125,7 +214,7 @@ package enum MenuRefusal: Equatable {
         case .gone: Self.goneNote(app)
         case .notAnswering: Self.notRespondingNote(app)
         case .notTrusted: Self.noAccessNote
-        case .tooMany: Self.tooManyNote
+        case .tooMany, .late: Self.tooManyNote
         }
     }
 
@@ -138,6 +227,7 @@ package enum MenuRefusal: Equatable {
         case .notAnswering: "\(app) is not answering Accessibility"
         case .notTrusted: "no Accessibility permission"
         case .tooMany: "too many requests"
+        case .late(let waited): "it waited \(String(format: "%.1f", waited)) s behind other requests"
         case .failed(let error): "Accessibility refused it (\(error))"
         }
     }
@@ -166,7 +256,7 @@ package enum PressDecision: Equatable {
     ///    reads as changed).
     package static func decide(elementValid: Bool, current: String?, shown: String?, enabled: Bool?,
                                hasChildren: Bool) -> PressDecision {
-        guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }
+        guard ShownTitle.matches(now: current, shown: shown) else { return .refuse(.changed) }
         if hasChildren { return .refuse(.changed) }
         if enabled == false { return .refuse(.disabled) }
         return elementValid ? .press : .pressFound

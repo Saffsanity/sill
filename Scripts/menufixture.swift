@@ -12,13 +12,17 @@
 // and one borderless 240×40 window far off every display (at -20000, -20000), which ignores the
 // mouse and can never be key; it holds one label, "none" at first. Every menu delegate and
 // validation callback is logged with its time (seconds since 1970, then since launch), and every
-// action as "ACTION ‹item›", setting the label: Set Label A → "A", Set Label B → "B", Deep Leaf →
-// "Deep", Rebuilt Leaf → "Rebuilt", any other → its title. SIGUSR1 gives Probe › Rebuilt a new menu
-// whose one item has the same title, SIGUSR2 one titled "Renamed Leaf", as an app that builds its
-// menus again does (Electron): the old item's element is then invalid, and the host finds the item
-// again by its path. (AppKit's menu item elements are positional: items replaced inside the same
-// NSMenu leave an element answering for whatever item is at its place now, measured 2026-09-27;
-// Dynamic N, retitled at each validation, shows the host's title check for that case.)
+// action as "ACTION ‹item›", then "PRESS '‹item›' in '‹its menu›'", setting the label: Set Label A →
+// "A", Set Label B → "B", Deep Leaf → "Deep", Rebuilt Leaf → "Rebuilt", any other → its title.
+// SIGUSR1 gives Probe › Rebuilt a new menu whose one item has the same title, SIGUSR2 one titled
+// "Renamed Leaf", as an app that builds its menus again does (Electron): the old item's element is
+// then invalid, and the host finds the item again by its path. (AppKit's menu item elements are
+// positional: items replaced inside the same NSMenu leave an element answering for whatever item
+// is at its place now, measured 2026-09-27; Dynamic N, retitled at each validation, shows the
+// host's title check for that case.) SIGHUP inserts a leaf "Inserted" at the top of Probe, in the
+// same menu, so every item of Probe moves down one place, its submenus included, and the top level
+// stays as it was: an app changing a menu in place. SIGALRM gives Probe a new menu holding the same
+// items, so every element read in Probe is invalid and the host walks from the bar.
 import AppKit
 
 let arguments = CommandLine.arguments
@@ -86,6 +90,7 @@ var dynamic = 0
 final class Controller: NSObject, NSMenuItemValidation {
     @objc func act(_ sender: NSMenuItem) {
         log("ACTION \(sender.title)")
+        log("PRESS '\(sender.title)' in '\(sender.menu?.title ?? "?")'")
         let names = ["Set Label A": "A", "Set Label B": "B", "Deep Leaf": "Deep", "Rebuilt Leaf": "Rebuilt"]
         label.stringValue = names[sender.title] ?? sender.title
     }
@@ -230,6 +235,30 @@ for (sig, title) in [(SIGUSR1, "Rebuilt Leaf"), (SIGUSR2, "Renamed Leaf")] {
     source.resume()
     signalSources.append(source)
 }
+// SIGHUP: "Inserted" at the top of Probe, in the same menu. SIGALRM: Probe's items moved into a new
+// menu (the old one emptied).
+let probeItem = main.item(withTitle: "Probe")!
+signal(SIGHUP, SIG_IGN); signal(SIGALRM, SIG_IGN)
+let insertSource = DispatchSource.makeSignalSource(signal: SIGHUP, queue: .main)
+insertSource.setEventHandler {
+    probeItem.submenu?.insertItem(item("Inserted"), at: 0)
+    log("INSERTED 'Inserted' at the top of Probe")
+}
+insertSource.resume()
+signalSources.append(insertSource)
+let renewSource = DispatchSource.makeSignalSource(signal: SIGALRM, queue: .main)
+renewSource.setEventHandler {
+    guard let old = probeItem.submenu else { return }
+    let items = old.items
+    old.removeAllItems()
+    let menu = NSMenu(title: "Probe")
+    menu.delegate = logging
+    for i in items { menu.addItem(i) }
+    probeItem.submenu = menu
+    log("RENEWED Probe as a new menu holding its \(items.count) items")
+}
+renewSource.resume()
+signalSources.append(renewSource)
 
 log("started pid \(getpid()), window at \(window.frame)")
 print("menufixture pid \(getpid())")

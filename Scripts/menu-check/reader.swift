@@ -1,8 +1,11 @@
 // Scripts/menu-check/run.sh reader|budget: MenuReader against the fixture, with no host, network or
 // encoder: its reads and presses as the mirror makes them (docs/menu-bar-plan.md, the critique's
-// C1–C3, and H4–H6's and H10's reader-level parts). Presses go only to the fixture whose pid is
-// given. usage (fixture.py runs it): reader PID FIXTURE_LOG FIXTURE_BIN [budget]
-// The ids are the fixture's (§5's table): Deep 4.19, Dynamic N 4.16, Rebuilt 4.18, 600 Items 4.21.
+// C1–C3, H4–H6's and H10's reader-level parts, and the review's: a menu read only while the item
+// that opens it has the title shown, a walk from the bar only past the menus read there). Presses go
+// only to the fixture whose pid is given. usage (fixture.py runs it): reader PID FIXTURE_LOG
+// FIXTURE_BIN [budget]
+// The ids are the fixture's (§5's table): Deep 4.19, Dynamic N 4.16, Rebuilt 4.18, 600 Items 4.21,
+// until the end, where SIGHUP inserts an item at the top of Probe.
 import Foundation
 import ApplicationServices
 
@@ -34,13 +37,25 @@ func watching<T>(_ body: () -> T) -> (T, [String]) {
     Thread.sleep(forTimeInterval: 0.15)
     return (v, Array(log().dropFirst(before)))
 }
-func items(_ id: String, of parent: AXUIElement?) -> MenuReader.Menu? {
-    if case .success(let m) = onQueue({ r.items(pid: pid, of: parent, path: path(id)) }) { return m }
+/// The titles of the menus on the way to an id, as the mirror keeps them for a walk from the bar.
+var titleOf: [String: String] = ["4": "Probe"]
+func ancestors(_ id: String) -> [String]? {
+    let lineage = path(id).lineage.dropLast().map(\.id)
+    let titles = lineage.compactMap { titleOf[$0] }
+    return titles.count == lineage.count ? titles : nil
+}
+func read(_ id: String, of parent: AXUIElement?, shown: String, ancestors given: [String]?? = nil) -> Result<MenuReader.Menu, MenuReader.Failure> {
+    let a = given ?? ancestors(id)
+    return onQueue { r.items(pid: pid, of: parent, path: path(id), shown: shown, ancestors: a) }
+}
+func items(_ id: String, of parent: AXUIElement?, shown: String) -> MenuReader.Menu? {
+    if case .success(let m) = read(id, of: parent, shown: shown) { return m }
     return nil
 }
-func press(_ id: String, _ element: AXUIElement?, shown: String?) -> (MenuReader.Pressed, Double, [String]) {
+func press(_ id: String, _ element: AXUIElement?, shown: String?, ancestors given: [String]?? = nil) -> (MenuReader.Pressed, Double, [String]) {
     let t = CFAbsoluteTimeGetCurrent()
-    let (p, lines) = watching { onQueue { r.press(pid: pid, element: element, path: path(id), shownTitle: shown) } }
+    let a = given ?? ancestors(id)
+    let (p, lines) = watching { onQueue { r.press(pid: pid, element: element, path: path(id), shownTitle: shown, ancestors: a) } }
     return (p, (CFAbsoluteTimeGetCurrent() - t - 0.15) * 1000, lines)
 }
 let front0 = front()
@@ -54,22 +69,23 @@ let probeBar = top.titles.first { $0.index == 4 }!.element
 if budgetRun {
     // The read budget, in a build whose readBudget is 0.005 s: 600 Items stops early and counts the rest.
     check(MenuReader.readBudget < 0.01, "this build's readBudget is \(MenuReader.readBudget) s")
-    if let probe = items("4", of: probeBar) {
+    if let probe = items("4", of: probeBar, shown: "Probe") {
         let stoppedEarly = probe.unread > 0
         check(probe.total == 22 && probe.unread == 22 - (probe.reads.last.map { $0.index + 1 } ?? 0)
               && (stoppedEarly ? probe.ms >= MenuReader.readBudget * 1000 : probe.reads.count == 22),
               "Probe within the budget: \(probe.reads.count) read, unread \(probe.unread) of \(probe.total) in \(String(format: "%.1f", probe.ms)) ms (stopped early only past the budget)")
     } else { check(false, "Probe readable") }
-    guard let m = items("4.21", of: nil) else { print("FAIL 600 Items unreadable"); exit(1) }
+    guard let m = items("4.21", of: nil, shown: "600 Items") else { print("FAIL 600 Items unreadable"); exit(1) }
     check(m.total == 600 && m.reads.count < 500 && m.reads.count >= 1 && m.unread == 600 - m.reads.count,
           "600 Items within the budget: \(m.reads.count) read, unread \(m.unread) of \(m.total), in \(String(format: "%.1f", m.ms)) ms")
     print("\(checks - failures) of \(checks) checks passed"); exit(failures == 0 ? 0 : 1)
 }
 
 // Probe's items, kept as the mirror keeps them.
-guard let probe = items("4", of: probeBar) else { print("FAIL Probe unreadable"); exit(1) }
+guard let probe = items("4", of: probeBar, shown: "Probe") else { print("FAIL Probe unreadable"); exit(1) }
 var kept: [String: (AXUIElement, String)] = [:]
 for read in probe.reads { if let t = read.item.title { kept["4.\(read.index)"] = (read.element, t) } }
+for (id, k) in kept where probe.reads.first(where: { "4.\($0.index)" == id })?.item.childCount ?? 0 > 0 { titleOf[id] = k.1 }
 print("Probe: " + probe.reads.map { "4.\($0.index) \($0.item.title ?? "nil")" }.joined(separator: " | "))
 let deepID = kept.first { $0.value.1 == "Deep" }!.key
 let dynamicID = kept.first { $0.value.1.hasPrefix("Dynamic ") }!.key
@@ -107,7 +123,7 @@ check(p.outcome == .refused(.changed) && !lines.contains { $0.contains("ACTION")
 // Dynamic N (H6): pressed within AppKit's second after the read, refused once the press's own read
 // validates the menu again and retitles it.
 Thread.sleep(forTimeInterval: 1.2)
-guard let probe2 = items("4", of: probeBar) else { print("FAIL Probe unreadable"); exit(1) }
+guard let probe2 = items("4", of: probeBar, shown: "Probe") else { print("FAIL Probe unreadable"); exit(1) }
 let dyn = probe2.reads.first { "4.\($0.index)" == dynamicID }!
 let dynTitle = dyn.item.title!
 Thread.sleep(forTimeInterval: 0.3)
@@ -119,7 +135,7 @@ check(p.outcome == .refused(.changed) && !lines.contains { $0.contains("ACTION")
       "\(dynamicID) \(dynTitle) pressed 1.8 s after the read: refused, the menus changed (\(lines.filter { $0.contains("Dynamic") || $0.contains("menuNeedsUpdate") }))")
 
 // Rebuilt (H6): the same title found again by its path; renamed, refused.
-guard let rebuilt = items(rebuiltID, of: kept[rebuiltID]!.0), let leaf = rebuilt.reads.first else { print("FAIL Rebuilt unreadable"); exit(1) }
+guard let rebuilt = items(rebuiltID, of: kept[rebuiltID]!.0, shown: "Rebuilt"), let leaf = rebuilt.reads.first else { print("FAIL Rebuilt unreadable"); exit(1) }
 check(leaf.item.title == "Rebuilt Leaf", "Rebuilt's leaf read: \(leaf.item.title ?? "nil")")
 kill(pid, SIGUSR1); Thread.sleep(forTimeInterval: 0.3)
 (p, ms, lines) = press("\(rebuiltID).\(leaf.index)", leaf.element, shown: "Rebuilt Leaf")
@@ -131,16 +147,16 @@ check(p.outcome == .refused(.changed) && p.foundTitle == "Renamed Leaf" && label
       "rebuilt as Renamed Leaf: refused, found Renamed Leaf, the label unchanged")
 
 // Deep, level by level, then its leaf (H4/H5's).
-guard let d1 = items(deepID, of: kept[deepID]!.0), let l2 = d1.reads.first,
-      let d2 = items("\(deepID).\(l2.index)", of: l2.element), let l3 = d2.reads.first,
-      let d3 = items("\(deepID).\(l2.index).\(l3.index)", of: l3.element), let deepLeaf = d3.reads.first else { print("FAIL Deep unreadable"); exit(1) }
+guard let d1 = items(deepID, of: kept[deepID]!.0, shown: "Deep"), let l2 = d1.reads.first,
+      let d2 = items("\(deepID).\(l2.index)", of: l2.element, shown: "Level 2"), let l3 = d2.reads.first,
+      let d3 = items("\(deepID).\(l2.index).\(l3.index)", of: l3.element, shown: "Level 3"), let deepLeaf = d3.reads.first else { print("FAIL Deep unreadable"); exit(1) }
 check(l2.item.title == "Level 2" && l3.item.title == "Level 3" && deepLeaf.item.title == "Deep Leaf", "Deep › Level 2 › Level 3 › Deep Leaf")
 (p, ms, lines) = press("\(deepID).\(l2.index).\(l3.index).\(deepLeaf.index)", deepLeaf.element, shown: "Deep Leaf")
 check(p.outcome == .pressed && label() == "Deep", "Deep Leaf: pressed, the label Deep")
 
 // 600 Items: 500 read, 100 more.
 let six = probe.reads.first { $0.item.title == "600 Items" }!
-if let m = items("4.\(six.index)", of: six.element) {
+if let m = items("4.\(six.index)", of: six.element, shown: "600 Items") {
     check(m.reads.count == 500 && m.unread == 100 && m.total == 600, "600 Items: 500 read, 100 unread, in \(String(format: "%.0f", m.ms)) ms (budget \(MenuReader.readBudget) s)")
 } else { check(false, "600 Items readable") }
 
@@ -152,7 +168,7 @@ let tSlow = CFAbsoluteTimeGetCurrent()
 check(p.outcome == .pressed || p.outcome == .pressedNoAnswer, "Slow Action: \(p.outcome) after \(Int(ms)) ms")
 print("note Slow Action's AXPress answered after \(Int(ms)) ms (\(p.outcome == .pressed ? "before its action ran" : "at the timeout"))")
 let tRead = CFAbsoluteTimeGetCurrent()
-let during = onQueue { r.items(pid: pid, of: probeBar, path: path("4")) }
+let during = read("4", of: probeBar, shown: "Probe")
 let readMS = (CFAbsoluteTimeGetCurrent() - tRead) * 1000
 if case .failure(.notAnswering) = during {
     check(readMS >= 900 && readMS < 1600, "a read of Probe while the action sleeps: not answering, after \(Int(readMS)) ms")
@@ -162,6 +178,49 @@ if case .failure(.notAnswering) = during {
 Thread.sleep(forTimeInterval: max(0, 2.3 - (CFAbsoluteTimeGetCurrent() - tSlow)))
 check(log().contains { $0.hasSuffix("ACTION Slow Action done") }, "…its action finished")
 if case .success = onQueue({ r.topLevel(pid: pid) }) { check(true, "…and the app answers again") } else { check(false, "the app answers again") }
+
+// The review's: a menu is read only while the item that opens it has the title shown there, and a walk
+// from the bar goes only past the menus read on the way.
+func failure(_ r: Result<MenuReader.Menu, MenuReader.Failure>) -> MenuReader.Failure? {
+    if case .failure(let f) = r { return f }
+    return nil
+}
+var got = read(deepID, of: kept[deepID]!.0, shown: "Rebuilt")
+check(failure(got) == .notShown(found: "Deep"), "Deep's element asked as Rebuilt: not shown, found Deep (\(got))")
+got = read("4.21", of: nil, shown: "600 Items", ancestors: .some(["Edit"]))
+check(failure(got) == .moved, "600 Items walked with Edit for Probe on the way: moved (\(got))")
+got = read("4.21", of: nil, shown: "600 Items", ancestors: .some(nil))
+check(failure(got) == .moved, "no element and nothing known on the way: moved, no walk (\(got))")
+(p, ms, lines) = press("4.0", nil, shown: "Set Label A", ancestors: .some(["File"]))
+check(p.outcome == .moved && !lines.contains { $0.contains("ACTION") }, "a press walked with File for Probe on the way: moved, no ACTION")
+(p, ms, lines) = press("4.0", nil, shown: "Set Label A", ancestors: .some(nil))
+check(p.outcome == .refused(.changed) && !lines.contains { $0.contains("ACTION") }, "a press with no element and nothing known on the way: refused, no walk")
+// SIGHUP: "Inserted" at the top of Probe; every item there moves down one place.
+let before = log().count
+kill(pid, SIGHUP); Thread.sleep(forTimeInterval: 0.3)
+check(log().dropFirst(before).contains { $0.hasSuffix("INSERTED 'Inserted' at the top of Probe") }, "SIGHUP: Inserted at the top of Probe")
+let sixID = "4.\(six.index)"
+let callbacks0 = log().count
+got = read(sixID, of: six.element, shown: "600 Items")
+Thread.sleep(forTimeInterval: 0.15)
+check(failure(got) == .notShown(found: "300 Items"), "\(sixID), kept, asked as 600 Items: not shown, found 300 Items (\(got))")
+check(!log().dropFirst(callbacks0).contains { $0.contains("'300 Items'") || $0.contains("'600 Items'") }, "…and neither 300 Items nor 600 Items was opened")
+got = read(sixID, of: nil, shown: "600 Items")
+check(failure(got) == .notShown(found: "300 Items"), "\(sixID) walked, asked as 600 Items: not shown, found 300 Items")
+let deepNow = "4.\(Int(deepID.split(separator: ".")[1])! + 1)"
+titleOf[deepNow] = "Deep"
+got = read("\(deepID).0", of: nil, shown: "Level 2")
+check(failure(got) == .moved, "Deep › Level 2 by its old path: Rebuilt on the way, not Deep: moved (\(got))")
+if case .success(let m) = read("\(deepNow).0", of: nil, shown: "Level 2") {
+    check(m.reads.first?.item.title == "Level 3", "…by its new path \(deepNow).0: Level 3 in it")
+} else { check(false, "Deep › Level 2 by its new path readable") }
+// SIGALRM: Probe's items in a new menu; every element read in Probe is invalid, and a read walks.
+kill(pid, SIGALRM); Thread.sleep(forTimeInterval: 0.3)
+check(log().contains { $0.contains("RENEWED Probe") }, "SIGALRM: Probe renewed")
+let sixNow = "4.\(six.index + 1)"
+if case .success(let m) = read(sixNow, of: six.element, shown: "600 Items") {
+    check(m.reads.count == 500 && m.unread == 100, "600 Items (\(sixNow)): its kept element invalid, found again by walking: 500 read, 100 more")
+} else { check(false, "600 Items after SIGALRM readable by walking") }
 
 check(front() == front0, "the frontmost app the same before and after (\(front0))")
 print("\(checks - failures) of \(checks) checks passed")

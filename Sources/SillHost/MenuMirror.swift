@@ -14,7 +14,18 @@ import StreamProtocol
 /// Requests are served one at a time, in arrival order (`enqueue`): a fetch's activation and read,
 /// a press, a subscription's read. So a device's answers follow its requests, and no two reads of
 /// one app overlap. Target and version change at once (`setTarget`); every step that waited checks
-/// them again, and a read that comes back for another version is dropped.
+/// them again, and a read that comes back for another version is dropped. A fetch whose turn comes
+/// after its device has stopped waiting (`RequestDeadline`) is not read, a choice that late is
+/// refused, and only a subscriber is served: a request from any other connection is answered at
+/// once, and one whose connection left before its turn is dropped (a choice still runs: a move's
+/// new connection counts on the Mac acting on what the old one carried).
+///
+/// Within one version an id names one item for every device (§3.3). A fetch and a choice carry the
+/// title the device showed, and nothing is read or pressed where that title is not the item's now.
+/// The submenus read in a version are recorded with their titles (`SubmenuRecord`): a read that
+/// finds another one at a recorded place, or a walk from the bar that meets one, means the app
+/// changed its menus in place, and the version moves (`treeChanged`), so no device's older ids are
+/// served against the new tree.
 @MainActor
 final class MenuMirror {
     struct Target: Equatable {
@@ -59,11 +70,25 @@ final class MenuMirror {
     private var elements: [MenuPath: Kept] = [:]
     private static let maxKept = 5_000
     private var cache = MenuCache()
+    /// The submenus read in this version, with their titles: the check of a read, and what a walk
+    /// from the bar must meet on its way.
+    private var submenus = SubmenuRecord()
+    /// When the top level was last read, and each bar menu's element by its index: a fetch within a
+    /// second of that read opens its menu without reading the top level again (a sweep across the
+    /// iPad's bar costs one top-level read).
+    private var topReadAt = -Double.infinity
+    private var topElements: [Int: AXUIElement] = [:]
     private var subscribers: [ObjectIdentifier: NWConnection] = [:]
     private var rates: [ObjectIdentifier: RequestRate] = [:]
+    /// Each subscriber's worst round trip of a recent second (its client stats), in ms: how long its
+    /// device waits for an answer (`RequestDeadline`).
+    private var roundTrips: [ObjectIdentifier: Int] = [:]
     /// The last top level broadcast to the subscribers (never an answer): sent again only changed.
     private var lastSent: MacMenu?
     private var chain: Task<Void, Never>?
+    /// Requests queued or being served: while others wait behind a fetch, it opens its menu without
+    /// reading the top level again (the titles it checks keep that safe).
+    private var queued = 0
     private var retryQueued = false
 
     var hasSubscribers: Bool { !subscribers.isEmpty }
@@ -108,7 +133,8 @@ final class MenuMirror {
 
     /// Kind 27. Without an id: the subscription, answered with the top level. With one: that menu's
     /// items, from a read of less than a second ago made while the app was frontmost, or read now.
-    /// At most 20 a second per connection; the rest get "Too many requests…" at once.
+    /// At most 20 a second per connection; the rest get "Too many requests…" at once, and so does
+    /// nothing else: a connection that never subscribed gets "The menus changed…" at once, unread.
     func fetch(_ r: FetchMenu, from c: NWConnection, who: String) {
         let id = ObjectIdentifier(c)
         let now = CFAbsoluteTimeGetCurrent()
@@ -118,17 +144,25 @@ final class MenuMirror {
             print("Menus from \(who) ignored: more than \(RequestRate.fetchesPerSecond) requests a second.")
         }
         rates[id] = rate
+        let menu = r.id.flatMap(MenuPath.init)?.id
         guard allowed else {
             Stats.shared.bump("menu.refused")
-            send(MacMenu(version: version, answering: r.token, menu: r.id.flatMap(MenuPath.init)?.id, items: [],
-                         note: MenuRefusal.tooManyNote), to: c)
+            send(MacMenu(version: version, answering: r.token, menu: menu, items: [], note: MenuRefusal.tooManyNote), to: c)
             return
         }
         guard let menuID = r.id else { subscribe(c, token: r.token); return }
-        enqueue { await self.serveFetch(r, id: menuID, to: c) }
+        // Only a device that asked for the top level is served a menu: any other was never sent one,
+        // and its target may be one nobody watches any more.
+        guard subscribers[id] != nil else {
+            Stats.shared.bump("menu.refused")
+            send(MacMenu(version: version, answering: r.token, menu: menu, items: [], note: MenuRefusal.changedNote), to: c)
+            return
+        }
+        enqueue { await self.serveFetch(r, id: menuID, to: c, arrived: now) }
     }
 
-    /// Kind 25: choose one item, at most 4 a second per connection. Logged whatever the outcome.
+    /// Kind 25: choose one item, at most 4 a second per connection, and only from a subscriber.
+    /// Logged whatever the outcome.
     func press(_ r: PressMenuItem, from c: NWConnection, who: String) {
         let id = ObjectIdentifier(c)
         let now = CFAbsoluteTimeGetCurrent()
@@ -143,17 +177,39 @@ final class MenuMirror {
             send(MacMenu(version: version, answering: r.token, pressed: false, note: MenuRefusal.tooManyNote), to: c)
             return
         }
-        enqueue { await self.servePress(r, to: c, who: who) }
+        guard subscribers[id] != nil else {
+            Stats.shared.bump("menu.refused")
+            print("Menu from \(who) refused: \(r.id.flatMap(MenuPath.init)?.id ?? SafeText.label(r.id ?? "no id", limit: 32)): \(MenuRefusal.changed.logReason(app: ""))")
+            send(MacMenu(version: version, answering: r.token, pressed: false, note: MenuRefusal.changedNote), to: c)
+            return
+        }
+        enqueue { await self.servePress(r, to: c, who: who, arrived: now) }
+    }
+
+    /// A connection's client stats, about once a second: its worst round trip of that second (a
+    /// negative one: none measured, and the last one measured stands).
+    func clientStats(_ c: NWConnection, rttMs: Int) {
+        let id = ObjectIdentifier(c)
+        guard subscribers[id] != nil, rttMs >= 0 else { return }
+        roundTrips[id] = rttMs
     }
 
     /// A connection closed.
     func clientLeft(_ c: NWConnection) {
         let id = ObjectIdentifier(c)
         rates[id] = nil
+        roundTrips[id] = nil
         guard subscribers.removeValue(forKey: id) != nil else { return }
         if subscribers.isEmpty {
-            // Nobody to answer: let go of the app's elements; the next subscriber reads afresh.
+            // Nobody to answer: let go of the app's elements and of what was read; the next subscriber
+            // reads afresh, in a new version, since nothing recorded any more what the ids of this one
+            // named (a device's rows from before, after a move whose old connection went first, are
+            // then refused rather than served against a tree read since).
+            version += 1
             elements = [:]
+            topElements = [:]
+            topReadAt = -.infinity
+            submenus.clear()
             cache.clear()
             onSubscribersChanged?(false)
         }
@@ -200,14 +256,19 @@ final class MenuMirror {
         }
     }
 
-    private func serveFetch(_ r: FetchMenu, id menuID: String, to c: NWConnection) async {
+    private func serveFetch(_ r: FetchMenu, id menuID: String, to c: NWConnection, arrived: Double) async {
+        let cid = ObjectIdentifier(c)
+        // The device left before this fetch's turn: nobody to answer, so nothing is activated or read.
+        guard subscribers[cid] != nil else { return }
         let path = MenuPath(menuID)
         func answer(_ m: MacMenu) { send(m, to: c) }
         func refuse(_ note: String) {
             Stats.shared.bump("menu.refused")
             answer(MacMenu(version: version, answering: r.token, menu: path?.id, items: [], note: note))
         }
-        guard r.version == version, let path, let t = target else { refuse(MenuRefusal.changedNote); return }
+        // What the device showed for the menu: the item at the id must still have it (an id is a place).
+        let shown = r.title ?? ""
+        guard r.version == version, let path, let t = target, !shown.isEmpty else { refuse(MenuRefusal.changedNote); return }
         if stale {
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: [], stale: true, note: note))
             return
@@ -217,12 +278,17 @@ final class MenuMirror {
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: e.items, more: e.more > 0 ? e.more : nil))
         }
         // A read an active app's states came from answers any fetch, with no activation.
-        if let e = cache.fresh(path.id, now: CFAbsoluteTimeGetCurrent(), frontmostNow: true) { cached(e); return }
+        if let e = cache.fresh(path.id, title: shown, now: CFAbsoluteTimeGetCurrent(), frontmostNow: true) { cached(e); return }
+        // Its device has stopped waiting (it waited behind other requests): nothing is activated or read.
+        if RequestDeadline.expired(waited: CFAbsoluteTimeGetCurrent() - arrived, rttMs: roundTrips[cid]) {
+            refuse(MenuRefusal.tooManyNote)
+            return
+        }
         let v = version
         let frontmost = await prepare()
         guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
         // Still not frontmost: a read now would return the last validation, an inactive app's too.
-        if !frontmost, let e = cache.fresh(path.id, now: CFAbsoluteTimeGetCurrent(), frontmostNow: false) { cached(e); return }
+        if !frontmost, let e = cache.fresh(path.id, title: shown, now: CFAbsoluteTimeGetCurrent(), frontmostNow: false) { cached(e); return }
         // Brought forward after a read made while it was not: AppKit validates the menu again only
         // once its second is over.
         let wait = frontmost ? cache.wait(path.id, now: CFAbsoluteTimeGetCurrent()) : 0
@@ -230,20 +296,42 @@ final class MenuMirror {
             try? await Task.sleep(for: .seconds(wait))
             guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
         }
+        // The activation and the wait can take a second and a half: the same checks again, now.
+        guard subscribers[cid] != nil else { return }
+        if RequestDeadline.expired(waited: CFAbsoluteTimeGetCurrent() - arrived, rttMs: roundTrips[cid]) {
+            refuse(MenuRefusal.tooManyNote)
+            return
+        }
         // The top level again, then the menu, in one hop: a top level that changed meanwhile moves
-        // the version, and this answer then says so (the menu is not read).
+        // the version, and this answer then says so (the menu is not read). Within a second of the
+        // last read of the top level, with other requests waiting, or with no time for a top-level
+        // read and a whole menu before the answer must go out, only the menu: a sweep across the
+        // bar reads the top level once, and the titles checked keep a menu read without it right.
         let reader = self.reader
+        let onePart = path.indexes.count == 1
+        let until = arrived + RequestDeadline.answerBy(rttMs: roundTrips[cid])
+        let now = CFAbsoluteTimeGetCurrent()
+        let readTopNow = !topRead || (onePart && topElements[path.indexes[0]] == nil)
+            || (now - topReadAt >= MenuCache.lifetime && queued <= 1
+                && until - now > Double(MenuReader.timeout) + MenuReader.readBudget)
         let expected: TopLevel? = topRead ? topLevel : nil      // nothing to compare with before a first read
-        let kept = path.indexes.count > 1 ? elements[path]?.element : nil
-        let (topResult, menuResult) = await onMenus { () -> (Result<(titles: [MenuReader.Read], ms: Double), MenuReader.Failure>, Result<MenuReader.Menu, MenuReader.Failure>?) in
-            let top = reader.topLevel(pid: t.pid)
-            guard case .success(let got) = top else { return (top, nil) }
-            if let expected, Self.level(of: got.titles) != expected { return (top, nil) }
-            let parent = path.indexes.count == 1 ? got.titles.first { $0.index == path.indexes[0] }?.element : kept
-            return (top, reader.items(pid: t.pid, of: parent, path: path))
+        let parent = onePart ? topElements[path.indexes[0]] : elements[path]?.element
+        let ancestors = ancestorTitles(path)
+        typealias TopRead = Result<(titles: [MenuReader.Read], ms: Double), MenuReader.Failure>
+        let (topResult, menuResult) = await onMenus { () -> (TopRead?, Result<MenuReader.Menu, MenuReader.Failure>?) in
+            var opener = parent
+            var top: TopRead? = nil
+            if readTopNow {
+                let read = reader.topLevel(pid: t.pid)
+                top = read
+                guard case .success(let got) = read else { return (read, nil) }
+                if let expected, Self.level(of: got.titles) != expected { return (read, nil) }
+                if onePart { opener = got.titles.first { $0.index == path.indexes[0] }?.element }
+            }
+            return (top, reader.items(pid: t.pid, of: opener, path: path, shown: shown, ancestors: ancestors, until: until))
         }
         guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
-        applyTop(topResult, target: t)
+        if let topResult { applyTop(topResult, target: t) }
         // What that read found goes to the subscribers first: a changed top level (a new version), the
         // app gone or not answering, or a top level read here for the first time in this version (its
         // first read failed; the polls stop retrying once it is read). An unchanged one sends nothing.
@@ -257,23 +345,51 @@ final class MenuMirror {
             return
         }
         guard let menuResult else {
-            if case .failure(.notTrusted) = topResult { refuse(MenuRefusal.noAccessNote) } else { refuse(MenuRefusal.changedNote) }
+            if case .failure(.notTrusted)? = topResult { refuse(MenuRefusal.noAccessNote) } else { refuse(MenuRefusal.changedNote) }
             return
         }
         switch menuResult {
         case .success(let menu):
             Stats.shared.bump("menu.read")
             var items: [MacMenuItem] = []
+            var found: [(index: Int, title: String, submenu: Bool)] = []
             for read in menu.reads {
                 guard let childPath = path.child(read.index), let item = MenuFormat.item(read.item, id: childPath.id) else { continue }
                 items.append(item)
-                if item.separator != true, elements.count < Self.maxKept || elements[childPath] != nil {
-                    elements[childPath] = Kept(element: read.element, title: item.title ?? "")
+                guard item.separator != true, let title = item.title else { continue }
+                found.append((read.index, title, item.submenu == true))
+                if elements.count < Self.maxKept || elements[childPath] != nil {
+                    elements[childPath] = Kept(element: read.element, title: title)
                 }
             }
+            // A submenu read before in this version at a place this read covers, and not there now:
+            // the app changed this menu in place, and the ids every device holds below it may name
+            // other items now.
+            guard submenus.read(menu: path.id, found: found, examined: menu.total - menu.unread) else {
+                treeChanged()
+                refuse(MenuRefusal.changedNote)
+                return
+            }
             let more = menu.unread
-            cache.store(path.id, MenuCache.Entry(items: items, more: more, at: CFAbsoluteTimeGetCurrent(), appWasFrontmost: frontmost))
+            cache.store(path.id, MenuCache.Entry(title: shown, items: items, more: more, at: CFAbsoluteTimeGetCurrent(),
+                                                 appWasFrontmost: frontmost))
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: items, more: more > 0 ? more : nil))
+        case .failure(.notShown(let found)):
+            // Not the menu the device opened. One of the bar's (read less than a second ago): the top
+            // level is read again now, which moves the version if it changed. A submenu read under
+            // another title in this version: the tree changed.
+            if onePart {
+                if await readTop(version: v) { publishTop() }
+            } else if let recorded = submenus.title(of: path.id), recorded != found {
+                treeChanged()
+            }
+            refuse(MenuRefusal.changedNote)
+        case .failure(.moved):
+            treeChanged()
+            refuse(MenuRefusal.changedNote)
+        case .failure(.late):
+            // Its time ran out on the way (the top level read first took it): nothing was read.
+            refuse(MenuRefusal.tooManyNote)
         case .failure(.notAnswering):
             Stats.shared.bump("menu.axTimeout")
             becomeStale(t)
@@ -290,7 +406,8 @@ final class MenuMirror {
         }
     }
 
-    private func servePress(_ r: PressMenuItem, to c: NWConnection, who: String) async {
+    private func servePress(_ r: PressMenuItem, to c: NWConnection, who: String, arrived: Double) async {
+        let cid = ObjectIdentifier(c)
         let path = r.id.flatMap(MenuPath.init)
         let app = label(target?.app ?? "")
         // The host's own titles; the device's are never logged. An id from another version, or one
@@ -306,13 +423,18 @@ final class MenuMirror {
         // tracking. A device never sends one; refused before anything is activated or read.
         guard path.indexes.count >= 2 else { refuse(.changed, what: logPath(path, app: t.app)); return }
         if stale { refuse(.notAnswering, what: logPath(path, app: t.app)); return }
+        // A device never gives up on a choice: one whose turn came this late is refused, not made
+        // seconds after it was chosen.
+        let waited = CFAbsoluteTimeGetCurrent() - arrived
+        if RequestDeadline.expired(waited: waited, rttMs: roundTrips[cid]) { refuse(.late(waited), what: logPath(path, app: t.app)); return }
         let v = version
         _ = await prepare()
         guard v == version, target?.pid == t.pid else { refuse(.changed, what: shownID); return }
         let reader = self.reader
         let kept = elements[path]?.element
         let shown = r.title
-        let result = await onMenus { reader.press(pid: t.pid, element: kept, path: path, shownTitle: shown) }
+        let ancestors = ancestorTitles(path)
+        let result = await onMenus { reader.press(pid: t.pid, element: kept, path: path, shownTitle: shown, ancestors: ancestors) }
         // A press can change any state.
         cache.clear()
         let what = logPath(path, app: t.app, last: result.foundTitle)
@@ -326,12 +448,29 @@ final class MenuMirror {
             Stats.shared.bump("menu.axTimeout")
             print("Menu from \(who): \(what) (\(label(t.app)) did not answer within 1 s; a dialog may be open)")
             send(MacMenu(version: version, answering: r.token, pressed: true), to: c)
+        case .moved:
+            // Found again by its path, a menu on the way was not the one read there: the tree changed.
+            refuse(.changed, what: what)
+            if v == version, target?.pid == t.pid { treeChanged() }
         case .refused(let why):
             if why == .notAnswering { Stats.shared.bump("menu.axTimeout") }
             refuse(why, what: what)
             if why == .gone, target?.pid == t.pid { targetGone(); publishTop() }
             if why == .notAnswering, target?.pid == t.pid, !stale { becomeStale(t); publishTop() }
         }
+    }
+
+    /// The titles of the menus on the way to `path` (every part but the last), as read in this
+    /// version: the top level's for the first, the submenus' record for the rest. A walk from the bar
+    /// must meet each of them. Nil when one is not known: nothing read there in this version.
+    private func ancestorTitles(_ path: MenuPath) -> [String]? {
+        var titles: [String] = []
+        for p in path.lineage.dropLast() {
+            let title = p.indexes.count == 1 ? top.first { $0.id == p.id }?.title : submenus.title(of: p.id)
+            guard let title else { return nil }
+            titles.append(title)
+        }
+        return titles
     }
 
     // MARK: The top level
@@ -355,6 +494,8 @@ final class MenuMirror {
             Stats.shared.bump("menu.top")
             if stale { print("Menus of \(label(t.app)) answering again.") }
             setTop(Self.level(of: got.titles), got.titles.compactMap { MenuFormat.topItem($0.item, index: $0.index) }, note: nil)
+            topReadAt = CFAbsoluteTimeGetCurrent()
+            topElements = Dictionary(got.titles.map { ($0.index, $0.element) }, uniquingKeysWith: { first, _ in first })
             untrusted = false
         case .failure(.notAnswering):
             Stats.shared.bump("menu.axTimeout")
@@ -367,9 +508,10 @@ final class MenuMirror {
         case .failure(.noMenuBar):
             setTop(TopLevel(titles: [], enabled: []), [], note: nil)
             untrusted = false
-        case .failure(.failed):
+        case .failure(.failed), .failure(.notShown), .failure(.moved), .failure(.late):
             // A passing error: what was read stays. A top level never read stays unread, so nothing
             // is sent for it (never an empty one in between), and each catalog poll reads again.
+            // (A top-level read never checks a title: those two come only from a menu's read.)
             break
         }
     }
@@ -402,10 +544,24 @@ final class MenuMirror {
         newVersion()
     }
 
+    /// A read found the tree changed under this version below the top level (`SubmenuRecord`): the
+    /// version moves, what was read in the old one goes, and the same top level goes out again with
+    /// the new version, so every device's older ids are refused and its open menus say so.
+    private func treeChanged() {
+        version += 1
+        cache.clear()
+        elements = [:]
+        submenus.clear()
+        publishTop()
+    }
+
     private func newVersion() {
         version += 1
         cache.clear()
         elements = [:]
+        submenus.clear()
+        topElements = [:]
+        topReadAt = -.infinity
         top = []
         topRead = false
         topLevel = nil
@@ -452,12 +608,15 @@ final class MenuMirror {
                                   payload: Wire.encode(m)), to: c)
     }
 
-    /// One request after the other, in arrival order (see the class comment).
+    /// One request after the other, in arrival order (see the class comment). A request's arrival
+    /// time is taken by the caller: its wait for its turn is judged against its device's.
     private func enqueue(_ op: @escaping @MainActor () async -> Void) {
         let previous = chain
+        queued += 1
         chain = Task { @MainActor in
             await previous?.value
             await op()
+            self.queued -= 1
         }
     }
 
