@@ -87,8 +87,21 @@ enum MacMenuElements {
     /// The `.one` layout's menu, which holds the Mac's menus (MacMenuBar).
     static let barWrapper = UIMenu.Identifier("me.saffer.sill.macmenu")
 
-    /// Words in a menu: disabled, so they can never be chosen.
-    static func noteAction(_ text: String) -> UIAction { UIAction(title: text, attributes: .disabled) { _ in } }
+    /// Words in a menu: disabled, so they can never be chosen. A note that ends in a parenthesis,
+    /// as the Mac's "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security ›
+    /// Accessibility)." does, shows it as the subtitle: a menu cuts a long title short at its third
+    /// line, and the part cut would be where to look.
+    static func noteAction(_ text: String) -> UIAction {
+        let body = text.hasSuffix(").") ? String(text.dropLast()) : text
+        if body.hasSuffix(")"), let open = body.range(of: " (", options: .backwards) {
+            let title = String(body[..<open.lowerBound])
+            let subtitle = String(body[open.upperBound..<body.index(before: body.endIndex)])
+            if !title.isEmpty, !subtitle.isEmpty {
+                return UIAction(title: title + (text.hasSuffix(").") ? "." : ""), subtitle: subtitle, attributes: .disabled) { _ in }
+            }
+        }
+        return UIAction(title: text, attributes: .disabled) { _ in }
+    }
 
     private static func element(_ row: MacMenuState.Row, client: StreamClient) -> UIMenuElement {
         switch row.kind {

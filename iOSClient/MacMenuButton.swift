@@ -67,6 +67,10 @@ struct MacMenuTrigger: UIViewRepresentable {
     func makeUIView(context: Context) -> MacMenuTriggerButton {
         let button = MacMenuTriggerButton(type: .custom)
         button.showsMenuAsPrimaryAction = true
+        // The Mac's order, top to bottom, whichever way the menu opens: UIKit's automatic order
+        // turns a menu that opens upward (the portrait bars, low on the screen) upside down, which
+        // would put Help first and a File menu's Quit before its New.
+        button.preferredMenuElementOrder = .fixed
         button.backgroundColor = .clear
         button.isAccessibilityElement = true
         button.accessibilityTraits = .button
