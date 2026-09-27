@@ -19,7 +19,10 @@ import StreamProtocol
 /// gate can refuse a test client. `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the device floor
 /// (DeviceGate) from "0", so the gate below runs, and `SILL_TEST_GOODBYE='<JSON>'` makes its
 /// refusals send that kind 22 payload instead (a reason this build does not know, for the device's
-/// tests). All are honoured only on a host that does not advertise, so a stray variable can never
+/// tests). `SILL_TEST_LOOPBACK=1` makes both doors listen on 127.0.0.1 alone, so a test host takes
+/// no connection from another machine (the Application Firewall never asks) and `lsof` shows it as
+/// `127.0.0.1:PORT`: devices and test clients on this Mac, the simulator included, reach it by
+/// 127.0.0.1. All are honoured only on a host that does not advertise, so a stray variable can never
 /// touch a real host.
 ///
 /// The home door (this listener) admits only loopback, link-local (AWDL included) and this Mac's
@@ -253,7 +256,11 @@ final class StreamServer {
         }
         testHost = !advertise
         (deviceFloor, testGoodbye) = Self.gateSettings(testHost: testHost)
-        listener = try Self.makeListener(peerToPeer: false, port: nil)
+        if Self.testLoopback {
+            print(testHost ? "Test listener: loopback only (SILL_TEST_LOOPBACK); reach this host at 127.0.0.1."
+                           : "SILL_TEST_LOOPBACK ignored: only a host that does not advertise takes it.")
+        }
+        listener = try Self.makeListener(peerToPeer: false, port: nil, loopback: testHost && Self.testLoopback)
         listener.service = makeService()
         wire(listener)
     }
@@ -287,6 +294,20 @@ final class StreamServer {
         }
         return (floor, goodbye)
     }
+
+    /// TEST ONLY: SILL_TEST_LOOPBACK (see the type's doc comment). Read once; "1", anything else
+    /// ignored with one line. Honoured only by a host that does not advertise (`loopbackOnly`).
+    static let testLoopback: Bool = {
+        guard let value = ProcessInfo.processInfo.environment["SILL_TEST_LOOPBACK"], !value.isEmpty else { return false }
+        guard value == "1" else {
+            print("SILL_TEST_LOOPBACK=\(value) ignored: 1 turns it on.")
+            return false
+        }
+        return true
+    }()
+
+    /// Both doors listen on 127.0.0.1 alone: a test host with SILL_TEST_LOOPBACK=1.
+    var loopbackOnly: Bool { testHost && Self.testLoopback }
 
     /// TEST ONLY: SILL_TEST_SWAP_FAIL (see the type's doc comment). Read once; "port" or "all".
     private static let testSwapFail: String? = ProcessInfo.processInfo.environment["SILL_TEST_SWAP_FAIL"]
@@ -382,8 +403,9 @@ final class StreamServer {
     }
 
     /// A listener with Sill's TCP options and service class, peer-to-peer or not, on `port` when
-    /// given (a replacement keeps the port that test clients and resolved devices know).
-    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?) throws -> NWListener {
+    /// given (a replacement keeps the port that test clients and resolved devices know); on
+    /// 127.0.0.1 alone with `loopback` (a test host's SILL_TEST_LOOPBACK).
+    private static func makeListener(peerToPeer: Bool, port: NWEndpoint.Port?, loopback: Bool) throws -> NWListener {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         // A client that vanishes without closing (app killed, Wi-Fi gone) would otherwise stay
@@ -395,8 +417,16 @@ final class StreamServer {
         let params = NWParameters(tls: nil, tcp: tcp)
         params.serviceClass = .interactiveVideo   // WMM video class on Wi-Fi: shorter queues, higher priority
         params.includePeerToPeer = peerToPeer     // Direct Wireless Connection only (see the MARK above)
+        if loopback { Self.bindToLoopback(params, port: port); return try NWListener(using: params) }
         if let port { return try NWListener(using: params, on: port) }
         return try NWListener(using: params)
+    }
+
+    /// TEST ONLY (SILL_TEST_LOOPBACK): `params` accept only on the loopback interface, bound to
+    /// 127.0.0.1 on `port` (any when nil). Both doors' listeners.
+    static func bindToLoopback(_ params: NWParameters, port: NWEndpoint.Port?) {
+        params.requiredInterfaceType = .loopback
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port ?? .any)
     }
 
     /// The listener's handlers. Each first checks that `l` is still the listener, so the callbacks
@@ -492,7 +522,7 @@ final class StreamServer {
         }
         let l: NWListener
         do {
-            l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: port)
+            l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: port, loopback: loopbackOnly)
         } catch {
             replacementFailed(error as? NWError ?? .posix(.EINVAL), swap: n)
             return
@@ -621,7 +651,7 @@ final class StreamServer {
             // Set before start (the setting at launch): build the listener with it, nothing to replace.
             if wantedPeerToPeer != peerToPeer {
                 do {
-                    let l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: nil)
+                    let l = try Self.makeListener(peerToPeer: wantedPeerToPeer, port: nil, loopback: loopbackOnly)
                     l.service = makeService()
                     wire(l)
                     listener = l
