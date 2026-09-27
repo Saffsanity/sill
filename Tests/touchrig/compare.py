@@ -8,8 +8,11 @@ with it off. A run's events are compared with their times left out; runs of poin
 scroll deltas are compared by their count and their last move or their sum, and a coast's steps
 (between momentumBegan and momentumEnded, paced by the display) only as being there.
   - One- and two-finger strokes, and a third finger that joins a scroll late: NEW's events are BASE's.
-  - Every other stroke of three to five fingers: after its third finger lands, nothing but its one
-    gesture (and a scroll it had begun, closed at once without a coast), and the gesture expected.
+  - Every other stroke of three to five fingers (placed slowly, beside a resting thumb, led by the
+    thumb, with a brief extra contact): from three fingers down, nothing but its one gesture (and a
+    scroll it had begun, closed at once without a coast), and the gesture expected, or nothing.
+  - A one- or two-finger stroke made right after a gesture on the same surface: its events are the
+    same stroke's made fresh (pointer moves by their count: the trackpad's pointer is relative).
   - OFF: NEW's events, less the gesture going out: nothing else at all.
 Exits 1 on any failure."""
 import re, sys
@@ -84,7 +87,33 @@ EXPECT = {   # scenario → the one gesture after the third finger (None: nothin
     "4-finger swipe up, landing 16 ms apart": "swipeUp fingers 4",
     "5-finger swipe up, landing 16 ms apart": None,
     "3-finger swipe up then cancelled mid-way": None,
+    # The review's (2026-09-27).
+    "3-finger pinch in (to 0.45), landing 100 ms apart": None,
+    "3-finger swipe up 180, landing 100 ms apart": None,
+    "a thumb resting 0.3 s, then three fingers swipe up 180": "swipeUp fingers 3",
+    "a thumb resting 0.3 s, then three fingers pinch in (to 0.45)": "pinch fingers 3",
+    "2 fingers resting 0.5 s, a 3rd lands, all swipe up 180": None,
+    "thumb-led pinch: the thumb up 130 to two still fingers": "pinch fingers 3",
+    "thumb-led spread: the thumb down 150 from two still fingers": "spread fingers 3",
+    "4-finger pinch, the thumb landing last (the Mac's pinch)": "pinch fingers 4",
+    "slow 3-finger swipe up 120 with a brief 4th contact lifting 25 pt in": "swipeUp fingers 3",
+    "slow 3-finger swipe up 120": "swipeUp fingers 3",
 }
+AFTER = {    # a stroke half a second after a gesture on the same surface → (the same stroke made fresh, the gesture)
+    "after a 3-finger swipe up whose first finger moved 12 pt first: 1-finger drag right 120": ("1-finger drag right 120", "swipeUp fingers 3"),
+    "after a 3-finger swipe up: 2-finger scroll up 150 (flick)": ("2-finger scroll up 150 (flick)", "swipeUp fingers 3"),
+    "after a 3-finger pinch in (to 0.45): 1-finger tap": ("1-finger tap", "pinch fingers 3"),
+    "after a 3-finger swipe up: 2-finger tap": ("2-finger tap", "swipeUp fingers 3"),
+    "after a thumb-led pinch: 1-finger tap": ("1-finger tap", "pinch fingers 3"),
+}
+
+def unplaced(events, surface):
+    """normal(), but on the trackpad without the pointer's position (a run of moves by its count): its
+    pointer is relative, so where it is depends on the strokes before."""
+    out = normal(events)
+    if surface != "TRACKPAD": return out
+    out = [re.sub(r"(pointer\.move ×\d+) → \([-\d.]+,[-\d.]+\)", r"\1", e) for e in out]
+    return [re.sub(r"(pointer\.\w+)\([-\d.]+,[-\d.]+\)", r"\1", e) for e in out]
 UNCHANGED = ["1-finger tap", "1-finger drag right 120", "1-finger hold 0.6 s, then move 60 and lift",
              "2-finger scroll up 150 (flick)", "2-finger scroll down 90, slowly", "2-finger tap",
              "2 fingers scroll 60, a 3rd lands 133 ms after the first, all move 120 more"]
@@ -120,8 +149,8 @@ def main():
             stray = [e for e in others if not e.endswith("scrollGesture.ended")]
             got = gestures[0].split(" gesture ", 1)[1] if gestures else None
             ok = t in new and len(gestures) == (1 if want else 0) and got == want and not stray and len(closed) <= 1
-            check(ok, f"{t}: {'one gesture, ' + want if want else 'no gesture'}; nothing else after the third finger"
-                      + (f" (a scroll closed at arming)" if closed else ""))
+            check(ok, f"{t}: {'one gesture, ' + want if want else 'no gesture'}; nothing else from three fingers down"
+                      + (f" (a scroll closed as it went silent)" if closed else ""))
             if not ok:
                 for e in after: print(f"       {e}")
             if closed:
@@ -131,6 +160,24 @@ def main():
                 n = [e.replace(" (switch off: not sent)", "") for e in sends(new.get(t, []))]
                 o = [e.replace(" (switch off: not sent)", "") for e in o]
                 check(o == n, f"{t}, the switch off: the same stroke, the gesture refused, nothing else")
+        for s, (fresh, want) in AFTER.items():
+            t = f"{surface} {s}"
+            events = new.get(t, [])
+            at = next((i for i, e in enumerate(events) if " gesture " in e), None)
+            got = events[at].split(" gesture ", 1)[1] if at is not None else None
+            later = unplaced(events[at + 1:], surface) if at is not None else None
+            alone = unplaced(new.get(f"{surface} {fresh}", []), surface)
+            empty = surface == "OVERLAY" and fresh == "2-finger tap"
+            ok = t in new and got == want and later == alone and (len(alone) > 0 or empty)
+            check(ok, f"{t}: {want}, then the same events as the stroke made fresh ({len(alone)})")
+            if not ok:
+                print(f"       gesture: {got}")
+                for x, y in zip((later or []) + ["-"] * max(0, len(alone) - len(later or [])), alone + ["-"] * max(0, len(later or []) - len(alone))):
+                    print(f"       after: {x}\n       fresh: {y}")
+            if off is not None:
+                o = [e.replace(" (switch off: not sent)", "") for e in sends(off.get(t, []))]
+                n = [e.replace(" (switch off: not sent)", "") for e in sends(new.get(t, []))]
+                check(o == n, f"{t}, the switch off: the same strokes, the gesture refused")
     if off is not None:
         for surface in ("TRACKPAD", "OVERLAY"):
             for s in UNCHANGED:

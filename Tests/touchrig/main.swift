@@ -176,6 +176,90 @@ func scenarios(_ c: CGPoint) -> [(String, [Step])] {
     out.append(("4-finger swipe up, landing 16 ms apart", Gesture.swipe(4, at: c, dx: 0, dy: -180, frames: 10)))
     out.append(("5-finger swipe up, landing 16 ms apart", Gesture.swipe(5, at: c, dx: 0, dy: -180, frames: 10)))
     out.append(("3-finger swipe up then cancelled mid-way", Array(Gesture.swipe(3, at: c, dx: 0, dy: -180, frames: 10).prefix(8)) + [.cancel]))
+    return out + reviewScenarios(c, nudge: nudge)
+}
+
+/// The review's strokes (2026-09-27): fingers placed slowly, a thumb resting on the glass, a pinch led by
+/// the thumb, the Mac's own thumb-and-three-finger pinch, a brief extra contact, and one- and two-finger
+/// strokes made right after a gesture on the same surface (compare.py holds them to the same strokes made
+/// fresh).
+func reviewScenarios(_ c: CGPoint, nudge: [Step]) -> [(String, [Step])] {
+    var out: [(String, [Step])] = []
+    let f3 = Gesture.fingers(3, around: c)
+    // Placed slowly: the third finger lands 200 ms after the first (100 ms apart).
+    out.append(("3-finger pinch in (to 0.45), landing 100 ms apart", Gesture.pinch(3, at: c, scale: 0.45, stagger: 6)))
+    out.append(("3-finger swipe up 180, landing 100 ms apart", Gesture.swipe(3, at: c, dx: 0, dy: -180, frames: 10, stagger: 6)))
+    // A thumb resting 0.3 s (under the long press's 0.45 s), then three fingers land 16 ms apart.
+    let thumb = CGPoint(x: c.x - 160, y: c.y + 90)
+    var rest: [Step] = [.begin([thumb]), .wait(18)]
+    for p in f3 { rest.append(.begin([p])) }
+    for k in 1...10 { rest.append(.move([thumb] + f3.map { CGPoint(x: $0.x, y: $0.y - CGFloat(k) * 18) })) }
+    rest += [.end([1]), .end([1]), .end([1]), .end([0])]
+    out.append(("a thumb resting 0.3 s, then three fingers swipe up 180", rest))
+    var restPinch: [Step] = [.begin([thumb]), .wait(18)]
+    for p in f3 { restPinch.append(.begin([p])) }
+    let centre = CGPoint(x: f3.map(\.x).reduce(0, +) / 3, y: f3.map(\.y).reduce(0, +) / 3)
+    for k in 1...12 {
+        let s = 1 - 0.55 * CGFloat(k) / 12
+        restPinch.append(.move([thumb] + f3.map { CGPoint(x: centre.x + ($0.x - centre.x) * s, y: centre.y + ($0.y - centre.y) * s) }))
+    }
+    restPinch += [.end([1]), .end([1]), .end([1]), .end([0])]
+    out.append(("a thumb resting 0.3 s, then three fingers pinch in (to 0.45)", restPinch))
+    // Two fingers resting half a second, then a third: silent, and nothing to decide.
+    let two = Gesture.fingers(2, around: c)
+    var restTwo: [Step] = [.begin([two[0]]), .begin([two[1]]), .wait(30), .begin([CGPoint(x: c.x + 1.5 * Gesture.spacing, y: c.y)])]
+    for k in 1...10 { restTwo.append(.move((two + [CGPoint(x: c.x + 1.5 * Gesture.spacing, y: c.y)]).map { CGPoint(x: $0.x, y: $0.y - CGFloat(k) * 18) })) }
+    restTwo += [.end([0]), .end([0]), .end([0])]
+    out.append(("2 fingers resting 0.5 s, a 3rd lands, all swipe up 180", restTwo))
+    // A pinch led by the thumb: two fingers 100 pt apart stay, the thumb 150 pt below travels up 130; and a
+    // spread, the thumb 30 pt below travelling down 150.
+    let fa = CGPoint(x: c.x - 50, y: c.y - 60), fb = CGPoint(x: c.x + 50, y: c.y - 60)
+    let th = CGPoint(x: c.x, y: c.y + 90)
+    var led: [Step] = [.begin([fa]), .begin([fb]), .begin([th])]
+    for k in 1...12 { led.append(.move([fa, fb, CGPoint(x: th.x, y: th.y - 130 * CGFloat(k) / 12)])) }
+    led += [.end([0]), .end([0]), .end([0])]
+    out.append(("thumb-led pinch: the thumb up 130 to two still fingers", led))
+    let near = CGPoint(x: c.x, y: c.y - 30)
+    var ledOut: [Step] = [.begin([fa]), .begin([fb]), .begin([near])]
+    for k in 1...12 { ledOut.append(.move([fa, fb, CGPoint(x: near.x, y: near.y + 150 * CGFloat(k) / 12)])) }
+    ledOut += [.end([0]), .end([0]), .end([0])]
+    out.append(("thumb-led spread: the thumb down 150 from two still fingers", ledOut))
+    // The Mac's own pinch: three fingers land, then the thumb below them; the fingers come down 60 and in
+    // 20, the thumb up 60. The thumb 110 pt below the fingers stays on the surface on a phone too (at 150
+    // an iPhone 17 Pro Max's half-window surface never saw it).
+    let macThumb = CGPoint(x: c.x + 20, y: c.y + 110)
+    var mac: [Step] = f3.map { .begin([$0]) } + [.begin([macThumb])]
+    for k in 1...12 {
+        let t = CGFloat(k) / 12
+        let fingers = [CGPoint(x: f3[0].x + 20 * t, y: f3[0].y + 60 * t), CGPoint(x: f3[1].x, y: f3[1].y + 60 * t),
+                       CGPoint(x: f3[2].x - 20 * t, y: f3[2].y + 60 * t)]
+        mac.append(.move(fingers + [CGPoint(x: macThumb.x, y: macThumb.y - 60 * t)]))
+    }
+    mac += [.end([0]), .end([0]), .end([0]), .end([0])]
+    out.append(("4-finger pinch, the thumb landing last (the Mac's pinch)", mac))
+    // A slow three-finger swipe up 120 (5 pt a frame, 300 pt/s), with a fourth contact that lands on the
+    // second frame and lifts, still, after 25 pt; and the same swipe alone.
+    let fourth = CGPoint(x: c.x - 170, y: c.y + 100)
+    var brief: [Step] = f3.map { .begin([$0]) } + [.begin([fourth])]
+    for k in 1...24 {
+        let pts = f3.map { CGPoint(x: $0.x, y: $0.y - CGFloat(k) * 5) }
+        brief.append(.move(k <= 5 ? pts + [fourth] : pts))
+        if k == 5 { brief.append(.end([3])) }
+    }
+    brief += [.end([0]), .end([0]), .end([0])]
+    out.append(("slow 3-finger swipe up 120 with a brief 4th contact lifting 25 pt in", brief))
+    var alone: [Step] = f3.map { .begin([$0]) }
+    for k in 1...24 { alone.append(.move(f3.map { CGPoint(x: $0.x, y: $0.y - CGFloat(k) * 5) })) }
+    alone += [.end([0]), .end([0]), .end([0])]
+    out.append(("slow 3-finger swipe up 120", alone))
+    // One- and two-finger strokes half a second after a gesture on the same surface.
+    let swipeUp = Gesture.swipe(3, at: c, dx: 0, dy: -180, frames: 10)
+    out.append(("after a 3-finger swipe up whose first finger moved 12 pt first: 1-finger drag right 120",
+                nudge + [.wait(30)] + Gesture.swipe(1, at: c, dx: 120, dy: 0, frames: 12)))
+    out.append(("after a 3-finger swipe up: 2-finger scroll up 150 (flick)", swipeUp + [.wait(30)] + Gesture.swipe(2, at: c, dx: 0, dy: -150, frames: 8)))
+    out.append(("after a 3-finger pinch in (to 0.45): 1-finger tap", Gesture.pinch(3, at: c, scale: 0.45) + [.wait(30)] + Gesture.tap(1, at: c)))
+    out.append(("after a 3-finger swipe up: 2-finger tap", swipeUp + [.wait(30)] + Gesture.tap(2, at: c)))
+    out.append(("after a thumb-led pinch: 1-finger tap", led + [.wait(30)] + Gesture.tap(1, at: c)))
     return out
 }
 
