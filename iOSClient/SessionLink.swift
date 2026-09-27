@@ -35,6 +35,11 @@ import Network
 /// while a hand-over's fence is up outlasts that fence, and a fence still up at `adopt` or `unhold`
 /// keeps what waits until its pong, its connection closing or its timeout.
 ///
+/// It also counts the input messages (kind 8) meant for the session's connection
+/// (`inputsOnSession`), which the Mac's pointer reports are judged by (docs/pointer-visibility-plan.md
+/// §3.3): each report (kind 26) says how many the Mac had read on the connection, and one built before
+/// it read this device's latest input is dropped.
+///
 /// Foundation and Network only: it is checked on its own with swiftc against a local stand-in for
 /// the Mac whose old connection is slow (docs/direct-wireless-plan.md, the review fixes).
 final class SessionLink {
@@ -73,12 +78,34 @@ final class SessionLink {
     private var waiting: [Data] = []
     /// The old connections of hand-overs whose fence is down, until what waited has gone out.
     private var fencedOff: [NWConnection] = []
+    /// Input messages counted for the session's connection: those handed to it since it became the
+    /// session's, and those waiting to go out on it (see `inputsOnSession`).
+    private var inputs = 0
+
+    /// The number of input messages (kind 8) counted for the session's connection: those `send` handed
+    /// to it since it became the session's, and those waiting to go out on it once the fences and the
+    /// hold are down, which is how many the Mac will have read on it once it has read everything this
+    /// device sent (TCP keeps the order). It restarts whenever the session's connection changes (the
+    /// setter, `handOver`, `adopt`) at the number still waiting, since those go out on the new one;
+    /// `unhold`, `fenceReturned` and `release` leave it, as what waited was counted for the connection
+    /// it goes out on; `dropHandOver` takes back what it drops, which never goes out.
+    var inputsOnSession: Int {
+        lock.lock(); defer { lock.unlock() }
+        return inputs
+    }
+
+    /// A serialized message's first byte is its kind; 8 is `.input` (StreamMessageKind, which this file
+    /// does not import).
+    private static func isInput(_ data: Data) -> Bool { data.first == 8 }
+
+    /// The input messages among those waiting. Under the lock.
+    private var waitingInputs: Int { waiting.reduce(0) { $0 + (Self.isInput($1) ? 1 : 0) } }
 
     /// The session's connection: the one read, and the one sent on outside a hand-over or a hold.
     /// Setting it leaves the fences and the hold alone; `dropHandOver` ends them.
     var connection: NWConnection? {
         get { lock.lock(); defer { lock.unlock() }; return current }
-        set { lock.lock(); current = newValue; lock.unlock() }
+        set { lock.lock(); current = newValue; inputs = waitingInputs; lock.unlock() }
     }
 
     /// One message to the Mac: on the session's connection, or kept, in order, while a fence or a
@@ -87,9 +114,11 @@ final class SessionLink {
         lock.lock(); defer { lock.unlock() }
         if !fences.isEmpty || holding != nil {
             waiting.append(data)
+            if Self.isInput(data) { inputs += 1 }
             return
         }
         current?.send(content: data, completion: .contentProcessed { _ in })
+        if current != nil, Self.isInput(data) { inputs += 1 }
     }
 
     /// Whether `c` is still read: the session's connection, or the old one of a hand-over until its
@@ -106,6 +135,7 @@ final class SessionLink {
     func handOver(from old: NWConnection, to new: NWConnection, fencePing: Data, nonce: Data) {
         lock.lock(); defer { lock.unlock() }
         current = new
+        inputs = waitingInputs
         fences.append(Fence(old: old, nonce: nonce))
         // Under the lock, as every send is: nothing can go out on `old` after this ping.
         old.send(content: fencePing, completion: .contentProcessed { _ in })
@@ -156,6 +186,7 @@ final class SessionLink {
     func adopt(_ new: NWConnection) -> Released? {
         lock.lock(); defer { lock.unlock() }
         current = new
+        inputs = waitingInputs
         guard let h = holding else { return nil }
         holding = nil
         return endedLocked(since: h.since)
@@ -192,6 +223,7 @@ final class SessionLink {
     func dropHandOver() -> [NWConnection] {
         lock.lock(); defer { lock.unlock() }
         let connections = fences.map(\.old) + (holding.map { [$0.connection] } ?? []) + fencedOff
+        inputs -= waitingInputs
         fences = []
         holding = nil
         waiting = []

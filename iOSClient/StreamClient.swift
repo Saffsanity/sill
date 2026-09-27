@@ -173,7 +173,16 @@ final class StreamClient: ObservableObject {
     /// waits out a closed window stands down if this moved meanwhile: the user chose something,
     /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
     private var choicesSent = 0
-    @Published var active: StreamSource = .none
+    @Published var active: StreamSource = .none {
+        didSet {
+            // The pointer sprite shows nothing while nothing streams.
+            let streaming = active != .none
+            if presence.streaming != streaming {
+                presence.streaming = streaming
+                renderPointer()
+            }
+        }
+    }
     @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
     @Published var icons: [String: UIImage] = [:]      // by bundle ID
     @Published var apps: [AppInfo] = []                // installed apps, for "All apps"
@@ -212,12 +221,33 @@ final class StreamClient: ObservableObject {
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
     @Published var videoSize: CGSize = .zero
-    /// The client-drawn pointer, as a fraction of the video frame, or nil when hidden. Written by the
-    /// trackpad and Pencil hover up to 120 times a second, read by the cursor sprite in the display
-    /// view. Deliberately NOT @Published: a SwiftUI re-render per move is the lag it exists to avoid.
-    /// Main thread only.
-    var localPointer: CGPoint? { didSet { onLocalPointerChange?(localPointer) } }
-    var onLocalPointerChange: ((CGPoint?) -> Void)?
+    // The pointer sprite (docs/pointer-visibility-plan.md §7.3; the rules are PointerPresence.swift's).
+    // One sprite in the display view shows the Mac's pointer while the Mac, or another device, moved it
+    // last (kind 26 says where), and this device's own only for the portrait trackpad (and the Pencil,
+    // with Q2's flip). None of it is @Published: a SwiftUI re-render per move is the lag the sprite
+    // exists to avoid, so `renderPointer` hands it straight to the view. Main thread, but the feed.
+    /// What the sprite shows: the feed as main last read it, this device's own pointer (`presence.own`,
+    /// written only by `setOwnPointer`: the trackpad's cursor or the Pencil's position, nil after a
+    /// finger on the stream, typing, a key or the iPad's own pointer), the layout and whether anything
+    /// streams (`active`).
+    private(set) var presence = PointerPresence()
+    /// The network queue's half: who moved the pointer last as this device knows it (its own input,
+    /// the Mac's fresh reports), where the Mac's pointer is, the anchor and the pad's re-seeds.
+    /// Written on `queue` (and reset on main), read on main; lock-protected.
+    private let pointerFeed = PointerFeed()
+    /// Where the sprite's tip goes, a fraction of the video frame, or nil to hide it: the display
+    /// view's `setPointer`, set by `StreamView.wirePointer`. Up to 120 times a second. Main thread.
+    var onPointerChange: ((CGPoint?) -> Void)?
+    /// Q1's flip only (`PointerPresence.trackpadLinger`): the one timer that re-renders when the
+    /// trackpad's pointer is due to go. Idle while the linger is nil, as it is by default.
+    private var lingerRender: DispatchWorkItem?
+    #if DEBUG
+    /// The DEBUG console's pointer lines (§7.8), on `queue`: when each "ignored" line last printed
+    /// (at most once a second each), and whether this session has heard the Mac yet.
+    private var pointerStaleLoggedAt = -Double.infinity
+    private var pointerRestatementLoggedAt = -Double.infinity
+    private var pointerHeard = false
+    #endif
     /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
     /// tour's rule reads it when it decides. Main thread.
     var lastInputAt: Double?
@@ -231,16 +261,20 @@ final class StreamClient: ObservableObject {
     func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
     /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
     /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
-    /// size (`recentrePointer`), waits for the pause to end; the DEBUG tripwire in `sendInput` names
-    /// anything else. Cleared with the session. Main thread.
+    /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
+    /// still has the pointer and its own still shows (the Mac, or another device, may have taken it
+    /// since); the DEBUG tripwire in `sendInput` names anything else. Cleared with the session.
+    /// Main thread.
     var inputPaused = false {
         didSet {
             guard oldValue, !inputPaused, pointerMoveOwed else { return }
             pointerMoveOwed = false
-            if let p = localPointer { sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y))) }
+            presence.follow(pointerFeed.current)
+            guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
+            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)))
         }
     }
-    /// A pointer move `recentrePointer` held back while input was paused.
+    /// A pointer move `pointerFrameChanged` held back while input was paused.
     private var pointerMoveOwed = false
     /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
     /// than with the stream screen, which goes with its session, so the automatic reconnect's
@@ -262,8 +296,8 @@ final class StreamClient: ObservableObject {
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
 
-    /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite. Not
-    /// @Published for the same reason as `localPointer`. Main thread.
+    /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite, whichever
+    /// pointer it shows. Not @Published for the same reason as `presence`. Main thread.
     struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
@@ -942,6 +976,7 @@ final class StreamClient: ObservableObject {
         sessionListed = false // …and its host is not yet known
         sessionHost = nil
         refusedListing = nil
+        resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
@@ -1390,6 +1425,15 @@ final class StreamClient: ObservableObject {
             #if DEBUG
             let waiting = (released?.waiting ?? 0) > 0 ? " (\(released!.waiting) wait for an earlier hand-over's fence)" : ""
             print("path: no fence (the old connection\(reconnected ? " is gone" : "'s path is gone")): \(released?.held ?? 0) held messages went out on the new connection\(waiting)")
+            #endif
+        }
+        // The Mac takes the new connection for a new device and reports the pointer to it at once,
+        // having read nothing on it: while this device had the pointer, that report is its own doing
+        // and must not bring up the Mac's arrow (docs/pointer-visibility-plan.md §7.3). Its control
+        // carries over until its first input there (SessionLink has restarted the count already).
+        if pointerFeed.handedOver() {
+            #if DEBUG
+            print("pointer: carried over to the new connection; this device keeps the pointer")
             #endif
         }
         if kind == .toCable, !reconnected { failedUps = nil }   // a move up that completed: the back-off starts again
@@ -2017,6 +2061,7 @@ final class StreamClient: ObservableObject {
         sessionListed = false
         sessionHost = nil
         refusedListing = nil
+        resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
         session = s
         goodbye = nil
         // Its way in is its route line's (`remoteRoute`, at its first window list), never a link word.
@@ -2129,7 +2174,7 @@ final class StreamClient: ObservableObject {
         linkStats = nil
         recentRttMedians = []
         slowLink = false
-        localPointer = nil
+        resetPointer()
         // A tour cut short by the session's end takes its pause with it, and a held pointer move.
         pointerMoveOwed = false
         inputPaused = false
@@ -2251,15 +2296,6 @@ final class StreamClient: ObservableObject {
         link.send(message.serialized())
     }
 
-    /// A new frame size (another source, an Aa resize) invalidates where the drawn pointer was: it
-    /// starts in the middle, and the Mac's cursor moves there too, so the two agree; while the tour
-    /// pauses input (`inputPaused`), the move waits for its end. Main thread.
-    func recentrePointer() {
-        localPointer = CGPoint(x: 0.5, y: 0.5)
-        if inputPaused { pointerMoveOwed = true; return }
-        sendInput(.pointer(.move, x: 0.5, y: 0.5))
-    }
-
     func sendInput(_ event: InputEvent) {
         // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
         // as something happening (StreamScreen.considerTour).
@@ -2272,6 +2308,9 @@ final class StreamClient: ObservableObject {
         #endif
         queue.async { [weak self] in
             guard let self else { return }
+            // Every input hands this device the pointer, coalesced moves included, here where the
+            // Mac's reports are judged, so none can slip between an input and its count.
+            self.pointerNoteSent(event)
             guard case .pointer(.move, _, _) = event else {
                 self.flushPendingMove()
                 self.send(.input, Wire.encode(event))
@@ -2310,6 +2349,209 @@ final class StreamClient: ObservableObject {
                                     isKeyframe: false, payload: payload)
         link.send(message.serialized())
     }
+
+    // MARK: - The pointer (docs/pointer-visibility-plan.md §7.3)
+    //
+    // Who moved the Mac's pointer last decides what the one sprite shows: the Mac (its own mouse, an
+    // app warping it) or another device, and the sprite is the Mac's pointer where kind 26 says it is,
+    // over the stream; this device, and the sprite is its own only for the portrait trackpad (the
+    // Pencil's with Q2's flip), else nothing. This device's input makes it the one (on `queue`, in
+    // sendInput's block); a fresh report from the Mac (kind 26, on `queue` too) makes it the Mac's.
+    // `renderPointer` puts the result on screen.
+
+    /// Hands the sprite what it shows now: the feed as it stands, this device's own pointer, the
+    /// layout, `active` and the pad's fingers (PointerPresence.sprite). Runs when any of them changes,
+    /// and at Q1's timer. Main thread.
+    func renderPointer() {
+        presence.follow(pointerFeed.current)
+        let now = ProcessInfo.processInfo.systemUptime
+        onPointerChange?(presence.sprite(now: now))
+        // Q1's flip: one re-render when the trackpad's pointer is due to go. Never while the linger
+        // is off (its end is then nil), and never again once that time has passed.
+        lingerRender?.cancel()
+        lingerRender = nil
+        if let ends = presence.lingerEnds, ends >= now {
+            let work = DispatchWorkItem { [weak self] in self?.renderPointer() }
+            lingerRender = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + (ends - now) + 0.01, execute: work)
+        }
+    }
+
+    /// This device's own pointer and what drew it (§7.5): the trackpad's cursor, the Pencil's
+    /// position, or nil for a finger on the stream, typing, a key or the iPad's own pointer (iPadOS
+    /// draws that one). Called alongside the input that goes out anyway, never instead of it. A flip
+    /// between none and some still tells the host (`setLocalCursor`), as it did; the Mac's arrow
+    /// never does. Main thread.
+    func setOwnPointer(_ p: CGPoint?, from origin: PointerPresence.Origin) {
+        let flipped = (p == nil) != (presence.own == nil)
+        presence.setOwn(p, from: origin)
+        if flipped { setLocalCursor(p != nil) }
+        renderPointer()
+    }
+
+    /// The feed, from one look, for the pad (§7.3): its anchor, where a trackpad stroke carries on from
+    /// (the newer of the Mac's last position over the stream and this device's last pointer event),
+    /// and its re-seeds, how many times the Mac or another device took the pointer from this device
+    /// or moved it on, which the pad compares with its own count to re-seed from the anchor
+    /// mid-stroke (PadCursor.catchUp). Any thread.
+    var pointerFeedState: PointerFeedState { pointerFeed.current }
+
+    /// The laptop layout (inner or outer portrait), where the trackpad's pointer shows. Main thread.
+    func setPointerLayout(portrait: Bool) {
+        guard presence.portrait != portrait else { return }
+        presence.portrait = portrait
+        renderPointer()   // a rotation: the trackpad's arrow goes in landscape and comes back in portrait
+    }
+
+    /// How many fingers are on the portrait pad; only Q1's flip reads it. Main thread.
+    func trackpadFingers(_ n: Int) {
+        presence.fingers(n, now: ProcessInfo.processInfo.systemUptime)
+        renderPointer()
+    }
+
+    /// A key from the portrait key row: it hands this device the pointer, as every input does, and
+    /// keeps what the sprite shows (PointerPresence.ownForKeyRow): the Mac's arrow stays where it is,
+    /// as this device's own, instead of the pad's cursor from before the Mac took over. Main thread.
+    func sendFromKeyRow(_ event: InputEvent) {
+        presence.follow(pointerFeed.current)
+        if let kept = presence.ownForKeyRow() { setOwnPointer(kept.own, from: kept.origin) }
+        sendInput(event)
+    }
+
+    /// The frame's size changed (another source, an Aa resize): this device's own pointer, while it
+    /// shows under this device's control, starts again in the middle and the Mac's goes there too, as
+    /// before; the Mac's arrow waits for the host's next report, which is in the new geometry already
+    /// (PointerPresence.recentresOnNewFrame). The display view calls it. Main thread.
+    func pointerFrameChanged() {
+        presence.follow(pointerFeed.current)
+        guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
+        setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
+        // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
+        if inputPaused { pointerMoveOwed = true; return }
+        sendInput(.pointer(.move, x: 0.5, y: 0.5))
+    }
+
+    /// A new session, or none (a new dial, a remote dial's winner, tearDown): the Mac has the pointer
+    /// until this device's first input (Q6), nowhere yet. Reset on main, so the sprite goes at once,
+    /// and again on `queue`, behind anything of the old connection still being handled there, so no
+    /// late report of it outlives the reset. Main thread.
+    private func resetPointerFeed() {
+        pointerFeed.reset()
+        queue.async {
+            self.pointerFeed.reset()
+            #if DEBUG
+            self.pointerStaleLoggedAt = -.infinity
+            self.pointerRestatementLoggedAt = -.infinity
+            self.pointerHeard = false
+            #endif
+            DispatchQueue.main.async { self.renderPointer() }
+        }
+        renderPointer()
+    }
+
+    /// The session is over (tearDown): the feed, this device's own pointer and the pad's fingers.
+    private func resetPointer() {
+        resetPointerFeed()
+        presence.fingers(0, now: ProcessInfo.processInfo.systemUptime)
+        setOwnPointer(nil, from: .none)
+    }
+
+    /// On `queue`, in sendInput's block: one input this device sends, coalesced moves included. It
+    /// makes this device the one moving the pointer, a pointer event's position the anchor, and a
+    /// position among those it sent lately (a hand-over's carry-over reads them); main is told only
+    /// when the pointer came here with it.
+    private func pointerNoteSent(_ event: InputEvent) {
+        let sent: PointerFeedState.Sent
+        switch event {
+        case .pointer(_, let x, let y): sent = .pointer(CGPoint(x: x, y: y))
+        case .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y): sent = .scroll(CGPoint(x: x, y: y))
+        case .text, .key: sent = .other
+        }
+        guard pointerFeed.sent(sent, now: CACurrentMediaTime()) else { return }
+        #if DEBUG
+        print("pointer: this device has it")
+        #endif
+        DispatchQueue.main.async { self.renderPointer() }
+    }
+
+    /// On `queue`: kind 26, where the Mac's pointer is while this device is not the one moving it.
+    /// Judged here, where this device's input is sent and counted: stale when the Mac built it before
+    /// reading this device's latest input (its `seen` below what SessionLink counted on this
+    /// connection, or a coalesced move still waiting to go out); during a hand-over's carry-over, this
+    /// device's own position reported back; else news, the pointer the Mac's (§3.3, §7.3).
+    private func receivePointer(_ data: Data) {
+        guard let report = Wire.decode(MacPointer.self, from: data) else { return }
+        let sentOnSession = link.inputsOnSession
+        let movePending = pendingMove != nil
+        let position = report.position.map { CGPoint(x: $0.x, y: $0.y) }
+        let now = CACurrentMediaTime()
+        switch pointerFeed.report(at: position, seen: report.seen, sentOnSession: sentOnSession, movePending: movePending, now: now) {
+        case .stale:
+            #if DEBUG
+            if now - pointerStaleLoggedAt >= 1 {
+                pointerStaleLoggedAt = now
+                print("pointer: ignored a position the Mac sent before reading this device's input (seen \(report.seen ?? 0), sent \(sentOnSession)\(movePending ? ", a move waiting" : ""))")
+            }
+            #endif
+        case .restatement:
+            #if DEBUG
+            if now - pointerRestatementLoggedAt >= 1 {
+                pointerRestatementLoggedAt = now
+                print("pointer: ignored the Mac restating this device's own position on the new connection")
+            }
+            #endif
+        case .news(let tookOver, let changed):
+            #if DEBUG
+            // Once per hand-over, and the session's first report: not per position.
+            if tookOver || !pointerHeard {
+                print(position.map { String(format: "pointer: the Mac has it at %.4f,%.4f", Double($0.x), Double($0.y)) }
+                      ?? "pointer: the Mac has it, off the stream")
+            }
+            pointerHeard = true
+            #endif
+            guard changed else { return }
+            // Rendered whatever connection carries the session by then: the render only reads the
+            // feed, which holds this report already, so it is never wrong. A report that lands just
+            // before a move hands the session to a new connection (`finishMove`) was otherwise never
+            // drawn: the new connection's first report says the same, which changes nothing, so
+            // nothing rendered it until the Mac's pointer moved again (the review, 2026-09-27).
+            DispatchQueue.main.async { self.renderPointer() }
+        }
+    }
+
+    #if DEBUG
+    /// The layout harness (`-SillPointer`, ContentView): the mock's pointer in one of the plan's
+    /// states, as the feed and this device's input would leave it: `mac@X,Y` (the Mac has it, over
+    /// the stream), `hidden` (the Mac has it, off the stream), `device@X,Y` (this device's trackpad)
+    /// or `pencil@X,Y` (its Pencil); `pencilShows` is Q2's flip (`-SillPencilPointer 1`). False for
+    /// a state it does not know. Main thread.
+    func debugSeedPointer(_ state: String, pencilShows: Bool) -> Bool {
+        let parts = state.lowercased().split(separator: "@", maxSplits: 1).map(String.init)
+        var at: CGPoint?
+        if parts.count == 2 {
+            let xy = parts[1].split(separator: ",").compactMap { Double($0) }
+            guard xy.count == 2 else { return false }
+            at = CGPoint(x: xy[0], y: xy[1])
+        }
+        presence.pencilShowsPointer = pencilShows
+        switch (parts[0], at) {
+        case ("mac", let p?):
+            _ = pointerFeed.report(at: p, seen: 0, sentOnSession: 0, movePending: false, now: CACurrentMediaTime())
+        case ("hidden", nil):
+            _ = pointerFeed.report(at: nil, seen: 0, sentOnSession: 0, movePending: false, now: CACurrentMediaTime())
+        case ("device", let p?):
+            _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
+            presence.setOwn(p, from: .trackpad)
+        case ("pencil", let p?):
+            _ = pointerFeed.sent(.pointer(p), now: CACurrentMediaTime())
+            presence.setOwn(p, from: .pencil)
+        default:
+            return false
+        }
+        renderPointer()
+        return true
+    }
+    #endif
 
     // MARK: - Host → client
 
@@ -2416,6 +2658,9 @@ final class StreamClient: ObservableObject {
                     #endif
                     self.moveToNetworkIfListed()
                     self.followBestPath()
+                    #if DEBUG
+                    InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
+                    #endif
                 }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
                 let previous = self.active
@@ -2481,6 +2726,8 @@ final class StreamClient: ObservableObject {
         case .cursorShape:
             guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
+        case .macPointer:
+            receivePointer(data)
         case .hostSettings:
             guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
             let from = connection

@@ -71,6 +71,10 @@ enum DuoLayout {
         return size.width > size.height ? .innerLandscape : .innerPortrait
     }
 
+    /// The laptop layout, inner or outer: stream on top, the key row and the trackpad below. Only
+    /// there does the device draw its own pointer, for the trackpad (PointerPresence).
+    var isPortrait: Bool { self == .innerPortrait || self == .outerPortrait }
+
     /// Whether `.outerPortrait` draws the phone's arrangement: on an iPhone, yes; on an iPad (a
     /// window narrower than 600 pt held upright), no: the compact halves, as before. DEBUG:
     /// `-SillIdiom pad` (or `phone`) draws the other device's, so the harness can photograph an
@@ -197,6 +201,11 @@ struct StreamScreen: View {
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
                 .allowsHitTesting(!overlayShown && tour == nil)
+                // The pointer sprite follows the layout: the trackpad's arrow shows only in the
+                // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
+                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                    client.setPointerLayout(portrait: portrait)
+                }
                 // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
                 // outside link puts the tour aside until the overlay has closed.
                 if let run = tour, !overlayShown {
@@ -756,7 +765,7 @@ struct StreamScreen: View {
                 // Same frame as the video, so a touch maps straight onto the streamed frame.
                 InputOverlay(videoSize: client.videoSize,
                              send: { client.sendInput($0) },
-                             setLocalPointer: { client.localPointer = $0 },
+                             setOwnPointer: { client.setOwnPointer($0, from: $1) },
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
