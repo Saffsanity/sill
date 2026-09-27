@@ -56,7 +56,8 @@ package final class StreamCoordinator {
     /// encoder, the launch probe never runs and the re-check never starts, so no test touches the
     /// Mac's one hardware encoder while Noah streams (PointerTestHooks).
     private let softwareOnly: Bool
-    /// The TEST ONLY hooks' lines (PointerTestHooks), printed as `start` begins; empty without them.
+    /// The TEST ONLY hooks' lines (PointerTestHooks, InputInjector.testInputLog), printed as `start`
+    /// begins; empty without them.
     private let testHookLines: [String]
     /// A picked window streams from its own HiDPI display (see VirtualStage): the CLI's
     /// `--virtual-display`, or the app's setting. Every branch this adds is behind this flag;
@@ -225,9 +226,10 @@ package final class StreamCoordinator {
         let env = ProcessInfo.processInfo.environment
         let path = PointerTestHooks.pointerPath(synthetic: synthetic, environment: env)
         let software = PointerTestHooks.softwareEncoder(synthetic: synthetic, environment: env)
+        let inputLog = InputInjector.testInputLog(synthetic: synthetic, environment: env)
         pointer = PointerWatch(synthetic: synthetic, path: path.path)
         softwareOnly = software.on
-        testHookLines = [path.line, software.line].compactMap { $0 }
+        testHookLines = [path.line, software.line, inputLog.line].compactMap { $0 }
         status = HostStatus()
         server = try StreamServer(advertise: !synthetic)   // the test pattern is for test clients, not devices
         server.macName = macName                           // the update goodbye names this Mac (DeviceGate)
@@ -245,6 +247,7 @@ package final class StreamCoordinator {
         server.pointerWatch = pointer
         injector.watch = pointer
         injector.dryRun = synthetic
+        injector.testLog = synthetic && inputLog.on
         stage.onWarp = { [pointer] in pointer.sillMoved() }
         // The identity's TXT tag must be in the first registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName)

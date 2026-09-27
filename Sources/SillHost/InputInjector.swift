@@ -51,6 +51,14 @@ final class InputInjector {
     /// zero and no Accessibility reminder prints. With the TEST ONLY scripted pointer a pointer
     /// event moves that pointer to its position instead (PointerWatch.sillMoved(to:)).
     var dryRun = false
+    /// TEST ONLY (SILL_TEST_INPUT_LOG=1, a synthetic host, which posts nothing: `testInputLog`): each
+    /// event a dry run would post is printed, a keyboard event with the flags it was made with ("Test
+    /// input: key 49 up (none)"), a pointer or scroll event with those the last keyboard event would
+    /// have left in the HID state table, which it would start from ("Test input: left mouse down
+    /// (none)"): what a device's keys leave for its next click, without posting anything.
+    var testLog = false
+    /// The flags the last keyboard event would have left in the table: the TEST ONLY log's.
+    private var testTable: UInt64 = 0
 
     // MARK: Entry point
 
@@ -92,11 +100,46 @@ final class InputInjector {
     /// was posted.
     private func post(_ event: CGEvent) -> Bool {
         if dryRun {
+            if testLog { logTest(event) }
             Stats.shared.bump("in.dry")
             return false
         }
         event.post(tap: .cghidEventTap)
         return true
+    }
+
+    /// TEST ONLY: one line for an event a dry run would have posted (`testLog`).
+    private func logTest(_ event: CGEvent) {
+        let flags = event.flags.rawValue & (KeyStrokes.capsLock | Self.modifierBits)
+        let what: String
+        switch event.type {
+        case .keyDown, .keyUp, .flagsChanged:
+            testTable = flags
+            let key = event.getIntegerValueField(.keyboardEventKeycode)
+            what = "key \(key) " + (event.type == .keyDown ? "down" : event.type == .keyUp ? "up" : "flags changed")
+            print("Test input: \(what) (\(KeyStrokes.names(flags)))")
+            return
+        case .mouseMoved: what = "pointer move"
+        case .leftMouseDown: what = "left mouse down"
+        case .leftMouseUp: what = "left mouse up"
+        case .leftMouseDragged: what = "left mouse drag"
+        case .rightMouseDown: what = "right mouse down"
+        case .rightMouseUp: what = "right mouse up"
+        case .rightMouseDragged: what = "right mouse drag"
+        case .scrollWheel: what = "scroll"
+        default: what = "event \(event.type.rawValue)"
+        }
+        print("Test input: \(what) (\(KeyStrokes.names(testTable)))")
+    }
+
+    /// TEST ONLY: SILL_TEST_INPUT_LOG, read once at the coordinator's start. "1" on a synthetic host
+    /// (which posts nothing) turns the log on; anything else, or any other host, is ignored with one
+    /// line. Nothing prints without the variable.
+    static func testInputLog(synthetic: Bool, environment env: [String: String]) -> (on: Bool, line: String?) {
+        guard let value = env["SILL_TEST_INPUT_LOG"], !value.isEmpty else { return (false, nil) }
+        guard synthetic else { return (false, "SILL_TEST_INPUT_LOG ignored: only a --synthetic host takes it.") }
+        guard value == "1" else { return (false, "SILL_TEST_INPUT_LOG=\(value) ignored: 1 turns it on.") }
+        return (true, "Test input log: each event this host would post is printed; a --synthetic host posts none.")
     }
 
     // MARK: Pointer
@@ -391,12 +434,12 @@ final class InputInjector {
         }
         let chord = KeyStrokes.flags(fromDevice: modifiers) & Self.modifierBits
         if down, !dryRun, chord != 0, KeyStrokes.modifierKeys[hidUsage] == nil {
-            // The table just before a chord's down, for `checkModifiersLeft` (a read: no permission).
+            // The table just before a chord's down, for `checkKeyModifiersLeft` (a read: no permission).
             chords[hidUsage] = (chord, CGEventSource.flagsState(.hidSystemState).rawValue)
         }
         post(strokes)
         if !down, let (chord, before) = chords.removeValue(forKey: hidUsage), let up = strokes.last {
-            checkModifiersLeft(chord: chord, left: up.flags, before: before)
+            checkKeyModifiersLeft(chord: chord, left: up.flags, before: before)
         }
     }
 
@@ -428,14 +471,14 @@ final class InputInjector {
     /// table's flags just before it.
     private var chords: [UInt16: (chord: UInt64, before: UInt64)] = [:]
     /// Said once a run: a chord's up left modifiers set.
-    private var saidModifiersLeft = false
+    private var saidKeyModifiersLeft = false
 
     /// A quarter of a second after a chord's up, the HID state table is read again (a read, no
     /// permission): a modifier the chord carried that its up did not (`left`), set now and not before
     /// the chord, is counted, `in.keyModifiersLeft`, and said the first time. The up's flags are
     /// meant to put the table back (KeyStrokes, inferred); a device test shows at once if they do not.
-    /// As the gestures' chords do (docs/trackpad-gestures-plan.md §7.3).
-    private func checkModifiersLeft(chord: UInt64, left: UInt64, before: UInt64) {
+    /// As the gestures' chords do (docs/trackpad-gestures-plan.md §7.3, their `checkModifiersLeft`).
+    private func checkKeyModifiersLeft(chord: UInt64, left: UInt64, before: UInt64) {
         let carried = chord & Self.modifierBits & ~left & ~before
         guard carried != 0 else { return }
         // Main actor, inherited from this method, as the scroll watchdog's.
@@ -445,8 +488,8 @@ final class InputInjector {
             let still = CGEventSource.flagsState(.hidSystemState).rawValue & carried
             guard still != 0 else { return }
             Stats.shared.bump("in.keyModifiersLeft")
-            guard !self.saidModifiersLeft else { return }
-            self.saidModifiersLeft = true
+            guard !self.saidKeyModifiersLeft else { return }
+            self.saidKeyModifiersLeft = true
             print("Keys: after a device's shortcut this Mac's modifier keys still read \(KeyStrokes.names(still)) "
                   + "(not before it); a click or a scroll may act as if they were held until a key is typed.")
         }
