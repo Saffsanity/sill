@@ -432,7 +432,8 @@ struct StreamScreen: View {
                              proxy: overlay,
                              isKeyboardShown: $keyboardShown,
                              latchedModifiers: latched,
-                             onModifiersConsumed: { latched = [] })
+                             onModifiersConsumed: { latched = [] },
+                             sendGesture: { client.sendGesture($0, fingers: $1) })
             }
             .background(Palette.panel)
             .clipShape(streamShape)

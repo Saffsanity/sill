@@ -153,6 +153,9 @@ enum MockCatalog {
         case .noroute, .remote, .remoteinternet, .remoteslow: client.route = nil
         default: client.route = .wifi
         }
+        // A Mac from this build takes the trackpad gestures (its window list says so); an older one
+        // does not, and its Settings panel says to update it.
+        client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,

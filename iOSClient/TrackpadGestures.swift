@@ -209,4 +209,17 @@ struct TrackpadGestures {
     }
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
+
+    // MARK: Sending
+
+    /// What becomes of a decided gesture (StreamClient.sendGesture): it goes to the Mac only while
+    /// this device's switch is on, a session is up, and the Mac's window list said it takes at least
+    /// `generation` (`WindowList.gestures`; nil from a Mac before them, which gets none). While a
+    /// window streams the Desktop is picked first, as its button does: none of the views a gesture
+    /// opens is in a window's picture.
+    static func sending(switchOn: Bool, connected: Bool, hostGestures: Int?, generation: Int,
+                        windowStreams: Bool) -> (send: Bool, desktopFirst: Bool) {
+        guard switchOn, connected, let takes = hostGestures, takes >= generation else { return (false, false) }
+        return (true, windowStreams)
+    }
 }

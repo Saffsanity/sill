@@ -15,7 +15,8 @@ import StreamProtocol
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
-/// only. Errors show inline, never in alerts.
+/// only. Errors show inline, never in alerts. The last group, This iPad (or iPhone), is the device's
+/// own: its switch is a preference here (`StreamClient.gesturesKey`) and sends nothing to the Mac.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -29,11 +30,14 @@ struct HostSettingsPanel: View {
     @State private var olderMac = false
     /// Bumped when Low Power Mode toggles, so the frame rate note is read again.
     @State private var powerState = 0
+    /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
+    /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
+    @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
 
     private var mac: String { client.macName.isEmpty ? "the Mac" : client.macName }
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     /// DEBUG `-SillSettingsEnd 1`: the rows start scrolled to their end, so a photo of a short
-    /// screen shows the last groups (Direct Wireless, Away from home).
+    /// screen shows the last groups (Direct Wireless, Away from home, This iPad).
     private static var startsAtEnd: Bool {
         #if DEBUG
         return UserDefaults.standard.bool(forKey: "SillSettingsEnd")
@@ -41,6 +45,17 @@ struct HostSettingsPanel: View {
         return false
         #endif
     }
+    /// DEBUG `-SillSettingsScroll gestures`: the rows start scrolled to the This iPad group, so a
+    /// photo of a short screen shows its switch and rows, which the footnote under them pushes out
+    /// of `-SillSettingsEnd`'s view.
+    private static var startsAtGestures: Bool {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "SillSettingsScroll") == "gestures"
+        #else
+        return false
+        #endif
+    }
+    private static let gesturesGroupID = "thisDevice"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,10 +63,13 @@ struct HostSettingsPanel: View {
             // The rows at their own height when they fit, a scroll view in the room left when not.
             ViewThatFits(in: .vertical) {
                 middle
-                ScrollView { middle }
-                    .scrollIndicatorsFlash(onAppear: true)
-                    .scrollBounceBehavior(.basedOnSize)
-                    .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
+                ScrollViewReader { reader in
+                    ScrollView { middle }
+                        .scrollIndicatorsFlash(onAppear: true)
+                        .scrollBounceBehavior(.basedOnSize)
+                        .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
+                        .onAppear { if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) } }
+                }
             }
             foot
         }
@@ -256,6 +274,9 @@ struct HostSettingsPanel: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 4)
             }
+            // After everything of the Mac's, whatever state its settings are in: while they load, and
+            // for a Mac without them too.
+            thisDevice
         }
     }
 
@@ -345,6 +366,57 @@ struct HostSettingsPanel: View {
                 Footnote(text: "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac.")
             }
         }
+    }
+
+    // MARK: This device
+
+    /// The last group: this device's own switch for three-finger gestures, and what each does when
+    /// the Mac takes them. Last because it is the least changed, and the compact halves' 259 pt show
+    /// the Mac's rows first. Nothing in it reaches the Mac.
+    @ViewBuilder private var thisDevice: some View {
+        Text("This \(device)")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 6)
+            .accessibilityAddTraits(.isHeader)
+            .id(Self.gesturesGroupID)
+        Rows {
+            Toggle(isOn: $gesturesOn) {
+                Text("Three-Finger Gestures").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+            if gesturesOn, macTakesGestures {
+                ForEach(Self.gestureRows, id: \.gesture) { row in
+                    RowDivider()
+                    GestureRow(symbol: row.symbol, gesture: row.gesture, action: row.action)
+                }
+            }
+        }
+        Footnote(text: gesturesFooter)
+    }
+
+    /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
+    private var macTakesGestures: Bool { (client.hostGestures ?? 0) >= TrackpadGesture.generation }
+
+    /// What each gesture does on the Mac. The pinch opens Launchpad on macOS 14 and 15, from the same
+    /// key.
+    private static let gestureRows: [(symbol: String, gesture: String, action: String)] = [
+        ("arrow.up", "Swipe Up", "Mission Control"),
+        ("arrow.down", "Swipe Down", "App Exposé"),
+        ("arrow.left.and.right", "Swipe Left or Right", "Spaces"),
+        ("arrow.down.right.and.arrow.up.left", "Pinch", "Apps"),
+        ("arrow.up.left.and.arrow.down.right", "Spread", "Show Desktop"),
+    ]
+
+    /// Under the switch: where the gestures go and what they do, or why nothing happens.
+    private var gesturesFooter: String {
+        guard gesturesOn else { return "Three-finger strokes do nothing while this is off." }
+        guard macTakesGestures else { return "Update Sill on \(mac) to use these." }
+        var text = "Three fingers on the trackpad or over the stream. While a window streams, a gesture shows the Desktop first, and the opposite gesture closes what one opened. \(mac) does these with its own keyboard shortcuts: one turned off in its Keyboard settings does nothing."
+        if device == "iPad" { text += " Four-finger swipes and a Magic Keyboard trackpad’s gestures stay with iPadOS." }
+        return text
     }
 
     /// "through Tailscale (mac-mini.tail1234.ts.net)": the first VPN or internet address the Mac
@@ -489,6 +561,46 @@ private struct AdaptiveRow<Control: View>: View {
     }
     /// The control carries the same title for VoiceOver, so this one is not read twice.
     private var label: some View { RowTitle(title: title, since: since).accessibilityHidden(true) }
+}
+
+/// One gesture and what it does on the Mac: read-only, the words side by side when they fit and
+/// stacked when larger text leaves no room, never cut off; one VoiceOver element ("Swipe Up,
+/// Mission Control").
+private struct GestureRow: View {
+    let symbol: String
+    let gesture: String
+    let action: String
+    /// Measured afresh when the text size changes, as `AdaptiveRow` is.
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                icon
+                Text(gesture).foregroundStyle(Palette.text)
+                Spacer(minLength: 8)
+                Text(action).foregroundStyle(Palette.muted)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                icon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(gesture).foregroundStyle(Palette.text)
+                    Text(action).foregroundStyle(Palette.muted)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 8)
+        }
+        .id(typeSize)
+        .rowFrame()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(gesture), \(action)")
+    }
+    private var icon: some View {
+        Image(systemName: symbol)
+            .foregroundStyle(Palette.muted)
+            .frame(width: 24)
+            .accessibilityHidden(true)
+    }
 }
 
 /// A hairline between rows, inset like the system's.

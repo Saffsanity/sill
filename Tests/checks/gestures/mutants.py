@@ -38,6 +38,12 @@ MUTANTS = {
                                               "for (id, f) in fingersDown { out[id] = f.now }"),
     "M24 a cancel before arming ignored": ("if armed { done = true } else { cancelledEarly = true }", "if armed { done = true }"),
     "M25 up and down swapped": ("return dy < 0 ? .swipeUp : .swipeDown", "return dy < 0 ? .swipeDown : .swipeUp"),
+    "M26 only the one generation": ("guard switchOn, connected, let takes = hostGestures, takes >= generation else",
+                                    "guard switchOn, connected, let takes = hostGestures, takes == generation else"),
+    "M27 sent with the switch off": ("guard switchOn, connected, let takes", "guard connected, let takes"),
+    "M28 the Desktop never first": ("return (true, windowStreams)", "return (true, false)"),
+    "M29 an older Mac sent to": ("guard switchOn, connected, let takes = hostGestures, takes >= generation else { return (false, false) }",
+                                 "guard switchOn, connected, (hostGestures ?? generation) >= generation else { return (false, false) }"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

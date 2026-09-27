@@ -414,6 +414,22 @@ do {
     check("a cancelled stroke stays silent until the next stroke's first touch", wasSilent && !g.silent)
 }
 
+// MARK: - Sending (StreamClient.sendGesture's rule)
+
+func sending(on: Bool = true, up: Bool = true, takes: Int?, window: Bool = false) -> (Bool, Bool) {
+    let r = G.sending(switchOn: on, connected: up, hostGestures: takes, generation: 1, windowStreams: window)
+    return (r.send, r.desktopFirst)
+}
+check("a Mac that says gestures 1: sent", sending(takes: 1) == (true, false))
+check("a Mac from before (gestures nil): nothing sent", sending(takes: nil) == (false, false))
+check("gestures 0: nothing sent", sending(takes: 0) == (false, false))
+check("a later Mac (gestures 2) takes these too: sent", sending(takes: 2) == (true, false))
+check("the switch off: nothing sent", sending(on: false, takes: 1) == (false, false))
+check("no session: nothing sent", sending(up: false, takes: 1) == (false, false))
+check("a window streaming: the Desktop first, then sent", sending(takes: 1, window: true) == (true, true))
+check("a window streaming, an older Mac: no Desktop pick either", sending(takes: nil, window: true) == (false, false))
+check("a window streaming, the switch off: no Desktop pick either", sending(on: false, takes: 1, window: true) == (false, false))
+
 // MARK: - 5,000 random strokes against a model
 
 /// The model: the plan's §6.1 written again, over a whole stroke's events at once.
