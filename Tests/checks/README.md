@@ -4,7 +4,7 @@ The parts of Sill that decide things (when the device looks for a Mac and which 
 takes, the settings ledger, the wire format, pairing, who may use which door, how frames go into the
 video encoder and when a stream gets a new encoder session, which device versions a Mac serves, how a
 session ends, what the update check makes of GitHub's answer, how the Mac download's disk image lays
-out its window) are plain Swift files that compile on their own. Each folder here compiles one or a
+out its window, what the Mac sends of its menus and what the device makes of it) are plain Swift files that compile on their own. Each folder here compiles one or a
 few of those files, exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with
 its own `main.swift`, and runs the result. Nothing here needs a device, Screen Recording,
 Accessibility, the video encoder or any network but loopback, so the checks run anywhere Xcode does,
@@ -35,6 +35,8 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `fence` | `iOSClient/SessionLink.swift`, `Sources/StreamProtocol/StreamMessage.swift` | the session's fenced hand-overs, hold, adopt, unhold and a new session dropping a hand-over, against a stand-in Mac on loopback: 600 numbered inputs arrive complete and in order, whatever the machine's speed (each step waits for what it needs, not a set time) | 14 modes | 20 |
 | `goodbye` | `iOSClient/GoodbyePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | how a session ends after the Mac's goodbye: today's five reasons, "update" and reasons the device does not know, the message cleaned, when it reconnects | 42 | 16 |
 | `ledger` | `iOSClient/HostSettingsLedger.swift`, `Sources/StreamProtocol/HostSettings.swift` | the device's settings ledger against a model host, scenarios and 5,000 random runs | 90 | none |
+| `menu-state` | `iOSClient/MacMenuState.swift` with `Sources/StreamProtocol` (`build.sh`) | the device's view of the Mac's menus (docs/menu-bar-plan.md §7.2): the top level, fetches joined, answered, refused, timed out, a new tree and a move's hand-over, choices and their refusals, stale menus, a bar menu built from an older top level asking by its title, the rows and sections; then 5,000 random sessions in which every opened menu's completion is settled exactly once | 118 and 5,000 sessions | 26 |
+| `menus` | `Sources/SillHost/MenuFormat.swift` and `MenuPolicy.swift` with `Sources/StreamProtocol` (`build.sh`, `-package-name sill`) | kinds 24, 25 and 27 and MacMenu.swift's JSON; the Mac's shortcuts as it draws them (modifiers, special and function keys, glyphs); items, ids and paths; the 1 s cache and the wait after an app is brought forward; the request rates; the press decision (only a leaf whose title now is the one shown); the refusals' words and the log's path | 279 | 33 |
 | `origin` | `Sources/SillHost/OriginPolicy.swift`, `InterfaceSnapshot.swift` | which door a connection may use, by source address and interface; the last cases read this Mac's own interfaces (read-only) | 66 | 10 |
 | `pairing-address` | `Sources/SillMenuBar/PairingWindowAddress.swift` with `AddressList`, `OriginPolicy` and `Sources/StreamProtocol` (`build.sh`) | the address the pairing window gives to type, with 5,000 random runs | 80 | 35 |
 | `policy` | `iOSClient/DiscoveryPolicy.swift` | when the device looks nearby, its rows and their words, the route word, the wired dial, reconnects, the move off AWDL, a session following the best path (the cable, Wi-Fi, Direct) and the remote rule | 286 | 70 |
@@ -45,7 +47,8 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 The counts are those of main at 1f3072a, where every check passes and every mutant is caught; the
 two encoder checks' are those of the encoder-two-in-flight branch that brought them, the four the
 `update-notice` branch brought (`compatibility`, `device-gate`, `goodbye`, `update-policy`) those of
-its merge with main at 32d532b, and `dmg-layout`'s those of the `mac-dmg` branch that brought it.
+its merge with main at 32d532b, `dmg-layout`'s those of the `mac-dmg` branch that brought it, and
+`menus`' and `menu-state`'s those of the `menu-bar-mirror` branch.
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
@@ -73,7 +76,9 @@ compile line now), and each list of mutants, a JSON file beside it there, the sa
 `mutants.py`. `dmg-layout` was written for the `mac-dmg` branch, after its review: its allocator
 expectations are those of a Finder-made image's `.DS_Store` (an installer image of 2023, which is
 not in the repository), and its run reads make-dmg.sh's layout by sourcing the script, which then
-only defines its functions.
+only defines its functions. `menus` and `menu-state` were written for `menu-bar-mirror` (the plan's
+H3); the menu reader and mirror, which need Accessibility and an app to read, are checked against a
+fixture app by `Scripts/menu-check/run.sh`, outside CI.
 
 ## Adding a check
 
@@ -96,3 +101,5 @@ a permission, a device or the network, and never anything that links VideoToolbo
   run any binary that links VideoToolbox. When it merges, move them here (or call that script from
   `ci.yml`).
 - `home-pairing` and `remote-bundle` are plans so far, without checks.
+- `pointer-visibility` (kind 26) and `trackpad-gestures` (kind 28): `protocol` expects 26 and 28 to
+  read as `.unknown`, and `menus` 26; the branch that brings either flips those cases.
