@@ -42,7 +42,7 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   coordinator's lines: "Link to iPad (iPad14,1): cannot carry Pro (withheld 52
   of 58 frames in the last second; the link carried about 6.4 Mbps);
   suggesting Low · Standard.", "… nothing has got through for 3 s …", "…
-  keeping up again." A report about a quality a pick has just replaced is left
+  keeping up again." A report about a bitrate a pick has just replaced is left
   out of kind 16. No Stats key.
 - Sill.app: Settings › Streaming's "Away from home" section (saved as
   `awayBitrate`, `awayCaptureScale`); the menu's Quality subtitle "Away from

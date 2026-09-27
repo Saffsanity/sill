@@ -209,10 +209,11 @@ package final class StreamCoordinator {
     /// Each connection whose catalog went out (`sendCatalog`): the ones settings states reach.
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     /// Each connection's link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6.5):
-    /// its kind 16's `link`, and the card's, with the quality it was judged at (`judgedAt`, the
-    /// running pair): a state leaves out a report about a quality that is no longer the target, so the
-    /// answer to the pick that lowers it already carries none (the restart's reset follows).
-    private var linkReports: [ObjectIdentifier: (report: LinkReport, judgedAt: (bitrate: Int, captureScale: CGFloat))] = [:]
+    /// its kind 16's `link`, and the card's. A state leaves out a report whose bitrate (the running
+    /// one when it was judged) is no longer the target's, so the answer to the pick that lowers it
+    /// already carries none (the restart's reset follows). The bitrate alone: a change of the capture
+    /// scale alone may restart nothing (the software encoder runs at points).
+    private var linkReports: [ObjectIdentifier: LinkReport] = [:]
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
 
@@ -716,12 +717,12 @@ package final class StreamCoordinator {
             let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
                                     bitrate: bitrate, carriedKbps: v.carriedKbps,
                                     suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
-            let previous = linkReports[id]?.report
+            let previous = linkReports[id]
             // The same state with the same suggestion (the judge reporting its rate as it moves): the
             // device and the card have nothing new to show, so nothing is published.
             if let previous, previous.state == report.state, previous.suggestedBitrate == report.suggestedBitrate,
                previous.suggestedCaptureScale == report.suggestedCaptureScale { return }
-            linkReports[id] = (report, config.effective(away: awayRunning))
+            linkReports[id] = report
             let shown = HostStatusSnapshot.LinkStatus(state: behind ? .behind : .stalled, withheld: v.withheld, bitrate: bitrate,
                                                       carriedKbps: v.carriedKbps, suggestedBitrate: suggestion?.bitrate,
                                                       suggestedCaptureScale: suggestion?.captureScale)
@@ -1835,10 +1836,9 @@ package final class StreamCoordinator {
     private func settingsState(for id: ObjectIdentifier, answering: Int? = nil) -> HostSettingsState {
         let t = target, s = status.snapshot
         let thisAway = routes[id]?.isAway ?? false
-        // A report about the quality that runs while it is still the target; one about a quality a
+        // A report about the bitrate that runs while it is still the target's; one about a bitrate a
         // pick has just replaced is stale (the restart's reset clears it a moment later).
-        let wanted = t.effective(away: awayWanted)
-        let link = linkReports[id].flatMap { $0.judgedAt == wanted ? $0.report : nil }
+        let link = linkReports[id].flatMap { $0.bitrate == t.effective(away: awayWanted).bitrate ? $0 : nil }
         let away = remote.map { _ in
             AwayQuality(homeBitrate: t.bitrate, homeCaptureScale: Double(t.captureScale),
                         awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),

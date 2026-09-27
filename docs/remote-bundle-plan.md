@@ -1633,9 +1633,9 @@ kind 18 check, and the host's view of the link (no device-side byte count).
   between the host and the link filled (12 Mbit/s on an 8 Mbit/s path), and a suggestion made from
   it stood for the whole spell. The coordinator publishes a report only when its state or its
   suggestion changes, so the device and the card see no report that only moved the rate. A report
-  judged at a quality that is no longer the target (a pick has just changed it, and the restart's
-  reset follows within milliseconds) is left out of kind 16, so the answer to the pick that lowers
-  the quality already carries none (H12 found the answer carrying the old report).
+  whose bitrate is no longer the target's (a pick has just changed it, and the restart's reset
+  follows within milliseconds) is left out of kind 16, so the answer to the pick that lowers the
+  quality already carries none (H12 found the answer carrying the old report).
 - **H11's gates for a slower path, restated.** The host judges only what it withholds, and it
   withholds nothing while the buffers between it and the slower link fill: the dip's 1 MB queue and
   the loopback's socket buffers took 5.9 s, the stopped downlink's 256 KB queue 2.9 s. Behind comes
@@ -1756,6 +1756,47 @@ loopback alone, on the software encoder, killed by PID.
   remotely`: no move in 30 s.
 - **S6:** the spoken labels ("…, away quality, Low, Standard", "Use Low, Standard") in the away-copy
   check; one announcement a spell in S3.
+
+### Review (2026-09-27)
+
+Three lenses over the whole of PR B before its pull request: pacing and link judging on `sill.net`
+(bytes, completions, the sweep), the away flag, the per-connection states and restarts on the main
+actor, and the device's UI and the move (fences, the kind 18 check, the back-off).
+
+- **Fixed:** the stale report was judged by the whole quality it ran at, bitrate and capture scale.
+  A change of the capture scale alone can restart nothing (on the software encoder the stream runs
+  at points either way), and then a report still true was left out of every later state, since the
+  judge reports only a new state or suggestion: the device's callout went while the link stayed
+  behind. A report is now stale only when its bitrate is not the target's.
+- **Again on the final build:** the harness's cases against origin/main (H3 and H11), every gate
+  passing with the same figures (real24 47.4 → 59.3 fps, kf25m32 1.5 → 60.1, bigkf8 19.1 → 59.8,
+  restartkf 1.6 → 60.1, ext120 120.0 with nothing dropped; the link's cases as above); H7 12 of 12,
+  H8 24 of 24, H12 14 of 14 (behind 4.7 s after the pick); S3 18 of 18; S4 13 of 13 and its
+  variants 7 of 7 (one earlier run of the main case saw the software encoder's watchdog restart the
+  stream at 4 Mbps before the move while other work held this Mac's load at 175: not the move);
+  every pure check, `swift build -c release` from clean, and policy's 76 mutants again.
+- **Found while verifying, fixed before their commits:** the answer to the pick that lowers the
+  quality carried the report it made stale (H12); the move home waited for a kind 18 that a host
+  without a remote door never sends before refusing another launch (S4's `other:`); the footnote
+  wrapped "Low" from "· Standard" (S1); `-SillLinkLine` suggested Low at Low · Standard, a pick that
+  changes nothing (S1); the device's console lacked §6.8's "link: behind …" and "link: keeping
+  up"; the move home's end with its remote connection gone printed the move to Wi‑Fi's words; one
+  of H15's mutants, the back-off with no failure counted, survived until a case for a listing that
+  begins a moment after a try.
+- **Looked at and left as they are:**
+  - Every counter a client's second is made of is touched on `sill.net` only: the sends, their
+    completions and the sweep, the remote door's connections included (RemoteServer shares the
+    queue).
+  - A verdict of the old judge can still be on its way to the main actor as a restart resets it;
+    the Tasks run in order, so the reset's fine comes last, and a report the coordinator already
+    has (same state and suggestion) publishes nothing.
+  - At home a lost frame costs about three frames while the keyframe is asked for at once, under a
+    tenth of a second's 60: never a short second. A home link is behind only when it keeps losing.
+  - During the move home the Mac serves both connections for about half a second at the home
+    quality, and may judge the departing remote one behind: one host line, which the device, by
+    then reading the home connection, never sees.
+  - Settings › Streaming's footer and the menu's subtitle follow the away target (`away` in the
+    snapshot), which the restart makes true within a moment.
 
 ### Where home pairing meets this (branch `home-pairing`, PR #37)
 
