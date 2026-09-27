@@ -46,9 +46,15 @@ MUTANTS = [
     ("the 21st request allowed", "MenuPolicy.swift", "guard arrivals.count < limit else { return false }", "guard arrivals.count <= limit else { return false }"),
     ("an ignored line every time", "MenuPolicy.swift", "if let last = lastIgnoredLine, now - last < 1 { return false }",
      "if let last = lastIgnoredLine, now - last < 0 { return false }"),
-    ("the title checked for a kept element", "MenuPolicy.swift", "if elementValid { return enabled == false ? .refuse(.disabled) : .press }",
-     "if elementValid, found == nil || found == shown { return enabled == false ? .refuse(.disabled) : .press }"),
-    ("a disabled item found again pressed", "MenuPolicy.swift", "return enabled == false ? .refuse(.disabled) : .pressFound", "return .pressFound"),
+    ("the kept element's title not compared", "MenuPolicy.swift", "guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }",
+     "guard elementValid || (current != nil && !current!.isEmpty && current == shown) else { return .refuse(.changed) }"),
+    ("an empty title matching", "MenuPolicy.swift", "guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }",
+     "guard let current, current == shown else { return .refuse(.changed) }"),
+    ("an item with children pressed", "MenuPolicy.swift", "if hasChildren { return .refuse(.changed) }", "_ = hasChildren"),
+    ("a disabled item pressed", "MenuPolicy.swift", "if enabled == false { return .refuse(.disabled) }", "_ = enabled"),
+    ("disabled judged before the title", "MenuPolicy.swift", "guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }",
+     "if enabled == false { return .refuse(.disabled) }\n        guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }"),
+    ("an item found again taken for the kept one", "MenuPolicy.swift", "return elementValid ? .press : .pressFound", "return .press"),
     ("the log's app not cleaned", "MenuPolicy.swift", "var parts = [SafeText.label(app)]", "var parts = [app]"),
 ]
 caught = 0

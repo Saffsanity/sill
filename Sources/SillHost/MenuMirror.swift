@@ -287,6 +287,9 @@ final class MenuMirror {
             send(MacMenu(version: version, answering: r.token, pressed: false, note: why.note(app: app)), to: c)
         }
         guard r.version == version, let path, let t = target else { refuse(.changed, what: shownID); return }
+        // One of the bar's menus: AXPress there would open it on the Mac, which then sits in menu
+        // tracking. A device never sends one; refused before anything is activated or read.
+        guard path.indexes.count >= 2 else { refuse(.changed, what: logPath(path, app: t.app)); return }
         if stale { refuse(.notAnswering, what: logPath(path, app: t.app)); return }
         let v = version
         _ = await prepare()
@@ -406,12 +409,13 @@ final class MenuMirror {
 
     // MARK: Helpers
 
-    /// "menufixture › Probe › Set Label A" from the host's own titles, else the id.
+    /// "menufixture › Probe › Set Label A" from the host's own titles, else the id. `last`: the title
+    /// an item found again by its path had there, which stands for it.
     private func logPath(_ path: MenuPath, app: String, last: String? = nil) -> String {
         let lineage = path.lineage
         let titles: [String?] = lineage.enumerated().map { i, p in
-            let known = p.indexes.count == 1 ? top.first { $0.id == p.id }?.title : elements[p]?.title
-            return known ?? (i == lineage.count - 1 ? last : nil)
+            if i == lineage.count - 1, let last { return last }
+            return p.indexes.count == 1 ? top.first { $0.id == p.id }?.title : elements[p]?.title
         }
         return MenuLog.path(app: app, titles: titles) ?? path.id
     }

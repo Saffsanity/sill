@@ -304,20 +304,37 @@ check(tl != TopLevel(titles: ["menufixture", "File", "Edit", "Tools"], enabled: 
 
 // MARK: - PressDecision (every row)
 
-typealias D = PressDecision
-check(D.decide(elementValid: true, found: nil, shown: "Save", enabled: true) == .press, "a kept element that answers: pressed")
-check(D.decide(elementValid: true, found: nil, shown: "Save", enabled: nil) == .press, "…its enabled flag missing: pressed")
-check(D.decide(elementValid: true, found: nil, shown: "Undo Typing", enabled: true) == .press
-      && D.decide(elementValid: true, found: "Undo Paste", shown: "Undo Typing", enabled: true) == .press,
-      "a kept element is authoritative: its title is never compared (Undo Typing → Undo Paste)")
-check(D.decide(elementValid: true, found: nil, shown: nil, enabled: true) == .press, "a kept element with no title shown: pressed")
-check(D.decide(elementValid: true, found: nil, shown: "Save", enabled: false) == .refuse(.disabled), "a kept element, disabled: refused")
-check(D.decide(elementValid: false, found: "Rebuilt Leaf", shown: "Rebuilt Leaf", enabled: true) == .pressFound, "found again by its path, same title: pressed")
-check(D.decide(elementValid: false, found: "Rebuilt Leaf", shown: "Rebuilt Leaf", enabled: nil) == .pressFound, "…enabled missing: pressed")
-check(D.decide(elementValid: false, found: "Rebuilt Leaf", shown: "Rebuilt Leaf", enabled: false) == .refuse(.disabled), "…disabled: refused")
-check(D.decide(elementValid: false, found: "Renamed Leaf", shown: "Rebuilt Leaf", enabled: true) == .refuse(.changed), "found again, another title: refused")
-check(D.decide(elementValid: false, found: nil, shown: "Rebuilt Leaf", enabled: nil) == .refuse(.changed), "nothing at the path: refused")
-check(D.decide(elementValid: false, found: "Rebuilt Leaf", shown: nil, enabled: true) == .refuse(.changed), "found again but no title shown to compare: refused")
+func decide(kept: Bool, _ current: String?, shown: String?, enabled: Bool? = true, children: Bool = false) -> PressDecision {
+    PressDecision.decide(elementValid: kept, current: current, shown: shown, enabled: enabled, hasChildren: children)
+}
+// The kept element: its title now is compared with the one shown, as for one found again (a
+// delegate that rewrites its NSMenuItems in place can make the same element another command).
+check(decide(kept: true, "Save", shown: "Save") == .press, "a kept element, its title still the one shown: pressed")
+check(decide(kept: true, "Save", shown: "Save", enabled: nil) == .press, "…its enabled flag missing: pressed")
+check(decide(kept: true, "Undo Paste", shown: "Undo Typing") == .refuse(.changed),
+      "a kept element retitled (Undo Typing → Undo Paste): refused, the menus changed")
+check(decide(kept: true, "Dynamic 6", shown: "Dynamic 5") == .refuse(.changed), "a delegate's reused item (Dynamic 5 → Dynamic 6): refused")
+check(decide(kept: true, "Save", shown: nil) == .refuse(.changed), "a kept element with no title shown: refused")
+check(decide(kept: true, "Save", shown: "save") == .refuse(.changed) && decide(kept: true, "Save", shown: "Save ") == .refuse(.changed),
+      "titles compared exactly")
+check(decide(kept: true, "", shown: "") == .refuse(.changed) && decide(kept: true, "", shown: nil) == .refuse(.changed),
+      "an empty title never matches, not even an empty one shown")
+check(decide(kept: true, "Save", shown: "Save", enabled: false) == .refuse(.disabled), "a kept element, disabled: refused, disabled")
+check(decide(kept: true, "Undo Paste", shown: "Undo Typing", enabled: false) == .refuse(.changed),
+      "retitled and disabled: the menus changed (the title is checked first)")
+check(decide(kept: true, "Deep", shown: "Deep", children: true) == .refuse(.changed),
+      "a kept element with children (a submenu item): refused, never pressed")
+check(decide(kept: true, "Deep", shown: "Deep", enabled: false, children: true) == .refuse(.changed),
+      "…disabled too: the menus changed (only a leaf is judged enabled or not)")
+// Found again by its path.
+check(decide(kept: false, "Rebuilt Leaf", shown: "Rebuilt Leaf") == .pressFound, "found again by its path, same title: pressed")
+check(decide(kept: false, "Rebuilt Leaf", shown: "Rebuilt Leaf", enabled: nil) == .pressFound, "…enabled missing: pressed")
+check(decide(kept: false, "Rebuilt Leaf", shown: "Rebuilt Leaf", enabled: false) == .refuse(.disabled), "…disabled: refused")
+check(decide(kept: false, "Renamed Leaf", shown: "Rebuilt Leaf") == .refuse(.changed), "found again, another title: refused")
+check(decide(kept: false, nil, shown: "Rebuilt Leaf", enabled: nil) == .refuse(.changed), "nothing at the path: refused")
+check(decide(kept: false, "Rebuilt Leaf", shown: nil) == .refuse(.changed), "found again but no title shown to compare: refused")
+check(decide(kept: false, "", shown: "") == .refuse(.changed), "found again with an empty title: refused")
+check(decide(kept: false, "Level 2", shown: "Level 2", children: true) == .refuse(.changed), "found again with children: refused")
 
 // MARK: - The refusals' words and the log's path
 

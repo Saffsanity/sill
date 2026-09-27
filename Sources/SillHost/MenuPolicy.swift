@@ -134,21 +134,32 @@ package enum MenuRefusal: Equatable {
 }
 
 package enum PressDecision: Equatable {
-    /// The kept element answered: pressed as it is, whatever its title now ("Undo Typing" became
-    /// "Undo Paste": still the same item).
+    /// The kept element, its title still the one shown.
     case press
-    /// Found again by its path, with the title the device showed.
+    /// Found again by its path, its title the one shown.
     case pressFound
     case refuse(MenuRefusal)
 
-    /// `elementValid`: the kept element answered; `found`: the title at the path when it did not
-    /// (nil: nothing there); `shown`: the device's title; `enabled`: the item's AXEnabled, either
-    /// way. A kept element is authoritative; the title is compared only for an item found again by
-    /// its path; a disabled item is refused.
-    package static func decide(elementValid: Bool, found: String?, shown: String?, enabled: Bool?) -> PressDecision {
-        if elementValid { return enabled == false ? .refuse(.disabled) : .press }
-        guard let found, let shown, found == shown else { return .refuse(.changed) }
-        return enabled == false ? .refuse(.disabled) : .pressFound
+    /// `elementValid`: the kept element answered; `current`: the item's title now (the kept
+    /// element's, or the one found at the path; nil: nothing there); `shown`: the device's;
+    /// `enabled`: its AXEnabled; `hasChildren`: it has a submenu (or a custom view's children).
+    /// In order:
+    /// 1. The title now must be the one shown, for a kept element as for one found again: a
+    ///    delegate that fills its menu with `menu:updateItem:atIndex:shouldCancel:` keeps its
+    ///    NSMenuItems and rewrites them, so after the validation the press's own read sets off the
+    ///    same element can stand for another command. An empty or missing title never matches: no
+    ///    device was shown one. An item retitled meanwhile ("Undo Typing" → "Undo Paste") is
+    ///    refused too, which is what a device that showed the old title should hear.
+    /// 2. A leaf only: AXPress on an item with children opens its menu on the Mac, and the app then
+    ///    sits in menu tracking until someone closes it.
+    /// 3. Enabled: a disabled item is refused (after the title, so a retitled and disabled item
+    ///    reads as changed).
+    package static func decide(elementValid: Bool, current: String?, shown: String?, enabled: Bool?,
+                               hasChildren: Bool) -> PressDecision {
+        guard let current, !current.isEmpty, current == shown else { return .refuse(.changed) }
+        if hasChildren { return .refuse(.changed) }
+        if enabled == false { return .refuse(.disabled) }
+        return elementValid ? .press : .pressFound
     }
 }
 

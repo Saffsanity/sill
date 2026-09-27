@@ -152,34 +152,31 @@ final class MenuReader: @unchecked Sendable {
 
     // MARK: Pressing
 
-    /// AXPress on the kept element; when it is gone (the app built its menu again), the item at
-    /// `path`, only if its title there is `shownTitle`. `PressDecision` decides. AXPress returns
-    /// once the app has run the action: one that runs a modal loop holds it until the timeout,
-    /// which counts as pressed.
+    /// AXPress on the kept element, or, when it is gone (the app built its menu again), on the item
+    /// at `path`; either only when its title now is `shownTitle`, it has no children and it is
+    /// enabled (`PressDecision`). An id of one part is one of the bar's menus: never pressed (the
+    /// mirror refuses it first). AXPress returns once the app has run the action: one that runs a
+    /// modal loop holds it until the timeout, which counts as pressed.
     func press(pid: pid_t, element: AXUIElement?, path: MenuPath, shownTitle: String?) -> Pressed {
         dispatchPrecondition(condition: .onQueue(queue))
         guard AXIsProcessTrusted() else { return Pressed(outcome: .refused(.notTrusted), foundTitle: nil) }
-        var target = element
+        guard path.indexes.count >= 2 else { return Pressed(outcome: .refused(.changed), foundTitle: nil) }
+        var target: AXUIElement? = nil
         var elementValid = false
-        var enabled: Bool? = nil
+        var now: ItemNow? = nil
         var found: String? = nil
         if let element {
-            AXUIElementSetMessagingTimeout(element, Self.timeout)
-            switch value(of: element, kAXEnabledAttribute, pid: pid) {
-            case .success(let v): elementValid = true; enabled = v as? Bool
-            case .failure(.failed): elementValid = false            // no longer answering (rebuilt): found again below
+            switch itemNow(element, pid: pid) {
+            case .success(let n): target = element; elementValid = true; now = n
+            case .failure(.failed): break                           // no longer answering (rebuilt): found again below
             case .failure(let f): return Pressed(outcome: .refused(Self.refusal(f)), foundTitle: nil)
             }
         }
         if !elementValid {
-            target = nil
             switch walk(pid: pid, to: path) {
             case .success(let e):
-                switch values(of: e, [kAXTitleAttribute, kAXDescriptionAttribute, kAXEnabledAttribute], pid: pid) {
-                case .success(let v):
-                    target = e
-                    found = MenuFormat.displayTitle(title: v[0] as? String, description: v[1] as? String)
-                    enabled = v[2] as? Bool
+                switch itemNow(e, pid: pid) {
+                case .success(let n): target = e; now = n; found = n.title
                 case .failure(.failed): break
                 case .failure(let f): return Pressed(outcome: .refused(Self.refusal(f)), foundTitle: nil)
                 }
@@ -187,7 +184,8 @@ final class MenuReader: @unchecked Sendable {
             case .failure(let f): return Pressed(outcome: .refused(Self.refusal(f)), foundTitle: nil)
             }
         }
-        switch PressDecision.decide(elementValid: elementValid, found: found, shown: shownTitle, enabled: enabled) {
+        switch PressDecision.decide(elementValid: elementValid, current: now?.title, shown: shownTitle, enabled: now?.enabled,
+                                    hasChildren: now?.hasChildren ?? false) {
         case .refuse(let why):
             return Pressed(outcome: .refused(why), foundTitle: found)
         case .press, .pressFound:
@@ -199,6 +197,26 @@ final class MenuReader: @unchecked Sendable {
                 return Pressed(outcome: .pressedNoAnswer, foundTitle: found)
             }
             return Pressed(outcome: .refused(Self.refusal(failure(e, started: started, pid: pid))), foundTitle: found)
+        }
+    }
+
+    /// What a press decides on: the item's title as a device is shown it, its enabled flag, and
+    /// whether it has children (a submenu, or a custom view's).
+    private struct ItemNow {
+        let title: String
+        let enabled: Bool?
+        let hasChildren: Bool
+    }
+
+    /// [AXTitle, AXDescription, AXEnabled, AXChildren] of one item, in one call. Fresh within a
+    /// second: the read validates the item's menu.
+    private func itemNow(_ element: AXUIElement, pid: pid_t) -> Result<ItemNow, Failure> {
+        switch values(of: element, [kAXTitleAttribute, kAXDescriptionAttribute, kAXEnabledAttribute, kAXChildrenAttribute], pid: pid) {
+        case .success(let v):
+            return .success(ItemNow(title: MenuFormat.displayTitle(title: v[0] as? String, description: v[1] as? String),
+                                    enabled: v[2] as? Bool, hasChildren: !((v[3] as? [AXUIElement]) ?? []).isEmpty))
+        case .failure(let f):
+            return .failure(f)
         }
     }
 
