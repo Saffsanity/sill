@@ -86,7 +86,8 @@ func write(_ volume: String, _ layout: DMGLayout) throws {
     if FileManager.default.fileExists(atPath: volume + "/.VolumeIcon.icns") {
         try VolumeIcon.setCustomIcon(volume)
     }
-    print("Wrote \(volume)/.DS_Store (\(data.count) bytes): a \(layout.width)x\(layout.height) window, "
+    print("Wrote \(volume)/.DS_Store (\(data.count) bytes): a \(layout.width)x\(layout.height + DMGLayout.titleBar) window "
+          + "(a \(layout.width)x\(layout.height) picture and the title bar), "
           + layout.items.map { "\($0.name) at \($0.x),\($0.y)" }.joined(separator: ", "))
 }
 
@@ -257,7 +258,8 @@ do {
         } else {
             let problems = check(volume, layout)
             if !problems.isEmpty { fail("the image's window is not as laid out:\n  - " + problems.joined(separator: "\n  - ")) }
-            print("The window: \(layout.width)x\(layout.height) points at \(layout.left),\(layout.top), icons \(layout.iconSize) points, "
+            print("The window: \(layout.width)x\(layout.height + DMGLayout.titleBar) points at \(layout.left),\(layout.top) "
+                  + "(the \(layout.width)x\(layout.height) picture and the title bar), icons \(layout.iconSize) points, "
                   + layout.items.map { "\($0.name) at \($0.x),\($0.y)" }.joined(separator: ", ")
                   + "; the background's alias leads to \(layout.background) on this volume; the volume's icon is on.")
         }
