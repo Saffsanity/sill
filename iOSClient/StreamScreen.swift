@@ -425,6 +425,8 @@ struct StreamScreen: View {
             endTour()
             return
         }
+        // Shown in this layout now: a later turn back into it offers nothing again this session.
+        tourOffered.insert(layout)
         guard carried != run else { return }
         tourLog("carried to \(carried.at.rawValue) (\(carried.index + 1) of \(carried.count), \(layout.rawValue))")
         tour = carried
