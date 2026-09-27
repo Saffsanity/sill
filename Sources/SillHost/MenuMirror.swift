@@ -204,15 +204,20 @@ final class MenuMirror {
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: [], stale: true, note: note))
             return
         }
-        if let e = cache.fresh(path.id, now: CFAbsoluteTimeGetCurrent()) {
+        func cached(_ e: MenuCache.Entry) {
             Stats.shared.bump("menu.cached")
             answer(MacMenu(version: version, answering: r.token, menu: path.id, items: e.items, more: e.more > 0 ? e.more : nil))
-            return
         }
+        // A read an active app's states came from answers any fetch, with no activation.
+        if let e = cache.fresh(path.id, now: CFAbsoluteTimeGetCurrent(), frontmostNow: true) { cached(e); return }
         let v = version
         let frontmost = await prepare()
         guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }
-        let wait = cache.wait(path.id, now: CFAbsoluteTimeGetCurrent())
+        // Still not frontmost: a read now would return the last validation, an inactive app's too.
+        if !frontmost, let e = cache.fresh(path.id, now: CFAbsoluteTimeGetCurrent(), frontmostNow: false) { cached(e); return }
+        // Brought forward after a read made while it was not: AppKit validates the menu again only
+        // once its second is over.
+        let wait = frontmost ? cache.wait(path.id, now: CFAbsoluteTimeGetCurrent()) : 0
         if wait > 0 {
             try? await Task.sleep(for: .seconds(wait))
             guard v == version, target?.pid == t.pid else { refuse(MenuRefusal.changedNote); return }

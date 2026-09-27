@@ -7,11 +7,17 @@ import StreamProtocol
 
 /// One menu's items as last read, per id. AppKit validates a menu when it is read and throttles
 /// that to about once a second per menu (measured): a read within the second returns the state
-/// computed at the last one. So an answer comes from a read of less than a second ago, made while
-/// the app was frontmost, and a read made while it was not (its states are an inactive app's) is
-/// not read again until its second is over.
+/// computed at the last one. So the cache answers only where a read now would return the same
+/// thing: a read of less than a second ago made while the app was frontmost answers any fetch; one
+/// made while it was not (an inactive app's states) answers only while the app is still not
+/// frontmost. Once the app has been brought forward, the menu is read again when `revalidation` has
+/// passed since that read, so that AppKit validates it anew for an active app.
 package struct MenuCache {
+    /// A read answers fetches for this long.
     package static let lifetime = 1.0
+    /// AppKit validates a menu again only after about a second: the probe's reads 0.43 and 0.83 s
+    /// after a validation got none, 1.03, 1.29 and 1.83 s after did.
+    package static let revalidation = 1.05
 
     package struct Entry: Equatable {
         package let items: [MacMenuItem]
@@ -29,17 +35,21 @@ package struct MenuCache {
 
     package mutating func store(_ id: String, _ entry: Entry) { entries[id] = entry }
 
-    /// An entry to answer from: read less than a second ago, while the app was frontmost.
-    package func fresh(_ id: String, now: Double) -> Entry? {
-        guard let e = entries[id], e.appWasFrontmost, now - e.at < Self.lifetime else { return nil }
+    /// An entry to answer from: read less than `lifetime` ago while the app was frontmost; or while
+    /// it was not, when `frontmostNow` is false too (AppKit would answer a read now from that same
+    /// validation). Asked with `frontmostNow: true` before the app is brought forward, and again
+    /// after with what that found.
+    package func fresh(_ id: String, now: Double, frontmostNow: Bool) -> Entry? {
+        guard let e = entries[id], now - e.at < Self.lifetime, e.appWasFrontmost || !frontmostNow else { return nil }
         return e
     }
 
-    /// How long to wait before reading `id` again: the rest of the second after a read made while
-    /// the app was not frontmost (AppKit would answer from that validation); else 0.
+    /// How long to wait before reading `id` again, the app now frontmost: the rest of
+    /// `revalidation` after a read made while it was not (a read sooner would return that inactive
+    /// validation); else 0.
     package func wait(_ id: String, now: Double) -> Double {
-        guard let e = entries[id], !e.appWasFrontmost, now - e.at < Self.lifetime else { return 0 }
-        return Self.lifetime - (now - e.at)
+        guard let e = entries[id], !e.appWasFrontmost, now - e.at < Self.revalidation else { return 0 }
+        return Self.revalidation - (now - e.at)
     }
 
     package mutating func clear() { entries = [:] }

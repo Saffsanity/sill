@@ -254,20 +254,27 @@ check(MenuPath(indexes: [0]) == nil && MenuPath(indexes: []) == nil && MenuPath(
 let items1 = [MacMenuItem(id: "4.0", title: "A")]
 var cache = MenuCache()
 cache.store("4", .init(items: items1, more: 0, at: 100, appWasFrontmost: true))
-check(cache.fresh("4", now: 100.99)?.items == items1, "fresh at 0.99 s")
-check(cache.fresh("4", now: 101.0) == nil, "not fresh at 1.0 s")
-check(cache.fresh("5", now: 100.1) == nil, "another menu: nothing")
-check(cache.wait("4", now: 100.3) == 0, "after a read while frontmost: no wait")
+check(cache.fresh("4", now: 100.99, frontmostNow: true)?.items == items1, "a read made while frontmost: fresh at 0.99 s")
+check(cache.fresh("4", now: 100.99, frontmostNow: false)?.items == items1, "…for an app not frontmost now as well")
+check(cache.fresh("4", now: 101.0, frontmostNow: true) == nil && cache.fresh("4", now: 101.0, frontmostNow: false) == nil,
+      "not fresh at 1.0 s")
+check(cache.fresh("5", now: 100.1, frontmostNow: true) == nil, "another menu: nothing")
+check(cache.wait("4", now: 100.3) == 0, "after a read made while frontmost: no wait")
 cache.store("3", .init(items: items1, more: 0, at: 200, appWasFrontmost: false))
-check(cache.fresh("3", now: 200.1) == nil, "a read made while the app was not frontmost is never answered from")
-check(abs(cache.wait("3", now: 200.3) - 0.7) < 1e-9, "…and waits out the rest of its second: 0.7 s at 0.3 s")
-check(cache.wait("3", now: 201.0) == 0 && cache.wait("3", now: 205) == 0, "…no wait once the second is over")
+check(cache.fresh("3", now: 200.1, frontmostNow: true) == nil, "a read made while the app was not frontmost never answers a frontmost app")
+check(cache.fresh("3", now: 200.99, frontmostNow: false)?.items == items1,
+      "…but answers while the app is still not frontmost, within the second (AppKit would answer from it)")
+check(cache.fresh("3", now: 201.0, frontmostNow: false) == nil, "…not at 1.0 s")
+check(abs(cache.wait("3", now: 200.3) - 0.75) < 1e-9, "…and, the app brought forward, waits until 1.05 s: 0.75 s at 0.3 s")
+check(abs(cache.wait("3", now: 201.0) - 0.05) < 1e-9, "…0.05 s still at 1.0 s (the probe's 0.83 s got no validation, 1.03 s did)")
+check(cache.wait("3", now: 201.05) == 0 && cache.wait("3", now: 205) == 0, "…no wait from 1.05 s")
 check(cache.wait("9", now: 1) == 0, "nothing read: no wait")
 cache.store("4", .init(items: [], more: 3, at: 300, appWasFrontmost: true))
-check(cache.fresh("4", now: 300.5)?.more == 3 && cache.fresh("4", now: 300.5)?.items == [], "a store replaces")
+check(cache.fresh("4", now: 300.5, frontmostNow: true)?.more == 3 && cache.fresh("4", now: 300.5, frontmostNow: true)?.items == [],
+      "a store replaces")
 cache.clear()
-check(cache.fresh("4", now: 300.5) == nil && cache.isEmpty, "clear")
-check(MenuCache.lifetime == 1.0, "lifetime 1 s")
+check(cache.fresh("4", now: 300.5, frontmostNow: true) == nil && cache.isEmpty, "clear")
+check(MenuCache.lifetime == 1.0 && MenuCache.revalidation == 1.05, "lifetime 1 s, revalidation 1.05 s")
 
 // MARK: - RequestRate
 
