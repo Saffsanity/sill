@@ -974,7 +974,8 @@ final class StreamServer {
     // can legitimately take longer: on a 2 Mbps uplink a 1.5 MB keyframe needs 6 s to hand off. So a
     // remote client is dropped when it has sent nothing for 8 s (it pings every 0.25 s and reports
     // once a second, so silence means it is gone), once 8 s have passed since it was admitted, and
-    // the drain backstop gives it 15 s after a 15 s grace.
+    // the drain backstop gives it 15 s after a 15 s grace. The same sweep asks for the keyframe a
+    // remote client waits for once the window has gone still (`sweepRemote`).
     private var remoteSweepTimer: DispatchSourceTimer?
     static let remoteSilence: TimeInterval = 8
     static let remoteDeadAfter: TimeInterval = 15
@@ -996,12 +997,27 @@ final class StreamServer {
 
     private func sweepRemote() {
         let now = Date().timeIntervalSince1970
+        var waiting: [Client] = []
         for client in clients.values where client.route.isRemote {
             let silent = now - client.lastHeardAt
             if now - client.connectedAt >= Self.remoteSilence, silent > Self.remoteSilence {
                 print("Client silent for \(Int(silent)) s, dropping: \(client.connection.endpoint)")
                 client.connection.cancel()   // its state handler forgets it
+            } else if client.needsKeyframe, client.keyframeWanted, !client.awaitingFirstKeyframe,
+                      client.pendingBytes <= Self.remoteIdleBytes, client.connection.state == .ready {
+                waiting.append(client)
             }
+        }
+        // A client that lost a frame asks for its keyframe when a later frame comes (`paceRemote`).
+        // Once the window has gone still, none comes, and it would keep the picture from before the
+        // drop until the window next changes: the end of a scroll, the last letters typed. So the
+        // sweep asks too, on the same terms (its queue idle, the request due); the encoder then
+        // encodes the still window's last frame again (HEVCEncoder.requestKeyframe). While frames
+        // come, whichever looks first asks, once.
+        if !waiting.isEmpty, remoteKeyframeDue(now) {
+            lastRemoteKeyframeRequest = now
+            for client in waiting { client.keyframeWanted = false }
+            onKeyframeNeeded?()
         }
     }
 
@@ -1179,7 +1195,8 @@ final class StreamServer {
     ///   everything but control messages (`remoteIdleBytes`), so the keyframe leads the queue
     ///   instead of queueing behind the backlog that caused the drop; at most every
     ///   `remoteKeyframeSpacing` for all remote clients together (later beside a home client:
-    ///   `remoteKeyframeDue`).
+    ///   `remoteKeyframeDue`). It asks when a later frame comes, or, once the window has gone
+    ///   still and none does, at the remote sweep (`sweepRemote`).
     /// - The keyframe it waits for goes out when the backlog fits the budget, or at once when it
     ///   has had none since it was admitted or the stream changed (the first keyframe).
     /// Returns whether to ask for one now. On `queue`. No new Stats key: skipped frames count as
