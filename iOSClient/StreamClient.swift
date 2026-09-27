@@ -218,6 +218,13 @@ final class StreamClient: ObservableObject {
     /// Main thread only.
     var localPointer: CGPoint? { didSet { onLocalPointerChange?(localPointer) } }
     var onLocalPointerChange: ((CGPoint?) -> Void)?
+    /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
+    /// tour's rule reads it when it decides. Main thread.
+    var lastInputAt: Double?
+    #if DEBUG
+    /// The tour is on screen (StreamScreen): `sendInput` says so if input goes out meanwhile.
+    var tourShowing = false
+    #endif
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -2194,6 +2201,14 @@ final class StreamClient: ObservableObject {
     }
 
     func sendInput(_ event: InputEvent) {
+        // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
+        // as something happening (StreamScreen.considerTour).
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        // The tour takes every touch and the keyboard while it shows, so nothing should get here
+        // then; the one case expected is a flick's coast still running out under Take the Tour.
+        if tourShowing { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
+        #endif
         queue.async { [weak self] in
             guard let self else { return }
             guard case .pointer(.move, _, _) = event else {

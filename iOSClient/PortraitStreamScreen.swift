@@ -229,6 +229,7 @@ struct PortraitStreamScreen: View {
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         // Measured inside the padding, as in landscape: the panel the video is drawn in.
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)
+        .tourTarget(.stream)
         .padding(8)
     }
 
@@ -241,11 +242,13 @@ struct PortraitStreamScreen: View {
                    send: { client.sendInput($0) },
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    showSpotlight: client.active == .desktop)
+                .tourTarget(.keys)
             Trackpad(send: { client.sendInput($0) },
                      setLocalPointer: { client.localPointer = $0 },
                      currentLocalPointer: { client.localPointer },
                      latched: latched,
                      onModifiersConsumed: { latched = [] })
+                .tourTarget(.trackpad)
         }
         .padding(.top, metrics.padTop)
         .padding(.horizontal, metrics.padSide)
@@ -270,10 +273,12 @@ struct PortraitStreamScreen: View {
                         menuFor: $windowMenu)
                 .opacity(scaleOpen ? 0.2 : 1)      // the slider unfolds over the strip's end
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.strip, inset: WindowStrip.tourBand(pad: metrics.thumbPad))
 
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              radius: metrics.buttonRadius, pointsPerStep: 36)
+                .tourTarget(.textSize)
 
             barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
                       accessibilityLabel: "Show the full Mac desktop",
@@ -287,6 +292,7 @@ struct PortraitStreamScreen: View {
                       action: { setSettings(!settingsOpen, true) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
+                .tourTarget(.settings)
         }
         .frame(height: metrics.barHeight)
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
