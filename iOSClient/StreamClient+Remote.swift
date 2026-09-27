@@ -572,6 +572,20 @@ extension StreamClient {
                 return true
             }
             if decision == .updateSill { status = DiscoveryPolicy.updateSillStatus(mac: mac.name) }
+            // A row that waits for a tap (an unsaved Mac that now asks devices to pair, a saved one
+            // that removed this device): the reconnect never asks, so it ends here, with the words
+            // a goodbye would have brought, rather than "…reconnects when it's back" for ever.
+            if let end = DiscoveryPolicy.reconnectEnd(decision, saved: id.flatMap { savedMac($0) } != nil) {
+                reconnect = nil
+                if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
+                cancelRemoteDial()
+                status = end == .removed ? DiscoveryPolicy.HomeCopy.removed(mac: r.name, device: Self.deviceWord)
+                                         : DiscoveryPolicy.HomeCopy.pairingRequired(mac: r.name, device: Self.deviceWord)
+                #if DEBUG
+                print("reconnect: \(mac.name) waits for a tap (\(end)); the reconnect ends")
+                #endif
+                return false
+            }
         }
         var wake = choice.recheckAt
         if let id = r.macID, r.remoteAllowed, savedMac(id) != nil, !dialingAutomatically {

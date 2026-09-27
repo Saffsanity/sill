@@ -741,6 +741,26 @@ enum DiscoveryPolicy {
         }
     }
 
+    /// How the automatic reconnect ends at a row that waits for a tap (§7.6): it never asks, so an
+    /// unsaved Mac whose door requires pairing (Require pairing turned on while this device was away
+    /// or its end came without a goodbye, or a Mac whose Sill now pairs at home) and a saved one that
+    /// removed this device would otherwise wait for a tap for ever under "…reconnects when it's
+    /// back" (the security review, 2026-09-27). The reconnect ends there with the words the goodbye
+    /// would have brought.
+    enum ReconnectEnd: Equatable {
+        /// "‹Mac› now asks devices to pair. Tap it to pair this ‹iPad›."
+        case pairingRequired
+        /// "‹Mac› removed this ‹iPad›. Tap it to pair again."
+        case removed
+    }
+
+    /// Nil unless `dial` (the reconnect's `homeDial`, `tap` false) waits for a tap; `saved`: the
+    /// row is a saved Mac (and so one that removed this device, the other way to wait).
+    static func reconnectEnd(_ dial: HomeDial, saved: Bool) -> ReconnectEnd? {
+        guard dial == .waitForTap else { return nil }
+        return saved ? .removed : .pairingRequired
+    }
+
     /// The status line after a tap that dialed nothing because the Mac's Sill is too old.
     static func updateSillStatus(mac: String) -> String {
         "\(mac) runs an older Sill. Update Sill on the Mac to connect."

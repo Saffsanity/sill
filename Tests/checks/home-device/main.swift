@@ -475,6 +475,28 @@ check("copy: the card's own errors (under the field) end at the row, the overlay
       C.stopped(mac: mini).hasSuffix("tap Mac mini again.") && C.closed(mac: mini).hasSuffix("tap Mac mini again.")
       && C.expired(mac: mini).contains("Tap Mac mini") && C.proofFailed(mac: mini).contains("Tap it"))
 
+// MARK: The reconnect at a row that waits for a tap (the security review, 2026-09-27)
+
+check("reconnectEnd: an unsaved Mac whose door requires pairing ends the reconnect with pairingRequired",
+      P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: false, revoked: false, homeTLS: false, debug: true, tap: false), saved: false) == .pairingRequired)
+check("reconnectEnd: a saved Mac that removed this device ends it with removed",
+      P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: true, revoked: true, homeTLS: true, debug: false, tap: false), saved: true) == .removed
+      && P.reconnectEnd(P.homeDial(door: .open, saved: true, revoked: true, homeTLS: true, debug: false, tap: false), saved: true) == .removed)
+var endsExactlyWhenWaiting = true, endsAll = 0
+for d in doors { for bits in 0..<16 {
+    let b = { (i: Int) in bits & (1 << i) != 0 }
+    let dial = P.homeDial(door: d, saved: b(0), revoked: b(1), homeTLS: b(2), debug: b(3), tap: false)
+    let end = P.reconnectEnd(dial, saved: b(0))
+    endsAll += 1
+    if (end != nil) != (dial == .waitForTap) { endsExactlyWhenWaiting = false }
+    if let end, end != (b(0) ? .removed : .pairingRequired) { endsExactlyWhenWaiting = false }
+    // A row the reconnect dials, or one too old (Update Sill, which it keeps looking past), never ends it.
+    if P.sessionTrust(dial, savedPin: Data([1])) != nil || dial == .updateSill, end != nil { endsExactlyWhenWaiting = false }
+} }
+check("reconnectEnd: over all \(endsAll) reconnects, it ends exactly at a row that waits for a tap, with the words of why", endsExactlyWhenWaiting)
+check("reconnectEnd's words: the goodbye's own", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad."
+      && C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again.")
+
 // MARK: Kind 18 and a goodbye "removed" speak for the Mac whose key the session has (the security
 // review, 2026-09-27)
 

@@ -180,6 +180,22 @@ check("after a window ran out, the card's \"Tap Mac mini for a new one.\" holds:
       cardWords(PairingWindow.closedReason(.expired, stoppedByThisProof: false)) == P.HomeCopy.expired(mac: "Mac mini") && !AskLimits.quiets(.expired))
 check("the literals homeRefusal reads are the wire's", PairResult.code == "code" && PairResult.stopped == "stopped" && PairResult.expired == "expired")
 
+// MARK: 11. The reconnect meets a door that now asks devices to pair (the security review, 2026-09-27)
+
+// An unsaved Mac on an open door, its session lost without a goodbye (or a DEBUG device's plain
+// session with main's Sill.app, which then became this one): GoodbyePolicy's words promise a
+// reconnect. Require pairing is on when the row comes back (p=1): the reconnect never asks, so it
+// waits for a tap; it ends there with the goodbye's own words, not "…reconnects when it's back".
+let lost = GoodbyePolicy.outcome(nil, mac: "Office", device: "iPad", saved: false)
+let officeBack = P.homeDial(door: .pairingRequired, saved: false, revoked: false, homeTLS: false, debug: true, tap: false)
+check("11 the session lost without a goodbye: its words promise a reconnect", lost.reconnect && lost.text.contains("reconnect"))
+check("11 the row back with p=1: the reconnect waits for a tap, and ends with \"now asks devices to pair\"",
+      officeBack == .waitForTap && P.reconnectEnd(officeBack, saved: false) == .pairingRequired
+      && P.HomeCopy.pairingRequired(mac: "Office", device: "iPad") == "Office now asks devices to pair. Tap it to pair this iPad.")
+check("11 the same row, still an open door: the reconnect dials it with any key, and nothing ends",
+      P.homeDial(door: .open, saved: false, revoked: false, homeTLS: false, debug: true, tap: false) == .anyKey
+      && P.reconnectEnd(.anyKey, saved: false) == nil)
+
 // MARK: 10. A kind 18 replayed on a look-alike's connection (the security review, 2026-09-27)
 
 // Mac M signs its kind 18 (a real signature, SignedMacInfo, with a real key); a look-alike with key X

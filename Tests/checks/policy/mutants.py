@@ -138,7 +138,7 @@ MUTANTS = {
     "S4 askAnswer: shown read as openOnMac": ("        case \"shown\"?: return .shown", "        case \"shown\"?: return .openOnMac"),
     "S4 askAnswer: locked read as refused": ("        case \"locked\"?: return .locked\n", ""),
     "S4 askAnswer: busy unbounded": ("        case \"busy\"?: return .busy(min(max(retryAfter ?? 1, 0.2), 10))", "        case \"busy\"?: return .busy(retryAfter ?? 1)"),
-    "S4 askAnswer: an unknown reason read as shown": ("        default: return .refused\n        }\n    }\n\n    /// Where a pairing link", "        default: return .shown\n        }\n    }\n\n    /// Where a pairing link"),
+    "S4 askAnswer: an unknown reason read as shown": ("        default: return .refused\n        }\n    }\n\n    /// What the home card says", "        default: return .shown\n        }\n    }\n\n    /// What the home card says"),
     "S4 linkRows: the asked key goes to every row": ("        if let askedKey, askedKey == linkKey { return nil }\n", ""),
     "S4 linkRows: plain doors dialed": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { !(askedKey != nil && $0.id == askedRow) }.map(\\.id)"),
     "S4 linkRows: the asked row not left out": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { $0.door != .plain }.map(\\.id)"),

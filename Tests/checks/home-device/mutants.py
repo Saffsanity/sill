@@ -140,6 +140,13 @@ M = [
      "            \"That code no longer works. Tap \\(mac) for a new one.\""),
     ("copy: an expired code sends to the menu", F, "static func expired(mac: String) -> String { \"That code expired. Tap \\(mac) for a new one.\" }",
      "static func expired(mac: String) -> String { \"That code expired. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\" }"),
+    # The reconnect at a row that waits for a tap (the security review, 2026-09-27).
+    ("reconnectEnd: never ends (waits for a tap for ever, as before the review)", F,
+     "        guard dial == .waitForTap else { return nil }\n        return saved ? .removed : .pairingRequired\n", "        return nil\n"),
+    ("reconnectEnd: ends at any row it does not dial", F, "        guard dial == .waitForTap else { return nil }\n",
+     "        guard dial == .waitForTap || dial == .updateSill else { return nil }\n"),
+    ("reconnectEnd: a saved Mac's end read as pairing required", F, "        return saved ? .removed : .pairingRequired\n",
+     "        return .pairingRequired\n"),
     # Kind 18 and goodbye "removed" bound to the session's key (the security review, 2026-09-27).
     ("macInfoNamesSession: any signature names the session (as before the review)", F,
      "        connectionKey == signer\n", "        true\n"),

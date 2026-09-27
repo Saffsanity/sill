@@ -3,3 +3,4 @@ Sources/StreamProtocol/*.swift
 iOSClient/DiscoveryPolicy.swift
 iOSClient/SavedMacs.swift
 Sources/SillHost/PairingWindow.swift
+iOSClient/GoodbyePolicy.swift

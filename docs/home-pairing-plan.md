@@ -1266,6 +1266,13 @@ New attention items (first group, orange):
   the saved Mac's Bonjour name alone (§7.3) is skipped by the reconnect from then on
   (`pinRefusedRows`) without that copy; after a tap, which asked for that Mac, the copy follows the
   Mac's other rows as for a row its tag named.
+- **The reconnect at a row that waits for a tap** (`DiscoveryPolicy.reconnectEnd`, the security
+  review, 2026-09-27): the automatic reconnect never asks, so an unsaved Mac whose door now requires
+  pairing (Require pairing turned on while this device was away, or a session that ended without a
+  goodbye; or a DEBUG device that used a Mac's plain door, then met its Sill with pairing at home) and
+  a saved one that removed this device end the reconnect with the goodbye's own words ("Mac mini now
+  asks devices to pair. Tap it to pair this ‹iPad›.", "Mac mini removed this ‹iPad›. Tap it to pair
+  again."). Before, it kept looking, and "…reconnects when it’s back" stayed for ever.
 - **Kind 18 speaks for the session's Mac only when the key of the connection it came on signed it**
   (`DiscoveryPolicy.macInfoNamesSession`, the security review, 2026-09-27): a Mac sends its kind 18
   to every session, an open door's included (and in plaintext at a plain door), so another Mac can
