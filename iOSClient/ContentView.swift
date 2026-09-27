@@ -136,7 +136,10 @@ struct ContentView: View {
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
 ///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
-///   row). The console says "input script: …" at each.
+///   row). The console says "input script: …" at each. It runs only when the session was dialled
+///   by `-SillConnect` to a loopback address and the host's first window list has no version
+///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
+///   …" and nothing is sent. Point it only at `--synthetic` hosts.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -319,6 +322,13 @@ struct LayoutHarness: View {
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
+///
+/// Only against a test host on this Mac (`refusal`): the steps send real input, and Sill.app, whose
+/// home door admits loopback, would post it, clicking, typing and moving the Mac's real pointer. So
+/// the session must have been dialled to a loopback address, and its first window list must carry
+/// no `hostVersion` (Sill.app always sends one; SillHost and the bare SillMenuBar never do). The
+/// gates start only `--synthetic` hosts, which post nothing; SillHost or the bare SillMenuBar without
+/// `--synthetic` would post the input, so never point a script at one.
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
@@ -364,11 +374,42 @@ enum InputScript {
         return steps
     }
 
-    /// The session's first window list is in (StreamClient): the script starts, once per launch.
+    /// Why the script must not run against this session, or nil when it may: it runs only when the
+    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT` or
+    /// `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is) and the host's
+    /// first window list carries no `hostVersion`, which Sill.app always sends. (`[::1]:PORT` never
+    /// arrives: UserDefaults reads a launch argument that starts with `[` as a property list, and
+    /// drops it.)
+    static func refusal(endpoint: NWEndpoint?, hostVersion: String?) -> String? {
+        guard let endpoint, isLoopback(endpoint) else {
+            return "the session was not dialled to a loopback address (-SillConnect 127.0.0.1:PORT)"
+        }
+        if let hostVersion { return "the host says it is Sill \(hostVersion), which posts input to this Mac" }
+        return nil
+    }
+
+    /// An address on this Mac's loopback: 127.0.0.0/8, ::1 (also as an IPv4-mapped address), or
+    /// the name localhost.
+    static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address): return address.isLoopback
+        case .ipv6(let address): return address.isLoopback || address.asIPv4?.isLoopback == true
+        case .name(let name, _): return name.lowercased() == "localhost"
+        @unknown default: return false
+        }
+    }
+
+    /// The session's first window list is in (StreamClient): the script starts, once per launch,
+    /// if `refusal` lets it.
     static func sessionListed(_ client: StreamClient) {
         let defaults = UserDefaults.standard
         guard !started, defaults.bool(forKey: "SillLive"), let text = defaults.string(forKey: "SillInputScript") else { return }
         started = true
+        if let why = refusal(endpoint: client.connection?.endpoint, hostVersion: client.hostVersion) {
+            print("input script: refused: \(why)")
+            return
+        }
         guard let steps = parse(text) else {
             print("input script: cannot read it: \(text)")
             return
