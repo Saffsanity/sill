@@ -2437,12 +2437,12 @@ final class StreamClient: ObservableObject {
             pointerHeard = true
             #endif
             guard changed else { return }
-            let from = connection
-            DispatchQueue.main.async {
-                // As the other handlers do: nothing of a replaced connection reaches the screen.
-                guard self.connection === from else { return }
-                self.renderPointer()
-            }
+            // Rendered whatever connection carries the session by then: the render only reads the
+            // feed, which holds this report already, so it is never wrong. A report that lands just
+            // before a move hands the session to a new connection (`finishMove`) was otherwise never
+            // drawn: the new connection's first report says the same, which changes nothing, so
+            // nothing rendered it until the Mac's pointer moved again (the review, 2026-09-27).
+            DispatchQueue.main.async { self.renderPointer() }
         }
     }
 
