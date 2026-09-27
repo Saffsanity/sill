@@ -495,6 +495,63 @@ final class InputInjector {
         }
     }
 
+    // MARK: Gestures
+
+    /// A trackpad gesture's shortcut (kind 28, docs/trackpad-gestures-plan.md §7.3): the key down
+    /// with exactly the flags the Mac stored for it (GestureChords), fn included, which the key path
+    /// above cannot carry, and the key up. Keycodes 160 and 131 are the Mission Control and
+    /// Launchpad keys of Apple keyboards, which no HID usage from a device names. Accessibility, as
+    /// all input. The coordinator calls it only on a host that advertises; a dry run posts nothing
+    /// here either.
+    ///
+    /// The key up carries the flags the HID system's state table held before the chord, not the
+    /// chord's. Events posted from `source` leave their flags in that table (CGEventSource.h: its
+    /// "accumulated information on modifier flag state … placed in effect by posting events"), and
+    /// every pointer and scroll event made from `source` afterwards starts from them: a key up with
+    /// control and fn would make the device's next tap a control-click (a context menu) and its next
+    /// scroll a control-scroll (the screen zooms where Accessibility's zoom uses control), as the
+    /// Spotlight key's ⌘ once reached the text typed after it (`type`). The shortcut acts on the key
+    /// down. `checkModifiersLeft` says so in the log if the table still holds the chord's modifiers.
+    func chord(keyCode: UInt16, flags: UInt64) {
+        if !dryRun { remindAboutAccessibilityIfNeeded() }
+        let before = CGEventSource.flagsState(.hidSystemState)
+        // Both made before either is posted, so a key never goes down without its up.
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
+        down.flags = CGEventFlags(rawValue: flags)
+        up.flags = before
+        let posted = post(down)
+        _ = post(up)
+        guard posted else { return }
+        Stats.shared.bump("in.gesture")
+        checkModifiersLeft(chord: flags, before: before.rawValue)
+    }
+
+    /// Said once a run: a chord left modifiers set that were not set before it.
+    private var saidModifiersLeft = false
+
+    /// A quarter of a second after a posted chord, the HID state table is read again (a read, which
+    /// needs no permission): a modifier the chord carried (shift, control, option, command or fn)
+    /// that is set now and was not before is counted, `in.gestureModifiersLeft`, and said the first
+    /// time. A device test (docs/trackpad-gestures-plan.md §9.5, P2) then shows at once whether the
+    /// key up put the table back.
+    private func checkModifiersLeft(chord: UInt64, before: UInt64) {
+        let carried = chord & GestureChords.modifierBits & ~before
+        guard carried != 0 else { return }
+        // Main actor, inherited from this method, as the scroll watchdog's.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self else { return }
+            let left = CGEventSource.flagsState(.hidSystemState).rawValue & carried
+            guard left != 0 else { return }
+            Stats.shared.bump("in.gestureModifiersLeft")
+            guard !self.saidModifiersLeft else { return }
+            self.saidModifiersLeft = true
+            print("Gestures: after a gesture's shortcut this Mac's modifier keys still read \(GestureChords.modifierNames(left)) "
+                  + "(not before it); a click or a scroll may act as if they were held until a key is typed.")
+        }
+    }
+
     // MARK: Accessibility permission
 
     private static var lastReminder: CFAbsoluteTime = 0

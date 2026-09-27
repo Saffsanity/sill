@@ -400,7 +400,8 @@ struct PortraitStreamScreen: View {
                          proxy: overlay,
                          isKeyboardShown: $keyboardShown,
                          latchedModifiers: latched,
-                         onModifiersConsumed: { latched = [] })
+                         onModifiersConsumed: { latched = [] },
+                         sendGesture: { client.sendGesture($0, fingers: $1) })
         }
         .background(Palette.panel)
         .clipShape(streamShape)
@@ -433,7 +434,8 @@ struct PortraitStreamScreen: View {
                  onFingers: { client.trackpadFingers($0) },
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
-                 verticalSpan: verticalSpan)
+                 verticalSpan: verticalSpan,
+                 sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
     }
 
