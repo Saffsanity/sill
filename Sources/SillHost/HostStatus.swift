@@ -46,12 +46,36 @@ package struct HostStatusSnapshot: Equatable {
         /// Nil on the home door; "through Tailscale", "through your VPN", "over the internet" or "by
         /// address" on the remote door. The card shows it instead of `route` (StatusText).
         package var remoteRoute: String?
+        /// Its link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6); nil while it
+        /// does. The card names it.
+        package var link: LinkStatus?
 
         package init(id: ObjectIdentifier, endpoint: String, name: String? = nil, fps: Int? = nil,
-                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil) {
+                     frameAgeMs: Int? = nil, rttMs: Int? = nil, route: ClientLink.Route? = nil, remoteRoute: String? = nil,
+                     link: LinkStatus? = nil) {
             self.id = id; self.endpoint = endpoint; self.name = name
             self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs
-            self.route = route; self.remoteRoute = remoteRoute
+            self.route = route; self.remoteRoute = remoteRoute; self.link = link
+        }
+    }
+
+    /// A device's link that does not keep up, as the card shows it: behind (the link cannot carry
+    /// the running quality) or stalled (nothing gets through either way), what was withheld, the
+    /// quality, what the link carried, and what would fit.
+    package struct LinkStatus: Equatable {
+        package enum State: Equatable { case behind, stalled }
+        package var state: State
+        package var withheld: Int
+        /// The running quality's bitrate, per 60 fps.
+        package var bitrate: Int
+        package var carriedKbps: Int?
+        package var suggestedBitrate: Int?
+        package var suggestedCaptureScale: Double?
+
+        package init(state: State, withheld: Int, bitrate: Int, carriedKbps: Int? = nil,
+                     suggestedBitrate: Int? = nil, suggestedCaptureScale: Double? = nil) {
+            self.state = state; self.withheld = withheld; self.bitrate = bitrate; self.carriedKbps = carriedKbps
+            self.suggestedBitrate = suggestedBitrate; self.suggestedCaptureScale = suggestedCaptureScale
         }
     }
 

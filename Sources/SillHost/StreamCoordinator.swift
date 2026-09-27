@@ -208,6 +208,11 @@ package final class StreamCoordinator {
     private var flipWaitToken = 0
     /// Each connection whose catalog went out (`sendCatalog`): the ones settings states reach.
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Each connection's link while it does not keep up (LinkJudge, docs/remote-bundle-plan.md §6.5):
+    /// its kind 16's `link`, and the card's, with the quality it was judged at (`judgedAt`, the
+    /// running pair): a state leaves out a report about a quality that is no longer the target, so the
+    /// answer to the pick that lowers it already carries none (the restart's reset follows).
+    private var linkReports: [ObjectIdentifier: (report: LinkReport, judgedAt: (bitrate: Int, captureScale: CGFloat))] = [:]
     /// When each connection last asked for a pairing code (kind 21): once per 30 s.
     private var lastPairingWanted: [ObjectIdentifier: CFAbsoluteTime] = [:]
 
@@ -272,6 +277,11 @@ package final class StreamCoordinator {
                 self.encoder?.requestKeyframe()
             }
         }
+        // Each device's link (LinkJudge): the report its kind 16 carries, the card's row, one line.
+        server.onClientLinkChanged = { [weak self] connection, verdict in
+            let id = ObjectIdentifier(connection)
+            Task { @MainActor in self?.linkChanged(id, verdict) }
+        }
         server.onKeyframeNeeded = { [weak self] in
             // Network queue → encoder lock: the next repaint carries the keyframe, or the last frame is
             // re-encoded once the window has been still for 50 ms (HEVCEncoder.requestKeyframe).
@@ -288,6 +298,7 @@ package final class StreamCoordinator {
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
                 self.lastPublished[id] = nil
+                self.linkReports[id] = nil
                 if self.flipWait == id { self.flipWait = nil }
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -676,6 +687,53 @@ package final class StreamCoordinator {
     /// Whether `id` is a Sill virtual display, which the app keeps its own windows off.
     package static func isSillVirtualDisplay(_ id: CGDirectDisplayID) -> Bool {
         CGDisplayVendorNumber(id) == VirtualStage.vendorID
+    }
+
+    // MARK: Each device's link (docs/remote-bundle-plan.md §6)
+
+    /// A device's link changed: behind or stalled becomes its report (the running quality, what was
+    /// withheld, the carried rate and what would fit at the running pair and the stream's rate), a
+    /// line when the state is new, and the card's row; a report that only moves the carried rate
+    /// prints nothing, and changes nothing unless it changes the suggestion; fine clears it, with
+    /// "keeping up again" only for a judged recovery, never for a restart's reset. The snapshot
+    /// change publishes, and each connection's state carries its own.
+    private func linkChanged(_ id: ObjectIdentifier, _ v: LinkJudge.Verdict) {
+        guard routes[id] != nil else { return }       // gone meanwhile
+        let device = status.snapshot.devices.first { $0.id == id }
+        let who = device?.name ?? device?.endpoint ?? "a device"
+        switch v.state {
+        case .fine:
+            let had = linkReports.removeValue(forKey: id) != nil
+            status.update {
+                guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                $0.devices[i].link = nil
+            }
+            if had, !v.reset { print(LinkJudge.fineLine(device: who)) }
+        case .behind, .stalled:
+            let behind = v.state == .behind
+            let fps = status.snapshot.stream?.fps ?? self.fps
+            let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: bitrate, fps: fps, captureScale: Double(captureScale))
+            let report = LinkReport(state: behind ? LinkReport.behind : LinkReport.stalled, withheldPerSecond: v.withheld,
+                                    bitrate: bitrate, carriedKbps: v.carriedKbps,
+                                    suggestedBitrate: suggestion?.bitrate, suggestedCaptureScale: suggestion?.captureScale)
+            let previous = linkReports[id]?.report
+            // The same state with the same suggestion (the judge reporting its rate as it moves): the
+            // device and the card have nothing new to show, so nothing is published.
+            if let previous, previous.state == report.state, previous.suggestedBitrate == report.suggestedBitrate,
+               previous.suggestedCaptureScale == report.suggestedCaptureScale { return }
+            linkReports[id] = (report, config.effective(away: awayRunning))
+            let shown = HostStatusSnapshot.LinkStatus(state: behind ? .behind : .stalled, withheld: v.withheld, bitrate: bitrate,
+                                                      carriedKbps: v.carriedKbps, suggestedBitrate: suggestion?.bitrate,
+                                                      suggestedCaptureScale: suggestion?.captureScale)
+            status.update {
+                guard let i = $0.devices.firstIndex(where: { $0.id == id }) else { return }
+                $0.devices[i].link = shown
+            }
+            guard previous?.state != report.state else { return }
+            print(behind ? LinkJudge.behindLine(device: who, bitrate: bitrate, withheld: v.withheld, offered: v.offered,
+                                                carriedKbps: v.carriedKbps, suggestion: suggestion)
+                         : LinkJudge.stalledLine(device: who, waiting: v.waiting))
+        }
     }
 
     // MARK: Client messages
@@ -1777,6 +1835,10 @@ package final class StreamCoordinator {
     private func settingsState(for id: ObjectIdentifier, answering: Int? = nil) -> HostSettingsState {
         let t = target, s = status.snapshot
         let thisAway = routes[id]?.isAway ?? false
+        // A report about the quality that runs while it is still the target; one about a quality a
+        // pick has just replaced is stale (the restart's reset clears it a moment later).
+        let wanted = t.effective(away: awayWanted)
+        let link = linkReports[id].flatMap { $0.judgedAt == wanted ? $0.report : nil }
         let away = remote.map { _ in
             AwayQuality(homeBitrate: t.bitrate, homeCaptureScale: Double(t.captureScale),
                         awayBitrate: t.awayBitrate, awayCaptureScale: Double(t.awayCaptureScale),
@@ -1789,7 +1851,8 @@ package final class StreamCoordinator {
                                  softwareEncoder: s.softwareEncoder,
                                  stream: s.stream?.wire,
                                  answering: answering,
-                                 away: away)
+                                 away: away,
+                                 link: link)
     }
 
     /// The Mac's Virtual Display pane in its order (SettingsPanes.swift, `statusText`), without the

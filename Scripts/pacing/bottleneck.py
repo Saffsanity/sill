@@ -12,12 +12,16 @@ random stalls (on 2026-09-26, ext120 on the base build ran at 7-120 fps from run
 clock, 119-120 fps and 8.6 drops a minute every time, the figure the plan's critique measured).
 
 usage: bottleneck.py --listen PORT --to HOST:PORT --rate-mbps R --delay-ms D [--queue-bytes Q]
-                     [--rate-at T:R,T:R...]
+                     [--rate-at T:R,T:R...] [--blackhole-at T]
   --rate-mbps R     downlink (host → device) bottleneck rate
   --delay-ms D      round trip added: D/2 each way
   --queue-bytes Q   the bottleneck's buffer (a cellular cell's per-device queue); the relay stops
                     reading from the host while Q bytes wait, so the host's TCP backs up behind it
-  --rate-at         T seconds after the relay started, the rate becomes R (a cellular dip: 20:0.5,35:8)
+  --rate-at         T seconds after the relay started, the rate becomes R (a cellular dip: 20:0.5,35:8);
+                    a rate of 0 stops the downlink alone: the device's pings still reach the host
+  --blackhole-at T  from T seconds after the relay started nothing crosses either way, and nothing is
+                    closed (a path gone dead both ways; sillrelay.py's --blackhole-after, from the
+                    relay's start instead of each connection's)
 The uplink (device → host) is only delayed. Prints one line per connection and per rate change."""
 import asyncio, socket, sys, time
 from collections import deque
@@ -34,7 +38,11 @@ RATE = float(opt("--rate-mbps", "8"))
 HALF = float(opt("--delay-ms", "70")) / 2000.0
 QUEUE = int(opt("--queue-bytes", "262144"))
 SCHEDULE = [(float(t), float(r)) for t, r in (p.split(":") for p in opt("--rate-at", "").split(",") if p)]
+BLACKHOLE = float(opt("--blackhole-at", "-1"))
 T0 = time.monotonic()
+
+def blackholed():
+    return BLACKHOLE >= 0 and time.monotonic() - T0 >= BLACKHOLE
 
 def rate_now():
     r = RATE
@@ -80,6 +88,7 @@ async def handle(dev_reader, dev_writer):
             while True:
                 while queued[0] >= QUEUE:
                     space.clear(); await space.wait()
+                while blackholed(): await asyncio.sleep(0.1)     # nothing more is taken from the host
                 data = await host_reader.read(16384)
                 if not data: break
                 queue.append(data); queued[0] += len(data); data_ready.set()
@@ -97,6 +106,8 @@ async def handle(dev_reader, dev_writer):
             chunk = queue[0]
             if not chunk:
                 line.append((time.monotonic() + HALF, b"")); line_ready.set(); return
+            if blackholed():
+                await asyncio.sleep(0.1); free = time.monotonic(); continue
             r = rate_now()
             if r <= 0:
                 await asyncio.sleep(0.05); free = time.monotonic(); continue
@@ -140,6 +151,8 @@ async def handle(dev_reader, dev_writer):
             due, d = up[0]
             w = due - time.monotonic()
             if w > 0: await asyncio.sleep(w)
+            if blackholed():                   # held, never delivered: the host hears nothing
+                await asyncio.sleep(0.1); continue
             up.popleft()
             if not d: break
             try:
@@ -158,10 +171,13 @@ async def handle(dev_reader, dev_writer):
 
 async def announce_rates():
     last = None
+    dark = False
     while True:
         r = rate_now()
         if r != last:
             print(f"{stamp()} relay: downlink {r:g} Mbit/s", flush=True); last = r
+        if blackholed() and not dark:
+            print(f"{stamp()} relay: blackhole both ways", flush=True); dark = True
         await asyncio.sleep(0.2)
 
 async def main():

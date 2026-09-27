@@ -22,9 +22,15 @@ import StreamProtocol
 // usage: Harness [--port P] [--kf BYTES] [--delta BYTES] [--fps N] [--gop S] [--icons N]
 //                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH]
 //                [--plain | --home] [--sizes-at T:KF:DELTA,…] [--still-at T:D,…]
-//                [--restart-at T:D,…]
+//                [--restart-at T:D,…] [--bitrate B]
 // --plain: the remote door without TLS; --home: plain TCP served as a home client (run.py's
 // DOOR=Home).
+// --bitrate: the running quality the link's reports speak of (default Pro, 40000000): each change of
+//   a device's link (LinkJudge, docs/remote-bundle-plan.md §6) prints "Link: behind (withheld 52 of
+//   58; carried 7.9 Mbps; suggesting Low)", the suggestion LinkJudge.suggestion gives for B at the
+//   run's fps and Standard (the harness has no resolution). Only the new build prints them: the lines
+//   compile under LINK_JUDGE, which build.sh defines for it alone (the base's StreamServer has no
+//   onClientLinkChanged).
 // --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change).
 // --still-at: from T seconds for D seconds no frame is captured (a still window: the motion stopped).
 //   A keyframe asked for meanwhile is the last frame encoded again, once the window has been still
@@ -69,6 +75,7 @@ func pairs(_ name: String) -> [(t: Double, d: Double)] {
 }
 let stills = pairs("--still-at")
 let restarts = pairs("--restart-at")
+let linkBitrate = Int(value("--bitrate", "40000000"))!
 
 if !logPath.isEmpty { HostLog.shared.configure(keepLines: 0, fileURL: URL(fileURLWithPath: logPath)) }
 
@@ -103,6 +110,16 @@ let server = try StreamServer(advertise: false)
 let psPayload = ParameterSets(nalUnitHeaderLength: 4, sets: [Data(count: 24), Data(count: 40), Data(count: 8)]).encoded()
 
 server.onKeyframeNeeded = { encoder.requestKeyframe() }
+#if LINK_JUDGE
+server.onClientLinkChanged = { _, v in
+    let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: linkBitrate, fps: fps, captureScale: 1)
+    var parts = ["withheld \(v.withheld) of \(v.offered)"]
+    if let carried = v.carriedKbps { parts.append("carried \(LinkJudge.mbps(kbps: carried)) Mbps") }
+    if v.state == .stalled { parts.append("\(LinkJudge.bytes(v.waiting)) waiting") }
+    if v.state != .fine { parts.append(suggestion.map { "suggesting \(LinkJudge.title($0))" } ?? "nothing lower") }
+    print("Link: \(v.state)\(v.reset ? " (reset)" : "") (\(parts.joined(separator: "; ")))")
+}
+#endif
 server.onClientCountChanged = { n in Stats.shared.activeClients = n }
 server.onClientConnected = { connection, route, _ in
     // The coordinator hops to the main actor first; so does this.
