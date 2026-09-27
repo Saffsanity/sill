@@ -2651,7 +2651,12 @@ resolved by reading both sides.
 - `SillProtocol` settled (Compatibility.swift, CLAUDE.md, docs/update-notice-plan.md §3.2, §4.6 and
   open question 14): protocol 1 is 1.0's TLS home door with ALPN `sill/1`, as the remote door is;
   pairing on the home door is no longer an example of what raises it; a later generation raises
-  both (`sill/2`, offered beside `sill/1` while older peers are served).
+  both: `sill/2` is offered beside `sill/1` and `sill-pair/1`, which a host offers for good
+  (`RemoteTLS.serverALPNs`), never instead of them. (As first written here, "offered beside
+  `sill/1` while older peers are served": the security review's reading, 2026-09-27, was that it
+  lets a later host drop `sill/1` exactly when its floor refuses 1.0 devices, and a 1.0 device
+  hears kind 22 "update" only inside a `sill/1` session; without it, a failed handshake, -9838,
+  "disconnected" and a redial for ever. Reworded, with the protocol check's case.)
 - This branch's pure checks in `Tests/checks`, and in CI's mutants matrix: `door`, `cable`,
   `asklimits`, `records`, `device`, `hometxt` and `home` are `door-policy`, `cable-link`,
   `ask-limits`, `home-records`, `home-device`, `home-txt` and `home-model`, built by

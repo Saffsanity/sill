@@ -3060,9 +3060,11 @@ device keeps working with Macs from the first public build on, or each says why
 - Kept as they are: the home door as Sill.app 1.0 ships it, TLS with pairing at home
   (docs/home-pairing-plan.md, branch `home-pairing`; it ships before 1.0, Noah 2026-09-25), not
   the plain-TCP `_sill._tcp` door, which only development builds and the CLI without `--pairing`
-  keep; the 14-byte header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of
-  Switcher, Input, Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16
-  within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`.
+  keep; the ALPNs `sill/1` and `sill-pair/1`, which every host offers for good at both doors
+  (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
+  header; kinds 0–23 and their payloads (HEVC with ParameterSets; the JSON of Switcher, Input,
+  Viewport, HostSettings, Remote and Compatibility); the ping echo; a kind 16 within 2 s of the
+  first window list; kind 22's `reason`, `message` and `reconnect`.
 - Additive only (HostSettings.swift's rules): new fields optional, never renamed or retyped; kind
   numbers never reused; no new case in an enum an older peer decodes. `StreamSource` keeps its
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
@@ -3073,7 +3075,11 @@ device keeps working with Macs from the first public build on, or each says why
   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
   before anything else. A device from 2026-09-25 on that receives it shows the host's message word
   for word, with its App Store link, and does not reconnect; older development builds cannot. At
-  the TLS home door only devices from home pairing on receive it (Decided, below).
+  the TLS home door only devices from home pairing on receive it (Decided, below). Kind 22 reaches
+  a 1.0 device only inside a `sill/1` session, so such a host still completes that device's
+  `sill/1` handshake and reads its hello through the gate before refusing it: a host that stopped
+  offering `sill/1` would leave it a failed handshake (-9838), "disconnected" and a redial every
+  few seconds, for ever.
 - Every device says hello first (kind 23: its version, build, protocol and name), and every host's
   window list gives its version and protocol (`hostVersion`, nil from SillHost and from Macs
   before 2026-09-25). A later device facing an older Mac tells what it lacks from these and from
@@ -3092,7 +3098,8 @@ device keeps working with Macs from the first public build on, or each says why
   close gives. 1.0's TLS home door is `SillProtocol` 1 with ALPN `sill/1`, as the remote door is:
   pairing on the home door is part of protocol 1, no longer an example of what raises it
   (Compatibility.swift, docs/update-notice-plan.md §3.2 and §4.6), and a later generation raises
-  both (`sill/2`, offered beside `sill/1` while older peers are served). Builds from before home
+  both: `sill/2` is offered beside `sill/1` and `sill-pair/1`, never instead of them (the first
+  bullet). Builds from before home
   pairing dial plain TCP and say hello in plaintext: at the TLS door they get a failed handshake
   and EOF, never kind 22 "update", and redial. Only development and TestFlight builds are that
   old, so no plaintext path or sniffer answers them.
