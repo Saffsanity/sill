@@ -9,8 +9,9 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Pairing at home (2026-09-25 to 27, branch `home-pairing` from main at
-1f3072a, with main merged in at cf05a78 and again at 2b38179, not rebased;
-the plan and every step's results are in `docs/home-pairing-plan.md`).**
+1f3072a, with main merged in at cf05a78 and again at 2b38179, not rebased,
+PR #37; the plan and every step's results are in
+`docs/home-pairing-plan.md`).**
 Noah: "Yes please lets add a pairing process for Wi-Fi/Direct connect,
 something easy to do but still secure, similar to how Tailscale is being
 paired. Wired should still pair automatically." He also decided it ships
