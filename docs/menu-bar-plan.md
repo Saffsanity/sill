@@ -106,9 +106,27 @@ Checked, without the hardware encoder:
   more. Slow Action: `AXPress` answered in 2–5 ms, before the action ran, and a read of Probe
   during the action's 2 s sleep timed out at 1,000 ms (`notAnswering`), then the app answered
   again. `lsappinfo front` sampled every 0.1 s never changed.
+- `Scripts/menu-check/run.sh` (e47df1d; the two harnesses above and below, from the repository): the
+  mirror harness drives the real MenuMirror, with the reader, as the coordinator does (fetch,
+  press, setTarget, catalogPolled, clientLeft), stubbing only the server's send, a connection,
+  Stats and print; 51 of 51: the subscription's v2 top level; File and Probe as §5's table; a fetch
+  0.4 s after a read from the cache (no fixture callback), 1.6 s after read again; Deep level by
+  level; 600 Items 500 and more 100; the presses and refusals above with the host's exact lines (the
+  bar item and Deep in 6–7 ms); an older version refused with the id; Dynamic N; Rebuilt; 50
+  fetches at once 20 served and 30 too many, ten presses 4 and 6, one ignored line each; Slow
+  Action, a fetch during it stale with "menufixture isn’t responding." and a stale top level of the
+  same version, a press refused, then a poll: "answering again" and a fresh top level; a second
+  subscriber; another window of the same app (the same version, nothing sent); no target (v+1, no
+  menus) and back (v+2); junk ids; C5: a `/bin/sleep`'s top level cannot be read (quick errors,
+  `failed`): v+3 and nothing sent, a poll reads again and still nothing, and once it is gone a poll
+  sends v+1 with no menus; the fixture killed: "menufixture is no longer open." and v+1 with no
+  menus; the last subscriber gone. A killed process its parent has not reaped still answers
+  kill(pid, 0), so the fixture's parent reaps it (real apps are reaped by launchd at once).
 - The fixture (H0): its label reads "none" over AX from another process; its window is off every
   display; the host's read-only `--menu-selftest=<its pid>` reads its four menus (the top level
   22 ms at first read, menus 0.6–11 ms: H11's times, within the probe's).
+- H9's first part: main's StreamMessage.swift at 150f781 and at cf05a78 reads kinds 24, 25 and 27 as
+  `.unknown` (23 as `.hello`).
 - H13's greps: no system-wide timeout, no AX call in MenuMirror, no `assumeIsolated` in the new
   files, `SILL_TEST_MENU_PID` taken only when synthetic, `kAXPressAction` only in MenuReader (after
   `PressDecision`) and WindowSizer's close button.
@@ -141,12 +159,14 @@ Next agent, in order:
 1. (Done) Merge main: cf05a78 at 53522ab. Main has not changed StreamCoordinator, StreamClient,
    StreamMessage or the pbxproj since 150f781, so this plan's line numbers still hold there.
 2. (Done but for the gates through the host) Verify and fix the host. Run H2 and H4–H11 once no
-   device is on Sill.app: the scratchpad's scripts, or by hand from §10.
+   device is on Sill.app: the scratchpad's scripts, or by hand from §10. `Scripts/menu-check/run.sh`
+   covers the reader and the mirror without a host (safe while Sill.app streams); run it again after
+   any change to the menu files.
 3. The iOS side, §7: the files and their four pbxproj entries by hand, `MacMenuState` checked with
    swiftc and mutants, the iPadOS 26 menu bar, the Menus button, `StreamClient`, the harness cases
    of §7.8; photos at the four Duo sizes and on an iPhone.
-4. Sill.app, §6; the docs (CLAUDE.md's Layout and Current step, docs/DEVELOPMENT.md,
-   `Tests/checks/README.md`'s table and ci.yml's mutants matrix for `menus`).
+4. Sill.app, §6; the docs (CLAUDE.md's Layout, Build and run and Current step, docs/DEVELOPMENT.md,
+   `Tests/checks/README.md`'s table and ci.yml's mutants matrix for `menus`, `Scripts/menu-check`).
 5. Review (wire and hard rules, the AX reader's queue and timeouts, the device UI and its hazards in
    §7.3, the fetch finding above), then a PR against main with Noah's device tests.
 Rules the build must keep: the reader presses nothing in any test but the fixture; no XCUITest or
