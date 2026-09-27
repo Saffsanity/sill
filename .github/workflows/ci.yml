@@ -119,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, clientlink, compatibility, device-gate, fence, goodbye, origin, pairing-address, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, update-policy]
+        check: [addresses, clientlink, compatibility, device-gate, encoder-mailbox, encoder-slowstate, fence, goodbye, origin, pairing-address, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

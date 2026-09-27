@@ -89,19 +89,21 @@ enum EncoderProbe {
     }
 
     /// Whether the hardware keeps up with a stream of this size now: frames of a moving test
-    /// pattern through a quiet hardware session (no line, no counter), one at a time as a stream
-    /// sends them (the next goes in when the last came back), and the rate the last `frames` of
-    /// them came back at. Three frames are drawn before the session opens and then reused, as a
-    /// capture stream reuses its surfaces, and the first pass over them is left out (the session's
-    /// warm-up, ~50 ms at Retina size, and each surface's first trip into the encoder): drawing a
-    /// frame costs milliseconds a stream never spends there (30 MB of fresh memory at Retina 6K),
-    /// and inside the timing it counted against the engine. `ok` false: a frame took longer than
-    /// `timeout` (it then counts as stuck until it comes back). `fps` nil: nothing could be
-    /// measured (no pixel buffers), so assume it keeps up. About 110 ms at 3024×1904 when the
-    /// engine is free (~120 fps; drawn inside the timing it measured ~115) and 290 ms at 6016×3384
-    /// (~39 fps; ~37); a starved engine shows as a low rate, not as no answer. Blocks the calling
-    /// thread for up to (`frames` + 3) × `timeout`: never call it on the main actor. `ms` leaves
-    /// the drawing out.
+    /// pattern through a quiet hardware session (no line, no counter), and the rate the last
+    /// `frames` of them came back at. They go in one at a time, the next when the last came back,
+    /// because a stream sends them so (HEVCEncoder keeps one frame inside VideoToolbox): the rate
+    /// measured, the bar a return needs (`returnBar`) and the engine rate learned from the best
+    /// test are then of the kind a stream gets. Three frames are drawn before the session opens
+    /// and then reused, as a capture stream reuses its surfaces, and the first pass over them is
+    /// left out (the session's warm-up, ~50 ms at Retina size, and each surface's first trip into
+    /// the encoder): drawing a frame costs milliseconds a stream never spends there (30 MB of fresh
+    /// memory at Retina 6K), and inside the timing it counted against the engine. `ok` false: a
+    /// frame took longer than `timeout` (it then counts as stuck until it comes back). `fps` nil:
+    /// nothing could be measured (no pixel buffers), so assume it keeps up. About 110 ms at
+    /// 3024×1904 when the engine is free (~120 fps; drawn inside the timing it measured ~115) and
+    /// 290 ms at 6016×3384 (~39 fps; ~37); a starved engine shows as a low rate, not as no answer.
+    /// Blocks the calling thread for up to (`frames` + 3) × `timeout`: never call it on the main
+    /// actor. `ms` leaves the drawing out.
     static func throughput(width: Int, height: Int, frames: Int = 7, timeout: TimeInterval = 1.0) -> (ok: Bool, fps: Double?, ms: Int) {
         let drawn = (0..<3).compactMap { testFrame(width: width, height: height, bar: $0) }
         let started = CFAbsoluteTimeGetCurrent()

@@ -32,7 +32,7 @@ From Design 1:
 
 WHY SWIFTPM (a) OVER AN XCODE PROJECT (b)
 - One build system. `swift build -c release` compiles the CLI, the core and the app, so a core API change cannot silently break the app, and it is the command every session already runs.
-- The script was run end to end. It signed with 'Apple Development: noah@apple.saffer.me (HG877AGTQ7)' (team 9B2KKVM937) with no keychain prompt. The designated requirement still matched after a rebuild. The actool icon renders natively on macOS 27; the sips .icns got a grey tile.
+- The script was run end to end. It signed with 'Apple Development: … (HG877AGTQ7)' (team 9B2KKVM937) with no keychain prompt. The designated requirement still matched after a rebuild. The actool icon renders natively on macOS 27; the sips .icns got a grey tile.
 - (b) is the move at M5 if CloudKit needs a provisioning profile. The library split keeps that cheap: flip `package` to `public`.
 
 WHY APPKIT AND NOT MenuBarExtra + THE SwiftUI Settings SCENE
@@ -558,7 +558,7 @@ TESTS WITHOUT PERMISSIONS (Claude)
 - T7, previews: run `-SillRenderPreviews $S/previews`, read the PNGs and menu.txt, and check them against the copy in step 11: no clipping at 520 pt, light and dark.
 - T8, idle footprint: the bare binary with no client for 60 s shows about 0.0 % CPU in `ps -o %cpu,rss -p PID`.
 - T9, bundle: `Scripts/make-app.sh`, without --install.
-  - The output says signed by 'Apple Development: noah@apple.saffer.me (HG877AGTQ7)'.
+  - The output says signed by 'Apple Development: … (HG877AGTQ7)'.
   - `codesign --verify --strict --verbose=2 .build/Sill.app` passes.
   - `codesign -d -r- .build/Sill.app` shows the identifier and the leaf CN, not a cdhash.
   - `plutil -p` shows LSUIElement, CFBundleIconName and NSBonjourServices.
@@ -621,7 +621,7 @@ RISKS
   - Running Contents/MacOS/Sill from Terminal makes Terminal the responsible process.
   - Two registered copies confuse LaunchServices.
   - The login item records the bundle's path.
-  - Developer ID has a team-based requirement: grant once more at M6. A Developer ID certificate needs the team's Account Holder (the certificate's O field is Marion Saffer).
+  - Developer ID has a team-based requirement: grant once more at M6. A Developer ID certificate needs the team's Account Holder.
 - Local Network privacy for a LaunchServices-launched app is untested on macOS 27. If it bites, the menu shows 'Waiting for the Network'.
 - Screen Recording needs a relaunch after granting, and macOS may ask again periodically.
 - Untested here, all need Noah:
@@ -641,7 +641,7 @@ RISKS
 DECISION: go with option (b). Move everything in Sources/SillHost except main.swift into a SwiftPM library target called SillHostKit. SillHost stays as a thin CLI over it. Add a hand-written project, /Users/noah/Downloads/winstream/macApp/Sill.xcodeproj. Its app target is SillMac: product Sill.app, bundle ID me.saffer.sill.mac, LSUIElement. It links the SillHostKit and StreamProtocol products through the same XCLocalSwiftPackageReference (relativePath "..") that iOSClient/Sill.xcodeproj uses.
 
 WHY (b) OVER (a):
-- Signing: Noah already signs in Xcode with team 9B2KKVM937. Automatic signing picks the only identity in the keychain, "Apple Development: noah@apple.saffer.me (HG877AGTQ7)". Its OU is 9B2KKVM937 and it is valid until 2027-09-22. No script has to hard-code an identity or run into keychain prompts.
+- Signing: Noah already signs in Xcode with team 9B2KKVM937. Automatic signing picks the only identity in the keychain, "Apple Development: … (HG877AGTQ7)". Its OU is 9B2KKVM937 and it is valid until 2027-09-22. No script has to hard-code an identity or run into keychain prompts.
 - Permissions: ⌘R launches the bundle as its own responsible process, so TCC asks on behalf of "Sill". A certificate-based designated requirement keeps those grants across rebuilds. Ad-hoc signing does not: the prototype's ad-hoc build shows `designated => cdhash H"…"`.
 - Icons and assets: actool compiles the asset catalog (the prototype produced AppIcon.icns and Assets.car). An Icon Composer .icon can simply be dropped into the folder.
 - Previews and profiling: SwiftUI previews and Instruments (Profile action) work out of the box.
@@ -874,7 +874,7 @@ Risks:
 - Apple Development signing keeps grants across rebuilds (expected designated requirement: identifier + anchor apple generic + leaf CN). Ad-hoc and headless test builds lose them.
 - Developer ID (M6) changes the requirement, so grants must be given once more.
 - Screen Recording needs a relaunch after granting, and macOS 15+ re-asks ScreenCaptureKit apps periodically.
-- A Developer ID Application certificate needs the team's Account Holder. The certificate's O field is "Marion Saffer"; confirm Noah holds that role on a paid membership before M6.
+- A Developer ID Application certificate needs the team's Account Holder.
 - Local Network privacy on macOS 15+ applies to the app, where Terminal was exempt. If the prompt is denied, devices won't find or reach the Mac. NSLocalNetworkUsageDescription gives the prompt its text, but what exactly triggers it on macOS 27 is unverified.
 - Bundle ID me.saffer.sill.mac is effectively permanent. TCC, Login Items, the defaults domain and future CloudKit all key off it. Noah should confirm it before the first grant.
 - Launch at login registers whatever copy is running. A DerivedData build breaks on a clean. Enable it only from /Applications/Sill.app.
@@ -1261,7 +1261,7 @@ Decision: (a), SwiftPM only. One `swift build -c release` compiles three things:
 
 How the two options compare:
 - **Reproducibility.** (a) is one build system that Claude sessions and CI can drive headless, and the bundle layout is readable in the script. (b) means a hand-written pbxproj, and `swift build` would never compile the Xcode app shell, so a change to the library API could break it unnoticed.
-- **Signing.** Both end in the same `codesign` call. Signing with "Apple Development: noah@apple.saffer.me (HG877AGTQ7)", team 9B2KKVM937, ran without a keychain prompt here. `--release` switches to Developer ID with hardened runtime and a timestamp.
+- **Signing.** Both end in the same `codesign` call. Signing with "Apple Development: … (HG877AGTQ7)", team 9B2KKVM937, ran without a keychain prompt here. `--release` switches to Developer ID with hardened runtime and a timestamp.
 - **Permissions attribution.** Identical in both: TCC keys on the bundle ID plus the designated requirement.
 - **Icon.** Now equal. actool compiles a generated Icon Composer document from design/AppIcon.svg into Assets.car plus a pre-masked .icns. A sips/iconutil .icns was shrunk into a grey tile on macOS 27; the actool output renders natively.
 - **How Noah works.** He runs the host from Terminal, and Claude sessions build it. He can still open Package.swift in Xcode for editing and use Attach to Process (dev builds carry get-task-allow).
@@ -1281,7 +1281,7 @@ How the two options compare:
 
 **How TCC grants survive rebuilds.**
 - A grant is stored as the bundle ID plus a snapshot of the code's designated requirement, and every access is checked against that snapshot.
-- The Apple Development requirement names the bundle ID and the certificate CN, not the binary: `identifier "me.saffer.sill.mac" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: noah@apple.saffer.me (HG877AGTQ7)" and certificate 1[field.1.2.840.113635.100.6.2.1] exists`. It also survives certificate renewal, since the CN stays the same; the current certificate is valid to 2027-09-22.
+- The Apple Development requirement names the bundle ID and the certificate CN, not the binary: `identifier "me.saffer.sill.mac" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: … (HG877AGTQ7)" and certificate 1[field.1.2.840.113635.100.6.2.1] exists`. It also survives certificate renewal, since the CN stays the same; the current certificate is valid to 2027-09-22.
 - Verified: a rebuilt, re-signed bundle passes `codesign --verify -R=<requirement recorded before the rebuild>`.
 - An ad-hoc requirement is a cdhash; the rebuilt ad-hoc bundle failed its old requirement. The toggle stays on in System Settings but access is denied.
 - Rules for Noah:
@@ -1528,7 +1528,7 @@ Test plan:
 - [no permissions] App binary without a bundle, launched from the shell so Terminal is responsible and nothing prompts: `.build/release/SillMenuBar --synthetic -maxFPS 60 -bitrate 25000000 > app.log`. Get the port with lsof on its PID, run `sillclient.py PORT 5 desktop --fps=120`. Expect about 60 fps and 'Streaming a synthetic test pattern at 3024×1898, 60 fps, 25 Mbps'. `kill -TERM PID` should exit 143 with 'Shutting down…'. A Sill status item shows in the menu bar while it runs. The prototype passed this.
 - [no permissions] Idle footprint: run the same binary with no client for 60 s. `ps -o %cpu,rss -p PID` should show about 0.0 % CPU (events push status, nothing polls). Kill it by PID.
 - [no permissions] Bundle: `Scripts/make-app.sh`.
-- The output says 'signed by: Apple Development: noah@apple.saffer.me (HG877AGTQ7)'.
+- The output says 'signed by: Apple Development: … (HG877AGTQ7)'.
 - `codesign --verify --strict --verbose=2 .build/Sill.app` passes.
 - `codesign -d -r- .build/Sill.app` shows the identifier + certificate-CN requirement.
 - `plutil -p .build/Sill.app/Contents/Info.plist` shows LSUIElement 1 and CFBundleIconName AppIcon.

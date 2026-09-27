@@ -337,6 +337,9 @@ tests of Direct Wireless Connection and remote access.
 
 `Tests/checks/run-all.sh` compiles the files that decide things (discovery and
 the session's path, the settings ledger, the wire format, pairing, who may use
+which door, how frames go into the video encoder and when a stream gets a new
+encoder session) on their own with a check each, and runs them: about two
+minutes, no device, permission or encoder. `--mutants` also checks that each check fails
 which door, the device floor, how a session ends, the update check) on their
 own with a check each, and runs them: about two minutes,
 no device, permission or encoder. `--mutants` also checks that each check fails
@@ -432,7 +435,30 @@ AirDrop, Sidecar and Universal Control can hold AWDL on too.
 
 ### What to try if it's slow
 
-- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode).
+- Read the host's stats line. `enc.mailboxDrop` counts captured frames the
+  encoder had no room for, so `enc.out` well under `cap.complete` with the
+  difference in `enc.mailboxDrop` means the encoder takes longer than a frame
+  interval. At the Retina Desktop's size that is either its slow state (about
+  30 ms a frame, so 33 fps with ~24 drops a second; it can set in after a few
+  seconds of few frames, at any bitrate) or another app encoding at the same
+  time (a screen recording, the Simulator's recorder, or the Claude app's iOS
+  Simulator panel, beside which a Retina Desktop ran at 33–36 fps). The stats
+  line can read alike for both: a test-pattern Retina stream beside that panel
+  alone read about 32 fps with about 27 drops a second. The kernel's encoder
+  log tells them apart (`Scripts/encoder-check/hbparse.py` reads it; its
+  header says how to fetch it): while another app shares the encoder, it lists
+  that app's session beside Sill's, and hbparse.py marks those windows
+  "(shared)"; in the slow state Sill's session is alone. Its C/F column is the
+  engine's figure, not Sill's time per frame, and moves with how many frames
+  the engine completes in all: about 14 ms in the slow state alone, about 10
+  beside the Simulator panel. The host gives a stream in the slow state a new
+  encoder session about 2 s into the motion, which runs at the full rate
+  again, and says so in its log ("Encoder (hardware HEVC …): frames took 29
+  ms each …; a new session takes 9 ms …"); if a new session is no faster
+  (another app sharing the encoder, say), the log says that and the stream
+  keeps it.
+- Resolution: Standard (`captureScale: 1`, four times fewer pixels to encode;
+  it never hit the slow state).
 - Prioritize encoding speed (`prioritizeSpeed: true`).
 - Lower bitrate, or wire the phone to the Mac and repeat to isolate Wi-Fi.
 - Check the Mac's Console for "dropped" from the capture; raise `queueDepth`.
@@ -508,6 +534,23 @@ tag (`SILL_RELEASE_TAG`) rather than ask origin. Pushing the tag, which a
 `--publish` from your Mac needs first, starts it too: with `SILL_SIGN_IN_CI`
 on, let that run publish instead.
 
+The iOS app goes to App Store Connect (TestFlight, then the App Store) from
+`Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
+signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
+checked (the version and build, the export compliance key, the Local Network
+and camera strings, the privacy manifest, an App Store signature and
+profile), and with `--upload` uploaded. `--bump` gives each upload of a
+version the next build number, alone in a commit; both refuse uncommitted
+changes, so every uploaded build is a commit's. It signs and uploads
+through the Apple Account in Xcode › Settings › Accounts, or through an App
+Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
+and it needs Xcode 27.
+`--privacy-report` lists what the archive's privacy manifest declares and the
+required-reason APIs its binary uses. The TestFlight workflow
+(`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.
+docs/release-checklist.md, "TestFlight", has the App Store Connect side, the
+record field by field.
+
 ## Known limitations
 
 - TCP: one lost packet stalls everything behind it. The real transport is UDP
@@ -527,14 +570,16 @@ on, let that run publish instead.
   with the iOS app), `SillHost` (the host library), `SillHostCLI` (the
   `SillHost` command), `SillMenuBar` (Sill.app) and two probes.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
-- `Packaging/`: Sill.app's Info.plist and entitlements.
+- `Packaging/`: Sill.app's Info.plist and entitlements, and the iOS app's
+  export options for App Store Connect.
 - `Scripts/`: `make-app.sh` (builds Sill.app), `release.sh` (the notarized
-  zip people download), `sillclient.py` (a wire-format test client),
+  zip people download), `release-ios.sh` (the iOS app's build for App Store
+  Connect and TestFlight), `sillclient.py` (a wire-format test client),
   `sillrelay.py` (a relay that slows or cuts the link, for tests) and
   `sillfeed.py` (a stand-in for GitHub's releases feed, for the update
   check's tests).
-- `Tests/checks/`: the pure checks (above). `.github/`: the CI and release
-  workflows, and the Sponsor button.
+- `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
+  TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.
