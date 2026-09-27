@@ -35,8 +35,12 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
   --move=X,Y@T       a pointer move (kind 8) to the frame fractions X, Y, T seconds in
   --tap=X,Y@T        a move there, a left down and a left up: three kind 8 messages
   --key=USAGE@T      a key down and up (a USB HID usage, no modifiers): two kind 8 messages
-                     --move, --tap and --key go only to a --synthetic host on this Mac (the process
-                     listening on PORT, by lsof and ps), which never posts input: anything else exits 2
+  --input=JSON@T     this literal kind 8 payload T seconds in (split on the last @), as written: an
+                     input the flags above do not make, such as a scroll or a scroll gesture's phase
+                     ({"scrollGesture":{"_0":"began","x":0.5,"y":0.5}}); one kind 8 message
+                     --move, --tap, --key and --input go only to a --synthetic host on this Mac (the
+                     process listening on PORT, by lsof and ps), which never posts input: anything
+                     else exits 2
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -61,7 +65,7 @@ its arrival time; dw= is Direct Wireless
 (1, 0, or - when the host did not report it: an older host). Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
-with status 2 (--raw17 goes out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
+with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
@@ -72,8 +76,8 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
-TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "move", "tap", "key")
-INPUT = ("move", "tap", "key")
+TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "move", "tap", "key", "input")
+INPUT = ("move", "tap", "key", "input")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello")
 
 def msg(kind, payload=b"", key=False):
@@ -332,7 +336,7 @@ try:
     # the listener's own arguments do (neither Sill.app nor a real SillHost carries --synthetic).
     if any(e[2] in INPUT for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
-            raise ValueError(f"--move, --tap and --key only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
+            raise ValueError(f"--move, --tap, --key and --input only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -440,6 +444,8 @@ def fire(e, now):
         print(f"  sent tap {text} (move, down, up) at {at}")
     elif name == "key":
         s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
+    elif name == "input":
+        s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
