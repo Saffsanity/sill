@@ -58,6 +58,14 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
         if !wasVisible { window.center() }
         if offer.byDevice {
             WindowPlacement.showInFront(window)
+            // It comes up without the keyboard and without focus, so VoiceOver would say nothing:
+            // its first line is announced, as the cable notice's is (once per window, not again
+            // for the same window's offer made again).
+            if !wasVisible || !offer.again {
+                NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                                     userInfo: [.announcement: PairDeviceView.askedLine(offer),
+                                                .priority: NSAccessibilityPriorityLevel.high.rawValue])
+            }
         } else {
             WindowPlacement.bringForward(window)
         }
@@ -163,7 +171,7 @@ struct PairDeviceView: View {
         VStack(alignment: .leading, spacing: 14) {
             if offer.byDevice {
                 // The name went through SafeText in the host, as every device-supplied name does.
-                Text("\(offer.requestedBy ?? "A device") \(offer.askedFrom ?? "on this network") asked to pair.")
+                Text(Self.askedLine(offer))
                     .font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Point it at this code, or tap Enter Code Instead and type the code.")
@@ -284,6 +292,12 @@ struct PairDeviceView: View {
                 Text(Self.countdown(until: offer.expiresAt, now: context.date))
             }
         }
+    }
+
+    /// A window a device opened: its first line, "iPad (iPad14,1) on this network asked to pair.",
+    /// which VoiceOver also announces as it comes up (PairDeviceWindowController.show).
+    static func askedLine(_ offer: RemoteAccess.PairingOffer) -> String {
+        "\(offer.requestedBy ?? "A device") \(offer.askedFrom ?? "on this network") asked to pair."
     }
 
     static func countdown(until end: Date, now: Date) -> String {

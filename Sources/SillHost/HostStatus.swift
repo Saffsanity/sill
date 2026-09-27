@@ -123,8 +123,9 @@ package struct RemoteStatus: Equatable {
         case unavailable(String)
     }
     /// A device asked to pair and no window shows its code by itself (the Mac locked, or the ask
-    /// limits), or a device-opened window is up: the menu's "‹device› Wants to Pair", for 5 minutes
-    /// after the ask. Never for an ask from this Mac itself.
+    /// limits), or a window shows its code (one its ask opened, or one the Mac's user opened from
+    /// this request): the menu's "‹device› Wants to Pair", for 5 minutes after the ask, less once
+    /// that device pairs or, for "showing", once the window closes. Never for an ask from this Mac.
     package struct PairingRequest: Equatable {
         /// The device's own name, cleaned: "iPad (iPad14,1)".
         package var name: String

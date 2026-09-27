@@ -127,18 +127,19 @@ enum StatusText {
                                   canPair: s.remote.map { $0.identityProblem == nil } ?? false)
     }
 
-    /// "iPad Wants to Pair", for 5 minutes after a device's ask (the host ends it sooner when the
-    /// window it opened closes): "Showing a code" while that window is up, "Show a Code…" when the
-    /// ask limits kept one from opening, the unlock line when this Mac was locked. Never for an ask
-    /// from this Mac itself (the host sets none).
+    /// "iPad Wants to Pair", for 5 minutes after a device's ask (the host ends it sooner: when the
+    /// window showing its code closes, and when that device pairs): "A code is showing." while that
+    /// window is up, "Click to show a code." when the ask limits kept one from opening, the unlock
+    /// line when this Mac was locked. Sentences with a full stop, as every attention subtitle is.
+    /// Never for an ask from this Mac itself (the host sets none).
     private static func pairingRequest(_ r: RemoteStatus?, now: Date) -> StatusPresentation.Attention? {
         guard let request = r?.pairingRequest, now.timeIntervalSince(request.at) < RemoteStatus.PairingRequest.shownFor else { return nil }
         let short = shortName(request.name)
         let subtitle: String
         switch request.reason {
-        case "showing": subtitle = "Showing a code"
-        case "locked": subtitle = "Unlock this Mac, then tap it on the \(short) again"
-        default: subtitle = "Show a Code…"
+        case "showing": subtitle = "A code is showing."
+        case "locked": subtitle = "Unlock this Mac, then tap it on the \(short) again."
+        default: subtitle = "Click to show a code."
         }
         return .init(title: "\(short) Wants to Pair", subtitle: subtitle,
                      action: .pairingRequest(name: request.name, showing: request.reason == "showing"))

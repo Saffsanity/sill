@@ -887,7 +887,7 @@ package enum HomeDoor: Equatable { case plain, pairingRequired, open, unavailabl
 package var homeDoor: HomeDoor
 /// A device asked and no window shows its code (the Mac locked, or the limits), or a device-opened
 /// window is open: for the menu's "‹device› Wants to Pair", 5 minutes after the ask.
-package var pairingRequest: PairingRequest?     // name, at, reason: "showing" | "locked" | "limit" (quiet or often; never an ask from this Mac)
+package var pairingRequest: PairingRequest?     // name, at, reason: "showing" | "locked" | "limit" (quiet or often; never an ask from this Mac); ends when that device pairs
 /// The last connection the home door refused as not TLS (an older Sill), for the menu.
 package var olderDeviceAt: Date?
 ```
@@ -1019,6 +1019,9 @@ while Remote Access is on." Everything else is unchanged.
   (SettingsWindow.swift:133), which activates Sill. In front, off the virtual display, without the
   keyboard; `.fullScreenAuxiliary` so it shows over a full-screen app. A click makes it key.
 - Its states (Pairing with…, Paired with…, a wrong code…, stopped, expired) are today's.
+- VoiceOver announces its first line as it comes up (it has neither focus nor the keyboard, so it
+  would otherwise say nothing), as the cable notice does; not again when the same window's offer is
+  made again (the security review, 2026-09-27).
 
 **Opened on the Mac** (the menu, a pane, New Code): as today, activating Sill, with the first line
 "In Sill on your iPhone or iPad, tap this Mac, or tap Add a Mac… when you’re away, then point it at
@@ -1049,7 +1052,7 @@ New attention items (first group, orange):
 
 | Title | Subtitle | While | Action |
 |---|---|---|---|
-| "iPad Wants to Pair" (the device's name) | "Showing a code" · "Show a Code…" · "Unlock this Mac, then tap it on the iPad again" | `pairingRequest`, 5 minutes from the ask: a device-opened window is open · an ask the limits kept from showing (never an ask from this Mac, §4.2 step 4) · the Mac was locked | brings the window forward, or opens one on the Mac "asked by" that device |
+| "iPad Wants to Pair" (the device's name) | "A code is showing." · "Click to show a code." · "Unlock this Mac, then tap it on the iPad again." | `pairingRequest`, 5 minutes from the ask: a device-opened window is open · an ask the limits kept from showing (never an ask from this Mac, §4.2 step 4) · the Mac was locked. It ends sooner when that device pairs, by any path (its key), and a window opened from the item takes it over ("A code is showing.", ending with that window) | brings the window forward, or opens one on the Mac "asked by" that device |
 | "An iPhone or iPad Needs Sill Updated" | "It tried to connect with an older Sill." | 10 minutes from `olderDeviceAt`: a source's third plain try within a minute (one try, a TLS 1.2 scanner's, lights nothing) | none |
 | "Devices Can’t Connect" | "Sill couldn’t use its key in your keychain." | `homeDoor == .unavailable` | Settings › Devices |
 

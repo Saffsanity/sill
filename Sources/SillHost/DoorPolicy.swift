@@ -270,7 +270,7 @@ enum DoorPolicy {
     /// The menu's "‹device› Wants to Pair" after an ask (§4.10, §6.4), 5 minutes from it: "showing"
     /// while the window this ask opened is up, "locked", "limit" (quiet or often); nil for a
     /// pairing, for a window that was already open, and always for an ask from this Mac, locked or
-    /// not: "Show a Code…" under a name an app chose is one click from the code it wants.
+    /// not: "Click to show a code." under a name an app chose is one click from the code it wants.
     static func menuRequest(_ a: Ask, fromThisMac: Bool) -> String? {
         if fromThisMac { return nil }
         switch a {

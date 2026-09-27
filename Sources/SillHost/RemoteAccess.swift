@@ -117,6 +117,8 @@ package final class RemoteAccess {
     private var askLineAt: [String: Double] = [:]
     static let askLineSpacing: Double = 60
     private var pairingRequest: RemoteStatus.PairingRequest?
+    /// The key that asked for `pairingRequest`: its pairing, by any path, ends the request.
+    private var requestKey: Data?
     private var requestExpiry: Task<Void, Never>?
     private var olderDeviceAt: Date?
 
@@ -309,6 +311,27 @@ package final class RemoteAccess {
     /// open, even with Remote Access off.
     package func openPairing(requestedBy: String?) {
         openPairing(requestedBy: requestedBy, byDevice: nil)
+        followRequest(named: requestedBy)
+    }
+
+    /// The Mac's user opened a window from the menu's "‹device› Wants to Pair" (AppModel's
+    /// `showPairingRequest`, `requestedBy` that device): the request now follows that window
+    /// ("showing": the item brings it forward, and it ends when the window closes), instead of
+    /// lasting its 5 minutes beside a code that may be long gone.
+    private func followRequest(named name: String?) {
+        guard let name, window.isOpen, let r = pairingRequest, r.name == name, r.reason != "showing" else { return }
+        requestExpiry?.cancel()
+        pairingRequest = RemoteStatus.PairingRequest(name: r.name, at: r.at, reason: "showing")
+        publish()
+    }
+
+    /// A device paired (a proof, or the cable): the menu's request that key made is answered.
+    private func requestAnswered(by key: Data) {
+        guard pairingRequest != nil, requestKey == key else { return }
+        requestExpiry?.cancel()
+        pairingRequest = nil
+        requestKey = nil
+        publish()
     }
 
     /// `byDevice`: a device's ask at a TLS home door (or its kind 21) opens this window; it is the
@@ -522,6 +545,7 @@ package final class RemoteAccess {
             print("Paired \(device.displayName) (key \(RemoteIdentity.shortName(attempt.deviceFingerprint))…) from \(attempt.display), "
                   + "with \(attempt.request.method == PairRequest.qr ? "the QR code" : "the code").")
             pairingState = .paired(device.displayName)
+            requestAnswered(by: attempt.deviceFingerprint)
             windowClosed(.used, reopen: true)
             return PairResult(ok: true, proof: Base64URL.encode(proofM), macID: identity.macID, name: macName,
                               recognitionKey: Base64URL.encode(identity.recognitionKey))
@@ -604,7 +628,7 @@ package final class RemoteAccess {
         case .openOnMac, .locked:
             break
         }
-        if let reason = DoorPolicy.menuRequest(verdict, fromThisMac: thisMac) { request(name: name, reason: reason) }
+        if let reason = DoorPolicy.menuRequest(verdict, fromThisMac: thisMac) { request(name: name, reason: reason, key: asker.fingerprint) }
         return verdict
     }
 
@@ -618,15 +642,21 @@ package final class RemoteAccess {
                             method: PairResult.cable)
         let fingerprint = Base64URL.encode(a.deviceFingerprint)
         let deviceID = cable.serial.map(CableLink.deviceID)
-        // A window this very key's ask opened earlier (over Wi-Fi, say) has no one to show its code
-        // to now: it goes, withdrawn, so it neither stays up for its 5 minutes nor quiets anyone.
-        defer { closeWindowOpened(by: a.deviceFingerprint) }
+        // Paired (again): a window this very key's ask opened earlier (over Wi-Fi, say) has no one
+        // to show its code to now, so it goes, withdrawn, neither staying up for its 5 minutes nor
+        // quieting anyone; and the menu's request that key made (the Mac was locked, say) is
+        // answered. Not after a save that failed: nothing was paired then.
+        let pairedNow = { [self] in
+            closeWindowOpened(by: a.deviceFingerprint)
+            requestAnswered(by: a.deviceFingerprint)
+        }
         if let i = paired.firstIndex(where: { $0.fingerprint == fingerprint }) {
             if paired[i].cableDevice == nil, let deviceID {
                 var next = paired
                 next[i].cableDevice = deviceID
                 if (try? store?.savePaired(next)) != nil { paired = next }
             }
+            pairedNow()
             return ok
         }
         let model = a.request.model.map { SafeText.label($0) }.flatMap { $0.isEmpty ? nil : $0 }
@@ -642,6 +672,7 @@ package final class RemoteAccess {
         publishTrust()
         publish()
         print("Paired \(device.displayName) (key \(RemoteIdentity.shortName(a.deviceFingerprint))…) over the USB cable (\(a.display)).")
+        pairedNow()
         onCablePaired?(device.displayName, fingerprint)
         return ok
     }
@@ -701,16 +732,19 @@ package final class RemoteAccess {
         return PairedDevice(fingerprint: "", name: SafeText.label(r.name), model: model, pairedAt: 0, method: "").displayName
     }
 
-    /// The menu's "‹device› Wants to Pair" for 5 minutes (a "showing" one also ends with its window).
-    private func request(name: String, reason: String) {
+    /// The menu's "‹device› Wants to Pair" for 5 minutes (a "showing" one also ends with its window,
+    /// and any ends once `key`, the device that asked, pairs).
+    private func request(name: String, reason: String, key: Data) {
         let r = RemoteStatus.PairingRequest(name: name, at: Date(), reason: reason)
         pairingRequest = r
+        requestKey = key
         publish()
         requestExpiry?.cancel()
         requestExpiry = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(RemoteStatus.PairingRequest.shownFor))
             guard let self, !Task.isCancelled, self.pairingRequest == r else { return }
             self.pairingRequest = nil
+            self.requestKey = nil
             self.publish()
         }
     }
@@ -735,6 +769,7 @@ package final class RemoteAccess {
         windowAsk = nil
         if pairingRequest?.reason == "showing" {
             pairingRequest = nil
+            requestKey = nil
             requestExpiry?.cancel()
         }
         switch reason {

@@ -226,9 +226,10 @@ final class AppModel {
         remote?.openPairing(requestedBy: nil)
     }
 
-    /// The menu's "‹device› Wants to Pair": its window forward while it shows the code ("Showing a
-    /// code"), else a window opened on the Mac, asked by that device ("Show a Code…", or after the
-    /// Mac was unlocked).
+    /// The menu's "‹device› Wants to Pair": its window forward while it shows the code ("A code is
+    /// showing."), else a window opened on the Mac, asked by that device ("Click to show a code.",
+    /// or after the Mac was unlocked), which the request then follows (RemoteAccess: it ends when
+    /// that window closes, or when the device pairs).
     func showPairingRequest(name: String, showing: Bool) {
         if showing, bringPairingForward?() == true { return }
         remote?.openPairing(requestedBy: name)
