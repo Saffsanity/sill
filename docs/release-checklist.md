@@ -227,19 +227,17 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       `Sill.zip.sha256`; before it builds, `--publish` checks that origin has the tag and that it
       names HEAD (the workflow's checkout is that tag). The site's Download button links
       `releases/latest/download/<name>`, which GitHub redirects to the newest release, so
-      download.html is never edited per release (the one exception: the next item). The
-      repository must be public for anonymous downloads and for the update check. Until it is,
-      `SILL_RELEASE_REPO=Saffsanity/sill-site` publishes there instead (point download.html's three
-      GitHub links there too), and release.sh warns: a release in sill-site can be downloaded, but
-      no Sill.app will offer it, so the download page's "it tells you when a new version is out"
-      does not hold for it. Once sill is public: unset `SILL_RELEASE_REPO` (in `~/.sill-release`
-      and the repository variable of that name too), point the links back at Saffsanity/sill, and
-      publish the newest release there, so that every older Sill.app offers it. One way or the
-      other for a version: pushing the tag, which a local `--publish` needs first, also starts the
-      release workflow. With `SILL_SIGN_IN_CI` set to `true` that run publishes the release, so
-      don't also run `--publish` here (whichever comes second stops at "already exists"); without
-      it the run only verifies (macOS minutes either way). Neither the variable nor any secret is
-      set on 2026-09-27, so a pushed tag only verifies.
+      download.html is never edited per release (its one exception, the move to Sill.dmg, is done:
+      below). Anonymous downloads and the update check need a public repository, which
+      Saffsanity/sill is since 2026-09-26. While it was private,
+      `SILL_RELEASE_REPO=Saffsanity/sill-site` was the way out (with download.html's three GitHub
+      links pointed there too); release.sh still warns that no Sill.app offers a release published
+      anywhere but Saffsanity/sill, so leave `SILL_RELEASE_REPO` unset (in `~/.sill-release` and as
+      a repository variable). One way or the other for a version: pushing the tag, which a local
+      `--publish` needs first, also starts the release workflow. With `SILL_SIGN_IN_CI` set to
+      `true` that run publishes the release, so don't also run `--publish` here (whichever comes
+      second stops at "already exists"); without it the run only verifies (macOS minutes either
+      way). Neither the variable nor any secret is set on 2026-09-27, so a pushed tag only verifies.
 - [ ] Release notes: `--publish` gives the release a one-line body (the version, the build and
       both SHA-256). Replace it with the release's notes, keeping that line as their last, with
       `gh release edit v<version> --repo Saffsanity/sill --notes-file <notes>` (as for v0.3.0 and
