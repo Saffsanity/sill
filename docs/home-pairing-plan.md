@@ -1,6 +1,6 @@
 # Pairing at home: Wi‑Fi, Direct and the cable — the plan
 
-## Status and hand-off (2026-09-27 02:38)
+## Status and hand-off (2026-09-27 06:40)
 
 Stopped by Noah at 99 % of the week's usage, at the end of build step 5 of 5 (§12), before the
 review phase. Branch `home-pairing` (worktree `/Users/noah/Downloads/winstream-pairing`, main merged
@@ -24,16 +24,26 @@ settled as this door's `sill/1`, and this branch's pure checks moved into `Tests
 touched is caught; the host gates of both plans that the merge could break pass live, on the
 software encoder with every listener on loopback. Not pushed.
 
+2026-09-27 06:40: the security review's fixes (Results, "The review fixes"). Its three lenses
+confirmed 13 findings; the pairing-security lens came back empty, cut short by a usage limit, and
+was read again from the code here, which found one more (Require pairing's keychain record, and
+the trust list before the first pairing). All 14 are fixed, one commit per theme (ae2e228 to
+1d95c6d), each with a check or a live run that fails before and passes after where one can; every
+pure check passes, every mutant of the checks the fixes touched is caught, and the builds are
+clean. Not pushed.
+
 Next agent, in order: (1) verify step 5: done, above; (2) merge main and rerun every check: done,
-above; (3) the security review the workflow planned (three lenses: the wire and TLS, pairing's
-rules and limits, the device UI), fixes; (4) the docs of §12's step 6 that are still to write
+above; (3) the security review the workflow planned (three lenses: the wire and TLS, pairing's rules
+and limits, the device UI), fixes: done, above; (4) the docs of §12's step 6 that are still to write
 (CLAUDE.md's Layout and Build and run for pairing at home's files, flags and TEST ONLY variables,
 and the README's Pairing section; the merge wrote only CLAUDE.md's Current step entry, its
-Compatibility floor and its Tests/checks and sillclient lines); (5) the PR with Noah's device
-tests (§11) and the install order: the iPad build first, then Sill.app. Quote Noah's authorization
-in the prompt: "Yes please lets add a pairing process for Wi-Fi/Direct connect, something easy to
-do but still secure, similar to how Tailscale is being paired. Wired should still pair
-automatically." (2026-09-25) and this resumption.
+Compatibility floor and its Tests/checks and sillclient lines; the review fixes' harness arguments,
+`-SillNoAutoDesktop`, `-SillOverlayLine` and a live `-SillScanOverlay`, are in ContentView's
+contract and §7.9, and main has moved on since cf05a78: PRs #29 to #33, origin/main at 2b38179, to
+merge first); (5) the PR with Noah's device tests (§11) and the install order: the iPad build first,
+then Sill.app. Quote Noah's authorization in the prompt: "Yes please lets add a pairing process for
+Wi-Fi/Direct connect, something easy to do but still secure, similar to how Tailscale is being
+paired. Wired should still pair automatically." (2026-09-25) and this resumption.
 
 
 2026-09-25. It stands alone: the implementer needs no other design document, though it builds on
@@ -1396,7 +1406,10 @@ the code Mac mini shows." Esc, Cancel or the escape gesture fold it back to the 
   `-SillHomeLink <sill://pair…>` type the code into, or scan the link with, the home card once the
   Mac answers the ask `shown`; `-SillOverlayCode <digits>` runs Pair This ‹iPad›… (its ask, then
   the code typed) once, on a session at home over TLS. The harness's `-SillScanOverlay 1` takes
-  `-SillOverlayLine asking|shown|openonmac|locked|noanswer` (the line the ask's answer sets). The move and path tests' rows count as the
+  `-SillOverlayLine asking|shown|openonmac|locked|noanswer` (the line the ask's answer sets), and
+  under `-SillLive 1` opens over the live session and asks its Mac; `-SillNoAutoDesktop 1` keeps the
+  device from picking the Desktop by itself, so a live gate's session streams nothing (the review
+  fixes, 2026-09-27). The move and path tests' rows count as the
   one saved Mac under `-SillHomeDoor` (they carry no TXT tag).
 
 ---
@@ -2817,3 +2830,128 @@ host at a time, another session's host waited for first.
   would have shown pairing at home's own words, not a Mac's message).
 - Not run: the simulator (S1–S7) and Noah's devices (P1–P16); main's parity and hardware gates
   (V1–V7, the encoder's) that need the hardware encoder or his devices.
+
+### The review fixes (2026-09-27)
+
+`$SP` here is `scratchpad/home-pairing-finish/review-fixes` in the session's scratchpad: the review
+rig (`rig/`: `ReviewRig-main.swift`, one more executable target in a scratch copy of the tree,
+never committed, the host as Sill.app sets it up with the test directory's store and the Mac's own
+actions on stdin; `gates.py` and `secgate.py`), the simulator gates (`sim/`: `simgates.py`,
+`loopback-ll.dylib`, each run's console, rig log and screenshot), the photos and the logs
+(`logs/`). Every DerivedData, every `git archive` copy, the rig's builds and the private simulator
+("Sill home-pairing") were deleted after.
+
+The workflow's review ran three lenses on da6cd66 (the wire and TLS, pairing's rules and limits,
+the device UI) and an adversarial pass confirmed 13 findings; a fourth lens, pairing's security
+(the ask, the QR and code paths at home, the cable and who can claim it, rate limits and lockouts,
+the trust store and keychain, Settings › Devices' Remove, Direct Wireless at home, logs), came back
+empty, cut short by a usage limit. It was read again here from the code: one more finding (14
+below). Each fix is its own commit, with a check or a live run that fails before and passes after
+where one can.
+
+**The fixes** (the commits say how, and what each check counts):
+1. **The floor let a later host drop `sill/1`** (ae2e228): "`sill/2` offered beside `sill/1`
+   while older peers are served" is now "a host offers `sill/1` and `sill-pair/1` for good, a
+   later generation only beside them, and refuses a device too old for it inside a `sill/1`
+   session with kind 22 "update"" (CLAUDE.md's floor, Compatibility.swift, RemoteTLS.swift, the
+   update-notice plan); `RemoteTLS.serverALPNs`, the protocol check's case.
+2. **What 1.0 freezes of pairing** (d984273): the floor names the TXT keys `r` and `p`, a
+   `sill-pair/1` connection as one kind 19 and one kind 20, the methods and reasons, kind 19's
+   `v` 1 and pairing never refused for age; a host answers a request of another `v` `closed` with
+   no try counted; kind 20 gains an optional `message` a later host can give a reason this build
+   does not know, which the device shows (§3.1, §3.5).
+3. **The home card promised a tap the Mac refused, and a device's Cancel left its window up**
+   (05cada8): the Mac's Cancel and a stop keep the asker quiet, an expiry and a withdrawal do not
+   (`AskLimits.quiets`); the card's words follow (`DiscoveryPolicy.homeRefusal`: the Sill menu
+   after a stop or a closed code, "Tap it for a new one" after an expiry); kind 19 "cancel" closes
+   the window the device's own ask opened (`PairingWindow.CloseReason.withdrawn`), sent by the
+   card's Cancel, and a cable pairing withdraws that device's window too.
+4. **Any TLS 1.2 client lit "An iPhone or iPad Needs Sill Updated"** (a40c9b9): the item waits
+   for a third plain try from one source within a minute (`DoorPolicy.olderSillTry`), as an older
+   Sill's redials make.
+5. **"‹device› Wants to Pair" outlived the pairing; its subtitles; VoiceOver** (698add8): the
+   request ends when the key that asked pairs, by a proof or over the cable, and follows a window
+   its item opened; the subtitles are sentences; a device-opened window announces its first line.
+6. **A tap on a tagless look-alike under a saved Mac's name** (e13f0be): `DiscoveryPolicy.rowMac`,
+   a tap dialed pinned as the reconnect always did (§7.3, §7.6); an open door's row reads "Not
+   paired" (`RowWord.openDoor`, the hint "Connects without pairing: Mac mini lets any device in.").
+7. **The project file's IDs** (0606cd6): StreamClient+Home.swift is A601/F601, as branch
+   pointer-visibility, now in main as PR #31, has A301/F301.
+8. **Kind 18 was not bound to the session's key** (1b5a3bf): it names the session's Mac only when
+   the connection it came on showed the signing key (`macInfoNamesSession`); a goodbye `removed`
+   revokes a saved Mac only from a session pinned to its key (`removalRevokes`) (§7.6).
+9. **An unsaved device's reconnect waited for ever at a door that now requires pairing**
+   (85bb126): `DiscoveryPolicy.reconnectEnd` ends it with the goodbye's own words (§7.6).
+10. **Pair This ‹iPad›… said a code was showing when none was** (5551d5c): it asks on its own
+    `sill-pair/1` connection to the session's door and its line says what the Mac answered
+    (`DiscoveryPolicy.overlayLine`), spoken; its Cancel withdraws a code shown for it (§7.5).
+11. **The harness** (380f081): `-SillNoAutoDesktop 1`, and `-SillScanOverlay 1` over a live
+    session, for the gates below.
+12. **The cable's words were never shown** (95d6eb0): the session's dial first, then "Paired with
+    Mac mini over the cable.", so the words are the turn's last, drawn and spoken until the session
+    comes.
+13. (The menu's subtitles, finding 13, are in 698add8 with 5.)
+14. **The security lens: Require pairing's keychain record** (1d95c6d): another process of this
+    user could create the `require-pairing` item before Sill ever saved it (Sill saves it only when
+    the switch changes) with a plain "0" and Sill among the apps allowed to read it, and Require
+    pairing was then off at Sill's next launch: any app on this Mac could reach the home door over
+    loopback and use Sill's grants. Now off only as "0." and a signature by the Mac's key over
+    "sill-require-pairing-off-v1\n‹Mac ID›" (`RequirePairingValue`, `HostIdentity.signRecord`), and
+    the keychain store makes the trust list, empty, at the first launch that finds none (the same
+    hole until the first pairing, from remote access). The rest of the lens found nothing to fix:
+    the ask and the proofs bind both TLS keys, the cable is the Mac's own IOKit reading and never
+    this Mac's address, the limits and backoff hold, Remove closes sessions at both doors and ones
+    the gate holds, Direct Wireless off closes what came over it, and no line of Sill.app's log
+    and no status holds a code, a secret or a serial (the CLI prints its code to its own stdout,
+    as it always has).
+
+**Verified** (2026-09-27, 03:30–06:50). Noah's iPad streamed from Sill.app for part of the time
+(`no-device.sh`), so nothing here used the hardware encoder: every host was a synthetic test host
+on the software encoder, every listener on loopback (`::1`, or `fe80::1%lo0` for the cable's
+stand-in, checked with `lsof` by PID), and the simulator gates' app picked nothing
+(`-SillNoAutoDesktop 1`), so nothing was encoded at all.
+- `Tests/checks/run-all.sh`: all 22 pass: addresses 41, ask-limits 34, cable-link 40, clientlink
+  89, compatibility 75, device-gate 58, door-policy 128, encoder-mailbox 38,256, encoder-slowstate
+  1,207, fence 14 modes, goodbye 45, home-device 164, home-model 51, home-records 39, home-txt 49,
+  ledger 90, origin 66, pairing-address 80, policy 336, protocol 190 and its 8 cross-checks,
+  remote-rules 107, update-policy 124.
+- The mutants of every check whose files the fixes touched, every one caught (453 in all, run again
+  on the last commit): home-device 107, home-model 15, home-records 21, home-txt 24, door-policy
+  58, ask-limits 20, protocol 23, compatibility 13, addresses 15 (`PairingWindow.swift`),
+  remote-rules 52 and policy 105. Three patterns had gone stale since 05cada8 (home-device's two
+  row words and its and policy's `askAnswer` context, which a new doc comment had moved): policy's
+  run had stopped at that one after 98 caught; each was fixed in the commit that found it.
+- Builds: `swift build -c release` of HEAD from `git archive`, clean, only the old CaptureProbe
+  warning; iOS Debug and Release for the simulator (signed ad hoc) and Debug for
+  `generic/platform=iOS` (`CODE_SIGNING_ALLOWED=NO`), each with fresh DerivedData, only the old
+  `StreamClient` capture warning (`StreamClient.swift:2613` now). The Release Info.plist: `_sill._tcp`
+  only, `ITSAppUsesNonExemptEncryption` false, version 0.5, `PrivacyInfo.xcprivacy`; none of the
+  harness's arguments is in the Release binary.
+- Live, the rig (the previous session, on the fixes' own trees against da6cd66's): the device's
+  Cancel, an expiry, the Mac's Cancel and a stop (3), 19 of 19, da6cd66's failing 8; plain tries
+  (4), 8 of 8, da6cd66's failing 4; the menu's request (5), 10 of 10, da6cd66's failing 5.
+- Live, a private simulator against the rig built from this tree, the app before (85bb126 with
+  the same harness) and after: the cable (12), `-SillConnect fe80::1%lo0:P -SillHomeDoor paired
+  -SillCableTest 1`: paired over the cable and connected pinned both times, the status lines
+  before "Paired with Noah’s MacBook Pro over the cable." then "Connecting to…" in one turn, after
+  "Connecting to…" then "Paired with…" until "Connected to…"; Pair This ‹iPad›… (10) over an open
+  door's session, the rig answering the ask from this Mac `openOnMac`: before the overlay said
+  "Noah’s MacBook Pro is showing a code now." (photographed) while the rig logged "not shown (it
+  asked from this Mac)", after "Noah’s MacBook Pro didn’t show a code by itself. On the Mac,
+  choose Pair iPhone or iPad… in the Sill menu." (photographed); with the ask admitted
+  (`SILL_TEST_ASK_FROM_THIS_MAC=1`) the rig opened a window for it ("offer byDevice=true") and the
+  line read "…is showing a code now."; and `-SillOverlayCode` over the open session with the Mac's
+  user's window up: the ask answered `shown`, the code paired "this session's Mac" (its kind 18,
+  signed by the connection's own key, named it: 8's binding on a real session).
+- Live, the rig with the test directory's store (14): Settings › Devices' switch saves a 97-byte
+  signed record and the next launch reads off; a plain "0" written in its place reads on, with the
+  line; Sill's own record put back reads off again: 3 of 3, the rig from the commit before reading
+  the planted "0" as off.
+- Photos: the harness's `homerows` at 1000×710 and 500×710 (the open door's row reads "Not
+  paired" beside the saved Mac's "Wi‑Fi").
+- Not run: Noah's devices (P1–P16); the keychain store's own writes (the trust list made at first
+  launch; no test touches the login keychain); VoiceOver heard (the announcements are posted, and
+  read in the code); the overlay's Cancel sending its withdrawal (the gates post no touch; the card's
+  Cancel's withdrawal ran live in 3); 9's reconnect and 8's replayed kind 18 live (the first needs
+  Bonjour rows, the second a Mac replaying another's kind 18: pure checks with real signatures
+  only); main's commits since cf05a78 (PRs #29–#33, origin/main at 2b38179), not merged.

@@ -49,8 +49,10 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `remote-rules` | `iOSClient/DiscoveryPolicy.swift`, `RemoteDialPolicy.swift`, `SavedMacs.swift` with `Sources/StreamProtocol` (`build.sh`), with `main.swift` and `home.swift` | the Remote rows and automatic remote dial, the order a saved Mac's addresses are tried in, what a failure means, saved Macs; pairing at home's model, a look-alike under a saved Mac's name among it, and the saved Macs' home fields (`home.swift`) | 107 | 52 |
 | `update-policy` | `Sources/SillMenuBar/UpdatePolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | Sill.app's update check: what each answer from GitHub's releases feed means, the offer, the schedule, the feeds and pages it accepts, every text | 124 | 18 |
 
-The counts are those of the `home-pairing` branch's merge with main at cf05a78, where every check
-passes and every mutant is caught (docs/home-pairing-plan.md, Results, "The merge with main").
+The counts are those of the `home-pairing` branch after its security review's fixes (2026-09-27),
+where every check passes and every mutant of the checks those fixes touched is caught
+(docs/home-pairing-plan.md, Results, "The review fixes"; the others as at the merge with main at
+cf05a78, "The merge with main").
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.

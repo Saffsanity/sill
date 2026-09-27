@@ -16,8 +16,9 @@ still pair automatically." The home door speaks TLS 1.3 with both keys pinned
 in Sill.app (and SillHost --pairing): a device pairs once, with the pairing
 window's QR code or code, or over the USB cable by itself, and one trust list
 serves Wi-Fi, Direct, the cable and remote access (Settings › Devices, Require
-pairing, Remove). Steps 0 to 5 of the plan's §12 are done and verified; the
-security review and Noah's device tests (§11) are next.
+pairing, Remove). Steps 0 to 5 of the plan's §12 are done and verified, and
+so are the security review's fixes (below); the step-6 docs, the PR and Noah's
+device tests (§11) are next.
 - Merged with main (2026-09-27, d11aa60 of main at cf05a78: PRs #16 to #28),
   not rebased. As the Compatibility floor below says, the device gate went
   into `Door` (home pairing landed second): `Door.admitSession` runs
@@ -36,8 +37,40 @@ security review and Noah's device tests (§11) are next.
   `ask-limits`, `home-records`, `home-device`, `home-txt`, `home-model`, and
   `home.swift` in `policy` and `remote-rules`), and into CI's mutants matrix.
   Verified: the plan's Results, "The merge with main".
+- Review fixes (2026-09-27, ae2e228 to 1d95c6d, one commit per theme; the
+  plan's Results, "The review fixes"). Three lenses on da6cd66 confirmed 13
+  findings; a fourth, pairing's security, came back empty and was read again
+  from the code (one more). The floor: a host offers `sill/1` and `sill-pair/1`
+  for good and refuses a 1.0 device inside `sill/1` with "update"; it freezes
+  the TXT keys, the pairing exchange, kind 19's `v` (another `v` is answered
+  `closed`, no try) and kind 20's reasons, with an optional `message` for a
+  reason a device does not know. The Mac: the Mac's Cancel and a stop keep an
+  asker quiet, an expiry and a withdrawal (kind 19 "cancel", the device's
+  Cancel) do not; "An iPhone or iPad Needs Sill Updated" only after three plain
+  tries from one source in a minute; "‹device› Wants to Pair" ends when that
+  key pairs; its subtitles are sentences; a device-opened window announces its
+  first line; Require pairing's stored "off" is "0." and a signature by the
+  Mac's key (`RequirePairingValue`: a record another app made first reads on),
+  and the keychain store makes the trust list, empty, at the first launch. The
+  device: a tap on a tagless row under a saved Mac's Bonjour name dials that
+  Mac pinned, as the reconnect always did (`DiscoveryPolicy.rowMac`); an open
+  door's row reads "Not paired"; kind 18 names the session's Mac only when the
+  connection's own key signed it, and "removed" revokes only from a session
+  pinned to that Mac; the reconnect ends at a door that now asks devices to
+  pair; Pair This iPad… asks on its own `sill-pair/1` connection and says what
+  the Mac answered; "Paired with ‹Mac› over the cable." stays until the session
+  comes. Harness: `-SillNoAutoDesktop 1`, `-SillScanOverlay 1` over a live
+  session, `-SillOverlayLine`. Verified: every pure check (22), the touched
+  checks' mutants, the builds, the rig's live gates and a private simulator's
+  before and after (the cable's words, the overlay's line); main has moved on
+  since cf05a78 (PRs #29 to #33, not merged here).
 - **Untested, for Noah:** the plan's §11 device tests (P1 to P16), with the
-  install order: the iPad build first, then Sill.app.
+  install order: the iPad build first, then Sill.app. Also: Sill.app's first
+  launch of this build makes the trust list in the login keychain when it has
+  none, and Settings › Devices' Require pairing off then on again works (the
+  keychain store's own writes ran nowhere else); Pair This iPad… over an open
+  door says "…is showing a code now." only when the Mac shows one, and its
+  Cancel closes that window.
 
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
