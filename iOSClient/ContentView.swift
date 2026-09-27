@@ -130,7 +130,10 @@ struct ContentView: View {
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
 ///   `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: the line under its title over a
 ///   session at home that speaks TLS, as the Mac's answer to the overlay's ask sets it
-///   (DiscoveryPolicy.overlayLine; the mock never asks).
+///   (DiscoveryPolicy.overlayLine; the mock never asks). Under `-SillLive 1` the overlay opens over
+///   the live session as soon as it connects, and asks its Mac as Pair This iPad… does.
+/// * `-SillNoAutoDesktop 1` — (also in the normal app) the device never picks the Desktop by
+///   itself: a live gate's session streams nothing, so no host encodes while it runs.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -288,7 +291,8 @@ struct LayoutHarness: View {
                                  drawerOpen: spec.drawerOpen,
                                  keyboardShown: spec.keyboardShown,
                                  scaleOpen: spec.scaleOpen, textScale: spec.textScale,
-                                 settingsOpen: spec.settingsOpen)
+                                 settingsOpen: spec.settingsOpen,
+                                 pairingOverlay: spec.scanOverlay, scannerOverride: spec.scanOverlay ? .placeholder : nil)
                 } else {
                     ConnectScreen(client: live)
                 }

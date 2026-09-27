@@ -221,6 +221,14 @@ final class StreamClient: ObservableObject {
     @Published private(set) var windowOrder: [UInt32] = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
+    /// DEBUG `-SillNoAutoDesktop 1`: the device never picks the Desktop by itself, so a live gate's
+    /// session streams nothing and no host encodes (a test host's software encoder included) while
+    /// it runs. Always false in a Release build.
+    #if DEBUG
+    private static let noAutoDesktop = UserDefaults.standard.bool(forKey: "SillNoAutoDesktop")
+    #else
+    private static let noAutoDesktop = false
+    #endif
     /// Picks and launches sent from this device (main thread). The automatic Desktop request that
     /// waits out a closed window stands down if this moved meanwhile: the user chose something,
     /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
@@ -2588,7 +2596,7 @@ final class StreamClient: ObservableObject {
                 // connection, and again when the window being watched has closed. Not when a pick
                 // failed (the host still lists the window): that is the user's to retry. At most
                 // once every 10 s, so a host that cannot start the Desktop does not loop.
-                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10 {
+                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10, !Self.noAutoDesktop {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
