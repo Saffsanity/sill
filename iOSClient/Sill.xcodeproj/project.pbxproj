@@ -18,6 +18,7 @@
 		A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00A /* PortraitStreamScreen.swift */; };
 		A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F501 /* PhonePortraitLayout.swift */; };
 		A1000001000000000000A00A /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00B /* TrackpadView.swift */; };
+		A1000001000000000000A701 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
 		A1000001000000000000A00B /* MockCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00C /* MockCatalog.swift */; };
 		A1000001000000000000A006 /* StreamProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A1000001000000000000D001 /* StreamProtocol */; };
 		A1000001000000000000A010 /* DiagnosticsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F010 /* DiagnosticsHUD.swift */; };
@@ -53,6 +54,7 @@
 		A1000001000000000000F00A /* PortraitStreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitStreamScreen.swift; sourceTree = "<group>"; };
 		A1000001000000000000F501 /* PhonePortraitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePortraitLayout.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00B /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
+		A1000001000000000000F701 /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00C /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
 		A1000001000000000000F010 /* DiagnosticsHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DiagnosticsHUD.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F011 /* StreamClient+Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Viewport.swift"; sourceTree = "<group>"; };
@@ -105,6 +107,7 @@
 				A1000001000000000000F004 /* HEVCDisplayView.swift */,
 				A1000001000000000000F009 /* InputOverlay.swift */,
 				A1000001000000000000F00B /* TrackpadView.swift */,
+				A1000001000000000000F701 /* TrackpadGestures.swift */,
 				A1000001000000000000F00C /* MockCatalog.swift */,
 				A1000001000000000000F01C /* PairingOverlay.swift */,
 				A1000001000000000000F01B /* AddMacCard.swift */,
@@ -231,6 +234,7 @@
 				A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */,
 				A1000001000000000000A008 /* InputOverlay.swift in Sources */,
 				A1000001000000000000A00A /* TrackpadView.swift in Sources */,
+				A1000001000000000000A701 /* TrackpadGestures.swift in Sources */,
 				A1000001000000000000A00B /* MockCatalog.swift in Sources */,
 				A1000001000000000000A01C /* PairingOverlay.swift in Sources */,
 				A1000001000000000000A01B /* AddMacCard.swift in Sources */,
