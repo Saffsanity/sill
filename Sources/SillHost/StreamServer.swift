@@ -1164,8 +1164,8 @@ final class StreamServer {
     ///   every delta references that keyframe, so dropping them for its sake wasted it and looped
     ///   (drop, a keyframe 2 s later, the next delta dropped behind it: 2026-09-25, 0–3 fps and
     ///   rtt up to 12 s at 150 Mbps on a phone's hotspot).
-    /// - Otherwise a frame is dropped when the backlog exceeds `remoteBacklogBudget`, or what the
-    ///   last keyframe left behind it (`backlogFloor`, following the backlog down) plus
+    /// - Otherwise a frame is dropped only when the backlog exceeds both `remoteBacklogBudget` and
+    ///   what the last keyframe left behind it (`backlogFloor`, following the backlog down) plus
     ///   `remoteBacklogSlack`: a backlog that shrinks is a link catching up, one that grows is a
     ///   stream the link cannot carry.
     /// - A client that lost a frame asks for a keyframe only once the connection has taken
