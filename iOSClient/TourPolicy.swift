@@ -220,6 +220,14 @@ enum TourPolicy {
         return memory
     }
 
+    /// Skip on a card (Esc and VoiceOver's escape gesture are Skip too): in the automatic tour it
+    /// turns the tour off for good on this device (`skipped`); in Take the Tour it only closes the
+    /// run, since the person asked for that one, and what the automatic tour still owes (the
+    /// upright card, a topic a later build adds) stays owed.
+    static func skip(_ run: TourRun, _ m: TourMemory) -> TourMemory {
+        run.replay ? m : skipped(m)
+    }
+
     // MARK: Runs
 
     /// The automatic tour: the steps owed, from the first.

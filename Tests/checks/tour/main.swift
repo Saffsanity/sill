@@ -54,6 +54,15 @@ check(TourPolicy.passed(.bar, TourMemory(seen: [.bar])) == TourMemory(seen: [.ba
 check(TourPolicy.passed(.laptop, sideways) == everything, "the upright card completes it")
 check(TourPolicy.skipped(sideways) == TourMemory(seen: [.touch, .bar, .settings], skipped: true), "Skip keeps what was seen")
 check(!TourPolicy.skipped(fresh).seen.contains(.touch) && TourPolicy.skipped(fresh).skipped, "Skip saves no step")
+// Skip in the automatic tour turns it off; in Take the Tour it only closes the run.
+let automaticRun = TourRun(steps: [.touch, .bar, .settings], at: .touch, replay: false)
+let replayRun = TourRun(steps: [.touch, .bar, .settings], at: .touch, replay: true)
+check(TourPolicy.skip(automaticRun, fresh) == TourMemory(skipped: true), "Skip in the automatic tour: off for good")
+check(TourPolicy.skip(automaticRun, sideways) == TourMemory(seen: [.touch, .bar, .settings], skipped: true), "…keeping what was seen")
+check(TourPolicy.skip(replayRun, sideways) == sideways, "Skip in Take the Tour: nothing saved, the tour not turned off")
+check(TourPolicy.owed(P, voiceOver: false, TourPolicy.skip(replayRun, sideways)) == [.laptop],
+      "after Take the Tour's Skip the upright card is still owed")
+check(TourPolicy.skip(TourRun(steps: all, at: .bar, passed: [.touch], replay: true), fresh) == fresh, "a replay upright, the same")
 
 // MARK: - The rule
 

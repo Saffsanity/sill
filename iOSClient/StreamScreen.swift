@@ -511,10 +511,13 @@ struct StreamScreen: View {
         }
     }
 
-    /// Skip: no automatic tour again on this device. Take the Tour still shows it.
+    /// Skip (Esc, VoiceOver's escape gesture): the automatic tour is off for good on this device;
+    /// in Take the Tour it only closes the run (TourPolicy.skip).
     private func tourSkip() {
-        tourStore.save(TourPolicy.skipped(tourStore.memory))
-        tourLog("skipped (saved\(tourStore.writes ? "" : "; this run only"))")
+        guard let run = tour else { return }
+        let memory = TourPolicy.skip(run, tourStore.memory)
+        if memory != tourStore.memory { tourStore.save(memory) }
+        tourLog(run.replay ? "closed (Take the Tour; nothing more saved)" : "skipped (saved\(tourStore.writes ? "" : "; this run only"))")
         endTour()
     }
 

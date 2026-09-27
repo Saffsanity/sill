@@ -20,6 +20,7 @@ MUTANTS = [
     ("laptop owed in landscape", "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .settings] : [.touch, .bar, .settings, .laptop]", "let all: [TourTopic] = layout == .landscape ? [.touch, .bar, .settings, .laptop] : [.touch, .bar, .settings, .laptop]"),
     ("Next not saving", "memory.seen.insert(t)", "_ = t"),
     ("Skip not saving", "memory.skipped = true", "memory.skipped = m.skipped"),
+    ("Skip in Take the Tour turns the tour off", "run.replay ? m : skipped(m)", "skipped(m)"),
     ("Next not advancing", "moved.at = run.steps[i + 1]", "moved.at = run.steps[i]"),
     ("carry goes to the first step, not the next one owed", "guard let next = list.first(where: { $0 > run.at && !run.passed.contains($0) }) else { return nil }", "guard let next = list.first(where: { !run.passed.contains($0) }) else { return nil }"),
     ("carry keeps a step the new layout lacks", "if list.contains(run.at) { return carried }", "if true { return carried }"),
