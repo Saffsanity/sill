@@ -452,22 +452,35 @@ private struct TourCard: View {
     @State private var appeared = false
 
     private static let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    /// The scrolling words' top, for the scroll back at each step.
+    private static let wordsTop = "sill.tour.words"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ViewThatFits(in: .vertical) {
                 words
-                ScrollView { words.padding(.bottom, 16) }
-                    .scrollIndicatorsFlash(onAppear: true)
-                    .scrollBounceBehavior(.basedOnSize)
-                    // Words that run on under the footer fade out instead of being cut mid-line.
-                    .mask {
-                        VStack(spacing: 0) {
-                            Color.black
-                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                                .frame(height: 16)
+                ScrollViewReader { reader in
+                    ScrollView { words.id(Self.wordsTop).padding(.bottom, 16) }
+                        .scrollIndicatorsFlash(onAppear: true)
+                        // Each step's words start at their top, and show there is more below: the card
+                        // keeps its identity from step to step (it slides), and so would the place a
+                        // reader scrolled the last step's words to.
+                        .scrollIndicatorsFlash(trigger: run.at)
+                        .onChange(of: run.at) { _, _ in
+                            var top = Transaction()
+                            top.disablesAnimations = true
+                            withTransaction(top) { reader.scrollTo(Self.wordsTop, anchor: .top) }
                         }
-                    }
+                        .scrollBounceBehavior(.basedOnSize)
+                        // Words that run on under the footer fade out instead of being cut mid-line.
+                        .mask {
+                            VStack(spacing: 0) {
+                                Color.black
+                                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                                    .frame(height: 16)
+                            }
+                        }
+                }
             }
             footer
                 .padding(.top, 14)
