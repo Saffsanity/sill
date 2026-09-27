@@ -657,7 +657,7 @@ setting must go" gains one line: an away variant goes in HostConfig's away knobs
 
 ```
 Away from home: every connected device is away; streaming at Low · Standard (4 Mbps per 60 fps, points). The home quality stays Pro · Retina.
-Home quality again: a device connected at home (fe80::47b:5945:e0aa:d0ac%en0.51447); streaming at Pro · Retina.
+Home quality again: a device connected at home (fe80::1c2d:3e4f:5a6b:7c8d%en0.51447); streaming at Pro · Retina.
 Settings from iPad (iPad14,1): away bitrate 4 → 15 Mbps per 60 fps
 Settings: away bitrate 4 → 15 Mbps per 60 fps
 ```
@@ -1379,8 +1379,10 @@ after PR A or with PR A's commits first. Cherry-pick this plan's commit.
 
 Built on `remote-pacing`, from main at 150f781 (2026-09-26): the host (72d469c), the harness
 (5e8255b; review fixes 1e2e649, 556cc7c, d8dcf2a, 5d18b11), the device's reader (c5326df; review
-fix e3a49ef), a comment (911202e), then main at cf05a78 merged in (7e577c5) and these docs. Items
-2–4 (PR B) are not started.
+fix e3a49ef), a comment (911202e), then main at cf05a78 merged in (7e577c5) and these docs
+(b0fd105), main at 676b362 merged in (07fe32f, no source of the host or the device changed), and
+the review's two cases (a81a58f) and fixes (24dee3c, a933a4f). Items 2–4 (PR B) are not
+started.
 
 ### Defaults taken
 
@@ -1425,61 +1427,140 @@ The others are PR B's.
   `onBytes` passes the count. H5's slow case is a 1 MB frame at 2 Mbit/s (the plan's 3 MB at
   1 Mbit/s would take 24 s), and the check has 17 mutants where the plan asks for 5.
 
+### Review (2026-09-27)
+
+An adversarial pass before the pull request, over the pacing's arithmetic and edge cases,
+starvation and bufferbloat, home sessions and the device's reader. It found two faults. Each got a
+harness case first (a81a58f), which fails on the build before its fix, and then the fix:
+
+1. **A restart while a keyframe was still being taken** (24dee3c). `paceRemote` kept one keyframe
+   in flight, the last one sent. A stream restarted while one was still being taken (a pick, a
+   rotation, a settings change: `resetForNewStream`) sent its first keyframe at once and forgot
+   the one before it, whose bytes then counted as backlog waiting beyond the new one. The new
+   stream's first delta was over the hold cap and dropped, and the device kept the new keyframe's
+   picture until a third keyframe, asked for once everything had drained. The client now keeps
+   every keyframe it is still taking (`keyframesInFlight`, their bytes in
+   `keyframeBytesInFlight`), the hold cap counts what waits beyond all of them, and the floor is
+   set once the last of them is taken. restartkf (2.5 MB keyframes, 4 KB deltas, 32 Mbit/s, the
+   stream restarting 0.1 s after a keyframe three times), three runs each: the build before
+   dropped a delta at every restart, 9 of 9 (54.7–56.2 fps, 136–152 `net.waitKey` after the first
+   keyframe); the fix at none (60.0–60.1 fps, no `net.waitKey` after the first keyframe). With
+   1.5 MB keyframes, 8 KB deltas and 20 Mbit/s, where this Mac's loopback buffers take most of a
+   keyframe within the 0.1 s, the build before dropped at 3 of 9 restarts and the fix at none.
+2. **A still window right after a drop** (a933a4f). A remote client that lost a frame asked
+   for its keyframe only when a later frame came (`paceRemote`), once its queue had drained. When
+   the window went still right after the drop (the end of a scroll, the last letters typed), no
+   later frame came, and the device kept the picture from before the drop until the window next
+   changed. Main has the same rule: it asked on the same later frame. A home client asks at the
+   drop itself. The remote sweep, once a second, now asks too, on the same terms: a keyframe
+   wanted, not a restarted stream's first, the queue at most `remoteIdleBytes`, the request due.
+   The encoder then encodes the still window's last frame again (HEVCEncoder.requestKeyframe, once
+   nothing has repainted for 50 ms). stillend (1.5 MB keyframes and 60 KB deltas on 16 Mbit/s, so
+   frames are dropped all along; the window still for 8 s three times), three runs each: on the
+   build before (24dee3c) the device kept the older picture through every still spell, 9 of 9,
+   and 9 of 9 on 07fe32f; with the fix it showed the last frame, encoded again, within 2.2 s of
+   each spell's start, 9 of 9 (2.2–2.3 s against 07fe32f).
+
+**Looked at and left as they are:**
+- **The byte counts.** Every message `send` hands over adds its size to `pendingBytes`, and its
+  completion takes the same size away. Both run on `sill.net`, and a connection's completions come
+  in order, so the count neither drifts nor goes negative, and a keyframe's completion means
+  everything queued before it was taken. Ticks bypass `send`: 14 bytes, at most every 30 ms.
+- **Bufferbloat.** Behind keyframes being taken, what Sill holds for a remote client is at most
+  those keyframes and 512 KB. With none, it is at most 256 KB, or the floor and 128 KB. The floor
+  is set only as the last keyframe being taken is taken, to what waits behind it: at most 512 KB
+  and a delta. Several keyframes are in flight at once only while their deltas stay under the cap,
+  and deltas reach it within about a second. In one ad hoc run where the keyframes alone exceed
+  the link (1.6 MB every 4 s with 2 KB deltas on 2 Mbit/s, 60 s, not a case), the build before
+  the review had a frame age of 11.3 s at the median and 17.1 s at p95, the final tree 10.8 and
+  13.9 s: keeping every keyframe lets no queue grow that keeping one did not. Both are a stream
+  the link cannot carry. The kernel's send buffer (autotuned up to 4 MB here,
+  `net.inet.tcp.autosndbufmax`) and the network's queue come on top, unseen (§3.7).
+- **Starvation.** A client waiting for a keyframe takes the encoder's own (every 4 s of frames)
+  whenever its queue is under the budget. So traffic that keeps its queue over `remoteIdleBytes`
+  (thumbnails on a slow link) delays its request, never its recovery. The loops left are a stream
+  bigger than the link (over8, stillend) and the bistable edge of §3.2.
+- **Home sessions.** Every change is inside `paceRemote`, an `if remote` in `send` or the remote
+  sweep, whose timer runs only while a remote client is connected. No new print or Stats key.
+  The harness's home case (a home client over plain TCP: the home branch and the home eviction
+  rule) after the review: 60.1 fps on both builds, nothing dropped, the worst frame age of a
+  second 15 and 18 ms at the median.
+- **The device's reader:** its pieces, caps, ends and `stillReads`, its queue (every connection it
+  reads starts on the client's network queue) and its lifetime (held by its pending read).
+  Unchanged; the check's 46 cases and 17 mutants ran again.
+- **bottleneck.py's comment** said macOS kept its 64 KB receive buffer. It does not: on loopback
+  the buffer held 340–590 KB whatever SO_RCVBUF said, set before connecting or after. So the path
+  holds 0.7–1 MB in the host's send buffer and the relay's receive buffer besides its queue. The
+  comment says so now. The relay is unchanged, so every figure here stands.
+- **The plan's example line** for "Home quality again" carried a real device's link-local
+  address; it has a made-up one now.
+
 ### Verified
 
 On this Mac (an M2 Pro), 2026-09-27, with no device, simulator recording or video encoder involved:
 
-- **H1, the builds,** before the merge (5d18b11) and on it (7e577c5): `swift build -c release` from
-  clean, only the CaptureProbe warning; the iOS app for the simulator, Debug and Release (arm64,
-  unsigned), only the old `StreamClient` capture warning.
-- **H3 and H4, the harness** (`Scripts/pacing/run.sh`, against origin/main at cf05a78, whose
-  StreamServer.swift is 150f781's). Each run started with the load average under 20, and one that
-  ended at 20 or more ran again, twice at most. fps is the device's mean after its first 5 s;
-  drops are the host's `net.dropped` a minute.
+- **H1, the builds,** before the merge (5d18b11), on it (7e577c5) and after the review (a933a4f):
+  `swift build -c release` from clean, only the CaptureProbe warning; the iOS app for the
+  simulator, Debug and Release (arm64, unsigned), only the old `StreamClient` capture warning.
+- **H3 and H4, the harness** (`Scripts/pacing/run.sh --full`, against origin/main at cf05a78 on the
+  merge and at 676b362 after the review, whose StreamServer.swift is 150f781's both times). Each run
+  started with the load average under 20, and one that ended at 20 or more ran again, twice at
+  most. fps is the device's mean after its first 5 s; drops are the host's `net.dropped` a minute.
 
-| Case | Before the merge, base → new fps | On the merge, base → new fps | New drops a minute | Gate (new) |
+| Case | On the merge (7e577c5), base → new fps | After the review (a933a4f), base → new fps | New drops a minute, after the review | Gate (new) |
 |---|---|---|---|---|
-| real24 (×3) | 36.5, 33.4, 39.0 → 59.3 ×3 | 19.0, 7.7, 31.3 → 56.6, 59.3, 59.4 | 0 (base 15–28) | ≥ 55 fps, none dropped: pass; 14–16 keyframes a minute |
-| kf25m32 (×3) | 1.5 ×3 → 60.1 ×3 | 1.5, 1.4, 1.5 → 60.1 ×3 | 0 (base 28.3) | ≥ 55 fps: pass |
-| bigkf8 (×3) | 1.6, 7.3, 1.6 → 59.8 ×3 | 1.9, 1.9, 1.6 → 59.8, 59.8, 59.9 | 0 (base 28–29) | each ≥ its base run: pass |
-| slowkfB | 0.5 → 64.8 | 0.4 → 64.8 | 0 | ≥ 55 fps after the first keyframe (67.9), no liveness loss: pass |
+| real24 (×3) | 19.0, 7.7, 31.3 → 56.6, 59.3, 59.4 | 45.1, 53.9, 53.1 → 59.3 ×3 | 0 (base 2.9–5.9) | ≥ 55 fps, none dropped: pass; 14.6 keyframes a minute |
+| kf25m32 (×3) | 1.5, 1.4, 1.5 → 60.1 ×3 | 1.3, 1.5, 1.4 → 58.2, 60.1, 59.9 | 0 (base 28.3) | ≥ 55 fps: pass |
+| bigkf8 (×3) | 1.9, 1.9, 1.6 → 59.8, 59.8, 59.9 | 24.5, 18.2, 18.3 → 59.8, 59.9, 59.8 | 0 (base 20.5–22.0) | each ≥ its base run: pass |
+| slowkfB | 0.4 → 64.8 | 0.4 → 64.8 | 0 | ≥ 55 fps after the first keyframe (67.9), no liveness loss: pass |
 | slowkf | 0.0 → 0.0 | 0.0 → 0.0 | – | recorded: the old device's rule lost the session 5 times on either host |
-| ext120 | 119.9 → 120.0 | 119.9 → 120.0 | 0 (base 5.7) | ≥ 115 fps, none dropped, no `net.waitKey` after the first keyframe: pass |
-| ext60 | 59.8 → 60.0 | 59.9 → 60.0 | 0 (base 8.6, 5.7) | the same at 60 fps: pass |
+| ext120 | 119.9 → 120.0 | 119.8 → 120.0 | 0 (base 5.7) | ≥ 115 fps, none dropped, no `net.waitKey` after the first keyframe: pass |
+| ext60 | 59.9 → 60.0 | 59.7 → 60.0 | 0 (base 11.4) | the same at 60 fps: pass |
 | fastbig | 60.0 → 60.0 | 60.0 → 60.0 | 0 | pass |
-| dip | 50.6 → 52.8 | 50.3 → 52.8 | 1.1 (base 3.2) | no loss or eviction, the frame age back at 45 ms 6.0 s after the dip (base 4.0): pass |
-| over8 | 2.5 → 4.9 | 1.7 → 4.9 | 27.8 | recorded, ≥ the base: pass |
+| dip | 50.3 → 52.8 | 50.3 → 52.8 | 1.1 (base 3.2) | no loss or eviction, the frame age back at 45 ms 6.0 s after the dip (base 4.0): pass |
+| over8 | 1.7 → 4.9 | 1.7 → 4.9 | 27.8 | recorded, ≥ the base: pass |
 | low | 60.1 → 60.1 | 60.1 → 60.1 | 0 | no worse than the base: pass |
-| switch | 37.7 → 60.1 | 36.5 → 60.1 | 0 (base 12–13) | no worse than the base: pass |
-| home | 59.8 → 60.1 | 60.0 → 60.0 | 0 | no worse than the base: pass |
-| relay2 (H4) | 61.3 → 62.4 | 61.4 → 62.3 | 0 | no loss or eviction, a frame every second, 15.3 keyframes a minute (base 16.0–16.6): pass |
+| switch | 36.5 → 60.1 | 59.4 → 60.1 | 0 (base 0) | no worse than the base: pass |
+| home | 60.0 → 60.0 | 60.1 → 60.1 | 0 | no worse than the base: pass |
+| relay2 (H4) | 61.4 → 62.3 | 61.5 → 62.1 | 0 | no loss or eviction, a frame every second, 15.3 keyframes a minute (base 15.9): pass |
 | blackhole (H4) | dropped at 13.1 s on both | dropped at 13.1 s on both | – | dropped for its silence 11–16 s after connecting: pass |
+| stillend (review) | – | 1.4 → 6.0; the last frame shown in 0 → 3 of 3 still spells | 17.6 (base 16.5) | every still spell ends with the last frame shown, within 5 s (2.2 s): pass |
+| restartkf (review) | – | 1.6 → 60.1 | 0 (base 33.3) | none dropped, no `net.waitKey` after the first keyframe: pass |
 
-  - Before the merge the matrix ran in three pieces: real24, kf25m32, bigkf8 and a first slowkfB
-    (64.7 fps; it ended with the load over 20) until other work on this Mac held the load average
-    at 200–700 for over twenty minutes; home, relay2 and blackhole on their own; the rest, slowkfB
-    again among them, from a scratch worktree at 5d18b11 once the load fell.
+  - Before the merge (5d18b11) the same cases ran with the same verdicts (that column is in this
+    file at b0fd105); the matrix ran in three pieces, since other work on this Mac held the load
+    average at 200–700 for over twenty minutes.
   - On the merge one base run, kf25m32's second, was skipped after its retry waited 20 minutes for
     the load; its first try, which ended with the load at 31, ran at 1.4 fps.
-  - bigkf8 was in the good state in all six runs of the new build (§3.2 found it bistable), with
+  - After the review other work on this Mac lifted the load average past 100 every ten minutes or
+    so: eight runs ended over 20 and ran again, and every run kept ended under 17.
+  - The base's loop depends on timing: real24 and switch fell into it less often after the review
+    than on the merge (switch not at all), while kf25m32 and restartkf (2.5 MB keyframes) looped
+    in every run. The new build's figures stayed where they were.
+  - bigkf8 was in the good state in all nine runs of the new build (§3.2 found it bistable), with
     a frame age of 0.6 s at the median and 1.5 s at p95: the standing queue of §3.7.
   - relay2 has a standing queue in the host's send buffer on both builds, since sillrelay.py reads
-    through a 64 KB buffer as in the remote plan's H14: frame age about 0.35 s at the median, the
-    pong's round trip 1.2–1.3 s at p95 on the new build (1.2–1.4 s on the base).
+    through a 64 KB buffer as in the remote plan's H14: the pong's round trip at p95 was 1.2 s on
+    the new build and 1.3–1.4 s on the base, on the merge and after the review.
 - **H5, the reader** (`Tests/checks/message-reader`): 46 checks, and 17 of 17 mutants caught (the
-  plan's five among them), before the merge and on it.
+  plan's five among them), before the merge, on it and after the review.
 - **S2, the reader live,** on a private iPad mini simulator (iOS 27.0), origin/main's app and then
   this branch's against the same harness host: origin/main's lost the session 7.3 s after
   connecting ("connection silent for 6 s: lost"; 7.2 s on the merge's run) while 1.8 MB came
   through; this branch's never did in 60 s. Its first keyframe landed about 8 s in, then it ran
   at 60 fps with a frame age of 40 ms (the app's own stats, and its HUD counting frames, "no
-  video"), and the host evicted nobody. Before the merge and on it.
-- **The pure checks** (`Tests/checks/run-all.sh`): all 16 pass, before the merge and on it.
+  video"), and the host evicted nobody. Before the merge and on it; after the review, this branch's
+  app alone against the final host: no loss in the 57 s it ran, its first frames 9 s in, then
+  59–60 fps at a frame age of 40–46 ms, nobody evicted.
+- **The pure checks** (`Tests/checks/run-all.sh`): all 16 pass, before the merge and on it; all 17
+  after the review (`dmg-layout` came with main at 676b362).
 
 ### Not verified here, for Noah
 
 On his devices: P1 (pacing on the hotspot at Pro and Extreme · Retina), P2 (liveness on a
 1 Mbit/s link), P3 (home unchanged at Extreme) and P14 (Extreme through the remote door on
-Tailscale's LAN path, at 60 fps and, from a 120 Hz device, at 120). Nothing here ran on a device,
-the hardware encoder or a real path: the harness sends over loopback, and a real path's send
-buffer may stay smaller (§3.2).
+Tailscale's LAN path, at 60 fps and, from a 120 Hz device, at 120). From the review, on the hotspot
+too: a scroll that stops settles on where it stopped within a few seconds, and a pick or a rotation
+while it scrolls keeps moving from the new stream's first picture. Nothing here ran on a device,
+the hardware encoder or a real path: the harness sends over loopback, whose kernel buffers take
+0.7–1 MB the pacing never sees, and a real path's send buffer may stay smaller (§3.2).

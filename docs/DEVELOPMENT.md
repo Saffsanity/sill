@@ -375,7 +375,7 @@ another), with no encoder, Screen Recording or device: the host fed fake frames
 of chosen sizes, a shaped path (a rate, a delay, a queue, a dip, a dead path)
 and a stand-in device that reads, pings and judges liveness as the app does,
 all on 127.0.0.1. It prints each case against its gate
-(docs/remote-bundle-plan.md §11): about 15 minutes, `--full` about 40, and it
+(docs/remote-bundle-plan.md §11): about 18 minutes, `--full` about 40, and it
 waits while the Mac is busy (a load average of 20 or more), since a busy Mac
 makes a stalled path of any link. `--list` shows the cases.
 
