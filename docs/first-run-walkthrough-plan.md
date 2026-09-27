@@ -1079,3 +1079,105 @@ two keys, Skip for good, Take the Tour last in Settings, and the Debug rule.
     rows) and speaks the rest VoiceOver's way. The alternative: keep `touch`, teaching VoiceOver's
     pass-through (double-tap and hold, then the gesture), which has not been tried on the stream's
     input view.
+
+---
+
+## Results (2026-09-27, the build)
+
+Built on `first-run-walkthrough` as §14 orders it, one commit per step (the rules and their check;
+the overlay and the stream screen; Take the Tour; then fixes and docs). Every open question took its
+default.
+
+### Where the build departs from the plan, and why
+
+- **The count goes on across a rotation.** §3.2 recomputed a run "less what this run has passed",
+  which would restart the dots ("Settings, step 1 of 2" after two cards). `TourPolicy.carry` gives
+  the new layout's steps (Take the Tour: all of them; the automatic tour: those owed and those this
+  run passed), so the card on screen keeps its place ("3 of 4"). A step the new layout lacks gives
+  way to the next one after it not yet passed, and with none after it the run ends (a run at
+  `laptop` turned sideways), nothing more saved.
+- **A `laptop` card passed under VoiceOver counts as seen.** §6.5 kept the trackpad's rows owed for
+  a run without VoiceOver; memory is per topic, and keeping `laptop` owed would bring the keys card
+  back at every upright session of a VoiceOver user. `touch` stays owed, as planned.
+- **"Not active" is UIKit's `applicationState`.** SwiftUI's `scenePhase` read inactive for an app
+  that was active and on screen in a headless simulator (every decision passed as "the app was not
+  active"); `UIApplication.shared.applicationState` read active.
+- **The strip's lit band** is its thumbnails' band with the active halo's 5 pt above and the app
+  badge's 6 pt below (`WindowStrip.tourBand`), so the cutout never cuts a badge; sideways the ring
+  then runs along the bar's top and bottom.
+- **The tail and the card's frame come from its laid-out height.** A `GeometryReader` in the card
+  reported frames scaled by the appear animation (0.94 to 1 over a quarter second), which hid the
+  tail until the end and changed the report every frame. Placed again at the height it was given, a
+  card lands where the layout put it; the check asserts that over its whole grid.
+- **The Settings row's group** has 10 pt above it when it follows a row, not a footnote (while
+  settings load, and for a Mac without them).
+- **Added:** `-SillTakeTourAt S` (the gates may not tap Take the Tour), and "S s after the picture"
+  on the console's `showing` lines. The scrolling words fade out over 16 pt above the footer instead
+  of being cut mid-line; Next and Done get 4 pt more height at large sizes.
+
+### Found and fixed while building
+
+- On the iPhone SE at accessibility-extra-large text the laptop card's Done wrapped to two lines:
+  the footer's line was measured with its buttons' words free to wrap. They are fixed size now, and
+  the line gives way to the stack when it would squeeze them (photographed at 375x667 at the default
+  size, accessibility-extra-large and the largest size).
+- A run carried into the other layout did not mark it offered, so a later turn back could offer the
+  laptop card again in the same session.
+
+### Verified
+
+- **H1:** iOS Debug and Release for the simulator and Debug for a generic device (unsigned):
+  `** BUILD SUCCEEDED **` with only the known `StreamClient` capture warning; the state of each
+  commit builds.
+- **H2:** `Tests/checks/tour`, 34,059 checks (the rule at every boundary, runs, carry both ways with
+  and without VoiceOver, the crease against `ConnectLayout.topHalf` at 20 sizes, the width, the
+  placements pinned at the Duo's four sizes and the iPhone SE's two against an oracle written from
+  §6.3's words, a grid of 400 screens by six card heights, both text regimes and two insets with
+  its properties, every string); 35 of 35 mutants caught (§14's 26 and nine more); in CI's mutants
+  matrix; `Tests/checks/run-all.sh` passes whole.
+- **H3:** no sheet, popover, alert, full-screen cover or TipKit, and nothing sent, in `Tour*.swift`;
+  `TourPolicy.swift` imports Foundation and CoreGraphics; `requestGeometryUpdate` only under DEBUG;
+  nothing in `Sources`, `Packaging`, `Scripts`, `Info.plist` or `PrivacyInfo.xcprivacy` changed;
+  A401, F401, A402 and F402 in their four places.
+- **H4:** the mock with no argument, the drawer, the held thumbnail's lights, the Aa ruler,
+  nothing active, the pairing overlay, the connect screen's methods and Add a Mac, at the four Duo
+  sizes, this build against the base (this plan's commit, built from `git archive`): 28 of 32 equal
+  pixel for pixel; the four held-thumbnail photos differ where it wiggles, as two photos of the base
+  do. `-SillSettings 1` equal at the four sizes; with `-SillSettingsEnd 1` the rows end in the new
+  row.
+- **S1, S2:** every step at 1000x710, 710x500, 710x1000, 500x710, the iPad Pro 13-inch's
+  1376x1032 and 1032x1376, and the iPhone SE's 667x375 and 375x667, at the default text size and at
+  accessibility-extra-large; the largest size at 710x500, 500x710, 710x1000 and 667x375; the
+  VoiceOver run at 1000x710 and 500x710. Every card's frame and tail, from the console's
+  `tour: screen …` lines, is what the check's model of the layouts gives. Sideways the bar's cards
+  sit 12 pt under the bar with a tail up; at 710x1000 nothing crosses the crease and no tail
+  points across it; at 500x710 and on the iPhone SE the bar and Settings cards point down at the
+  window bar; at larger sizes a card grows toward the top, over its targets if it must, and its
+  words scroll under a fade with the footer whole.
+- **S3:** Take the Tour at the end of the panel's rows at 500x710, 710x500 and 1000x710, for a Mac
+  with settings, one without (legacy) and one offering Pair This iPad…, at the default size and
+  xxLarge.
+- **S4:** in the mock: `fresh` no tour in the first second and the touch card at 1.07–1.17 s;
+  `landscape` at 710x1000 the laptop card alone, with its subtitle and no dots; `done` and
+  `skipped` nothing ("nothing owed here"); the Apps list open, a stand-in touch at 0.5 s and the
+  pairing overlay each "not this session" with the reason; `-SillTourPress next@1` through Done,
+  "done (saved: touch, bar, settings; this run only)".
+- **The saved keys, in the mock** (a fresh install, `-SillTourState saved`): the first session
+  showed the tour and saved each step as Next and Done passed it; the second said "nothing owed
+  here"; Take the Tour from the Settings panel (`-SillTakeTourAt 2`) showed it again from the
+  first step; the app's plist held `Sill.tourSeen` touch, bar, settings and `Sill.tourSkipped`
+  false.
+- **Not run: S5 and the phone's live photos.** Every live run needs `SillHost --synthetic`, which
+  uses the hardware video encoder, and `Scripts/encoder-check/no-device.sh` found a device
+  streaming from Noah's Sill.app at every check from 01:17 on, so no host was started. The same
+  sequence ran on the mock with the real keys (above). `-SillOrientation landscape` was seen to
+  turn the normal app sideways in the iPhone 18 Pro Max simulator (its connect screen, which needs
+  no host), so the phone's sideways photos need no harness fallback when they run.
+
+### Untested, for Noah
+
+§13's P1–P11 on the iPad mini and the iPhone 15 Pro, and the taps themselves: no tap could be made
+here, so Next, Skip, Done, a tap on the dim (the nudge, and whether any tap is lost to it: §6.1's
+fallback) and the touch watcher on a device (a touch in the first second leaves the session
+alone) are for the devices.
+

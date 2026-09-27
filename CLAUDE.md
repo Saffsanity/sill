@@ -8,6 +8,99 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**First-run tour (2026-09-27, branch `first-run-walkthrough` from main at
+cf05a78; the plan, its critique and the results are in
+`docs/first-run-walkthrough-plan.md`).** Noah (2026-09-26): "Add to feature
+list, app usage walkthrough first time after pairing/connecting". The device
+only: no wire change, nothing sent to the Mac, two UserDefaults keys.
+- What it does: a second after the first picture from a Mac (the window list,
+  a frame size, a source), if nothing was touched anywhere on the screen, sent
+  to the Mac or opened since (a recognizer on the window that takes nothing
+  counts every touch; `StreamClient.lastInputAt` every input), the stream
+  screen dims (black 0.58 over the whole screen, safe areas included) and a
+  card points at one part at a time, cut out of the dim and ringed in the
+  accent: `touch` (the picture: tap, hold, drag; Apple Pencil on iPad), `bar`
+  (hold a thumbnail, slide on Aa; sideways Keyboard), `settings` (Disconnect
+  and Take the Tour live there; sideways "Hold your iPad upright"), upright
+  `laptop` (the sticky modifiers, the keyboard key, the trackpad's two-finger
+  tap and hold-then-drag). Three cards sideways, four upright. Whoever touched
+  anything in that second is left alone for the session; one decision per
+  session and layout, and a turn after it offers only what its layout has
+  alone (the laptop card). Next and Done save each step (`Sill.tourSeen`), so
+  an ended session resumes at the first step not passed; Skip ends it for good
+  (`Sill.tourSkipped`); the Settings panel's last row, Take the Tour, shows
+  every step of the layout again. While it shows the layouts take no touch and
+  the keyboard is down (back after), so no touch, Pencil, hover or key reaches
+  the Mac; an outside pairing link puts it aside. Esc skips (Done on the last
+  card), Return goes on. VoiceOver: no touch card and no trackpad rows, the
+  rest in VoiceOver's words (swipe up or down for a thumbnail's actions and
+  Aa), focus on each title with "step N of M" and where the lit part is, the
+  escape gesture skips, Magic Tap goes on. Every text size: the card widens to
+  560 pt at accessibility sizes, grows toward the top (over its own targets if
+  it must, never across the Duo's crease) and then its words scroll under a
+  fade with the footer in reach. Reduce Motion cross-fades.
+- Files (Layout): `TourPolicy.swift` (pure), `TourOverlay.swift`, targets in
+  StreamScreen, TopBar and PortraitStreamScreen, the row in
+  HostSettingsPanel, `lastInputAt` and a DEBUG tripwire in StreamClient, the
+  harness's arguments and `-SillOrientation` in ContentView; `Tests/checks/tour`
+  (in CI's mutants matrix). pbxproj A401/F401, A402/F402.
+- Beyond the plan (its Results say why): the count goes on across a rotation
+  (the plan restarted it); a laptop card passed under VoiceOver counts as seen;
+  "not active" is UIKit's applicationState (SwiftUI's scenePhase read inactive
+  for an active app in a headless simulator, so every decision passed); the
+  strip's lit band takes in the active halo and the badge; the card's tail and
+  frame come from its laid-out height (a GeometryReader in it saw the appear
+  animation's scale); `-SillTakeTourAt`. Found and fixed: Done wrapping to two
+  lines on the iPhone SE at accessibility-extra-large (the footer's line was
+  measured with its words free to wrap); a run carried into the other layout
+  left that layout's decision open.
+- Verified (the plan's Results): Debug and Release for the simulator and Debug
+  for a device, only the known StreamClient warning, and each commit's state
+  builds; `Tests/checks/tour` 34,059 checks and 35 of 35 mutants, `run-all.sh`
+  whole (16 checks); the hard-rule greps (no presentation or TipKit, nothing
+  sent from the tour's files, nothing outside the app changed); 32 harness
+  photos against the base, pixel for pixel equal but the held thumbnail's
+  wiggle (which differs base against base); the Settings panel's photos differ
+  only by the new row at the end; every step photographed at 1000x710,
+  710x500, 710x1000, 500x710, the iPad Pro 13-inch's two sizes and the iPhone
+  SE's 667x375 and 375x667, at default and accessibility-extra-large text,
+  the largest size at the tightest four, and the VoiceOver run, each card's
+  frame and tail (the console's `tour: screen …` lines) as the check's model
+  of the layouts; the rule in the mock (fresh, landscape, done, skipped, the
+  Apps list, a stand-in touch, the pairing overlay, Next through Done); with
+  the real keys in the mock, shown, then "nothing owed", then back from
+  Settings. Not run yet: the live runs against `SillHost --synthetic` (the
+  first connection shows it, the second does not, the Settings row brings it
+  back; the phone's real insets on an iPhone 18 Pro Max, upright and with
+  `-SillOrientation landscape`, which turns the normal app in the simulator),
+  because Noah's iPad streamed from Sill.app the whole time
+  (`Scripts/encoder-check/no-device.sh` blocked every check from 01:17 on;
+  the runner is ready in the session's scratchpad, `walkthrough/tools/live.py`).
+- **Untested, for Noah (the plan's P1–P11, on the iPad mini and the iPhone 15
+  Pro):** the automatic tour needs a Release or TestFlight build on a fresh
+  install, or Debug with `-SillTourState fresh` (Xcode's scheme). P1 a second
+  after the Desktop shows, untouched: the tour; while it shows tap, hold and
+  drag on the picture, type on a hardware keyboard, hover and touch with the
+  Pencil, use a trackpad or mouse: nothing reaches the Mac (no `in.` counters
+  in the host's `[1s]` lines) and the picture keeps moving; fresh again,
+  touch the picture within the first second: no tour this session. P2 each
+  step lights what it names in both layouts; held upright after a tour
+  sideways and left alone: the laptop card once. P3 quit Sill.app at the
+  third card, reopen: the next session starts at the first step not passed.
+  P4 Take the Tour in both layouts with the keyboard up before Settings: the
+  keyboard back after Done. P5 Skip on the first card: no tour at the next
+  session, nor upright. P6 VoiceOver (no touch card, no trackpad rows, focus
+  on each title, rows read whole, swipe up or down in the bar rows, the
+  escape gesture skips, Magic Tap goes on, the stream screen read afresh
+  after Done). P7 the largest text size. P8 Reduce Motion (fades only). P9 a
+  hardware keyboard (Return on, Esc skips). P10 an outside link (the Camera on
+  the Mac's pairing code) during the tour: it steps aside, Cancel, it is back
+  at its step. P11 the iPhone upright and sideways: each ring on its
+  controls, the cards clear of the Dynamic Island and the home indicator,
+  "iPhone" and no Pencil row. Also the taps themselves: Next, Skip and Done
+  under a finger, and a tap on the dim nudging Next (no tap could be made
+  here; if one is lost to the dim, the plan's §6.1 drops the nudge).
+
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and
@@ -2791,7 +2884,16 @@ good.
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
-  swiftc).
+  swiftc). The first-run tour: `TourPolicy` (its steps and targets per layout,
+  when it shows by itself, what it remembers, a rotation mid-run, the crease,
+  where the card goes, every word; pure, Foundation and CoreGraphics,
+  `Tests/checks/tour`) and `TourOverlay` (the dim with the lit cutout and its
+  ring, the card placed by a Layout, the targets' preference in the stream
+  screen's named space `sill.screen`, `TourStore` for `Sill.tourSeen` and
+  `Sill.tourSkipped`, `TouchWatcher`, a recognizer on the window that counts
+  every touch and takes none, and DEBUG `TourDebug`); StreamScreen runs it
+  (targets, the rule's inputs, the layer above the layouts and under the
+  pairing overlay, Take the Tour from the Settings panel's last row).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -2848,14 +2950,11 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `encoder-mailbox`, `encoder-slowstate`, `fence`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules` (the two encoder
-  checks refuse a binary that links VideoToolbox). `run-all.sh [--mutants]
-  [-v] [name…]` runs them and exits
-  `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
-  `run-all.sh [--mutants] [-v] [name…]` runs them and exits
-  with the number that failed (a folder whose `run.sh` is not executable
+  `compatibility`, `device-gate`, `encoder-mailbox`, `encoder-slowstate`,
+  `fence`, `goodbye`, `ledger`, `origin`, `pairing-address`, `policy`,
+  `protocol`, `remote-rules`, `tour`, `update-policy` (the two encoder checks
+  refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v]
+  [name…]` runs them and exits with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
   file updates its check (and a mutant's pattern) in the same commit.
@@ -3012,7 +3111,19 @@ panel's route word change at the hand-over; the console's "discovery: …" and
 '<spec>'` (with `-SillConnect`: the session's Mac listed as a network row whose
 cable and Wi-Fi come and go on cue, so the session follows the best path for
 real; the spec is ContentView's contract, the console's "path: …" lines say
-what happened). A fake screen wider than the
+what happened). The first-run tour, in the mock, under `-SillLive 1` and in
+the normal app: `-SillTourState fresh|landscape|done|skipped|saved` turns the
+automatic tour on (a Debug build never shows it by itself otherwise; `saved`
+reads and writes `Sill.tourSeen` and `Sill.tourSkipped`, the others last one
+run), `-SillTour touch|bar|settings|laptop` starts it at that step, and the
+stand-ins `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`,
+`-SillTakeTourAt S` (Settings, then its Take the Tour) and
+`-SillTourVoiceOver 1`; `-SillOrientation landscape|portrait` asks the normal
+app's scene for that orientation (a phone simulator sideways with its real
+safe areas); the console's "tour: …" lines say what happened, and a card's
+line gives its frame and tail. `xcrun simctl launch --console-pty` streams the
+console; `--stdout=PATH` writes inside the simulated device's own file system.
+A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
 drawn a quarter turn clockwise; `sips -r 270` the screenshot.
 
