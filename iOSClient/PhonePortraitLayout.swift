@@ -9,17 +9,26 @@ import CoreGraphics
 /// changes shape (a 16:9 one gets black bars above and below) or the keyboard comes up (it covers
 /// the trackpad; row 1, with the Keyboard button, stays above it on every phone).
 ///
-/// `DuoLayout.outerPortrait` draws this: every iPhone upright, the Duo's outer display upright and
-/// an iPad window narrower than 600 pt held upright. Pure (CoreGraphics only), so
-/// `Tests/checks/phone-portrait` compiles it with swiftc and checks it at every size.
+/// `DuoLayout.outerPortrait` on an iPhone draws this (`DuoLayout.phoneArrangement`): every iPhone
+/// upright, and the Duo's outer display upright; an iPad window that narrow keeps the compact halves.
+/// The vertical rhythm is the approved mockup's, with the compact halves' paddings and gaps: 24 pt
+/// from the picture to the buttons and 22 from the buttons to the thumbnails, as the compact window
+/// bar centres its 50 pt buttons in 62 (so 412×389 pt of trackpad on an 18 Pro Max, 374×331 on an
+/// 18 Pro). Pure (CoreGraphics only), so `Tests/checks/phone-portrait` compiles it with swiftc and
+/// checks it at every size.
 struct PhonePortraitLayout: Equatable {
     /// Around the picture: its pane's margin from the screen's sides and top.
     static let margin: CGFloat = 8
     /// The picture's shape: 16:10, the shape most Mac windows and displays have. Whole points,
     /// rounded down, so it is never taller than 16:10 and the rows below sit on whole points.
     static let aspect: CGFloat = 1.6
-    /// From the picture's margin to row 1 (so 18 pt from the picture itself).
+    /// From the picture's margin to row 1's band.
     static let underPicture: CGFloat = 10
+    /// Row 1 sits in a band 12 pt taller than its buttons, the buttons centred, as the compact window
+    /// bar holds its 50 pt buttons in 62: 6 pt above and below them. So 24 pt from the picture to the
+    /// buttons (8 + 10 + 6) and 16 from the buttons to the strip (6 + 10), whose thumbnails sit 6 pt
+    /// into it: 22 from the buttons to the thumbnails, the mockup Noah approved.
+    static let band: CGFloat = 6
     /// The rows' and the trackpad's inset from the screen's sides.
     static let side: CGFloat = 14
     /// Under the trackpad, to the screen's bottom edge.
@@ -35,13 +44,12 @@ struct PhonePortraitLayout: Equatable {
     /// of the rows and its first thumbnail lines up with Apps and esc.
     static let stripInset: CGFloat = 8
     static let capHeight: CGFloat = 44
-    /// The least trackpad there is: only a screen too short for it (an iPad window, never a phone)
-    /// makes the picture give way.
+    /// The least trackpad there is: only a screen too short for it makes the picture give way, and
+    /// the shortest phone only just (an iPhone SE with Display Zoom, 320×548 under its status bar:
+    /// the picture 188 pt tall, 2 pt short of 16:10).
     static let minTrackpad: CGFloat = 120
     /// From row 1 to the drawer and the Settings panel, which hang under it.
     static let panelGap: CGFloat = 8
-    static let drawerWidth: CGFloat = 380
-    static let settingsWidth: CGFloat = 360
     /// The Aa ruler's finger travel per detent at most, and `TextScaleControl.sliderInset`, the room
     /// either side of its four detent spans.
     static let maxRulerStep: CGFloat = 36
@@ -58,6 +66,7 @@ struct PhonePortraitLayout: Equatable {
     /// The picture's pane: the frame the video is drawn in, aspect-fit, and the viewport the Mac
     /// fits windows to.
     let picture: CGRect
+    /// Row 1's buttons, across the row and 50 pt tall (their band is 6 pt more above and below).
     let row1: CGRect
     /// Row 1's buttons, in `Button` order.
     let buttons: [CGRect]
@@ -73,19 +82,21 @@ struct PhonePortraitLayout: Equatable {
     /// leading edge; `rulerStep` is its points per detent.
     let ruler: CGRect
     let rulerStep: CGFloat
-    /// The app drawer, from under row 1 at the leading edge, and the Settings panel, from under row
-    /// 1 at the trailing edge; each is at most this tall (the panel follows its content).
+    /// The app drawer and the Settings panel, from under row 1 across its whole span (Apps' leading
+    /// edge to Settings' trailing one), so nothing cut shows beside them; each is at most this tall
+    /// (the panel follows its content).
     let drawer: CGRect
     let settings: CGRect
     /// The Settings panel's top-trailing corner as fractions of `size`: where it grows from.
     let settingsAnchor: CGPoint
-    /// What the drawer's dim and the panel's tap catcher cover: everything but row 1's band, which
-    /// stays live while they are open, as the landscape bar does.
+    /// What the drawer's dim and the panel's tap catcher cover: everything but row 1's buttons,
+    /// which stay live while they are open, as the landscape bar does.
     let dim: [CGRect]
 
-    /// Everything but the picture and the trackpad, top to bottom: 228 pt.
+    /// Everything but the picture and the trackpad, top to bottom: 240 pt.
     static var fixedHeight: CGFloat {
-        margin + margin + underPicture + buttonHeight + rowGap + stripHeight + rowGap + capHeight + rowGap + bottom
+        margin + margin + underPicture + band + buttonHeight + band + rowGap + stripHeight + rowGap + capHeight
+            + rowGap + bottom
     }
 
     init(size: CGSize) {
@@ -99,14 +110,14 @@ struct PhonePortraitLayout: Equatable {
         let pictureHeight = min(natural, max(0, height - Self.fixedHeight - Self.minTrackpad))
         picture = CGRect(x: Self.margin, y: Self.margin, width: pictureWidth, height: pictureHeight)
 
-        // Row 1: five equal buttons across the row, `gap` apart.
+        // Row 1: five equal buttons across the row, `gap` apart, centred in their band.
         let rowWidth = max(0, width - 2 * Self.side)
-        row1 = CGRect(x: Self.side, y: picture.maxY + Self.margin + Self.underPicture,
+        row1 = CGRect(x: Self.side, y: picture.maxY + Self.margin + Self.underPicture + Self.band,
                       width: rowWidth, height: Self.buttonHeight)
         buttons = Self.split(row1, count: Button.allCases.count, gap: Self.gap)
 
-        // Row 2: the strip, wider than the rows by its own padding.
-        strip = CGRect(x: Self.side - Self.stripInset, y: row1.maxY + Self.rowGap,
+        // Row 2: the strip, under row 1's band, wider than the rows by its own padding.
+        strip = CGRect(x: Self.side - Self.stripInset, y: row1.maxY + Self.band + Self.rowGap,
                        width: max(0, width - 2 * (Self.side - Self.stripInset)), height: Self.stripHeight)
 
         // Row 3: six equal caps, `gap` apart.
@@ -126,12 +137,11 @@ struct PhonePortraitLayout: Equatable {
         let rulerWidth = rulerStep * Self.rulerSpans + 2 * Self.rulerInset
         ruler = CGRect(x: aa.midX - rulerWidth / 2, y: row1.minY, width: rulerWidth, height: Self.buttonHeight)
 
-        // The drawer and the panel hang under row 1, down to the trackpad's bottom.
+        // The drawer and the panel hang under row 1 and span it, down to the trackpad's bottom.
         let panelTop = row1.maxY + Self.panelGap
         let panelHeight = max(0, height - Self.bottom - panelTop)
-        drawer = CGRect(x: Self.side, y: panelTop, width: min(Self.drawerWidth, rowWidth), height: panelHeight)
-        let settingsWidth = min(Self.settingsWidth, rowWidth)
-        settings = CGRect(x: width - Self.side - settingsWidth, y: panelTop, width: settingsWidth, height: panelHeight)
+        drawer = CGRect(x: Self.side, y: panelTop, width: rowWidth, height: panelHeight)
+        settings = CGRect(x: Self.side, y: panelTop, width: rowWidth, height: panelHeight)
         settingsAnchor = CGPoint(x: width > 0 ? settings.maxX / width : 1, y: height > 0 ? settings.minY / height : 0)
 
         dim = [CGRect(x: 0, y: 0, width: width, height: row1.minY),
