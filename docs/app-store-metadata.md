@@ -61,6 +61,14 @@ These texts are only true once these are:
   The support page shows a way to reach you (guideline 1.5).
 - Sill for Mac at the download URL is Developer ID signed, notarized and
   stapled, and opens on a Mac that never had it.
+- Guideline 4.2.7 (as Apple published it on 2026-09-27) binds a remote desktop
+  app that mirrors specific software rather than the whole host: the local
+  network only (a), and software rendered on the host (b). Sill mirrors the
+  whole Mac (the Desktop, any window, an Apps list of what is installed),
+  which is how the audit of 2026-09-25 read it. A reviewer who reads it the
+  other way would question Remote Access and the Mac's menus shown in the
+  device's own menus (PR #36): the review notes say plainly that the device
+  shows the Mac app's menus and that the Mac runs them.
 - The build carries `PrivacyInfo.xcprivacy` and the export compliance key
   (section 6).
 - The version record's Version is the build's: the first App Store version
@@ -399,7 +407,7 @@ Plain ASCII on purpose, so every character is one byte.
 
 ```text
 WHAT SILL IS
-Sill is a remote display for the user's own Mac. The iPhone and iPad app shows any window, or the whole desktop, of a Mac running the free Sill for Mac, and sends touch, trackpad, keyboard and Apple Pencil input back to it. Every app runs and draws on the Mac. The iOS app only shows the picture and sends input. Its Apps list shows only apps already installed on that Mac.
+Sill is a remote display for the user's own Mac. The iPhone and iPad app shows any window, or the whole desktop, of a Mac running the free Sill for Mac, and sends touch, trackpad, keyboard and Apple Pencil input back to it. Every app runs and draws on the Mac. The iOS app shows the picture and the Mac app's menus, and sends input. Its Apps list shows only apps already installed on that Mac.
 
 There is no account, no sign-in, no in-app purchase, no ads and no server. The app talks only to the user's own Mac, which it finds with Bonjour on the local network.
 
@@ -616,8 +624,8 @@ Safe:
   another script (it reads the blocks as 0.3.1 had them 3 to 6 lower than
   the counts above: description 2,056, review notes 3,550; keywords and
   What's New the same): description 2,332 (local-only 2,176) of 4,000
-  characters; review notes 3,906 bytes (local-only 3,199) of 4,000, all
-  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 94
+  characters; review notes 3,926 bytes (local-only 3,219) of 4,000, all
+  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 74
   bytes left, or the notes lose words elsewhere.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
