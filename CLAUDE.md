@@ -112,6 +112,277 @@ only: no wire change, nothing sent to the Mac, two UserDefaults keys.
   under a finger, and a tap on the dim nudging Next (no tap could be made
   here; if one is lost to the dim, the plan's §6.1 drops the nudge).
 
+**The iPhone's portrait layout (2026-09-27, branch `iphone-portrait` from main
+at cf05a78, PR #30; the plan, its open questions with the defaults taken, its
+gates and the review's fixes are in `docs/iphone-portrait-plan.md`).** Noah: on an iPhone
+held upright the software keyboard covered the key row's keyboard cap, so
+nothing on screen could take it down, and the picture's half left black bars
+around a 16:9 or 16:10 window. Approved (2026-09-27): the picture in a fixed
+16:10 pane at the top (a 16:9 window gets black bars above and below; nothing
+below the pane ever moves), then row 1, Apps, Aa, Keyboard, Desktop and
+Settings, widened to the row with the key row's 8 pt between them; row 2, the
+thumbnails; row 3, esc, tab, ctrl, opt, cmd and shift (no arrows, no Spotlight
+cap); the trackpad in the rest. Landscape, the iPad and the Duo's inner
+display unchanged; no wire change.
+- `PhonePortraitLayout` (pure, CoreGraphics only; `Tests/checks/phone-portrait`,
+  149 cases and 28 of 28 mutants, in CI's mutants matrix): every rect from the
+  stream screen's size, the screen less its top inset (the bottom inset and
+  the keyboard are ignored, so nothing moves for them). The picture 8 pt from
+  the edges, ⌊(W − 16) ÷ 1.6⌋ tall (424×265 on an 18 Pro Max, 386×241 on an
+  18 Pro), giving way only where the trackpad would drop under 120 pt (an SE
+  with Display Zoom, by 2 pt); row 1's five buttons (W − 60) ÷ 5 wide (76,
+  68.4) and 50 tall, centred in a 62 pt band as the compact window bar holds
+  its own, so 24 pt under the picture and 22 over the thumbnails (the approved
+  mockup's rhythm); the strip 62 tall from 6 to W − 6, its first thumbnail at
+  14 with Apps and esc; six caps (W − 68) ÷ 6 wide and 44 tall; the trackpad to
+  16 pt above the bottom (412×389 on the Pro Max, 374×331 on the Pro, the
+  mockup's; 243 and 202 tall before); the Aa ruler centred on Aa and inside the
+  row (36 pt a detent on every phone); the drawer and the Settings panel 8 pt
+  under row 1 and across it, Apps' leading edge to Settings' trailing one (523
+  and 465 pt of room; 351 and 310 before); the dim and the tap catcher
+  everything but row 1's buttons.
+- Detection: `DuoLayout.outerPortrait`, unchanged (taller than wide, narrower
+  than 600 pt), draws the phone's arrangement on an iPhone: every iPhone
+  upright and the Duo's outer display (500×710), which has the same keyboard
+  problem, a choice Noah can reverse (`DuoLayout`'s doc says how). An iPad
+  window that narrow keeps the compact halves as on main, the key row's fold
+  into two rows included: the idiom, read once in `DuoLayout.phoneArrangement`
+  (DEBUG `-SillIdiom pad|phone` swaps it). `PortraitMetrics.phone` (`.phone`)
+  draws the phone's arrangement, `.compact` and `.regular` the halves.
+- `PortraitStreamScreen`: the picture pane, key row, trackpad, drawer and panel
+  are built once for both arrangements; the phone's are placed by a small
+  `Layout` in reading order (picture, row 1, strip, keys, trackpad). Row 1 is
+  the landscape bar's five in its order (Keyboard lit while the keyboard is up,
+  "Show the keyboard"/"Hide the keyboard"), each symbol and Aa's text in a
+  24 pt box so the five labels share one line; at the accessibility text sizes
+  a long press shows a button or cap large (not Aa). The Aa ruler unfolds over
+  row 1, its value inside it, and the other four fade and take no touch. The
+  drawer and the Settings panel hang under row 1, which stays live and
+  undimmed as the landscape bar does (Apps, Settings and Keyboard behave as
+  there); the strip hides while either is open, and while the drawer is,
+  VoiceOver skips what it dims. A held thumbnail's lights open below the
+  strip. The viewport sends the 16:10 pane, so Aa and the virtual display
+  shape Mac windows to 16:10. `TrackpadSurface.verticalSpan`: the phone's pad
+  measures pointer motion, two-finger scrolling and its coast against its width
+  ÷ 1.6, so the extra height is room, not a slower pointer (today's arithmetic
+  would be about 40 % slower vertically on the Pros). `KeyRow` has two sets,
+  `.full` (the halves' twelve) and `.phone` (six); each cap's action is
+  `tap(key)`.
+- DEBUG (ContentView's contract): the harness draws a fake screen larger than
+  the simulator scaled down, laid out at its own size (the Duo's and the iPad's
+  sizes on iPhone simulators); `-SillKeyboard 1` raises the keyboard for real
+  in a live session; `-SillKeyboardToggle <s>[,<s>…]` toggles it as the
+  Keyboard button does; `-SillDrawer`, `-SillSettings` and `-SillScaleOpen`
+  open theirs 1.5 s into a live session; `viewport: 386×241 pt, scale none,
+  60 fps` on the console; `-SillInputTest 1` (loopback only) runs the key
+  row's and the trackpad's own code once; `-SillIdiom pad` draws an iPad
+  window's arrangement on an iPhone simulator.
+- Verified at the first build (2026-09-27, 01:05–02:15, d44c132, on private
+  simulators of the iPhone 18 Pro Max, 18 Pro and 17e, deleted after; `simctl
+  io screenshot` only): the check (141 cases, 24 of 24 mutants) and
+  `Tests/checks/run-all.sh`, all 16; iOS Debug and Release for the simulator
+  and Debug for a generic device, only the known `StreamClient` capture
+  warning; 52 harness photos of the other layouts pixel for pixel the base
+  build's but for what the base shows against itself; the phone layout at
+  every phone's stream screen in eight states, measured against the rule; the
+  normal app on each phone against a stand-in Mac: the viewport, the keyboard
+  from row 1 up and down (its top at 636, 573 and 543 pt: 320 and 301 pt tall,
+  no suggestions bar, which the check's table uses), the drawer, the panel,
+  the ruler, AX-XL, `-SillInputTest`; a 16:10 picture filling the pane and a
+  16:9 one with bars of 13.2, 11.9 and 11.3 pt above and below, everything
+  under the picture the same for both. Not run then: `SillHost --synthetic`,
+  which no-device.sh blocked from 01:00 to 02:48 (Noah's iPad mini streaming).
+- Review fixes (2026-09-27, after d44c132; the plan's "Review fixes"): row 1
+  back in the mockup's band (it sat 6 pt high and everything under it 12, the
+  trackpads 401 and 343); the labels on one line; the ruler's value inside the
+  ruler (also in the compact halves' 50 pt window bar); the drawer and the
+  panel across row 1 (at 380 and 360 pt they left cut slivers beside them) with
+  the strip hidden under them; VoiceOver skipping what the drawer dims; the
+  lights below the strip on every phone (over row 1 on the SE and at 500×710
+  before); the Duo's keyboard in the table; the Large Content Viewer; an iPad
+  window narrower than 600 pt back on the compact halves (the approval was for
+  iPhones). Verified (04:40–05:10, the same simulators, one at a time, deleted
+  after): the check 149 cases and 28 of 28 mutants; 81 harness photos of every
+  other layout, the iPad's narrow windows included (`-SillIdiom pad`), against
+  the base: 56 identical at once, the compact halves' ruler value changed as
+  intended, the rest the held thumbnail's wiggle and Δ1–2 anti-aliasing that
+  retakes reproduce; 60 harness photos of the phone layout at seven sizes
+  measured against the rule (rows within a pixel at 3x, label tops within
+  2 px, the panels' edges on row 1's, the ruler's value 2.3 pt inside, the
+  lights below the strip); the normal app against `SillHost --synthetic` behind
+  a relay that drops input, no-device.sh passing before, during and after, each
+  host under 55 s: on the Pro Max the viewport 424×265, Apps at 359–409 pt and
+  the trackpad 412×389, the keyboard's top 95 pt under row 3, the panels, the
+  ruler, a 16:9 picture's 13.3 pt bars with row 1, the keys and the pad pixel
+  for pixel the same as at 16:10, with the keyboard up and at AX-XL,
+  `-SillInputTest` (every event dropped at the relay); on the 18 Pro 386×241,
+  374×331 and 56 pt; on the 17e 374×233, 362×324 and 49 pt; S3's text sizes.
+  Merged with main at 676b362 (PR #29, the disk image; merge e73f231): only
+  ci.yml's mutants matrix and CLAUDE.md conflicted. After it
+  `Tests/checks/run-all.sh`, all 17; `swift build -c release` (only the
+  CaptureProbe warning); iOS Debug and Release for the simulator and Debug for
+  a generic device, from clean (only the `StreamClient` capture warning).
+- For the other branches: `pointer-visibility` changes the picture pane's
+  `InputOverlay` and the `Trackpad`'s closures once (both arrangements share
+  them now) and keeps both edits to `TrackpadSurface.moveCursor` (its
+  `setOwnPointer`, this branch's `ySpan` on the `cursor.y` line);
+  `DuoLayout.isPortrait` stays right. `first-run-walkthrough`: on phones
+  upright `windows` lights Apps (row 1) and the strip (row 2), `bar` lights
+  Aa, Keyboard and Desktop as in landscape, `keyboard` is row 1's button, and
+  `keys` the six caps (its "keyboard key" row belongs to the halves only); its
+  500×710 row takes `PhonePortraitLayout`'s rects on an iPhone and the compact
+  halves on an iPad (`DuoLayout.phoneArrangement`, as `StreamScreen` asks),
+  and its card placement in portrait the phone's rects (the picture 224–302 pt
+  tall at the top, the drawer and the panel across row 1). `trackpad-gestures`:
+  the arrows are gone from phones (⌃ with the key row's ↑ is the halves'
+  only); its two-finger deltas follow the span. `home-pairing`: textual merges
+  in `StreamScreen.swift` and the harness.
+- **Untested, for Noah (the plan's P1–P8, on the iPhone 15 Pro and the iPad
+  mini):** a 16:10 and a 16:9 window upright (bars above and below, nothing
+  below the picture moves when switching); the keyboard from row 1 (up with
+  esc to shift in view on the 15 Pro, typing, down again), cmd-latch then C,
+  cmd then space for Spotlight with the Desktop streaming, a hardware
+  keyboard's arrows; the trackpad (a diagonal at the finger's angle, one
+  stroke down crossing the picture, two-finger scrolling at about today's
+  speed, tap, two-finger tap, hold and drag); Aa (the ruler over row 1; on
+  release the Mac window resizes to 16:10, Sill.log's "Resized … for a 377×235
+  panel"); the drawer and Settings under a live row 1, as wide as it (Apps
+  again closes, a tap on the picture closes and clicks nothing); a held
+  thumbnail's lights below the strip; rotation both ways with the drawer, the
+  panel, the keyboard and a latch; VoiceOver's order (Apps, Text size,
+  Keyboard, Desktop, Settings, the thumbnails, Escape to Shift, the trackpad's
+  hint; with the drawer open, row 1 then the drawer); a long press on a button
+  or cap at an accessibility text size; the iPad mini upright and sideways as
+  before, and in a window narrower than 600 pt upright, the compact halves as
+  before.
+
+**The Mac download in a disk image (2026-09-27, branch `mac-dmg` from main at
+cf05a78, PR #29).** Noah: "Sill should open in a .dmg and be draggable into
+applications folder like regular apps". `Scripts/release.sh` now makes
+`Sill.dmg` beside `Sill.zip`, from the same notarized, stapled app. Nothing was
+notarized, published or tagged, and the download page still links the zip.
+- The image (`Scripts/make-dmg.sh`, Layout): Sill.app, a link to
+  /Applications, a white background with an arrow from one to the other
+  (`design/DMGBackground.svg`, 660 x 400 points, the arrow in the app icon's
+  greys, "To install Sill, drag it to Applications." under them), and the
+  app's icon as the volume's. Its window: 660 x 432 points at (200, 120), the
+  picture and macOS 27's 32-point title bar, icon view, no toolbar, sidebar,
+  path or status bar, 128-point icons at (170, 180) and (490, 180). HFS+ and
+  ULFO (LZFSE, read-only): the script's header says why, and why not APFS.
+  The window is a `.DS_Store` that `Scripts/dmg-layout` (Swift: Foundation,
+  ImageIO) writes with no Finder and no AppleScript, in Finder's own layout:
+  re-encoding the records of a Finder-made installer image's `.DS_Store`
+  (2023) gives its header, DSDB's five words, its leaf and the used part of
+  its root block byte for byte (only the stale bytes Finder leaves in unused
+  space differ, the 12 after DSDB's five words among them), and Claude's image
+  of September 2026 has the same blocks, free lists and header. The
+  background's alias is Finder's form (tags 0, 16, 17, 1, 2, 14, 15, 18 and
+  19; tag 20, the build folder's image, left out), and CoreFoundation
+  resolves it to the picture on the mounted image. `Tests/checks/dmg-layout`
+  checks the writer (Layout).
+- release.sh: `make-dmg.sh --prepare` right after the build (the layout tool
+  and the background, so a problem with either stops the run before anything
+  goes to Apple); a real run, after the zip's checks, makes the image of the
+  stapled app, signs it with the same identity, sends it to Apple on its own
+  (`notarize`, the zip's code as a function; its answer and log
+  `.build/Sill-<version>-dmg-notary*`), staples it and checks it
+  (`check_disk_image`: hdiutil verify, stapler validate, spctl's open context
+  as "Notarized Developer ID", mounted `-nobrowse` in `$TMPDIR` with the
+  Sill.app inside through `check_gatekeeper`, detached on failure too); it
+  prints both SHA-256s, and `--publish` uploads Sill.dmg, Sill.dmg.sha256,
+  Sill.zip and Sill.zip.sha256, the notes naming both hashes. A dry run makes
+  the image from the app before stapling, signed with the identity.
+- The zip stays in every release for now; the download page moves to the
+  image only once a release carries it: docs/release-checklist.md, part 2
+  (the release first, the link checked, then the page, then the site
+  republished), and the page's new lines wait in a comment above its card in
+  `site/download.html`. The release workflow's verify job makes
+  `Sill-<version>-adhoc.dmg` (`make-dmg.sh --sign -`) and keeps it as a second
+  artifact; the publish job keeps both submissions' answers and logs as the
+  artifact `notary-v<version>`.
+- Review fixes (2026-09-27; one review of the branch, each finding checked
+  here before it was fixed):
+  - The window was 4 points too short on macOS 27. Its WindowBounds was
+    {{200, 120}, {660, 428}}, 400 and a 28-point title bar, but AppKit on this
+    Mac (macOS 27.0, 26A428; Finder records the same SDK) gives a titled
+    window a 32-point bar: `NSWindow.frameRect(forContentRect:)` makes 660 x
+    400 a 660 x 432 frame, and a 428-point frame keeps 396 points. (Another
+    project, on macOS 27, captured Finder opening a 660 x 432 WindowBounds as
+    a 660 x 432 frame, the picture anchored at the top.) Now 432
+    (`DMGLayout.titleBar` 32). Under macOS 14's and 15's 28-point bar (not
+    measured here) that leaves 4 points below the picture, so the picture is
+    white to every edge (it faded to #f2f3f5 at the bottom) and so is the
+    view's backgroundColor (make-dmg.sh's `edge`). DMGLayout's comment had
+    Finder-made images adding the title bar; the Finder-made one of 2023 has
+    WindowBounds 512 x 400 for its 512 x 400 picture (Claude.dmg's tool adds
+    22, the bar before macOS 11: 444 for a 422 picture).
+  - The publish job's notary logs were never kept. The pinned upload-artifact
+    (v7.0.1) skips every file and folder whose name starts with a dot, the
+    search's root included, unless `include-hidden-files` is true, so
+    `.build/Sill-*-notary*` found nothing and the step passed without an
+    artifact, on main as well (the zip's log). Now `include-hidden-files:
+    true` and `if-no-files-found: warn`. Checked with the action's own
+    `dist/upload/index.js` under node, the step's inputs read from the YAML,
+    in a workspace holding the four notary files beside the zip and the
+    image: before, "No files were found"; now "there will be 4 files
+    uploaded", and a warning when there are none. The verify job's two
+    uploads name their file and were always found.
+  - The writer's checks lived in the session's scratchpad: now
+    `Tests/checks/dmg-layout` (Layout), 70 checks and 43 of 43 mutants (the
+    28-point bar among them), in `run-all.sh`, CI and CI's mutants matrix
+    (fifteen jobs). It holds the allocator to the Finder-made file (its
+    10,244 bytes, header bytes, blocks and free lists, compared again here
+    with the scratch tests' own reader), and fails when make-dmg.sh's layout
+    arguments (the script sourced) or the SVG's size and white fill move
+    without it.
+- Verified after the fixes (2026-09-27, 03:13-03:17): the rehearsal again,
+  `SILL_SIGN_IDENTITY='Developer ID Application: NOAH WILLIAM SAFFER
+  (9B2KKVM937)' Scripts/release.sh --dry-run`, exit 0 in 17 s (the build
+  cached, the layout tool compiled) with no keychain prompt: Sill-0.3.0.dmg
+  2.9 MB (the zip 2.8 MB, the app 6.0 MB), UDIF read-only compressed (lzfse),
+  its CRC32 valid, signed by that identity with a timestamp, identifier
+  me.saffer.sill.dmg; `spctl -a -vv -t open --context
+  context:primary-signature` rejects it as "Unnotarized Developer ID", which
+  notarization changes. Mounted: an HFS+ volume "Sill", 21.0 MB with 6.3 MB
+  used, exactly the five items, Applications a link to /Applications, the
+  custom-icon flag, .VolumeIcon.icns the app's, the TIFF 660x400 at 72 dpi
+  and 1320x800 at 144, white at every corner and edge in both, the
+  `.DS_Store` read back by the tool and by the scratch tests' own decoder
+  (10,244 bytes in Finder's blocks, bounds {{200, 120}, {660, 432}}, the
+  view's colour white, the icons' places, the alias's IDs the folder's and
+  the file's), the alias resolving to the picture on that mount, and Sill.app
+  byte for byte `.build/Sill.app`, passing codesign --deep --strict (the
+  image stays there for Noah's look). `Tests/checks/run-all.sh`, all 16
+  (130 s), and `dmg-layout --mutants`, 43 of 43. In the session's scratchpad
+  (`mac-dmg/tests`, removed at the end): make-dmg.sh for real (hdiutil,
+  codesign ad hoc) against a fake app, 101 checks (the build's 97 with the
+  edges' white and the view's colour) and 26 of 26 mutants (the build's 24,
+  now the 28-point bar where it had 22, and a grey edge and a grey picture),
+  no image left attached; release.sh's 169 checks and publish_release's 13
+  again (release.sh has not changed since the build); both workflows parse,
+  their actions pinned, every run block parsing under /bin/bash 3.2.
+  Earlier, the build's run before the review: release.sh against stand-ins,
+  169 checks (PR #18's 101 and 68 for the image: every step's order, the image
+  made once from the stapled app, both submissions, the four assets with their
+  checksum files, every failure stopping before anything is published, the
+  mount detached, also when it holds no HFS+ volume, a busy attach tried
+  again) and 38 of 38 mutants; publish_release with the real gh against a
+  stand-in GitHub API (the four uploads with their names and sizes, the
+  notes), 13 checks.
+- **Untested, for Noah:** a real release (two notarizations, the image's
+  staple, spctl's "Notarized Developer ID" for it, `--publish`'s four assets,
+  the `notary-v<version>` artifact on a signed run); the window in the Finder
+  on macOS 27 (the whole picture, a scroll settles back, the names under the
+  icons readable in Dark Mode on the white picture, the volume icon): the
+  checklist's part 1 §2 has the look; on macOS 14 or 15, the 4 points of white
+  below the picture; the image on another Mac (downloaded, so quarantined: it
+  opens, the drag, Sill opens, also offline); the verify job on GitHub
+  (hdiutil and Quick Look on the runner); the page's move.
+- Known: files written from a Claude session carry `com.apple.provenance`,
+  which `xattr -d` can't remove, so the rehearsal image's files carry it
+  (Claude.dmg's have none); the zip has always carried the same attributes in
+  its AppleDouble entries. Not changed here.
+
 **TestFlight tooling (2026-09-26, branch `testflight-tooling` from main at
 150f781).** Noah: "help me do the 4 opens for TestFlight" (the App Store
 Connect record, screenshots, the 0.5 archive and upload, the placeholder and
@@ -2780,13 +3051,20 @@ good.
   `SillLinks.swift` that isn't one, and sourced it only defines its
   functions (docs/release-checklist.md, TestFlight). `Scripts/make-app.sh`
   builds, iconizes, signs and installs the bundle; `Scripts/release.sh`
-  (M6) makes the download from it:
-  `make-app.sh --release`, a zip (`ditto -c -k --keepParent`), Apple's notary
-  service (`notarytool submit --wait`, the profile in `SILL_NOTARY_PROFILE`),
-  the ticket stapled, the zip made again with the ticket inside, and a copy
-  unpacked from it checked with `stapler validate` and `spctl` ("Notarized
-  Developer ID"); it prints `.build/Sill-<version>.zip` and its SHA-256 for
-  `site/download.html`. It refuses to start, before building, without a
+  (M6) makes the downloads from it:
+  `make-app.sh --release`, `make-dmg.sh --prepare` (the image's tool and
+  background, before anything goes to Apple), a zip (`ditto -c -k
+  --keepParent`), Apple's notary service (`notarytool submit --wait`, the
+  profile in `SILL_NOTARY_PROFILE`), the ticket stapled, the zip made again
+  with the ticket inside, and a copy unpacked from it checked with `stapler
+  validate` and `spctl` ("Notarized Developer ID"); then the disk image of the
+  stapled app (`make-dmg.sh --sign`), notarized on its own, stapled, and
+  checked (`hdiutil verify`, `stapler validate`, `spctl -t open --context
+  context:primary-signature` as "Notarized Developer ID", mounted `-nobrowse`
+  in `$TMPDIR` and the Sill.app inside checked as the zip's copy); it prints
+  `.build/Sill-<version>.dmg` and `.zip` with their SHA-256. A dry run makes
+  the image too, from the app before stapling, signed with the same identity.
+  It refuses to start, before building, without a
   Developer ID Application identity (`SILL_SIGN_IDENTITY`, checked against the
   keychain) or the profile, or on a HEAD without the tag v‹version› (the
   update check's), or with `SILL_RELEASE_TAG` (the release workflow sets it)
@@ -2802,7 +3080,27 @@ good.
   missing tag from the default branch's tip; not asked in the release
   workflow, whose checkout is that tag and keeps no credentials); in
   Saffsanity/sill it passes gh `--verify-tag`, anywhere else it warns that no
-  Sill.app will offer the release. Sourced, it only defines its functions.
+  Sill.app will offer the release. It uploads `Sill.dmg`, `Sill.dmg.sha256`,
+  `Sill.zip` and `Sill.zip.sha256` (the zip kept for now: the site's links name
+  it until a release carries the image). Sourced, it only defines its functions.
+  `Scripts/make-dmg.sh --sign IDENTITY APP DMG` (`-` for ad hoc) makes the
+  image: an HFS+ volume "Sill" (not APFS: Finder names the background by an
+  HFS+ alias record, and Finder-made and current third-party images are
+  HFS+) with the app (`ditto`), a link to /Applications, `.background/`
+  (design/DMGBackground.svg rendered by Quick Look at 1x and 2x, cropped,
+  joined by tiffutil into one TIFF; cached in `.build/dmg`) and
+  `.VolumeIcon.icns` (the app's AppIcon.icns, with the root's custom-icon
+  flag); its window laid out by a `.DS_Store` that `Scripts/dmg-layout`
+  (Swift, compiled into `.build/dmg`; DSStore.swift, FinderAlias.swift,
+  DMGLayout.swift) writes without Finder and reads back (`check`): 660 x 432
+  points, the picture's 400 and macOS 27's 32-point title bar
+  (`DMGLayout.titleBar`; `Tests/checks/dmg-layout` checks the writer); converted
+  to ULFO (LZFSE, read-only), signed (identifier `me.saffer.sill.dmg`, a
+  timestamp unless ad hoc) and checked mounted (exactly five items at the
+  root, the link, the layout, the app byte for byte). Mounts are `-nobrowse`
+  in a new folder in `$TMPDIR`: mounted under the home folder, fseventsd
+  writes `.fseventsd` onto the image as it unmounts. `--prepare` only builds
+  the tool and the background. Sourced, it only defines its functions.
   `Scripts/sillclient.py` is the wire-format test client
   (timed `--set=K=V[,K=V]@T` kind 17 changes with tokens 1, 2, 3…,
   `--raw17=JSON@T`, `--pick=none|desktop|window:ID@T`, `--stats`,
@@ -2865,9 +3163,20 @@ good.
   Direct Wireless on, the Remote rows and when a lost saved Mac is dialed away
   from home; pure, checked with swiftc), `StreamScreen`
   (landscape: top bar, thumbnails, drawer, Aa, Keyboard, Desktop; layout
-  selection by size incl. Duo outer display), `PortraitStreamScreen` (laptop
-  layout: stream, compact bar, key rows, trackpad), `InputOverlay` (direct touch,
-  Pencil, keyboard, scroll momentum), `TrackpadView`, `HEVCDisplayView` (shared
+  selection by size incl. Duo outer display, and `DuoLayout.phoneArrangement`,
+  the idiom: which arrangement `.outerPortrait` draws), `PortraitStreamScreen`
+  (portrait in two arrangements: the halves, the picture over the window bar,
+  the key row and the trackpad, at the inner display's size and, for an iPad
+  window narrower than 600 pt, the compact one with the key row in two lines;
+  and a phone held upright, from `PhonePortraitLayout`; the key row's two sets,
+  twelve and six), `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
+  an iPhone, as rects from the stream screen's size: the picture's fixed 16:10
+  pane, row 1's five buttons in their band, the strip, six caps, the trackpad
+  and its vertical span, the Aa ruler, the drawer and the Settings panel across
+  row 1, and the dim; pure, `Tests/checks/phone-portrait`),
+  `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum),
+  `TrackpadView` (the relative pad; `verticalSpan`, a phone's width ÷ 1.6, and
+  the DEBUG input test), `HEVCDisplayView` (shared
   display view + DEBUG HUD), `DiagnosticsHUD` (client stats reporter),
   `StreamClient+Viewport`, `ContentView` (connect screen with rows ending in
   Wired, Wi-Fi, Direct or Remote, the hint and Search Nearby, Add a Mac…, and
@@ -2939,10 +3248,14 @@ good.
   host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
   with "mutants", each check's mutants in a job of its own. `release.yml`: a
   pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
-  `make-app.sh` signed ad hoc, zipped as an artifact) unless the repository
+  `make-app.sh` signed ad hoc, zipped, and `make-dmg.sh`'s image of it, ad hoc
+  too, as two artifacts) unless the repository
   variable `SILL_SIGN_IN_CI` is `true`, then the Developer ID .p12 into a
   temporary keychain, the notary key stored as a profile in it, `release.sh
-  --publish`, and the keychain deleted in an always() step. Secrets,
+  --publish`, Apple's notary logs kept as an artifact (`include-hidden-files:
+  true`: upload-artifact skips whatever is under a folder whose name starts
+  with a dot, `.build` included), and the keychain deleted in an always()
+  step. Secrets,
   variables, rotation and costs: docs/release-checklist.md, "Releasing from
   GitHub Actions". `testflight.yml`: by hand only; `release-ios.sh
   --unsigned` without an App Store Connect key, `--sign-at-export` with one
@@ -2961,11 +3274,14 @@ good.
   and runs; `--mutants` runs `mutants.py`, passing only when every mutant is
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
-  `compatibility`, `device-gate`, `encoder-mailbox`, `encoder-slowstate`,
-  `fence`, `goodbye`, `ledger`, `origin`, `pairing-address`, `policy`,
-  `protocol`, `remote-rules`, `tour`, `update-policy` (the two encoder checks
-  refuse a binary that links VideoToolbox). `run-all.sh [--mutants] [-v]
-  [name…]` runs them and exits with the number that failed (a folder whose `run.sh` is not executable
+  `compatibility`, `device-gate`, `dmg-layout` (Scripts/dmg-layout's
+  `.DS_Store` and alias writer, against Finder's own layout of the file,
+  make-dmg.sh's layout arguments and the SVG's size and edge),
+  `encoder-mailbox`, `encoder-slowstate`, `fence`, `goodbye`, `ledger`,
+  `origin`, `pairing-address`, `phone-portrait`, `policy`, `protocol`,
+  `remote-rules`, `tour`, `update-policy` (the two encoder checks refuse a
+  binary that links VideoToolbox). `run-all.sh [--mutants] [-v] [name…]` runs
+  them and exits with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
   compiles and the checks that belong to open branches. A change to a checked
   file updates its check (and a mutant's pattern) in the same commit.
@@ -2992,6 +3308,7 @@ SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' SILL_NOTARY_PROFILE=sill-notary Scripts/release.sh [--dry-run]   # M6: the notarized download (docs/release-checklist.md)
 Scripts/release-ios.sh                  # the iOS app for App Store Connect: archive, export .build/ios/export/Sill.ipa, check it; uploads nothing
 Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (docs/release-checklist.md, TestFlight; --privacy-report, --print-version)
+Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's disk image of any build, ad hoc (release.sh makes the real one)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
@@ -3136,7 +3453,28 @@ line gives its frame and tail. `xcrun simctl launch --console-pty` streams the
 console; `--stdout=PATH` writes inside the simulated device's own file system.
 A fake screen wider than the
 simulator but fitting on its side (1133x744 on an upright iPad Pro 13") is
-drawn a quarter turn clockwise; `sips -r 270` the screenshot.
+drawn a quarter turn clockwise; `sips -r 270` the screenshot. One that fits
+neither way (the Duo's or an iPad's size on an iPhone simulator) is drawn
+scaled down and laid out at its own size ("harness: 710x1000 drawn at 0.62");
+a phone's whole stream screen on that phone (440x894 on an 18 Pro Max, 402x812
+on an 18 Pro) reaches into the simulator's safe area and runs its trackpad past
+its bottom edge: photograph it on a larger simulator, or in the normal app.
+`-SillKeyboard 1` raises the software keyboard for real in a live session (the
+mock only lights the button), `-SillKeyboardToggle <s>[,<s>…]` toggles it at
+those seconds as the Keyboard button does, and in a live session (the normal
+app with `-SillConnect`, or `-SillLive 1`) `-SillDrawer 1`, `-SillSettings 1`
+and `-SillScaleOpen 1` open theirs 1.5 s after the stream starts. The console
+prints `viewport: 386×241 pt, scale none, 60 fps` for each viewport sent.
+`-SillIdiom pad` draws a screen taller than wide and narrower than 600 pt as
+an iPad does (the compact halves) rather than as a phone, so an iPhone
+simulator photographs it (`phone` the other way round; the normal app too).
+`-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: once, the
+portrait key row taps cmd, esc, shift and ctrl through its caps' action, then
+the trackpad checks that a touch at its centre lands on it, strokes, taps with
+the latched keys held and scrolls, through its own code ("input test: …"); a
+synthetic host posts what it gets on this Mac, so put a relay in front of it
+that reads the device's frames (the 14-byte header: kind, then the payload's
+length at bytes 10–13) and drops kind 8 (`sillrelay.py` passes everything).
 
 ## Compatibility floor
 
