@@ -36,6 +36,8 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Tells MacMenuHub when this scene's window is key: the iPad's menu bar shows its session's menus.
+        .background(KeyWindowObserver(client: client))
         .onAppear {
             client.startBrowsing()
             client.startRemote()                 // saved Macs without a key are cleared; DEBUG pairing arguments
@@ -125,6 +127,29 @@ struct ContentView: View {
 ///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
 ///   and `remoteslow` (none: the route line under it says how instead).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
+/// * `-SillMacMenu <case>` — the mock Mac's menus (docs/menu-bar-plan.md §7.8; see
+///   `MockCatalog.MenuCase`): `code` (the default: VS Code's ten, File with shortcuts, sections, a ✓,
+///   a disabled item and Open Recent ▸, Code › Settings ▸ Themes ▸ three deep, View › Appearance
+///   with a mixed mark), `blender` (Blender and Window), `long` (a Window menu of 300 windows, and a
+///   History of 600: 500 rows and "100 more on the Mac"), `stale` (every menu disabled under "Code
+///   isn’t responding."), `noaccess` (the Accessibility note, no menus), `none` (no Menus button),
+///   `slow` (each menu answered after 1.5 s, UIKit's placeholder meanwhile), `timeout` (never
+///   answered: "Mac mini didn’t answer. Open the menu again." after 4 s) or `refuse` (every choice
+///   refused). The mock answers a menu and a choice 0.2 s after it is asked. Ignored with
+///   `-SillLive 1`, whose session has the Mac's own menus.
+/// * `-SillMenusOpen 1` — the Menus button's pull-down opens after launch, as a tap opens it
+///   (`performPrimaryAction`, iOS 17.4); `-SillMenusOpen 'File'` or `'Code/Settings'` opens it on
+///   that menu's own items instead, each level fetched on the way as a tap on it would fetch it.
+///   `-SillMenuPress 'File/Save'` chooses that item once the first top level is in, as a tap would
+///   (the menus on the way fetched, the kind 25 sent). Both run once per launch, in the normal app
+///   and under `-SillLive 1` too, on the Mac's own menus: against a synthetic host started with
+///   SILL_TEST_MENU_PID, the fixture's (`-SillMenuPress 'Probe/Set Label A'`). A headless run cannot
+///   tap; these stand in for the taps.
+/// * The iPad's menu bar (iPadOS 26), in the normal app too: `-SillMenuBarLayout perMenu|replace|one`
+///   (where the Mac's menus go, the plan's Q1, for one run), `-SillMenuDump 1` (the main menu's
+///   root after each build, on the console), `-SillMenuBuildTwice 1` (the insertion made twice in
+///   one build: the second inserts nothing) and `-SillMenuNoView 1` (View removed before the
+///   insertion). The console's "menus: …" and "menubar: …" lines say what happened.
 /// * `-SillConnectCase <case>` — show the connect screen instead, in a discovery state: `looking`,
 ///   `hint` (nothing listed: the hint and Search Nearby), `nearby` (a Wi-Fi row and Direct
 ///   rows), `methods` (a row ending in each word: Wired, Wi-Fi, none, Direct, and long names) or
@@ -186,6 +211,8 @@ struct LayoutHarness: View {
         let connectCase: MockCatalog.ConnectCase?
         /// The stream screen under the pairing overlay.
         let scanOverlay: Bool
+        /// The mock Mac's menus. Ignored when `live`, whose session has the Mac's own.
+        let macMenu: MockCatalog.MenuCase
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -204,7 +231,8 @@ struct LayoutHarness: View {
                         settingsOpen: defaults.bool(forKey: "SillSettings"),
                         settingsCase: MockCatalog.SettingsCase(rawValue: defaults.string(forKey: "SillSettingsCase") ?? "") ?? .default,
                         connectCase: MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? ""),
-                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"))
+                        scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
+                        macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code)
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -226,7 +254,8 @@ struct LayoutHarness: View {
         self.spec = spec
         self.live = live
         _mock = StateObject(wrappedValue: spec.connectCase.map(MockCatalog.connectClient)
-                                ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase))
+                                ?? MockCatalog.client(active: spec.mockActive, settings: spec.settingsCase,
+                                                      menus: spec.live ? nil : spec.macMenu))
     }
 
     var body: some View {
@@ -247,6 +276,8 @@ struct LayoutHarness: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .statusBar(hidden: true)
+        // The iPad's menu bar follows the client this frame shows, as the app's does.
+        .background(KeyWindowObserver(client: spec.live ? live : mock))
         .onAppear {
             if spec.live {
                 live.startBrowsing()

@@ -442,6 +442,21 @@ private struct TopBar: View {
                 .opacity(scaleOpen ? 0.2 : 1)      // the ruler is centred on Aa and reaches over the strip's end
                 .allowsHitTesting(!scaleOpen)
 
+            // The Mac's menus of the streamed app, next to the thumbnails because they are the picked
+            // window's app's. Only while the Mac sent some: with none the strip takes its room back.
+            if client.menus.hasMenus {
+                MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                              spacing: metrics.buttonSpacing,
+                              onOpen: {
+                                  setSettings(false, false)
+                                  windowMenu = nil
+                                  withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+                              })
+                    .opacity(scaleOpen ? 0 : 1)    // under the Aa ruler, as the buttons after Aa
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
+
             // Text size: the host sizes the Mac window to the panel divided by this scale, so a
             // bigger number means a smaller Mac window and bigger text here. The slider unfolds to
             // the right, over the two buttons after it, which fade while it is open.
@@ -469,6 +484,7 @@ private struct TopBar: View {
                 .allowsHitTesting(!scaleOpen)
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
+        .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
         .frame(height: metrics.height)
         .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.

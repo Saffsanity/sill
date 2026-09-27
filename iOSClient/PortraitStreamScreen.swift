@@ -271,6 +271,20 @@ struct PortraitStreamScreen: View {
                 .opacity(scaleOpen ? 0.2 : 1)      // the slider unfolds over the strip's end
                 .allowsHitTesting(!scaleOpen)
 
+            // The Mac's menus, as in the landscape bar: only while the Mac sent some.
+            if client.menus.hasMenus {
+                MacMenuButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                              radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
+                              onOpen: {
+                                  setSettings(false, false)
+                                  windowMenu = nil
+                                  withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+                              })
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
+
             TextScaleControl(scale: $textScale, open: $scaleOpen,
                              width: metrics.buttonWidth, height: metrics.buttonHeight,
                              radius: metrics.buttonRadius, pointsPerStep: 36)
@@ -290,6 +304,7 @@ struct PortraitStreamScreen: View {
         }
         .frame(height: metrics.barHeight)
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
+        .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
     }
 
     private func barButton(open: Bool, symbol: String, label: String, accessibilityLabel: String,
