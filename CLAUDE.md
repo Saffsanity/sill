@@ -9,11 +9,11 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Remote pacing (2026-09-27, branch `remote-pacing` from main at 150f781, with
-main at cf05a78 and 676b362 merged in; PR A of docs/remote-bundle-plan.md,
-whose "Results: PR A" has every number).** Item 1 of the away-from-home bundle
-Noah decided on 2026-09-25 ("a proven keyframe livelock"), its own PR ahead of
-items 2–4 (the away quality, the link report, the move home: PR B, not
-started).
+main at cf05a78 and 676b362 merged in, PR #34; PR A of
+docs/remote-bundle-plan.md, whose "Results: PR A" has every number).** Item 1
+of the away-from-home bundle Noah decided on 2026-09-25 ("a proven keyframe
+livelock"), its own PR ahead of items 2–4 (the away quality, the link report,
+the move home: PR B, not started).
 - The livelock (Sill.log 2026-09-25 14:13–14:36, the iPad on the iPhone's
   hotspot through Tailscale at Extreme, then Pro · Retina): `paceRemote`
   dropped any frame while more than two messages were unacknowledged, so a
