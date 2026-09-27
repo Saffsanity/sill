@@ -1,35 +1,5 @@
 # The Mac's pointer on the device — the plan
 
-## Status and hand-off (2026-09-27 03:00)
-
-Branch `pointer-visibility` (worktree `/Users/noah/Downloads/winstream-pointer`, from main at
-8b0d418, merged with main at cf05a78 in b6f57d0):
-- 7e3de05, kind 26 and the host's pure rules (`MacPointer`, `PointerControl`, with
-  `Tests/checks/pointer-control`); d75b827, this plan as its critique left it; 9ec9673, the
-  device's pure parts (`PointerPresence.swift`, SessionLink's input count, with
-  `Tests/checks/pointer-presence` and the fence check's count); a18acd6, those checks listed and in
-  CI.
-- 49abee1, the rest of the host as an interrupted build left it on 2026-09-26 (Noah stopped the
-  workflow at 99 % of the week's usage), then the host's finish, in two runs (the first was
-  interrupted at about 00:22 before it committed; the second checked its work again and committed
-  it: f8f08f6, 9e6996b, 4a08fd3): the host read against §4–§6, the test client's `--input`, the
-  pointer-watch check listed and in CI's mutants, and every host gate run ("Results: the host").
-  Nothing in the host was missing; no host source changed in that step.
-- The device (§7): 0a5a394, two more pure rules (the key row, a new frame); 67a78b1, the device's
-  half wired up, with the harness; b6f57d0, main at cf05a78 merged in (one merge commit); then this
-  plan's "Results: the device" and CLAUDE.md. Everything was run again on the merge.
-- Next: the review of §11 step 5 (three lenses: the control rule and its races on both ends, the
-  host's threads and cost, the device UI in all four layouts and through rotation), then the PR
-  with P1–P12 for Noah. Nothing is pushed.
-
-Noah's authorization: "When the Mac is controlling the mouse pointer, it should show the real mouse
-pointer… When Sill is controlling the Mac, continue to hide the real pointer and only render the
-client side one in portrait mode when the trackpad is used" (2026-09-25); the plan's defaults ("I
-trust your judgement") but Q4, the pointer sampled at the frame rate; "Work on 5-12 as well
-please" (2026-09-26); "Continue working where you left off with Opus 5.5 subagents" (2026-09-26
-23:38).
-
-
 2026-09-25. It stands alone: the implementer needs no other design document. Written from a
 read-only survey of `/Users/noah/Downloads/winstream-remote` (branch `remote-access` at 78d76e0,
 which contains cb0ec55); line numbers are at 78d76e0. No host or app was started, no event was
@@ -431,7 +401,8 @@ The rules of the others:
   the pointer, so the Mac's next real motion shows its arrow at once.
 
 **Also in this file, pure.** `static func fraction(of p: CGPoint, in r: CGRect) -> (x: Double, y: Double, inside: Bool)`:
-- `inside` is 0 ≤ x ≤ 1 and 0 ≤ y ≤ 1;
+- `inside` is 0 ≤ x < 1 and 0 ≤ y < 1 (the far edges are the next display's first column and row,
+  or past a window: "Review fixes");
 - an empty rectangle is never inside;
 - x and y are rounded by `MacPointer.rounded`.
 
@@ -469,7 +440,9 @@ What `sample()` does:
   "Measured") are re-read on PointerWatch's own serial queue (`sill.pointer`, utility QoS), never
   on `sill.net`: a window-server round trip there would sit in front of frames and pongs, and a
   pong must measure the network and nothing else (StreamServer.swift:806-809). A tick whose read
-  moved starts one when none is running and the last is at least 0.1 s old; the result lands
+  moved starts one when none is running and the last is at least 0.1 s old, and (since the review,
+  `sample(devices:)`) some device other than the one moving the pointer is there to be sent it;
+  one runs every 2 s whatever the pointer does; the result lands
   under the lock, and each tick uses the newest bounds it has (at most about 0.1 s and one call
   old). `sample()` never waits for it. `kCGWindowIsOnscreen` false counts as not inside.
 
@@ -761,7 +734,8 @@ lock-protected, read by main):
     drop it (the console line, §7.8);
   - while a hand-over is carried over (below), drop it if it `isRestatement`;
   - otherwise `control = .elsewhere`, the position, `anchor = position` when inside, and
-    `takeovers += 1` when control was `.here`;
+    `takeovers += 1` when control was `.here` (since the review `reseeds`, which also counts news
+    that moves the anchor while the Mac has the pointer: "Review fixes");
   - hop to main when anything shown changed, checking `self.connection === from` as the other
     handlers do.
   The cap is `maxOtherHostPayload`, unchanged.
@@ -783,7 +757,8 @@ lock-protected, read by main):
   newest of the Mac's last position over the stream and this device's last pointer event. That
   also mends today's jump back after a finger tap: a tap left `localPointer` nil, and the pad
   carried on from its stale cursor.
-- **`pointerTakeovers`** (the feed's `takeovers`). The pad reads it at each move and re-seeds its
+- **`pointerTakeovers`** (the feed's `takeovers`; `reseeds` since the review, read with the anchor
+  in one look, `pointerFeedState`). The pad reads it at each move and re-seeds its
   cursor from `pointerAnchor` when it changed since the pad's own last move. TrackpadView adopts
   the shared pointer only at a stroke's first finger today (TrackpadView.swift:368-373), so a
   finger resting on the pad while the Mac took over would otherwise carry on from where it
@@ -1251,7 +1226,9 @@ from the one before in the last 0.1 s) and some device is sent it, StreamServer 
 stream's frame interval (`PointerWatch.frameInterval`, from the `fps` the coordinator hands over
 with the geometry) on `sill.net`, and the 30 ms tick only keeps the link awake; 0.1 s after the last
 change the sampler stops and the tick samples again. A device that drives the pointer is never sent
-it, so one device alone never starts the sampler.
+it, so one device alone never starts the sampler while it drives; while it only watched, the
+sampler also ran with the pointer off the source, where every report is the same `inside: false`
+and nothing goes out (the review found that, and the rest of what "Review fixes" lists).
 
 The step ran twice. The first run (to about 00:22) ran every gate below and was stopped before it
 committed; the second (00:38 to 01:10) read the host again and ran every gate again from a fresh
@@ -1458,3 +1435,118 @@ which uses the hardware encoder: a device streamed from Sill.app throughout (mai
 `Scripts/encoder-check/no-device.sh` said so at every look). The synthetic hosts listen on every
 interface, as SillHost always has; they advertise nothing and only loopback clients, and the
 simulator on this Mac through its own link-local addresses, reached them.
+
+---
+
+## Review fixes (2026-09-27)
+
+The review of §11 step 5 (three lenses: the control rule and its races on both ends, the host's
+threads and cost, the device in every layout) found eight things. Each was reproduced before it
+was fixed, on 98d2860 (the device half merged with main); the seventh, a race, from the code and
+the pure model only. Every fix has a check where one fits.
+
+- **The frame-rate sampler ran off the source.** It started whenever the pointer moved and some
+  device watched, over the streamed source or not, while every report there is the same `inside:
+  false` and none goes out. The review's harness (the real StreamServer and PointerWatch, the
+  server never started, a loopback-only NWListener feeding `serve`, a scripted pointer with the
+  real location read only for its cost): at 120 fps with the pointer moving off the source, 120
+  reads and 135–143 wakeups a second, against 33 and 34 still. Now `PointerWatch.samplerInterval`
+  starts it only while the pointer moves over the source and some device is sent it; the sample
+  that sees the pointer leave still sends `inside: false` and stops it, and the next tick sees it
+  come back. Off the source: 33 reads and 34 wakeups a second. The price is up to a tick at the
+  way back in: crossing the edge every half second at 120 fps, the first report over the source
+  came 2.7–24 ms after the crossing (1.1–9.5 ms before the fix), the first `inside: false` 2.1–11
+  ms after the way out (1.1–8.1), 77 reads a second instead of 120.
+- **Below 33 fps the sampler sampled less often than the tick it replaced** (24 fps: 42 ms apart;
+  30 fps: 33 ms). It runs only when the frame interval is shorter than the tick's, so at 24 and 30
+  fps the tick samples: 29.7–29.8 ms apart in the harness, 29–30 ms in H8at24 and H8at30 (below).
+- **A regular-mode window was re-read about 8.6 times a second while one device drove alone**,
+  for a fraction nobody is sent. `sample(devices:)` takes the devices the host would send the
+  pointer to (every ready one), and a re-read after a move starts only while one of them is not the
+  one moving the pointer; the one every 2 s runs whoever is there. One device driving: 0.6 re-reads
+  a second; with a second device watching: 8.6 (9.1 before), and it hears every position.
+- **The far edges read as inside.** `PointerControl.fraction` took 0…1 closed, so (1512, 474.5) on
+  the 1512×949 Desktop, the next display's first column, read x 1.0 and inside. Now 0 ≤ x < 1 and
+  0 ≤ y < 1, judged before rounding as before; (1511.99, 474.5) is inside with x 1.0.
+- **The pad acted from where a finger landed after the Mac moved the pointer under it.** The pad
+  re-seeded from the anchor only when a report took the pointer from this device (`takeovers`), so
+  a finger that landed while the Mac already had the pointer and rested while the Mac's mouse moved
+  it on pulled it back with its next move, click, long press or scroll: in the review's run (the
+  Debug app against a loopback stand-in) the first kind 8 after the Mac's move to (0.7, 0.7) went
+  out at (0.2183, 0.2), where the finger had landed; with the device driving first it went to
+  (0.7183, 0.7), which is why S2 never saw it. `reseeds` counts news that takes the pointer and
+  news that moves the anchor while the Mac or another device has it, and every catch-up compares
+  it; the real PointerPresence.swift with the review's sequence now gives (0.7184, 0.7).
+- **A report just before a move's hand-over was never drawn.** It was recorded in the feed on the
+  network queue, then drawn on main only if the session's connection was still the one it came on;
+  one that landed after the probe had read the new connection's window list but before
+  `moveProbed` ran was not, finishMove draws nothing, and the new connection's first report says
+  the same (the pure model: news, `changed` false). The render reads only the feed, which already
+  holds the report, so it no longer asks which connection carries the session.
+- **`-SillInputScript` had no guard.** Its steps send real kind 8, and Sill.app's home door admits
+  loopback and posts what it reads: a gate given a stale port, or a session on a Bonjour row, could
+  have clicked and typed on this Mac. `InputScript.refusal` runs the script only when the session
+  was dialled to a loopback address and the host's first window list has no `hostVersion`
+  (Sill.app always sends one), else "input script: refused: …".
+- **`PointerPresence.own`'s comment** named `StreamClient.localPointer`, which is gone.
+
+New for the reruns, TEST ONLY: `SILL_TEST_LOOPBACK=1`, honoured only by a host that does not
+advertise, puts both doors on 127.0.0.1 alone (`requiredInterfaceType` loopback and a required
+local endpoint), so a test host takes no connection from another machine; one line says so.
+
+Checks: pointer-control 152 (147 and 5: the edge column and row outside, the last ones inside, the
+second display's first column its own, an infinite height), 33 of 33 mutants (30 and 3: the edge
+column or row inside, the first column outside; its infinite-width case moved halfway down, since
+at y = 1 the half-open test alone kept it out and the guard's mutant survived); pointer-watch 132
+(112 and 20: the sampler rule at each edge, the re-read with one device, a watcher, the Mac taking
+over and no device), 40 of 40 (33 and 7); pointer-presence 165 (157 and 8: re-seeds, and the
+review's case in the order TrackpadSurface calls it, a move, a tap, another device driving on), 43
+of 43 (41 and 2: a re-seed only on a takeover, the old rule, and only when the anchor moves).
+
+Run, the hardware encoder only where said (while `Scripts/encoder-check/no-device.sh` said no
+device was connected to Sill.app, watched every 2 s), every host synthetic and on 127.0.0.1 alone
+(lsof checked at each start), nothing posted, the real pointer only read (the same point before
+and after the host gates):
+- The review's harness, extended by two phases (in and out of the source; a window with a second
+  device watching), on 98d2860 and on the fixed tree: the numbers above. Three integration mutants
+  of StreamServer's call, each built into the harness, bring one back each: the sampler whatever
+  the source (120 reads a second off it), the watch never told who is there (0.6 re-reads a second
+  with a watcher), no tick in the rule (24 reads a second at 24 fps, 43.5 ms apart).
+- Builds: `swift build -c release`; iOS Debug and Release for the simulator and Debug for a device,
+  generic and unsigned, only the old `StreamClient` capture warning; the host's commits of the fixes
+  each built and checked on their own, and the pad's commit's app built for the simulator.
+- `Tests/checks/run-all.sh` on the merge with main at 676b362: all 19 pass.
+- Host gates (gates.py's H4–H9, H13 and the rest of the host step's, as before but for these): H8at30
+  and H8at24 now expect the tick (67 lines in 2 s, at most 34 in any second, 29–30 ms apart);
+  Hedge, new (a step on x = 1512 outside, on 1511.99 inside with x 1.0, the row at y = 949 outside);
+  Hremote, both listeners on 127.0.0.1. All pass; H7c and H8at30 on a second run: in the first,
+  under load averages near 200 from other sessions' jobs, H7c's first device started 2 s late and
+  was still connected when the path moved, and H8at30's arrivals bunched (40 in a second) while the
+  host's own count was 33. H2 against the host step's logs of 8b0d418 (hardware): identical masked
+  and sorted but for the loopback line, in all four cases (the Direct Wireless client case in two of
+  three tries; the third differed in its first second's counters, the client arriving a second
+  later). The sampler at 120 fps (hardware): 238 lines in 2.0 s, at most 121 in any second, 8.0 ms
+  apart.
+- Live, on a simulator of its own (an iPad Pro 13-inch (M5), "Sill pointer", deleted after), the
+  app in the harness against loopback-only hosts: S2–S7 as before, but S5 only across the move from
+  AWDL (S5's cable and Wi-Fi moves need a host on this Mac's own Wi-Fi and cable addresses); S2b,
+  new (portrait: the finger lands while the Mac has the pointer at the 1 s step, rests while it
+  moves to the 3 s step, then strokes: the second device's first position after the stroke begins
+  within 0.02 of the 3 s step, none near the 1 s step, the pad's arrow carried on from the 3 s
+  step); S2c, new (the same rest, then a click on the pad: its arrow at the 3 s step, nothing near
+  the 1 s step, `in.dry 2`); S8, new, against tools/fakehost.py (a loopback stand-in that logs each
+  kind 8 and posts nothing): a host whose window list says Sill 9.9 gets "input script: refused: the
+  host says it is Sill 9.9, which posts input to this Mac" and no kind 8; one with no version gets
+  the script's input dialled by 127.0.0.1, ::1 and localhost (`-SillConnect [::1]:P` never reaches
+  the app: UserDefaults reads an argument that starts with `[` as a property list and drops it).
+  51 of 51 before the merge and again on it (a run on the merge between the two, at load averages
+  of 100–240, failed only photos that came seconds late and showed later steps).
+- S1, the 40 photos: all as expected; 25 identical to the device step's pixel for pixel, the other
+  15 differing only in the iPad's own home indicator.
+- H12: the bare app's 100 previews from main (676b362) and from the merge, rendered from one path:
+  identical.
+
+Not run: anything on a device (P1–P12; P3 now in both orders); S5's moves to the cable and back to
+Wi-Fi, and its reconnect over the cable (they need a host on this Mac's Wi-Fi and cable addresses);
+the hand-over race live (a report on the old connection between the probe's read and `moveProbed`
+on main: from the code and the pure model).
