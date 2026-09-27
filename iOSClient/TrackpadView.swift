@@ -17,6 +17,9 @@ struct Trackpad: View {
     let currentLocalPointer: () -> CGPoint?
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    /// What the pad's vertical motion is measured against: nil is its own height (see
+    /// `TrackpadSurface.verticalSpan`).
+    var verticalSpan: CGFloat? = nil
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
 
@@ -26,7 +29,8 @@ struct Trackpad: View {
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setLocalPointer: setLocalPointer,
                          currentLocalPointer: currentLocalPointer,
-                         latched: latched, onModifiersConsumed: onModifiersConsumed)
+                         latched: latched, onModifiersConsumed: onModifiersConsumed,
+                         verticalSpan: verticalSpan)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -73,6 +77,7 @@ struct TrackpadView: UIViewRepresentable {
     let currentLocalPointer: () -> CGPoint?
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
+    var verticalSpan: CGFloat? = nil
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -88,6 +93,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.setLocalPointer = setLocalPointer
         uiView.currentLocalPointer = currentLocalPointer
         uiView.latchedModifiers = latched
+        uiView.verticalSpan = verticalSpan
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -107,6 +113,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// Modifiers the key row is holding for the next click. Cleared here when one is spent.
     var latchedModifiers: KeyModifiers = []
     var onModifiersConsumed: (() -> Void)?
+    /// How far a finger travels down the pad for the share of the frame that the pad's width is
+    /// across: nil is the pad's own height. A phone's pad is far taller than the picture's shape,
+    /// so it passes its width ÷ 1.6 (PhonePortraitLayout.trackpadSpan): a stroke then moves the
+    /// pointer as far down as across on a 16:10 picture, and the extra height is room, not a slower
+    /// pointer. Pointer motion, two-finger scrolling and its coast all use it.
+    var verticalSpan: CGFloat?
+    /// `verticalSpan`, or the pad's height.
+    private var ySpan: CGFloat { verticalSpan.flatMap { $0 > 0 ? $0 : nil } ?? bounds.height }
 
     /// The virtual cursor, in frame coordinates (0…1), starting in the middle. Clamped, so pushing
     /// past an edge parks the pointer there instead of losing it. Still the source of truth for
@@ -212,7 +226,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func moveCursor(dx: CGFloat, dy: CGFloat) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         cursor.x = min(max(cursor.x + dx / bounds.width * Self.travel, 0), 1)
-        cursor.y = min(max(cursor.y + dy / bounds.height * Self.travel, 0), 1)
+        cursor.y = min(max(cursor.y + dy / ySpan * Self.travel, 0), 1)
         // The local sprite first, since it is the feedback the finger is waiting for; then the
         // Mac, whose cursor still has to follow for clicks to land there. No rate limit needed
         // here: sendInput coalesces moves to one every 8 ms.
@@ -311,7 +325,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 guard bounds.width > 0, bounds.height > 0 else { return }
                 // Natural sign, same as the direct-touch overlay: fingers down, content down.
                 send(.scroll(x: cursor.x, y: cursor.y,
-                             dx: dx / bounds.width, dy: dy / bounds.height))
+                             dx: dx / bounds.width, dy: dy / ySpan))
             } else if !trackerDriving {
                 moveCursor(dx: dx, dy: dy)
             }
@@ -357,7 +371,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // Converted to frame fractions exactly as live two-finger deltas are.
                 guard let self, self.bounds.width > 0, self.bounds.height > 0 else { return }
                 self.send(.scroll(x: at.x, y: at.y,
-                                  dx: step.x / self.bounds.width, dy: step.y / self.bounds.height))
+                                  dx: step.x / self.bounds.width, dy: step.y / self.ySpan))
             },
             onEnd: { send(.scrollGesture(.momentumEnded, x: at.x, y: at.y)) })
     }

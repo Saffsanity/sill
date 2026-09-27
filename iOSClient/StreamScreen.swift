@@ -45,6 +45,15 @@ enum Palette {
 /// the posture only changed how much room there is, not what the screen is for. The thresholds sit
 /// between those sizes with room to spare — 600 separates the 500 pt outer width from the 710 pt
 /// inner one, and 560 the 500 pt outer height from the inner 710.
+///
+/// The same sizes catch the phones: every iPhone held upright (375–440 pt wide) is
+/// `.outerPortrait` and on its side `.outerLandscape`, and so is an iPad window narrower than 600 pt
+/// held upright (Slide Over, a narrow Split View). `.outerPortrait` draws the phone's arrangement
+/// (Noah, 2026-09-27: the picture in a fixed 16:10 pane on top, then the Keyboard button's row, the
+/// thumbnails, six keys and the trackpad; `PhonePortraitLayout`), the Duo's outer display
+/// included: it has a phone's shape and the same keyboard over its key row. To give it back the
+/// halves, send 480 pt and wider to `portrait(metrics: .regular)`'s arrangement at compact sizes
+/// (phones are at most 440; docs/iphone-portrait-plan.md, Detection).
 enum DuoLayout {
     case innerLandscape, innerPortrait, outerPortrait, outerLandscape
 
