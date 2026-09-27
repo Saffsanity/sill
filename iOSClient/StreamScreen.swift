@@ -542,13 +542,17 @@ struct StreamScreen: View {
         endTour()
     }
 
+    /// The run ends: Done, Skip, or a turn with nothing of it left. Put aside under the pairing
+    /// overlay (an outside link), it ends there too, and the keyboard stays down under that
+    /// overlay, as the overlay leaves it at its own close.
     private func endTour() {
+        let onScreen = tourOnScreen
         withAnimation(.easeOut(duration: 0.2)) { tour = nil }
         client.tourSession.running = false
-        if tourKeyboardAfter { overlay.setKeyboard(shown: true) }
+        if tourKeyboardAfter && !overlayShown { overlay.setKeyboard(shown: true) }
         tourKeyboardAfter = false
-        // VoiceOver reads the stream screen afresh.
-        AccessibilityNotification.ScreenChanged().post()
+        // VoiceOver reads the stream screen afresh (not from under the pairing overlay).
+        if onScreen { AccessibilityNotification.ScreenChanged().post() }
     }
 
     /// Settings › Take the Tour: the panel closes without putting the keyboard back (the tour does,
