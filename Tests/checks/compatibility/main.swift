@@ -139,6 +139,95 @@ let helloMessage = StreamMessage(kind: .hello, timestamp: 1, isKeyframe: false, 
 check(StreamMessage.parseHeader(helloMessage)?.kind == .hello, "the hello's header parses")
 check(SillProtocol.current == 1, "protocol 1")
 
+// The Mac's sound (docs/audio-plan.md §3.4, H3's wire cases): the hello's codecs, AudioFormat, Send
+// Audio in kinds 16 and 17, the audio note and ClientStats' two fields, every one optional, and the
+// older payloads decoding the newer JSON (each `Old…` below is the type as it was before the sound).
+struct OldHello: Codable, Equatable { var appVersion: String?; var build: String?; var `protocol`: Int?; var device: String? }
+struct OldStreamSettings: Codable, Equatable {
+    var maxFPS: Int; var bitrate: Int; var captureScale: Double; var prioritizeSpeed: Bool; var virtualDisplay: Bool; var directWireless: Bool?
+}
+struct OldClientStats: Codable, Equatable {
+    var fps: Int; var frameAgeMs: Int; var rttMs: Int; var device: String; var frameAgeMaxMs: Int?; var rttMaxMs: Int?
+}
+struct OldChange: Codable, Equatable {
+    var token: Int?; var maxFPS: Int?; var bitrate: Int?; var captureScale: Double?; var prioritizeSpeed: Bool?; var virtualDisplay: Bool?; var directWireless: Bool?
+}
+let soundHello = Hello(appVersion: "0.6", build: "7", protocol: 1, device: "iPad (iPad14,1)", audio: AudioCodec.devicePlays)
+check(json(soundHello) == #"{"appVersion":"0.6","audio":["aac-eld"],"build":"7","device":"iPad (iPad14,1)","protocol":1}"#,
+      "the hello lists its codecs under \"audio\": \(json(soundHello))")
+check(Wire.decode(Hello.self, from: Wire.encode(soundHello)) == soundHello, "a hello with codecs round-trips")
+check(json(Hello(appVersion: "1.0")) == #"{"appVersion":"1.0"}"#, "a hello without codecs has no audio key (a device that plays no sound)")
+check(Wire.decode(Hello.self, from: Data(#"{"audio":["opus","aac-eld"],"later":1}"#.utf8))?.audio == ["opus", "aac-eld"],
+      "the codecs decode in the device's order, unknown keys skipped")
+check(Wire.decode(Hello.self, from: Data(#"{"audio":"aac-eld"}"#.utf8)) == nil, "codecs as one string do not decode")
+check(Wire.decode(OldHello.self, from: Wire.encode(soundHello)) == OldHello(appVersion: "0.6", build: "7", protocol: 1, device: "iPad (iPad14,1)"),
+      "an older host reads the new hello and skips its codecs")
+check(Wire.decode(Hello.self, from: Data(#"{"appVersion":"1.0","build":"42","protocol":1,"device":"iPad"}"#.utf8))?.audio == nil,
+      "an older device's hello: no codecs")
+// The host's pick: the first of the device's list (best first) that the host makes.
+check(AudioCodec.choose(offered: nil) == nil, "choose: no list (an older device), no sound")
+check(AudioCodec.choose(offered: []) == nil, "choose: an empty list, no sound")
+check(AudioCodec.choose(offered: ["opus"]) == nil, "choose: nothing this host makes, no sound")
+check(AudioCodec.choose(offered: ["aac-eld"]) == "aac-eld", "choose: aac-eld")
+check(AudioCodec.choose(offered: ["opus", "aac-eld"]) == "aac-eld", "choose: past a codec this host does not make")
+check(AudioCodec.choose(offered: ["AAC-ELD", "aac-eld "]) == nil, "choose: names are exact (no case folding, no trimming)")
+check(AudioCodec.choose(offered: ["opus", "aac-eld"], makes: ["aac-eld", "opus"]) == "opus", "choose: the device's order wins over the host's")
+check(AudioCodec.choose(offered: ["x", "aac-eld", "opus"], makes: ["opus", "aac-eld"]) == "aac-eld", "choose: the first the host makes, not the host's best")
+check(AudioCodec.choose(offered: ["aac-eld"], makes: []) == nil, "choose: a host that makes nothing sends nothing")
+check(AudioCodec.hostMakes == ["aac-eld"] && AudioCodec.devicePlays == ["aac-eld"] && AudioCodec.aacELD == "aac-eld", "the codec's name")
+// AudioFormat: every field, none, and a later host's.
+let format = AudioFormat(codec: "aac-eld", sampleRate: 48000, channels: 2, framesPerPacket: 480, primingFrames: 240, bitrate: 128_000,
+                         epoch: 3, cookie: Data([0xF8, 0xF0, 0x21, 0x2C, 0x00]), source: AudioFormat.sourceApp, app: "Safari")
+check(json(format) == #"{"app":"Safari","bitrate":128000,"channels":2,"codec":"aac-eld","cookie":"+PAhLAA=","epoch":3,"framesPerPacket":480,"primingFrames":240,"sampleRate":48000,"source":"app"}"#,
+      "AudioFormat's keys, the cookie in base64: \(json(format))")
+check(Wire.decode(AudioFormat.self, from: Wire.encode(format)) == format, "AudioFormat round-trips")
+check(Wire.decode(AudioFormat.self, from: Data("{}".utf8)) == AudioFormat() && json(AudioFormat()) == "{}", "{} is an AudioFormat with nothing in it")
+check(Wire.decode(AudioFormat.self, from: Data(#"{"codec":"opus","v":2,"channels":6}"#.utf8)) == AudioFormat(codec: "opus", channels: 6),
+      "a later host's format: unknown keys skipped, an unknown codec kept as its string")
+check(Wire.decode(AudioFormat.self, from: Data(#"{"cookie":"not base64!"}"#.utf8)) == nil, "a cookie that is not base64 does not decode")
+check([AudioFormat.sourceApp, AudioFormat.sourceDesktop, AudioFormat.sourceTest] == ["app", "desktop", "test"], "the source's words")
+// Send Audio (kind 16's settings, kind 17's change) and the audio note.
+let withSound = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                               directWireless: false, sendAudio: true)
+check(json(withSound).contains(#""sendAudio":true"#) && Wire.decode(StreamSettings.self, from: Wire.encode(withSound)) == withSound,
+      "StreamSettings carries sendAudio and round-trips")
+let noSound = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
+                             directWireless: false, sendAudio: nil)
+check(!json(noSound).contains("sendAudio"), "a host without sound leaves sendAudio out")
+check(Wire.decode(OldStreamSettings.self, from: Wire.encode(withSound))
+      == OldStreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false, directWireless: false),
+      "an older device reads the new settings and skips sendAudio")
+check(Wire.decode(StreamSettings.self, from: Data(#"{"maxFPS":60,"bitrate":8000000,"captureScale":1,"prioritizeSpeed":true,"virtualDisplay":false,"directWireless":true}"#.utf8))?.sendAudio == nil,
+      "an older host's settings: sendAudio nil (no row)")
+check(HostSettingsChange(sendAudio: true).isEmpty == false && HostSettingsChange(token: 3).isEmpty && HostSettingsChange(sendAudio: false).isEmpty == false,
+      "a change with only sendAudio is not empty")
+check(HostSettingsChange(sendAudio: true).applied(to: noSound).sendAudio == true
+      && HostSettingsChange(sendAudio: false).applied(to: withSound).sendAudio == false
+      && HostSettingsChange(maxFPS: 60).applied(to: withSound).sendAudio == true,
+      "applied(to:) lays sendAudio over the settings and keeps it when the change has none")
+check(json(HostSettingsChange(token: 4, sendAudio: true)) == #"{"sendAudio":true,"token":4}"#, "kind 17 with Send Audio: \(json(HostSettingsChange(token: 4, sendAudio: true)))")
+check(Wire.decode(OldChange.self, from: Wire.encode(HostSettingsChange(token: 4, sendAudio: true))) == OldChange(token: 4),
+      "an older host reads a Send Audio change as an empty one")
+let noted = HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
+                              audioNote: "Couldn’t capture the sound of Safari: it did not start within 2 s.")
+check(Wire.decode(HostSettingsState.self, from: Wire.encode(noted))?.audioNote == "Couldn’t capture the sound of Safari: it did not start within 2 s.",
+      "kind 16's audio note round-trips")
+check(!json(HostSettingsState(settings: withSound, persistent: true, virtualDisplayAvailable: true, softwareEncoder: false)).contains("audioNote"),
+      "no note, no key")
+// ClientStats' two fields.
+let heard = ClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11, audioBehindMs: 42, audioLate: 3)
+check(Wire.decode(ClientStats.self, from: Wire.encode(heard)) == heard && json(heard).contains(#""audioBehindMs":42"#) && json(heard).contains(#""audioLate":3"#),
+      "ClientStats carries audioBehindMs and audioLate")
+check(Wire.decode(OldClientStats.self, from: Wire.encode(heard))
+      == OldClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad", frameAgeMaxMs: 20, rttMaxMs: 11),
+      "an older host reads the new stats and skips the sound's")
+let quiet = ClientStats(fps: 60, frameAgeMs: 9, rttMs: 7, device: "iPad")
+check(!json(quiet).contains("audio") && Wire.decode(ClientStats.self, from: Wire.encode(quiet))?.audioLate == nil,
+      "a device that played no sound sends neither")
+// Kind 29.
+check(StreamMessageKind.audio.rawValue == 29 && StreamMessageKind(rawValue: 29) == .audio, "kind 29 is audio")
+check(StreamMessageKind(rawValue: 30) == nil, "kind 30 is not this build's")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {

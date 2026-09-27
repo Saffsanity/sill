@@ -10,7 +10,7 @@ extension HostConfig {
     var streamSettings: StreamSettings {
         StreamSettings(maxFPS: maxFPS, bitrate: bitrate, captureScale: Double(captureScale),
                        prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                       directWireless: directWireless)
+                       directWireless: directWireless, sendAudio: nil)   // no sound yet: the devices show no row
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:

@@ -11,7 +11,8 @@ PATHS = {
 }
 MUTANTS = [
     # The wire (MacMenu.swift, StreamMessage.swift)
-    ("the fetch at 28", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 28"),
+    # A number no plan will take (250 to 254), so the next kind moves no mutant (docs/audio-plan.md §3.1).
+    ("the fetch at 250", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 250"),
     ("stale set from pressed", "MacMenu.swift", "self.pressed = pressed; self.stale = stale", "self.pressed = pressed; self.stale = pressed"),
     ("a press's token dropped", "MacMenu.swift", "own titles.\n    public var title: String?\n    public var token: Int?\n\n    public init(version: Int? = nil, id: String? = nil, title: String? = nil, token: Int? = nil) {\n        self.version = version; self.id = id; self.title = title; self.token = token",
      "own titles.\n    public var title: String?\n    public var token: Int?\n\n    public init(version: Int? = nil, id: String? = nil, title: String? = nil, token: Int? = nil) {\n        self.version = version; self.id = id; self.title = title; self.token = nil"),

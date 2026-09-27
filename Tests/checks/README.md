@@ -117,6 +117,10 @@ a permission, a device or the network, and never anything that links VideoToolbo
   item 1's host side is measured by the pacing harness (`Scripts/pacing/run.sh`), which needs no
   encoder but runs for minutes and on loopback at up to 600 Mbit/s, so it is not a pure check.
 - `trackpad-gestures` (kind 28): `protocol`, `menus` and `pointer-control` expect 28 to read as
-  `.unknown`, and three mutants renumber a kind onto 28 or 29 (`menus`' "the fetch at 28",
-  `pointer-control`'s "kind 26 numbered 28" and "… 29"); that branch flips the cases and moves the
-  mutants to free numbers, since a kind renumbered onto a taken one no longer compiles.
+  `.unknown`; that branch flips those cases to its `gesture`. Kind 29 is the Mac's sound (`audio`,
+  docs/audio-plan.md), and the checks expect 30 and up to read as `.unknown`. The mutants that
+  renumber a kind do so onto numbers no plan will take, 250 to 254 (`menus`' "the fetch at 250",
+  `pointer-control`'s "kind 26 numbered 251" and "… 252", `compatibility`'s "kind 29 as 253",
+  `protocol`'s "kind 29 as 254"), since a kind renumbered onto a taken one no longer compiles; a
+  later kind moves none of them. A mutant the gestures' branch adds onto 29 or 30 ("kind 28 as 29")
+  moves to that range too when it merges.

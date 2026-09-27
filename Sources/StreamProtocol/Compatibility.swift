@@ -14,7 +14,8 @@ import Foundation
 // Pure: Foundation only, so it is checked on its own with swiftc.
 
 /// The wire's generation. 1: the 14-byte header, kinds 0–23, and any later kind an older peer can
-/// skip (24, 25 and 27, the Mac's menus: MacMenu.swift), and the JSON rules of HostSettings.swift.
+/// skip (24, 25 and 27, the Mac's menus: MacMenu.swift; 29, the Mac's sound: Audio.swift, sent only to
+/// a device whose hello lists a codec), and the JSON rules of HostSettings.swift.
 /// Raised only by a change an older peer cannot skip (a new transport, pairing required on the home
 /// door); an additive change never raises it. When it rises, the host's device floor rises too
 /// (DeviceGate, docs/update-notice-plan.md §4.6).
@@ -89,8 +90,8 @@ public struct SillVersion: Comparable, Hashable, Sendable, CustomStringConvertib
 /// Kind 23: the first message of every session connection a device makes (home door, remote door,
 /// a move's network connection), written straight to that connection before anything else, so a
 /// host can judge the device before it sends it anything (DeviceGate). Never on a pairing
-/// connection, whose one message is kind 19. All four fields are optional: `{}` decodes, so a host
-/// never fails on a thin hello.
+/// connection, whose one message is kind 19. Every field is optional: `{}` decodes, so a host never
+/// fails on a thin hello.
 public struct Hello: Codable, Sendable, Equatable {
     /// CFBundleShortVersionString: "1.0" (the iOS project's MARKETING_VERSION). What a host's floor
     /// compares (DeviceGate).
@@ -101,8 +102,14 @@ public struct Hello: Codable, Sendable, Equatable {
     public var `protocol`: Int?
     /// "iPad (iPad14,1)", as ClientStats.device. The host cleans it (SafeText.label).
     public var device: String?
+    /// The codecs of the Mac's sound this device plays, best first (`AudioCodec.devicePlays`:
+    /// ["aac-eld"]). Nil from a device that plays none, every device before 2026-09-27: a host sends
+    /// it no kind 29 (Audio.swift).
+    public var audio: [String]?
 
-    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil) {
+    public init(appVersion: String? = nil, build: String? = nil, protocol: Int? = nil, device: String? = nil,
+                audio: [String]? = nil) {
         self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device
+        self.audio = audio
     }
 }

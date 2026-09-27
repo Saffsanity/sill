@@ -363,9 +363,11 @@ func header(_ kind: UInt8) -> StreamHeader? {
 }
 check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, goodbye",
       [header(18)?.kind, header(19)?.kind, header(20)?.kind, header(21)?.kind, header(22)?.kind] == [.macInfo, .pairRequest, .pairResult, .pairingWanted, .goodbye])
-check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer; 28 unknown (skipped)",
+check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
-      && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer && header(28)?.kind == .unknown)
+      && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
+check("kind 29 is audio (the Mac's sound); 28 and 30 unknown (skipped)",
+      header(29)?.kind == .audio && header(28)?.kind == .unknown && header(30)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -376,6 +378,95 @@ check("kind 20 JSON leaves out nil fields", String(data: Wire.encode(pr), encodi
 check("kind 19 decodes the plan's example",
       Wire.decode(PairRequest.self, from: Data(#"{"v":1,"method":"qr","proof":"AyZAJqNTU5nSKEaHx6RZOf0K5dOeygR_8JSrCV_gNOo","name":"iPad","model":"iPad14,1"}"#.utf8))?.model == "iPad14,1")
 check("kind 22 decodes an unknown reason as a string", Wire.decode(Goodbye.self, from: Data(#"{"reason":"later","x":1}"#.utf8))?.reason == "later")
+
+// MARK: - Kind 29, the Mac's sound (docs/audio-plan.md §3.2)
+
+func audioPackets(_ epoch: Int, _ seq: UInt32, _ start: Bool, _ packets: [Data]) -> Data {
+    AudioMessage.packets(AudioPackets(epoch: epoch, seq: seq, segmentStart: start, packets: packets)).serialized()
+}
+// The plan's example: the first packet of a segment, epoch 3, 162 bytes of AAC-ELD.
+let eld = Data((0..<162).map { UInt8(truncatingIfNeeded: $0 &* 7 &+ 1) })
+let audioExample = audioPackets(3, 0, true, [eld])
+check("kind 29 type 2: the plan's example is 02 0003 00000000 01 01 00A2 and 162 bytes, 173 in all",
+      hex(audioExample.prefix(11)) == "0200030000000001010" + "0a2" && audioExample.count == 173 && audioExample.suffix(162) == eld)
+check("kind 29 type 2: 187 bytes with the header", StreamMessage(kind: .audio, timestamp: 1, isKeyframe: false, payload: audioExample).serialized().count == 187)
+check("kind 29 type 2: parsed back", AudioMessage.parse(audioExample) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: true, packets: [eld])))
+let many = (0..<255).map { i in Data(repeating: UInt8(i), count: i % 40) }
+let manyBytes = audioPackets(65_535, 4_000_000_000, false, many)
+check("kind 29 type 2: 255 packets (some empty), the top epoch and a large seq round-trip",
+      AudioMessage.parse(manyBytes) == .packets(AudioPackets(epoch: 65_535, seq: 4_000_000_000, segmentStart: false, packets: many)))
+check("kind 29 type 2: the epoch is written modulo 65,536",
+      AudioMessage.parse(audioPackets(70_000, 1, false, [eld])) == .packets(AudioPackets(epoch: 4464, seq: 1, segmentStart: false, packets: [eld])))
+check("kind 29 type 2: seq and epoch big endian", hex(audioPackets(0x0102, 0x03040506, false, [Data([9])]).prefix(9)) == "020102030405060001")
+var flagged = audioExample; flagged[7] = 0x03
+check("kind 29 type 2: flags bit 0 is the segment's start; bits 1–7 ignored",
+      AudioMessage.parse(flagged) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: true, packets: [eld])))
+flagged[7] = 0xFE
+check("kind 29 type 2: flags 0xFE has no segment start",
+      AudioMessage.parse(flagged) == .packets(AudioPackets(epoch: 3, seq: 0, segmentStart: false, packets: [eld])))
+// Type 1, the format.
+let fmt = AudioFormat(codec: AudioCodec.aacELD, sampleRate: 48_000, channels: 2, framesPerPacket: 480, primingFrames: 240, bitrate: 128_000,
+                      epoch: 3, cookie: Data([0xF8, 0xF0, 0x21, 0x2C]), source: AudioFormat.sourceDesktop)
+let fmtBytes = AudioMessage.format(fmt).serialized()
+check("kind 29 type 1: 01 then the JSON, parsed back", fmtBytes.first == 1 && AudioMessage.parse(fmtBytes) == .format(fmt)
+      && Wire.decode(AudioFormat.self, from: fmtBytes.dropFirst()) == fmt)
+check("kind 29 type 1: {} is a format with nothing in it", AudioMessage.parse(Data([1]) + Data("{}".utf8)) == .format(AudioFormat()))
+// What a reader refuses, and never traps on.
+func refused(_ name: String, _ d: Data) { check("kind 29 refused: \(name)", AudioMessage.parse(d) == nil) }
+refused("an empty payload", Data())
+refused("an unknown type (3)", Data([3]) + audioExample.dropFirst())
+refused("type 0", Data([0]) + audioExample.dropFirst())
+refused("type 1 with no JSON", Data([1]))
+refused("type 1 that is not JSON", Data([1]) + Data("aac".utf8))
+refused("type 1 over 4 KB", Data([1]) + Data(#"{"app":""#.utf8) + Data(repeating: 0x61, count: 4100) + Data(#""}"#.utf8))
+check("kind 29 type 1: 4,096 bytes are taken", AudioMessage.parse(Data([1]) + Data(#"{"app":""#.utf8) + Data(repeating: 0x61, count: 4085) + Data(#""}"#.utf8)) != nil)
+refused("type 2 with only its type", Data([2]))
+refused("type 2 cut short in its header", audioExample.prefix(8))
+refused("type 2 with a count of 0", Data([2, 0, 3, 0, 0, 0, 0, 1, 0]))
+refused("type 2 with a count of 0 and bytes after it", Data([2, 0, 3, 0, 0, 0, 0, 1, 0, 0, 1, 7]))
+refused("type 2 with a length past the end", audioExample.dropLast())
+refused("type 2 with bytes left over", audioExample + Data([0]))
+refused("type 2 missing its second packet", audioPackets(3, 0, false, [eld, eld]).prefix(9 + 2 + 162 + 1))
+var countTooHigh = audioPackets(3, 0, false, [eld]); countTooHigh[8] = 2
+refused("type 2 counting a packet it does not carry", countTooHigh)
+let big = Data(repeating: 1, count: 16_384 - 9 - 2)
+check("kind 29 type 2: 16,384 bytes are taken", AudioMessage.parse(audioPackets(1, 1, false, [big])) != nil)
+refused("type 2 over 16 KB", audioPackets(1, 1, false, [big + Data([1])]))
+// Serialized limits: this host never reaches them, but they never produce what a reader refuses.
+check("kind 29 type 2: at most 255 packets are written", {
+    if case .packets(let p)? = AudioMessage.parse(audioPackets(1, 1, false, Array(repeating: Data([1]), count: 300))) { return p.packets.count == 255 }
+    return false
+}())
+// 1,000 random byte strings (and 1,000 random well-formed messages cut and flipped): nil or a message,
+// never a trap, and whatever parses re-serializes to the same bytes when it is type 2.
+var generator = SystemRandomNumberGenerator()
+var parsedRandom = 0, roundTripFailures = 0
+for i in 0..<2000 {
+    var d: Data
+    if i < 1000 {
+        d = Data((0..<Int.random(in: 0...40, using: &generator)).map { _ in UInt8.random(in: 0...255, using: &generator) })
+        if i % 3 == 0, !d.isEmpty { d[0] = 2 }
+        if i % 3 == 1, !d.isEmpty { d[0] = 1 }
+    } else {
+        let packets = (0..<Int.random(in: 1...4, using: &generator)).map { _ in Data((0..<Int.random(in: 0...20, using: &generator)).map { _ in UInt8.random(in: 0...255, using: &generator) }) }
+        d = audioPackets(Int.random(in: 0...65_535, using: &generator), UInt32.random(in: 0...UInt32.max, using: &generator), Bool.random(using: &generator), packets)
+        switch Int.random(in: 0...3, using: &generator) {
+        case 0: d = d.prefix(Int.random(in: 0...d.count, using: &generator))
+        case 1: d[Int.random(in: 0..<d.count, using: &generator)] ^= UInt8.random(in: 1...255, using: &generator)
+        case 2: d.append(UInt8.random(in: 0...255, using: &generator))
+        default: break
+        }
+    }
+    guard let m = AudioMessage.parse(d) else { continue }
+    parsedRandom += 1
+    if case .packets(let p) = m {
+        var again = p.serialized()
+        again[7] = d[7]   // the flags' ignored bits are not kept
+        if again != d { roundTripFailures += 1 }
+    }
+}
+check("kind 29: 2,000 random and damaged payloads never trap (\(parsedRandom) parsed), and each type 2 parsed writes the same bytes back",
+      roundTripFailures == 0)
 
 // MARK: - RemoteTLS, live on loopback: the shared builder on both ends
 

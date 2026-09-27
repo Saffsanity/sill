@@ -62,6 +62,11 @@ public enum StreamMessageKind: UInt8 {
                              // with the title it showed for that menu; without an id, the top level, and a request for
                              // every later one on this connection. Answered to that device alone, from a read of at
                              // most 1 s ago
+    // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and 28, held for the
+    // trackpad gesture (docs/trackpad-gestures-plan.md). Older readers map it to `.unknown` and skip it.
+    case audio = 29          // host → device: AudioMessage — the sound of what streams: a format (JSON AudioFormat),
+                             // then packets (binary AudioPackets). Only to a device whose hello lists the codec
+                             // (Hello.audio), and only while Send Audio is on
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

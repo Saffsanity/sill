@@ -44,11 +44,18 @@ public struct ClientStats: Codable, Hashable {
     public var frameAgeMaxMs: Int?
     /// The slowest round trip among that second's pongs, -1 when none came back. nil from an older client.
     public var rttMaxMs: Int?
+    /// The Mac's sound (kind 29): that second's median of how far the sound trailed the picture as the
+    /// device sees it, in ms, -1 for a second in which no sound played. Nil from a device that has
+    /// played none this session, and from an older client.
+    public var audioBehindMs: Int?
+    /// The sound's packets of that second that came too late to play. Nil as `audioBehindMs`.
+    public var audioLate: Int?
 
     public init(fps: Int, frameAgeMs: Int, rttMs: Int, device: String,
-                frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil) {
+                frameAgeMaxMs: Int? = nil, rttMaxMs: Int? = nil, audioBehindMs: Int? = nil, audioLate: Int? = nil) {
         self.fps = fps; self.frameAgeMs = frameAgeMs; self.rttMs = rttMs; self.device = device
         self.frameAgeMaxMs = frameAgeMaxMs; self.rttMaxMs = rttMaxMs
+        self.audioBehindMs = audioBehindMs; self.audioLate = audioLate
     }
 }
 

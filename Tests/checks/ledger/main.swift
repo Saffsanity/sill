@@ -33,7 +33,8 @@ func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool) -> HostSet
 
 // MARK: - Scenarios (deterministic)
 
-let base = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false, directWireless: false)
+let base = StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
+                          sendAudio: nil)
 func st(_ s: StreamSettings, answering: Int? = nil, vd: Bool = true, note: String? = nil) -> HostSettingsState {
     HostSettingsState(settings: s, persistent: true, virtualDisplayAvailable: vd, virtualDisplayNote: note, softwareEncoder: false,
                       stream: RunningStream(width: 3024, height: 1898, fps: 60, mbps: 15, onVirtualDisplay: false), answering: answering)
@@ -388,7 +389,7 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     let old = Int.random(in: 0..<4, using: &rng) == 0
     let start = StreamSettings(maxFPS: 120, bitrate: [15_000_000, 12_000_000].randomElement(using: &rng)!,   // 12 = a Mac-side custom value
                                captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                               directWireless: Bool.random(using: &rng))
+                               directWireless: Bool.random(using: &rng), sendAudio: nil)
     let host = Host(target: start, app: app, old: old)
     var intentBase = start
     if !app { intentBase.virtualDisplay = false }

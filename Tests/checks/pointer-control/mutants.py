@@ -55,8 +55,10 @@ MUTANTS = [
     ("a non-finite position", POINTER, "guard inside == true, let x, let y, x.isFinite, y.isFinite", "guard inside == true, let x, let y"),
     ("inside left out of the JSON when false", POINTER, "self.x = x; self.y = y; self.inside = inside; self.seen = seen",
      "self.x = x; self.y = y; self.inside = inside == false ? nil : inside; self.seen = seen"),
-    ("kind 26 numbered 28", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 28 "),
-    ("kind 26 numbered 29", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 29 "),
+    # Numbers no plan will take (250 to 254): a kind renumbered onto a taken one does not compile, so the
+    # next kind moves none of these (docs/audio-plan.md §3.1).
+    ("kind 26 numbered 251", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 251 "),
+    ("kind 26 numbered 252", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 252 "),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

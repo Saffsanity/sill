@@ -18,6 +18,19 @@ MUTANTS = [
     ("reconnect false by default (old goodbyes change)", "Remote.swift", "reconnect: Bool? = nil) {", "reconnect: Bool? = false) {"),
     ("protocol 1 by default", "Switcher.swift", "hostVersion: String? = nil, protocol: Int? = nil) {", "hostVersion: String? = nil, protocol: Int? = 1) {"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
+    # The Mac's sound (docs/audio-plan.md §3.4): the hello's codecs, the host's pick, Send Audio, the note, the stats.
+    ("the hello's codecs never kept", "Compatibility.swift", "        self.audio = audio\n", "        self.audio = nil\n"),
+    ("the pick takes the host's order", "Audio.swift", "return offered.first { makes.contains($0) }", "return makes.first { offered.contains($0) }"),
+    ("the pick takes the device's last", "Audio.swift", "return offered.first { makes.contains($0) }", "return offered.last { makes.contains($0) }"),
+    ("the pick ignores what the host makes", "Audio.swift", "return offered.first { makes.contains($0) }", "return offered.first"),
+    ("the pick folds case", "Audio.swift", "return offered.first { makes.contains($0) }", "return offered.first { c in makes.contains { $0 == c.lowercased() } }"),
+    ("Send Audio never kept in the settings", "HostSettings.swift", "        self.sendAudio = sendAudio\n    }\n}\n\n/// The pipeline", "        self.sendAudio = nil\n    }\n}\n\n/// The pipeline"),
+    ("Send Audio left out of isEmpty", "HostSettings.swift", "&& directWireless == nil && sendAudio == nil", "&& directWireless == nil"),
+    ("Send Audio left out of applied(to:)", "HostSettings.swift", "        if let v = sendAudio { r.sendAudio = v }\n", ""),
+    ("a change's Send Audio never kept", "HostSettings.swift", "        self.directWireless = directWireless\n        self.sendAudio = sendAudio\n    }\n\n    /// All setting", "        self.directWireless = directWireless\n        self.sendAudio = nil\n    }\n\n    /// All setting"),
+    ("the audio note never kept", "HostSettings.swift", "self.audioNote = audioNote", "self.audioNote = nil"),
+    ("the late count never kept", "Viewport.swift", "self.audioBehindMs = audioBehindMs; self.audioLate = audioLate", "self.audioBehindMs = audioBehindMs; self.audioLate = nil"),
+    ("kind 29 as 253", "StreamMessage.swift", "    case audio = 29 ", "    case audio = 253 "),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:
