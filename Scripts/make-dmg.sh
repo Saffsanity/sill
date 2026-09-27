@@ -27,10 +27,11 @@
 #   take AppleScript, which asks for Automation permission, and a logged-in session showing the
 #   window. dmg-layout then reads it back from the finished image (`check`): the records, the
 #   background's alias leading to the picture wherever the image is mounted, the picture's sizes,
-#   the volume icon. Window: design/DMGBackground.svg's 660 x 400 points plus the title bar, icon
-#   view, no toolbar, sidebar or status bar, 128-point icons, Sill.app at (170, 180) and
-#   Applications at (490, 180), the ends of the SVG's arrow; .background and .VolumeIcon.icns placed
-#   below the window, for anyone who shows hidden files.
+#   the volume icon. Window: design/DMGBackground.svg's 660 x 400 points plus macOS 27's 32-point
+#   title bar (DMGLayout.titleBar says why), icon view, no toolbar, sidebar or status bar, 128-point
+#   icons, Sill.app at (170, 180) and Applications at (490, 180), the ends of the SVG's arrow;
+#   .background and .VolumeIcon.icns placed below the window, for anyone who shows hidden files.
+#   Tests/checks/dmg-layout checks the layout tool's .DS_Store and alias against these numbers.
 # - The background: design/DMGBackground.svg, rendered by Quick Look at 660 and 1320 pixels wide
 #   (design/README.md's tool; the app icon is made the same way), cropped to the picture (Quick Look
 #   renders into a square), joined by tiffutil into one TIFF that holds both, so the window is sharp
@@ -55,7 +56,7 @@ window=660x400          # design/DMGBackground.svg's size: the window's content,
 position=200,120        # the window's top-left corner on the screen
 icon_size=128
 text_size=12
-edge=f2f3f5             # the SVG's bottom edge, shown if Finder makes the window taller than the picture
+edge=ffffff             # the SVG's every edge: shown where the window is larger than the picture
 layout=(
     --window "$window" --position "$position" --icon-size "$icon_size" --text-size "$text_size"
     --background .background/background.tiff --background-color "$edge"

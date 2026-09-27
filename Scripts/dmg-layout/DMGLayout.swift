@@ -20,7 +20,9 @@ struct DMGLayout: Equatable {
     var textSize: Int
     /// The picture's path on the volume, such as ".background/background.tiff".
     var background: String
-    /// What Finder shows around the picture if the window comes out larger than it: its edge colour.
+    /// The view's colour behind the picture, for where the window is larger than it: the picture's
+    /// edge colour. (Finder may show its own fill there instead: white in Light Mode, so a picture
+    /// white to its edges, as Sill's is, looks the same either way.)
     var backgroundColor: (red: Int, green: Int, blue: Int)
     /// Where each icon's centre sits, in points from the content's top-left corner.
     var items: [Item]
@@ -28,12 +30,16 @@ struct DMGLayout: Equatable {
     /// who shows hidden files in Finder; otherwise Finder would place them among the others.
     var hidden: [String]
 
-    /// Finder's WindowBounds is the whole window, its title bar included (Finder-made images'
-    /// windows are their picture's height plus the title bar), and a window with no toolbar has
-    /// only that bar on top: 28 points since macOS 11, older tools' 22 before. Should Finder make
-    /// the content taller than the picture instead, the strip below shows backgroundColor, the
-    /// picture's own bottom edge.
-    static let titleBar = 28
+    /// Finder's WindowBounds is the whole window, its title bar included, and a window with no
+    /// toolbar has only that bar above its content: 32 points on macOS 27 (AppKit's
+    /// NSWindow.frameRect(forContentRect:styleMask:) for a titled window, on a Mac whose Finder is
+    /// built with the same SDK), 28 on macOS 11 to 15 (not measured here). The window is sized for
+    /// the taller bar: on macOS 27 its content is exactly the picture, and under a 28-point bar it
+    /// is 4 points taller, a strip below the picture that shows white, as every edge of the picture
+    /// is (make-dmg.sh's backgroundColor, and Finder's own fill in Light Mode). Sized for 28, the
+    /// window would hide the picture's bottom 4 points on macOS 27; sized to the picture alone, as
+    /// some images are (a Finder-made one of 2023: 512 x 400 for a 512 x 400 picture), 32.
+    static let titleBar = 32
 
     static func == (a: DMGLayout, b: DMGLayout) -> Bool {
         a.width == b.width && a.height == b.height && a.left == b.left && a.top == b.top
