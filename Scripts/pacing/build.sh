@@ -17,7 +17,7 @@ git rev-parse --verify --quiet "$base^{commit}" > /dev/null || { echo "build.sh:
 
 # StreamServer.swift and what it compiles with (a file BASE lacks is left out; if StreamServer
 # needed it, the build says so).
-host_files=(StreamServer ClientLink DeviceGate HostLog InterfaceSnapshot OriginPolicy RefusalSummary Stats)
+host_files=(StreamServer ClientLink DeviceGate HostLog InterfaceSnapshot OriginPolicy PointerControl PointerWatch RefusalSummary Stats)
 
 # put DEST: stdin to DEST, only if it differs.
 put() {
