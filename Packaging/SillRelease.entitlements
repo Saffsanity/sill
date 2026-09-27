@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Release builds (Scripts/make-app.sh --release) ONLY, and ONLY when a matching Developer ID
+	     provisioning profile is embedded (Packaging/embedded.provisionprofile). These three are
+	     profile-restricted entitlements: a binary that carries them without a profile that
+	     authorises the access group has a valid signature but is killed by AMFI at launch. So
+	     make-app.sh signs with this file only when the profile is present, and otherwise signs
+	     without it and keeps the identity in the login keychain (docs/keychain-plan.md §4, §9).
+
+	     They put the Mac's remote-access identity (key, recognition key, trust list, Require
+	     pairing) in the data-protection keychain under the access group 9B2KKVM937.me.saffer.sill.mac,
+	     which only a process of team 9B2KKVM937 entitled to that group can read or create — so no
+	     other process can pre-create or read those items (the security review, 2026-09-27).
+
+	     Team 9B2KKVM937 is Developer ID (the release identity). A development build signed Apple
+	     Development (team HG877AGTQ7) must NOT carry these (it would be AMFI-killed too, and its
+	     group would differ); it keeps Packaging/SillDebug.entitlements and the login keychain. -->
+	<key>application-identifier</key>
+	<string>9B2KKVM937.me.saffer.sill.mac</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>9B2KKVM937</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>9B2KKVM937.me.saffer.sill.mac</string>
+	</array>
+</dict>
+</plist>

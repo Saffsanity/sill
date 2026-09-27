@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import Security
 import SillHostCore
 import StreamProtocol
 
@@ -144,27 +145,18 @@ final class AppModel {
 
     // MARK: Pairing and remote access
 
-    /// The Mac's identity and trust list, and Require pairing beside them: the login keychain in
-    /// Sill.app. A test never touches that keychain: `--synthetic` keeps them in memory, and so does
-    /// the bare SillMenuBar binary, whose ad hoc signature changes with every build (each rebuild
-    /// would face a keychain prompt for items the last one made). TEST ONLY: the bare binary with
-    /// `--synthetic` (a test host) keeps them in SILL_TEST_REMOTE_DIR (a 0700 directory) instead;
-    /// Sill.app ignores it with a line (a caller could hand it a trust list of its own).
+    /// The Mac's identity and trust list, and Require pairing beside them: a keychain in Sill.app,
+    /// picked by IdentityStorePlan (docs/keychain-plan.md). An entitled Developer ID build (a
+    /// provisioning profile embedded, so it holds a `keychain-access-groups` entitlement) uses the
+    /// data-protection keychain, which no other process can pre-create or read; any other real
+    /// Sill.app — a development build, or a release with no profile — uses the legacy login keychain.
+    /// A test never touches a keychain: `--synthetic` keeps them in memory, and so does the bare
+    /// SillMenuBar binary, whose ad hoc signature changes with every build. TEST ONLY: the bare
+    /// binary with `--synthetic` (a test host) keeps them in SILL_TEST_REMOTE_DIR (a 0700 directory)
+    /// instead; a real Sill.app ignores it with a line (a caller could hand it a trust list of its
+    /// own).
     private func makeRemoteAccess() -> RemoteAccess {
-        var store: IdentityStore = KeychainIdentityStore()
-        if synthetic || !Self.bundled {
-            store = MemoryIdentityStore()
-            if let dir = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_DIR"], !dir.isEmpty {
-                if synthetic, !Self.bundled {
-                    do { store = try FileIdentityStore(directory: URL(fileURLWithPath: dir)) }
-                    catch { print("SILL_TEST_REMOTE_DIR=\(dir) ignored: \(error)") }
-                } else {
-                    print("SILL_TEST_REMOTE_DIR ignored: only a test host takes it (one that does not advertise and is not Sill.app itself).")
-                }
-            }
-        } else if let dir = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_DIR"], !dir.isEmpty {
-            print("SILL_TEST_REMOTE_DIR ignored: only a test host takes it (one that does not advertise and is not Sill.app itself).")
-        }
+        let store = makeIdentityStore()
         let remote = RemoteAccess(store: store)
         if let problem = remote.identityProblem { print("Remote access unavailable: \(problem)") }
         remote.restoreSeen(settings.remoteDevicesSeen())
@@ -176,6 +168,51 @@ final class AppModel {
         // A device paired by itself over the USB cable: the notice, once per pairing.
         remote.onCablePaired = { [weak self] name, fingerprint in self?.showCableNotice?(CableNotice(name: name, fingerprint: fingerprint)) }
         return remote
+    }
+
+    /// The identity store IdentityStorePlan names for this launch (docs/keychain-plan.md), and one
+    /// log line saying which keychain the identity is in and why. SILL_TEST_REMOTE_DIR is honoured
+    /// only for a test host and otherwise ignored with a line, as before.
+    private func makeIdentityStore() -> IdentityStore {
+        let dir = ProcessInfo.processInfo.environment["SILL_TEST_REMOTE_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+        let choice = IdentityStorePlan.choose(bundled: Self.bundled, synthetic: synthetic,
+                                              entitledAccessGroup: Self.entitledKeychainAccessGroup(), testRemoteDir: dir)
+        if dir != nil, case .testDirectory = choice {} else if dir != nil {
+            print("SILL_TEST_REMOTE_DIR ignored: only a test host takes it (one that does not advertise and is not Sill.app itself).")
+        }
+        switch choice {
+        case .dataProtection(let group):
+            // The strong keychain: no other process can pre-create or read these items. Logged so a
+            // release build can be confirmed hardened (and Noah's on-device pass can read it back).
+            print("Remote access: the identity is in the data-protection keychain (access group \(group)).")
+            return KeychainIdentityStore(accessGroup: group)
+        case .legacy:
+            // No keychain-access-groups entitlement (a development build, or a release with no
+            // embedded provisioning profile): the login keychain, the profile-free fallback. Said in
+            // the log so a build that should have hardened but did not is visible.
+            print("Remote access: the identity is in the login keychain (no keychain-access-groups entitlement — a development build, or a release with no embedded provisioning profile; docs/keychain-plan.md).")
+            return KeychainIdentityStore()
+        case .memory:
+            return MemoryIdentityStore()
+        case .testDirectory(let path):
+            do { return try FileIdentityStore(directory: URL(fileURLWithPath: path)) }
+            catch { print("SILL_TEST_REMOTE_DIR=\(path) ignored: \(error)"); return MemoryIdentityStore() }
+        }
+    }
+
+    /// The `keychain-access-groups` entitlement the running binary actually holds, from its own
+    /// signature — the first group ending in the app's suffix, else the first. Nil for any build
+    /// without an embedded provisioning profile (every development and ad hoc build reads its own
+    /// entitlement as nil, measured 2026-09-27), which is exactly the signal to use the legacy store.
+    /// This reads only this process's own entitlements; it authenticates nothing about other apps.
+    private static func entitledKeychainAccessGroup() -> String? {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else { return nil }
+        if let groups = value as? [String], !groups.isEmpty {
+            return groups.first { $0.hasSuffix(".me.saffer.sill.mac") } ?? groups.first
+        }
+        if let group = value as? String, !group.isEmpty { return group }
+        return nil
     }
 
     /// Require pairing at launch, from the identity store beside the trust list: on when it was

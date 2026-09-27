@@ -128,10 +128,44 @@ if [ -z "$identity" ]; then
 fi
 if [ "$release" = 1 ]; then
     # Developer ID: hardened runtime and a secure timestamp (notarization needs both), no get-task-allow.
-    codesign --force --options runtime --timestamp --sign "$identity" "$stage"
+    #
+    # The identity items' keychain (docs/keychain-plan.md): with a Developer ID provisioning profile
+    # that authorises the access group, embed it and sign with Packaging/SillRelease.entitlements, so
+    # Sill.app keeps its key and trust list in the data-protection keychain, which no other process
+    # can pre-create or read. Without the profile, sign without those entitlements: they are
+    # profile-restricted, so a build that carried them without a matching profile would pass codesign
+    # yet be killed by AMFI at launch. The profile-free build is a valid, notarizable Developer ID
+    # app that keeps its identity in the login keychain (the same store as before this change) — safe,
+    # and said in the log so the softer keychain is never a silent surprise.
+    profile="${SILL_PROVISION_PROFILE:-Packaging/embedded.provisionprofile}"
+    group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' Packaging/SillRelease.entitlements)"
+    if [ -f "$profile" ]; then
+        # The profile must authorise this access group, or the signed app is AMFI-killed at launch.
+        prof_dir="$(mktemp -d)"; trap 'rm -rf "$prof_dir"' EXIT
+        if ! security cms -D -i "$profile" -o "$prof_dir/prof.plist" 2>/dev/null; then
+            rm -rf "$stage"; echo "error: --release could not decode the provisioning profile '$profile'." >&2; exit 1
+        fi
+        prof_appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$prof_dir/prof.plist" 2>/dev/null || true)"
+        if [ "$prof_appid" != "$group" ]; then
+            rm -rf "$stage"
+            echo "error: the provisioning profile '$profile' is for '${prof_appid:-nothing}', not '$group'; it would AMFI-kill the app. Mint one for me.saffer.sill.mac (docs/release-checklist.md)." >&2
+            exit 1
+        fi
+        cp "$profile" "$stage/Contents/embedded.provisionprofile"
+        codesign --force --options runtime --timestamp --entitlements Packaging/SillRelease.entitlements --sign "$identity" "$stage"
+        # After signing: the app must actually carry the access group, or it would be AMFI-killed.
+        if ! codesign -d --entitlements - --xml "$stage" 2>/dev/null | grep -q "$group"; then
+            rm -rf "$stage"; echo "error: the signed app does not carry the keychain access group '$group'." >&2; exit 1
+        fi
+        keychain_note="data-protection keychain (access group $group)"
+    else
+        codesign --force --options runtime --timestamp --sign "$identity" "$stage"
+        keychain_note="login keychain (no provisioning profile at '$profile'; to harden the identity keychain, mint one — docs/release-checklist.md)"
+    fi
 else
     # get-task-allow lets lldb and Xcode's Attach to Process attach to the hardened app.
     codesign --force --options runtime --timestamp=none --entitlements Packaging/SillDebug.entitlements --sign "$identity" "$stage"
+    keychain_note="login keychain (a development build has no keychain-access-groups entitlement)"
 fi
 codesign --verify --strict "$stage"
 # Who signed it, read from the signature: the leaf certificate's name, empty for ad hoc.
@@ -146,6 +180,7 @@ fi
 rm -rf "$app"
 mv "$stage" "$app"
 echo "Built $app, version $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") ($build_number), signed by: ${signer:-ad hoc}"
+echo "  identity keychain: ${keychain_note:-login keychain}"
 codesign -d -r- "$app" 2>&1 | sed -n 's/^# *designated => /  designated requirement: /p; s/^designated => /  designated requirement: /p'
 
 dest="${SILL_INSTALL_DIR:-/Applications}/Sill.app"

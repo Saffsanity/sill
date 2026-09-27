@@ -8,6 +8,69 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Keychain hardening (2026-09-27, branch `keychain-hardening` from
+`home-pairing` (PR #37, not yet merged), not pushed; the assessment, the
+decision and what was implemented are in `docs/keychain-plan.md`).** Noah's
+pre-1.0 question: move Sill.app's remote-access identity (the Mac's key,
+recognition key, trust list and Require pairing) from the legacy login
+keychain, which does not authenticate who made an item (a process running
+before Sill's first launch can pre-create every item and Sill adopts it — the
+home-pairing security review), to the data-protection keychain, which no other
+process can pre-create or read. Reproduced the risk and settled the cost with
+test items of own names in throwaway keychains only (never the login keychain,
+never Sill's real items): the legacy keychain's creator and ACL are
+attacker-set, so Sill's verbatim lookups adopt a planted key (and a planted key
+signs a verifying require-pairing-off record); and the data-protection path
+needs a `keychain-access-groups` entitlement — a Developer ID binary that
+carries it without a provisioning profile is AMFI-killed at launch (exit 137,
+codesign still valid), while an ad-hoc build without it gets `-34018`. So the
+strong keychain is profile-or-the-app-won't-launch, and only Sill.app is
+affected (the CLI is memory, iOS is already data-protection).
+- Implemented (the recommended path): `IdentityStorePlan` (pure,
+  `Tests/checks/keychain`, 13 cases, 7 mutants, in CI's matrix) chooses the
+  store from four launch facts — an entitled real Sill.app uses the
+  data-protection keychain and **never** the legacy one beside it (so no
+  planted legacy item is adopted), an unentitled real Sill.app uses the login
+  keychain (the safe, profile-free fallback), a test host uses memory or the
+  test directory. `AppModel.entitledKeychainAccessGroup()` reads the running
+  binary's own `keychain-access-groups` (`SecTaskCopyValueForEntitlement`);
+  measured nil for every ad-hoc/dev build, so only a profile-embedded Developer
+  ID build takes the strong path. `KeychainIdentityStore(accessGroup:)` is
+  parameterised — nil is the legacy keychain byte-for-byte, a group adds
+  `kSecUseDataProtectionKeychain` + the access group to every query — and, in
+  data-protection mode, adopts any legacy item on first launch (`adoptLegacyKey`
+  re-imports the same key material, so the same fingerprint, Mac ID and every
+  device's pin; `adoptLegacyGeneric` copies the recognition key, trust list and
+  Require pairing), so an update keeps the identity; then the login keychain is
+  never read again. `Packaging/SillRelease.entitlements` and `make-app.sh
+  --release`: with a profile at `Packaging/embedded.provisionprofile` (gitignored)
+  it verifies the profile authorises the access group (refusing a mismatch that
+  would AMFI-kill the app), embeds it and signs with the entitlements; without
+  one it signs as before (login keychain) and says so; every build's last line
+  names the identity keychain. `release.sh`'s `check_signature` confirms the
+  state. The CLI and the bare binary are unchanged.
+- Verified (no notarization, no device, no profile minted): `swift build`
+  clean; `Tests/checks/run-all.sh` all 28 pass (keychain new); the keychain
+  check's 7 mutants; `make-app.sh` (Apple Development) → login-keychain note,
+  entitlements get-task-allow only; `make-app.sh --release` dry-run (Developer
+  ID, no profile) → the login-keychain fallback, hardened, no keychain groups,
+  `codesign --verify --strict` clean; a bogus profile refused (exit 1); the
+  migration proof (scratch `keychain/migrate.swift`) passes with test names in
+  throwaway keychains (same public key, same Mac ID, the signed require-pairing
+  record still verifies, the generics round-trip), nothing leaked to the login
+  keychain, the search list unchanged.
+- **For Noah (docs/keychain-plan.md §10, release-checklist.md Part 1 §5):**
+  mint the Developer ID provisioning profile for `me.saffer.sill.mac` (team
+  9B2KKVM937, Keychain Sharing) with one `xcodebuild -allowProvisioningUpdates`
+  run from a throwaway macOS target — it touches your Apple Account, so this
+  branch did not run it — drop it at `Packaging/embedded.provisionprofile` and
+  rebuild; then the on-device pass (the strong keychain is unreachable without
+  the profile: the app launches un-AMFI-killed, reads and writes its items, a
+  rebuild keeps them, an update from a legacy-store build migrates cleanly).
+  Land it with home pairing, before the first public build, so new installs go
+  straight to the strong keychain (off the wire, so not a floor blocker). The
+  base is `home-pairing` until #37 merges; then merge main in.
+
 **Pairing at home (2026-09-25 to 27, branch `home-pairing` from main at
 1f3072a, with main merged in at cf05a78 and again at 2b38179, not rebased,
 PR #37; the plan and every step's results are in

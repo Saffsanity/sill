@@ -177,6 +177,50 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       shows the Apple ID; TestFlight §2 has the command). A Mac that needs a newer Sill on the
       device then shows "Update Sill in the App Store" under its notice.
 
+### 5. The keychain provisioning profile (for the hardened identity keychain)
+
+Optional, but recommended before the first public build (docs/keychain-plan.md): it moves Sill's
+remote‑access identity (the Mac's key, the trust list, Require pairing) from the legacy login
+keychain to the data‑protection keychain, which no other process can pre‑create or read. Without it,
+a release still builds and runs — it keeps the identity in the login keychain, and `make-app.sh
+--release` and `release.sh` say so in the log. Landing it before the first public build means new
+installs write straight to the strong keychain and only your own dev Macs need the reset below.
+
+Team **9B2KKVM937** (Developer ID), access group **9B2KKVM937.me.saffer.sill.mac**. There is no
+Xcode project for the Mac app, so mint the profile with a one‑off target:
+
+- [ ] In a throwaway Xcode macOS App target, set the bundle identifier to `me.saffer.sill.mac`, the
+      team to 9B2KKVM937, Signing to Automatic, and add the **Keychain Sharing** capability with the
+      group `me.saffer.sill.mac`. Then, once (it registers the App ID's Keychain Sharing capability
+      and downloads a **Developer ID** provisioning profile that authorises the access group):
+      `xcodebuild -allowProvisioningUpdates -scheme <that target> -destination 'generic/platform=macOS' -configuration Release archive`
+      (the same `-allowProvisioningUpdates` mechanism the App Store profile used). This registers a
+      new App ID and capability on your Apple Account and may prompt for it — it is a deliberate
+      step, so a background/CI run must not do it.
+- [ ] The profile lands in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` (a
+      `.provisionprofile`; `security cms -D -i <file>` prints its plist — check `Entitlements ›
+      application-identifier` is `9B2KKVM937.me.saffer.sill.mac`). Copy it to
+      `Packaging/embedded.provisionprofile` (git‑ignored; keep a backup outside the repo), or point
+      `SILL_PROVISION_PROFILE` at it.
+- [ ] Check: `make-app.sh --release` prints `identity keychain: data-protection keychain (access
+      group 9B2KKVM937.me.saffer.sill.mac)`; a mismatched profile is refused before it builds an
+      AMFI‑killable app.
+- Two teams: your Apple Development identity is team **HG877AGTQ7**, the Developer ID is
+      **9B2KKVM937**. Only the Developer ID build carries the profile and the access group; a
+      development build (make-app.sh's default) must **not** — it keeps `SillDebug.entitlements` and
+      the login keychain, or macOS would kill it at launch.
+- The profile expires (a year). Renewing it is the same `-allowProvisioningUpdates` run; replace
+      `Packaging/embedded.provisionprofile`. A release with an expired or missing profile falls back
+      to the login keychain with a log line, so it never fails silently.
+- Your own dev Macs that already used remote access on the legacy store are migrated
+      **automatically** on the first hardened launch: the code copies the key (same Mac ID),
+      recognition key, trust list and Require pairing from the login keychain into the
+      data‑protection keychain, so pairings survive and the log says
+      "migrated the Mac's identity key…". Nothing to do. Only if you want to start fresh instead,
+      delete the login‑keychain items by hand (`security delete-generic-password -s
+      me.saffer.sill.remote` for each of `recognition-key`, `paired-devices`, `require-pairing`, and
+      the key in Keychain Access) and re‑pair — on a Mac you own, never in CI.
+
 ## Part 2: every release
 
 - [ ] Versions: Sill for Mac's is `CFBundleShortVersionString` in `Packaging/Info.plist`; its

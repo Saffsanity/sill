@@ -269,6 +269,17 @@ check_signature() {
     if codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q 'get-task-allow'; then
         fail "$app carries the get-task-allow entitlement, which notarization refuses"
     fi
+    # The identity keychain (docs/keychain-plan.md): an embedded provisioning profile means the
+    # data-protection keychain, and then the app must carry the access group, or macOS would kill it
+    # at launch; no profile means the login keychain, the safe fallback, worth naming in a release's
+    # log so it is never a silent surprise. make-app.sh has already refused a mismatched profile.
+    if [ -f "$app/Contents/embedded.provisionprofile" ]; then
+        codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q 'keychain-access-groups' \
+            || fail "$app embeds a provisioning profile but does not carry keychain-access-groups; it would be killed at launch"
+        say "Identity keychain: data-protection (embedded provisioning profile, keychain-access-groups present)"
+    else
+        say "Identity keychain: login keychain (no embedded provisioning profile; docs/keychain-plan.md — safe, but the hardened data-protection keychain needs the profile)"
+    fi
 }
 
 # Gatekeeper's verdict on one copy of the app: a valid stapled ticket, and "Notarized Developer ID".
