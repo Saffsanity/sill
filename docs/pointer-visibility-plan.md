@@ -1,19 +1,31 @@
 # The Mac's pointer on the device — the plan
 
-## Status and hand-off (2026-09-26 05:20)
+## Status and hand-off (2026-09-27 01:10)
 
-Stopped by Noah at 99 % of the week's usage during the host build. Branch `pointer-visibility`
-(worktree `/Users/noah/Downloads/winstream-pointer`, from main at 8b0d418) holds 51006b8, the
-protocol and host (kind 26, the Mac's pointer, and who moves it), and the commit after this one:
-the rest of the host as the interrupted agent left it while it was running the pure checks against
-the branch. Unverified, unreviewed; no iOS file has changed. Next agent: (1) build and run
-`Tests/checks/run-all.sh`, fix, commit the host properly; (2) the iOS half (the plan's device
-sections: the real pointer shown while the Mac moves it, the client pointer only for the portrait
-trackpad); (3) merge main (bd46192 or later), review, PR with Noah's device tests. Noah's
-authorization: "When the Mac is controlling the mouse pointer, it should show the real mouse
+Branch `pointer-visibility` (worktree `/Users/noah/Downloads/winstream-pointer`, from main at
+8b0d418, not merged with main since):
+- 7e3de05, kind 26 and the host's pure rules (`MacPointer`, `PointerControl`, with
+  `Tests/checks/pointer-control`); d75b827, this plan as its critique left it; 9ec9673, the
+  device's pure parts (`PointerPresence.swift`, SessionLink's input count, with
+  `Tests/checks/pointer-presence` and the fence check's count; nothing calls them yet); a18acd6,
+  those checks listed and in CI.
+- 49abee1, the rest of the host as an interrupted build left it on 2026-09-26 (Noah stopped the
+  workflow at 99 % of the week's usage), then this step, the host's finish, in two runs (the first
+  was interrupted at about 00:22 before it committed; the second checked its work again and
+  committed it): the host read against §4–§6, the test client's `--input`, the pointer-watch check
+  listed and in CI's mutants, and every host gate run ("Results: the host", at the end). Nothing in
+  the host was missing; no host source changed in this step.
+- Next: (2) the iOS half, §7 (the Mac's pointer shown while the Mac or another device moves it,
+  the device's own only on the portrait trackpad), gates H1 (iOS), H3 (presence, SessionLink) and
+  S1–S5; (3) merge main (cf05a78 or later: keep both Current step entries in CLAUDE.md, union
+  ci.yml's lists), the review of §11 step 5, and the PR with P1–P12 for Noah.
+
+Noah's authorization: "When the Mac is controlling the mouse pointer, it should show the real mouse
 pointer… When Sill is controlling the Mac, continue to hide the real pointer and only render the
-client side one in portrait mode when the trackpad is used" (2026-09-25) and "Work on 5-12 as well
-please" (2026-09-26).
+client side one in portrait mode when the trackpad is used" (2026-09-25); the plan's defaults ("I
+trust your judgement") but Q4, the pointer sampled at the frame rate; "Work on 5-12 as well
+please" (2026-09-26); "Continue working where you left off with Opus 5.5 subagents" (2026-09-26
+23:38).
 
 
 2026-09-25. It stands alone: the implementer needs no other design document. Written from a
@@ -1217,3 +1229,118 @@ measurement. It changed the plan in place:
   `SessionLink.inputsOnSession` as §7.3 says, `adopt` and `unhold` included, and `dropHandOver`
   takes back what it drops. Checks: `Tests/checks/pointer-control`, `Tests/checks/pointer-presence`,
   and the fence check's count (every mode, and a mode of its own).
+
+---
+
+## Results: the host (2026-09-27)
+
+The host half as 49abee1 left it, read against §4–§6 and "Since the critique", then run. Nothing
+the plan asks of the host was missing, and no Swift source changed in this step: `PointerWatch`
+(§4.2, with the frame rate it samples at), StreamServer's counts, kind 26 at each tick and the
+frame-rate sampler (§4.3), the coordinator's geometry per source and the two hooks (§4.4, §4.7,
+§4.10), InputInjector's notes before each post and the dry run (§4.5), VirtualStage's `onWarp`
+(§4.6), the lines and Stats keys (§4.9) and the test client's flags (§5). Added:
+`sillclient.py --input=JSON@T`, a literal kind 8 for inputs the other flags do not make (a scroll, a
+scroll gesture's phase), behind the same guard; the pointer-watch check in `Tests/checks/README.md`
+and in CI's mutants matrix.
+
+The frame-rate sampler (Q4). While the pointer moves (`PointerControl.isMoving`: a read differed
+from the one before in the last 0.1 s) and some device is sent it, StreamServer samples at the
+stream's frame interval (`PointerWatch.frameInterval`, from the `fps` the coordinator hands over
+with the geometry) on `sill.net`, and the 30 ms tick only keeps the link awake; 0.1 s after the last
+change the sampler stops and the tick samples again. A device that drives the pointer is never sent
+it, so one device alone never starts the sampler.
+
+The step ran twice. The first run (to about 00:22) ran every gate below and was stopped before it
+committed; the second (00:38 to 01:10) read the host again and ran every gate again from a fresh
+folder but the two that use the hardware encoder: from 00:38:50 on a device streamed from Noah's
+Sill.app over the cable, so main's `Scripts/encoder-check/no-device.sh` said no at every look. Those
+two, H2 and the sampler at 120 fps, are the first run's, read again from its logs; Sill.log shows no
+device connected while they ran (one from 00:05:46 to 00:10:06 only, which the first run's guard
+caught, below). The numbers are the second run's unless a line says otherwise. Other sessions' jobs
+held the Mac's load average between 15 and 232 (12 cores) through the second run; every gate passed
+through it.
+
+Checked, all without a device, the hardware encoder only where said (such a run started only while
+no-device.sh said no device was connected to Sill.app, and was watched every 2 s; every host
+synthetic, killed by PID, none left running), and the real pointer only read, never moved (read
+before and after each batch of gates: the same point):
+- Builds: a clean `swift build -c release` into a scratch path (27 s; only the CaptureProbe
+  warning); iOS Debug and Release for the generic simulator, arm64, unsigned, from an empty
+  DerivedData (only the old `StreamClient` capture warning).
+- Pure checks: `Tests/checks/run-all.sh`, all 16 (pointer-watch 112, pointer-control 147,
+  pointer-presence 141, the fence's 15 modes); mutants: pointer-watch 33 of 33, pointer-control 30
+  of 30.
+- H2, the CLI byte for byte (hardware encoder; the first run, 00:01–00:05): 8b0d418 from
+  `git archive` against this branch, `SillHost --synthetic` idle 35 s and with
+  `sillclient.py PORT 5 desktop`, both again with `--direct-wireless`: the host's output identical
+  masked and sorted (7, 17, 8 and 18 lines), the client's too (which kinds, and
+  `first kinds: 2 16 4×119 5 16 2 14` in all four); the default host with `--pointer`: no pointer
+  line and no `ptr.` key. The second run read those logs again (the same verdicts), and checked
+  that the base folder is 8b0d418's `git archive` file for file with its build current, and that
+  the branch's binary is the one that ran (no Swift source changed since; `swift build` had
+  nothing to do).
+- The gates below ran on synthetic hosts with `SILL_TEST_SOFTWARE_ENCODER=1` and a scripted path,
+  and `sillclient.py … --pointer`:
+  - H4: the five steps give four lines, (0.5000, 0.5000), (0.7500, 0.2500), `inside=0`,
+    (0.2500, 0.7500), all `seen=0`, 0.48–0.51 s apart; nothing for the repeated step.
+  - H5a (a still path, a move at 2 s): the first state, then nothing for the rest of the run;
+    `in.dry 1` in that second.
+  - H5b (5 pt every 0.05 s, a move at 3 s): 39 lines before it, none in flight, the next 0.297 s
+    after it with `seen=1`.
+  - H5c, new (a scroll gesture's began, which posts nothing, so only the arrival opens the settle):
+    the next line 0.305 s after it, `seen=1`, `in.dry 0`. H5d, new (a scroll delta): 0.292 s,
+    `in.dry 1`. H5e, new (a kind 8 that does not decode): 0.054 s, `seen=1`: it hands its device
+    the pointer, without the settle.
+  - H6 (a key at 3 s): the next line 0.060 s after it, `seen=2`.
+  - H7 (two clients, A moves at 2 s): B hears (0.2500, 0.2500) `seen=0`; A only its first state.
+    H7b, new (A moves at 2 s, B at 3.3 s): each hears the other's position with its own count (B
+    `seen=0`, A `seen=1`) and nothing after its own input. H7c, new (A moves, then leaves; the path
+    moves 2 s later): B hears all 21 steps and no `ptr.mac` is counted, since the Mac had the
+    pointer again. H7d, new (A sends 100 moves 10 ms apart, which the dry run applies to the
+    scripted pointer): B hears A's motion 59 times in 0.99 s, 17.0 ms apart (the median): the
+    sampler at 60 fps; `in.dry 100`.
+  - H8 (2,000 steps 1 ms apart): 119 lines in 1.98 s, at most 62 in any second (the client's
+    arrival times jitter by a few ms), 17 ms apart (the median); none once the path stopped. New,
+    the stream's own rate: the client asking for 30 fps (the stream then 1512×948 at 30 fps): 60
+    lines in 1.97 s, at most 31 in any second, 33.0 ms apart. At 120 fps (the first run, 00:18: the
+    hardware encoder at Standard resolution, 1512×948, since the software one stops at 60): 239
+    lines in 2.0 s, at most 121 in any second, 8.0 ms apart; its first try was stopped by the guard
+    when a device connected to Sill.app at 00:05:46, the host killed within the watch's 2 s.
+  - H9: the 17 host logs of the second run's gates: 11 seconds with `in.dry`, none with
+    `in.pointer`, `in.scroll`, `in.text` or `in.key`; all 20 streams on the software encoder.
+  - The remote door, new: a synthetic `--remote` host (`SILL_TEST_REMOTE_DIR`,
+    `SILL_TEST_NO_ROUTER=1`), sillclient paired by its link, then a TLS 1.3 session with the moving
+    path and a move at 3 s: 76 lines through TLS, the next after the move 0.302 s later with
+    `seen=1`.
+  - A path file with a bad line 3: the plan's line, no pointer, no `ptr.` key.
+- H10, cost: `PointerWatch.sample()` with the real location read, 100,000 times: 0.20 µs mean
+  (median 0.17, p99 0.29 µs); with a regular-mode window whose re-read was due at every sample:
+  0.09 µs (11 re-reads ran meanwhile on `sill.pointer`, none waited for); the re-read alone, one
+  window through `CGWindowListCopyWindowInfo`: 239 µs mean, median 131 µs, p99 2.0 ms, off
+  `sill.net` (the first run: 132 and 192 µs mean); the location read alone
+  0.10 µs. Idle: a hook host with no client, 35 s: 0.0 % CPU, 0.18 s of CPU time at 2 s and at
+  35 s; a client that picks nothing, 8 s: no tick and no `ptr.` key, 0.0 %.
+- H11: no `CGEventTapCreate`, `tapCreate`, `addGlobalMonitorForEvents`,
+  `addLocalMonitorForEvents`, `CGRequestListenEventAccess` or `CGRequestPostEventAccess` in
+  Sources/ or iOSClient/; no added `updateConfiguration` or `assumeIsolated`; `showsCursor: false`
+  at the capture's start; the hooks read only through `PointerTestHooks`, which honours them on a
+  synthetic host alone; `sillMoved` before every pointer and scroll post, and the dry run posts
+  nothing.
+- H12: the bare app's previews from 8b0d418 and this branch, rendered from one path: identical
+  (100 files).
+- H13: 8b0d418's `sillclient.py` against a hook host runs through, listing 26 by number in `kinds=`
+  and `first kinds:`; 8b0d418's StreamMessage parses a kind 26 header as `.unknown` with its length.
+- Integration mutants (a scratch copy of the tree, each built and run against one gate): 8 of 8
+  caught: no `clientLeft` (H7c: `ptr.mac 1`), input not counted (H5b: `seen=0`), a pointer input
+  opening no settle (H5c: 0.058 s; H5b alone cannot tell, since the dry run's post opens it too),
+  the tick sampling beside the sampler (H8: 89 in a second, 13 ms apart), no sampler (H8: 34 in a
+  second, 30 ms apart), the driver sent the pointer too (H5a: a line after its own move), every
+  sample re-sent (H4: 123 lines), the test pattern's input mapped onto the real display (H7: y
+  0.2587).
+
+Not run: anything on a device, and a real (non-synthetic) host, which would advertise `_sill._tcp`
+beside Sill.app: the real pointer's path is covered by the pointer-watch check's injected reader and
+H10's harness, which read the real location and a real window's bounds. The synthetic hosts listen
+on every interface, as SillHost always has (nothing binds it to loopback); they advertise nothing,
+only loopback clients reached them, and the Application Firewall's list gained no entry.

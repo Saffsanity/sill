@@ -8,6 +8,68 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
+from main at 8b0d418, not merged with main since; the plan, its hand-off and
+the host's results are in `docs/pointer-visibility-plan.md`).** Noah: "When the
+Mac is controlling the mouse pointer, it should show the real mouse pointer on
+the desktop on Sill. When Sill is controlling the Mac, continue to hide the
+real pointer and only render the client side one in portrait mode when the
+trackpad is used" (2026-09-25); the plan's defaults, but Q4: the pointer is
+sampled at the stream's frame rate while it moves. The host half is done and
+checked; the device half (the plan's §7) is next.
+- Wire: kind 26 `macPointer`, host → device, JSON `MacPointer`
+  (`Pointer.swift`): where the Mac's pointer is in the streamed frame (`x`,
+  `y` as fractions to 4 places, left out off the stream), `inside`, and `seen`,
+  the input messages (kind 8) the host had read on that connection, so a device
+  drops a report built before the host read its latest input. Every field
+  optional; older readers skip 26. 24, 25 and 27 stay held for the Mac menu bar.
+- Host: one controller, the Mac or the device whose input the host read last
+  (`PointerControl`, pure). Any kind 8 hands the pointer to its device; a
+  pointer or scroll input, and Sill's own post or warp (noted just before it),
+  open a 0.25 s settle; a read 0.5 pt or more from the last position that
+  counted, outside the settle, is the Mac's (a slow drag adds up, jitter never
+  does); a read more than 0.25 s after the one before starts afresh.
+  `PointerWatch` reads `CGEvent(source: nil).location` (no permission; a
+  sample takes about 0.2 µs) at each 30 ms link tick, and at the stream's frame
+  rate while the pointer moves and some device is sent it; it judges the read
+  against the streamed source (the Desktop's display, a staged window's crop
+  or full-screen band, a regular-mode window's bounds and on-screen flag,
+  re-read on `sill.pointer` at most every 0.1 s after a move and every 2 s
+  anyway), and reads nothing while nothing streams. StreamServer sends kind
+  26, only when it changed, to every device but the one driving, as it sends
+  ticks (not counted in `inflight`; it stands in for that device's tick). No
+  line prints; `ptr.sent` and `ptr.mac` join the `[1s]` lines when they happen.
+  A synthetic host never reads the real pointer and never posts input
+  (`in.dry` instead, InputInjector's dry run, and no activation or raise), and
+  has a pointer only with the TEST ONLY `SILL_TEST_POINTER_PATH`;
+  `SILL_TEST_SOFTWARE_ENCODER=1` keeps a synthetic host off the hardware
+  encoder for good (Build and run).
+- Device: `PointerPresence.swift` (pure: what the one sprite shows, a report's
+  freshness, the carry-over across a hand-over, the portrait pad's cursor) and
+  SessionLink's input count (`inputsOnSession`) are in; nothing calls them yet.
+- Verified (the plan's "Results: the host"; the step ran twice, the first run
+  interrupted at about 00:22 before it committed, the second running every gate
+  again but the two on the hardware encoder): a clean `swift build -c release`
+  (only the CaptureProbe warning), iOS Debug and Release for the simulator (only
+  the old `StreamClient` warning); `Tests/checks/run-all.sh`, all 16
+  (pointer-control 147 and 30 of 30 mutants, pointer-watch 112 and 33 of 33,
+  pointer-presence 141); on synthetic hosts with the scripted pointer, the
+  software encoder and `sillclient.py --pointer`: the path's positions, the
+  settle after a move (the Mac's next report 0.30 s later) and after a scroll
+  gesture's began (0.31 s), none after a key (0.06 s), `seen` per connection,
+  two devices taking turns, a driver leaving, another device's motion reaching a
+  watcher at 60 fps (17 ms apart), the sampler at the stream's rate (33 ms apart
+  at 30 fps, 17 at 60), kind 26 through the remote door, 0.0 % CPU with nobody
+  streaming, nothing posted and the real pointer never moved; 8 integration
+  mutants of the wiring, each caught by one of those runs. From the first run's
+  logs (the hardware encoder, with no device connected to Sill.app; one streamed
+  through the second run, so they were not run again): the CLI's output against
+  8b0d418's, masked and sorted, idle and with a client, with and without
+  `--direct-wireless`, identical, with no kind 26 from a host without the hook,
+  and the sampler at 120 fps (8.0 ms apart).
+- **Untested, for Noah:** everything on the devices, once the device half is
+  built: the plan's P1–P12.
+
 **Update check and device notice (2026-09-25, branch `update-notice` from
 `remote-access` at cb0ec55, PR #13, with main merged in at 1f3072a and again
 at 32d532b, not rebased; the plan, its open questions with the defaults taken,
@@ -2075,7 +2137,10 @@ good.
   bundles and the wire's versions, compared part by part) and `Hello` (kind 23,
   the device's first message); `Goodbye` (Remote.swift) carries `message`,
   `minimumVersion` and `reconnect` too, and `WindowList` the host's
-  `hostVersion` and `protocol`.
+  `hostVersion` and `protocol`. `Pointer.swift` — `MacPointer` (kind 26, host
+  → device: where the Mac's pointer is in the streamed frame while this device
+  is not moving it, and `seen`, the input messages the host had read on the
+  connection).
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -2134,6 +2199,16 @@ good.
   words and log lines; pure, checked with swiftc; the gate itself, which runs
   only above "0", is StreamServer's, with the TEST ONLY
   SILL_TEST_MIN_DEVICE_VERSION and SILL_TEST_GOODBYE).
+  The Mac's pointer: `PointerControl` (who moves it, the Mac or the device
+  whose input the host read last, with the settle for Sill's own motion; the
+  fraction kind 26 carries; pure, `Tests/checks/pointer-control`) and
+  `PointerWatch` (the host's sampling of it: PointerControl under a lock, the
+  streamed source's rectangle, a regular-mode window's bounds re-read on
+  `sill.pointer`, the TEST ONLY scripted pointer `TestPointerPath` and
+  `PointerTestHooks`; `Tests/checks/pointer-watch`). StreamServer samples it at
+  each tick, and at the stream's frame rate while it moves, and sends kind 26
+  to every device not moving it; InputInjector notes each pointer and scroll
+  post just before it and, on a synthetic host, posts nothing (`in.dry`).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
@@ -2183,7 +2258,10 @@ good.
   `--host`, `--device`, `--big-payload`, `--flood`, `--stop-ping@T`,
   `--stop-read@T`, `--pairing-wanted@T`; the remote door with `--tls
   --identity=DIR`, `--pair-url`, `--pair-code`, `--pin=FP|none` and
-  `--expect-tls-fail`, printing kinds 18, 20 and 22; every argument is checked
+  `--expect-tls-fail`, printing kinds 18, 20 and 22; the Mac's pointer with
+  `--pointer` (each kind 26), `--move=X,Y@T`, `--tap=X,Y@T`, `--key=USAGE@T`
+  and `--input=JSON@T` (a literal kind 8), the input flags only to a
+  `--synthetic` host on this Mac (lsof and ps); every argument is checked
   before it connects, and a bad one exits 2). `Scripts/sillrelay.py` is a
   shaping passthrough relay (`--listen 0 --to HOST:PORT [--delay-ms N]
   [--rate-mbps R] [--blackhole-after S] [--record PREFIX]`; TLS passes
@@ -2217,8 +2295,9 @@ good.
   (`followBestPath`: to the cable, to Wi-Fi, made again over either), ping,
   generic `send`), `SessionLink` (the session's connection and the one door out
   to the Mac; the moves' fenced hand-overs, which chain, and the hold of a move
-  off a lost path: `handOver`, `hold`, `adopt`, `unhold`; Foundation and
-  Network only, checked with swiftc),
+  off a lost path: `handOver`, `hold`, `adopt`, `unhold`; the input messages
+  counted for the session's connection, `inputsOnSession`, which a kind 26's
+  `seen` is judged against; Foundation and Network only, checked with swiftc),
   `DiscoveryPolicy` (when to look nearby, the rows and the word each ends in,
   the session's route word for the Settings panel,
   when a reconnect may take a Direct row, when a session over AWDL moves to
@@ -2257,7 +2336,10 @@ good.
   `AddMacCard` (the card, the fields, `EscapeKey`), `CodeScanner` (VisionKit),
   `PairingOverlay` (Pair This iPad…), `GoodbyePolicy` (the words and the
   reconnect after a session ends, a Mac's notice included; pure, checked with
-  swiftc).
+  swiftc), `PointerPresence` (the Mac's pointer: what the one pointer sprite
+  shows, a kind 26's freshness, the network queue's feed with a hand-over's
+  carry-over, the portrait pad's cursor; pure, `Tests/checks/pointer-presence`;
+  pbxproj A301/F301; nothing calls it yet).
   `PrivacyInfo.xcprivacy`, a resource of the target, is the privacy manifest:
   it declares UserDefaults (CA92.1) and `systemUptime` (35F9.1), and any new
   use of a required-reason API (file dates, disk space, `mach_absolute_time`,
@@ -2305,7 +2387,8 @@ good.
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped): `addresses`, `clientlink`,
   `compatibility`, `device-gate`, `fence`, `goodbye`, `ledger`, `origin`,
-  `pairing-address`, `policy`, `protocol`, `remote-rules`, `update-policy`.
+  `pairing-address`, `pointer-control`, `pointer-presence`, `pointer-watch`,
+  `policy`, `protocol`, `remote-rules`, `update-policy`.
   `run-all.sh [--mutants] [-v] [name…]` runs them and exits
   with the number that failed (a folder whose `run.sh` is not executable
   fails); `common.sh` is sourced by each `run.sh`; `README.md` lists what each
@@ -2327,6 +2410,8 @@ swift run -c release SillHost --remote      # the remote door for this run on an
 swift run -c release SillHost --remote --internet   # also admit paired devices from outside this Mac's networks and VPNs
 swift run -c release SillHost --print-reachability  # the addresses a device would get away from home, then exit
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
+SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, never the hardware encoder
+python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~2 min; --mutants adds the mutants, most of an hour)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
@@ -2395,6 +2480,19 @@ in a 0700 directory instead of memory or the keychain; the bare app's
 printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
 `SILL_TEST_ORIGIN=vpn|internet` (loopback counts as that origin) and
 `SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every headless host).
+The Mac's pointer, headless: every synthetic host is a dry run (its input is
+counted as `in.dry`, never posted, and activates or raises nothing) and never
+reads the real pointer. TEST ONLY, honoured only by a synthetic host (anywhere else one
+line says it is ignored): `SILL_TEST_POINTER_PATH=<file>` is a scripted
+pointer on the test pattern, lines `T X Y` (seconds since the stream's first
+sample, points in the 1512×949 pattern, outside allowed; `#` comments; at most
+10,000 steps and 1 MiB, a bad file refused whole with one line): the test
+pattern then has a pointer, a test client's input lands in the pattern's space
+and a dry-run pointer event moves the scripted pointer (the newer of it and a
+step wins); `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
+no launch probe and no re-check, so a test never touches the hardware encoder
+(60 fps at most: a 120 fps sampler test needs the hardware, and so the
+no-device check).
 The device floor, headless: `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the floor
 of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is
