@@ -46,10 +46,11 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
     /// a window streams). True when it went.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
-    /// Every direct touch, for three-finger strokes: from the moment one arms, nothing of it reaches
-    /// the Mac but its gesture (`strokes.silent`, each finger handler's first line).
+    /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
+    /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
+    /// line).
     private let strokes = StrokeObserver()
-    /// The finger pan, for where a scroll that a stroke's arming closes ends.
+    /// The finger pan, for where a scroll that a stroke's silence closes ends.
     private weak var scrollPan: UIPanGestureRecognizer?
 
     override init(frame: CGRect) {
@@ -94,7 +95,7 @@ final class InputOverlayView: UIView, UIKeyInput {
         // (StrokeObserver, TrackpadGestures). It only watches: it takes no touch from the
         // recognizers above and delays none.
         scrollPan = pan
-        strokes.onArmed = { [weak self] in self?.strokeArmed() }
+        strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
         addGestureRecognizer(strokes)
     }
@@ -198,10 +199,10 @@ final class InputOverlayView: UIView, UIKeyInput {
         }
     }
 
-    /// A stroke just became a gesture (TrackpadGestures): a scroll it had begun (a first finger that
-    /// slid before the others landed) ends here, with no coast; the Mac got deltas of less than
-    /// `chordTravel`. Nothing else of the stroke goes out.
-    private func strokeArmed() {
+    /// A stroke just went silent (TrackpadGestures: three fingers down): a scroll it had begun (a first
+    /// finger that slid before the others landed) ends here, with no coast; the Mac got deltas of less
+    /// than `chordTravel`. Nothing else of the stroke goes out but its gesture.
+    private func strokeSilenced() {
         lastPanTranslation = .zero
         guard scrollGestureOpen else { return }
         scrollGestureOpen = false
@@ -529,8 +530,8 @@ struct InputOverlay: UIViewRepresentable {
 
 // MARK: - Stroke observer
 
-/// Feeds a surface's `TrackpadGestures` with every direct touch, so a stroke that reaches three
-/// fingers in time becomes a gesture for the Mac and nothing else of it does
+/// Feeds a surface's `TrackpadGestures` with every direct touch, so a stroke that has three fingers
+/// down before any has moved sends the Mac nothing but its gesture, if it makes one
 /// (docs/trackpad-gestures-plan.md §6.2). One on each glass surface: the portrait trackpad and the
 /// stream.
 ///
@@ -544,14 +545,15 @@ struct InputOverlay: UIViewRepresentable {
 /// portrait trackpad's recognizers take them too.
 final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
     private var strokes = TrackpadGestures()
-    /// From arming until the next stroke's first touch: the surface sends nothing.
+    /// From three fingers down until the next stroke's first touch: the surface sends nothing.
     var silent: Bool { strokes.silent }
     /// A button the surface pressed is held (the trackpad's press-and-hold drag); asked as each
-    /// finger lands, and no stroke arms while it is.
+    /// finger lands, and no stroke goes silent while it is (its button must still come up).
     var holding: () -> Bool = { false }
-    /// The stroke just became a gesture: close what it had opened (a scroll).
-    var onArmed: () -> Void = {}
-    /// The decision, at the first lift after arming: the gesture and its fingers, 3 or 4.
+    /// The stroke just went silent: close what it had opened (a scroll).
+    var onSilenced: () -> Void = {}
+    /// The decision, at the first lift of a finger that armed the stroke: the gesture and its
+    /// fingers, 3 or 4.
     var onGesture: (TrackpadGestures.Gesture, Int) -> Void = { _, _ in }
     /// Each touch of the stroke, numbered as it lands.
     private var ids: [ObjectIdentifier: Int] = [:]
@@ -585,7 +587,7 @@ final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
             let id = nextID
             nextID += 1
             ids[ObjectIdentifier(touch)] = id
-            if strokes.down(id, at: touch.location(in: view), time: touch.timestamp, holding: holding()) == .armed { onArmed() }
+            if strokes.down(id, at: touch.location(in: view), time: touch.timestamp, holding: holding()) == .silenced { onSilenced() }
         }
     }
 

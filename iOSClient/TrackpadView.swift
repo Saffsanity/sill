@@ -137,8 +137,9 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
     /// a window streams). True when it went, which the light tick follows.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
-    /// Every direct touch, for three-finger strokes: from the moment one arms, nothing of it reaches
-    /// the Mac but its gesture (`strokes.silent`, each finger handler's first line).
+    /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
+    /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
+    /// line).
     private let strokes = StrokeObserver()
 
     /// The virtual cursor, in frame coordinates (0…1), starting in the middle, clamped, so pushing
@@ -249,10 +250,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(fingerCounter)
 
         // Three fingers or more: a gesture for the Mac, never a click, a drag or a scroll
-        // (StrokeObserver, TrackpadGestures). It only watches, as the counter does; no stroke arms
-        // while the press-and-hold drag holds the button.
+        // (StrokeObserver, TrackpadGestures). It only watches, as the counter does; no stroke goes
+        // silent while the press-and-hold drag holds the button, which must still come up.
         strokes.holding = { [weak self] in self?.dragging ?? false }
-        strokes.onArmed = { [weak self] in self?.strokeArmed() }
+        strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in self?.gestureDecided(gesture, fingers: fingers) }
         addGestureRecognizer(strokes)
     }
@@ -501,16 +502,16 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - Three fingers
 
-    /// A stroke just became a gesture (TrackpadGestures): a two-finger scroll already under way ends
-    /// here, with no coast. Pointer motion before the third finger stays (at most `chordTravel`);
-    /// nothing else of the stroke goes out.
-    private func strokeArmed() {
+    /// A stroke just went silent (TrackpadGestures: three fingers down): a two-finger scroll already
+    /// under way ends here, with no coast. Pointer motion before the third finger stays (at most
+    /// `chordTravel`); nothing else of the stroke goes out but its gesture.
+    private func strokeSilenced() {
         if scrolling { endScroll(momentumVelocity: nil) }
     }
 
-    /// The stroke's gesture, decided at its first lift: to the Mac, with a light tick when it went
-    /// (an iPhone's; an iPad has no Taptic Engine). A latched modifier stays latched: a gesture is
-    /// not a keystroke.
+    /// The stroke's gesture, decided as one of its three fingers lifts: to the Mac, with a light tick
+    /// when it went (an iPhone's; an iPad has no Taptic Engine). A latched modifier stays latched: a
+    /// gesture is not a keystroke.
     private func gestureDecided(_ gesture: TrackpadGestures.Gesture, fingers: Int) {
         if sendGesture(gesture, fingers) { clickHaptic.impactOccurred(intensity: 0.7) }
     }
