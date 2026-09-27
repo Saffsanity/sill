@@ -230,6 +230,15 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Lower latency when the Mac is busy, at a softer picture.")
             }
+            Section {
+                Toggle("Send audio", isOn: $settings.config.sendAudio)
+                if settings.config.sendAudio, let problem = model.coordinator?.status.snapshot.audio?.problem {
+                    Label("Sill \(problem). The picture is unaffected.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            } footer: {
+                Footnote("Devices play the sound of what you stream: all of the streamed window’s app, or every app for the Desktop. The Mac keeps playing it too, and each device can mute it with its Sound button. Nothing is recorded.")
+            }
             if let snapshot = model.coordinator?.status.snapshot, snapshot.softwareEncoder {
                 Section {
                     Label(snapshot.hardwareEncoderStuck
@@ -317,7 +326,7 @@ private struct PermissionsPane: View {
             Section {
                 PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
                               // Not "on this network": a device connected over Direct Wireless shares none.
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices.",
+                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad, and their sound when Send Audio is on. Nothing is recorded or saved; frames and sound go straight to your devices.",
                               button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
                     permissions.requestScreenRecording()
                 }

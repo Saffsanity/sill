@@ -14,7 +14,7 @@ import StreamProtocol
 ///                                              change settings s seconds after launch, exactly as
 ///                                              a control would (maxFPS, captureScale, bitrate,
 ///                                              prioritizeSpeed, virtualDisplay, directWireless,
-///                                              remoteAccess, remotePort, internetAccess,
+///                                              sendAudio, remoteAccess, remotePort, internetAccess,
 ///                                              remoteAddressName=host[:port], updateCheck). Saved
 ///                                              like any change: run it on the bare binary, whose
 ///                                              defaults domain is "SillMenuBar", not on Sill.app.
@@ -176,6 +176,7 @@ enum DebugHooks {
         case "prioritizeSpeed": config.prioritizeSpeed = flag
         case "virtualDisplay": config.virtualDisplay = flag
         case "directWireless": config.directWireless = flag
+        case "sendAudio": config.sendAudio = flag
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
@@ -246,7 +247,8 @@ enum DebugHooks {
                        appearance: appearance, to: out.appendingPathComponent("card-\(sample.name)-\(name).png"))
             }
             var config = model.settings.config
-            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmark matches the sample
+            config.virtualDisplay = sample.snapshot.virtualDisplayOn     // the checkmarks match the sample
+            config.sendAudio = sample.snapshot.audio != nil
             let entries = MenuBuilder.entries(presentation: p, config: config, login: login, permissions: sample.permissions)
             menuText += "=== \(sample.name) (glyph: \(p.glyph), tooltip: \(p.tooltip))\n"
             menuText += MenuBuilder.dump(entries, card: p) + "\n"
@@ -380,6 +382,10 @@ enum DebugHooks {
         streaming.virtualDisplayOn = true
         var two = streaming
         two.devices = [ipad, iphone]
+        // The Mac's sound going to the one device (Send Audio on): the widest source row there is
+        // with it, on the virtual display over Wi-Fi, ending in "sound".
+        var sound = streaming
+        sound.audio = HostStatusSnapshot.Audio(source: "Safari", devices: 1)
         // A still window on the Mac's own screen (virtual display off) to one device, at the most the
         // menu offers (Maximum at 120 fps: 80 Mbps) over the widest word: the source row stays on one
         // line, as it does while the picture changes, so the open menu keeps its height. The device
@@ -420,6 +426,7 @@ enum DebugHooks {
             Sample(name: "streaming", snapshot: streaming),
             Sample(name: "still-window", snapshot: still),
             Sample(name: "two-devices", snapshot: two),
+            Sample(name: "sound", snapshot: sound),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "software-encoder-stuck", snapshot: stuck),
             Sample(name: "virtual-display-fallback", snapshot: fallback),

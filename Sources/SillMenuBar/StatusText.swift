@@ -175,7 +175,8 @@ enum StatusText {
 
     /// What streams: "Safari — Apple Developer" over "3024×1898 · 118 of 120 fps · 30 Mbps" (a still
     /// picture: "120 fps, still"), and with one device, how it is connected: "… · 30 Mbps · Wi-Fi".
-    /// With two or more, each device's own row says it.
+    /// With two or more, each device's own row says it. "· sound" ends it while a device gets the
+    /// Mac's sound.
     private static func sourceRow(_ s: HostStatusSnapshot) -> StatusPresentation.Row? {
         guard let stream = s.stream else { return nil }
         let title: String, symbol: String
@@ -199,6 +200,8 @@ enum StatusText {
             detail += " · real window (virtual display: \(s.lastStageFailure ?? s.virtualDisplayProblem ?? "unavailable"))"
         }
         if stream.softwareEncoder { detail += " · software encoder" }
+        // The Mac's sound goes out too, while a device gets it (docs/audio-plan.md, Q9).
+        if s.audio?.devices ?? 0 > 0 { detail += " · sound" }
         return StatusPresentation.Row(id: "source", symbol: symbol, title: title, detail: detail)
     }
 
