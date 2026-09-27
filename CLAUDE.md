@@ -3946,8 +3946,8 @@ good.
   profiles, keychains and design/reel/.
 - `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27
   with Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`:
-  pull requests and pushes to main that touch more than documents, the site or
-  the design files, and by hand; `swift build -c release`,
+  pull requests and pushes to main that touch more than documents or the site
+  (`design/` counts: `dmg-layout` reads its SVG), and by hand; `swift build -c release`,
   `Tests/checks/run-all.sh`, the iOS app for the generic simulator (Debug,
   arm64, `CODE_SIGNING_ALLOWED=NO`), and the CLI's paths that exit before the
   host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
