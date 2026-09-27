@@ -8,8 +8,9 @@ Runs are named CASE-I-BUILD (real24-1-base, real24-1-new, …). The first S seco
 connected (default 5: the catalog and the first keyframe) are left out of every figure except
 fpsK (the fps from the second after the first keyframe arrived), gap (the longest run of seconds
 without a frame from then on), evict@ (seconds from the device's first connection to the host's
-first eviction) and rec (seconds from the relay's last rate increase until the frame age's median
-is back at 45 ms or less)."""
+first eviction), rec (seconds from the relay's last rate increase until the frame age's median
+is back at 45 ms or less) and still (the host's still spells, --still-at: how many ended with the
+device showing the last frame before the spell or a later one, and the longest it took)."""
 import os, re, statistics, sys
 from collections import defaultdict
 
@@ -33,7 +34,8 @@ def read(name, suffix):
     p = os.path.join(RUNS, f"{name}.{suffix}")
     return open(p, errors="replace").read().splitlines() if os.path.exists(p) else []
 
-DEV = re.compile(r"(\d\d:\d\d:\d\d\.\d+) \S+:\s+(\d+) fps\s+age\s+(\S+)\s+rtt\s+(\S+)\s+in\s+(\d+) kB\s+keys (\d+)")
+DEV = re.compile(r"(\d\d:\d\d:\d\d\.\d+) \S+:\s+(\d+) fps\s+age\s+(\S+)\s+rtt\s+(\S+)\s+in\s+(\d+) kB\s+keys (\d+)(?:\s+newest ([\d.]+))?")
+STILL = re.compile(r"\S+ (\d\d:\d\d:\d\d\.\d+) Still: for (\S+) s after the frame of ([\d.]+)")
 
 def one(name):
     dev, host, relay = read(name, "device.txt"), read(name, "host.log"), read(name, "relay.txt")
@@ -76,12 +78,24 @@ def one(name):
     if ups:
         back = ups[-1]
         rec = next((t - back for t, _, a, _, _ in seconds if t > back and a != "–" and int(a.split("/")[0]) <= 45), float("inf"))
+    # Still spells: whether the device came to show the last frame before each (or a later one, the
+    # last frame encoded again) while the window stayed still, and how long that took. Its lines
+    # come once a second, so "after" is to the second.
+    newest = [(secs(m.group(1)), float(m.group(7))) for m in map(DEV.match, dev) if m and m.group(7)]
+    spells = [(secs(m.group(1)), float(m.group(2)), float(m.group(3))) for m in map(STILL.match, host) if m]
+    fresh = []
+    for start, length, last in spells:
+        if not newest or newest[-1][0] < start + length: continue       # the run ended first
+        seen = [t for t, ts in newest if start - 1 < t <= start + length + 0.5 and ts >= last - 1e-6]
+        fresh.append(max(0.0, seen[0] - start) if seen else None)
     mins = max(n, 1) / 60
     return {"fps": statistics.mean(fps) if fps else 0.0, "p10": pct(fps, 10), "fpsK": statistics.mean(after_key) if after_key else 0.0,
             "sent": sent / max(n, 1), "drop": drop / mins, "wait": wait / mins, "waitK": wait_after_key, "keys": keys / mins,
             "age50": pct(worst_age, 50), "age95": pct(worst_age, 95), "rtt50": pct(worst_rtt, 50), "rtt95": pct(worst_rtt, 95),
             "rttmax": max(worst_rtt) if worst_rtt else 0, "lost": lost, "evict": evict, "rec": rec, "drops": drop,
-            "gap": gap, "evictAt": evict_at}
+            "gap": gap, "evictAt": evict_at,
+            "stills": len(fresh), "stale": sum(x is None for x in fresh),
+            "freshMax": max((x for x in fresh if x is not None), default=None)}
 
 names = sorted({f[: -len(".device.txt")] for f in os.listdir(RUNS) if f.endswith(".device.txt")})
 # Runs that ended with the Mac busy (run.sh's load.txt: the load at 20 or more after its last try).
@@ -108,11 +122,12 @@ def f(v, fmt):
     return format(v, fmt)
 
 print(f"{'run':24} {'fps':>5} {'p10':>4} {'fpsK':>5} {'gap':>3} {'sent/s':>6} {'drop/m':>6} {'wait/m':>6} {'waitK':>5} {'keys/m':>6} "
-      f"{'age50':>6} {'age95':>6} {'rtt50':>6} {'rtt95':>6} {'rttMax':>6} {'lost':>4} {'evict':>5} {'evict@':>6} {'rec s':>5}")
+      f"{'age50':>6} {'age95':>6} {'rtt50':>6} {'rtt95':>6} {'rttMax':>6} {'lost':>4} {'evict':>5} {'evict@':>6} {'rec s':>5} {'still':>9}")
 for name, r in runs.items():
     print(f"{name + ('*' if loaded.get(name) else ''):24} {r['fps']:5.1f} {f(r['p10'], '4.0f'):>4} {r['fpsK']:5.1f} {r['gap']:3d} {r['sent']:6.1f} {r['drop']:6.1f} {r['wait']:6.0f} {r['waitK']:5d} "
           f"{r['keys']:6.1f} {f(r['age50'], '6.0f'):>6} {f(r['age95'], '6.0f'):>6} {f(r['rtt50'], '6.0f'):>6} {f(r['rtt95'], '6.0f'):>6} "
-          f"{r['rttmax']:6.0f} {r['lost']:4d} {r['evict']:5d} {f(r['evictAt'], '6.1f'):>6} {f(r['rec'], '5.1f'):>5}")
+          f"{r['rttmax']:6.0f} {r['lost']:4d} {r['evict']:5d} {f(r['evictAt'], '6.1f'):>6} {f(r['rec'], '5.1f'):>5} "
+          f"{(str(r['stills'] - r['stale']) + '/' + str(r['stills']) + (' ' + format(r['freshMax'], '.1f') if r['freshMax'] is not None else '')) if r['stills'] else '–':>9}")
 print(f"""
 fps, p10: the device's frames a second (mean, 10th percentile), after the first {SKIP:g} s; fpsK: the mean
 from the second after the first keyframe arrived; gap: the longest run of seconds without a frame
@@ -121,7 +136,9 @@ minute; waitK: net.waitKey in the host's seconds wholly after the first keyframe
 keyframes the device got a minute; age, rtt: each second's worst frame age and pong round trip
 (ms), p50/p95/max; lost: the device's liveness losses; evict: the host's silence or drain
 evictions; evict@: seconds from the device's first connection to the first of them; rec: seconds
-from the relay's last rate increase until a second's median frame age is 45 ms or less.""")
+from the relay's last rate increase until a second's median frame age is 45 ms or less; still: of
+the still spells (--still-at), how many ended with the device showing the last frame before the
+spell or a later one, then the longest that took (s, to the device's second).""")
 if any(loaded.values()):
     print("*: the run ended with the load average at 20 or more, after its last try (load.txt).")
 
@@ -146,6 +163,8 @@ GATES = {
                lambda r, b: r["lost"] == 0 and r["evict"] == 0 and r["gap"] < 5 and (b is None or r["keys"] <= b["keys"] + 1)),
     "blackhole": ("dropped for its silence 11–16 s after it connected (5 + 8)",
                   lambda r, b: r["evictAt"] is not None and 11 <= r["evictAt"] <= 16),
+    "stillend": ("every still spell ends with the last frame shown, within 5 s", lambda r, b: r["stills"] > 0 and r["stale"] == 0 and r["freshMax"] <= 5),
+    "restartkf": ("0 dropped, 0 waitKey after the first keyframe", lambda r, b: r["drops"] == 0 and r["waitK"] == 0),
     "bigkf8": ("recorded (bistable); each run ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "over8": ("recorded; ≥ its base run's fps", lambda r, b: b is None or r["fps"] >= b["fps"]),
     "low": ("no worse than its base run (2 fps, 1 drop a minute)", lambda r, b: b is None or no_worse(r, b)),

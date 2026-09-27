@@ -5,8 +5,9 @@ pixels. TLS 1.3 with a client certificate and ALPN sill/1 (or plain TCP with --p
 - reads every message;
 - pings every 0.25 s (8-byte monotonic stamp, echoed by the host as a pong);
 - closes a one-second window each second: fps, frame age median/max, rtt median/max, sent to the
-  host as ClientStats (kind 12, device "harness") and printed here with the bytes that arrived and
-  the keyframes among the frames;
+  host as ClientStats (kind 12, device "harness") and printed here with the bytes that arrived, the
+  keyframes among the frames and the stamp of the newest frame it has (across reconnects: what its
+  screen shows, which summarize.py compares with the host's last frame before a still spell);
 - the device's liveness rule (StreamClient.checkLiveness), checked at each ping: nothing for
   max(6 s, 4 × the worst rtt of the last second that had a pong) → "connection silent … lost".
   By default "nothing" means no message completed (the device before MessageReader, which stamped
@@ -28,6 +29,7 @@ PLAIN = "--plain" in sys.argv
 RECONNECT = "--reconnect" in sys.argv
 TAG = opt("--tag", "dev")
 BYTES_LIVENESS = "--liveness-bytes" in sys.argv
+NEWEST = [0.0]      # the newest frame's stamp (the header's), across sessions
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.environ.get("PACING_OUT") or os.path.join(HERE, "..", "..", ".build", "pacing")
 KEY, CERT = os.path.join(OUT, "devkey.pem"), os.path.join(OUT, "devcert.pem")
@@ -87,6 +89,7 @@ async def session(ctx, deadline):
                 if n: st["last"] = time.monotonic()        # a payload completed
                 if kind == 1:
                     st["frames"] += 1
+                    NEWEST[0] = max(NEWEST[0], ts)
                     st["ages"].append(max(0.0, (time.time() - ts) * 1000))
                     if key: st["keys"] += 1
                 elif kind == 11 and len(payload) >= 8:
@@ -116,7 +119,7 @@ async def session(ctx, deadline):
             writer.write(msg(12, json.dumps(stats).encode()))
             a = f"{age[0]}/{age[1]}" if age else "–"
             r = f"{rtt[0]}/{rtt[1]}" if rtt else "–"
-            say(f"{fps:3d} fps  age {a:>11}  rtt {r:>11}  in {st['bytes'] // 1000:5d} kB  keys {st['keys']}")
+            say(f"{fps:3d} fps  age {a:>11}  rtt {r:>11}  in {st['bytes'] // 1000:5d} kB  keys {st['keys']}  newest {NEWEST[0]:.3f}")
             st["frames"] = 0; st["ages"].clear(); st["rtts"].clear(); st["bytes"] = 0; st["keys"] = 0
             if time.monotonic() > deadline: st["why"] = "done"; st["open"] = False
 

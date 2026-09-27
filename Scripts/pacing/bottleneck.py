@@ -53,8 +53,12 @@ async def handle(dev_reader, dev_writer):
     COUNT += 1
     n = COUNT
     try:
-        # The receive buffer is set before connecting, so the handshake advertises it and the
-        # kernel never autotunes it: the only deep queue on this path is the bottleneck's own.
+        # A 64 KB receive buffer is asked for before connecting, but macOS autotunes a loopback
+        # socket's buffers whatever SO_RCVBUF says (2026-09-27: 64 KB asked, 340-590 KB held, set
+        # before connecting or after). So besides the bottleneck's own queue this path holds the
+        # host's send buffer (about 380 KB here) and the relay's receive buffer, 0.7-1 MB in all
+        # that the host's pacing never sees, as on a real path it never sees the kernel's send
+        # buffer or the network's queue.
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
         s.setblocking(False)

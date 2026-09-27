@@ -17,9 +17,9 @@
 # device share the Mac's cores with whatever else runs, and a busy Mac makes a stalled path of any
 # link. Each run's load at its start and end is in the matrix's load.txt.
 #
-#   Scripts/pacing/run.sh                  the gate cases once each (about 15 minutes)
+#   Scripts/pacing/run.sh                  the gate cases once each (about 18 minutes)
 #   Scripts/pacing/run.sh --full           the plan's H3 matrix and H4: every case, real24, kf25m32
-#                                          and bigkf8 three times each (about 35 minutes)
+#                                          and bigkf8 three times each (about 40 minutes)
 #   Scripts/pacing/run.sh --cases real24,dip [--repeat 3]
 #   Scripts/pacing/run.sh --base 8b0d418   compare with another commit (default origin/main)
 #   Scripts/pacing/run.sh --list           the cases and their arguments
@@ -43,6 +43,14 @@
 #            no more than its base run's
 #   blackhole  the same path going dead both ways 5 s into the connection (the remote plan's H15):
 #            the host drops the device for its silence about 13 s after it connected (5 + 8)
+#   stillend Pro · Retina-sized frames bigger than a 16 Mbit/s hotspot (60 KB deltas, so frames are
+#            dropped all along) with the window going still for 8 s three times: the device comes
+#            to show the last frame before each still spell (or that frame encoded again) within
+#            5 s, not the picture from before a drop until the window next changes
+#   restartkf  2.5 MB keyframes, 4 KB deltas on 32 Mbit/s (kf25m32's link), the stream restarting
+#            0.1 s after a keyframe three times (a pick, a rotation or a settings change while a
+#            keyframe is still being taken): the new stream's deltas follow its keyframe, nothing
+#            dropped
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
 #   (the old device's liveness: whole messages) and home (a home client, plain TCP: unchanged).
@@ -58,7 +66,7 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
-        -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
     esac
 done
@@ -74,6 +82,8 @@ cases=(
   "dip|60|1|Remote|bottleneck|--kf 150000 --delta 8000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 1048576 --rate-at 20:0.5,32:8 -- --reconnect"
   "relay2|90|1|Remote|sillrelay|--kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 -- --reconnect --liveness-bytes"
   "blackhole|30|1|Remote|sillrelay|--kf 100000 --delta 2000 -- --rate-mbps 2 --delay-ms 150 --blackhole-after 5 -- --reconnect --liveness-bytes"
+  "stillend|55|1|Remote|bottleneck|--kf 1500000 --delta 60000 --still-at 12:8,27:8,42:8 -- --rate-mbps 16 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
+  "restartkf|40|1|Remote|bottleneck|--kf 2500000 --delta 4000 --restart-at 10:0.1,20:0.1,30:0.1 -- --rate-mbps 32 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
 )
 full_cases=(
   "ext60|25|1|Remote|bottleneck|--kf 2000000 --delta 312500 --fps 60 -- --rate-mbps 400 --delay-ms 6 --queue-bytes 262144 -- --reconnect"

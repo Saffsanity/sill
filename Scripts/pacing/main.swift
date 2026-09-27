@@ -21,10 +21,18 @@ import StreamProtocol
 //
 // usage: Harness [--port P] [--kf BYTES] [--delta BYTES] [--fps N] [--gop S] [--icons N]
 //                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH]
-//                [--plain | --home] [--sizes-at T:KF:DELTA,…]
+//                [--plain | --home] [--sizes-at T:KF:DELTA,…] [--still-at T:D,…]
+//                [--restart-at T:D,…]
 // --plain: the remote door without TLS; --home: plain TCP served as a home client (run.py's
 // DOOR=Home).
 // --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change).
+// --still-at: from T seconds for D seconds no frame is captured (a still window: the motion stopped).
+//   A keyframe asked for meanwhile is the last frame encoded again, once the window has been still
+//   for 50 ms, as HEVCEncoder.requestKeyframe does; nothing else is sent. It prints "Still: …" with
+//   the stamp of the last frame before it, and "Moving again" after it (summarize.py's still rows).
+// --restart-at: D seconds after the first keyframe at or after T seconds, the stream restarts with
+//   the same sizes (a window picked, a rotation, a settings change), so its first keyframe goes out
+//   while that keyframe may still be crossing the link. It prints "Restart: …".
 // --log: the host's lines with Sill.log's timestamps (HostLog), which summarize.py reads.
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -52,6 +60,15 @@ let schedule: [(t: Double, kf: Int, delta: Int)] = value("--sizes-at", "").split
     let p = $0.split(separator: ":"); guard p.count == 3 else { return nil }
     return (Double(p[0])!, Int(p[1])!, Int(p[2])!)
 }
+/// "T:D,T:D": T and D in seconds (--still-at, --restart-at).
+func pairs(_ name: String) -> [(t: Double, d: Double)] {
+    value(name, "").split(separator: ",").compactMap {
+        let p = $0.split(separator: ":"); guard p.count == 2 else { return nil }
+        return (Double(p[0])!, Double(p[1])!)
+    }
+}
+let stills = pairs("--still-at")
+let restarts = pairs("--restart-at")
 
 if !logPath.isEmpty { HostLog.shared.configure(keepLines: 0, fileURL: URL(fileURLWithPath: logPath)) }
 
@@ -70,6 +87,14 @@ final class FakeEncoder {
         let key = forced || sinceKey >= Int(Double(fps) * gop)
         if key { forced = false; sinceKey = 0 } else { sinceKey += 1 }
         return (key, key ? kf : delta)
+    }
+    /// Capture queue, while the window is still: whether a keyframe was asked for (the last frame is
+    /// then encoded again). No frame comes otherwise, so the periodic count does not move.
+    func stillKeyframe() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard forced else { return false }
+        forced = false; sinceKey = 0
+        return true
     }
 }
 
@@ -156,6 +181,10 @@ server.setStreaming(true)
 let captureQueue = DispatchQueue(label: "harness.capture", qos: .userInteractive)
 let started = Date()
 var nextSizes = schedule
+var nextRestarts = restarts
+var restartDue: Double?            // when the pending --restart-at restart happens
+var stillSince: Double?            // when the current still spell began
+var lastFrameStamp = 0.0           // the last frame's timestamp (the header's)
 let frameTimer = DispatchSource.makeTimerSource(queue: captureQueue)
 frameTimer.schedule(deadline: .now() + 0.5, repeating: 1.0 / Double(fps), leeway: .milliseconds(1))
 frameTimer.setEventHandler {
@@ -167,12 +196,39 @@ frameTimer.setEventHandler {
         encoder.requestKeyframe()
         server.resetForNewStream()          // a settings change restarts the stream
     }
+    if let due = restartDue, t >= due {
+        restartDue = nil
+        print("Restart: the stream starts again (keyframe \(encoder.kf) B)")
+        encoder.requestKeyframe()
+        server.resetForNewStream()
+    }
+    if let spell = stills.first(where: { t >= $0.t && t < $0.t + $0.d }) {
+        if stillSince == nil {
+            stillSince = t
+            print(String(format: "Still: for %g s after the frame of %.3f", spell.d, lastFrameStamp))
+        }
+        // A keyframe asked for while still: the last frame again, once still for 50 ms.
+        guard t - stillSince! >= 0.05, encoder.stillKeyframe() else { return }
+        let now = Date().timeIntervalSince1970
+        Stats.shared.bump("enc.out")
+        server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: psPayload))
+        server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: true, payload: Data(count: encoder.kf)))
+        lastFrameStamp = now
+        print("Still: the last frame again as a keyframe")
+        return
+    }
+    if stillSince != nil { stillSince = nil; print("Moving again") }
     let (key, size) = encoder.next()
     Stats.shared.bump("cap.complete")
     Stats.shared.bump("enc.out")
     let now = Date().timeIntervalSince1970
     if key { server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: psPayload)) }
     server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: key, payload: Data(count: size)))
+    lastFrameStamp = now
+    if key, restartDue == nil, let r = nextRestarts.first, t >= r.t {
+        nextRestarts.removeFirst()
+        restartDue = t + r.d
+    }
 }
 frameTimer.resume()
 
