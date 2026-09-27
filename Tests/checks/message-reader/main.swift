@@ -20,7 +20,8 @@
 // a window list announcing 4 MB + 1: .tooBig, nothing read after the header), caps (a 4 MB window
 // list and a 5 MB frame: both delivered), stop and stopmid (stillReads false between messages and
 // in the middle of a payload: no callback after it, stillReads asked at most once more, and after
-// the stop between messages nothing read: a second reader finds the next message whole). Every
+// the stop between messages nothing read: a second reader finds the next message whole), stopend
+// (the last message stops the reading and the end came with it: no end reported after it). Every
 // callback is checked to run on the reader's queue. Prints "ok" or "FAIL" per check; exits 1 on any
 // failure.
 import Foundation
@@ -414,6 +415,26 @@ func stop() {
     rig.close()
 }
 
+func stopAtEnd() {
+    // Two messages and the end, all there before the reader looks, so the last piece's read brings
+    // the end with it (as in eofbetween); the last message stops the reading (a move's fence coming
+    // back on the old connection). The end is then not this reader's to report.
+    let rig = Rig()
+    rig.onMessage = { seen in
+        if seen.messages.count == 2 { seen.reading = false; seen.stoppedAt = now() }
+    }
+    rig.write(message(1, .windowList, 1000))
+    rig.write(message(2, .frame, 300_000), final: true)
+    usleep(200_000)
+    rig.read()
+    rig.wait(5) { !$0.reading }
+    usleep(300_000)
+    check(rig.look { $0.messages.count == 2 && $0.messages[1].payload == payload(2, 300_000) }, "stopend: both messages delivered, whole")
+    check(rig.look { $0.ends.isEmpty && $0.callbacksAfterStop == 0 }, "stopend: no end reported after the message that stopped the reading, though the end came with it")
+    check(rig.look { $0.asksAfterStop <= 1 }, "stopend: stillReads asked at most once more (\(rig.look { $0.asksAfterStop }))")
+    rig.close()
+}
+
 func stopMid() {
     let rig = Rig()
     rig.read()
@@ -440,7 +461,7 @@ func stopMid() {
 let cases: [(String, () -> Void)] = [
     ("random", random), ("burst", burst), ("slow", slow), ("eof", eof), ("eofheader", eofAfterHeader), ("eofbetween", eofBetween), ("eoflater", eofLater),
     ("toobig", { tooBigCase(.frame, 40 << 20, "a frame announcing 40 MB"); tooBigCase(.windowList, (4 << 20) + 1, "a window list announcing 4 MB + 1") }),
-    ("caps", caps), ("stop", stop), ("stopmid", stopMid),
+    ("caps", caps), ("stop", stop), ("stopend", stopAtEnd), ("stopmid", stopMid),
 ]
 let wanted = Set(CommandLine.arguments.dropFirst())
 for (name, run) in cases where wanted.isEmpty || wanted.contains(name) { run() }

@@ -34,15 +34,19 @@ MUTANTS = {
     "R12 a header's read not reported": [("            onBytes(data.count)\n            // Nothing a Sill host sends", "            // Nothing a Sill host sends")],
     "R13 a piece replaces the buffer": [("                    buffer.append(data)\n", "                    buffer = data\n")],
     "R14 the reading stops after an empty payload": [
-        ("                onMessage(header, Data())\n                if ended { onEnd(.closed(error)) } else { readHeader() }\n",
-         "                onMessage(header, Data())\n                if ended { onEnd(.closed(error)) }\n")],
+        ("end is not this reader's to report.\n                if ended { if stillReads() { onEnd(.closed(error)) } } else { readHeader() }\n",
+         "end is not this reader's to report.\n                if ended { if stillReads() { onEnd(.closed(error)) } }\n")],
     "R15 the end between messages ignored": [("                if isComplete || error != nil { onEnd(.closed(error)) }\n", "                if error != nil { onEnd(.closed(error)) }\n")],
     "R16 a read after the end that came with a message": [
-        ("                    if ended { onEnd(.closed(error)) } else { readHeader() }\n", "                    readHeader()\n")],
+        ("                    if ended { if stillReads() { onEnd(.closed(error)) } } else { readHeader() }\n", "                    readHeader()\n")],
+    "R17 the end reported after the message that came with it stopped the reading": [
+        ("                    if ended { if stillReads() { onEnd(.closed(error)) } } else { readHeader() }\n",
+         "                    if ended { onEnd(.closed(error)) } else { readHeader() }\n")],
     # Not a mutant here: dropping the check for an end that came with a header (`guard !ended`
     # after the header). Network reports the end with the last bytes of a read of 1 to 256 KB, but
     # never with a header's read (minimum = maximum = 14 bytes), even when the end is already there
-    # (2026-09-26), so no case can tell the two apart; the check stays for a stack that does.
+    # (2026-09-26), so no case can tell the two apart; the check stays for a stack that does. For
+    # the same reason not R17's twin after an empty payload (whose message ends at its header).
 }
 caught = 0
 for name, edits in MUTANTS.items():

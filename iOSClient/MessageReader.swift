@@ -92,7 +92,9 @@ final class MessageReader {
             // A zero-length payload is legal (an empty window list, say); receive() rejects length 0.
             guard header.payloadLength > 0 else {
                 onMessage(header, Data())
-                if ended { onEnd(.closed(error)) } else { readHeader() }
+                // The message may have stopped the reading (a move's fence came back): then the
+                // end is not this reader's to report.
+                if ended { if stillReads() { onEnd(.closed(error)) } } else { readHeader() }
                 return
             }
             // The end came with the header: its payload never will. (Today Network reports the end
@@ -128,8 +130,9 @@ final class MessageReader {
                     buffer = Data()
                     onMessage(header, payload)
                     // The end can come with the last bytes: then it is the end now. (A read after it
-                    // would only fail, with ENODATA, "No message available on STREAM".)
-                    if ended { onEnd(.closed(error)) } else { readHeader() }
+                    // would only fail, with ENODATA, "No message available on STREAM".) Unless the
+                    // message stopped the reading, as above.
+                    if ended { if stillReads() { onEnd(.closed(error)) } } else { readHeader() }
                     return
                 }
             }
