@@ -10,14 +10,14 @@ Formerly winstream; the folder still carries the old name.
 
 **The Mac's pointer on the device (2026-09-26/27, branch `pointer-visibility`
 from main at 8b0d418, merged with main at cf05a78 in b6f57d0 and at 676b362
-in e7307e6, not rebased; the plan and the results, host, device and the
-review's fixes, are in `docs/pointer-visibility-plan.md`).** Noah: "When the
+in e7307e6, not rebased, PR #31; the plan and the results, host, device and
+the review's fixes, are in `docs/pointer-visibility-plan.md`).** Noah: "When the
 Mac is controlling the mouse pointer, it should show the real mouse pointer
 on the desktop on Sill. When Sill is controlling the Mac, continue to hide
 the real pointer and only render the client side one in portrait mode when
 the trackpad is used" (2026-09-25); the plan's defaults, but Q4: the pointer
 is sampled at the stream's frame rate while it moves. Built, reviewed and
-checked; the pull request waits on Noah's device tests (P1–P12, below).
+checked; PR #31 waits on Noah's device tests (P1–P12, below).
 - Wire: kind 26 `macPointer`, host → device, JSON `MacPointer`
   (`Pointer.swift`): where the Mac's pointer is in the streamed frame (`x`,
   `y` as fractions to 4 places, left out off the stream), `inside`, and `seen`,
