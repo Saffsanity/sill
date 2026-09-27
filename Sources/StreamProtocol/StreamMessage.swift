@@ -62,6 +62,11 @@ public enum StreamMessageKind: UInt8 {
                              // with the title it showed for that menu; without an id, the top level, and a request for
                              // every later one on this connection. Answered to that device alone, from a read of at
                              // most 1 s ago
+    // Trackpad gestures (Gesture.swift), after the menus' 24, 25 and 27. Older hosts map it to `.unknown` and
+    // skip it.
+    case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
+                             // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
+                             // Apps…). Only to a host whose window list says `gestures` 1 or more
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

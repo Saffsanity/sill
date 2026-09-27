@@ -24,6 +24,11 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stop-ping@T      from T seconds in, send no more pings and no stats: a silent client
   --stop-read@T      from T seconds in, read nothing more (pings go on): a client that stopped draining
   --pairing-wanted@T send kind 21 ("show your pairing code") T seconds in
+  --gesture=NAME[,FINGERS]@T  send a trackpad gesture (kind 28) T seconds in: swipeUp, swipeDown,
+                     swipeLeft, swipeRight, pinch or spread, and 3 or 4 fingers (3 when left out)
+  --raw28=JSON@T     send this literal kind 28 payload T seconds in (split on the last @)
+                     --gesture and --raw28 go only to a --synthetic host on this Mac, as input does:
+                     it logs the shortcut it would post and posts nothing; any other host posts it
   --hello=VER[,PROTO] send a hello (kind 23) first, before the select, as a device from 2026-09-25 on does:
                      {"appVersion": VER, "protocol": PROTO, "device": the --device name, else "sillclient"};
                      --hello=none sends {} (a hello with nothing in it). Without it no hello is sent: an
@@ -93,8 +98,10 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
-         "move", "tap", "key", "input")
+         "move", "tap", "key", "input", "gesture", "raw28")
 INPUT = ("move", "tap", "key", "input")
+# What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
+GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
 VALUED = ("host", "device", "big-payload", "flood", "identity", "pair-url", "pair-code", "pin", "hello", "expect-menus")
 # Sends that read or press the host's menus: only against a host started with the fixture's pid.
 MENU_SENDS = ("fetch", "press", "raw25", "raw27")
@@ -128,6 +135,13 @@ def pairs(body, keys, flag):
         if k not in keys: raise ValueError(f"{flag}: unknown key {k!r} (keys: {', '.join(sorted(keys))})")
         out[k] = value(k, v)
     return out
+
+def gesture(text):
+    name, _, fingers = text.partition(",")
+    if name not in GESTURES: raise ValueError(f"--gesture: not a gesture: {name!r} ({', '.join(GESTURES)})")
+    n = number(fingers, "--gesture's fingers") if fingers else 3
+    if n not in (3, 4): raise ValueError(f"--gesture: 3 or 4 fingers, not {n}")
+    return {"gesture": name, "fingers": n}
 
 def fractions(text, flag):
     """X,Y for --move and --tap: two finite numbers, frame fractions (outside 0…1 is allowed)."""
@@ -330,6 +344,7 @@ try:
                 parsed = (pairs(text, SET_KEYS, "--set") if name == "set" else source(text) if name == "pick"
                           else number(text, "--fps-after") if name == "fps-after"
                           else fractions(text, f"--{name}") if name in ("move", "tap")
+                          else gesture(text) if name == "gesture"
                           else usage(text) if name == "key" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
@@ -371,6 +386,11 @@ try:
     if any(e[2] in INPUT for e in events):
         if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
             raise ValueError(f"--move, --tap, --key and --input only go to a --synthetic host on this Mac, which never posts input; nothing on port {port} is one.")
+    # A gesture likewise: a --synthetic host logs the shortcut it would post and posts nothing
+    # (docs/trackpad-gestures-plan.md §7.4); any other host would post it on this Mac.
+    if any(e[2] in ("gesture", "raw28") for e in events):
+        if host not in ("127.0.0.1", "::1", "localhost") or not synthetic_listener(port):
+            raise ValueError(f"--gesture and --raw28 only go to a --synthetic host on this Mac, which posts no gesture; nothing on port {port} is one.")
 except ValueError as e:
     print(f"sillclient.py: {e}", file=sys.stderr); sys.exit(2)
 show_pointer = "--pointer" in flags
@@ -510,6 +530,10 @@ def fire(e, now):
         s.sendall(key_input(parsed, True) + key_input(parsed, False)); print(f"  sent key {parsed} (down, up) at {at}")
     elif name == "input":
         s.sendall(msg(8, text.encode())); print(f"  sent input {text} at {at}")
+    elif name == "gesture":
+        s.sendall(msg(28, json.dumps(parsed).encode())); print(f"  sent gesture {json.dumps(parsed)} at {at}")
+    elif name == "raw28":
+        s.sendall(msg(28, text.encode())); print(f"  sent raw kind 28 {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
