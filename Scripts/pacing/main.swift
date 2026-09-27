@@ -16,12 +16,14 @@ import StreamProtocol
 //   does while frames flow) or when fps × gop frames passed since the last one
 //   (MaxKeyFrameInterval), parameter sets broadcast before every keyframe;
 // - the catalog's thumbnail pass: every thumbnail again every 6 s.
-// The home door (StreamServer's own listener, advertise: false) serves `--plain` home runs
-// (run.py's DOOR=Home), and is started only for them; the remote door listens on loopback only.
+// Its one door listens on loopback only (below); StreamServer's own listener, which takes
+// connections on every interface, is never started.
 //
 // usage: Harness [--port P] [--kf BYTES] [--delta BYTES] [--fps N] [--gop S] [--icons N]
-//                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH] [--plain]
-//                [--sizes-at T:KF:DELTA,…]
+//                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH]
+//                [--plain | --home] [--sizes-at T:KF:DELTA,…]
+// --plain: the remote door without TLS; --home: plain TCP served as a home client (run.py's
+// DOOR=Home).
 // --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change).
 // --log: the host's lines with Sill.log's timestamps (HostLog), which summarize.py reads.
 
@@ -43,7 +45,8 @@ let thumbs = Int(value("--thumbs", "11"))!
 let thumbBytes = Int(value("--thumb-bytes", "8000"))!
 let seconds = Double(value("--seconds", "60"))!
 let logPath = value("--log", "")
-let plain = args.contains("--plain")
+let home = args.contains("--home")
+let plain = home || args.contains("--plain")
 /// "T:kf:delta,T:kf:delta": at T seconds, the sizes change (a settings change: Pro → Low).
 let schedule: [(t: Double, kf: Int, delta: Int)] = value("--sizes-at", "").split(separator: ",").compactMap {
     let p = $0.split(separator: ":"); guard p.count == 3 else { return nil }
@@ -101,9 +104,17 @@ func sendThumbnails() {
     }
 }
 
-// The remote door: RemoteTLS's parameters (TLS 1.3 over tcpOptions: no Nagle, keepalive,
-// connectionDropTime 15; interactiveVideo), any client key accepted, admitted at `.ready`.
-// `--plain`: the same door without TLS.
+// The door, on loopback only: nothing but the harness's relay ever connects, and a test host must
+// never take a connection from another machine (the Application Firewall would ask about it).
+// - By default the remote door: RemoteTLS's parameters (TLS 1.3 over tcpOptions: no Nagle,
+//   keepalive, connectionDropTime 15; interactiveVideo), any client key accepted, served as a
+//   remote session at `.ready`, as RemoteServer admits one.
+// - `--plain`: the same remote door without TLS (a device that speaks plain TCP, such as the app
+//   dialling it by address).
+// - `--home`: plain TCP, each connection served as a home client from this Mac (the home branch of
+//   `broadcast` and the home eviction rule, as the home door registers one), where StreamServer's
+//   own listener would take connections on every interface. Its `start` builds and starts that
+//   listener and nothing else, so it is never called.
 let params: NWParameters
 if plain {
     params = NWParameters(tls: nil, tcp: RemoteTLS.tcpOptions(dialing: false))
@@ -113,20 +124,24 @@ if plain {
     let tls = RemoteTLS.options(identity: identity.tls, role: .server, queue: server.queue) { _, _ in true }
     params = RemoteTLS.parameters(tls: tls, dialing: false)
 }
-// Loopback only: nothing but the harness's relay ever connects, and a test host must never take a
-// connection from another machine (the Application Firewall would ask about it).
 params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
+let doorName = home ? "Home" : "Remote"
 let door = try NWListener(using: params)
 door.stateUpdateHandler = { state in
-    if case .ready = state { print("Remote door listening on port \(door.port!.rawValue) (\(plain ? "TCP" : "TLS 1.3"))") }
-    if case .failed(let e) = state { print("Remote door failed: \(e)"); exit(1) }
+    if case .ready = state { print("\(doorName) door listening on port \(door.port!.rawValue) (\(plain ? "TCP" : "TLS 1.3"), loopback)") }
+    if case .failed(let e) = state { print("\(doorName) door failed: \(e)"); exit(1) }
 }
 door.newConnectionHandler = { c in
     c.stateUpdateHandler = { state in
         switch state {
         case .ready:
-            server.serve(c, route: .remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness"))
-            print("Remote client connected: harness through Tailscale (\(c.endpoint))")
+            if home {
+                server.serve(c, route: .home(.loopback))
+                print("Home client connected: \(c.endpoint)")
+            } else {
+                server.serve(c, route: .remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness"))
+                print("Remote client connected: harness through Tailscale (\(c.endpoint))")
+            }
         case .failed:
             c.cancel()
         default: break
@@ -135,9 +150,6 @@ door.newConnectionHandler = { c in
     c.start(queue: server.queue)
 }
 door.start(queue: server.queue)
-// StreamServer's own listener (the home door, on every interface) only for a home run; a remote run
-// needs none of it (its `start` builds and starts that listener, nothing else).
-if plain { server.start() }
 server.setStreaming(true)
 
 // The fake encoder's output, one frame per 1/fps on its own queue (the VT callback thread's role).
@@ -170,7 +182,6 @@ thumbTimer.setEventHandler { sendThumbnails() }
 thumbTimer.resume()
 
 DispatchQueue.main.async { Stats.shared.startPrinting() }
-if plain { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { print("Home door listening on port \(server.port ?? 0) (TCP, loopback admitted)") } }
 DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
     print("Harness done after \(Int(seconds)) s.")
     exit(0)

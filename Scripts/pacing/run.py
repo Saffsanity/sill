@@ -4,9 +4,10 @@ seconds. run.sh runs the cases; this is one of them.
 usage: run.py NAME BUILD SECONDS [host args...] -- [relay args...] -- [device args...]
 BUILD is base or new (build.sh's), or any other package made the same way under .build/pacing.
 Writes NAME.host.log (the host's lines with Sill.log's timestamps), NAME.host.out (its stdout),
-NAME.relay.txt and NAME.device.txt into $PACING_RUNS (default .build/pacing/runs). DOOR=Home sends
-the relay to the host's home door (plain TCP; give the device --plain) instead of its remote door.
-Every process is started in its own session and killed by PID at the end: none is left running."""
+NAME.relay.txt and NAME.device.txt into $PACING_RUNS (default .build/pacing/runs). DOOR=Home waits
+for the host's home door (give the host --home and the device --plain) instead of its remote door;
+every door and the relay listen on 127.0.0.1 only. Every process is started in its own session and
+killed by PID at the end: none is left running."""
 import os, queue, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))

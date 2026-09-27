@@ -3,8 +3,9 @@
 # against new, with no encoder, no Screen Recording and no device. Each case runs a host, a shaped
 # path and a device, all on loopback:
 #   - the host (main.swift, built by build.sh): StreamServer.swift as it is at BASE (base) and in
-#     the working tree (new), serving a remote session over RemoteTLS's TLS 1.3 parameters, fed
-#     fake frames of the case's sizes (a keyframe when asked for and every 4 s);
+#     the working tree (new), serving a remote session over RemoteTLS's TLS 1.3 parameters (home: a
+#     home client over plain TCP), fed fake frames of the case's sizes (a keyframe when asked for
+#     and every 4 s);
 #   - bottleneck.py: a downlink of R Mbit/s behind a Q-byte queue, D ms of round trip;
 #   - device.py: the iPad's reader, pings, stats and liveness (--liveness-bytes: MessageReader's).
 # Then summarize.py's table: every run, and each case's base and new side by side with the new
@@ -36,7 +37,7 @@
 #            frame age back at 45 ms within 10 s of the dip's end
 #   --full adds ext60 (Extreme at 60 fps, 400 Mbit/s), fastbig (150 KB deltas on 100 Mbit/s),
 #   low, switch (Pro-sized to Low-sized at 30 s), over8 (a stream bigger than the link), slowkf
-#   (the old device's liveness: whole messages) and home (the home door, plain TCP: unchanged).
+#   (the old device's liveness: whole messages) and home (a home client, plain TCP: unchanged).
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -70,7 +71,7 @@ full_cases=(
   "switch|50|1|Remote|--kf 1500000 --delta 30000 --sizes-at 30:150000:8000 -- --rate-mbps 24 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "over8|45|1|Remote|--kf 1500000 --delta 60000 -- --rate-mbps 8 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
   "slowkf|50|1|Remote|--kf 1600000 --delta 1000 --gop 30 --icons 20 -- --rate-mbps 2 --delay-ms 70 --queue-bytes 262144 -- --reconnect"
-  "home|30|1|Home|--kf 150000 --delta 8000 -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
+  "home|30|1|Home|--kf 150000 --delta 8000 --home -- --rate-mbps 20 --delay-ms 10 --queue-bytes 262144 -- --plain"
 )
 all=("${cases[@]}" "${full_cases[@]}")
 if [ "$list" = 1 ]; then
