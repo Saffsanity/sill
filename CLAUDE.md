@@ -116,9 +116,11 @@ only: no wire change, nothing sent to the Mac, two UserDefaults keys.
   `-SillTourActivityAt` touches in the first session only. Then main at
   5c6a850 merged in (PRs #29 and #30; ci.yml, CLAUDE.md, DEVELOPMENT.md,
   HostSettingsPanel and PortraitStreamScreen conflicted; the targets on the
-  views both arrangements share), and the phone's arrangement got its rules.
+  views both arrangements share), and the phone's arrangement got its rules;
+  then main at 2b38179 (PRs #31–#33): the Mac's pointer's `pointerFrameChanged`
+  now holds its move while a card shows (the eighth fix, carried over).
   Verified: `Tests/checks/tour` 43,784 checks and 63 of 63 mutants,
-  `run-all.sh` all 18; iOS Debug and Release for the simulator and Debug for a
+  `run-all.sh` all 21 on the last merge; iOS Debug and Release for the simulator and Debug for a
   device, each commit's state building, only the known warning; `swift build
   -c release`; the review's probes before and after (the scroll after Next
   486 → 0; an accessibility activation in the beat: the tour came, now "not

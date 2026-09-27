@@ -1316,12 +1316,20 @@ At the default size on an 18 Pro Max the bar card (273 pt, 269 of room above the
 the thumbnails. `Tests/checks/tour` compiles `PhonePortraitLayout.swift` and places cards against
 its rects.
 
-### Verified after the review and the merge
+### Merged with main at 2b38179 (PRs #31, the Mac's pointer on the device, #32 and #33)
+
+The Mac's pointer replaced `StreamClient.localPointer` with `PointerPresence` and its feed; a new
+frame size now goes through `pointerFrameChanged`, which holds the Mac's move while a card shows
+(the eighth fix, carried onto it) and sends it at the pause's end only if this device still has the
+pointer and its own still shows. The Mac's arrow is drawn in the display view, under the dim. The
+tour's photos on the iPhone were the same before and after this merge (card frames and pixels).
+
+### Verified after the review and the merges
 
 - `Tests/checks/tour`: 43,784 checks (34,059 before: Skip, sessions, the carried decision, the
   phone's steps, copy and carry, cards beside their targets, phone pins at 440x894, 402x812, 375x647
   and 500x710, and the grid over every phone size), 63 of 63 mutants (35 before); `run-all.sh`,
-  all 18 checks.
+  all 18 checks after the first merge and all 21 after the second.
 - iOS Debug and Release for the simulator and Debug for a generic device (unsigned), each commit's
   state building, only the known StreamClient capture warning; `swift build -c release`.
 - Harness photos on a private iPad Pro 13-inch, before the merge: every step at the four Duo sizes
@@ -1340,7 +1348,11 @@ its rects.
   Pencil row), and live against `SillHost --synthetic` (the guard before each host, a watchdog on
   Sill.log during, each host under 30 s, none left running): every step upright (440x894 under the
   Dynamic Island) and sideways (832x440), at the default size and accessibility-extra-large, each
-  ring on its controls under the real safe areas. The tripwire never fired in any live run.
+  ring on its controls under the real safe areas. After the second merge, again live on the
+  iPhone (the hosts on loopback and the software encoder, `SILL_TEST_LOOPBACK`,
+  `SILL_TEST_SOFTWARE_ENCODER`): the reconnect after a session that passed showed nothing, the one
+  after a run cut at its second card showed the tour from the step not passed, and the phone's
+  cards sat where they did before. The tripwire never fired in any live run.
 
 ### Untested, for Noah
 
