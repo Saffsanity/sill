@@ -537,5 +537,65 @@ for t in [P.HomeTrust.plain, .saved(pin: kM), .saved(pin: kX), .open(seen: nil),
 }
 check("removed revokes at home exactly when the session is pinned to the saved Mac's key, over every trust", revokesAsPinned)
 
+// MARK: A Mac set up again with a new key (Noah, 2026-09-27: Sill for Mac 0.4.0 made the Mac a new
+// key and recognition key; its row read the saved Mac's "Wi-Fi" by its name and a tap dialed the old
+// key for ever)
+
+let names: [(macID: String, bonjourName: String?)] = [("OLD", "Noah’s MacBook Pro")]
+let noah = "Noah’s MacBook Pro"
+check("rowMac: a row whose tag names no saved Mac is none, under a saved Mac's name too",
+      P.rowMac(tagged: nil, carriesTag: true, name: noah, saved: names) == nil)
+check("rowMac: a tagless row under that name is still the saved Mac, by name alone; a tag naming it is it",
+      P.rowMac(tagged: nil, carriesTag: false, name: noah, saved: names)! == ("OLD", false)
+      && P.rowMac(tagged: "OLD", carriesTag: true, name: "Other", saved: names)! == ("OLD", true))
+check("otherTagUnderSavedName: a tag naming no saved Mac, under a saved Mac's name", P.otherTagUnderSavedName(tagged: nil, carriesTag: true, name: noah, saved: names))
+check("otherTagUnderSavedName: not for a tagless row, a saved Mac's tag, or another name",
+      !P.otherTagUnderSavedName(tagged: nil, carriesTag: false, name: noah, saved: names)
+      && !P.otherTagUnderSavedName(tagged: "OLD", carriesTag: true, name: noah, saved: names)
+      && !P.otherTagUnderSavedName(tagged: nil, carriesTag: true, name: "Office", saved: names))
+check("rowDoor: such a row on an open door asks (never any key); p=1 and plain as they are; other rows as they are",
+      P.rowDoor(.open, otherTagUnderSavedName: true) == .pairingRequired && P.rowDoor(.pairingRequired, otherTagUnderSavedName: true) == .pairingRequired
+      && P.rowDoor(.plain, otherTagUnderSavedName: true) == .plain && doors.allSatisfy { P.rowDoor($0, otherTagUnderSavedName: false) == $0 })
+// The re-keyed Mac's row, as recomputeMacs and homeDecision take it: not saved, its door by rowDoor.
+for (d, label) in [(P.HomeDoor.pairingRequired, "p=1"), (.open, "p=0")] {
+    let door = P.rowDoor(d, otherTagUnderSavedName: P.otherTagUnderSavedName(tagged: nil, carriesTag: true, name: noah, saved: names))
+    let saved = P.rowMac(tagged: nil, carriesTag: true, name: noah, saved: names) != nil
+    check("a re-keyed Mac's row (\(label)): Not paired, a tap asks with any key, the reconnect waits for a tap",
+          P.rowWord(door: door, saved: saved, revoked: false, homeTLS: false, debug: false, method: .wifi, cable: false) == .notPaired
+          && P.homeDial(door: door, saved: saved, revoked: false, homeTLS: false, debug: false, tap: true) == .ask(pinned: false)
+          && P.homeDial(door: door, saved: saved, revoked: false, homeTLS: false, debug: true, tap: false) == .waitForTap)
+}
+check("reconnectMatches: by the row's tag when both have one", P.reconnectMatches(savedID: "OLD", bonjourName: noah, rowMacID: "OLD", rowName: "x", rowCarriesTag: true)
+      && !P.reconnectMatches(savedID: "OLD", bonjourName: noah, rowMacID: "NEW", rowName: noah, rowCarriesTag: true))
+check("reconnectMatches: a saved Mac by name only from a tagless row, never one whose tag names no saved Mac",
+      P.reconnectMatches(savedID: "OLD", bonjourName: noah, rowMacID: nil, rowName: noah, rowCarriesTag: false)
+      && !P.reconnectMatches(savedID: "OLD", bonjourName: noah, rowMacID: nil, rowName: noah, rowCarriesTag: true))
+check("reconnectMatches: an unsaved Mac's reconnect by name, tag or none (as before)",
+      P.reconnectMatches(savedID: nil, bonjourName: noah, rowMacID: nil, rowName: noah, rowCarriesTag: true)
+      && P.reconnectMatches(savedID: nil, bonjourName: noah, rowMacID: nil, rowName: noah, rowCarriesTag: false)
+      && !P.reconnectMatches(savedID: nil, bonjourName: noah, rowMacID: nil, rowName: "Office", rowCarriesTag: false))
+// The pin refused (-9808) with no other row: paired again.
+let rowsOfOld: [(id: String, macID: String?)] = [("network:A", "OLD"), ("network:B", "OLD"), ("network:C", nil)]
+check("afterPinRefused: the other rows its tag names first", P.afterPinRefused(macID: "OLD", tried: ["network:A"], rows: rowsOfOld, tagNamed: true, tapped: true) == .nextRow("network:B"))
+check("afterPinRefused: none left, a tag-named row, a tap's or the reconnect's: paired again (newKey)",
+      P.afterPinRefused(macID: "OLD", tried: ["network:A", "network:B"], rows: rowsOfOld, tagNamed: true, tapped: true) == .newKey
+      && P.afterPinRefused(macID: "OLD", tried: ["network:A", "network:B"], rows: rowsOfOld, tagNamed: true, tapped: false) == .newKey)
+check("afterPinRefused: none left, a tapped row taken by name: paired again; the reconnect's: skipped, nothing unpaired",
+      P.afterPinRefused(macID: "OLD", tried: ["network:C"], rows: [("network:C", nil)], tagNamed: false, tapped: true) == .newKey
+      && P.afterPinRefused(macID: "OLD", tried: ["network:C"], rows: [("network:C", nil)], tagNamed: false, tapped: false) == .skipRow)
+check("a Mac marked newKey: its row reads Not paired (Wired on the cable), p=1 or p=0",
+      [P.HomeDoor.pairingRequired, .open].allSatisfy { P.rowWord(door: $0, saved: true, revoked: false, homeTLS: true, debug: false, method: .wifi, cable: false, newKey: true) == .notPaired }
+      && P.rowWord(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, method: .wired, cable: true, newKey: true) == .pairsOverCable)
+check("a Mac marked newKey: a tap asks with any key (its old key cannot answer), revoked or not; the reconnect waits for a tap",
+      [false, true].allSatisfy { rev in [P.HomeDoor.pairingRequired, .open].allSatisfy {
+          P.homeDial(door: $0, saved: true, revoked: rev, homeTLS: true, debug: false, tap: true, newKey: true) == .ask(pinned: false)
+          && P.homeDial(door: $0, saved: true, revoked: rev, homeTLS: true, debug: true, tap: false, newKey: true) == .waitForTap } })
+check("a Mac marked newKey without p, seen over TLS: nothing dialed (Update Sill)",
+      P.homeDial(door: .plain, saved: true, revoked: false, homeTLS: true, debug: true, tap: true, newKey: true) == .updateSill)
+check("reconnectEnd: a Mac marked newKey ends the reconnect with its words",
+      P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, tap: false, newKey: true), saved: true, newKey: true) == .newKey
+      && C.newKey(mac: noah, device: "iPad") == "Noah’s MacBook Pro has a new key since this iPad paired. Tap it to pair again.")
+check("a dial not the reconnect's ends after 10 s, the reconnect's own 5 s left as it is", P.tapDialDeadline == 10)
+
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }
