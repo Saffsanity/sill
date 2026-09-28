@@ -3,9 +3,9 @@
 # with its main.swift (swiftc; no Xcode project, no package build) and runs the result. Nothing here
 # needs a device, Screen Recording, Accessibility, the video encoder or any network but loopback.
 #
-#   Tests/checks/run-all.sh                   every check (about two minutes on an M-series Mac)
+#   Tests/checks/run-all.sh                   every check (about five minutes on an M-series Mac)
 #   Tests/checks/run-all.sh policy fence      only these
-#   Tests/checks/run-all.sh --mutants [...]   also each check's mutants (slow: the lot takes most of an hour)
+#   Tests/checks/run-all.sh --mutants [...]   also each check's mutants (slow: the lot takes well over an hour)
 #   Tests/checks/run-all.sh -v [...]          show every check's whole output as it runs
 #
 # Each check's output goes to .build/checks/<name>/run.log (and mutants.log). A failing check's FAIL
