@@ -266,7 +266,10 @@ struct ContentView: View {
 ///   scanned by, the home card once the Mac shows its code), `-SillOverlayCode <digits>` (Pair This
 ///   iPad… with that code, once, over a session at home over TLS).
 /// * Real pairing, in the normal app and under `-SillLive 1` (not the mock): `-SillPairURL
-///   '<sill://pair…>'` pairs with that link at launch without the confirmation; `-SillPairCode
+///   '<sill://pair…>'` pairs with that link at launch, without the confirmation, at the link's own
+///   addresses only, as Add a Mac… does (a link with none, a home-only one, pairs nothing): a
+///   confirmed link tries the home rows first, which the gates reach with `-SillTapRow` and
+///   `-SillHomeLink` above; `-SillPairCode
 ///   <12 digits> -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first
 ///   saved Mac as a tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and
 ///   this device's key; `-SillDeviceKeySE 1` makes and uses a Secure Enclave device key under its

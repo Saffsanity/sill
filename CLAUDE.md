@@ -4436,7 +4436,9 @@ pairingrequired` and settings cases `paired|pairedoff|openpair`,
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
 draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip), and in
 the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
-at launch, no confirmation), `-SillPairCode <12 digits> -SillPairAddress host:port`,
+at launch, no confirmation, at the link's own addresses only: a confirmed link
+tries the home rows first, which `-SillTapRow` and `-SillHomeLink` below reach),
+`-SillPairCode <12 digits> -SillPairAddress host:port`,
 `-SillDialSaved 1`, `-SillForgetMacs 1`, `-Sill.savedMacs '<JSON>'` (one run;
 `'[]'` empties), `-SillRemoteRoute vpn|internet` (a loopback session counts as
 that route), `-SillHelloVersion <v>` (the version the hello gives, against a

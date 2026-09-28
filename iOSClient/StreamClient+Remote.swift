@@ -206,7 +206,9 @@ extension StreamClient {
     /// `-SillForgetHomeTLS 1` clears what this device learned of their home doors (`homeTLS`), so it
     /// dials an older Sill.app plainly again (docs/home-pairing-plan.md §3.4); `-SillPairURL`,
     /// `-SillPairCode` with `-SillPairAddress`, and `-SillDialSaved 1` start a pairing or a remote
-    /// dial as the UI would, without the link's confirmation.
+    /// dial as Add a Mac… and a Remote row would, without the link's confirmation: `-SillPairURL`
+    /// pairs at the link's own addresses only, where a confirmed link tries the home rows first
+    /// (`confirmPendingLink`).
     func startRemote() {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SillForgetMacs") {
