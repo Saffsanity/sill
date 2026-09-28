@@ -300,8 +300,8 @@ package struct KeyUpCheck: Sendable {
 package enum DroppedInput {
     /// Whether `event` still goes: a key's up when `keyDown` says that key is down on the Mac, a
     /// button's up when that button is (`leftDown`, `rightDown`). Downs, moves, scrolls, text and a
-    /// scroll gesture's boundaries never do (an open scroll gesture the Mac closes by itself,
-    /// InputInjector's scroll watchdog).
+    /// scroll gesture's boundaries never do (InputInjector's scroll watchdog closes a gesture left
+    /// open).
     package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool) -> Bool {
         switch event {
         case .key(let usage, false, _): return keyDown(usage)
