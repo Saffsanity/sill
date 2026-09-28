@@ -345,7 +345,8 @@ struct StreamView: UIViewRepresentable {
         client.onPointerChange = { [weak view] p in view?.setPointer(p) }
         // A new frame size (another source, an Aa resize) changes what a fraction means: this
         // device's own pointer, while it shows, starts again in the middle and the Mac's goes there
-        // too; the Mac's arrow follows the host's next report.
+        // too (after the tour, while one shows: `pointerFrameChanged`); the Mac's arrow follows the
+        // host's next report.
         view.onVideoSizeForPointer = { [weak client] _ in client?.pointerFrameChanged() }
         // Catch up with what the sprite shows now (a pointer set before this view was hosted).
         client.renderPointer()

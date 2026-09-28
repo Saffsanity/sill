@@ -24,6 +24,8 @@ struct Trackpad: View {
     /// What the pad's vertical motion is measured against: nil is its own height (see
     /// `TrackpadSurface.verticalSpan`).
     var verticalSpan: CGFloat? = nil
+    /// A three- or four-finger gesture, for the Mac (`StreamClient.sendGesture`). True when it went.
+    var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
 
@@ -33,7 +35,7 @@ struct Trackpad: View {
             DotGrid().allowsHitTesting(false)
             TrackpadView(send: send, setPointer: setPointer, feed: feed, onFingers: onFingers,
                          latched: latched, onModifiersConsumed: onModifiersConsumed,
-                         verticalSpan: verticalSpan)
+                         verticalSpan: verticalSpan, sendGesture: sendGesture)
             VStack {
                 Spacer(minLength: 0)
                 Text("Drag to move the pointer. Tap to click, two fingers to scroll.")
@@ -82,6 +84,7 @@ struct TrackpadView: UIViewRepresentable {
     let latched: KeyModifiers
     let onModifiersConsumed: () -> Void
     var verticalSpan: CGFloat? = nil
+    var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -100,6 +103,7 @@ struct TrackpadView: UIViewRepresentable {
         uiView.onFingers = onFingers
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
+        uiView.sendGesture = sendGesture
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -129,6 +133,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     var verticalSpan: CGFloat?
     /// `verticalSpan`, or the pad's height.
     private var ySpan: CGFloat { verticalSpan.flatMap { $0 > 0 ? $0 : nil } ?? bounds.height }
+    /// A three- or four-finger gesture the pad decided, for the Mac (`StreamClient.sendGesture`,
+    /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
+    /// a window streams). True when it went, which the light tick follows.
+    var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
+    /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
+    /// line).
+    private let strokes = StrokeObserver()
 
     /// The virtual cursor, in frame coordinates (0…1), starting in the middle, clamped, so pushing
     /// past an edge parks the pointer there instead of losing it (PadCursor, pure, checked in
@@ -236,6 +248,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         fingerCounter.onCount = { [weak self] n in self?.onFingers(n) }
         fingerCounter.delegate = self
         addGestureRecognizer(fingerCounter)
+
+        // Three fingers or more: a gesture for the Mac, never a click, a drag or a scroll
+        // (StrokeObserver, TrackpadGestures). It only watches, as the counter does; no stroke goes
+        // silent while the press-and-hold drag holds the button, which must still come up.
+        strokes.holding = { [weak self] in self?.dragging ?? false }
+        strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
+        strokes.onGesture = { [weak self] gesture, fingers in self?.gestureDecided(gesture, fingers: fingers) }
+        addGestureRecognizer(strokes)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -284,6 +304,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// Once a second finger joins, this stroke's motion belongs to the pan (scroll, then one-finger
     /// moves after a lift, with its own rebase) until every finger is up.
     @objc private func handleTrack() {
+        guard !strokes.silent else { return }
         switch tracker.state {
         case .began:
             trackSuspended = false
@@ -315,6 +336,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// tracker is not already doing it, which it normally is: the pan begins ~10 pt into a stroke,
     /// the tracker at touch-down.
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard !strokes.silent else { return }
         switch gesture.state {
         case .began:
             panTouches = gesture.numberOfTouches
@@ -441,12 +463,19 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    @objc private func handleTap() { click(down: .leftDown, up: .leftUp) }
+    @objc private func handleTap() {
+        guard !strokes.silent else { return }
+        click(down: .leftDown, up: .leftUp)
+    }
 
     /// Two fingers is the right button, the way a Mac trackpad's secondary click works.
-    @objc private func handleTwoFingerTap() { click(down: .rightDown, up: .rightUp) }
+    @objc private func handleTwoFingerTap() {
+        guard !strokes.silent else { return }
+        click(down: .rightDown, up: .rightUp)
+    }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard !strokes.silent else { return }
         switch gesture.state {
         case .began:
             dragging = true
@@ -469,6 +498,22 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         default:
             break
         }
+    }
+
+    // MARK: - Three fingers
+
+    /// A stroke just went silent (TrackpadGestures: three fingers down): a two-finger scroll already
+    /// under way ends here, with no coast. Pointer motion before the third finger stays (at most
+    /// `chordTravel`); nothing else of the stroke goes out but its gesture.
+    private func strokeSilenced() {
+        if scrolling { endScroll(momentumVelocity: nil) }
+    }
+
+    /// The stroke's gesture, decided as one of its three fingers lifts: to the Mac, with a light tick
+    /// when it went (an iPhone's; an iPad has no Taptic Engine). A latched modifier stays latched: a
+    /// gesture is not a keystroke.
+    private func gestureDecided(_ gesture: TrackpadGestures.Gesture, fingers: Int) {
+        if sendGesture(gesture, fingers) { clickHaptic.impactOccurred(intensity: 0.7) }
     }
 
     /// The click itself carries no position beyond the cursor and no modifiers: pointer events have

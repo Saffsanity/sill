@@ -281,6 +281,28 @@ final class StreamClient: ObservableObject {
     func showMockLinkStats(_ stats: LinkStats, slow: Bool = false) { linkStats = stats; slowLink = slow }
     #endif
 
+    // The Mac's menus (kinds 24, 25 and 27; see the Mac's menus section below, MacMenuState.swift
+    // and MacMenuElements.swift). Main thread.
+    /// This connection's menus: the Mac's top level (the streamed app's menu bar), the menus this
+    /// device asked for and waits on, and the choices it sent. Reset on every tear-down.
+    @Published private(set) var menus = MacMenuState()
+    /// Each opened menu's completion, by its key, until `menus` settles it: exactly once.
+    private var menuCompletions: [Int: (MacMenuState.Content) -> Void] = [:]
+    private var menuKey = 0
+    /// The next kind 25 or 27's token: strictly increasing for the life of the process, never reset,
+    /// as the settings' are, so an answer can never be taken for one to an earlier connection's.
+    private var menuToken = 1
+    /// The waiting fetches' timeout check (one at a time, for the oldest).
+    private var menusExpiry: DispatchWorkItem?
+    #if DEBUG
+    /// What each waiting completion opened, for the console ("menus: File (2) in 41 ms, 24 items").
+    private var menuAsked: [Int: (title: String, id: String, at: Double)] = [:]
+    /// The harness's Mac menus (`-SillMacMenu`): what the mock Mac answers its fetches and choices with.
+    var mockMenus: MockCatalog.MacMenus?
+    /// `-SillMenuPress` has run on this client.
+    private var menuPressArgumentDone = false
+    #endif
+
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
     /// are fractions of this, so the overlay needs it to letterbox touches the way the layer does.
     @Published var videoSize: CGSize = .zero
@@ -311,6 +333,50 @@ final class StreamClient: ObservableObject {
     private var pointerRestatementLoggedAt = -Double.infinity
     private var pointerHeard = false
     #endif
+    /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
+    /// tour's rule reads it when it decides. Main thread.
+    var lastInputAt: Double?
+    /// When the person last used one of the stream screen's controls, by whatever means: a tap, or
+    /// VoiceOver's double tap, Switch Control, Voice Control or Full Keyboard Access, none of which
+    /// makes a touch (a pick, a launch, a window's command or place in the bar, a settings change;
+    /// StreamScreen stamps its own buttons with `noteAction`). systemUptime, not @Published: the
+    /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
+    /// connection's start) are not the person's and leave it alone. Main thread.
+    private(set) var lastActionAt: Double?
+    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
+    /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
+    /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
+    /// still has the pointer and its own still shows (the Mac, or another device, may have taken it
+    /// since); the DEBUG tripwire in `sendInput` names anything else. Cleared with the session.
+    /// Main thread.
+    var inputPaused = false {
+        didSet {
+            guard oldValue, !inputPaused, pointerMoveOwed else { return }
+            pointerMoveOwed = false
+            presence.follow(pointerFeed.current)
+            guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
+            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)))
+        }
+    }
+    /// A pointer move `pointerFrameChanged` held back while input was paused.
+    private var pointerMoveOwed = false
+    /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
+    /// than with the stream screen, which goes with its session, so the automatic reconnect's
+    /// session can go on with it. StreamScreen reads and writes it. Main thread.
+    var tourSession = TourSession()
+
+    /// A session is connected: the automatic reconnect's goes on with the last one's tour decision
+    /// (TourPolicy.nextSession), any other decides afresh. Main thread.
+    func startTourSession(reconnected: Bool) {
+        tourSession = TourPolicy.nextSession(after: tourSession, reconnected: reconnected)
+        #if DEBUG
+        if tourSession.decided {
+            let layouts = [TourLayout.landscape, .portrait, .phone].filter { tourSession.offered.contains($0) }.map(\.rawValue)
+            print("tour: the automatic reconnect's session keeps the last one's decision (decided in: \(layouts.joined(separator: ", ")))")
+        }
+        #endif
+    }
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -615,6 +681,10 @@ final class StreamClient: ObservableObject {
     /// with the session.
     @Published var hostVersion: String?
     @Published var hostProtocol: Int?
+    /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
+    /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
+    /// session.
+    @Published var hostGestures: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -641,7 +711,8 @@ final class StreamClient: ObservableObject {
 
     // Liveness, on `queue` (docs/remote-access-plan.md §7.6). The host answers every ping, so a
     // live connection never goes quiet for long; a dead path used to keep a frozen picture.
-    /// The last completed receive with data (CACurrentMediaTime).
+    /// When the last bytes came (CACurrentMediaTime): every header and every piece of a payload
+    /// (MessageReader, at most 256 KB a read), so a session is live while any byte arrives.
     private var lastReceivedAt = 0.0
     /// The worst round trip of the last second that measured one, ms.
     private var worstRecentRttMs: Double?
@@ -653,6 +724,9 @@ final class StreamClient: ObservableObject {
     static let livenessFloor = 6.0
     /// A remote path that is not viable for this long is a lost connection.
     static let viabilityLimit = 3.0
+    /// The automatic reconnect's dial of a row that is not ready this long after it started is let
+    /// go, and the reconnect looks again (`connect(to:)`), as a connection waiting that long is.
+    static let reconnectDialWait = 5.0
 
     // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
     // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
@@ -1165,7 +1239,7 @@ final class StreamClient: ObservableObject {
                     }
                 }
                 self.startMeasuring(c, remote: false)   // before the first read, so the first window is this connection's alone
-                self.readHeader(on: c)
+                self.startReading(c)
             case .waiting(let e):
                 print("connection waiting: \(e)")
                 // Once `c` carries the session (a wired dial's too), waiting again means its path is gone.
@@ -1220,14 +1294,36 @@ final class StreamClient: ObservableObject {
                 self?.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row,
                                         why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
             }
+        } else if reconnect != nil {
+            // The automatic reconnect's dial (a tap clears `reconnect` first) must get ready. Every
+            // look of the reconnect needs `connection == nil` (its remote dial too), so a dial that
+            // never does would hold it for good, and one can: a row dialed as its registration goes
+            // (Sill quit or died without a goodbye, the row's last second) leaves the Bonjour resolve
+            // waiting with no end, in `.preparing`, where only `.waiting` has a limit (above). Let
+            // go after reconnectDialWait, the reconnect keeps what it was (its loss, its remote
+            // dials' timing, "Reconnecting…"), and tearDown's discoveryChanged looks again: the
+            // Mac's row listed by then (back under another name, say), else its remote dial when
+            // due. A wired dial gets this through its fallback, which has none.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectDialWait) { [weak self] in
+                guard let self, self.connection === c, !self.connected, self.reconnect != nil, c.state != .ready else { return }
+                #if DEBUG
+                print("reconnect: \(name) not ready in \(Self.reconnectDialWait) s (\(c.state)); letting it go and looking again")
+                #endif
+                self.connection = nil
+                c.cancel()                                                 // its .cancelled finds it replaced
+                self.tearDown(status: self.status, restartSearch: false)   // then its discoveryChanged looks again
+            }
         }
         return true
     }
 
     /// The session is connected: at `.ready` for a plain door, at its first window list over TLS
-    /// (`homeSessionReady`). The reconnect ends, the nearby search stops, and a session over AWDL or
-    /// on Wi-Fi with the cable listed may move at once. Main thread.
+    /// (`homeSessionReady`). The automatic reconnect's session (its `reconnect` is kept until now; a
+    /// tap clears it) goes on with the last session's tour decision. The reconnect ends, the nearby
+    /// search stops, and a session over AWDL or on Wi-Fi with the cable listed may move at once. Main
+    /// thread.
     func markConnected(endpoint: NWEndpoint?, name: String) {
+        startTourSession(reconnected: reconnect != nil)
         reconnect = nil
         // Connected: no ask is left waiting (a pairing through a link's addresses leaves one), so the
         // home card never comes back for it with the connect screen.
@@ -1472,7 +1568,8 @@ final class StreamClient: ObservableObject {
     /// Mac adds a connection to its broadcasts before its catalog goes out. A goodbye (kind 22)
     /// before the list goes to `moveSaidGoodbye`, and the reading goes on to the Mac's close. A read
     /// that fails, a message cut short, or one bigger than the session's reader takes
-    /// (`readHeader`), cancels `c`, which ends the move (`moveEnded`).
+    /// (MessageReader's caps), cancels `c`, which ends the move (`moveEnded`). Its own reads, whole
+    /// messages at a time: its 5 s bound it, and it reads only up to the first window list.
     private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -1504,8 +1601,8 @@ final class StreamClient: ObservableObject {
             }
             if header.payloadLength == 0 { next(Data()); return }
             c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { data, _, isComplete, error in
-                // As in readPayload: fewer bytes than announced is the connection ending mid-message,
-                // never a message to keep.
+                // As in MessageReader: fewer bytes than announced is the connection ending
+                // mid-message, never a message to keep.
                 guard let data, data.count == header.payloadLength else {
                     if isComplete || error != nil || data != nil { c.cancel() }
                     return
@@ -1640,12 +1737,16 @@ final class StreamClient: ObservableObject {
         queue.async {
             self.startMeasuring(c, remote: false)
             for m in kept { self.handle(m.header, m.payload) }
-            self.readHeader(on: c)
+            self.startReading(c)
         }
         // The Mac keeps a frame rate per connection: this one's viewport is the first thing the new
         // connection carries once the fence is down, and the old one closes half a second after
         // that (`fenceEnded`), so the stream's rate never falls back to the default.
         if let v = lastViewport { sendViewport(v) }
+        // The Mac sends its menus only to a connection that asked, and answers a request on the
+        // connection it came on, which the session no longer reads: the menus waiting settle, and
+        // the new connection asks for the top level (the same Mac: its menus stay meanwhile).
+        menusMoved()
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
@@ -2270,7 +2371,7 @@ final class StreamClient: ObservableObject {
         connection = c
         queue.async { [weak self] in
             self?.startMeasuring(c, remote: true)
-            self?.readHeader(on: c)
+            self?.startReading(c)
         }
     }
 
@@ -2345,6 +2446,7 @@ final class StreamClient: ObservableObject {
         notice = nil
         hostVersion = nil
         hostProtocol = nil
+        hostGestures = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -2356,6 +2458,9 @@ final class StreamClient: ObservableObject {
         recentRttMedians = []
         slowLink = false
         resetPointer()
+        // A tour cut short by the session's end takes its pause with it, and a held pointer move.
+        pointerMoveOwed = false
+        inputPaused = false
         // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
         // session's viewport may reach the next connection, which may already be dialling.
         forgetViewport()
@@ -2386,12 +2491,24 @@ final class StreamClient: ObservableObject {
         settingsExpiry?.cancel()
         settingsExpiry = nil
         lastRttMaxMs = nil
+        // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
+        // loses the Mac's menus at its next rebuild.
+        resetMenus()
     }
 
     // MARK: - Client → host
 
-    /// Ask the host to stream this source. The host answers with a fresh window list.
+    /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
+    /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        noteAction()
+        request(source)
+    }
+
+    /// Asks the host to stream this source: the person's pick (`select`), or this device's own
+    /// request (the Desktop on a connection's first list, a pick made again after a move), which
+    /// is not the person's doing.
+    private func request(_ source: StreamSource) {
         choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
@@ -2402,6 +2519,7 @@ final class StreamClient: ObservableObject {
 
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
+        noteAction()
         send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
@@ -2417,6 +2535,7 @@ final class StreamClient: ObservableObject {
 
     /// Moves a window to `index` of the arranged bar (a drag in progress). Main thread.
     func moveWindow(_ id: UInt32, to index: Int) {
+        noteAction()
         var order = orderedWindows.map(\.id)
         guard let from = order.firstIndex(of: id), index >= 0, index < order.count, from != index else { return }
         order.remove(at: from)
@@ -2443,6 +2562,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
@@ -2463,6 +2583,15 @@ final class StreamClient: ObservableObject {
     }
 
     func sendInput(_ event: InputEvent) {
+        // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
+        // as something happening (StreamScreen.considerTour).
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
+        // move to a new frame's middle, so nothing should get here then; the one case expected is a
+        // flick's coast still running out under Take the Tour.
+        if inputPaused { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
+        #endif
         queue.async { [weak self] in
             guard let self else { return }
             // Every input hands this device the pointer, coalesced moves included, here where the
@@ -2491,6 +2620,40 @@ final class StreamClient: ObservableObject {
                 }
             }
         }
+    }
+
+    /// This device's switch for three-finger gestures (the Settings panel's This iPad group): on
+    /// unless turned off. The device's own preference, never sent to the Mac; read at each gesture.
+    static let gesturesKey = "Sill.trackpadGestures"
+    static var gesturesOn: Bool {
+        // `bool(forKey:)`, not `as? Bool`: a launch argument's "0" is a string, which it reads as
+        // @AppStorage does, so the switch and the panel always agree.
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
+    }
+
+    /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
+    /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
+    /// only while this device's switch is on and the Mac says it takes gestures. While a window
+    /// streams, the Desktop first, as its button picks it: none of the views a gesture opens
+    /// (Mission Control, App Exposé, Apps, Show Desktop) is in a window's picture. A pointer move
+    /// still waiting goes before the gesture, as before any input but a move. Nothing else: no
+    /// pointer, no scroll, and a latched modifier stays latched. Main thread. True when it went.
+    @discardableResult
+    func sendGesture(_ gesture: TrackpadGestures.Gesture, fingers: Int) -> Bool {
+        var windowStreams = false
+        if case .window = active { windowStreams = true }
+        let plan = TrackpadGestures.sending(switchOn: Self.gesturesOn, connected: connected, hostGestures: hostGestures,
+                                            generation: TrackpadGesture.generation, windowStreams: windowStreams)
+        guard plan.send else { return false }
+        if plan.desktopFirst { select(.desktop) }
+        let payload = Wire.encode(TrackpadGesture(gesture: gesture.rawValue, fingers: fingers))
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.flushPendingMove()
+            self.send(.gesture, payload)
+        }
+        return true
     }
 
     /// On `queue`.
@@ -2583,6 +2746,8 @@ final class StreamClient: ObservableObject {
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
+        // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
+        if inputPaused { pointerMoveOwed = true; return }
         sendInput(.pointer(.move, x: 0.5, y: 0.5))
     }
 
@@ -2710,53 +2875,34 @@ final class StreamClient: ObservableObject {
 
     // MARK: - Host → client
 
-    /// The read loop is bound to one connection: a replaced connection's loop stops at its next
-    /// read instead of reading from the new one. The direct connection a move is leaving is read on
-    /// until its fence's pong (`deliver`): the same loop, so no message is split between two.
-    private func readHeader(on c: NWConnection) {
-        guard link.reads(c) else { return }
-        c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
-            guard let self, self.link.reads(c) else { return }
-            guard let data, let header = StreamMessage.parseHeader(data) else {
-                // EOF (the host closed cleanly) or a read error: both mean the Mac is gone.
-                if let error { print("read error: \(error)") }
-                if isComplete || error != nil { self.connectionLost(c, error: error) }
-                return
-            }
-            self.lastReceivedAt = CACurrentMediaTime()
-            // Nothing a Sill host sends is bigger than these (docs/remote-access-plan.md §3.7). A
-            // reader that waited for whatever a header announces could be held for ever, or read
-            // an SSH banner as a 1.7 GB payload: closed, and on a remote dial that is "not Sill".
-            let cap = header.kind == .frame ? StreamMessage.maxFramePayload : StreamMessage.maxOtherHostPayload
-            guard header.payloadLength <= cap else {
-                print("closing: the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
-                self.connectionLost(c, end: .notSill)
-                c.cancel()
-                return
-            }
-            self.readPayload(header, on: c)
-        }
+    /// Reads `c` (MessageReader) for as long as SessionLink reads it: a replaced connection's
+    /// reading stops at its next read instead of reading from the new one, and the direct connection
+    /// a move is leaving is read on until its fence's pong (`deliver`), by the same reader, so no
+    /// message is split between two. Every header and every piece of a payload stamps liveness
+    /// (`lastReceivedAt`), so a large message crossing a slow path keeps its session alive. On
+    /// `queue`.
+    private func startReading(_ c: NWConnection) {
+        MessageReader(connection: c,
+                      stillReads: { [weak self] in self?.link.reads(c) ?? false },
+                      onBytes: { [weak self] _ in self?.lastReceivedAt = CACurrentMediaTime() },
+                      onMessage: { [weak self] header, data in self?.deliver(header, data, from: c) },
+                      onEnd: { [weak self] end in self?.readingEnded(c, end) }).start()
     }
 
-    private func readPayload(_ header: StreamHeader, on c: NWConnection) {
-        // A zero-length payload is legal (an empty window list, say); receive() rejects length 0.
-        guard header.payloadLength > 0 else {
-            deliver(header, Data(), from: c)
-            readHeader(on: c)
-            return
-        }
-        c.receive(minimumIncompleteLength: header.payloadLength, maximumLength: header.payloadLength) { [weak self] data, _, isComplete, error in
-            guard let self, self.link.reads(c) else { return }
-            // EOF or an error mid-message is the Mac gone, as it is between messages: ignoring it
-            // left a dead connection on screen with a frozen picture.
-            guard let data, data.count == header.payloadLength else {
-                if let error { print("read error: \(error)") }
-                if isComplete || error != nil || data != nil { self.connectionLost(c, error: error) }
-                return
-            }
-            self.lastReceivedAt = CACurrentMediaTime()
-            self.deliver(header, data, from: c)
-            self.readHeader(on: c)
+    /// `c`'s reading ended by itself. On `queue`.
+    private func readingEnded(_ c: NWConnection, _ end: MessageReader.End) {
+        switch end {
+        case .closed(let error):
+            // EOF (the host closed cleanly) or a read error, between messages or in the middle of
+            // one: both mean the Mac is gone.
+            if let error { print("read error: \(error)") }
+            connectionLost(c, error: error)
+        case .tooBig(let header):
+            // Nothing a Sill host sends is bigger (docs/remote-access-plan.md §3.7): closed, and on
+            // a remote dial that is "not Sill".
+            print("closing: the host announced a \(header.payloadLength)-byte message (kind \(header.kind.rawValue))")
+            connectionLost(c, end: .notSill)
+            c.cancel()
         }
     }
 
@@ -2804,6 +2950,7 @@ final class StreamClient: ObservableObject {
                 self.sessionHost = list.launchID
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
+                if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -2815,6 +2962,9 @@ final class StreamClient: ObservableObject {
                     #endif
                     self.moveToNetworkIfListed()
                     self.followBestPath()
+                    // Once per connection, now that the Mac has let this device in: the Mac's menus,
+                    // their top level now and again whenever it changes (a Mac from before them skips it).
+                    self.subscribeToMenus()
                     #if DEBUG
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
                     #endif
@@ -2836,7 +2986,7 @@ final class StreamClient: ObservableObject {
                         #if DEBUG
                         print("path: nothing streams on the new connection: picking \(pick) again")
                         #endif
-                        self.select(pick)
+                        self.request(pick)
                         return
                     }
                 }
@@ -2848,7 +2998,7 @@ final class StreamClient: ObservableObject {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
-                        self.select(.desktop)
+                        self.request(.desktop)
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
@@ -2862,7 +3012,7 @@ final class StreamClient: ObservableObject {
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
-                            self.select(.desktop)
+                            self.request(.desktop)
                         }
                     default:
                         break
@@ -2923,6 +3073,16 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
                 self.goodbye = goodbye
+            }
+        case .macMenu:
+            // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
+            // (MacMenuState). One that does not decode is dropped: its completion times out.
+            guard let menu = Wire.decode(MacMenu.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                // A replaced connection's answer must not settle, or describe, the next one's menus.
+                guard self.connection === from else { return }
+                self.receiveMenus(menu)
             }
         default:
             break // client → host kinds, and anything a newer host invents
@@ -3055,6 +3215,7 @@ extension StreamClient {
     /// shown, and nothing before this connection's first state (an older Mac never sends one).
     /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
     func changeSettings(_ change: HostSettingsChange) {
+        noteAction()
         guard let out = settings.pick(change, token: settingsToken, now: ProcessInfo.processInfo.systemUptime) else { return }
         settingsToken += 1
         settingsProblem = nil
@@ -3219,6 +3380,275 @@ extension StreamClient {
               let number = UInt16(raw[raw.index(after: colon)...]),
               let port = NWEndpoint.Port(rawValue: number) else { return nil }
         return .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port)
+    }
+    #endif
+}
+
+// MARK: - The Mac's menus
+
+extension StreamClient {
+    /// The subscription: a kind 27 without an id, once per connection at its first window list (and
+    /// on a move's new connection). The Mac then sends its top level and every later one; a Mac from
+    /// before the menus skips it and sends nothing, so no Menus button shows. Main thread.
+    func subscribeToMenus() {
+        send(.fetchMenu, payload: Wire.encode(FetchMenu(token: nextMenuToken())))
+    }
+
+    /// A menu of the top level opened, in the iPad's bar or the Menus button's pull-down: built as
+    /// `id` under `title` from the top level of `builtVersion` (another session's, perhaps), it asks
+    /// by its title when the current top level's menu there has another (MacMenuState rule 11),
+    /// since UIKit rebuilds the bar lazily. With no menu of that title now, the menus changed, and
+    /// the bar is asked for a rebuild again. `completion` runs once, on the main queue. Main thread.
+    func fetchTopMenu(id: String, title: String, builtVersion: Int, completion: @escaping (MacMenuState.Content) -> Void) {
+        guard let current = menus.version else { completion(.message(MacMenuState.notConnected)); return }
+        guard let asked = menus.barMenuID(builtID: id, title: title) else {
+            #if DEBUG
+            print("menubar: \(title) was built from version \(builtVersion); version \(current) has none")
+            #endif
+            completion(.message(MacMenuState.changedNote))
+            MacMenuHub.shared.menusChanged(self)
+            return
+        }
+        #if DEBUG
+        if builtVersion != current || asked != id { print("menubar: \(title) was built from version \(builtVersion) as \(id); asked as \(asked) in version \(current)") }
+        #endif
+        fetchMenu(id: asked, version: current, title: title, completion: completion)
+    }
+
+    /// A submenu of a fetched menu opened: asked in the version its row came in. Main thread.
+    func fetchMenu(_ row: MacMenuState.Row, completion: @escaping (MacMenuState.Content) -> Void) {
+        guard let id = row.id else { completion(.message(MacMenuState.changedNote)); return }
+        fetchMenu(id: id, version: row.version, title: row.title, completion: completion)
+    }
+
+    private func fetchMenu(id: String, version: Int?, title: String, completion: @escaping (MacMenuState.Content) -> Void) {
+        menuKey += 1
+        let key = menuKey
+        let token = menuToken
+        let now = ProcessInfo.processInfo.systemUptime
+        switch menus.fetch(id, title: title, version: version, key: key, token: token, now: now) {
+        case .send(let request):
+            menuToken += 1
+            menuCompletions[key] = completion
+            #if DEBUG
+            menuAsked[key] = (title, id, now)
+            #endif
+            send(.fetchMenu, payload: Wire.encode(request))
+            scheduleMenusExpiry()
+            #if DEBUG
+            if connection == nil { mockAnswer(request) }
+            #endif
+        case .joined:
+            menuCompletions[key] = completion
+            #if DEBUG
+            menuAsked[key] = (title, id, now)
+            #endif
+        case .settled(let content):
+            completion(content)
+        }
+    }
+
+    /// An item chosen in a menu: a kind 25 with the version its row came in and the title shown, or
+    /// a refusal told at once (the app not answering on the Mac). Main thread.
+    func pressMenuItem(_ row: MacMenuState.Row) {
+        switch menus.press(row, token: menuToken) {
+        case .send(let request)?:
+            menuToken += 1
+            send(.pressMenuItem, payload: Wire.encode(request))
+            #if DEBUG
+            print("menus: chose \(row.title) (\(request.id ?? ""))")
+            if connection == nil { mockAnswer(request) }
+            #endif
+        case .refused(let refusal)?:
+            menuRefused(refusal)
+        case nil:
+            break
+        }
+    }
+
+    /// A kind 24 from the Mac, on this connection. Main thread.
+    private func receiveMenus(_ m: MacMenu) {
+        let (done, topChanged, refusal) = menus.receive(m, now: ProcessInfo.processInfo.systemUptime)
+        finishMenus(done)
+        if topChanged {
+            #if DEBUG
+            let count = menus.menus.count
+            let what = count == 0 && menus.app == nil ? "none" : "\(menus.app ?? "?"), \(count) menu\(count == 1 ? "" : "s")"
+            print("menus: \(what) (version \(menus.version.map(String.init) ?? "?"))"
+                  + (menus.stale ? ", stale" : "") + (menus.note.map { ": \($0)" } ?? ""))
+            pressFromLaunchArgument()
+            #endif
+            MacMenuHub.shared.menusChanged(self)
+        }
+        if let refusal { menuRefused(refusal) }
+        scheduleMenusExpiry()
+    }
+
+    /// A choice not made: the warning haptic (iPhones; an iPad has no Taptic Engine) and VoiceOver's
+    /// announcement. Nothing on screen: the Mac's picture says what happened (plan's Q9).
+    private func menuRefused(_ refusal: MacMenuState.Refusal) {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        UIAccessibility.post(notification: .announcement, argument: refusal.announcement)
+        #if DEBUG
+        print(refusal.byMac ? "menus: the Mac refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
+                            : "menus: not sent: \(refusal.title) (\(refusal.id)): \(refusal.note)")
+        #endif
+    }
+
+    /// Runs the completions `menus` settled, each once.
+    private func finishMenus(_ done: [MacMenuState.Done]) {
+        for d in done {
+            #if DEBUG
+            if let asked = menuAsked.removeValue(forKey: d.key) {
+                let ms = Int(((ProcessInfo.processInfo.systemUptime - asked.at) * 1000).rounded())
+                switch d.content {
+                case .sections(let sections, let more):
+                    let items = sections.flatMap { $0 }.filter { $0.kind != .note }.count
+                    print("menus: \(asked.title) (\(asked.id)) in \(ms) ms, \(items) item\(items == 1 ? "" : "s")" + (more > 0 ? ", \(more) more" : ""))
+                case .message(let text):
+                    print("menus: \(asked.title) (\(asked.id)) after \(ms) ms: \(text)")
+                }
+            }
+            #endif
+            menuCompletions.removeValue(forKey: d.key)?(d.content)
+        }
+    }
+
+    /// How long an opened menu waits for the Mac: 4 s, or four of the worst recent round trips on a
+    /// slow link, as a settings pick does.
+    private var menusTimeout: Double { settingsTimeout }
+
+    /// Arms the timeout check for the oldest waiting fetch, replacing any armed one.
+    private func scheduleMenusExpiry() {
+        menusExpiry?.cancel()
+        menusExpiry = nil
+        guard let oldest = menus.oldestWait else { return }
+        let work = DispatchWorkItem { [weak self] in self?.expireMenus() }
+        menusExpiry = work
+        let due = oldest + menusTimeout + 0.05 - ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, due), execute: work)
+    }
+
+    /// Menus the Mac never answered: "‹Mac› didn’t answer. Open the menu again."
+    private func expireMenus() {
+        finishMenus(menus.expire(now: ProcessInfo.processInfo.systemUptime, timeout: menusTimeout, mac: macName))
+        scheduleMenusExpiry()
+    }
+
+    /// The connection ended: every open menu says "Not connected.", and nothing of the Mac's menus is
+    /// kept. From `tearDown`. Main thread.
+    func resetMenus() {
+        finishMenus(menus.reset())
+        // Every completion is the state's, so none is left; one that were would wait for ever.
+        let left = menuCompletions
+        menuCompletions = [:]
+        for (_, completion) in left { completion(.message(MacMenuState.notConnected)) }
+        menusExpiry?.cancel()
+        menusExpiry = nil
+        #if DEBUG
+        menuAsked = [:]
+        #endif
+        MacMenuHub.shared.menusChanged(self)
+    }
+
+    /// A move handed the session to its new connection (`finishMove`): what waits settles, and the
+    /// new connection subscribes. Main thread.
+    func menusMoved() {
+        finishMenus(menus.connectionReplaced())
+        scheduleMenusExpiry()
+        subscribeToMenus()
+    }
+
+    private func nextMenuToken() -> Int {
+        defer { menuToken += 1 }
+        return menuToken
+    }
+
+    #if DEBUG
+    /// The harness's menus: the mock Mac's top level, as if the Mac had sent it on this connection.
+    func showMockMenus(_ mock: MockCatalog.MacMenus) {
+        mockMenus = mock
+        receiveMenus(mock.topLevel)
+    }
+
+    /// The mock Mac answers a fetch after its delay (never, for `timeout`), as a host would.
+    private func mockAnswer(_ request: FetchMenu) {
+        guard let mock = mockMenus, let delay = mock.fetchDelay else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.connection == nil, self.mockMenus != nil else { return }
+            self.receiveMenus(mock.answer(request))
+        }
+    }
+
+    /// …and a choice after 0.2 s: pressed, or refused (`refuse`).
+    private func mockAnswer(_ request: PressMenuItem) {
+        guard let mock = mockMenus else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.connection == nil, self.mockMenus != nil else { return }
+            self.receiveMenus(mock.answer(request))
+        }
+    }
+
+    /// A menu or item by its titles from the top level ("File/Save"), each level fetched as a tap on
+    /// it would fetch it: the harness's way to open a submenu or choose an item without a tap. The
+    /// row, and the top level's version when it is one of the Mac's menus; nil when a title is not
+    /// there.
+    func resolveMenuPath(_ titles: [String], completion: @escaping ((row: MacMenuState.Row, topLevelVersion: Int?)?) -> Void) {
+        guard let first = titles.first, let version = menus.version,
+              let top = menus.menus.first(where: { $0.title == first }) else { completion(nil); return }
+        var found: (row: MacMenuState.Row, topLevelVersion: Int?) = (top, version)
+        func step(_ rest: ArraySlice<String>) {
+            guard let next = rest.first else { completion(found); return }
+            let open: (MacMenuState.Content) -> Void = { content in
+                guard case .sections(let sections, _) = content,
+                      let row = sections.flatMap({ $0 }).first(where: { $0.title == next }) else { completion(nil); return }
+                found = (row, nil)
+                step(rest.dropFirst())
+            }
+            if let v = found.topLevelVersion, let id = found.row.id {
+                fetchTopMenu(id: id, title: found.row.title, builtVersion: v, completion: open)
+            } else {
+                fetchMenu(found.row, completion: open)
+            }
+        }
+        step(titles.dropFirst())
+    }
+
+    /// Why the harness must not open menus by their path or choose an item in this session
+    /// (`-SillMenusOpen 'File/…'`, `-SillMenuPress`), or nil when it may: the mock's menus, or the
+    /// test app's (Scripts/menufixture.swift) through a test host, a session dialled to a loopback
+    /// address whose Mac's window list gives no version (SillHost; Sill.app always gives one) and
+    /// whose top level is menufixture's. Never a real Mac's menus: a choice there is made in whatever
+    /// app it streams, and each menu opened is validated by that app.
+    var menuHarnessRefusal: String? {
+        guard connection != nil else { return nil }
+        if let why = InputScript.refusal(endpoint: connection?.endpoint, hostVersion: hostVersion) {
+            return why.replacingOccurrences(of: ", which posts input to this Mac", with: "")
+        }
+        guard menus.app == "menufixture" else { return "the menus are \(menus.app ?? "no app")'s, not the test app's (menufixture)" }
+        return nil
+    }
+
+    /// `-SillMenuPress 'File/Save'`: once the first top level is in, the item at that path is chosen
+    /// as a tap on it would choose it (the menus on the way fetched, the kind 25 sent), once per
+    /// client. The harness cannot tap; against a synthetic host with SILL_TEST_MENU_PID this is the
+    /// fixture's item pressed through the host. Only where `menuHarnessRefusal` lets it.
+    private func pressFromLaunchArgument() {
+        guard !menuPressArgumentDone, menus.version != nil, !menus.menus.isEmpty,
+              let raw = UserDefaults.standard.string(forKey: "SillMenuPress"), !raw.isEmpty else { return }
+        menuPressArgumentDone = true
+        if let why = menuHarnessRefusal {
+            print("menus: harness: -SillMenuPress \(raw) refused: \(why)")
+            return
+        }
+        let path = raw.split(separator: "/").map { String($0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.resolveMenuPath(path) { [weak self] found in
+                guard let self else { return }
+                guard let found, found.row.kind == .item else { print("menus: harness: nothing to choose at \(path.joined(separator: " › "))"); return }
+                self.pressMenuItem(found.row)
+            }
+        }
     }
     #endif
 }

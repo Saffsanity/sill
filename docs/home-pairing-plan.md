@@ -2999,3 +2999,213 @@ Noah's Sill.app at each run.
   main's pointer and portrait code into StreamClient, StreamScreen, HostSettingsPanel, ContentView
   and MockCatalog beside this branch's; the smoke test covers a pairing and a session, not the
   photos); the rest of the H list on the merge.
+
+### The merge with main after PRs #34 to #38 (2026-09-27)
+
+`$SP` here is `scratchpad/merge37` in the session's scratchpad: the host gates (`gates.py`, their
+logs in `gates/`), the CLI's parity (`parity.py`, `parity/`), the device's smoke test (`sim37.py`,
+its run in `sim/`), the mutants' runner (`mutants.sh`) and the builds', checks' and mutants' logs
+(`logs/`). The parents' trees built from `git archive` (`bases/`), every DerivedData, the Swift
+package's scratch build and the private simulator ("Sill merge37") were deleted after.
+
+Noah tried PR #37 on his iPad and iPhone against its Sill.app ("home pairing looks good!", relayed
+2026-09-27) and asked for it to merge after PRs #34 and #38. Main was at da43f6b: PRs #35 (the
+first-run tour: `TourPolicy`, `TourOverlay`, StreamClient's `lastInputAt`, `lastActionAt`,
+`inputPaused` and `tourSession`), #36 (the Mac's menus: kinds 24, 25 and 27, `MenuMirror`, the
+device's `MacMenu*`), #34 (remote pacing: StreamServer's byte budget for remote clients, the device's
+`MessageReader`, `Scripts/pacing`) and #38 (the trackpad gestures: kind 28, `GestureChords`,
+`TrackpadGestures`, the Settings panel's This iPad group, which ends with Take the Tour). One merge
+commit, not a rebase; git stopped in 12 files (ci.yml, CLAUDE.md, sillclient.py,
+StreamCoordinator, StreamServer, Compatibility, the checks' README, DEVELOPMENT.md, ContentView,
+HostSettingsPanel, MockCatalog, StreamClient), each resolved by reading both sides.
+
+**What landed.**
+- StreamServer: a client has both sides' fields (this branch's `encrypted` and `onCable`, #34's
+  `pendingBytes`, the keyframes it is still taking and `backlogFloor`). #34's pacing stays the
+  remote door's, exactly where it put it: `paceRemote`, the bytes `send` counts for a remote client
+  and the remote sweep's keyframe request, all keyed on `route.isRemote`. A TLS home session is a
+  home client there (`.home(origin, peer:)`), so it keeps the home rule of `broadcast` and the home
+  eviction, which #34 left as they were; the tick keeps this branch's rule (a TLS client skips one
+  right after a send, one on the cable gets none; ticks are outside the byte count, as #34 has them).
+  The gate's refusals and every goodbye (a Door's at admission, `closeSessions`' to a session) are
+  written straight to their connections, outside `send`, as before, so none of them meets the byte
+  count, and the connection closes behind them. The gate and the hello stay in the Door for both
+  TLS doors.
+- The coordinator hands kinds 24, 25, 27 and 28 to the menus' mirror and the gestures whichever
+  door a session came by (`serve` registers TLS sessions as the plain door registers its own), and
+  kind 8 feeds `GestureChords.input` and the menus' Desktop check as on main. A semantic conflict
+  git did not flag: main's gestures were dry, and SILL_TEST_HOTKEYS read, on `server.isTestHost`,
+  which meant "does not advertise" on main but, since this branch, also "is not Sill.app's own
+  executable" (for the door and pairing hooks, TestHooks). On the merge, Sill.app's own executable
+  in test pattern mode would have posted a gesture's chord to this Mac. Both follow `synthetic` now
+  (the host that does not advertise), as `injector.dryRun` does.
+- The device: every session connection is read by `MessageReader` (`startReading`: a home dial's,
+  TLS or plain, a move's and a remote winner's). The tour's session starts where a session at home
+  connects, `markConnected` (at `.ready` over a plain door, at the first window list over TLS through
+  `homeSessionReady`), with the automatic reconnect's `reconnect` kept until then, and a remote one's
+  in `remoteSessionReady`, as on main. The menus' subscription follows `homeSessionReady` at the
+  first window list; a move's hand-over re-subscribes (`menusMoved`) and a tear-down resets them.
+- The Settings panel: the Mac's settings, Direct Wireless, Away from home (this branch's pairing
+  rows), This iPad's gestures, then Take the Tour, last. The harness's contract (ContentView) and
+  MockCatalog keep both sides' arguments and cases (the pairing settings cases take gestures, as
+  every case but `legacy` does); sillclient.py both sides' flags.
+- `SillProtocol`'s comment and CLAUDE.md's floor: kinds 0–28 inside `sill/1` at both TLS doors,
+  with the menus' and the gestures' rules beside pairing's.
+- `Scripts/pacing` (#34's harness, which compiles the real StreamServer.swift): on the merge its new
+  side no longer built (no `Door`, `DoorPolicy`, `HostIdentity` or `TrustBox`; `serve` wants the
+  hello and a home route its peer). Its host set now has Door, DoorPolicy, HostIdentity, CableLink
+  and PairingWindow (a file a base lacks is still left out), and main.swift calls `serve` as the
+  side's StreamServer has it: build.sh defines `PACING_SERVE_BEFORE_HOME_PAIRING` for a StreamServer
+  from before pairing at home, so the harness still compares against such a base.
+- CI's mutants matrix and the checks' README: the union, 33 checks (32 with mutants). CLAUDE.md:
+  both sides' Current step entries, Layout, Build and run and the checks' list. The project file
+  merged by itself: A601/F601 (StreamClient+Home), A701/F701 (TrackpadGestures), A040–A044/F040–F044
+  (the menus), A401/F401 and A402/F402 (the tour), A020/F020 (MessageReader), each ID once and every
+  source in the target once.
+
+**Verified** (2026-09-27, 17:50–19:05). Nothing here used the hardware encoder: every host ran with
+`SILL_TEST_SOFTWARE_ENCODER=1` and `SILL_TEST_NO_ROUTER=1`, and every listener was on 127.0.0.1
+(`SILL_TEST_LOOPBACK=1`, checked with `lsof` by the host's PID); `no-device.sh` found no device on
+Noah's Sill.app at each host's start.
+- Builds: `swift build -c release` from a clean scratch path, only the old CaptureProbe warning; iOS
+  Debug and Release for the simulator and Debug for `generic/platform=iOS`, unsigned
+  (`CODE_SIGNING_ALLOWED=NO`), with fresh DerivedData, only the old `StreamClient` capture warning
+  (`StreamClient.swift:2989` now). Release's Info.plist declares `_sill._tcp` alone, the Debug ones
+  `_silltest._tcp` too; all three `ITSAppUsesNonExemptEncryption` false, with
+  `PrivacyInfo.xcprivacy`; none of the harness's arguments is in the Release binary.
+- `Tests/checks/run-all.sh`: all 33 pass (295 s): addresses 41, ask-limits 34, cable-link 40,
+  clientlink 89, compatibility 93, device-gate 58, dmg-layout 70, door-policy 128, encoder-mailbox
+  38,256, encoder-slowstate 1,207, fence 15 modes, gesture-chords 141, gestures 156, goodbye 45,
+  home-device 164, home-model 51, home-records 39, home-txt 49, ledger 90, menu-state 5,122,
+  menus 309, message-reader 46, origin 66, pairing-address 80, phone-portrait 152, pointer-control
+  156, pointer-presence 165, pointer-watch 132, policy 336, protocol 191 and its 8 cross-checks,
+  remote-rules 107, tour 43,784, update-policy 124.
+- The mutants of the 18 checks that compile the whole of StreamProtocol, whose sources the merge
+  changed on both sides (this branch's Compatibility, HostSettings, Pairing, Remote and RemoteTLS;
+  main's Compatibility, Gesture, MacMenu, StreamMessage and Switcher), on the merged tree before
+  the commit: addresses 15, ask-limits 20, cable-link 20, compatibility 19, device-gate 14,
+  door-policy 58, goodbye 18, home-model 15, home-records 21, home-txt 24, menu-state 29, menus 43,
+  pairing-address 35, pointer-control 33, pointer-watch 40, protocol 23, remote-rules 52 and
+  update-policy 18, 497 of 497 caught (45 min, three checks at a time). The other 15 compile files
+  equal to one parent's, where their mutants last ran (the ledger has none).
+- The CLI's stdout without `--pairing` (the plain door), idle 35 s (7 lines) and with a client (a
+  hello, pick none; 18 lines), masked and sorted, identical to both parents' (7a6bf41 and da43f6b,
+  each built from `git archive`).
+- Live, the merged CLI (`gates.py`, 25 of 25). G1, `--pairing`: the TLS home door on 127.0.0.1
+  alone; pairing by the link; a pinned session whose hello came inside TLS, whose menus'
+  subscription (kind 27) was answered with the top level (kind 24), which got its settings (kind
+  16), and whose swipe up and four-finger swipe down (kind 28) the host logged as "→ Mission
+  Control" and "→ closes Mission Control … (not posted: a test host)"; no kind 26 to the device
+  that moved the pointer. G2, `--pairing --remote`: the key paired at home served at the remote
+  door, streaming the test pattern on the software encoder (244 frames in 6 s while the mutants
+  shared the CPU) with no `net.dropped`, and the menus answered there too; a TLS home session
+  streaming by the home rule (204 frames in 5 s). G3, the plain door: the menus answered and two
+  gestures logged, not posted.
+- `Scripts/pacing/run.sh`, the merge against origin/main (da43f6b), whose `paceRemote`, `send`,
+  `sweepRemote` and `broadcast` the merge left byte for byte main's: the gate cases and home once
+  each, then home and bigkf8 three times more (`.build/pacing/runs/20260927-182119` and
+  `-185319`). Every gate passed: real24 59.3 fps (base 60.0) with nothing dropped, kf25m32 60.1
+  (60.1), ext120 120.0 (120.0) with nothing dropped, slowkfB 64.9 (64.8) with no liveness loss, dip
+  52.8 (52.6) with its frame age back at 45 ms in 6.0 s on both, relay2 62.1 (62.4) with no loss or
+  eviction, blackhole dropped for its silence 13.1 s after it connected on both, stillend's three
+  still spells ending on the last frame within 2.2 s on both, restartkf 60.0 (60.1) with nothing
+  dropped; home 60.0 fps with no drop in three runs of three (the first run's one drop in 26 s, 2.3
+  a minute against its base's none, did not come back). bigkf8, recorded as bistable, ran at 59.8
+  fps with nothing dropped in all four runs of either build; its "each run ≥ its base run's fps"
+  read under a base run's 59.8–59.9 by less than 0.1 fps and so printed FAIL, as two builds of the
+  same pacing code can.
+- Live, a private simulator (iPad Air 11-inch (M4), iOS 27.0) with the Debug build, ad hoc signed,
+  against the merged CLI (`sim37.py`, 13 of 13): an unsaved Mac's ask answered `shown`, its link
+  scanned in the home card, then "connected … over TLS, a saved Mac" and "menus: none (version 1)"
+  (kind 24 read by MessageReader over TLS), nothing streamed; relaunched with `-SillTourState
+  fresh`, the saved Mac dialed pinned with no ask, the Desktop streaming on the software encoder
+  over TLS, and "tour: showing touch (1 of 4), 1.06 s after the picture" with no input sent while
+  it showed; under `-SillLive 1` the input script's two gestures went through `sendGesture` over
+  TLS, and the host logged both and posted neither.
+- Not run: Noah's devices (his try of PR #37 came before this merge); photos of the harness's
+  cases; the rest of the H and S lists on the merge.
+
+### The review of the merge (2026-09-27)
+
+`$SP` here is `scratchpad/merge37/fix` in the session's scratchpad: the pacing harness's tick count
+(`ticks.py`, `kindcount.py`), the CLI's ticks by door (`livetick.py`), the reconnect's scenarios on
+the simulator (`lib2.py`, `rt.py`, `rtour2.py`), their logs and photos (`out/`) and the builds'
+logs. The merge's tree built from `git archive` (`base-tree/`), every DerivedData and the private
+simulator ("Sill merge37", an iPad Pro 11-inch (M5), iOS 27.0) were deleted after.
+
+A read-only review of 70a75e7 (the host and the wire live, the device on a private simulator, the
+docs against the code) reported eight findings. Each was checked here first; all eight were real,
+and each is fixed in a commit of its own theme (4889e62 to 553ad58, and this one):
+- **The pacing harness's `home` case measured the TLS tick rule** (4889e62). `serve` set
+  `client.encrypted = true` for every session. Every session a Door admits is TLS, but the harness
+  serves its plain-TCP home client as `.home(.loopback, peer: nil)`, which then skipped a tick after
+  every other message: 15 ticks in 8 s against its base's 267, while the case compares only frames
+  and drops, so it passed. Now `client.encrypted = route.encrypted` (a home route is TLS with a
+  peer; the Door always gives one). Checked: the case's client read by a raw frame counter for 8 s,
+  base (da43f6b) 267 ticks and 455 frames, this 268 and 454; `Scripts/pacing/run.sh --base da43f6b
+  --cases home` passed, 60.0 fps on both with nothing dropped
+  (`.build/pacing/runs/20260927-205256`); the CLI (`--synthetic`, 127.0.0.1, the software encoder):
+  a client paired by the link at the TLS home door and streaming got 13 ticks in 10 s (the TLS rule,
+  as before the fix), one on the plain door 31 to 34 a second.
+- **The automatic reconnect could hang for good** (0d628fe; on the branch before the merge, and
+  main's `reconnectIfListed` has the same guard). After a loss without a goodbye the reconnect dials
+  the Mac's row while its registration is still listed; that row's Bonjour resolve then never ends,
+  so the dial stays in `.preparing`, which had no limit (`.waiting` has 5 s), and every later look
+  needs `connection == nil` (a home dial is not `why == .automatic`), the remote dial included. Now
+  the automatic reconnect's own dial (a tap clears `reconnect` first) that is not ready 5 s after it
+  started (`StreamClient.reconnectDialWait`) is let go as the reconnect already replaces its remote
+  dial: dropped, `tearDown` with the status as it is, whose `discoveryChanged` looks again, with
+  the reconnect as it was (its loss, its remote dials' timing, the tour's decision). A wired dial
+  gets it through its fallback; a tap's dial, `-SillConnect`'s and a ready TLS session waiting for
+  its first window list are as before. Checked on the simulator (`rt.py`), a TLS home session by the
+  tapped row of a `--pairing --remote` host whose key the app had paired through the link, the host
+  stopped with SIGTERM: on 70a75e7's build a host back under another name 3 s later, or 0.3 s later,
+  was never reached in 40 s and 42 s, and with no host after, no remote dial came in 30 s (the app
+  held no TCP socket; 4 of 7: the pairing and the three first sessions); on this build the session was back
+  6.4 s and 8.1 s after the kill ("reconnect: Sill test … not ready in 5.0 s (preparing); letting it
+  go and looking again", then the new row dialed pinned over TLS), and with no host the remote dial
+  started 10.3 s after it (7 of 7). The tour's rule across that reconnect (`rtour2.py`): a first
+  session decided "not this session" by a stand-in touch kept its decision ("the automatic
+  reconnect's session keeps the last one's decision", no tour, 5 of 5), and a tour on screen at the
+  loss came back on the reconnect's session (4 of 4).
+- **`-SillPairURL` skips a confirmed link's path** (356e2c8). It calls `pair(link:)`, the link's own
+  addresses, while `confirmPendingLink` tries the home rows pinned to the link's key first, so a
+  home-only link pairs nothing that way. The flag stays as the remote-access gates use it; the
+  harness contract, `startRemote`'s comment and CLAUDE.md's Build and run say what it does and
+  name the gates' way to the home rows (`-SillTapRow`, then `-SillHomeLink`).
+- **The App Store material still described the plain home door** (0cb4966):
+  docs/app-store-metadata.md's export compliance (plain TCP at both ends), its review notes' CONNECT
+  (a tap shows the desktop) and the description's any-device bullet. The file is for the first
+  upload, which carries pairing at home, so it now describes it: Before you submit asks for a Sill
+  for Mac with pairing at home at the download URL (a Release build shows "Update Sill" for 0.3.1);
+  App Privacy says what pairing sends and keeps (Data Not Collected still); the description pairs
+  once by a code, or by itself over the cable, "By default" only paired devices get in, every
+  connection encrypted; export compliance names TLS 1.3 through Network.framework for every
+  connection (the key stays NO); the review notes pair in step 6 (3,891 bytes, all ASCII); the demo
+  video and the screenshot steps pair too (the simulator through Pair iPhone or iPad… and Enter
+  Code Instead: a Mac opens no window for an ask from itself).
+- **Two slips in the docs** (62be05d): DEVELOPMENT.md put Pair This iPad… "at the end of its
+  Settings panel" (it is in Away from home; the panel ends with This iPad's gestures and Take the
+  Tour); CLAUDE.md's floor had kinds 0–28 "inside `sill/1` at both doors", which took in 19 and 20,
+  a `sill-pair/1` connection's.
+- **Stale costs and timings** (553ad58): the checklist priced the mutants at fifteen jobs, two
+  hours and $7.50 (32 jobs now; their scripts took 205 minutes here, so about four hours, some
+  2,400 included minutes or $15 on a private repository) and called Saffsanity/sill private (public
+  since 2026-09-26); run-all.sh's header said two minutes and most of an hour (five, and well over
+  an hour).
+- **Nothing for Noah's devices after the third merge** (this commit): CLAUDE.md's untested list
+  gains the merge's device-side changes and the reconnect's let-go.
+
+**Verified** (2026-09-27, 20:25–21:00), every host on 127.0.0.1 alone (`SILL_TEST_LOOPBACK=1`,
+checked with `lsof`), the software encoder and no router, `no-device.sh` finding no device on
+Noah's Sill.app before each; identities in scratch `SILL_TEST_REMOTE_DIR`s, never the keychain:
+- `swift build -c release` (only StreamServer.swift changed on the host); iOS Debug for the
+  simulator (ad hoc signed, for the simulator's keychain) and Release for the simulator and Debug
+  for `generic/platform=iOS`, unsigned, each in its own DerivedData, only the old `StreamClient`
+  capture warning (`StreamClient.swift:3011` now).
+- `Tests/checks/run-all.sh`: all 33 pass (303 s). No mutants were affected: no check compiles
+  StreamServer.swift, StreamClient.swift, StreamClient+Remote.swift or ContentView.swift, and
+  run-all.sh changed in its comment only.
+- `Scripts/pacing` against da43f6b: the `home` case above. The other cases serve `.remote` routes,
+  whose rule the fix does not change.
+- Not run: Noah's devices.

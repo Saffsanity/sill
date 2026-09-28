@@ -48,11 +48,16 @@ public struct WindowList: Codable {
     /// The host's SillProtocol.current; nil from hosts before 2026-09-25, which speak 1. The JSON key
     /// is "protocol".
     public var `protocol`: Int?
+    /// Which trackpad gestures this host takes (kind 28, Gesture.swift): 1 is the six of
+    /// `TrackpadGesture.names`, each turned into the Mac's own shortcut. Nil from every host before
+    /// 2026-09-27, to which a device sends no kind 28. A later generation of gestures says 2 and
+    /// goes only to a host that says so.
+    public var gestures: Int?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
-                hostVersion: String? = nil, protocol: Int? = nil) {
+                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
-        self.hostVersion = hostVersion; self.protocol = `protocol`
+        self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
     }
 }
 

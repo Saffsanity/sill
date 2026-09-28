@@ -60,6 +60,10 @@ These texts are only true once these are:
   The support page shows a way to reach you (guideline 1.5).
 - Sill for Mac at the download URL is Developer ID signed, notarized and
   stapled, and opens on a Mac that never had it.
+- Sill for Mac at the download URL has pairing at home (PR #37; 0.3.1, the
+  download on 2026-09-27, does not). A Release build of the iOS app never
+  connects to an older Sill for Mac: its row reads "Update Sill", and App
+  Review could not connect at all.
 - The build carries `PrivacyInfo.xcprivacy` and the export compliance key
   (section 6).
 - The version record's Version is the build's: the first App Store version
@@ -213,10 +217,16 @@ developer can't reach:
 - Taps, pointer moves, scrolls, keys, typed text and the panel size go to the
   same Mac. The Mac sends back the picture, window titles, thumbnails, app
   icons and its name.
-- Kept on the device only: each Mac's thumbnail order and the names of Macs
-  seen with Direct Wireless Connection on. With Remote Access: the device's
-  key and the saved Macs' addresses (Keychain and app storage), and camera
-  frames, which are read for the pairing code and never saved or sent.
+- Pairing (once per device, at home or for Remote Access) sends the device's
+  public key, name and model to that Mac, which keeps them in its list of
+  paired devices (Sill for Mac's Settings › Devices, where they can be
+  removed).
+- Kept on the device only: each Mac's thumbnail order, the names of Macs
+  seen with Direct Wireless Connection on, and which steps of the first-run
+  tour were seen (or that it was skipped); the device's key and the paired
+  Macs, each with its key's fingerprint, its name and, with Remote Access, its
+  addresses (Keychain and app storage); and camera frames, which are read for
+  the pairing code and never saved or sent.
 - No analytics, crash reporting, ads, third-party SDKs or servers, and no
   tracking. The iOS app makes no request of its own to anything but the Mac:
   there is no `URLSession` and no web view in it or in StreamProtocol, on main
@@ -244,7 +254,7 @@ Sill needs the free Sill for Mac on the Mac you want to use. Get it at getsill.a
 
 Get started
 • Open Sill for Mac and allow Screen Recording and Accessibility.
-• Open Sill on your iPhone or iPad. Your Mac shows up in the list. Tap it.
+• Open Sill on your iPhone or iPad. Your Mac shows up in the list. Tap it. The first time, scan the code your Mac shows.
 • Pick a window from the Apps list, or tap Desktop to see the whole screen.
 
 Made for touch
@@ -262,8 +272,8 @@ Smooth and sharp
 Your Mac, your network
 • Connect over Wi-Fi, or over a USB cable.
 • Mac nearby but on another network? Turn on Direct Wireless Connection on the Mac and connect straight to it.
-• Away from home, pair your device once and reach your Mac through your own VPN. Only paired devices can connect this way, and the connection is encrypted.
-• While Sill for Mac is open, any iPhone or iPad with Sill on the same network can connect to it. Use it on networks you trust.
+• Pair each device with your Mac once by scanning a code. Over a USB cable it pairs by itself. By default your Mac lets in only the devices you paired, and every connection is encrypted.
+• Away from home, reach your Mac through your own VPN.
 
 Private
 • No account, no ads, no tracking.
@@ -281,11 +291,12 @@ Before the source is public with a LICENSE file, don't call Sill open source
 anywhere in the listing (2.3.1(a)). Once it is, a line such as "Sill is free
 and open source." can join "Private".
 
-The bullet "While Sill for Mac is open, any iPhone or iPad with Sill on the same
-network can connect to it" is true on main and on the remote-access branch,
-whose home connection stays open to devices on the Mac's networks. It stays
-until pairing covers the local network too. Leaving it out would make the
-listing sound safer than the app is.
+The pairing bullet says "By default" because Require pairing, in Sill for
+Mac's Settings › Devices, can be turned off: then any device on the Mac's
+network can connect, still encrypted. Before pairing at home (PR #37) a bullet
+here said that any iPhone or iPad with Sill on the same network could connect;
+this text is for a build with pairing at home, the first one to App Review, with
+a Sill for Mac that has it at the download URL (Before you submit).
 
 Apple's trademark rules keep its product names singular and never possessive
 in public copy, here and on the site: "sound from your Mac" and "Mac computers
@@ -346,20 +357,22 @@ questions, TestFlight builds included. Don't also add the build setting
 `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption` to the project: use one, not
 both.
 
-- The home connection uses no encryption. Both ends open plain TCP
-  (`NWParameters(tls: nil, tcp: tcp)`, iOSClient/StreamClient.swift:870 and
-  Sources/SillHost/StreamServer.swift:347), and the iOS app makes no HTTPS
-  requests. Before Remote Access, the iOS app and StreamProtocol imported no
-  CryptoKit, CommonCrypto or Security at all.
-- Remote Access (PR #13, on main since ba91136) adds TLS 1.3 through
-  Network.framework (`sec_protocol_options`,
-  Sources/StreamProtocol/RemoteTLS.swift), P-256 keys and ECDSA signatures
-  (Security, CryptoKit), and HMAC-SHA256 and PBKDF2 for the pairing code
-  (CryptoKit, CommonCrypto). All of it is encryption within
-  Apple's operating system. Apple's reference, "Export compliance
-  documentation for encryption", lists "Your app uses encryption limited to
-  that within the Apple operating system" as needing no documentation in App
-  Store Connect. So the key stays NO.
+- Every connection to the Mac is TLS 1.3 through Network.framework
+  (`sec_protocol_options`, Sources/StreamProtocol/RemoteTLS.swift, which the
+  device's `DeviceTLS` in iOSClient/StreamClient+Home.swift builds on), each
+  end pinned to the other's key: away from home since Remote Access (PR #13,
+  ba91136), and at home since pairing at home (PR #37). A Release build never
+  opens a plain connection; only a Debug build still dials an older Sill for
+  Mac's plain TCP door (`NWParameters(tls: nil, tcp: tcp)`,
+  `DeviceTLS.plain`). The iOS app makes no HTTPS requests. Before Remote
+  Access, the iOS app and StreamProtocol imported no CryptoKit, CommonCrypto
+  or Security at all.
+- Besides TLS: P-256 keys and ECDSA signatures (Security, CryptoKit), and
+  HMAC-SHA256 and PBKDF2 for the pairing code (CryptoKit, CommonCrypto). All
+  of it is encryption within Apple's operating system. Apple's reference,
+  "Export compliance documentation for encryption", lists "Your app uses
+  encryption limited to that within the Apple operating system" as needing no
+  documentation in App Store Connect. So the key stays NO.
 - Without the key, App Store Connect asks "What type of encryption algorithms
   does your app implement?" The answer is "None of the algorithms mentioned
   above". The other choices are for proprietary algorithms, or standard ones
@@ -369,8 +382,8 @@ both.
 - Apple adds that an app with exempt encryption "might" need a year-end
   self-classification report to the U.S. government. BIS's rule of March 29,
   2021 dropped that report for mass-market end items such as application
-  software (mass-market components still file it). That is about the Remote
-  Access build only. Not legal advice.
+  software (mass-market components still file it). Since pairing at home that
+  is about every build, not only one with Remote Access. Not legal advice.
 
 ## 7. App Review Information
 
@@ -389,7 +402,7 @@ Plain ASCII on purpose, so every character is one byte.
 WHAT SILL IS
 Sill is a remote display for the user's own Mac. The iPhone and iPad app shows any window, or the whole desktop, of a Mac running the free Sill for Mac, and sends touch, trackpad, keyboard and Apple Pencil input back to it. Every app runs and draws on the Mac. The iOS app only shows the picture and sends input. Its Apps list shows only apps already installed on that Mac.
 
-There is no account, no sign-in, no in-app purchase, no ads and no server. The app talks only to the user's own Mac, which it finds with Bonjour on the local network.
+There is no account, no sign-in, no in-app purchase, no ads and no server. The app talks only to the user's own Mac, which it finds with Bonjour on the local network. Each device pairs with the Mac once, and every connection is encrypted.
 
 WHAT YOU NEED
 - A Mac with Apple silicon and macOS 14 or later.
@@ -405,9 +418,10 @@ The Permissions pane then says "You're all set."
 
 CONNECT
 5. Open Sill on the iPhone or iPad. Tap Allow when it asks for Local Network access.
-6. The Mac appears under "Connect to a Mac" within a few seconds. Tap it. The Mac's desktop appears.
+6. The Mac appears under "Connect to a Mac" within a few seconds, marked "Not paired". Tap it: the Mac shows a code and the device opens its camera (allow camera access). Point it at the code, or tap Enter Code Instead and type the 12 digits. The camera only reads that code. The Mac's desktop appears. This is once per device; over a USB-C cable the device pairs by itself.
 
 WHAT TO TRY
+- The first time your Mac's picture shows, a short tour points out the controls. Take the Tour in Settings shows it again.
 - Apps (magnifying glass): pick an open window, or search the list and open an app.
 - Tap to click. Drag to scroll. Touch and hold to right-click. Apple Pencil works as a mouse.
 - Keyboard: type into the window. A hardware keyboard works too, with shortcuts.
@@ -421,10 +435,10 @@ IF THE MAC DOES NOT APPEAR
 Some networks (guest, office, hotel) keep devices from seeing each other. Then either connect an iPad to the Mac with a USB-C cable (the Mac's row then says "Wired"), or turn on Direct Wireless Connection in the Sill menu on the Mac and tap Search Nearby on the device. That connects without a shared network.
 
 VIDEO
-The attached video, filmed with a camera, shows a Mac and an iPad together: setup, streaming, touch and keyboard input, and the Settings panel.
+The attached video, filmed with a camera, shows a Mac and an iPad together: setup, pairing, streaming, touch and keyboard input, and the Settings panel.
 
 REMOTE ACCESS
-On the Mac, choose Remote Access... in the Sill menu, turn on Remote Access and click Pair iPhone or iPad... A code appears. On the device, tap Add a Mac... on the connect screen and point the camera at the code (allow camera access when asked), or tap Enter Code Instead and type it. The camera only reads that code. After pairing, the device can reach the Mac from another network through the user's own VPN, for example the same VPN (such as Tailscale) on the Mac and the device. To try it, pair on the same network, then move the device to cellular or a hotspot with the VPN on. Only paired devices can connect this way, and the connection is encrypted. The attached video shows this too.
+On the Mac, choose Remote Access... in the Sill menu and turn on Remote Access. A device paired in step 6 can then reach the Mac from another network through the user's own VPN, for example the same VPN (such as Tailscale) on the Mac and the device. To try it, move the paired device to cellular or a hotspot with the VPN on. A device away from the Mac's network pairs with Pair iPhone or iPad... in the Sill menu and Add a Mac... on the device. Only paired devices can connect this way, and the connection is encrypted. The attached video shows this too.
 ```
 
 Local-only build: delete from `REMOTE ACCESS` to the end.
@@ -450,18 +464,19 @@ together with a camera:
 | 2 | Download Sill for Mac from the download page, move it to Applications, open it | The page, the file, Sill opening its Settings on Permissions |
 | 3 | Screen Recording: Allow…, the switch in System Settings, Quit & Reopen | The System Settings switch turning on |
 | 4 | Accessibility: Allow…, the switch; the pane says "You're all set." | Both permissions allowed |
-| 5 | Open Sill on the iPad, Allow Local Network, the Mac appears, tap it | The Mac found without typing anything; the Mac's desktop on the iPad |
+| 5 | Open Sill on the iPad, Allow Local Network, the Mac appears ("Not paired"), tap it: the Mac's pairing window comes up, the iPad's camera reads its code | The Mac found without typing anything; the code scanned once; the Mac's desktop on the iPad |
 | 6 | Apps, pick Notes (a note written for the shoot) | The same window on both screens |
 | 7 | Touch: tap to click, drag to scroll, touch and hold for a right-click menu; Apple Pencil moving the pointer, with hover if the iPad supports it | Each action landing on the Mac at the same moment |
 | 8 | Keyboard: type a sentence into the note | The letters appearing on the Mac too |
 | 9 | Turn the iPad upright: the laptop layout; move the pointer with the trackpad, click, two-finger scroll; switch windows from a thumbnail; touch and hold one for its window buttons | The trackpad driving the Mac's pointer |
 | 10 | Settings (the gear): change Quality, show the same value in the Sill menu on the Mac, then Disconnect | The panel and the Mac's menu agreeing; the iPad back on "Connect to a Mac" |
-| 11 | Only for a build with Remote Access: Remote Access… in the Sill menu, Pair iPhone or iPad…, Add a Mac… on the iPad, the camera reading the code, "Paired with …"; then the iPad on cellular or a hotspot with the VPN on, connecting and streaming | The code scanned, then the stream with the iPad off the Mac's network |
-| 12 | The same Mac on an iPhone: connect, pick a window, type a word | The app on iPhone too |
+| 11 | Only for a build with Remote Access: Remote Access… in the Sill menu, the switch on; then the iPad, paired in shot 5, on cellular or a hotspot with the VPN on, connecting and streaming | The stream with the iPad off the Mac's network, and no second pairing |
+| 12 | The same Mac on an iPhone: pair it (tap the Mac, scan the code), pick a window, type a word | The app on iPhone too |
 
-Optional, if time allows: an iPad on a USB-C cable (the row says "Wired"), and
-Direct Wireless Connection with Search Nearby when the iPad has no shared
-network.
+Optional, if time allows: an iPad on a USB-C cable (the row says "Wired"; an
+iPad not yet paired pairs by itself there, and the Mac shows a notice with
+Remove), and Direct Wireless Connection with Search Nearby when the iPad has no
+shared network.
 
 ## 9. Screenshots
 
@@ -522,9 +537,17 @@ screenshots.
    xcrun simctl launch "$SIM" me.saffer.sill
    ```
 
-4. In Simulator, click the Mac's row, then set up each screen with the mouse.
+4. Pair the simulator once. It runs on this Mac, and Sill for Mac never opens
+   its pairing window for a device on the Mac itself, so choose Pair iPhone or
+   iPad… in the Sill menu first, then click the Mac's row in Simulator, click
+   Enter Code Instead in the card that opens (the simulator has no camera) and
+   type the 12 digits the Mac's window shows; the Mac's desktop then appears.
+   Set up each screen with the mouse.
    Device › Rotate Left (⌘←) turns it to landscape. I/O › Keyboard › Toggle
-   Software Keyboard (⌘K) shows the on-screen keyboard.
+   Software Keyboard (⌘K) shows the on-screen keyboard. On a fresh install the
+   first-run tour dims the screen about a second after the Mac's picture shows,
+   unless something is touched: click the picture at once to go without it, or
+   take the tour once, before the screenshots.
 5. Capture each one and turn it into a JPEG without alpha:
 
    ```sh
@@ -539,8 +562,9 @@ screenshots.
    landscape shot must read 2868 × 1320 (iPhone) or 2752 × 2064 (iPad). If one
    comes out upright with the picture on its side, turn it with `sips -r 90` or
    `sips -r 270`, whichever puts it right.
-6. Afterwards: `xcrun simctl status_bar "$SIM" clear`, and quit Sill in the
-   simulator so it stops streaming.
+6. Afterwards: `xcrun simctl status_bar "$SIM" clear`, quit Sill in the
+   simulator so it stops streaming, and remove the simulator in Sill's
+   Settings › Devices on the Mac.
 
 Good to know:
 
@@ -588,11 +612,12 @@ Safe:
 
 - Limits, measured on the blocks in this file by a script: name 4 characters;
   fallback 23; subtitle 27 of 30; promotional text 164 of 170;
-  description 2,062 (local-only 1,906) of 4,000 characters; keywords
+  description 2,060 (local-only 2,005) of 4,000 characters; keywords
   95 bytes (local-only 97) of 100, each
   keyword at least three characters, no spaces, no repeats; review notes
-  3,553 bytes (local-only 2,845) of 4,000, all ASCII;
-  What's New 260 and 226 characters.
+  3,891 bytes (local-only 3,320) of 4,000, all ASCII;
+  What's New 260 and 226 characters. The description and the notes were
+  measured again on 2026-09-27, after pairing at home (below).
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
@@ -621,6 +646,14 @@ Safe:
   Mac's Permissions pane and menu, and on remote-access "Add a Mac…",
   "Remote Access…", "Pair iPhone or iPad…" and "Enter Code Instead".
 - No em-dashes in this file; no email address in it.
+- Pairing at home (PR #37, 2026-09-27): the description, the review notes,
+  the export compliance, the privacy answers, the demo video and the
+  screenshot steps describe it, since every connection at home is TLS with
+  pairing from then on and a Release build never connects to an older Sill for
+  Mac. The names in them match the code: "Not paired" (the row), "Enter Code
+  Instead" (the home card, as Add a Mac…'s), "Pair iPhone or iPad…" and
+  Settings › Devices (the Mac), and an ask from the Mac itself (the simulator)
+  gets no window by itself (`DoorPolicy.ask`).
 
 ## Sources
 

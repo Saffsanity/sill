@@ -3,7 +3,8 @@ import Foundation
 // H3 of docs/update-notice-plan.md (its protocol part): SillVersion and the payloads, against
 // Sources/StreamProtocol compiled into this binary:
 //   swiftc -O Sources/StreamProtocol/*.swift Tests/checks/compatibility/main.swift -o check
-// Given a path, it also writes the payloads that H4 read with an older StreamProtocol (cb0ec55's).
+// Given a path, it also writes the payloads that H4 read with an older StreamProtocol (cb0ec55's),
+// and the trackpad gestures plan's H6 (a kind 28 message, a window list with `gestures`).
 var failures = 0
 var checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
@@ -142,6 +143,31 @@ let helloMessage = StreamMessage(kind: .hello, timestamp: 1, isKeyframe: false, 
 check(StreamMessage.parseHeader(helloMessage)?.kind == .hello, "the hello's header parses")
 check(SillProtocol.current == 1, "protocol 1")
 
+// Kind 28, the trackpad gesture (docs/trackpad-gestures-plan.md §4), and the window list's
+// `gestures`: additive both ways.
+check(TrackpadGesture.names == ["swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread"], "the six names, in order: \(TrackpadGesture.names)")
+check(Set(TrackpadGesture.names).count == 6, "the six names are distinct")
+check(TrackpadGesture.generation == 1, "gestures 1: the six")
+let gesture = TrackpadGesture(gesture: TrackpadGesture.swipeUp, fingers: 3)
+check(json(gesture) == #"{"fingers":3,"gesture":"swipeUp"}"#, "a gesture's keys: \(json(gesture))")
+check(json(TrackpadGesture(gesture: TrackpadGesture.pinch)) == #"{"gesture":"pinch"}"#, "no finger count: left out")
+check(Wire.decode(TrackpadGesture.self, from: Data(#"{"gesture":"spread","fingers":4,"phase":"began"}"#.utf8)) == TrackpadGesture(gesture: "spread", fingers: 4),
+      "unknown keys are skipped (a later generation's fields)")
+check(Wire.decode(TrackpadGesture.self, from: Data(#"{"gesture":"rotate"}"#.utf8))?.gesture == "rotate", "a later name decodes as a string")
+check(Wire.decode(TrackpadGesture.self, from: Data(#"{"fingers":3}"#.utf8)) == nil, "no name: no gesture")
+check(Wire.decode(TrackpadGesture.self, from: Data(#"{"gesture":3}"#.utf8)) == nil, "a number as the name does not decode")
+check(Wire.decode(TrackpadGesture.self, from: Data(#"{"gesture":"swipeUp","fingers":"3"}"#.utf8)) == nil, "a string as the count does not decode")
+let takes = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.5", protocol: 1, gestures: TrackpadGesture.generation)
+check(json(takes).contains(#""gestures":1"#), "a list from a host that takes them says gestures 1: \(json(takes))")
+check(!json(list).contains("gestures"), "a list without them leaves the key out: \(json(list))")
+check(decodedOld != nil && decodedOld?.gestures == nil, "an older host's list decodes, gestures nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.gestures == 1, "gestures round-trips")
+check(StreamMessageKind.gesture.rawValue == 28 && StreamMessageKind(rawValue: 28) == .gesture, "kind 28 is gesture")
+check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 29) == nil, "27 is the menus' fetch, 29 not this build's")
+let gestureMessage = StreamMessage(kind: .gesture, timestamp: 1, isKeyframe: false, payload: Wire.encode(gesture)).serialized()
+check(StreamMessage.parseHeader(gestureMessage)?.kind == .gesture, "the gesture's header parses")
+check(gestureMessage.count == StreamMessage.headerLength + Wire.encode(gesture).count, "one header, then the JSON")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
@@ -150,6 +176,8 @@ if let out {
         "goodbyeLater": later,
         "windowList": String(decoding: Wire.encode(list), as: UTF8.self),
         "helloMessage": helloMessage.base64EncodedString(),
+        "gestureMessage": gestureMessage.base64EncodedString(),
+        "windowListGestures": String(decoding: Wire.encode(takes), as: UTF8.self),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }
