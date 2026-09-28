@@ -432,8 +432,9 @@ connect (TLS 1.3, each end pinned to the other's key).
    the address is the Mac's MagicDNS name or the Tailscale IP address under it;
    otherwise it is this network's address, with another VPN's address under it
    when the Mac runs one. A device connected at home without pairing (Require
-   pairing off) can use Pair This iPad… at the end of its Settings panel
-   instead: it asks the Mac for a code, as a tap on a "Not paired" row does.
+   pairing off) can use Pair This iPad… in the Away from home group of its
+   Settings panel instead: it asks the Mac for a code, as a tap on a "Not
+   paired" row does.
 3. Away from home the Mac is a "Remote" row about 3 s after the connect screen
    opens (the local network gets the first 3 s); tap it. After a drop the device
    reconnects by itself, first on the local network, then remotely. The

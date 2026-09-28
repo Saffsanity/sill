@@ -4548,8 +4548,9 @@ device keeps working with Macs from the first public build on, or each says why
   (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
   header; kinds 0–28 and their payloads (HEVC with ParameterSets; the JSON of Switcher, Input,
   Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu and Gesture), inside `sill/1` at
-  both doors; the ping echo; a kind 16 within 2 s of the first window list; kind 22's `reason`,
-  `message` and `reconnect`; the Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3):
+  both doors (19 and 20 on their own `sill-pair/1` connection, the next bullet); the ping echo; a
+  kind 16 within 2 s of the first window list; kind 22's `reason`, `message` and `reconnect`; the
+  Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3):
   a kind 27 without an id is the device's subscription, and only a subscriber is served (another
   connection's fetches and choices are answered "The menus changed…", nothing read or pressed); an
   id is a path of child indexes that names one item for every device within one version, and a
