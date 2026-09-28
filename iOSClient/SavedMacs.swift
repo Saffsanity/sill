@@ -33,6 +33,17 @@ struct SavedMac: Codable, Hashable, Identifiable {
     var lastConnectedAt: Date?
     /// "Tailscale", "your VPN", "the internet" or "by address".
     var lastRoute: String?
+    /// This device has seen the Mac's home door speak TLS: a TXT record with `p`, or a TLS session
+    /// at home (docs/home-pairing-plan.md §7.3). Its rows are then dialed only over TLS, in DEBUG
+    /// too, and a row of it without `p` reads "Update Sill" (no downgrade: its own Sill never goes
+    /// back to plain, and someone may be replaying its tag). Kept by a new pairing with the same
+    /// Mac (`SavedMacs.adding`). Optional, so a record from before it decodes.
+    var homeTLS: Bool?
+    /// The Mac removed this device (goodbye `removed`), or refused its key on a pinned home dial
+    /// (-9825, -9829): no automatic reconnect, its row reads "Not paired" ("Wired" on the cable),
+    /// and a tap asks, pinned to this record's key. Cleared by the next pairing, whose record
+    /// replaces this one. Optional, so a record from before it decodes.
+    var revoked: Bool?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }
@@ -82,8 +93,13 @@ enum SavedMacs {
     }
 
     /// After a pairing: replaces the record with the same Mac ID, then keeps at most `cap`,
-    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`).
+    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`). The record it replaces
+    /// is the same Mac (the Mac ID is its key's), so what this device has seen of its home door
+    /// stays (`homeTLS`): a pairing from away after a removal must not let a plain row of that Mac
+    /// be dialed again. `revoked` goes with the old record.
     static func adding(_ mac: SavedMac, to list: [SavedMac]) -> [SavedMac] {
+        var mac = mac
+        if list.contains(where: { $0.macID == mac.macID && $0.homeTLS == true }) { mac.homeTLS = true }
         var next = list.filter { $0.macID != mac.macID }
         next.append(mac)
         while next.count > cap {
@@ -123,6 +139,40 @@ enum SavedMacs {
             out[mac.macID] = n == 1 ? mac.name : "\(mac.name) (\(n))"
         }
         return out
+    }
+
+    /// `homeTLS` set on the Macs of `ids`: seen with `p`, or a TLS session at home with them ran
+    /// (docs/home-pairing-plan.md §7.3). Nil when none changes, so a caller writes only a change.
+    static func seenOverTLS(_ ids: Set<String>, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { ids.contains($0.macID) && $0.homeTLS != true }) else { return nil }
+        return list.map { mac in
+            guard ids.contains(mac.macID) else { return mac }
+            var next = mac
+            next.homeTLS = true
+            return next
+        }
+    }
+
+    /// `revoked` set on `id`: the Mac removed this device (goodbye `removed`), or refused its key on
+    /// a pinned home dial (§7.6). Nil when `id` is not saved or is revoked already.
+    static func revoking(_ id: String, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { $0.macID == id && $0.revoked != true }) else { return nil }
+        return list.map { mac in
+            guard mac.macID == id else { return mac }
+            var next = mac
+            next.revoked = true
+            return next
+        }
+    }
+
+    /// DEBUG `-SillForgetHomeTLS 1` (§3.4, §7.9): `homeTLS` cleared on every saved Mac, so a DEBUG
+    /// build dials an older Sill.app (another branch's) plainly again.
+    static func forgettingHomeTLS(_ list: [SavedMac]) -> [SavedMac] {
+        list.map { mac in
+            var next = mac
+            next.homeTLS = nil
+            return next
+        }
     }
 
     /// The saved Mac whose recognition key made `tag`, if any.

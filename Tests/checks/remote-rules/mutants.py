@@ -42,6 +42,24 @@ M = [
     (R, "a held code starts by itself", "return !(failed && !tapped && secret == lastScanned)", "return true"),
     (R, "a tap never retries", "return !(failed && !tapped && secret == lastScanned)", "return !(failed && secret == lastScanned)"),
     (R, "any code is held after a failure", "return !(failed && !tapped && secret == lastScanned)", "return !(failed && !tapped)"),
+    # Pairing at home (docs/home-pairing-plan.md, step 4): the home model and the saved Macs' home fields.
+    (D, "S4 homeEnd: removed misspelt", "        if goodbye == \"removed\" { return .removed }", "        if goodbye == \"remove\" { return .removed }"),
+    (D, "S4 homeEnd: pairingRequired misspelt", "        if goodbye == \"pairingRequired\" { return .pairingRequired }", "        if goodbye == \"pairingrequired\" { return .pairingRequired }"),
+    (D, "S4 askAnswer: the cable's method misspelt", "guard method == \"cable\", askedCable", "guard method == \"usb\", askedCable"),
+    (D, "S4 askAnswer: shown misspelt", "        case \"shown\"?: return .shown", "        case \"show\"?: return .shown"),
+    (D, "S4 askAnswer: busy misspelt", "        case \"busy\"?: return .busy(", "        case \"Busy\"?: return .busy("),
+    (D, "S4 rowWord: a revoked Mac dialed pinned", "            if saved && !revoked { return .method(method) }", "            if saved { return .method(method) }"),
+    (D, "S4 homeDial: a homeTLS Mac dialed plain in DEBUG", "            return debug && !homeTLS ? .plain : .updateSill", "            return debug ? .plain : .updateSill"),
+    (S, "S4 adding forgets homeTLS", "        if list.contains(where: { $0.macID == mac.macID && $0.homeTLS == true }) { mac.homeTLS = true }\n", ""),
+    (S, "S4 seenOverTLS marks nothing", "            next.homeTLS = true\n            return next\n        }\n    }\n\n    /// `revoked`", "            return next\n        }\n    }\n\n    /// `revoked`"),
+    (S, "S4 revoking marks nothing", "            next.revoked = true\n", ""),
+    (S, "S4 recognize: any tag names the first Mac", "        return list.first { mac in mac.recognitionKeyData.map { RecognitionTag.matches(tag, recognitionKey: $0) } ?? false }?.macID", "        return list.first?.macID"),
+    (S, "S4 seenOverTLS marks every Mac", "            guard ids.contains(mac.macID) else { return mac }\n            var next = mac\n            next.homeTLS = true", "            var next = mac\n            next.homeTLS = true"),
+    (S, "S4 seenOverTLS reports a change that is none", "        guard list.contains(where: { ids.contains($0.macID) && $0.homeTLS != true }) else { return nil }", "        guard list.contains(where: { ids.contains($0.macID) }) else { return nil }"),
+    (S, "S4 revoking marks every Mac", "            guard mac.macID == id else { return mac }\n            var next = mac\n            next.revoked = true", "            var next = mac\n            next.revoked = true"),
+    (S, "S4 revoking twice", "        guard list.contains(where: { $0.macID == id && $0.revoked != true }) else { return nil }", "        guard list.contains(where: { $0.macID == id }) else { return nil }"),
+    (S, "S4 forgettingHomeTLS sets false", "            next.homeTLS = nil\n", "            next.homeTLS = false\n"),
+    (S, "S4 forgettingHomeTLS forgets nothing", "            next.homeTLS = nil\n", ""),
 ]
 caught = 0
 for f, name, old, new in M:

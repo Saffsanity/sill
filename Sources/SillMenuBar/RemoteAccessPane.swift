@@ -18,23 +18,20 @@ struct LiveRemoteAccessPane: View {
                          actions: RemoteAccessPane.Actions(
                              setPort: { settings.config.remotePort = $0 },
                              setAddressName: { settings.remoteAddressName = $0 },
-                             pair: { model.pairDevice() },
-                             remove: { model.removeDevice($0) },
-                             rename: { model.renameDevice($0, to: $1) }))
+                             showDevices: { model.showSettings?(.devices) }))
     }
 }
 
 /// The Remote Access pane (docs/remote-access-plan.md §6.1): the switch, the Mac's addresses and
-/// its port, the paired devices, the internet switch, and sleep. Values in, actions out, so the
+/// its port, how many devices are paired (the list itself is in Settings › Devices,
+/// docs/home-pairing-plan.md §6.2), the internet switch, and sleep. Values in, actions out, so the
 /// previews can draw every state. Errors show inline, never in alerts.
 struct RemoteAccessPane: View {
     struct Actions {
         var setPort: (Int) -> Void = { _ in }
         var setAddressName: (String) -> Void = { _ in }
-        var pair: () -> Void = {}
-        /// Nil when the device was removed; otherwise why it is still paired.
-        var remove: (String) -> String? = { _ in nil }
-        var rename: (String, String) -> Void = { _, _ in }
+        /// Show Devices…: Settings on the Devices tab.
+        var showDevices: () -> Void = {}
     }
 
     let status: RemoteStatus
@@ -45,15 +42,10 @@ struct RemoteAccessPane: View {
     /// The address name setting, as saved.
     let addressName: String
     let actions: Actions
-    /// "Last connected 2 minutes ago" counts from here (fixed in the previews).
-    var now: Date?
 
     @State private var editingPort = false
     @State private var portText = ""
     @State private var portSaved = false
-    @State private var removedName: String?
-    /// A Remove the keychain did not keep: the device's name and why.
-    @State private var removeProblem: (name: String, reason: String)?
     @State private var nameText: String?
     @State private var nameProblem: String?
 
@@ -209,40 +201,18 @@ struct RemoteAccessPane: View {
 
     // MARK: Paired devices
 
+    /// One row: the list, Remove and Pair iPhone or iPad… are in Settings › Devices, since the same
+    /// devices connect at home too.
     private var pairedDevices: some View {
         Section {
-            if let removedName {
-                Text("\(removedName) can no longer connect. To use it again, pair it again.")
+            LabeledContent("Paired devices") {
+                HStack(spacing: 8) {
+                    Text(status.paired.isEmpty ? "None" : "\(status.paired.count)").monospacedDigit()
+                    Button("Show Devices…") { actions.showDevices() }
+                }
             }
-            if let removeProblem {
-                // The system's messages end with a full stop of their own.
-                let reason = removeProblem.reason.hasSuffix(".") ? String(removeProblem.reason.dropLast()) : removeProblem.reason
-                Warning("\(removeProblem.name) is still paired: Sill couldn’t update the keychain (\(reason)). Try again.")
-            }
-            if status.paired.isEmpty {
-                Text("No paired devices yet.").foregroundStyle(.secondary)
-            }
-            ForEach(status.paired) { device in
-                PairedDeviceRow(device: device, now: now,
-                                remove: {
-                                    // Said only once the keychain kept it: otherwise the device
-                                    // would be trusted again at the next launch.
-                                    if let reason = actions.remove(device.id) {
-                                        removedName = nil
-                                        removeProblem = (device.name, reason)
-                                    } else {
-                                        removedName = device.name
-                                        removeProblem = nil
-                                    }
-                                },
-                                rename: { actions.rename(device.id, $0) })
-            }
-            Button("Pair iPhone or iPad…") { actions.pair() }
-                .disabled(!available)
-        } header: {
-            Text("Paired Devices")
         } footer: {
-            Footnote("A paired device can see and control this Mac wherever it can reach it. If one is lost, remove it here.")
+            Footnote("The devices you pair in Devices can connect from afar while Remote Access is on.")
         }
     }
 
@@ -390,66 +360,6 @@ struct RemoteAccessPane: View {
     }
 }
 
-/// One paired device: its name (double-click to rename: Return saves, Esc cancels), when it
-/// paired and last connected from away, and Remove, with no confirmation since it only takes
-/// access away.
-private struct PairedDeviceRow: View {
-    let device: PairedDeviceSummary
-    let now: Date?
-    let remove: () -> Void
-    let rename: (String) -> Void
-
-    @State private var editing = false
-    @State private var text = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        LabeledContent {
-            Button("Remove", action: remove)
-        } label: {
-            if editing {
-                TextField("Name", text: $text)
-                    .focused($focused)
-                    .onSubmit {
-                        rename(text)
-                        editing = false
-                    }
-                    .onExitCommand { editing = false }
-            } else {
-                Text(device.name)
-                    .onTapGesture(count: 2) { startEditing() }
-                    .accessibilityAction(named: "Rename") { startEditing() }
-            }
-            Text(detail)
-        }
-    }
-
-    private func startEditing() {
-        text = device.name
-        editing = true
-        focused = true
-    }
-
-    /// "Paired Sep 24 · last connected 2 minutes ago through Tailscale".
-    private var detail: String {
-        let reference = now ?? Date()
-        var out = "Paired \(Self.day(device.pairedAt, now: reference))"
-        if let seen = device.lastSeen {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            let when = reference.timeIntervalSince(seen) < 60 ? "just now" : formatter.localizedString(for: seen, relativeTo: reference)
-            out += " · last connected \(when)"
-            if let route = device.lastRoute { out += " \(route)" }
-        }
-        return out
-    }
-
-    static func day(_ date: Date, now: Date) -> String {
-        let sameYear = Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: now)
-        return sameYear ? date.formatted(.dateTime.month(.abbreviated).day()) : date.formatted(.dateTime.month(.abbreviated).day().year())
-    }
-}
-
 /// Copy, then "Copied" for 1.5 s.
 private struct CopyButton: View {
     let text: String
@@ -467,16 +377,5 @@ private struct CopyButton: View {
             }
         }
         .accessibilityLabel(copied ? "Copied" : spoken)
-    }
-}
-
-/// An orange problem line with its sign.
-private struct Warning: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-    var body: some View {
-        Label(text, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }

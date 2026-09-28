@@ -16,7 +16,13 @@ struct StatusPresentation: Equatable {
 
     /// Something that needs the user, shown in the menu with an orange warning.
     struct Attention: Equatable, Identifiable {
-        enum Action: Equatable { case allowScreenRecording, allowAccessibility, showRemoteAccess, none }
+        enum Action: Equatable {
+            case allowScreenRecording, allowAccessibility, showRemoteAccess, showDevices
+            /// "‹device› Wants to Pair": its window forward while it shows the code (`showing`), else
+            /// a window opened on the Mac, asked by that device (its paired-style name).
+            case pairingRequest(name: String, showing: Bool)
+            case none
+        }
         var title: String
         var subtitle: String
         var action: Action
@@ -50,8 +56,13 @@ struct PermissionState: Equatable {
 
 /// The status copy. Title case in menus, sentence case in explanations, typographic quotes.
 enum StatusText {
+    /// How long the menu says an iPhone or iPad needs Sill updated after the home door refused one
+    /// of its plain connections (docs/home-pairing-plan.md §6.4).
+    static let olderDeviceShownFor: TimeInterval = 600
+
+    /// `now`: the clock the menu's items that last a while are judged by (fixed in the previews).
     static func present(snapshot s: HostStatusSnapshot, permissions: PermissionState,
-                        startupError: String?, hasCoordinator: Bool) -> StatusPresentation {
+                        startupError: String?, hasCoordinator: Bool, now: Date = Date()) -> StatusPresentation {
         let (header, subtitle) = headline(s, permissions, startupError, hasCoordinator)
 
         var attention: [StatusPresentation.Attention] = []
@@ -78,10 +89,23 @@ enum StatusText {
             attention.append(.init(title: "Remote Access Can’t Start", subtitle: "Port \(port) is in use by another app.",
                                    action: .showRemoteAccess))
         }
+        // Pairing at home (docs/home-pairing-plan.md §6.4).
+        let request = pairingRequest(s.remote, now: now)
+        if let request { attention.append(request) }
+        if let at = s.remote?.olderDeviceAt, now.timeIntervalSince(at) < olderDeviceShownFor {
+            attention.append(.init(title: "An iPhone or iPad Needs Sill Updated", subtitle: "It tried to connect with an older Sill.",
+                                   action: .none))
+        }
+        let homeDoorClosed = homeDoorUnavailable(s.remote)
+        if homeDoorClosed {
+            attention.append(.init(title: "Devices Can’t Connect", subtitle: "Sill couldn’t use its key in your keychain.",
+                                   action: .showDevices))
+        }
 
-        // The attention glyph means "Sill needs you". The test pattern needs no permission.
+        // The attention glyph means "Sill needs you". The test pattern needs no permission. A device
+        // waiting to pair and a closed home door need the user too; an older device is only news.
         let glyph: StatusGlyph.State
-        if startupError != nil || isFailed(s.network) || remotePortTaken != nil
+        if startupError != nil || isFailed(s.network) || remotePortTaken != nil || request != nil || homeDoorClosed
             || (!s.synthetic && !(permissions.screenRecording && permissions.accessibility)) {
             glyph = .attention
         } else if s.stream != nil {
@@ -101,6 +125,30 @@ enum StatusText {
                                   tooltip: "Sill — \(header)", accessibilityLabel: "Sill, \(header)",
                                   advertisedName: name, remoteAccessNote: remoteAccessNote(s.remote),
                                   canPair: s.remote.map { $0.identityProblem == nil } ?? false)
+    }
+
+    /// "iPad Wants to Pair", for 5 minutes after a device's ask (the host ends it sooner: when the
+    /// window showing its code closes, and when that device pairs): "A code is showing." while that
+    /// window is up, "Click to show a code." when the ask limits kept one from opening, the unlock
+    /// line when this Mac was locked. Sentences with a full stop, as every attention subtitle is.
+    /// Never for an ask from this Mac itself (the host sets none).
+    private static func pairingRequest(_ r: RemoteStatus?, now: Date) -> StatusPresentation.Attention? {
+        guard let request = r?.pairingRequest, now.timeIntervalSince(request.at) < RemoteStatus.PairingRequest.shownFor else { return nil }
+        let short = shortName(request.name)
+        let subtitle: String
+        switch request.reason {
+        case "showing": subtitle = "A code is showing."
+        case "locked": subtitle = "Unlock this Mac, then tap it on the \(short) again."
+        default: subtitle = "Click to show a code."
+        }
+        return .init(title: "\(short) Wants to Pair", subtitle: subtitle,
+                     action: .pairingRequest(name: request.name, showing: request.reason == "showing"))
+    }
+
+    /// The home door has no listener: the identity (its key, the trust list) could not be used.
+    private static func homeDoorUnavailable(_ r: RemoteStatus?) -> Bool {
+        if case .unavailable? = r?.homeDoor { return true }
+        return false
     }
 
     /// The remote door's port while Remote Access is on and another app holds that port.
@@ -133,6 +181,11 @@ enum StatusText {
                                  _ hasCoordinator: Bool) -> (String, String?) {
         if let startupError { return ("Sill Couldn’t Start", startupError) }
         if !hasCoordinator { return ("Starting…", nil) }
+        // No listener at all (fail closed): no device can find or reach this Mac.
+        if homeDoorUnavailable(s.remote) {
+            return ("Not Visible on the Network",
+                    "Sill couldn’t use its key in your keychain. Quit Sill and open it again, and choose Always Allow if the keychain asks.")
+        }
         switch s.network {
         case .starting:
             return ("Starting…", nil)

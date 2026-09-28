@@ -28,6 +28,11 @@ struct ConnectLayout {
 /// Add a Mac (docs/remote-access-plan.md §7.7–7.8, §7.10), unfolded in the connect screen's column
 /// in place of the rows. Scanning the code on the Mac is the default; Enter Code Instead types its
 /// address and 12-digit code. Pairing progress and every error show inline, never in an alert.
+///
+/// The home card (docs/home-pairing-plan.md §7.5, §7.7–7.8) is the same card for a row whose Mac
+/// shows its code because a tap asked (`home`, the row's name): the scanner, or the code alone,
+/// both going to the door the ask reached (StreamClient.pairHome, the scanner through `scanned`);
+/// one line of words, which is also its collapsed line; every layout rule as above.
 struct AddMacCard: View {
     @ObservedObject var client: StreamClient
     let layout: ConnectLayout
@@ -38,6 +43,8 @@ struct AddMacCard: View {
     let close: () -> Void
     /// A field has the keyboard: the column collapses its words to one line.
     @Binding var editing: Bool
+    /// The home card's Mac, as its row names it; nil for Add a Mac.
+    var home: String? = nil
 
     @State private var address = ""
     @State private var code = ""
@@ -53,7 +60,7 @@ struct AddMacCard: View {
             if layout.short && !typed {
                 HStack(alignment: .top, spacing: 16) {
                     CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: false) },
-                                retryNeedsTap: client.scanRetryNeedsTap)
+                                retryNeedsTap: client.scanRetryNeedsTap, mac: home)
                         .frame(width: 260, height: 200)
                     VStack(alignment: .leading, spacing: 8) {
                         words
@@ -70,7 +77,7 @@ struct AddMacCard: View {
                         // Gone while a pairing runs, back after a failure: the new scanner finds the
                         // code still in view, which StreamClient.scanned holds until it is tapped.
                         CodeScanner(mode: scannerMode, onLink: { client.scanned($0, tapped: $1, overlay: false) },
-                                    retryNeedsTap: client.scanRetryNeedsTap)
+                                    retryNeedsTap: client.scanRetryNeedsTap, mac: home)
                             .frame(height: layout.short ? 200 : 230)
                     }
                     progress
@@ -86,7 +93,14 @@ struct AddMacCard: View {
     // MARK: Words
 
     @ViewBuilder private var words: some View {
-        if editing && (layout.compactPortrait || layout.short) {
+        if let mac = home {
+            // The home card has one line, the same whether or not the code has the keyboard: the
+            // Mac shows its code now, and the typed path needs no address.
+            Text(typed ? DiscoveryPolicy.HomeCopy.typeCode(mac: mac) : DiscoveryPolicy.HomeCopy.showing(mac: mac, device: device))
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if editing && (layout.compactPortrait || layout.short) {
             Text("Type the address and code from your Mac.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
@@ -107,11 +121,14 @@ struct AddMacCard: View {
 
     private var fields: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PairingField(prompt: "100.101.102.103 or mac.example.net", label: "Address", text: $address,
-                         keyboard: .URL, submit: .next)
-                .focused($focus, equals: .address)
-                .onSubmit { focus = .code }
-            if let problem, problem.field == .address { ProblemLine(text: problem.text) }
+            // The home card dials the door its ask reached: the code alone.
+            if home == nil {
+                PairingField(prompt: "100.101.102.103 or mac.example.net", label: "Address", text: $address,
+                             keyboard: .URL, submit: .next)
+                    .focused($focus, equals: .address)
+                    .onSubmit { focus = .code }
+                if let problem, problem.field == .address { ProblemLine(text: problem.text) }
+            }
             PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($focus, equals: .code)
                 .onSubmit(pair)
@@ -138,7 +155,11 @@ struct AddMacCard: View {
     private func pair() {
         guard !working else { return }
         focus = nil
-        client.pairTyped(code: code, address: address, overlay: false)
+        if home != nil {
+            client.pairHome(code: code)
+        } else {
+            client.pairTyped(code: code, address: address, overlay: false)
+        }
     }
 
     // MARK: Progress and errors

@@ -6,8 +6,10 @@ import StreamProtocol
 /// whether or not a window list came (docs/update-notice-plan.md §7.3). Pure: Foundation and
 /// StreamProtocol, checked on its own with swiftc.
 ///
-/// The five reasons hosts have sent since remote access keep their words and their reconnects.
-/// "update" (a Mac whose device floor is above this device's version, DeviceGate) and any other
+/// The five reasons hosts have sent since remote access keep their words and their reconnects, and
+/// so does "pairingRequired" (pairing at home: Require pairing turned on while this unpaired device
+/// was connected; StreamClient+Home ends such a session at home with these words). "update" (a Mac
+/// whose device floor is above this device's version, DeviceGate) and any other
 /// reason are notices: the host's own words (its `message`, cleaned), shown as the status line, and
 /// a reconnect only when the Mac asks for one (`"reconnect":true`); "update" also offers the App
 /// Store. Before this rule a reason the device did not know showed "‹Mac› disconnected…" and
@@ -32,7 +34,8 @@ enum GoodbyePolicy {
 
     /// The reasons whose words and reconnects are this build's own; "update" and any other reason
     /// are notices.
-    static let knownReasons: Set<String> = [Goodbye.quit, Goodbye.removed, Goodbye.remoteOff, Goodbye.internetOff, Goodbye.busy]
+    static let knownReasons: Set<String> = [Goodbye.quit, Goodbye.removed, Goodbye.remoteOff, Goodbye.internetOff, Goodbye.busy,
+                                            Goodbye.pairingRequired]
 
     /// A goodbye this build shows by the Mac's words: "update", or a reason it does not know (a
     /// kind 22 that did not decode reads as reason "").
@@ -63,6 +66,10 @@ enum GoodbyePolicy {
                            reconnect: true, remoteAllowed: false, isNotice: false)
         case Goodbye.busy:
             return Outcome(text: "\(mac) is already serving 8 devices.", reconnect: true, remoteAllowed: saved, isNotice: false)
+        case Goodbye.pairingRequired:
+            // Only at a home door over TLS, to an unpaired device: a tap on its row asks to pair.
+            return Outcome(text: "\(mac) now asks devices to pair. Tap it to pair this \(device).",
+                           reconnect: false, remoteAllowed: false, isNotice: false)
         case Goodbye.update:
             // The host always sends its message; these words are for one that does not.
             var own = "Update Sill on this \(device) to keep using \(mac)."

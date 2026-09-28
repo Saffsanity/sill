@@ -35,10 +35,18 @@ package struct HostConfig: Equatable, Sendable {
     /// The remote door also admits sources outside this Mac's networks and VPNs (a router port
     /// forward).
     package var internetAccess: Bool
+    /// Require pairing: the home door admits only paired keys (TLS either way;
+    /// docs/home-pairing-plan.md §4.1). The Mac's alone, like Remote Access: absent from
+    /// StreamSettings, HostSettingsChange, DeviceSettings.accepted, `applying` and `restartNeeded`.
+    /// Counts only on a host whose home door speaks TLS (Sill.app; SillHost --pairing); the CLI's
+    /// default plain door has no pairing at all. In Sill.app it is kept with the trust list (the
+    /// identity store), never in UserDefaults or a launch argument: any process of this user can
+    /// write those, and this is the one switch that would let an unpaired key in.
+    package var requirePairing: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, prioritizeSpeed: Bool, virtualDisplay: Bool,
-                 directWireless: Bool, remoteAccess: Bool, remotePort: Int, internetAccess: Bool) {
+                 directWireless: Bool, remoteAccess: Bool, remotePort: Int, internetAccess: Bool, requirePairing: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -48,16 +56,19 @@ package struct HostConfig: Equatable, Sendable {
         self.remoteAccess = remoteAccess
         self.remotePort = remotePort
         self.internetAccess = internetAccess
+        self.requirePairing = requirePairing
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift, and the app's
     /// defaults. Virtual display off in both until Noah flips it. Direct Wireless off in both
     /// (Noah, 2026-09-24): AWDL costs every Wi-Fi stream its steadiness, and a shared network needs
     /// none of it. Remote access and internet access off in both: only the Mac's own user widens
-    /// exposure. 7455 is unassigned at IANA and below the ephemeral range.
+    /// exposure. 7455 is unassigned at IANA and below the ephemeral range. Require pairing on: a
+    /// home door that speaks TLS admits only paired devices until the Mac's user says otherwise.
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
-                                             remoteAccess: false, remotePort: 7455, internetAccess: false)
+                                             remoteAccess: false, remotePort: 7455, internetAccess: false,
+                                             requirePairing: true)
 
     /// The remote door's port when none is set.
     package static let defaultRemotePort = 7455
@@ -77,7 +88,8 @@ package struct HostConfig: Equatable, Sendable {
 
     /// What differs from `new`, for the log: "frame rate limit 120 → 60 fps, bitrate 15 → 8 Mbps
     /// per 60 fps, Retina → points, speed off → on, virtual display off → on, direct wireless
-    /// off → on, remote access off → on, remote port 7455 → 7460, internet access off → on".
+    /// off → on, remote access off → on, remote port 7455 → 7460, internet access off → on, require
+    /// pairing on → off".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -91,6 +103,7 @@ package struct HostConfig: Equatable, Sendable {
         if remoteAccess != new.remoteAccess { parts.append("remote access \(onOff(remoteAccess)) → \(onOff(new.remoteAccess))") }
         if remotePort != new.remotePort { parts.append("remote port \(remotePort) → \(new.remotePort)") }
         if internetAccess != new.internetAccess { parts.append("internet access \(onOff(internetAccess)) → \(onOff(new.internetAccess))") }
+        if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 

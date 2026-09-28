@@ -11,12 +11,12 @@ progress, the decisions already made, and every test hook.
 ## Overview
 
 Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frames)
-→ Network.framework TCP + Bonjour → AVSampleBufferDisplayLayer`
+→ Network.framework TLS 1.3 over TCP + Bonjour → AVSampleBufferDisplayLayer`
 
 - `Sources/StreamProtocol/`: the wire format, shared by both sides. The iOS
   project links this package for it.
 - `Sources/SillHost/`: the host itself (the `SillHostCore` library): capture,
-  encode, network, input, the virtual display and remote access.
+  encode, network, input, the virtual display, pairing and remote access.
 - `Sources/SillMenuBar/`: Sill.app, the menu bar host. `Sources/SillHostCLI/`:
   `SillHost`, the same host on the command line.
 - `Sources/CaptureProbe/` and `Sources/VirtualDisplayProbe/`: tools for
@@ -65,8 +65,9 @@ rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
 "Direct"; from away, "through Tailscale" or "over the internet"), and what is
 streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
-Connection, Remote Access… and Pair iPhone or iPad… (see Remote access below),
-Launch at Login, Permissions, Show Log… and Settings… (⌘,).
+Connection, Remote Access… and Pair iPhone or iPad… (see Pairing at home and
+Remote access below), Launch at Login, Permissions, Show Log… and Settings…
+(⌘,). Settings › Devices lists the paired devices, with Require pairing.
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
@@ -115,6 +116,8 @@ swift run -c release SillHost --synthetic            # the Desktop streams a tes
 swift run -c release SillHost --remote               # the remote door for this run, on any free port (--remote=PORT)
 swift run -c release SillHost --remote --internet    # also admit paired devices from the internet
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
+swift run -c release SillHost --pairing              # the home door speaks TLS with pairing required, as Sill.app's does
+swift run -c release SillHost --print-cable          # what the USB cable rule reads on this Mac, then exit
 swift run -c release SillHost --encoder-selftest     # is the hardware encoder alive? 5 s, then it exits
 swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it
 swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device would get for an app (a pid, or its name), read once
@@ -122,6 +125,11 @@ swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device 
 
 The argument matches an app name or window title. Leave it off to see the list
 of on-screen windows.
+
+Its home door stays as it always was, plain TCP with no pairing: any device
+on your network can connect to `SillHost`, without encryption, so use it only
+while developing Sill. `--pairing` gives it Sill.app's door (Pairing at home,
+below) with a new identity each run.
 
 A device can change the command-line host's settings from its Settings panel
 too; `SillHost` saves nothing, so a change lasts until it quits, and the
@@ -166,16 +174,18 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    identifier if `me.saffer.sill` collides with something (it does on any team
    but the project's own).
 3. Run on a real device on the same Wi-Fi (or with Direct Wireless Connection
-   on in Sill on the Mac). Tap the Mac's name. Its row ends in where the device
-   sees it: "Wi-Fi", "Wired" (a cable), "Direct", or nothing when it can't
-   tell. A "Wired" row connects over the cable, even with Wi-Fi up (should
-   that not connect within 2.5 s, over whichever link the device picks); the
-   Settings panel's readout ends in the link the connection does take. At
-   home a session follows the cable: plugged in, it moves there about 2 s
-   later; pulled, it moves to Wi-Fi at once, without the connect screen;
-   dropped by the Mac while the cable stays in (Sill away in the background,
-   say), it reconnects over the cable. A session from away (Remote access,
-   below) keeps its way in until it ends.
+   on in Sill on the Mac). Tap the Mac's name; the first time, pair it (Pairing
+   at home, below). Its row ends in where the device sees it: "Wi-Fi", "Wired"
+   (a cable), "Direct", or nothing when it can't tell; "Not paired" before a
+   pairing, and "Update Sill" for a Mac whose Sill is too old for this build. A
+   "Wired" row connects over the cable, even with Wi-Fi up (should that not
+   connect within 2.5 s, over whichever link the device picks); the Settings
+   panel's readout ends in the link the connection does take. At home a session
+   follows the cable: plugged in, it moves there about 2 s later; pulled, it
+   moves to Wi-Fi at once, without the connect screen; dropped by the Mac while
+   the cable stays in (Sill away in the background, say), it reconnects over
+   the cable. A session from away (Remote access, below) keeps its way in until
+   it ends.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
@@ -348,6 +358,61 @@ on, anyone nearby running Sill can find and connect to the Mac. Turning Wi-Fi
 off in Control Center does not end a direct connection (it leaves the radio on
 for AirDrop); Settings › Wi-Fi does.
 
+## Pairing at home
+
+Sill.app's home door speaks TLS 1.3 with each end pinned to the other's key,
+as Remote Access does, and one list of paired devices serves both: a device
+paired at home connects nearby and, with Remote Access on, from away, and one
+paired for Remote Access connects at home with no further step.
+
+- **On the same network, or nearby with Direct Wireless Connection:** a Mac
+  this device has not paired with reads "Not paired". Tap it: the Mac opens
+  its pairing window by itself, in front of what you are doing but without
+  taking the keyboard, and the device opens its camera. Point it at the QR
+  code, or choose Enter Code Instead and type the 12 digits. Cancel on the Mac
+  closes a window you did not ask for. A Mac opens at most three such windows
+  in ten minutes, and none for ten minutes to a device after you click Cancel
+  on the Mac or after five wrong codes; the device then says to choose Pair
+  iPhone or iPad… in the Sill menu, which always works. A locked Mac shows no
+  code ("Unlock Mac mini, then tap it again."), and an ask from the Mac itself
+  (the Simulator, another app) never opens a window: pair those with Pair
+  iPhone or iPad….
+- **Over the USB cable:** an unpaired iPhone or iPad on the Mac's cable reads
+  "Wired". Tap it, and while the Mac is unlocked it pairs by itself, with no
+  code; the Mac shows a notice with Remove for ten seconds. Both ends check
+  that the connection really is the cable (the Mac: an IPv6 link-local source
+  under the iPhone's or iPad's own USB interface, never an address of the Mac
+  itself; the device: an interface with nothing but link-local addresses), so
+  a USB Ethernet adapter, or an iPhone sharing its connection over USB, gets
+  the code window instead. One key per iPhone or iPad pairs this way: another
+  key of the same device (another app, say) gets the code window until the
+  first is removed.
+- **Settings › Devices** on the Mac lists the paired devices, how each paired
+  and when and how it last connected, with Remove (the device can no longer
+  connect: "Mac mini removed this iPad. Tap it to pair again.") and rename
+  (double-click). **Require pairing** is on by default. Off, any device at
+  home, and any app on the Mac, connects without pairing, still encrypted;
+  turned on again, it disconnects the devices that are not paired ("Mac mini
+  now asks devices to pair."). Sill keeps it beside the paired devices in the
+  login keychain, not in its defaults.
+- **Older builds:** a device from before pairing at home dials the home door
+  without TLS and can no longer connect to this Sill.app; the menu says "An
+  iPhone or iPad Needs Sill Updated". Update the device first, then the Mac. A
+  Release build of the iPhone and iPad app never connects without TLS ("Update
+  Sill" on the row of a Mac with an older Sill); a Debug build still dials an
+  older Sill.app's plain door until it has seen that Mac speak TLS (launch it
+  once with `-SillForgetHomeTLS 1` to forget).
+- **The command-line host** keeps its plain, open door (The command-line host,
+  above). With `--pairing` it prints its code and link in Terminal, and again
+  after each device's ask; `--print-cable` prints what the cable rule reads on
+  each interface and exits.
+- **To start over:** remove the device in Settings › Devices, or on the device
+  touch and hold the Mac's row and choose Forget. The paired devices, Require
+  pairing's setting and the Mac's key are in Keychain Access › login (the key
+  "Sill Remote Access" and the passwords of service `me.saffer.sill.remote`);
+  deleting them makes this Mac new to every device, and every device pairs
+  again.
+
 ## Remote access (away from home)
 
 Sill reaches your Mac from anywhere through a VPN you already run, or through a
@@ -359,15 +424,17 @@ connect (TLS 1.3, each end pinned to the other's key).
    listens on TCP port 7455 (Change… picks another) and lists the addresses a
    device will use: your Tailscale address and its MagicDNS name, another VPN,
    this network's address.
-2. Pair each device once, at home or away: Pair iPhone or iPad… in the Sill
-   menu shows a QR code and a 12-digit code for five minutes. On the device,
-   tap Add a Mac… at the bottom of the connect screen and point it at the
-   code, or choose Enter Code Instead and type the address and the code the
-   window shows. With Tailscale, the address is the Mac's MagicDNS name or the
-   Tailscale IP address under it; otherwise it is this network's address, with
-   another VPN's address under it when the Mac runs one. A device already
-   connected at home can use Pair This iPad… at the end of its Settings panel
-   instead; the Mac shows its code by itself.
+2. Pair each device once, at home or away (a device already paired at home is
+   paired for this too): Pair iPhone or iPad… in the Sill menu shows a QR code
+   and a 12-digit code for five minutes. On the device, tap Add a Mac… at the
+   bottom of the connect screen and point it at the code, or choose Enter Code
+   Instead and type the address and the code the window shows. With Tailscale,
+   the address is the Mac's MagicDNS name or the Tailscale IP address under it;
+   otherwise it is this network's address, with another VPN's address under it
+   when the Mac runs one. A device connected at home without pairing (Require
+   pairing off) can use Pair This iPad… in the Away from home group of its
+   Settings panel instead: it asks the Mac for a code, as a tap on a "Not
+   paired" row does.
 3. Away from home the Mac is a "Remote" row about 3 s after the connect screen
    opens (the local network gets the first 3 s); tap it. After a drop the device
    reconnects by itself, first on the local network, then remotely. The
@@ -404,7 +471,7 @@ If it doesn't connect:
 - Testing a port forward from inside your home network can fail on routers
   without "hairpin" NAT: test over cellular.
 - "no longer accepts this iPad": the device was removed on the Mac (Settings ›
-  Remote Access › Paired Devices); pair it again.
+  Devices); pair it again.
 
 Quality follows you home: the Quality setting belongs to the Mac, and Sill.app
 saves it, so picking Low (4 Mbps, for a slow link) away from home leaves it at
@@ -424,10 +491,10 @@ is the host to pair with for good.
 
 To start over on the Mac: quit Sill, then `for k in remoteAccess remotePort
 internetAccess remoteAddressName remoteDevicesSeen; do defaults delete
-me.saffer.sill.mac $k; done`. The Mac's identity and its paired devices are in
-Keychain Access › login: the key "Sill Remote Access" and the passwords of
-service `me.saffer.sill.remote`; deleting them makes this Mac new to every
-device, which must pair again. On the device, a paired Mac's row has Forget in
+me.saffer.sill.mac $k; done`. The Mac's identity, its paired devices and
+Require pairing are in Keychain Access › login: the key "Sill Remote Access"
+and the passwords of service `me.saffer.sill.remote`; deleting them makes this
+Mac new to every device, which must pair again. On the device, a paired Mac's row has Forget in
 its menu (touch and hold).
 
 ## Test tools
@@ -443,12 +510,13 @@ the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
 encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
-on a phone held upright, the Mac's menus on both ends, which three-finger
-strokes are gestures and what the Mac does with one, which modifiers a device's
-keys leave set on the Mac) on their own with a check
-each, and runs them: about two minutes, no device, permission or encoder.
-`--mutants` also checks that each
-check fails when its file is changed in one place (most of an hour).
+on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
+ends, which three-finger strokes are gestures and what the Mac does with one,
+which modifiers a device's keys leave set on the Mac,
+the first-run tour, and pairing at home: the doors, the cable, the device's
+rows) on their own with a check each, and runs them: about five minutes, no
+device, permission or encoder. `--mutants` also checks that each check fails
+when its file is changed in one place (well over an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -580,6 +648,11 @@ simulator:
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
   round.
+- Pairing at home: `-SillServiceType _silltest._tcp` (only test hosts
+  registered under that type are rows), `-SillHomeDoor paired|open|plain`
+  (what a `-SillConnect` address counts as), `-SillCableTest 1` (this
+  device's path counts as the cable) and the connect screen's `home…` cases;
+  `CLAUDE.md`, Build and run, has them all.
 - `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
   one run, `-SillSettingsScroll gestures` opens the Settings panel at that
   group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
@@ -792,10 +865,10 @@ record field by field.
   or QUIC with FEC; measure before deciding.
 - The encoder is fixed to one size, so a resized window restarts the pipeline
   (a brief black frame on the device).
-- Single window at a time. On the home network the stream is not encrypted
-  (only this Mac's own networks may connect); away from home it runs over TLS
-  1.3 to paired devices only. The device reconnects on a timer when the Mac
-  drops it.
+- Single window at a time. Every connection runs over TLS 1.3 to paired
+  devices only (with Require pairing off, to any device at home, still
+  encrypted); only the command-line host without `--pairing` keeps a plain,
+  open home door. The device reconnects on a timer when the Mac drops it.
 - Bonjour at home, your VPN or a port forward away (Remote access above).
   iCloud auto-pairing comes with milestone 5.
 
