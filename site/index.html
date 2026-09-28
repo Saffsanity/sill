@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="Sill shows windows from your Mac on your iPhone and iPad. Free, with no account and no servers.">
 <title>Sill: windows from your Mac on your iPhone and iPad</title>
@@ -27,6 +27,19 @@
     <p class="cta"><a class="button" href="download.html">Download Sill for Mac</a></p>
     <p class="muted small">Free. For Mac computers with Apple silicon, on macOS 14 or later.</p>
   </section>
+
+  <div class="film">
+    <!-- The teaser's one address, beside the page (media-src 'self' above). Served from media.getsill.app
+         instead, it is https://media.getsill.app/Sill-teaser.mp4 and media-src https://media.getsill.app:
+         docs/release-checklist.md, "The film on the site and the README". -->
+    <video controls playsinline preload="none" poster="media/sill-teaser-poster.jpg" width="1920" height="1080" aria-label="A short film about Sill: windows from a Mac, shown and used on an iPad">
+      <source src="media/Sill-teaser.mp4" type="video/mp4">
+    </video>
+    <a class="film-link" href="reel.html" aria-label="Watch the full film, 1:23">
+      <img src="media/sill-film-poster.jpg" alt="" width="1920" height="1080">
+      <span><span class="film-link-title">Watch the full film</span> <span class="muted">1:23</span></span>
+    </a>
+  </div>
 
   <p class="intro">Sill shows a window from your Mac, or its whole desktop, on your iPhone or iPad, and lets you use it with touch, a keyboard or Apple Pencil. It streams straight from your Mac to your device over your own network, so there is no account to create and no server in between. Both parts are free: the Sill app for iPhone and iPad, and Sill for Mac.</p>
 

@@ -18,3 +18,8 @@ AuthKey_*
 
 # The sizzle reel's renders (design/reel, over a gigabyte): kept out of git.
 design/reel/
+
+# The site's films, the teaser and the whole film: GitHub Pages serves them, and the README plays
+# the teaser from an upload. They are never committed here, so clones stay small; their posters are.
+# docs/release-checklist.md, "The film on the site and the README".
+site/media/*.mp4

@@ -2,6 +2,15 @@
 
 Any window from your Mac, on your iPhone and iPad.
 
+<!-- The teaser: replace this comment with the address GitHub gives
+     site/media/Sill-teaser.mp4 when it is dropped into a comment box on this
+     repository (https://github.com/user-attachments/assets/…), alone on its
+     line, with the blank lines around it kept. GitHub then plays it here.
+     docs/release-checklist.md, "The film on the site and the README", has the
+     steps. -->
+
+<a href="https://getsill.app/reel"><img src="site/media/sill-film-poster.jpg" width="480" alt="Watch the full film, 1:23"></a>
+
 Sill shows a window from your Mac, or the whole desktop, on your iPhone or
 iPad. You use it there with touch, a trackpad, a keyboard or Apple Pencil.
 Sill for Mac captures the window, encodes it as HEVC video and sends it to the

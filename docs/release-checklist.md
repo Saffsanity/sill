@@ -96,7 +96,9 @@ shell.
 
 ### 3. The website
 
-Preview it with `python3 -m http.server 8000 --directory site` and http://localhost:8000.
+Preview it with `python3 -m http.server 8000 --directory site` and http://localhost:8000. The
+films play there only while `site/media/` holds them, which git does not ("The film on the site
+and the README", below).
 
 Before it goes public (Saffsanity/sill went public on 2026-09-26, after the sweep of PR #24; the
 unchecked items below were done that day or record what was decided):
@@ -124,12 +126,14 @@ serves the root or `/docs`, never `/site`. So:
 
 ```
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
-rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # whenever the site changes
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll --exclude 'media/*.mp4' site/ ../sill-site/   # whenever the site changes
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
-sill-site has two files of its own that `site/` lacks, `.nojekyll` and `.github/FUNDING.yml` (its
-Sponsor button); the two excludes keep `--delete` off them.
+The excludes keep `--delete` off sill-site's own files: its `.git`, `.github/FUNDING.yml` (its
+Sponsor button), its `.nojekyll` and, if getsill.app serves the films itself,
+`media/Sill-teaser.mp4` and `media/Sill-film.mp4` ("The film on the site and the README"), which
+`site/` never holds in git. The last one also keeps a working copy's own films from being copied.
 
 - [x] Domain, done 2026-09-25: getsill.app at Cloudflare, with A records to GitHub Pages
       (185.199.108.153, .109, .110, .111), the matching AAAA records (2606:50c0:8000::153 to
@@ -255,6 +259,115 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
 - [ ] Submit for review with manual release. Release once the Mac download is live.
 - [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date.
 
+## The film on the site and the README
+
+The home page plays a teaser of the sizzle reel, and under it the film's poster links the whole
+film on a page of its own, `site/reel.html` (https://getsill.app/reel). The README plays the same
+teaser from an upload to GitHub and shows the same poster, linking that page. The files, all in
+`site/media/`, keep these names from cut to cut:
+
+| File | What it is | In git |
+|---|---|---|
+| `Sill-teaser.mp4` | The teaser: 20 to 25 s, under 10 MB (GitHub plays a video uploaded to a repository on the Free plan up to 10 MB) | no |
+| `Sill-film.mp4` | The whole film: 1:23, about 45 MB | no |
+| `sill-teaser-poster.jpg` | What the teaser shows before it plays. The film's page uses it too: a browser draws its own play button over a video, which a poster with one drawn on it would double | yes |
+| `sill-film-poster.jpg` | The film's poster, with a play button drawn on it: the link on the home page and in the README | yes |
+
+The two films stay out of git (`.gitignore`): every clone would carry them, and every cut would
+stay in the history for good. They are copied by hand to where they are served. A page fetches
+nothing of a film until the visitor presses play (`preload="none"`), and the two pages with a film
+add `media-src` for it to their Content-Security-Policy and nothing else.
+
+### Where the films are served
+
+getsill.app's records are proxied through Cloudflare (part 1 §3), and Cloudflare's terms for the
+Free, Pro and Business plans (its Service-Specific Terms, "Content Delivery Network") let it
+disable or limit a site that serves video through the CDN without a paid service such as Stream.
+So the films have to reach visitors from GitHub Pages directly, one of two ways. Noah decides.
+
+- **A. The proxy off for getsill.app.** The films live in sill-site's `media/`, beside the pages,
+  and the pages stay as they are (`media/…`, `media-src 'self'`). What that changes:
+  - In Cloudflare › DNS, getsill.app's four A and four AAAA records (and `www`, if it was added)
+    go from Proxied to DNS only. Email Routing's MX and TXT records are never proxied, so
+    support@getsill.app keeps working.
+  - The certificate. Cloudflare no longer serves one; GitHub Pages asks Let's Encrypt for its
+    own once getsill.app points at GitHub directly. Until it has one, https://getsill.app answers
+    with a certificate for another name, and since browsers open .app only over HTTPS, the site
+    does not open at all. Switch at a quiet hour. If the certificate has not come several minutes
+    later, remove the custom domain in sill-site's Settings › Pages, type it again and save
+    (GitHub's advice). `curl -sI https://getsill.app | head -1` prints `HTTP/2 200` once it is
+    there; then tick Enforce HTTPS, which redirects http:// as Cloudflare's Always Use HTTPS did.
+  - Cloudflare's settings stop applying to the site: the SSL/TLS mode, Always Use HTTPS, its cache
+    and Email Address Obfuscation (the pages' `<!--email_off-->` comments are then served as
+    written; the address is on the pages either way). Part 1 §3's Cloudflare items no longer
+    apply, and visitors reach GitHub's servers instead of Cloudflare's.
+- **B. A media host, media.getsill.app, DNS only.** getsill.app stays as it is, proxied; only
+  the films come from a second GitHub Pages site:
+  - A new public repository, say Saffsanity/sill-media, holding the two films at its root and an
+    empty `.nojekyll`, with Pages on (main, / root) and the custom domain media.getsill.app
+    (Settings › Pages).
+  - In Cloudflare › DNS: `media CNAME saffsanity.github.io`, DNS only. GitHub then gets the
+    certificate for media.getsill.app (if not, remove and re-add the domain, as in A); tick
+    Enforce HTTPS once it has.
+  - In each page with a film, one address and one CSP entry change (the comment above each video
+    says so); the posters stay in `site/media/`, under `img-src 'self'`:
+    - `site/index.html`: `src="media/Sill-teaser.mp4"` becomes
+      `src="https://media.getsill.app/Sill-teaser.mp4"`, and `media-src 'self'` becomes
+      `media-src https://media.getsill.app`;
+    - `site/reel.html`: `src="media/Sill-film.mp4"` becomes
+      `src="https://media.getsill.app/Sill-film.mp4"`, with the same CSP change.
+
+Either way, GitHub's limits apply: it refuses a pushed file over 100 MiB and warns over 50 MiB, a
+published Pages site may be at most 1 GB, and the soft limit for a site's traffic is 100 GB a
+month, about 2,000 plays of the whole film. Every cut pushed adds its size to the repository's
+history, and GitHub recommends keeping a Pages repository under 1 GB.
+
+### The first time, in this order
+
+- [ ] Host the films: A or B above, with the certificate in place. With B, edit the two pages on
+      the branch that carries them before the next steps.
+- [ ] Copy the films to where they are served (the working copy's `site/media/` holds them), and
+      commit and push them there:
+
+```
+mkdir -p ../sill-site/media && cp site/media/Sill-teaser.mp4 site/media/Sill-film.mp4 ../sill-site/media/   # A
+git -C ../sill-site add media && git -C ../sill-site commit -m "The films" && git -C ../sill-site push
+git clone https://github.com/Saffsanity/sill-media.git ../sill-media   # B, once
+cp site/media/Sill-teaser.mp4 site/media/Sill-film.mp4 ../sill-media/   # B
+git -C ../sill-media add -A && git -C ../sill-media commit -m "The films" && git -C ../sill-media push
+```
+
+- [ ] Republish the site from the branch that carries the pages, with part 1 §3's commands. Its
+      rsync leaves `media/*.mp4` alone, so it never deletes A's films.
+- [ ] Check the pages in a private window, on a Mac and on an iPhone, in light and dark:
+      https://getsill.app/ shows the teaser's poster, and pressing play plays the teaser with its
+      sound (inline on the iPhone); the film's link under it opens https://getsill.app/reel,
+      which plays the whole film. Safari's Web Inspector shows no Content-Security-Policy error,
+      and with B the films come from media.getsill.app.
+- [ ] Put the teaser in the README. On github.com/Saffsanity/sill, open the pull request that
+      carries these pages (or any issue) and drag `site/media/Sill-teaser.mp4` into the comment
+      box. GitHub uploads it at once and writes its address in the box, a line like
+      `https://github.com/user-attachments/assets/…`. Copy that line, clear the box and leave
+      without posting: the upload stays. In `README.md`, replace the teaser's comment with the
+      line, alone on its line with the blank lines around it, and commit.
+- [ ] Merge the pull request. The README then plays the teaser and shows the film's poster
+      (`site/media/sill-film-poster.jpg`), which opens https://getsill.app/reel. Look at it on
+      github.com/Saffsanity/sill, signed out too.
+
+### A new cut
+
+- [ ] Replace the four files in `site/media/` under the same names, the teaser still under
+      10 MB, and commit the posters. If the length changed, change it where the pages and the
+      README give it (`grep -rn -e '1:23' -e '23 seconds' site README.md`); if the film's words
+      changed, change "What the film shows" in `site/reel.html`.
+- [ ] Copy the films over the old ones and push them, republish and check the pages, as the
+      first time (a browser can keep showing the old film for a few minutes).
+- [ ] Upload the new teaser as the first time, and replace the README's old address with the new
+      one. The old upload stays on GitHub, with nothing linking to it.
+- [ ] Every cut stays in the history of sill-site (A) or of the media repository (B). The media
+      repository holds nothing else, so when its history nears 1 GB it can start afresh: an
+      orphan branch with only the current files, pushed over main.
+
 ## TestFlight
 
 Sill for iPhone and iPad reaches testers, then the App Store, through App Store Connect.
@@ -328,10 +441,10 @@ address (the number left out, say) stops it before it builds.
       so TestFlight needs no republish. The pages getsill.app serves lack the `<!--email_off-->`
       comments only because Cloudflare takes them out. If `site/` changes before that release,
       republish it without the download page (and, as in part 1 §3, without touching sill-site's
-      own `.nojekyll` and `.github`):
+      own `.nojekyll`, `.github` and films):
 
 ```
-rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll --exclude download.html site/ ../sill-site/
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll --exclude download.html --exclude 'media/*.mp4' site/ ../sill-site/
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 

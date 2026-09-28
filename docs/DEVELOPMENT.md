@@ -800,9 +800,11 @@ record field by field.
   reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
-- `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
-  policy and support. Preview it with
-  `python3 -m http.server 8000 --directory site`.
+- `site/`: the website, plain HTML for GitHub Pages: home (with the teaser),
+  the film, download, privacy policy and support. The films' posters are in
+  `site/media/`, the films themselves are not in git
+  (`docs/release-checklist.md`, "The film on the site and the README").
+  Preview it with `python3 -m http.server 8000 --directory site`.
 - `docs/`: the brief, the plans, `app-store-metadata.md` (what App Store
   Connect asks for) and `release-checklist.md` (the order of work for a
   release).

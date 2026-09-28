@@ -10,6 +10,7 @@
   --link: #0066cc;
   --button: #0071e3;
   --button-hover: #0077ed;
+  --frame: transparent;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
     --muted: #a1a1a6;
     --line: #38383a;
     --link: #2997ff;
+    --frame: #38383a;
   }
 }
 
@@ -187,3 +189,46 @@ ol.steps > li::before {
   line-height: 30px;
   text-align: center;
 }
+
+/* Films: the teaser on the home page, the whole film on reel.html. Each box is 16:9 before its
+   poster arrives, so nothing under it moves. In dark mode a hairline keeps a dark film's corners
+   from melting into the page. */
+
+.film { margin: 40px 0 0; }
+.film video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #000000;
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--frame);
+}
+.film video:fullscreen { border-radius: 0; box-shadow: none; }
+.film video:-webkit-full-screen { border-radius: 0; box-shadow: none; }
+
+/* The link to the whole film: its poster, small, beside the words. */
+.film-link {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--card);
+  border-radius: 16px;
+  color: var(--text);
+}
+.film-link:hover { text-decoration: none; }
+.film-link:hover .film-link-title { text-decoration: underline; }
+.film-link:focus-visible { border-radius: 16px; }
+.film-link img {
+  flex: none;
+  width: clamp(112px, 36%, 176px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #000000;
+  border-radius: 8px;
+}
+.film-link-title { display: block; color: var(--link); font-weight: 600; }
+
+.film-words li { margin: 10px 0; }

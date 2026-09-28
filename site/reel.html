@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="The Sill film: windows from your Mac on your iPad, in a minute and 23 seconds, with its words written out.">
+<title>The Sill Film</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html"><img src="icon.svg" alt="" width="30" height="30">Sill</a>
+  <nav aria-label="Site">
+    <a href="download.html">Download</a>
+    <a href="support.html">Support</a>
+  </nav>
+</header>
+
+<main>
+  <h1>The Sill Film</h1>
+  <p class="lede">Sill in a minute and 23 seconds: your Mac’s windows on an iPad, what you can do with them there, and how your iPad reaches your Mac.</p>
+
+  <div class="film">
+    <!-- The film's one address, beside the page (media-src 'self' above). Served from media.getsill.app
+         instead, it is https://media.getsill.app/Sill-film.mp4 and media-src https://media.getsill.app:
+         docs/release-checklist.md, "The film on the site and the README". The poster is the teaser's:
+         the film's own has a play button drawn on it, for links, and a browser draws its own play button
+         over a video with controls, so it would show two. -->
+    <video controls playsinline preload="none" poster="media/sill-teaser-poster.jpg" width="1920" height="1080" aria-label="The Sill film, 1:23, with music and no voice">
+      <source src="media/Sill-film.mp4" type="video/mp4">
+    </video>
+  </div>
+
+  <h2>What the film shows</h2>
+  <p>The film has music and no voice. Here are its words in the order they appear, each with what the picture shows.</p>
+  <ul class="film-words">
+    <li><strong>Your Mac apps. On the window sill.</strong> A Mac, an iPad and a window, drawn as in Sill’s icon.</li>
+    <li><strong>Any Mac window.</strong> An iPad connects to a Mac, and the bar along its top shows the Mac’s windows as live thumbnails.</li>
+    <li><strong>One tap to switch.</strong> A tap on a thumbnail brings up that window.</li>
+    <li><strong>Or the whole desktop.</strong> The Desktop button brings up the Mac’s whole desktop.</li>
+    <li><strong>App drawer from afar.</strong> The Apps drawer lists the apps on the Mac.</li>
+    <li><strong>Text at the size you choose.</strong> Sliding on Aa resizes the Mac window, and its text grows on the iPad.</li>
+    <li><strong>Click. Scroll. Type. With haptic trackpad.</strong> Held upright, the iPad shows the window above a row of keys and a trackpad, and the Mac’s pointer follows a finger on the trackpad. In small type: “Haptics on iPhone.”</li>
+    <li><strong>Close. Minimize. Full Screen.</strong> Holding a thumbnail shows the window’s three buttons.</li>
+    <li><strong>Latency you don’t notice. Hardware-encoded HEVC, straight to your iPad.</strong></li>
+    <li><strong>Up to 120 fps. On ProMotion displays.</strong> The number rolls up from 60.</li>
+    <li><strong>Hidden on your Mac. Still live on your iPad.</strong> A window on a drawn Mac is covered by another, and on the iPad it keeps streaming. In small type: “With Virtual Display on, Sill streams the window from an invisible virtual display.”</li>
+    <li><strong>Wi-Fi. Wired. Direct. Direct needs no shared network.</strong> The connect screen lists three Macs, each with how it is reached. In small type: “With Direct Wireless Connection on in Sill.”</li>
+    <!-- Remote Access: take these two items out for a release without Remote Access. -->
+    <li><strong>Or remote, through your own VPN.</strong> A fourth Mac joins the list as Remote. In small type: “With Remote Access on in Sill.”</li>
+    <li><strong>Pair once. Remote Access lets in only the devices you pair.</strong> The Mac’s pairing window with its code, beside an iPad adding that Mac. Then the iPad’s settings say it is connected through Tailscale.</li>
+    <!-- /Remote Access -->
+    <li><strong>No subscription. No servers.</strong></li>
+    <li><strong>Sill. Free. Open source. For iPhone and iPad, with a free Mac companion.</strong> Sill’s icon and name, and in small type a trademark notice.</li>
+    <li><strong>Designed for iPhone Duo. Both screens. Coming soon.</strong> A folding iPhone opens.</li>
+  </ul>
+
+  <h2>Get Sill</h2>
+  <p>Sill for Mac is free, for Mac computers with Apple silicon on macOS 14 or later. Sill for iPhone and iPad is on its way to the App Store; until it is there, you can build it from <a href="https://github.com/Saffsanity/sill#building-from-source">its source code</a>.</p>
+  <p class="cta"><a class="button" href="download.html">Download Sill for Mac</a></p>
+  <p>The <a href="index.html">home page</a> says what you need and how to connect.</p>
+</main>
+
+<footer class="site-footer">
+  <nav aria-label="Footer">
+    <a href="index.html">Home</a>
+    <a href="download.html">Download</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="support.html">Support</a>
+    <a href="https://github.com/Saffsanity/sill">Source on GitHub</a>
+    <a href="https://github.com/Saffsanity/sill-site">This site on GitHub</a>
+  </nav>
+</footer>
+</body>
+</html>

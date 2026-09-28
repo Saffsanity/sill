@@ -3798,12 +3798,26 @@ good.
   `--big`, `--slow`, `--reset`, `--redirect`, `--set-cookie`,
   `--all-headers`; `GET /__control?key=value` changes them while it runs).
 - `site/` — the website, for GitHub Pages at the domain in `site/CNAME`:
-  `index.html`, `download.html` (links the newest GitHub Release's `Sill.zip`
-  and `Sill.zip.sha256`; never edited per release), `privacy.html` (the policy
-  App Store Connect and the app link to), `support.html`, `style.css` (system
-  fonts, light and dark) and `icon.svg` (a copy of design/AppIcon.svg). No
-  scripts and nothing loaded from elsewhere: every page's
-  Content-Security-Policy is `default-src 'none'`. Links are relative and
+  `index.html` (under the hero the teaser, `media/Sill-teaser.mp4`, plays in
+  the page, and under it the film's poster links to `reel.html`), `reel.html`
+  (the whole film, `media/Sill-film.mp4`, 1:23, and its words written out for
+  anyone who cannot watch), `download.html` (links the newest GitHub Release's
+  `Sill.dmg` and `Sill.dmg.sha256`; never edited per release), `privacy.html`
+  (the policy App Store Connect and the app link to), `support.html`,
+  `style.css` (system fonts, light and dark; a film's 16:9 box, rounded like
+  the cards, holds its place before the poster arrives) and `icon.svg` (a
+  copy of design/AppIcon.svg). `media/` has the two posters in git
+  (`sill-teaser-poster.jpg`, the film page's too, and `sill-film-poster.jpg`,
+  a play button drawn on it, for links: a browser draws its own over a
+  video) and the two MP4s only locally (`.gitignore`): they are copied to
+  where GitHub Pages serves them, sill-site's `media/` or a media.getsill.app
+  site, since Cloudflare's proxy may not carry video (docs/release-checklist.md,
+  "The film on the site and the README"). A video has controls, playsinline,
+  `preload="none"` (nothing fetched before play), no autoplay, a label and
+  one `<source>`, its one address. No scripts and nothing loaded from
+  elsewhere: every page's Content-Security-Policy is `default-src 'none'`,
+  and the two pages with a film add `media-src 'self'` (with the `<source>`,
+  what changes if the films move to media.getsill.app). Links are relative and
   name a file (`download.html`; Home is `index.html`, since `./` opens nothing
   from the folder), so it renders from the folder; GitHub Pages also serves
   each page without `.html`, the form the app and App Store Connect use
@@ -3933,17 +3947,22 @@ good.
   device, Direct Wireless, remote access (setup, troubleshooting, reset), the
   test tools in brief (Build and run below has them all), measuring latency,
   troubleshooting (slow, frozen, the encoder), releasing, known limitations.
-- `README.md` — the public front page: the site's lede, links to getsill.app
-  and its download, support and privacy pages, a commented App Store badge
-  slot, requirements, how it works, tips, building from source in brief,
-  contributing, the license. `LICENSE` — the Apache License 2.0.
+- `README.md` — the public front page: the site's lede, the teaser's slot (a
+  comment until Noah uploads `site/media/Sill-teaser.mp4` to GitHub and puts
+  its github.com/user-attachments address there, which GitHub plays), the
+  film's poster (`site/media/sill-film-poster.jpg`) linking to
+  getsill.app/reel, links to getsill.app and its download, support and
+  privacy pages, a commented App Store badge slot, requirements, how it
+  works, tips, building from source in brief, contributing, the license.
+  `LICENSE` — the Apache License 2.0.
   `.github/FUNDING.yml` — the Sponsor button: GitHub Sponsors (a `ko_fi:`
   line joins it once there is a Ko-fi handle). Tip links live there, in the
   README's Tips and on the site, never in the iOS app. `SECURITY.md` — how to
   report a vulnerability (support@getsill.app, never a public issue) and what
   is in scope. `.github/ISSUE_TEMPLATE/` — issue forms: a bug report, an idea,
   a question, no blank issue. `.gitignore` also leaves out signing keys,
-  profiles, keychains and design/reel/.
+  profiles, keychains, design/reel/ and the site's films
+  (`site/media/*.mp4`).
 - `.github/workflows/` — GitHub Actions on the `xcode-27` runner (macOS 27
   with Xcode 27, a public preview; the only image with Xcode 27). `ci.yml`:
   pull requests and pushes to main that touch more than documents, the site or
