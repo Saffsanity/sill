@@ -54,6 +54,11 @@ the App Store yet; until it is, you can build it from source (below).
   needs Accessibility. Three fingers swipe and pinch as on a Mac's trackpad:
   Mission Control, App Exposé, the Spaces, Apps and Show Desktop, through the
   keyboard shortcuts your Mac has for them.
+- **The menus** of the app you use reach your device too: in the iPad's own
+  menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
+  Sill for Mac reads each menu from the app as you open it and chooses the
+  item you pick, through Accessibility. When someone moves the mouse at your
+  Mac, your device shows the pointer where it is.
 - **Nearby**, your device finds your Mac with Bonjour on your local network.
   Over a USB cable, your Mac shows as Wired and the connection uses the cable.
   With no shared network, Direct Wireless Connection (off by default) connects
@@ -66,7 +71,8 @@ the App Store yet; until it is, you can build it from source (below).
   you can remove any of them there.
 - **Away from home**, Remote Access (off by default) lets the devices you
   paired reach your Mac through your own VPN or a port you forward on your
-  router.
+  router; a device learns how the next time it connects at home with Remote
+  Access on.
 - **The virtual display** (off by default) moves a window you stream onto a
   display of its own on your Mac, so it keeps updating when other windows
   cover it. It uses a private macOS API, which is one reason Sill for Mac comes
@@ -75,12 +81,14 @@ the App Store yet; until it is, you can build it from source (below).
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
 does not play sound from your Mac. Only the iPhones and iPads you paired can
 connect, unless you turn off Require pairing in Settings › Devices; then any
-device on your network can, still encrypted. Sill for Mac 0.3.1, the download
-today, came before pairing at home: with it, connections on your local
-network, over the cable and over Direct Wireless Connection are not
-encrypted, and any iPhone or iPad with Sill on the same network, or nearby
-while Direct Wireless Connection is on, can connect to your Mac. Use it on
-networks you trust.
+device on your network can, still encrypted. Pairing at home came with Sill
+for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and each needs the other:
+the iPhone and iPad app shows an older Sill for Mac as "Update Sill", and an
+older iPhone and iPad app can't connect to Sill for Mac 0.4.0 at home. With
+Sill for Mac 0.3.1 or earlier, connections on your local network, over the
+cable and over Direct Wireless Connection are not encrypted, and any iPhone or
+iPad with Sill on the same network, or nearby while Direct Wireless Connection
+is on, can connect to your Mac: update it.
 
 ## Tips
 
