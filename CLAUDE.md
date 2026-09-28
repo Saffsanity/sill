@@ -8,6 +8,74 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The stuck command after Spotlight (2026-09-27, branch `spotlight-modifier-fix`
+from main at 643af6b, with main at da43f6b (PR #38) merged in; not pushed).**
+Noah: "The stuck command after Spotlight", found by PR #38's review. The
+Spotlight key sent ⌘Space as one key down and up, each carrying command, and
+the host posted both as they came; every keyboard event posted leaves its flags
+in the HID state table its source reads (CGEventSource.h), and pointer and
+scroll events start from them, so the next tap was a ⌘-click until something
+was typed. The key row, a latched ⌘, ⌃ or ⌥ on the software keyboard and a
+hardware keyboard's ⌘ did the same. Inferred, not observed: nothing may be
+posted while this is built.
+- Host (`KeyStrokes`, pure): a key's down carries its device's modifiers and
+  what the modifier keys down hold, its up only what they hold; a modifier's
+  own key is a flags-changed event with what is held; a key or text that no
+  longer says a modifier lets go of that key first; a device that leaves, and
+  the host at its end (Sill.app's Quit, a Ctrl-C, kill or hangup; the CLI
+  without --virtual-display then dies of the signal as before,
+  `HostShutdown.installKeyRelease`), let go of every key and button. Input
+  with nowhere to land (nothing streams, or a switch drops held input) is
+  dropped but for the up of a key or a button the Mac has down
+  (`DroppedInput`), a button's where the pointer is.
+- The tripwire (`KeyUpCheck`, pure): a quarter of a second after every key's
+  up whose down put a modifier in the table (a modifier key's own, a
+  shortcut's key, the ups KeyStrokes makes), the table is read again; a
+  modifier the up should have taken out and the table still holds, that no
+  key down holds and no key since carried, is counted, `in.keyModifiersLeft`,
+  and said once with the key ("Keys: a quarter of a second after a device's
+  key 55 came up, …"). TEST ONLY `SILL_TEST_INPUT_LOG=1` (Build and run)
+  prints what a `--synthetic` host would post and each check it arms.
+- Device (`KeyChords`, pure): a shortcut goes out as a keyboard sends it, its
+  modifiers' own keys around it (`KeyChord.press`: the Spotlight key, the key
+  row, a latched ⌘S), so Sill.app 0.3.x is left nothing held either; a
+  hardware key's up follows its down (`ForwardedKeys`), a cancelled press
+  comes up, and the overlay lets go of its keys when it stops taking them.
+- `Tests/checks/key-strokes` (329 checks, 72 mutants; CI and its mutants
+  matrix): every path's exact events on this Mac and on one from before, the
+  tripwire armed for each path and reporting on Macs that keep their table
+  through a modifier key's up or another key's, input with nowhere to land,
+  and random sessions of two older devices (3,000, and 1,000 on each such Mac)
+  and of this device (2,000, and 500 each). Against main's rules, 205 of the
+  279 checks before the review failed.
+- Review (2026-09-27; each reproduced first, then fixed in a commit of its
+  own): the tripwire was armed for none of this device's paths; the CLI's
+  default path died of a signal with a device's modifier down; the drag guard
+  this branch had added to `TrackpadSurface.didMoveToWindow` never ran (UIKit
+  cancels the long press first, and its end lets the button and the modifiers
+  up and spends the latch: a rig on a private simulator) and is gone; and,
+  older than the branch, a button's up with nowhere to land was dropped,
+  leaving the Mac's button down and every later move a drag.
+- Verified: `swift build -c release`; iOS Debug for the simulator (CI's
+  command), only the StreamClient warning; `run-all.sh`, all 27; the dry run on
+  a synthetic host against 84ddd9c's (this device's Spotlight key arms a check
+  for command at key 55's up; a drag whose stream stops ends "left mouse up
+  (none) at 454,285" and the moves after are moves, where 84ddd9c's are
+  drags); SIGINT, SIGTERM and SIGHUP with ⌘ and the button held let go of both
+  and end with 84ddd9c's wait status; the app's `-SillInputTest` against that host, a
+  rotation rig and the touch rig (72 of 72 against main's) on a private
+  simulator, deleted after.
+- **Untested, for Noah:** with this Sill.app and this iPad build, the Spotlight
+  key and then a tap on a file in Finder selects it (not a ⌘-click), and the
+  same after the key row's ⌘esc, a latched ⌘S and a hardware ⌘C; a latched
+  ⌘-click stays a ⌘-click and the next tap is plain; ⌘ held while Wi-Fi drops,
+  and Quit Sill.app while holding it: plain clicks after; a drag held on the
+  trackpad while the window is closed on the Mac (⌘W there), let go, then
+  another window picked: the pointer moves there, nothing drags. Sill.log
+  should have no "Keys: … came up, this Mac's modifier keys still read" line;
+  if it has, note the key (55 is ⌘). With this iPad build against Sill.app
+  0.3.1, the Spotlight key then a tap is a plain click.
+
 **Keychain hardening (2026-09-27, branch `keychain-hardening` from
 `home-pairing` (PR #37, not yet merged), PR #42 (a draft); the assessment, the
 decision, what was implemented and its proof with the real profile are in
@@ -3968,13 +4036,23 @@ good.
   `swiftc -package-name sill`, which its `package` access needs),
   `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
-  events and Spotlight ignored them), HID keys),
+  events and Spotlight ignored them), HID keys as KeyStrokes gives them, each
+  device's keys let go when it leaves and every key and button at the host's
+  end, the check after each key's up, a button's up with nowhere to land where
+  the pointer is; the TEST ONLY input log), `KeyStrokes` (a device's key as the
+  Mac's: its virtual key, and the flags each event carries from the modifier
+  keys the devices hold down, so a key's up leaves only what is held;
+  `KeyUpCheck`, whether an up took its modifiers out of the HID state table;
+  `DroppedInput`, what of input with nowhere to land still goes; pure,
+  `Tests/checks/key-strokes`),
   `WindowSizer` (Accessibility resize for the Aa scale; `placement/move/
   restore` for the virtual display), `VirtualDisplay` (private-API wrapper),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
-  `releaseForQuit` for the app's Quit), `VirtualDisplaySelfTest`
+  `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
+  default path: a device's keys let go, then the signal's own end),
+  `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
   heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
   (who may use which door; pure), `RefusalSummary` (one refusal line a minute),
@@ -4045,7 +4123,8 @@ good.
   per connection, waits for a switch in flight, queues the chord behind held
   input, and on a host that does not advertise posts none (`in.gestureDry`);
   `InputInjector.chord` posts it (`in.gesture`), its key up with the HID
-  state table's flags from before it (`in.gestureModifiersLeft` if some stay).
+  state table's flags from before it (`KeyStrokes.chord`;
+  `in.gestureModifiersLeft` if some stay).
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
@@ -4261,7 +4340,12 @@ good.
   row 1, and the dim, and the Menus button ending the strip's row (`menus`,
   `stripBesideMenus`); pure, `Tests/checks/phone-portrait`),
   `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum; each input
-  says what drew this device's pointer), `TrackpadView` (the relative pad: its
+  says what drew this device's pointer; hardware keys through `ForwardedKeys`,
+  let go when the overlay stops taking keys), `KeyChords` (`KeyModifiers`; a
+  shortcut with its modifiers' own keys pressed around it, the Spotlight key's
+  ⌘Space, the trackpad's modifier keys around a click; `ForwardedKeys`, a
+  hardware key's up after its down; pure, `Tests/checks/key-strokes` with the
+  host's KeyStrokes), `TrackpadView` (the relative pad: its
   cursor a `PadCursor`, from the anchor; a recognizer that only counts fingers;
   `verticalSpan`, a phone's width ÷ 1.6, and the DEBUG input test),
   `HEVCDisplayView` (shared display view, the one pointer sprite + DEBUG HUD),
@@ -4404,7 +4488,9 @@ good.
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `encoder-mailbox`,
   `encoder-slowstate`, `fence`, `gesture-chords`, `gestures`, `goodbye`,
-  `home-device`, `home-model`, `home-records`, `home-txt`, `ledger`,
+  `home-device`, `home-model`, `home-records`, `home-txt`, `key-strokes` (the
+  host's KeyStrokes and the device's KeyChords, against a model of the Mac's
+  HID state table and of a Mac from before), `ledger`,
   `menu-state` (iOSClient's MacMenuState), `menus` (the host's MenuFormat and
   MenuPolicy, and MacMenu.swift's JSON), `message-reader`, `origin`,
   `pairing-address`, `phone-portrait`, `pointer-control`, `pointer-presence`,
@@ -4446,6 +4532,8 @@ python3 Scripts/sillclient.py PORT 5 none --pair-ask --then-code=$T/code --ident
 python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=bitrate=25000000   # a device's settings change
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # a scripted pointer on the test pattern, on 127.0.0.1 alone, never the hardware encoder
 python3 Scripts/sillclient.py PORT 6 desktop --pointer --move=0.25,0.25@3   # each kind 26 as it arrives; input goes only to a --synthetic host
+SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic   # prints each event a dry run would post ("Test input: key 49 up (none)")
+python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5   # an older device's Spotlight key, then a tap
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
@@ -4537,7 +4625,13 @@ and a dry-run pointer event moves the scripted pointer (the newer of it and a
 step wins); `SILL_TEST_SOFTWARE_ENCODER=1` starts on the software encoder, with
 no launch probe and no re-check, so a test never touches the hardware encoder
 (60 fps at most: a 120 fps sampler test needs the hardware, and so the
-no-device check).
+no-device check); `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
+post, "Test input: key 49 down (command)" with the flags it was made with, and
+a pointer or scroll event with those the last keyboard event would have left
+in the HID state table, a button's with where it goes ("Test input: left mouse
+down (none) at 756,474"), and each check a key's up arms ("Test input: key 55
+up: the table read again in 0.25 s for command"): what a device's keys and
+buttons leave for its next click (KeyStrokes), without posting anything.
 The device floor, headless: `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the floor
 of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is

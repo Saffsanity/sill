@@ -51,10 +51,27 @@ final class InputInjector {
     /// zero and no Accessibility reminder prints. With the TEST ONLY scripted pointer a pointer
     /// event moves that pointer to its position instead (PointerWatch.sillMoved(to:)).
     var dryRun = false
+    /// TEST ONLY (SILL_TEST_INPUT_LOG=1, a synthetic host, which posts nothing: `testInputLog`): each
+    /// event a dry run would post is printed, a keyboard event with the flags it was made with ("Test
+    /// input: key 49 up (none)"), a pointer or scroll event with those the last keyboard event would
+    /// have left in the HID state table, which it would start from ("Test input: left mouse down
+    /// (none) at 756,474", a button's with where it goes): what a device's keys leave for its next
+    /// click, without posting anything; and the check a key's up arms (`KeyUpCheck`).
+    var testLog = false
+    /// The flags of the last keyboard event posted (a dry run's: that would have been), which the HID
+    /// state table holds by KeyStrokes' inference: the check after a key's up reads the table against
+    /// it, and the TEST ONLY log gives it to each pointer event.
+    private var lastKeyFlags: UInt64 = 0
+    /// Where the last pointer event went: a synthetic host's pointer, which it never reads.
+    private var lastPointerLocation: CGPoint = .zero
 
     // MARK: Entry point
 
-    func apply(_ event: InputEvent, in rect: CGRect) {
+    /// One device's input. `device` is its connection, whose keys KeyStrokes keeps down until they
+    /// come up or it leaves (`releaseKeys`). `rect` is the streamed source's rectangle, or `.null` for
+    /// input with nowhere to land that still goes (`isUpOfSomethingDown`: StreamCoordinator), a
+    /// button's up then going where the pointer is.
+    func apply(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         switch event {
         case .pointer(let action, let x, let y):
@@ -74,27 +91,76 @@ final class InputInjector {
         case .scroll(let x, let y, let dx, let dy):
             scroll(at: point(x, y, in: rect), dx: dx * rect.width, dy: dy * rect.height)
         case .text(let string):
-            type(string)
+            type(string, from: device)
         case .scrollGesture(let phase, let x, let y):
             scrollGesture(phase, at: point(x, y, in: rect))
         case .key(let hidUsage, let down, let modifiers):
-            key(hidUsage: hidUsage, down: down, modifiers: modifiers)
+            key(hidUsage: hidUsage, down: down, modifiers: modifiers, from: device)
         }
     }
 
+    /// Where a device's position lands on the Mac: its fraction of `rect`; with no source to place it
+    /// on (`.null`), where the pointer is now.
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+        if rect.isNull { return pointerNow() }
+        return CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+    }
+
+    /// Where the Mac's pointer is: read (no permission) on a host that posts; on a synthetic host,
+    /// which never reads the real pointer, where its last pointer event went.
+    private func pointerNow() -> CGPoint {
+        if !dryRun, let location = CGEvent(source: nil)?.location { return location }
+        return lastPointerLocation
     }
 
     /// The one place an event reaches the Mac: posted, or in a dry run only counted. True when it
     /// was posted.
     private func post(_ event: CGEvent) -> Bool {
+        if Self.isKeyboard(event.type) { lastKeyFlags = event.flags.rawValue & (KeyStrokes.capsLock | Self.modifierBits) }
         if dryRun {
+            if testLog { logTest(event) }
             Stats.shared.bump("in.dry")
             return false
         }
         event.post(tap: .cghidEventTap)
         return true
+    }
+
+    private static func isKeyboard(_ type: CGEventType) -> Bool { type == .keyDown || type == .keyUp || type == .flagsChanged }
+
+    /// TEST ONLY: one line for an event a dry run would have posted (`testLog`).
+    private func logTest(_ event: CGEvent) {
+        let what: String
+        switch event.type {
+        case .keyDown, .keyUp, .flagsChanged:
+            let key = event.getIntegerValueField(.keyboardEventKeycode)
+            what = "key \(key) " + (event.type == .keyDown ? "down" : event.type == .keyUp ? "up" : "flags changed")
+            print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))")
+            return
+        case .mouseMoved: what = "pointer move"
+        case .leftMouseDown: what = "left mouse down"
+        case .leftMouseUp: what = "left mouse up"
+        case .leftMouseDragged: what = "left mouse drag"
+        case .rightMouseDown: what = "right mouse down"
+        case .rightMouseUp: what = "right mouse up"
+        case .rightMouseDragged: what = "right mouse drag"
+        case .scrollWheel: what = "scroll"
+        default: what = "event \(event.type.rawValue)"
+        }
+        // A button's event says where it goes: a button's up with no source goes where the pointer is.
+        let button = event.type != .mouseMoved && event.type != .scrollWheel
+        let at = button ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
+        print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))\(at)")
+    }
+
+    /// TEST ONLY: SILL_TEST_INPUT_LOG, read once at the coordinator's start. "1" on a synthetic host
+    /// (which posts nothing) turns the log on; anything else, or any other host, is ignored with one
+    /// line. Nothing prints without the variable.
+    static func testInputLog(synthetic: Bool, environment env: [String: String]) -> (on: Bool, line: String?) {
+        guard let value = env["SILL_TEST_INPUT_LOG"], !value.isEmpty else { return (false, nil) }
+        guard synthetic else { return (false, "SILL_TEST_INPUT_LOG ignored: only a --synthetic host takes it.") }
+        guard value == "1" else { return (false, "SILL_TEST_INPUT_LOG=\(value) ignored: 1 turns it on.") }
+        return (true, "Test input log: each event this host would post is printed; a --synthetic host posts none.")
     }
 
     // MARK: Pointer
@@ -131,7 +197,15 @@ final class InputInjector {
         // One synthetic "finger": a constant event number keeps a down/drag/up sequence coherent.
         event.setIntegerValueField(.mouseEventNumber, value: 0)
         watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
+        lastPointerLocation = location
         if post(event) { Stats.shared.bump("in.pointer") }
+    }
+
+    /// Whether this input is the up of a key or a button the Mac has down, which still goes when the
+    /// input has nowhere to land (DroppedInput, StreamCoordinator): its down was posted, its up has
+    /// not been.
+    func isUpOfSomethingDown(_ event: InputEvent) -> Bool {
+        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown)
     }
 
     private func beginClick(_ state: inout ButtonState, at location: CGPoint) {
@@ -335,7 +409,10 @@ final class InputInjector {
 
     // MARK: Text
 
-    private func type(_ string: String) {
+    private func type(_ string: String, from device: KeyStrokes.Device) {
+        // A device types text with none of its modifier keys down: any it still holds goes up first
+        // (KeyStrokes.text), as the characters carry no flags either.
+        post(keys.text(from: device))
         for character in string {
             switch character {
             case "\n": tap(virtualKey: 36)          // Return
@@ -371,14 +448,83 @@ final class InputInjector {
 
     // MARK: Keys
 
-    private func key(hidUsage: UInt16, down: Bool, modifiers: UInt64) {
-        guard let virtualKey = Self.virtualKeys[hidUsage] else {
+    /// Which Mac key each device key is, the flags each event carries, and the keys down (KeyStrokes,
+    /// pure): a key's up leaves only what modifier keys still hold, so no chord leaves its modifiers
+    /// in the HID state table that the next click and scroll start from.
+    private var keys = KeyStrokes()
+
+    private func key(hidUsage: UInt16, down: Bool, modifiers: UInt64, from device: KeyStrokes.Device) {
+        guard let strokes = keys.key(usage: hidUsage, down: down, modifiers: modifiers, from: device) else {
             Stats.shared.bump("in.unknownKey")
             return
         }
-        guard let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: down) else { return }
-        event.flags = Self.flags(from: modifiers)
-        if post(event) { Stats.shared.bump("in.key") }
+        post(strokes)
+    }
+
+    /// Posts KeyStrokes' events in order, each made from `source` with exactly its flags (a modifier's
+    /// own keycode makes a flags-changed event), and has each up checked a quarter of a second later
+    /// (KeyUpCheck: the table read just before each down, a read that needs no permission).
+    private func post(_ strokes: [KeyStroke], letGo: Bool = false) {
+        for stroke in strokes {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: stroke.virtualKey, keyDown: stroke.down) else { continue }
+            event.flags = CGEventFlags(rawValue: stroke.flags)
+            // A dry run reads no table: what it would hold is the last event's flags, none of them the Mac's own.
+            let table = stroke.down && !dryRun ? CGEventSource.flagsState(.hidSystemState).rawValue : lastKeyFlags
+            let check = upCheck.posting(stroke, table: table, posted: lastKeyFlags)
+            if post(event) { Stats.shared.bump(letGo ? "in.keyLetGo" : "in.key") }
+            guard let check else { continue }
+            if !dryRun { checkKeyModifiersLeft(check.id, key: stroke.virtualKey); continue }
+            // A dry run's table is its own: the check reads it at once, and it holds nothing it should not.
+            _ = upCheck.read(check.id, table: lastKeyFlags, posted: lastKeyFlags, held: keys.heldFlags)
+            if testLog { print("Test input: key \(stroke.virtualKey) up: the table read again in 0.25 s for \(KeyStrokes.names(check.cleared))") }
+        }
+    }
+
+    /// A device left: every key it still holds down goes up (KeyStrokes.release), so a key or a
+    /// modifier whose up it never sent (its connection ended in between) does not stay down on the
+    /// Mac and make the next click a ⌘-click. Counted, `in.keyLetGo`, when posted.
+    func releaseKeys(of device: KeyStrokes.Device) {
+        post(keys.release(device), letGo: true)
+    }
+
+    /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
+    /// button still down, where the pointer is, so nothing a device pressed outlives Sill on the Mac.
+    func releaseAll() {
+        post(keys.releaseAll(), letGo: true)
+        if left.isDown { pointer(.leftUp, at: pointerNow()) }
+        if right.isDown { pointer(.rightUp, at: pointerNow()) }
+    }
+
+    /// Shift, control, option and command: the modifiers that change a click or a scroll.
+    private static let modifierBits = KeyStrokes.shift | KeyStrokes.control | KeyStrokes.option | KeyStrokes.command
+    /// Each key down on the Mac with the modifiers its down put in the table: what its up should take
+    /// out, for `checkKeyModifiersLeft`.
+    private var upCheck = KeyUpCheck()
+    /// Said once a run: a key's up left modifiers set.
+    private var saidKeyModifiersLeft = false
+
+    /// A quarter of a second after a key's up that should have taken modifiers out of the HID state
+    /// table (check `id`, KeyUpCheck.posting), the table is read again (a read, no permission): what
+    /// it still holds of them, that no key down on the Mac holds and no key posted since carried
+    /// (KeyUpCheck.read), is counted, `in.keyModifiersLeft`, and said the first time with the key. A
+    /// key's up is meant to put the table back (KeyStrokes, inferred); a device test shows at once if
+    /// it does not. As the gestures' chords do (docs/trackpad-gestures-plan.md §7.3, their
+    /// `checkModifiersLeft`).
+    private func checkKeyModifiersLeft(_ id: Int, key: UInt16) {
+        // Main actor, inherited from this method, as the scroll watchdog's.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self else { return }
+            let still = self.upCheck.read(id, table: CGEventSource.flagsState(.hidSystemState).rawValue,
+                                          posted: self.lastKeyFlags, held: self.keys.heldFlags)
+            guard still != 0 else { return }
+            Stats.shared.bump("in.keyModifiersLeft")
+            guard !self.saidKeyModifiersLeft else { return }
+            self.saidKeyModifiersLeft = true
+            print("Keys: a quarter of a second after a device's key \(key) came up, this Mac's modifier keys still read "
+                  + "\(KeyStrokes.names(still)) (not before it went down); a click or a scroll may act as if they were held "
+                  + "until a key is typed.")
+        }
     }
 
     // MARK: Gestures
@@ -391,7 +537,8 @@ final class InputInjector {
     /// here either.
     ///
     /// The key up carries the flags the HID system's state table held before the chord, not the
-    /// chord's. Events posted from `source` leave their flags in that table (CGEventSource.h: its
+    /// chord's (KeyStrokes.chord): what the devices' modifier keys hold, and the Mac's own keyboard.
+    /// Events posted from `source` leave their flags in that table (CGEventSource.h: its
     /// "accumulated information on modifier flag state … placed in effect by posting events"), and
     /// every pointer and scroll event made from `source` afterwards starts from them: a key up with
     /// control and fn would make the device's next tap a control-click (a context menu) and its next
@@ -400,17 +547,17 @@ final class InputInjector {
     /// down. `checkModifiersLeft` says so in the log if the table still holds the chord's modifiers.
     func chord(keyCode: UInt16, flags: UInt64) {
         if !dryRun { remindAboutAccessibilityIfNeeded() }
-        let before = CGEventSource.flagsState(.hidSystemState)
+        let before = CGEventSource.flagsState(.hidSystemState).rawValue
+        let strokes = KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: before)
         // Both made before either is posted, so a key never goes down without its up.
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
-        down.flags = CGEventFlags(rawValue: flags)
-        up.flags = before
-        let posted = post(down)
-        _ = post(up)
+        let events = strokes.compactMap { CGEvent(keyboardEventSource: source, virtualKey: $0.virtualKey, keyDown: $0.down) }
+        guard events.count == strokes.count else { return }
+        for (event, stroke) in zip(events, strokes) { event.flags = CGEventFlags(rawValue: stroke.flags) }
+        let posted = post(events[0])
+        _ = post(events[1])
         guard posted else { return }
         Stats.shared.bump("in.gesture")
-        checkModifiersLeft(chord: flags, before: before.rawValue)
+        checkModifiersLeft(chord: flags, before: before)
     }
 
     /// Said once a run: a chord left modifiers set that were not set before it.
@@ -437,71 +584,6 @@ final class InputInjector {
                   + "(not before it); a click or a scroll may act as if they were held until a key is typed.")
         }
     }
-
-    /// The client sends UIKeyModifierFlags bits. They sit at the same bit positions as the
-    /// CGEventFlags masks, but build the flags explicitly rather than reinterpreting the number:
-    /// anything else in there (numeric pad, iOS-only bits) has no business reaching the Mac.
-    private static func flags(from modifiers: UInt64) -> CGEventFlags {
-        var flags: CGEventFlags = []
-        if modifiers & (1 << 16) != 0 { flags.insert(.maskAlphaShift) }
-        if modifiers & (1 << 17) != 0 { flags.insert(.maskShift) }
-        if modifiers & (1 << 18) != 0 { flags.insert(.maskControl) }
-        if modifiers & (1 << 19) != 0 { flags.insert(.maskAlternate) }
-        if modifiers & (1 << 20) != 0 { flags.insert(.maskCommand) }
-        return flags
-    }
-
-    /// USB HID usage (UIKeyboardHIDUsage on the client) → macOS virtual keycode (Carbon kVK_*).
-    /// Only the keys a phone keyboard can send; anything else is dropped and counted.
-    private static let virtualKeys: [UInt16: CGKeyCode] = [
-        // Letters, 0x04…0x1D = A…Z
-        0x04: 0, 0x05: 11, 0x06: 8, 0x07: 2, 0x08: 14, 0x09: 3, 0x0A: 5, 0x0B: 4, 0x0C: 34,
-        0x0D: 38, 0x0E: 40, 0x0F: 37, 0x10: 46, 0x11: 45, 0x12: 31, 0x13: 35, 0x14: 12,
-        0x15: 15, 0x16: 1, 0x17: 17, 0x18: 32, 0x19: 9, 0x1A: 13, 0x1B: 7, 0x1C: 16, 0x1D: 6,
-        // Digits, 0x1E…0x27 = 1…9 then 0
-        0x1E: 18, 0x1F: 19, 0x20: 20, 0x21: 21, 0x22: 23, 0x23: 22, 0x24: 26, 0x25: 28,
-        0x26: 25, 0x27: 29,
-        // Editing and punctuation
-        0x28: 36,   // Return
-        0x29: 53,   // Escape
-        0x2A: 51,   // Delete (backspace)
-        0x2B: 48,   // Tab
-        0x2C: 49,   // Space
-        0x2D: 27,   // -
-        0x2E: 24,   // =
-        0x2F: 33,   // [
-        0x30: 30,   // ]
-        0x31: 42,   // \
-        0x33: 41,   // ;
-        0x34: 39,   // '
-        0x35: 50,   // `
-        0x36: 43,   // ,
-        0x37: 47,   // .
-        0x38: 44,   // /
-        0x39: 57,   // Caps Lock
-        // F1…F12
-        0x3A: 122, 0x3B: 120, 0x3C: 99, 0x3D: 118, 0x3E: 96, 0x3F: 97,
-        0x40: 98, 0x41: 100, 0x42: 101, 0x43: 109, 0x44: 103, 0x45: 111,
-        // Navigation
-        0x4A: 115,  // Home
-        0x4B: 116,  // Page Up
-        0x4C: 117,  // Forward Delete
-        0x4D: 119,  // End
-        0x4E: 121,  // Page Down
-        0x4F: 124,  // Right
-        0x50: 123,  // Left
-        0x51: 125,  // Down
-        0x52: 126,  // Up
-        // Modifiers, in case the client sends them as keys as well as flags
-        0xE0: 59,   // Left Control
-        0xE1: 56,   // Left Shift
-        0xE2: 58,   // Left Option
-        0xE3: 55,   // Left Command
-        0xE4: 62,   // Right Control
-        0xE5: 60,   // Right Shift
-        0xE6: 61,   // Right Option
-        0xE7: 54,   // Right Command
-    ]
 
     // MARK: Accessibility permission
 
