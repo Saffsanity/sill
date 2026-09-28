@@ -14,14 +14,16 @@
 #
 # The cases (name|seconds|DOOR|RELAY|DEVICES|HOSTENV|gate|host args -- relay args -- device args):
 #   home       H5: 60 s at home, Balanced-sized frames (300 KB keyframes, 30 KB deltas) at 60 fps, Send
-#              Audio on: 100 ± 1 packets a second, no seq gap, every click within 1 ms of its second
+#              Audio on: 100 ± 1 packets a second, no seq gap, every click within 1 ms of its second; the
+#              device's playout model on the arrivals (audiocheck): nothing late after 2 s, no jump after 3 s
 #   home-off   the same with Send Audio off: no sound, and the picture's net.sent, net.dropped and
 #              frame age as with it (H5), the host's CPU (H12)
 #   home1024   H5 with 1024-frame chunks (SILL_TEST_AUDIO_CHUNK): 93.75 packets a second
 #   segments   H8 on two devices: each tone paused 50 ms at 3 s and 500 ms at 6 s after it starts, the
 #              source changed at 12 s: a segment start at each resumed chunk, placed by its stamp (the
 #              clicks), nothing more than 40 ms after its stamp, a new epoch with its format first on
-#              each device
+#              each device, and the playout model's cover kept at what the link shows (the pauses are
+#              no jitter)
 #   away8      H6: the remote door (TLS) through an 8 Mbit/s bottleneck, 70 ms, 1.5 MB keyframes and
 #              30 KB deltas (more than the link): frames dropped, the sound never; packets no later
 #              than the frames + 20 ms; away8-off the same without sound

@@ -5,8 +5,9 @@
 #     AudioEncoder, SyntheticAudio, TestTone), its Sources/StreamProtocol and Scripts/audio/main.swift,
 #     as a throwaway SwiftPM package under .build/audio/host (git-ignored); named "sill" like the real
 #     package, so the host files' `package` access compiles unchanged;
-#   - the device: Scripts/audiocheck.swift with Sources/StreamProtocol, iOSClient/AudioDecoder.swift and
-#     Sources/SillHost/TestTone.swift as one module (swiftc), .build/audio/audiocheck.
+#   - the device: Scripts/audiocheck.swift with Sources/StreamProtocol, iOSClient/AudioDecoder.swift,
+#     iOSClient/AudioPlayout.swift and Sources/SillHost/TestTone.swift as one module (swiftc),
+#     .build/audio/audiocheck.
 # Nothing is copied into the repository, and a file is rewritten only when it changed, so a second build
 # is quick. Refuses a binary that links VideoToolbox, ScreenCaptureKit, CoreMedia or AVFoundation: the
 # harness never touches the Mac's encoder, never captures sound and never plays any.
@@ -70,6 +71,7 @@ dev="$out/device"
 mkdir -p "$dev"
 for f in Sources/StreamProtocol/*.swift; do put "$dev/$(basename "$f")" < "$f"; done
 put "$dev/AudioDecoder.swift" < iOSClient/AudioDecoder.swift
+put "$dev/AudioPlayout.swift" < iOSClient/AudioPlayout.swift
 put "$dev/TestTone.swift" < Sources/SillHost/TestTone.swift
 put "$dev/main.swift" < Scripts/audiocheck.swift
 if ! swiftc -O "$dev"/*.swift -o "$out/audiocheck" > "$out/audiocheck-build.log" 2>&1; then

@@ -45,6 +45,11 @@ def device(name, suffix="device.txt"):
     d["fage"] = [num(r"frameAge p50 ([\d.–]+)"), num(r"frameAge p50 [\d.–]+ p95 ([\d.–]+)"), num(r"frameAge p50 [\d.–]+ p95 [\d.–]+ max ([\d.–]+)")]
     d["aage"] = [num(r"packetAge p50 ([\d.–]+)"), num(r"packetAge p50 [\d.–]+ p95 ([\d.–]+)"), num(r"packetAge p50 [\d.–]+ p95 [\d.–]+ max ([\d.–]+)")]
     d["closed"] = "closed the connection" in text
+    # The playout model on these arrivals (iOSClient/AudioPlayout.swift, with an ideal output).
+    for key in ("placed", "late", "lateAfter2", "jumps", "jumpsAfter3", "joins", "dups"):
+        d["m_" + key] = num(r"model: .*?\b" + key + r"=(\d+)", int, None)
+    for key in ("coverMax", "coverMaxAfter3", "needMax"):
+        d["m_" + key] = num(r"model: .*?\b" + key + r"=([\d.–]+)", float, None)
     # Per second: (t, frames, frame age median, frame age max, packets, packet age median, packet age max)
     per = []
     for m in re.finditer(r"^t=(\d+) frames=(\d+) fage=([\d.–]+)/([\d.–]+) aud=(\d+) aage=([\d.–]+)/([\d.–]+)", text, re.M):
@@ -76,7 +81,26 @@ def row(name):
           f"cpu {cpu(name):5.1f}%")
     print(f"               device: frames {d['frames']} fage {d['fage']} ms; packets {d['packets']} ({d['rate']}/s) aage {d['aage']} ms; "
           f"formats {d['formats']} epochs [{d['epochs']}] starts {d['starts']} gaps {d['gaps']} orphans {d['orphans']} clicks {d['within']}/{d['clicks']}")
+    if d.get("m_placed") is not None:
+        print(f"               model: placed {d['m_placed']} late {d['m_late']} (after 2 s {d['m_lateAfter2']}) jumps {d['m_jumps']} "
+              f"(after 3 s {d['m_jumpsAfter3']}) joins {d['m_joins']} dups {d['m_dups']} cover max {d['m_coverMax']} ms "
+              f"(after 3 s {d['m_coverMaxAfter3']}) need max {d['m_needMax']} ms")
     return h, d
+
+def model_gate(name, d, cover=False):
+    """The device's playout model on the run's real arrivals: nothing too late to play after its first
+    2 s and no jump after 3 s; with `cover`, its jitter cover after 3 s no more than the link showed (the
+    packets' largest age less their median, + 5 ms) or home's 40 ms start: pauses and a new epoch are
+    segments placed by their stamps, never jitter (H8)."""
+    if d.get("m_placed") is None:
+        gate(False, f"{name}: no playout model numbers in the AUDIOCHECK line"); return
+    gate(d["m_lateAfter2"] == 0 and d["m_jumpsAfter3"] == 0,
+         f"{name}: the playout model: late after 2 s {d['m_lateAfter2']}, jumps after 3 s {d['m_jumpsAfter3']}, {d['m_placed']} placed")
+    if cover:
+        spread = (d["aage"][2] or 0) - (d["aage"][0] or 0)
+        allowed = max(40.0, spread + 5)
+        gate(d["m_coverMaxAfter3"] is not None and d["m_coverMaxAfter3"] <= allowed,
+             f"{name}: the model's jitter cover after 3 s at most {d['m_coverMaxAfter3']} ms (the link's spread {spread:.1f} ms; ≤ {allowed:.1f})")
 
 print(f"Runs in {runs}")
 for spec in sys.argv[2:]:
@@ -88,9 +112,11 @@ for spec in sys.argv[2:]:
         gate(99 <= d["rate"] <= 101, f"{name}: {d['rate']} packets a second (100 ± 1)")
         gate(d["gaps"] == 0 and d["orphans"] == 0 and d["failures"] == 0, f"{name}: no seq gap, no packet before its format, nothing undecodable")
         gate(d["clicks"] >= 0.9 * len(d["per"]) and d["within"] == d["clicks"], f"{name}: {d['within']} of {d['clicks']} clicks within 1 ms of their second")
+        model_gate(name, d)
     elif kind == "home1024":      # H5 with 1024-frame chunks: 93.75 a second
         gate(92.75 <= d["rate"] <= 94.75, f"{name}: {d['rate']} packets a second (93.75 ± 1)")
         gate(d["gaps"] == 0 and d["within"] == d["clicks"] and d["clicks"] > 0, f"{name}: no gap; {d['within']} of {d['clicks']} clicks within 1 ms")
+        model_gate(name, d)
     elif kind.startswith("same-as="):   # H5: the picture the same with and without sound
         other = kind.split("=", 1)[1]
         ho, do = host(other), device(other)
@@ -117,6 +143,9 @@ for spec in sys.argv[2:]:
             gate(dd["starts"] >= 5 and dd["gaps"] == 0, f"{name} {suffix}: {dd['starts']} segment starts, {dd['gaps']} seq gaps")
             gate(dd["within"] == dd["clicks"] and dd["clicks"] > 0, f"{name} {suffix}: {dd['within']} of {dd['clicks']} clicks within 1 ms, the segments placed by their stamps")
             gate(not late, f"{name} {suffix}: no packet more than 40 ms after its stamp after the first second ({[p[0] for p in late]})")
+            # H8: the pauses and the source change are segments placed by their stamps, not jitter: the
+            # model's cover stays where the steady link puts it.
+            model_gate(f"{name} {suffix}", dd, cover=True)
         gate(h["total"]("aud.gap") == 4, f"{name}: the host began 4 segments after gaps, two in each tone (aud.gap {h['total']('aud.gap')})")
     elif kind.startswith("away"):   # H6: the sound never dropped while frames are, packets no later than frames + 20 ms
         want_drops = kind == "away-drops"
