@@ -109,7 +109,10 @@ unchecked items below were done that day or record what was decided):
       below). Apple wants real contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
-      print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
+      print nothing: `grep -n -i -E 'remote access|vpn|tailscale|port you forward' site/*.html |
+      grep -v '“Sill Remote Access”'` (that is the keychain item's name, which stays). Pairing and
+      the camera are no longer Remote Access's: every device pairs since pairing at home (PR #37),
+      so the pages describe both outside the blocks.
 - [x] Done 2026-09-26: the repository is public with its LICENSE (Apache-2.0, since PR #15), and
       `index.html` says "Free and open source" with the GitHub link, `support.html` links the
       issues, and the README shows its CI badge. Sill for Mac already says "free and open source"
@@ -171,8 +174,8 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       screenshots.
 - [ ] For a build without Remote Access, paste the local-only keywords, What's New
       and review notes, leave out the description's "Away from home" bullet, and film no shot 11
-      (metadata, the Remote Access switch). Then nothing you paste mentions Remote Access, a VPN,
-      Tailscale, pairing or camera access.
+      (metadata, the Remote Access switch). Then nothing you paste mentions Remote Access, a VPN
+      or Tailscale. Pairing and the camera stay: every device pairs since PR #37.
 - [ ] Export compliance (metadata §6): nothing to answer. The app's Info.plist says NO
       (`ITSAppUsesNonExemptEncryption`), so the uploaded build must not show Missing Compliance.
 - [ ] App Review Information (metadata §7 and §8): contact, notes, the video.
@@ -362,6 +365,78 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       privacy.html's lines for the tour (PR #35), the Mac's menus (PR #36) and its pointer (PR
       #31, whose Mac side 0.3.1 already has) wait for the next release, with that page's date.
 
+### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
+
+Pairing at home (PR #37) made the home door TLS 1.3 with pairing, and neither side works at home with
+the other's older release (docs/home-pairing-plan.md §3.4, read again against the code on
+2026-09-27):
+
+- A device from before it (TestFlight's 0.5 (1), from b37f47a, or a build of main before PR #37) at
+  Sill for Mac 0.4.0: it dials plain TCP, and the door fails the handshake (-9836) within
+  milliseconds and closes. The device reads a TLS alert and EOF, shows its stream screen for a
+  moment (build 1 counts a session from TCP's ready), then "‹Mac› disconnected. Sill will reconnect
+  when it can reach it." (for a Mac it never saved, "…It will reconnect when the Mac is back."),
+  and its reconnect dials the listed row again at once, over and over, for as long as both run:
+  nothing spaces the tries while the Mac is listed (its 2 s timer only covers a Mac that is not),
+  so it can flicker several times a second. Nobody has watched it on a device; the plan's "every
+  2 s" was read from that timer. No notice can reach it through a failed handshake. The Mac's menu
+  says "An iPhone or iPad Needs Sill Updated" from a source's third plain try within a minute, for
+  10 minutes; those tries never start the door's backoff, so the updated device gets in at once.
+  Remote Access still serves it (the remote door was TLS already), away from home.
+- 0.5 (2), or any Release build from PR #37 on, at Sill for Mac 0.3.1 or earlier: that Sill
+  advertises no `p` in its TXT record, a plain door, and a Release build never dials one (no
+  downgrade). The row reads "Update Sill", and a tap dials nothing and says "‹Mac› runs an older
+  Sill. Update Sill on the Mac to connect." The Mac sees nothing; its update check offers 0.4.0
+  once it is published. A Debug build dials a plain door until it has seen that Mac speak TLS.
+- Both new: every device pairs once, with the code over Wi-Fi or by itself over the cable, one
+  paired for Remote Access before too. Keychain hardening (PR #42) keeps a release's identity, trust
+  list and Require pairing in the data-protection keychain and never reads 0.3.1's login-keychain
+  items (no migration, docs/keychain-plan.md §9a), so a Mac that ran 0.3.1 with Remote Access
+  starts 0.4.0 with a new key and Mac ID and none of its pairings. A device paired at home learns the Mac's addresses for afar only in a session at home while Remote Access
+  is on (the Mac lists them only then); without them a dial away says only that the Mac didn't
+  answer.
+
+So the device build goes first (it says what to update), then the Mac, in this order, once PRs
+#37, #38, #42 and #43 are on main and Noah has tried main's build, one device of it a Release build as
+TestFlight's is (a Debug build dials a plain door it has not seen speak TLS, and shows the tour only
+when asked):
+
+- [ ] The release's pull request (branch `release-next`): main merged in, the words that waited for
+      the three (the site's pages, the README's How it works, the metadata, this section),
+      `CFBundleShortVersionString` 0.4.0 and `CURRENT_PROJECT_VERSION` 2; CI green; merged.
+- [ ] Tag its merge commit: `git tag -a v0.4.0 -m "Sill for Mac 0.4.0: pairing at home"` and
+      `git push origin v0.4.0` (the release workflow verifies it: neither `SILL_SIGN_IN_CI` nor a
+      secret is set).
+- [ ] From that commit, `Scripts/release-ios.sh --upload`: 0.5 (2) to App Store Connect. As soon as
+      it shows under TestFlight, its What to Test (the build › Test Details): internal testers
+      with automatic distribution get it the moment it is processed (5 to 30 minutes, and an
+      email).
+- [ ] Once it is processed, one device installs it from TestFlight and connects at home to a Mac
+      that runs this release's code (Noah's build of main from his trial will do: the release
+      commit adds only words and the two version numbers): the Release build's first session at
+      the new door. If that fails, stop here, with only an internal TestFlight build out: fix,
+      and the next device build is 3.
+- [ ] Stage the site: the tagged pages rsynced into the sill-site clone (part 1 §3) and committed,
+      not pushed yet.
+- [ ] The keychain profile in place: `Packaging/embedded.provisionprofile` (git-ignored; part 1 §5,
+      "Sill Developer ID"). This release must be built with it: `make-app.sh --release`, which
+      release.sh runs, prints `identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)` and release.sh "Identity keychain: data-protection". Without
+      it the build falls back to the login keychain and says so: stop, since the notes tell users
+      their Mac's keys moved. The rehearsal (`release.sh --dry-run`) shows the same lines first.
+- [ ] Then `Scripts/release.sh --publish` from the same commit (part 1 §2's variables), the notes
+      over its one-line body (`gh release edit v0.4.0 --notes-file …`), the site's commit pushed
+      at once (the Download button gives the new release's Sill.dmg the moment it is published,
+      and the pages should say what it does), and the check of what was published, signed out.
+- [ ] The Beta App Description (TestFlight §6).
+- [ ] Noah's devices: Sill from TestFlight on the iPad and the iPhone, then Sill for Mac from the
+      download on a Mac that runs a release (not the Apple Development build on this Mac, part 1
+      §1). The iPad, paired for Remote Access on 2026-09-25, pairs once more (the Mac's new key,
+      above), and so does the iPhone, with the code or over the cable; each reaches the Mac away
+      from home once it has connected at home with Remote Access on.
+- [ ] Not before 0.4.0 is the download: 0.5 (2) to an external group or App Review, which use the
+      Sill for Mac that getsill.app/download gives.
+
 ## TestFlight
 
 Sill for iPhone and iPad reaches testers, then the App Store, through App Store Connect.
@@ -513,7 +588,7 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
 
 | Field | Value |
 |---|---|
-| Beta App Description | The block below (548 characters) |
+| Beta App Description | The block below (665 characters) |
 | Feedback Email | `support@getsill.app` |
 | Marketing URL | `https://getsill.app` |
 | Privacy Policy URL | `https://getsill.app/privacy` |
@@ -525,7 +600,7 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil.
 
-It needs the free Sill for Mac, from https://getsill.app/download, on a Mac with Apple silicon and macOS 14 or later. Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac.
+It needs the free Sill for Mac 0.4.0 or later, from https://getsill.app/download, on a Mac with Apple silicon and macOS 14 or later. Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac. The first time, pair: scan the code your Mac shows, or type it. Over a USB cable, it pairs by itself.
 
 To send feedback, take a screenshot while you use Sill, or use Send Beta Feedback in TestFlight. Write to support@getsill.app for anything else.
 ```

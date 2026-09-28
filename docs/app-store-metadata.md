@@ -37,7 +37,9 @@ is `iOSClient/SillLinks.swift`.
 
 **Remote Access switch.** The blocks below describe a 1.0 that includes Remote
 Access (PR #13, on main since ba91136). Guideline 2.3.1(a) forbids describing
-what the build lacks, so if 1.0 ships without it, make every one of these cuts:
+what the build lacks, so if 1.0 ships without it, make every one of these cuts.
+Pairing and the camera stay either way: since pairing at home (PR #37, Sill for
+Mac 0.4.0 with build 0.5 (2)) every device pairs, at home too.
 
 | Where | Cut |
 |---|---|
@@ -81,7 +83,9 @@ These texts are only true once these are:
   version 1.0, and only a build whose version matches can be added to it, so
   set the record's Version to 0.5 (section 5).
 - Every claim in the description has been seen working on a device. Still
-  open: the menus (PR #36's P1 to P13: the Menus button, the iPad's menu bar
+  open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
+  pairing by itself, Remove), three-finger gestures (PR #38's P1 to P13), the
+  menus (PR #36's P1 to P13: the Menus button, the iPad's menu bar
   on iPadOS 26), the Mac's pointer on the device (PR #31's P1 to P12), the
   first-run tour (PR #35's P1 to P16), the USB cable on an iPhone (verified
   on the iPad mini only; if it fails, write "a USB cable (iPad)"), Apple
@@ -226,8 +230,8 @@ developer can't reach:
   generic name ("iPad"), so the model is what tells devices apart. It goes to
   the Mac the device is connected to, which shows it in its menu and writes it
   in its own log on that Mac (`~/Library/Logs/Sill`).
-- Taps, pointer moves, scrolls, keys, typed text, the menu items chosen and
-  the panel size go to the same Mac. The Mac sends back the picture, window
+- Taps, pointer moves, scrolls, three-finger gestures, keys, typed text, the
+  menu items chosen and the panel size go to the same Mac. The Mac sends back the picture, window
   titles, thumbnails, app icons, its name, the menus of the app in use (their
   titles, and a menu's items when the device opens it) and where its own
   pointer is over the picture.
@@ -236,8 +240,9 @@ developer can't reach:
   paired devices (Sill for Mac's Settings › Devices, where they can be
   removed).
 - Kept on the device only: each Mac's thumbnail order, the names of Macs
-  seen with Direct Wireless Connection on, and which steps of the first-run
-  tour were seen (or that it was skipped); the device's key and the paired
+  seen with Direct Wireless Connection on, which steps of the first-run
+  tour were seen (or that it was skipped) and whether three-finger gestures
+  are on; the device's key and the paired
   Macs, each with its key's fingerprint, its name and, with Remote Access, its
   addresses (Keychain and app storage); and camera frames, which are read for
   the pairing code and never saved or sent.
@@ -277,6 +282,7 @@ Made for touch
 • Apple Pencil works as a mouse, with hover on iPad models that support it.
 • Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below.
 • Type with the on-screen keyboard or a hardware keyboard. Shortcuts work too.
+• Swipe and pinch with three fingers for Mission Control, App Exposé, Spaces, Apps and Show Desktop.
 • Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26 or later, use the menu bar at the top of the screen.
 • Switch windows from live thumbnails in the bar. Touch and hold one to close, minimize or go full screen. Drag it to reorder.
 • When the mouse moves on your Mac, its pointer shows on your iPhone or iPad too.
@@ -421,12 +427,12 @@ Plain ASCII on purpose, so every character is one byte.
 WHAT SILL IS
 Sill is a remote display for the user's own Mac. The iPhone and iPad app shows any window, or the whole desktop, of a Mac running the free Sill for Mac, and sends touch, trackpad, keyboard and Apple Pencil input back to it. Every app runs and draws on the Mac. The iOS app shows the picture and the Mac app's menus, and sends input. Its Apps list shows only apps already installed on that Mac.
 
-There is no account, no sign-in, no in-app purchase, no ads and no server. The app talks only to the user's own Mac, which it finds with Bonjour on the local network. Each device pairs with the Mac once, and every connection is encrypted.
+There is no account, no sign-in, no in-app purchase, no ads and no server. The app talks only to the user's own Mac, which it finds with Bonjour on the local network.
 
 WHAT YOU NEED
 - A Mac with Apple silicon and macOS 14 or later.
 - An iPhone or iPad on the same Wi-Fi network as the Mac.
-- Sill for Mac, free: https://getsill.app/download (Developer ID, notarized).
+- Sill for Mac 0.4.0 or later, free: https://getsill.app/download (Developer ID, notarized).
 
 SET UP THE MAC (about 2 minutes)
 1. Download Sill for Mac from the link above, move Sill to Applications and open it (click Open if macOS asks). It lives in the menu bar, with no Dock icon, and opens its Settings on Permissions.
@@ -435,14 +441,16 @@ SET UP THE MAC (about 2 minutes)
 4. If macOS asks whether Sill may find devices on your local network, click Allow.
 The Permissions pane then says "You're all set."
 
-CONNECT
+CONNECT AND PAIR (once per device)
 5. Open Sill on the iPhone or iPad. Tap Allow when it asks for Local Network access.
-6. The Mac appears under "Connect to a Mac" within a few seconds, marked "Not paired". Tap it: the Mac shows a code and the device opens its camera (allow camera access). Point it at the code, or tap Enter Code Instead and type the 12 digits. The camera only reads that code. The Mac's desktop appears. This is once per device; over a USB-C cable the device pairs by itself.
+6. The Mac appears under "Connect to a Mac" within a few seconds, marked "Not paired". Tap it.
+7. The Mac opens a window with a QR code and a 12-digit code. Point the device's camera at the QR code (allow camera access; the camera only reads that code), or tap Enter Code Instead and type the digits. The Mac's desktop appears. Over a USB-C cable (the row says "Wired") the device pairs by itself while the Mac is unlocked.
 
 WHAT TO TRY
-- The first time your Mac's picture shows, a short tour points out the controls. Take the Tour in Settings shows it again.
+- The first time the Mac's picture shows, a short tour points out the controls. Take the Tour in Settings shows it again.
 - Apps (magnifying glass): pick an open window, or search the list and open an app.
 - Tap to click. Drag to scroll. Touch and hold to right-click. Apple Pencil works as a mouse.
+- Three fingers: swipe up for Mission Control, left or right for Spaces, spread for Show Desktop.
 - Keyboard: type into the window. A hardware keyboard works too, with shortcuts.
 - Menus (in the bar; on iPad with iPadOS 26 or later also the menu bar at the top of the screen): the menus of the app on the Mac. Choose an item and the Mac does it.
 - Move the mouse on the Mac: its pointer shows on the device too.
@@ -450,16 +458,16 @@ WHAT TO TRY
 - Window thumbnails in the bar: tap to switch. Touch and hold for the window's close, minimize and full screen buttons. Keep holding and drag to reorder.
 - Desktop: the whole Mac screen.
 - Hold the device upright (portrait): a laptop layout with a trackpad and a row of keys.
-- Settings (gear, last in the bar): the Mac's Quality, Resolution and Frame Rate. The Sill menu on the Mac shows the same values. Disconnect is at the bottom.
+- Settings (gear, last in the bar): the Mac's Quality, Resolution and Frame Rate. Disconnect is at the bottom.
 
 IF THE MAC DOES NOT APPEAR
-Some networks (guest, office, hotel) keep devices from seeing each other. Then either connect an iPad to the Mac with a USB-C cable (the Mac's row then says "Wired"), or turn on Direct Wireless Connection in the Sill menu on the Mac and tap Search Nearby on the device. That connects without a shared network.
+Some networks (guest, office, hotel) keep devices from seeing each other. Then connect an iPad to the Mac with a USB-C cable, or turn on Direct Wireless Connection in the Sill menu on the Mac and tap Search Nearby on the device, which needs no shared network.
 
 VIDEO
 The attached video, filmed with a camera, shows a Mac and an iPad together: setup, pairing, streaming, touch and keyboard input, and the Settings panel.
 
 REMOTE ACCESS
-On the Mac, choose Remote Access... in the Sill menu and turn on Remote Access. A device paired in step 6 can then reach the Mac from another network through the user's own VPN, for example the same VPN (such as Tailscale) on the Mac and the device. To try it, move the paired device to cellular or a hotspot with the VPN on. A device away from the Mac's network pairs with Pair iPhone or iPad... in the Sill menu and Add a Mac... on the device. Only paired devices can connect this way, and the connection is encrypted. The attached video shows this too.
+On the Mac, choose Remote Access... in the Sill menu and turn it on while the paired device is connected: the device then learns how to reach it from another network through the user's own VPN (such as Tailscale on both). To try it, move the device to cellular or a hotspot with the VPN on and tap the Mac. The attached video shows this too.
 ```
 
 Local-only build: delete from `REMOTE ACCESS` to the end.
@@ -489,9 +497,9 @@ together with a camera:
 | 6 | Apps, pick Notes (a note written for the shoot); then Menus, Format, and a style for a line | The same window on both screens; the style chosen on the iPad applied on the Mac |
 | 7 | Touch: tap to click, drag to scroll, touch and hold for a right-click menu; Apple Pencil moving the pointer, with hover if the iPad supports it | Each action landing on the Mac at the same moment |
 | 8 | Keyboard: type a sentence into the note | The letters appearing on the Mac too |
-| 9 | Turn the iPad upright: the laptop layout; move the pointer with the trackpad, click, two-finger scroll; switch windows from a thumbnail; touch and hold one for its window buttons | The trackpad driving the Mac's pointer |
+| 9 | Turn the iPad upright: the laptop layout; move the pointer with the trackpad, click, two-finger scroll; three fingers up for Mission Control and down again; switch windows from a thumbnail; touch and hold one for its window buttons | The trackpad driving the Mac's pointer; Mission Control opening and closing on the Mac |
 | 10 | Settings (the gear): change Quality, show the same value in the Sill menu on the Mac, then Disconnect | The panel and the Mac's menu agreeing; the iPad back on "Connect to a Mac" |
-| 11 | Only for a build with Remote Access: Remote Access… in the Sill menu, the switch on; then the iPad, paired in shot 5, on cellular or a hotspot with the VPN on, connecting and streaming | The stream with the iPad off the Mac's network, and no second pairing |
+| 11 | Only for a build with Remote Access: the iPad, paired in shot 5, connected at home; Remote Access… in the Sill menu, turned on while it is connected (its Settings panel then says how it reaches the Mac away from home); then the iPad on cellular or a hotspot with the VPN on, connecting and streaming | The stream with the iPad off the Mac's network, with no second pairing |
 | 12 | The same Mac on an iPhone: pair it (tap the Mac, scan the code), pick a window, type a word | The app on iPhone too |
 
 Optional, if time allows: an iPad on a USB-C cable (the row says "Wired"; an
@@ -644,8 +652,17 @@ Safe:
   the counts above: description 2,056, review notes 3,550; keywords and
   What's New the same): description 2,332 (local-only 2,176) of 4,000
   characters; review notes 3,926 bytes (local-only 3,219) of 4,000, all
-  ASCII; the rest unchanged. Pairing at home (PR #37) must fit in the 74
-  bytes left, or the notes lose words elsewhere.
+  ASCII; the rest unchanged.
+- With pairing at home (PR #37) and the gestures (PR #38), for the release of
+  Sill for Mac 0.4.0 with build 0.5 (2), the same script: description 2,437
+  (local-only 2,382) of 4,000 characters; review notes 3,948
+  bytes (local-only 3,592) of 4,000, all ASCII, after they lost the
+  Mac menu's agreeing values, a clause on encryption in WHAT SILL IS and
+  REMOTE ACCESS, the pairing that REMOTE ACCESS no longer needs and a sentence
+  of IF THE MAC DOES NOT APPEAR, and gained the three-finger gestures and the
+  rule that Remote Access is turned on while the paired device is connected
+  (a device learns the Mac's addresses only from a session with Remote Access
+  on); the rest unchanged.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
