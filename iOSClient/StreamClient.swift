@@ -24,6 +24,9 @@ struct FoundMac: Identifiable, Hashable {
     /// a sighting of the saved Mac (its Remote row stays), and no context menu: it may be a
     /// stranger's until its key says otherwise.
     let savedByName: String?
+    /// The row's TXT record carries a recognition tag (any, a saved Mac's or not). A row whose tag
+    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`).
+    let carriesTag: Bool
     /// How the Mac is reachable, the word at the end of a network or Direct row ("Wired", "Wi-Fi",
     /// "Direct"), or nil when the interfaces it was seen on do not say (DiscoveryPolicy.method), and
     /// for a Remote row. Only shown: which route a tap takes is `route`'s and `wired`'s.
@@ -45,9 +48,10 @@ struct FoundMac: Identifiable, Hashable {
     let homeWord: DiscoveryPolicy.RowWord
 
     init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil, savedByName: String? = nil,
-         method: DiscoveryPolicy.Method? = nil, wired: NWInterface? = nil, wifi: NWInterface? = nil,
+         carriesTag: Bool = false, method: DiscoveryPolicy.Method? = nil, wired: NWInterface? = nil, wifi: NWInterface? = nil,
          door: DiscoveryPolicy.HomeDoor = .plain, homeWord: DiscoveryPolicy.RowWord? = nil) {
         self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID; self.savedByName = savedByName
+        self.carriesTag = carriesTag
         self.method = method; self.wired = wired; self.wifi = wifi
         self.door = door; self.homeWord = homeWord ?? .method(method)
     }
@@ -929,18 +933,24 @@ final class StreamClient: ObservableObject {
             let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: seen.policy)
             let wifi = DiscoveryPolicy.wifiInterface(direct: row.direct, interfaces: seen.policy)
             let macID = SavedMacs.recognize(tag: seen.tag, in: savedMacs) ?? seen.stands
-            let named = DiscoveryPolicy.rowMac(tagged: macID, name: row.name, saved: byName)
+            let carriesTag = !(seen.tag ?? "").isEmpty
+            let named = DiscoveryPolicy.rowMac(tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName)
             let savedByName = named?.tagNamed == false ? named?.macID : nil
             let saved = named.flatMap { n in savedMacs.first { $0.macID == n.macID } }
+            // A tag that names no saved Mac under a saved Mac's name: a Mac set up again (a new key),
+            // or a look-alike; either way a tap asks, whatever its `p` (DiscoveryPolicy.rowDoor).
+            let door = DiscoveryPolicy.rowDoor(seen.door, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
+                tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName))
             let method = DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy)
-            let word = DiscoveryPolicy.rowWord(door: seen.door, saved: saved != nil, revoked: saved?.revoked == true,
+            let word = DiscoveryPolicy.rowWord(door: door, saved: saved != nil, revoked: saved?.revoked == true,
                                                homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, method: method,
-                                               cable: wired.map { DiscoveryPolicy.carriesOnlyLinkLocal($0, own: own) } ?? false)
+                                               cable: wired.map { DiscoveryPolicy.carriesOnlyLinkLocal($0, own: own) } ?? false,
+                                               newKey: saved?.newKey == true)
             return FoundMac(name: row.name, endpoint: seen.endpoint, route: row.direct ? .direct : .network,
-                            macID: macID, savedByName: savedByName, method: method,
+                            macID: macID, savedByName: savedByName, carriesTag: carriesTag, method: method,
                             wired: wired.flatMap { name in seen.interfaces.first { $0.name == name } },
                             wifi: wifi.flatMap { name in seen.interfaces.first { $0.name == name } },
-                            door: seen.door, homeWord: word)
+                            door: door, homeWord: word)
         }
         for mac in next where mac.route == .network && paths.wifi[mac.name] != nil { lastWifiRow[mac.name] = mac }
         // The moment a saved Mac's network row goes is what holds back its remote dial; the last
@@ -1105,7 +1115,8 @@ final class StreamClient: ObservableObject {
         case .waitForTap:
             return false
         case .ask(let pinned):
-            ask(mac, savedID: pinned ? saved?.macID : nil, tagNamed: mac.macID != nil)
+            ask(mac, savedID: pinned ? saved?.macID : nil, tagNamed: mac.macID != nil,
+                replaces: saved?.newKey == true ? saved?.macID : nil)
             return true
         case .pinned, .anyKey, .plain:
             guard let trust = DiscoveryPolicy.sessionTrust(decision, savedPin: saved?.fingerprintData) else { return false }
@@ -1117,7 +1128,8 @@ final class StreamClient: ObservableObject {
     func homeDecision(_ mac: FoundMac, macID: String?, tap: Bool) -> DiscoveryPolicy.HomeDial {
         let saved = macID.flatMap { savedMac($0) }
         return DiscoveryPolicy.homeDial(door: mac.door, saved: saved != nil, revoked: saved?.revoked == true,
-                                        homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, tap: tap)
+                                        homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, tap: tap,
+                                        newKey: saved?.newKey == true)
     }
 
     /// A row's session dial with `trust`: over the row's wired interface first when it says "Wired"
@@ -1185,8 +1197,27 @@ final class StreamClient: ObservableObject {
     @discardableResult
     func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false, macID: String? = nil, fallback: NWEndpoint? = nil,
                  trust: DiscoveryPolicy.HomeTrust = .plain, row: HomeRow? = nil) -> Bool {
-        // A TLS dial's parameters need this device's key, made now at its first one.
-        guard let params = sessionParameters(trust, peerToPeer: peerToPeer) else { return false }
+        // A TLS dial's parameters need this device's key, made now at its first one. A pin refused
+        // (-9808) ends the dial as its `.waiting` would have: a Bonjour row's connection never says
+        // so itself, it prepares again and again (DeviceTLS.options), and the tap's "Connecting to…"
+        // stayed for good (Noah, 2026-09-27).
+        let refused = WeakConnection()
+        guard let params = sessionParameters(trust, peerToPeer: peerToPeer, onPinRefused: { [weak self] in
+            guard let self, let c = refused.connection else { return }
+            refused.connection = nil   // once per connection
+            #if DEBUG
+            print("home: this device's pin refused the key that answered as \(name) (-9808)")
+            #endif
+            DispatchQueue.main.async {
+                guard self.connection === c, !self.connected else { return }
+                if let fallback {
+                    self.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row, why: "met another key (-9808)")
+                    return
+                }
+                self.connectionLost(c, error: .tls(DiscoveryPolicy.pinRefused))
+                c.cancel()
+            }
+        }) else { return false }
         // One connection at a time. A tap on the connect screen racing the reconnect timer used to
         // open two: both then read from whichever `connection` pointed at, interleaving headers
         // and payloads, while the other was never read and the host evicted it after 4 s.
@@ -1295,9 +1326,25 @@ final class StreamClient: ObservableObject {
                 break
             }
         }
+        refused.connection = c
         followRoute(of: c)
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
+        if reconnect == nil {
+            // Not the automatic reconnect's dial (a tap's, the session after a pairing, `-SillConnect`):
+            // its first window list within DiscoveryPolicy.tapDialDeadline, or it ends with words, so
+            // "Connecting to…" never stays (a wired dial's fallback counts afresh from its own dial).
+            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.tapDialDeadline) { [weak self] in
+                guard let self, self.connection === c, !self.connected, self.reconnect == nil else { return }
+                #if DEBUG
+                print("session: \(name) not connected in \(DiscoveryPolicy.tapDialDeadline) s (\(c.state)); giving up")
+                #endif
+                self.connection = nil
+                c.cancel()                                   // its .cancelled finds it replaced
+                self.tearDown(status: DiscoveryPolicy.HomeCopy.noAnswer(mac: name))
+                self.updateDiscovery()
+            }
+        }
         if let fallback {
             DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
                 self?.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row,
@@ -3333,11 +3380,12 @@ extension StreamClient {
         if Self.testHomeDoor != .plain {
             let one = savedMacs.count == 1 ? savedMacs[0] : nil
             let decision = DiscoveryPolicy.homeDial(door: Self.testHomeDoor, saved: one != nil, revoked: one?.revoked == true,
-                                                    homeTLS: one?.homeTLS == true, debug: true, tap: true)
+                                                    homeTLS: one?.homeTLS == true, debug: true, tap: true, newKey: one?.newKey == true)
             print("home: -SillConnect \(raw) counts as a \(Self.testHomeDoor) door\(one.map { " of \($0.name) (saved)" } ?? ""): \(decision)")
             if case .ask(let pinned) = decision {
                 startAsk(HomeAsk(target: HomeDialer.Target(endpoint: address, label: raw), name: raw, cableRow: false,
-                                 savedID: pinned ? one?.macID : nil, tagNamed: true))
+                                 savedID: pinned ? one?.macID : nil, tagNamed: true,
+                                 replaces: one?.newKey == true ? one?.macID : nil))
                 return
             }
             guard let t = DiscoveryPolicy.sessionTrust(decision, savedPin: one?.fingerprintData) else { return }

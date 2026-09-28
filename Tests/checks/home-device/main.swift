@@ -162,19 +162,19 @@ check("the word says what a tap does in \(agree) of \(total) combinations (Not p
 // A tap is as strict as the automatic reconnect: a row whose tag names no saved Mac, under the
 // Bonjour name a saved Mac was last reached by, is that Mac, dialed pinned to its key.
 let savedByName: [(macID: String, bonjourName: String?)] = [("RECENT", "Mac mini"), ("OLD", "Mac mini"), ("NONAME", nil), ("STUDIO", "Studio")]
-check("rowMac: a tag this device resolved names the row's Mac, whatever its name", P.rowMac(tagged: "OLD", name: "Studio", saved: savedByName)! == ("OLD", true))
+check("rowMac: a tag this device resolved names the row's Mac, whatever its name", P.rowMac(tagged: "OLD", carriesTag: true, name: "Studio", saved: savedByName)! == ("OLD", true))
 check("rowMac: no tag of a saved Mac's, a saved Mac's Bonjour name: that Mac, by name alone",
-      P.rowMac(tagged: nil, name: "Studio", saved: savedByName)! == ("STUDIO", false))
-check("rowMac: two saved Macs of that name: the most recently used (the first given)", P.rowMac(tagged: nil, name: "Mac mini", saved: savedByName)! == ("RECENT", false))
+      P.rowMac(tagged: nil, carriesTag: false, name: "Studio", saved: savedByName)! == ("STUDIO", false))
+check("rowMac: two saved Macs of that name: the most recently used (the first given)", P.rowMac(tagged: nil, carriesTag: false, name: "Mac mini", saved: savedByName)! == ("RECENT", false))
 check("rowMac: another name, a renamed \"Mac mini (2)\", or a case change: no saved Mac",
-      P.rowMac(tagged: nil, name: "Office", saved: savedByName) == nil && P.rowMac(tagged: nil, name: "Mac mini (2)", saved: savedByName) == nil
-      && P.rowMac(tagged: nil, name: "mac mini", saved: savedByName) == nil)
-check("rowMac: a saved Mac with no Bonjour name is never a row's by name", P.rowMac(tagged: nil, name: "", saved: [("NONAME", nil)]) == nil)
-check("rowMac: nothing saved, nothing named", P.rowMac(tagged: nil, name: "Mac mini", saved: []) == nil)
+      P.rowMac(tagged: nil, carriesTag: false, name: "Office", saved: savedByName) == nil && P.rowMac(tagged: nil, carriesTag: false, name: "Mac mini (2)", saved: savedByName) == nil
+      && P.rowMac(tagged: nil, carriesTag: false, name: "mac mini", saved: savedByName) == nil)
+check("rowMac: a saved Mac with no Bonjour name is never a row's by name", P.rowMac(tagged: nil, carriesTag: false, name: "", saved: [("NONAME", nil)]) == nil)
+check("rowMac: nothing saved, nothing named", P.rowMac(tagged: nil, carriesTag: false, name: "Mac mini", saved: []) == nil)
 // A look-alike: a tagless row under a saved Mac's name. As that Mac, a tap dials it pinned, never
 // with any key (p=0) or plain (DEBUG, no p, homeTLS): the stranger's key fails the pin.
 func lookAlike(_ d: P.HomeDoor, homeTLS: Bool, debug: Bool) -> H {
-    let named = P.rowMac(tagged: nil, name: "Mac mini", saved: savedByName)
+    let named = P.rowMac(tagged: nil, carriesTag: false, name: "Mac mini", saved: savedByName)
     return P.homeDial(door: d, saved: named != nil, revoked: false, homeTLS: homeTLS, debug: debug, tap: true)
 }
 check("a look-alike on an open door (p=0): pinned to the saved key, not any key", lookAlike(.open, homeTLS: true, debug: false) == .pinned

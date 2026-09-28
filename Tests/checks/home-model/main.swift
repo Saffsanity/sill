@@ -136,7 +136,7 @@ check("8 a link naming another key after a look-alike answered the ask: the othe
 // 2026-09-27): the row is M by its name alone (as the reconnect always took it), dialed pinned to
 // M's key, so the stranger's key fails the pin; a tap once dialed it with any key.
 let byName = saved.map { (macID: $0.macID, bonjourName: $0.bonjourName) }
-let named = P.rowMac(tagged: SavedMacs.recognize(tag: nil, in: saved), name: "Mac mini", saved: byName)
+let named = P.rowMac(tagged: SavedMacs.recognize(tag: nil, in: saved), carriesTag: false, name: "Mac mini", saved: byName)
 check("9 a tagless row under M's Bonjour name is M, by its name alone", named.map { $0.macID == macM && !$0.tagNamed } == true)
 let lookMac = named.flatMap { n in saved.first { $0.macID == n.macID } }
 let lookTap = P.homeDial(door: .open, saved: lookMac != nil, revoked: lookMac?.revoked == true, homeTLS: lookMac?.homeTLS == true, debug: true, tap: true)
@@ -145,7 +145,7 @@ check("9 a tap on it dials M pinned (never any key), as the reconnect does", loo
 check("9 the stranger's key fails that pin (-9808): another key as M, never a session", P.homeEnd(trust: .saved(pin: fpM), goodbye: nil, tls: -9808) == .wrongKey)
 check("9 without p, M seen over TLS: nothing dialed, in DEBUG too", P.homeDial(door: .plain, saved: true, revoked: false, homeTLS: lookMac?.homeTLS == true,
       debug: true, tap: true) == .updateSill)
-check("9 a tagless row under another name is no saved Mac: an open door's reads Not paired", P.rowMac(tagged: nil, name: "Office", saved: byName) == nil
+check("9 a tagless row under another name is no saved Mac: an open door's reads Not paired", P.rowMac(tagged: nil, carriesTag: false, name: "Office", saved: byName) == nil
       && P.rowWord(door: .open, saved: false, revoked: false, homeTLS: false, debug: true, method: .wifi, cable: false) == .openDoor)
 
 // MARK: The Mac's quiet rule and the device's words, together (the security review, 2026-09-27)
