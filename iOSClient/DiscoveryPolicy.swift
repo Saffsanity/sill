@@ -958,7 +958,8 @@ enum DiscoveryPolicy {
         /// reconnects; the row reads Not paired once the Mac's new record arrives.
         case pairingRequired
         /// Another key answered as the saved Mac (-9808: this device's pin refused it): the other
-        /// rows its tag names are dialed, pinned, before any words; never a plain retry.
+        /// rows its tag names are dialed, pinned, before any words; never a plain retry. With none
+        /// left the Mac is paired again (`afterPinRefused`: SavedMac.newKey, a tap asks).
         case wrongKey
         /// Anything else: the words and the reconnect as before.
         case other
