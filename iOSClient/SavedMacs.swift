@@ -193,6 +193,39 @@ enum SavedMacs {
         return list.filter { $0.macID != old }
     }
 
+    /// After a dial of `old` completed its handshake with `new`'s key at `proof` ("host|port", one of
+    /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
+    /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
+    /// typed addresses, `homeTLS`, and `proof` as the address that last worked. Nothing changes
+    /// when either is not saved or they are the same record.
+    static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
+        guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
+        return list.compactMap { mac in
+            if mac.macID == old { return nil }
+            guard mac.macID == new else { return mac }
+            var next = mac
+            let have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
+            let carried = (o.typedAddresses ?? []).filter { !have.contains("\($0.host.lowercased())|\($0.port ?? next.remotePort)") }
+            if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }
+            if o.homeTLS == true { next.homeTLS = true }
+            next.lastWorked = proof
+            return next
+        }
+    }
+
+    /// The Remote rows' order: by pairing date, except that the records of one name go together,
+    /// newest first, so that while an old record of a Mac set up again is still saved (it goes the
+    /// first time it is dialed where `superseding` can prove it), the one that works leads.
+    static func remoteOrder(_ list: [SavedMac]) -> [SavedMac] {
+        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }
+        var out: [SavedMac] = []
+        var done = Set<String>()
+        for mac in byDate where done.insert(mac.name).inserted {
+            out += byDate.filter { $0.name == mac.name }.reversed()
+        }
+        return out
+    }
+
     /// DEBUG `-SillForgetHomeTLS 1` (§3.4, §7.9): `homeTLS` cleared on every saved Mac, so a DEBUG
     /// build dials an older Sill.app (another branch's) plainly again.
     static func forgettingHomeTLS(_ list: [SavedMac]) -> [SavedMac] {

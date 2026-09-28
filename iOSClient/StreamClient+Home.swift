@@ -26,10 +26,15 @@ enum DeviceTLS {
     /// again (the simulator against a synthetic host with another key, 2026-09-27: "Connecting to…"
     /// for good, no state after `.preparing`), so a dial that must end at a refused pin hears it
     /// here.
+    ///
+    /// `alsoAccept`: other saved Macs' keys that may answer in the pin's place at this address
+    /// (RemoteDialPolicy.successors: a Mac set up again, whose newer record this device holds too);
+    /// the caller reads which key completed the handshake off the ready connection.
     static func options(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
-                        onPinRefused: (() -> Void)? = nil) -> NWProtocolTLS.Options {
+                        alsoAccept: [Data] = [], onPinRefused: (() -> Void)? = nil) -> NWProtocolTLS.Options {
         RemoteTLS.options(identity: identity.tls, role: .client(alpn: alpn), verify: { fp in
             guard let pin else { return fp != nil }
+            if let fp, fp != pin, alsoAccept.contains(fp) { return true }
             guard fp == pin else { onPinRefused?(); return false }
             return true
         }, queue: queue)

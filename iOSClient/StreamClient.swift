@@ -958,7 +958,7 @@ final class StreamClient: ObservableObject {
         let networkIDs = Set(next.filter { $0.route == .network }.compactMap(\.macID))
         savedSightings = DiscoveryPolicy.sightings(savedSightings, listed: networkIDs, now: now)
         let names = SavedMacs.displayNames(savedMacs)
-        let saved = savedMacs.sorted { $0.pairedAt < $1.pairedAt }.map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
+        let saved = SavedMacs.remoteOrder(savedMacs).map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
         let remote = DiscoveryPolicy.remoteRows(saved: saved, listedIDs: Set(next.compactMap(\.macID)), now: now,
                                                 searchingSince: searchingSince, localNetworkDenied: localNetworkDenied)
         next += remote.map { FoundMac(name: $0.name, endpoint: nil, route: .remote, macID: $0.macID) }

@@ -53,6 +53,10 @@ final class RemoteConnector {
     private let candidates: [RemoteDialPolicy.Candidate]
     private let mode: Mode
     private let identity: RemoteIdentity
+    /// A session dial's other keys by candidate (`Candidate.key`): saved Macs whose key may answer
+    /// at that address in the pin's place (RemoteDialPolicy.successors). The winner's `fingerprint`
+    /// says which key it met.
+    private let successors: [String: [Data]]
     // On `queue`.
     private var attempts: [Attempt] = []
     private var next = 0
@@ -66,8 +70,10 @@ final class RemoteConnector {
     /// On `queue`, once, when no attempt won.
     var onFailed: ((Failed) -> Void)?
 
-    init(candidates: [RemoteDialPolicy.Candidate], mode: Mode, identity: RemoteIdentity, queue: DispatchQueue) {
+    init(candidates: [RemoteDialPolicy.Candidate], mode: Mode, identity: RemoteIdentity, queue: DispatchQueue,
+         successors: [String: [Data]] = [:]) {
         self.candidates = candidates
+        self.successors = successors
         self.mode = mode
         self.identity = identity
         self.queue = queue
@@ -118,7 +124,8 @@ final class RemoteConnector {
         let pin: Data? = { switch mode { case .session(let p): return p; case .pairing(let p): return p } }()
         // The whole of trust: the pin, or on the typed pairing path any P-256 key (nil is no P-256).
         // The one TLS builder every connection to a Mac goes through (DeviceTLS).
-        let tls = DeviceTLS.options(identity: identity, alpn: alpn, pin: pin, queue: queue)
+        let others: [Data] = { if case .session = mode { return successors[candidate.key] ?? [] }; return [] }()
+        let tls = DeviceTLS.options(identity: identity, alpn: alpn, pin: pin, queue: queue, alsoAccept: others)
         let connection = NWConnection(host: NWEndpoint.Host(candidate.host), port: port,
                                       using: RemoteTLS.parameters(tls: tls, dialing: true))
         let attempt = Attempt(candidate, connection)

@@ -60,6 +60,27 @@ M = [
     (S, "S4 revoking twice", "        guard list.contains(where: { $0.macID == id && $0.revoked != true }) else { return nil }", "        guard list.contains(where: { $0.macID == id }) else { return nil }"),
     (S, "S4 forgettingHomeTLS sets false", "            next.homeTLS = nil\n", "            next.homeTLS = false\n"),
     (S, "S4 forgettingHomeTLS forgets nothing", "            next.homeTLS = nil\n", ""),
+    # A Mac set up again: the old record superseded (2026-09-28).
+    (R, "SUP any address counts", "        guard unique || (loopback && allowLoopback) else { return [] }\n", ""),
+    (R, "SUP loopback always counts", "guard unique || (loopback && allowLoopback) else", "guard unique || loopback else"),
+    (R, "SUP a private address counts", "let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)", "let unique = isVPNAddress(h) || kind(ofHost: h) != MacAddress.vpn"),
+    (R, "SUP the saved kind ignored", "let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)", "let unique = isVPNAddress(h) || kind(ofHost: h) == MacAddress.internet"),
+    (R, "SUP any name", "                && mac.name == old.name && mac.pairedAt > lastReached", "                && mac.pairedAt > lastReached"),
+    (R, "SUP any date", "                && mac.name == old.name && mac.pairedAt > lastReached", "                && mac.name == old.name"),
+    (R, "SUP an equal date", "mac.pairedAt > lastReached", "mac.pairedAt >= lastReached"),
+    (R, "SUP the last reach ignored", "let lastReached = old.lastConnectedAt ?? old.pairedAt", "let lastReached = old.pairedAt"),
+    (R, "SUP a revoked successor", "mac.macID != old.macID && mac.revoked != true && mac.newKey != true", "mac.macID != old.macID && mac.newKey != true"),
+    (R, "SUP a new-key successor", "mac.macID != old.macID && mac.revoked != true && mac.newKey != true", "mac.macID != old.macID && mac.revoked != true"),
+    (R, "SUP itself", "mac.macID != old.macID && mac.revoked != true", "mac.revoked != true"),
+    (S, "SUP the old record kept", "            if mac.macID == old { return nil }\n", ""),
+    (S, "SUP typed addresses not carried", "            if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }\n", ""),
+    (S, "SUP typed addresses repeated", "let carried = (o.typedAddresses ?? []).filter { !have.contains(", "let carried = (o.typedAddresses ?? []).filter { have.contains(\"\") || !have.contains("),
+    (S, "SUP homeTLS not carried", "            if o.homeTLS == true { next.homeTLS = true }\n", ""),
+    (S, "SUP the proof not remembered", "            next.lastWorked = proof\n", ""),
+    (S, "SUP with the newer unsaved", "guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else", "guard old != new, let o = list.first(where: { $0.macID == old }) else"),
+    (S, "SUP with itself", "guard old != new, let o = list.first", "guard let o = list.first"),
+    (S, "SUP remote order oldest first", "            out += byDate.filter { $0.name == mac.name }.reversed()", "            out += byDate.filter { $0.name == mac.name }"),
+    (S, "SUP remote order newest first overall", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }\n        var out", "        let byDate = list.sorted { ($0.pairedAt, $0.macID) > ($1.pairedAt, $1.macID) }\n        var out"),
 ]
 caught = 0
 for f, name, old, new in M:
