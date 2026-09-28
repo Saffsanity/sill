@@ -724,6 +724,9 @@ final class StreamClient: ObservableObject {
     static let livenessFloor = 6.0
     /// A remote path that is not viable for this long is a lost connection.
     static let viabilityLimit = 3.0
+    /// The automatic reconnect's dial of a row that is not ready this long after it started is let
+    /// go, and the reconnect looks again (`connect(to:)`), as a connection waiting that long is.
+    static let reconnectDialWait = 5.0
 
     // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
     // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
@@ -1290,6 +1293,25 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
                 self?.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row,
                                         why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
+            }
+        } else if reconnect != nil {
+            // The automatic reconnect's dial (a tap clears `reconnect` first) must get ready. Every
+            // look of the reconnect needs `connection == nil` (its remote dial too), so a dial that
+            // never does would hold it for good, and one can: a row dialed as its registration goes
+            // (Sill quit or died without a goodbye, the row's last second) leaves the Bonjour resolve
+            // waiting with no end, in `.preparing`, where only `.waiting` has a limit (above). Let
+            // go after reconnectDialWait, the reconnect keeps what it was (its loss, its remote
+            // dials' timing, "Reconnecting…"), and tearDown's discoveryChanged looks again: the
+            // Mac's row listed by then (back under another name, say), else its remote dial when
+            // due. A wired dial gets this through its fallback, which has none.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectDialWait) { [weak self] in
+                guard let self, self.connection === c, !self.connected, self.reconnect != nil, c.state != .ready else { return }
+                #if DEBUG
+                print("reconnect: \(name) not ready in \(Self.reconnectDialWait) s (\(c.state)); letting it go and looking again")
+                #endif
+                self.connection = nil
+                c.cancel()                                                 // its .cancelled finds it replaced
+                self.tearDown(status: self.status, restartSearch: false)   // then its discoveryChanged looks again
             }
         }
         return true
