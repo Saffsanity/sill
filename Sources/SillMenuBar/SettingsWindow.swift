@@ -2,13 +2,14 @@ import AppKit
 import SwiftUI
 import SillHostCore
 
-/// The Settings window's tabs.
+/// The Settings window's tabs, in the toolbar's order.
 enum SettingsTab: String, CaseIterable {
-    case general, streaming, virtualDisplay, permissions, remoteAccess
+    case general, devices, streaming, virtualDisplay, permissions, remoteAccess
 
     var title: String {
         switch self {
         case .general: "General"
+        case .devices: "Devices"
         case .streaming: "Streaming"
         case .virtualDisplay: "Virtual Display"
         case .permissions: "Permissions"
@@ -19,6 +20,7 @@ enum SettingsTab: String, CaseIterable {
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .devices: "ipad.and.iphone"
         case .streaming: "play.rectangle"
         case .virtualDisplay: "display"
         case .permissions: "lock.shield"
@@ -142,6 +144,19 @@ enum WindowPlacement {
                 if !window.isKeyWindow { window.orderFrontRegardless() }
             }
         }
+    }
+
+    /// A window a device put up (a pairing window it asked for, the cable notice): in front of every
+    /// app's windows (over a full-screen app too, with `.fullScreenAuxiliary` in its collection
+    /// behavior), off the virtual display, without activating Sill or taking the keyboard, so a
+    /// device's request can never swallow what is being typed in another app. A click makes it key.
+    /// (docs/home-pairing-plan.md §6.3)
+    static func showInFront(_ window: NSWindow) {
+        if onNoUsefulScreen(window), let area = NSScreen.screens.first?.visibleFrame {
+            let size = window.frame.size
+            window.setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.midY - size.height / 2))
+        }
+        window.orderFrontRegardless()
     }
 
     private static func onNoUsefulScreen(_ window: NSWindow) -> Bool {

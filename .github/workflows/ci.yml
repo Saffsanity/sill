@@ -13,14 +13,15 @@
 # time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
 name: CI
 
-# A change that touches only documents, the website or design files starts no run. (Should this
-# job ever become a required check, such a pull request would wait for it: drop paths-ignore then.)
+# A change that touches only documents or the website starts no run. (Should this job ever become
+# a required check, such a pull request would wait for it: drop paths-ignore then.) design/ is not
+# left out: Tests/checks/dmg-layout reads design/DMGBackground.svg (the disk image's window).
 on:
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'LICENSE']
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'LICENSE']
   workflow_dispatch:
     inputs:
       mutants:
@@ -119,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, clientlink, compatibility, device-gate, dmg-layout, encoder-mailbox, encoder-slowstate, fence, goodbye, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
+        check: [addresses, ask-limits, cable-link, clientlink, compatibility, device-gate, dmg-layout, door-policy, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, home-device, home-model, home-records, home-txt, keychain, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

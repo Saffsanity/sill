@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iPhones with ProMotion hold app rendering at 60 Hz unless the app asks; the stream is 120 fps
+	     on those panels, so ask. iPads ignore this key. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<!-- Export compliance: Sill uses no encryption but Apple's own, so uploads, TestFlight builds
+	     included, skip the encryption questions. Look again before adding cipher code or a crypto
+	     library of Sill's own (docs/app-store-metadata.md section 6). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Finds your Mac on the local network.</string>
+	<!-- DEBUG ONLY: Info.plist (the Release configuration's) plus `_silltest._tcp`, which the Debug
+	     build browses for with -SillServiceType _silltest._tcp: the simulator refuses a browse for
+	     a type this list does not declare (-65555 NoAuth, docs/home-pairing-plan.md, H0's P5). A
+	     key added to Info.plist goes here too; nothing else may differ. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_sill._tcp</string>
+		<string>_silltest._tcp</string>
+	</array>
+	<!-- Add a Mac: the embedded scanner reads the pairing code the Mac shows. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Sill scans the code on your Mac to pair with it.</string>
+	<!-- sill://pair links from the Camera or Messages. Never acted on without a confirmation, since
+	     another app could claim the scheme too; the in-app scanner is the main path. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>me.saffer.sill.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sill</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

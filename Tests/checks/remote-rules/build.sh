@@ -7,4 +7,5 @@ for f in "${3:-$WT/iOSClient/DiscoveryPolicy.swift}" "${4:-$WT/iOSClient/RemoteD
   sed '/^import StreamProtocol$/d' "$f" > $T/$(basename "$f")
 done
 cp $(dirname $0)/main.swift $T/main.swift
+cp $(dirname $0)/home.swift $T/home.swift
 swiftc -O $T/*.swift -o $OUT 2>&1 | grep -E "error" ; rm -rf $T

@@ -14,11 +14,32 @@ package struct PairedDevice: Codable, Hashable, Sendable {
     package var model: String?
     /// Seconds since 1970.
     package var pairedAt: Double
-    /// "qr" or "code" (M5 adds "icloud"): how it was trusted.
+    /// "qr", "code" or "cable" (paired by itself over the USB cable, docs/home-pairing-plan.md
+    /// §4.8; M5 adds "icloud"): how it was trusted.
     package var method: String
+    /// The iPhone or iPad this key paired over, or ran a session over, by the USB cable:
+    /// CableLink.deviceID of its USB serial number, never the serial. A different key from the
+    /// same device then pairs only with the code; Remove frees the device. Nil for a key never seen
+    /// on the cable. Optional, so a list from before it decodes, and left out of the JSON when nil.
+    package var cableDevice: String?
 
-    package init(fingerprint: String, name: String, model: String?, pairedAt: Double, method: String) {
+    package init(fingerprint: String, name: String, model: String?, pairedAt: Double, method: String, cableDevice: String? = nil) {
         self.fingerprint = fingerprint; self.name = name; self.model = model; self.pairedAt = pairedAt; self.method = method
+        self.cableDevice = cableDevice
+    }
+
+    /// How it was paired, as the Devices pane words it: "with the QR code", "with a code", "over
+    /// the USB cable"; nil for a method this build does not know.
+    package var displayMethod: String? { Self.displayMethod(method) }
+
+    /// The words for a stored method (`displayMethod`; the pane's summaries use it too).
+    package static func displayMethod(_ method: String) -> String? {
+        switch method {
+        case PairRequest.qr: return "with the QR code"
+        case PairRequest.code: return "with a code"
+        case PairResult.cable: return "over the USB cable"
+        default: return nil
+        }
     }
 
     /// "iPad (iPad14,1)", or the name alone.
@@ -54,9 +75,25 @@ package final class HostIdentity: @unchecked Sendable {
         SignedMacInfo.signing(info, with: remote.privateKey)
     }
 
-    /// A fresh TXT record for one Bonjour registration: `r` = a new tag.
-    package func txtRecord() -> NWTXTRecord? {
-        RecognitionTag.make(recognitionKey: recognitionKey).map { NWTXTRecord([RecognitionTag.txtKey: $0]) }
+    /// An ECDSA P-256 / SHA-256 signature (DER) by the Mac's key over `data`: a record only this Mac
+    /// could have written (RequirePairingValue). Nil when the key cannot sign.
+    package func signRecord(_ data: Data) -> Data? {
+        SecKeyCreateSignature(remote.privateKey, .ecdsaSignatureMessageX962SHA256, data as CFData, nil) as Data?
+    }
+
+    /// Whether `signature` is the Mac's key's over `data` (`signRecord`).
+    package func verifyRecord(_ data: Data, signature: Data) -> Bool {
+        guard let publicKey = SecKeyCopyPublicKey(remote.privateKey) else { return false }
+        return SecKeyVerifySignature(publicKey, .ecdsaSignatureMessageX962SHA256, data as CFData, signature as CFData, nil)
+    }
+
+    /// A fresh TXT record for one Bonjour registration: `r` = a new tag, and `p` (HomeDoorTXT) when
+    /// the home door speaks TLS: "1" pairing required, "0" open. A plain door carries no `p`.
+    package func txtRecord(homeDoor p: String? = nil) -> NWTXTRecord? {
+        guard let tag = RecognitionTag.make(recognitionKey: recognitionKey) else { return nil }
+        var entries = [RecognitionTag.txtKey: tag]
+        if let p { entries[HomeDoorTXT.key] = p }
+        return NWTXTRecord(entries)
     }
 }
 
@@ -78,6 +115,14 @@ package protocol IdentityStore: AnyObject {
     /// next save would replace it.
     func loadPaired() throws -> [PairedDevice]
     func savePaired(_ devices: [PairedDevice]) throws
+    /// Require pairing (docs/home-pairing-plan.md §4.8), kept beside the trust list and never in
+    /// UserDefaults, as the record RemoteAccess writes and judges (RequirePairingValue: off only
+    /// with the Mac's own signature): nil when none was ever saved, which reads as on, so a missing
+    /// item only ever turns pairing on. A read that fails throws (the caller then counts it as on).
+    /// Its own item, not a field of the trust list: an older Sill reading a changed list would call
+    /// it damaged and lose its identity.
+    func loadRequirePairing() throws -> Data?
+    func saveRequirePairing(_ record: Data) throws
     /// TEST ONLY: a directory where a test hook may leave the current pairing link and code (the
     /// file store's own, 0700); nil for every other store.
     var testDirectory: URL? { get }
@@ -116,6 +161,10 @@ package final class MemoryIdentityStore: IdentityStore {
     package func loadPaired() throws -> [PairedDevice] { paired }
     package func savePaired(_ devices: [PairedDevice]) throws { paired = devices }
 
+    private var requirePairing: Data?
+    package func loadRequirePairing() throws -> Data? { requirePairing }
+    package func saveRequirePairing(_ record: Data) throws { requirePairing = record }
+
     static func randomBytes(_ n: Int) throws -> Data {
         var b = [UInt8](repeating: 0, count: n)
         guard SecRandomCopyBytes(kSecRandomDefault, n, &b) == errSecSuccess else { throw IdentityStoreError("the random source failed") }
@@ -126,9 +175,10 @@ package final class MemoryIdentityStore: IdentityStore {
 /// TEST ONLY (SILL_TEST_REMOTE_DIR=<dir>, honoured only by a host that does not advertise): the
 /// identity and trust list in a directory of mode 0700, each file 0600, so a test can pair, restart
 /// the host and find the same Mac ID and pairings, without the login keychain.
-/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`, and
-/// `.lock`, which one host holds for as long as it uses the directory: two hosts sharing it would
-/// each save their own list over the other's.
+/// Files: `host-key` (the private key, X9.63), `recognition-key` (32 bytes), `paired.json`,
+/// `require-pairing` (RequirePairingValue's record; no file reads as on), and `.lock`, which one
+/// host holds for as long as it uses the directory: two hosts sharing it would each save their own
+/// list over the other's.
 package final class FileIdentityStore: IdentityStore {
     package let directory: URL
     /// The open `.lock`, flock'ed exclusively; closing it (or the process ending) lets it go.
@@ -202,6 +252,14 @@ package final class FileIdentityStore: IdentityStore {
         try Self.writePrivate(try encoder.encode(devices), to: directory.appendingPathComponent("paired.json"))
     }
 
+    package func loadRequirePairing() throws -> Data? {
+        try Self.read(directory.appendingPathComponent("require-pairing"))
+    }
+
+    package func saveRequirePairing(_ record: Data) throws {
+        try Self.writePrivate(record, to: directory.appendingPathComponent("require-pairing"))
+    }
+
     /// Writes `data` with mode 0600 from its creation, replacing the file atomically. Also the
     /// app's -SillPairAfter hook, for the pairing link and code a test reads (never printed).
     package static func writePrivate(_ data: Data, to url: URL) throws {
@@ -214,14 +272,53 @@ package final class FileIdentityStore: IdentityStore {
     }
 }
 
-/// What the remote door's verify block and admission read on the network queue: immutable,
-/// replaced whole under a lock on every change. Nothing that reads it ever waits on the main actor.
+/// Require pairing's stored record, in every store: "1" on; off only as "0." and a signature by
+/// this Mac's own key over `offMessage` (HostIdentity.signRecord), which names the Mac. Anything
+/// else reads as on, the safe side: a missing record (Sill saves one only when the switch changes),
+/// a plain "0", a signature by another key or for another Mac, bytes that are not a record. Any
+/// process of this user can create the keychain item before Sill has ever saved it, with Sill among
+/// the apps its access control lets read it without asking, and a plain "0" there turned pairing off
+/// behind Sill's back: every app on this Mac could then reach the home door over loopback and use
+/// Sill's Screen Recording and Accessibility (the security review, 2026-09-27). It cannot sign with
+/// the Mac's key, which the keychain keeps for Sill alone.
+enum RequirePairingValue {
+    static let on = Data("1".utf8)
+
+    /// What the Mac's key signs to turn pairing off: the purpose and the Mac ID, so a record never
+    /// stands for another thing or another Mac.
+    static func offMessage(macID: String) -> Data { Data("sill-require-pairing-off-v1\n\(macID)".utf8) }
+
+    /// The record for `on`: "1", or "0." and base64url of `sign(offMessage)`; nil when `sign` gives
+    /// nothing (the key could not sign), and then nothing is saved.
+    static func encode(_ on: Bool, macID: String, sign: (Data) -> Data?) -> Data? {
+        if on { return Self.on }
+        guard let signature = sign(offMessage(macID: macID)), !signature.isEmpty else { return nil }
+        return Data(("0." + Base64URL.encode(signature)).utf8)
+    }
+
+    /// Whether a stored record means on: true for anything but "0." and a signature `verify` takes
+    /// for this Mac's off message.
+    static func decode(_ data: Data, macID: String, verify: (_ message: Data, _ signature: Data) -> Bool) -> Bool {
+        guard let text = String(data: data, encoding: .utf8), text.hasPrefix("0."),
+              let signature = Base64URL.decode(String(text.dropFirst(2))), !signature.isEmpty else { return true }
+        return !verify(offMessage(macID: macID), signature)
+    }
+}
+
+/// What both doors' verify blocks and admission read on the network queue: immutable, replaced
+/// whole under a lock on every change. Nothing that reads it ever waits on the main actor.
 struct TrustSnapshot: Sendable {
     /// Paired fingerprints → display names ("iPad (iPad14,1)").
     var paired: [Data: String] = [:]
+    /// A pairing window is open: the home door takes its proofs.
     var pairingOpen = false
+    /// One the remote door takes proofs for (opened by the Mac's user, or the CLI's --remote),
+    /// never one a device opened by asking (docs/home-pairing-plan.md §4.6).
+    var remotePairingOpen = false
     var remoteAccess = false
     var internetAccess = false
+    /// The home door admits only paired keys (on a TLS home door; the plain one has no pairing).
+    var requirePairing = true
     /// Interface → network service name ("utun4" → "Tailscale"), for a session's route label.
     var serviceNames: [String: String] = [:]
 }

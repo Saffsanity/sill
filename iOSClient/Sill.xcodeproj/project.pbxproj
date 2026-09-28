@@ -18,6 +18,7 @@
 		A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00A /* PortraitStreamScreen.swift */; };
 		A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F501 /* PhonePortraitLayout.swift */; };
 		A1000001000000000000A00A /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00B /* TrackpadView.swift */; };
+		A1000001000000000000A701 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
 		A1000001000000000000A00B /* MockCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00C /* MockCatalog.swift */; };
 		A1000001000000000000A006 /* StreamProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A1000001000000000000D001 /* StreamProtocol */; };
 		A1000001000000000000A010 /* DiagnosticsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F010 /* DiagnosticsHUD.swift */; };
@@ -35,6 +36,7 @@
 		A1000001000000000000A01E /* GoodbyePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01E /* GoodbyePolicy.swift */; };
 		A1000001000000000000A018 /* RemoteConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F018 /* RemoteConnector.swift */; };
 		A1000001000000000000A019 /* StreamClient+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F019 /* StreamClient+Remote.swift */; };
+		A1000001000000000000A601 /* StreamClient+Home.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F601 /* StreamClient+Home.swift */; };
 		A1000001000000000000A01A /* CodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01A /* CodeScanner.swift */; };
 		A1000001000000000000A01B /* AddMacCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01B /* AddMacCard.swift */; };
 		A1000001000000000000A01C /* PairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F01C /* PairingOverlay.swift */; };
@@ -55,12 +57,14 @@
 		A1000001000000000000F005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000001000000000000F101 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A1000001000000000000F006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1000001000000000000F00D /* Info-Debug.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-Debug.plist"; sourceTree = "<group>"; };
 		A1000001000000000000F007 /* Sill.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sill.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000001000000000000F008 /* StreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScreen.swift; sourceTree = "<group>"; };
 		A1000001000000000000F009 /* InputOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputOverlay.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00A /* PortraitStreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitStreamScreen.swift; sourceTree = "<group>"; };
 		A1000001000000000000F501 /* PhonePortraitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePortraitLayout.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00B /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
+		A1000001000000000000F701 /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00C /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
 		A1000001000000000000F010 /* DiagnosticsHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DiagnosticsHUD.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F011 /* StreamClient+Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Viewport.swift"; sourceTree = "<group>"; };
@@ -77,6 +81,7 @@
 		A1000001000000000000F01E /* GoodbyePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoodbyePolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F018 /* RemoteConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnector.swift; sourceTree = "<group>"; };
 		A1000001000000000000F019 /* StreamClient+Remote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Remote.swift"; sourceTree = "<group>"; };
+		A1000001000000000000F601 /* StreamClient+Home.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Home.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F01A /* CodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeScanner.swift; sourceTree = "<group>"; };
 		A1000001000000000000F01B /* AddMacCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMacCard.swift; sourceTree = "<group>"; };
 		A1000001000000000000F01C /* PairingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingOverlay.swift; sourceTree = "<group>"; };
@@ -124,11 +129,13 @@
 				A1000001000000000000F004 /* HEVCDisplayView.swift */,
 				A1000001000000000000F009 /* InputOverlay.swift */,
 				A1000001000000000000F00B /* TrackpadView.swift */,
+				A1000001000000000000F701 /* TrackpadGestures.swift */,
 				A1000001000000000000F00C /* MockCatalog.swift */,
 				A1000001000000000000F01C /* PairingOverlay.swift */,
 				A1000001000000000000F01B /* AddMacCard.swift */,
 				A1000001000000000000F01A /* CodeScanner.swift */,
 				A1000001000000000000F019 /* StreamClient+Remote.swift */,
+				A1000001000000000000F601 /* StreamClient+Home.swift */,
 				A1000001000000000000F018 /* RemoteConnector.swift */,
 				A1000001000000000000F017 /* RemoteDialPolicy.swift */,
 				A1000001000000000000F01E /* GoodbyePolicy.swift */,
@@ -142,6 +149,7 @@
 				A1000001000000000000F005 /* Assets.xcassets */,
 				A1000001000000000000F101 /* PrivacyInfo.xcprivacy */,
 				A1000001000000000000F006 /* Info.plist */,
+				A1000001000000000000F00D /* Info-Debug.plist */,
 				A1000001000000000000C002 /* Frameworks */,
 				A1000001000000000000C003 /* Products */,
 			);
@@ -258,11 +266,13 @@
 				A1000001000000000000A004 /* HEVCDisplayView.swift in Sources */,
 				A1000001000000000000A008 /* InputOverlay.swift in Sources */,
 				A1000001000000000000A00A /* TrackpadView.swift in Sources */,
+				A1000001000000000000A701 /* TrackpadGestures.swift in Sources */,
 				A1000001000000000000A00B /* MockCatalog.swift in Sources */,
 				A1000001000000000000A01C /* PairingOverlay.swift in Sources */,
 				A1000001000000000000A01B /* AddMacCard.swift in Sources */,
 				A1000001000000000000A01A /* CodeScanner.swift in Sources */,
 				A1000001000000000000A019 /* StreamClient+Remote.swift in Sources */,
+				A1000001000000000000A601 /* StreamClient+Home.swift in Sources */,
 				A1000001000000000000A018 /* RemoteConnector.swift in Sources */,
 				A1000001000000000000A017 /* RemoteDialPolicy.swift in Sources */,
 				A1000001000000000000A01E /* GoodbyePolicy.swift in Sources */,
@@ -412,7 +422,7 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_FILE = "Info-Debug.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Sill;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

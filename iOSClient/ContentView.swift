@@ -96,7 +96,7 @@ struct ContentView: View {
 ///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
 ///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
-/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, [::1] or
+/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, ::1, [::1] or
 ///   localhost), once per launch, in the portrait key row's and trackpad's own code: the key row
 ///   taps cmd, esc, shift and ctrl through its caps' action 1.0, 1.4, 1.8 and 2.0 s after it shows
 ///   (⌘esc goes out; shift and ctrl stay latched), then the trackpad checks that a touch at its
@@ -158,18 +158,37 @@ struct ContentView: View {
 ///   "Client left: …%en0". The console says what happened ("path: …").
 /// * `-SillSettings 1` — start with the Settings panel open (a real Mac's state under `-SillLive 1`).
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
-///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home).
+///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
+///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
+///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
+///   short screen).
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
 ///   `noroute`; and for the Away from home group, away from home: `remote` (through Tailscale,
-///   48 ms, saved), `remoteinternet` or `remoteslow` (the slow-link callout); at home:
-///   `remotepair` (Pair This iPad…), `remoteoff` (the footnote only) or `noremote` (no kind 18: no
-///   group) (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's
-///   route, the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired),
-///   `noroute` (none, as a connection whose path says nothing), and `remote`, `remoteinternet`
-///   and `remoteslow` (none: the route line under it says how instead).
+///   48 ms, saved: "Paired"), `remoteinternet` or `remoteslow` (the slow-link callout); at home:
+///   `remotepair` (over a plain door, not saved: Pair This iPad…), `remoteoff` (the footnote only)
+///   or `noremote` (no kind 18: no group); and pairing at home, a session over TLS: `paired`
+///   (saved: "Paired", Remote Access on), `pairedoff` (the same with Remote Access off) or
+///   `openpair` (not saved, on a Mac that lets any device in, Remote Access off: Pair This iPad…)
+///   (see `MockCatalog.SettingsCase`). The mock answers a pick after 0.35 s. The session's route,
+///   the readout's last word: Wi-Fi, except `directlink` (Direct), `wired` (Wired), `noroute`
+///   (none, as a connection whose path says nothing), and `remote`, `remoteinternet` and
+///   `remoteslow` (none: the route line under it says how instead).
+/// * `-Sill.trackpadGestures 0` — not a harness argument either: this device's switch for
+///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
+///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
+///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
+///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
+///   accessibility actions whether or not it is on).
 /// * `-SillScanOverlay 1` — the stream screen under Pair This iPad…'s overlay (a drawn viewfinder).
+///   `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: the line under its title over a
+///   session at home that speaks TLS, as the Mac's answer to the overlay's ask sets it
+///   (DiscoveryPolicy.overlayLine; the mock never asks). Under `-SillLive 1` the overlay opens over
+///   the live session as soon as it connects, and asks its Mac as Pair This iPad… does.
+/// * `-SillNoAutoDesktop 1` — (also in the normal app) the device never picks the Desktop by
+///   itself: a live gate's session streams nothing, so no host encodes while it runs.
 /// * `-SillMacMenu <case>` — the mock Mac's menus (docs/menu-bar-plan.md §7.8; see
 ///   `MockCatalog.MenuCase`): `code` (the default: VS Code's ten, File with shortcuts, sections, a ✓,
 ///   a disabled item and Open Recent ▸, Code › Settings ▸ Themes ▸ three deep, View › Appearance
@@ -226,11 +245,31 @@ struct ContentView: View {
 ///   or remote access's: `remote` (Remote rows), `addmac`, `addcode`, `addcodeerror`, `pairing`,
 ///   `remotedial`, `remotefail` (with `-SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|
 ///   wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff`), `camera` (refused) or
-///   `externalpair` (an outside link's confirmation). Ignored with `-SillLive 1`. The mock never
+///   `externalpair` (an outside link's confirmation); or pairing at home's
+///   (docs/home-pairing-plan.md §7.9): `homerows` (a saved Wi-Fi row, "Not paired", an unpaired
+///   "Wired" over the cable, a Wired row through a USB Ethernet adapter reading "Not paired", an
+///   open door's row reading "Not paired", "Update Sill", and long names), `homeasking` (a tap's ask: "Pairing with Mac mini…", the row
+///   lit), `homecard` (the home card, scanning), `homecode` (its typed path), `homecodeerror` (a
+///   wrong code), `homelocked`, `homeopenonmac`, `homerevoked`, `homecabledone`, `homeolder` (a tap
+///   on an "Update Sill" row) or `pairingrequired`. Ignored with `-SillLive 1`. The mock never
 ///   browses; Search Nearby and a row's tap only change what it shows (see
 ///   `MockCatalog.ConnectCase`).
+/// * Pairing at home, in the normal app and under `-SillLive 1` (§7.9): `-SillServiceType
+///   _silltest._tcp` (the browsers look for that type: a test host registered with
+///   SILL_TEST_SERVICE_TYPE is a real row, and no real Mac is; the Debug build's Info.plist
+///   declares it); `-SillHomeDoor paired|open|plain` (what a `-SillConnect` address counts as: an
+///   address has no TXT record; `paired` is the one saved Mac when exactly one is saved, else an
+///   unsaved Mac whose door asks for pairing); `-SillForgetHomeTLS 1` (dial an older Sill.app
+///   plainly again); `-SillCableTest 1` (this device's path counts as the USB cable for the ask);
+///   and for the gates, which drive no UI: `-SillTapRow <name prefix>` (taps that row once, as soon
+///   as it is listed), `-SillHomeCode <digits>` and `-SillHomeLink <sill://pair…>` (typed into, or
+///   scanned by, the home card once the Mac shows its code), `-SillOverlayCode <digits>` (Pair This
+///   iPad… with that code, once, over a session at home over TLS).
 /// * Real pairing, in the normal app and under `-SillLive 1` (not the mock): `-SillPairURL
-///   '<sill://pair…>'` pairs with that link at launch without the confirmation; `-SillPairCode
+///   '<sill://pair…>'` pairs with that link at launch, without the confirmation, at the link's own
+///   addresses only, as Add a Mac… does (a link with none, a home-only one, pairs nothing): a
+///   confirmed link tries the home rows first, which the gates reach with `-SillTapRow` and
+///   `-SillHomeLink` above; `-SillPairCode
 ///   <12 digits> -SillPairAddress host:port` the typed path; `-SillDialSaved 1` dials the first
 ///   saved Mac as a tap on its Remote row would; `-SillForgetMacs 1` clears the saved Macs and
 ///   this device's key; `-SillDeviceKeySE 1` makes and uses a Secure Enclave device key under its
@@ -425,7 +464,8 @@ struct LayoutHarness: View {
                                  drawerOpen: spec.drawerOpen,
                                  keyboardShown: spec.keyboardShown,
                                  scaleOpen: spec.scaleOpen, textScale: spec.textScale,
-                                 settingsOpen: spec.settingsOpen)
+                                 settingsOpen: spec.settingsOpen,
+                                 pairingOverlay: spec.scanOverlay, scannerOverride: spec.scanOverlay ? .placeholder : nil)
                 } else {
                     ConnectScreen(client: live)
                 }
@@ -456,7 +496,11 @@ struct LayoutHarness: View {
 /// * `click` — a tap on the pad: a click where its cursor is;
 /// * `tap X,Y` — a finger's tap on the stream at that fraction of the frame;
 /// * `key USAGE` — a hardware key (a HID usage), down and up: this device's pointer hides;
-/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays.
+/// * `row USAGE` — a key of the portrait key row: what the sprite shows stays;
+/// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
+///   `StreamClient.sendGesture` as a surface's decision goes (the switch, the Mac's `gestures`, the
+///   Desktop first while a window streams): swipeUp, swipeDown, swipeLeft, swipeRight, pinch or
+///   spread; the console says whether it went ("input script: t=… gesture swipeUp: sent").
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
@@ -470,6 +514,7 @@ struct LayoutHarness: View {
 enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
+        case gesture(TrackpadGestures.Gesture, fingers: Int)
 
         var description: String {
             switch self {
@@ -480,6 +525,7 @@ enum InputScript {
             case .tap(let x, let y): return "tap \(x),\(y)"
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
+            case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
             }
         }
     }
@@ -505,6 +551,12 @@ enum InputScript {
             case ("tap", 3) where pair.count == 2: step = .tap(x: pair[0], y: pair[1])
             case ("key", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .key(usage)
             case ("row", 3): guard let usage = UInt16(words[2]) else { return nil }; step = .row(usage)
+            case ("gesture", 3):
+                let parts = words[2].split(separator: ",").map(String.init)
+                guard let g = TrackpadGestures.Gesture(rawValue: parts[0]), parts.count <= 2 else { return nil }
+                let fingers = parts.count == 2 ? Int(parts[1]) : 3
+                guard let fingers, fingers == 3 || fingers == 4 else { return nil }
+                step = .gesture(g, fingers: fingers)
             default: return nil
             }
             steps.append((at, step))
@@ -513,11 +565,11 @@ enum InputScript {
     }
 
     /// Why the script must not run against this session, or nil when it may: it runs only when the
-    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT` or
-    /// `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is) and the host's
-    /// first window list carries no `hostVersion`, which Sill.app always sends. (`[::1]:PORT` never
-    /// arrives: UserDefaults reads a launch argument that starts with `[` as a property list, and
-    /// drops it.)
+    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT`,
+    /// `[::1]:PORT` or `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is)
+    /// and the host's first window list carries no `hostVersion`, which Sill.app always sends.
+    /// (UserDefaults drops `[::1]:PORT`, a launch argument that starts like a property list but is
+    /// not one; StreamClient.init puts it back from the command line.)
     static func refusal(endpoint: NWEndpoint?, hostVersion: String?) -> String? {
         guard let endpoint, isLoopback(endpoint) else {
             return "the session was not dialled to a loopback address (-SillConnect 127.0.0.1:PORT)"
@@ -573,6 +625,10 @@ enum InputScript {
         case .row(let usage):
             client.sendFromKeyRow(.key(hidUsage: usage, down: true, modifiers: 0))
             client.sendFromKeyRow(.key(hidUsage: usage, down: false, modifiers: 0))
+        case .gesture(let g, let fingers):
+            let went = client.sendGesture(g, fingers: fingers)
+            print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))
+            return
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }
@@ -582,15 +638,22 @@ enum InputScript {
 /// Before a Mac is picked: the Macs the browsers found and the saved ones they do not list, as
 /// drawer-style rows that end in how each is reachable ("Wired", "Wi-Fi", or "Direct" for one
 /// reached over peer-to-peer Wi-Fi; "Remote" for a saved Mac dialed through its VPN or the internet;
-/// nothing when the device cannot tell); when none turns up on the network, why, with Search
-/// Nearby; and Add a Mac… last, which unfolds the pairing card in the column's place
-/// (docs/remote-access-plan.md §7.8, §7.10). A saved Mac's row has a menu: Connect or Connect
-/// Remotely, and Forget. Along the bottom, a footer says Sill needs its free Mac app and where to
-/// get it, and links support and the privacy policy (App Review guidelines 1.5, 2.1 and 5.1.1(i)).
-/// None of it shows while connected: the stream screen takes this one's place (`ContentView`).
+/// nothing when the device cannot tell), or, at home, in what a tap does first: "Not paired" (the
+/// Mac shows a code), "Wired" for an unpaired Mac on the USB cable (it pairs by itself), "Update
+/// Sill" (its Sill is too old for this build) (docs/home-pairing-plan.md §7.3); when none turns up
+/// on the network, why, with Search Nearby; and Add a Mac… last, which unfolds the pairing card in
+/// the column's place (docs/remote-access-plan.md §7.8, §7.10). When a tap's ask makes the Mac show
+/// its code, the home card unfolds there instead, for that row (§7.5, §7.8). A saved Mac's row has a
+/// menu: Connect or Connect Remotely, and Forget. Along the bottom, a footer says Sill needs its
+/// free Mac app and where to get it, and links support and the privacy policy (App Review
+/// guidelines 1.5, 2.1 and 5.1.1(i)). None of it shows while connected: the stream screen takes
+/// this one's place (`ContentView`).
 struct ConnectScreen: View {
     @ObservedObject var client: StreamClient
     @State private var adding: Bool
+    /// The home card's Mac: a tap on its row asked, and the Mac shows its code (`homeAsk`). Kept
+    /// through the pairing's end, "Paired with…", while the session after it comes up.
+    @State private var homeCard: String?
     @State private var typed: Bool
     /// A field of the card has the keyboard.
     @State private var editing = false
@@ -603,7 +666,19 @@ struct ConnectScreen: View {
         self.client = client
         self.scannerOverride = scannerOverride
         _adding = State(initialValue: adding)
+        _homeCard = State(initialValue: client.homeAsk.flatMap { $0.phase == .shown ? $0.name : nil })
         _typed = State(initialValue: typed)
+    }
+
+    /// A card is up in the rows' place: Add a Mac, or the home card.
+    private var carded: Bool { adding || homeCard != nil }
+
+    /// "Pair with Mac mini" over the home card; "Add a Mac" over Add a Mac and an outside link's
+    /// confirmation.
+    private var title: String {
+        if client.pendingLink != nil || adding { return "Add a Mac" }
+        if let mac = homeCard { return DiscoveryPolicy.HomeCopy.cardTitle(mac: mac) }
+        return "Connect to a Mac"
     }
 
     private var device: String { StreamClient.deviceWord }
@@ -642,7 +717,7 @@ struct ConnectScreen: View {
                         centreHeight: layout.topHalf ? min(geo.size.height / 2, 500) : geo.size.height,
                         visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
                         column(layout)
-                            .frame(width: adding && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
+                            .frame(width: carded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
                                    alignment: .leading)
                             // Placed by its leading edge, not centred: the side-by-side card is wider
                             // than the rows, and centring it moved the title sideways as the card
@@ -676,6 +751,19 @@ struct ConnectScreen: View {
             // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
             if case .paired = old, new == .idle, !client.connected { fold() }
         }
+        .onChange(of: client.homeAsk) { _, ask in
+            if let ask, ask.phase == .shown {
+                // The Mac shows its code: the home card for that row.
+                if homeCard != ask.name { unfoldHome(ask.name) }
+            } else if ask == nil, homeCard != nil {
+                // The ask ended while the card was up. A pairing that went through keeps the card
+                // ("Paired with…") until the session comes, or the 10 s above fold it.
+                switch client.pairing {
+                case .working, .paired: break
+                case .idle, .failed: foldHome()
+                }
+            }
+        }
         // VoiceOver hears each status line (§7.8): a remote dial and why it failed, a reconnect,
         // "Stopped trying…", "… is saved", Forget, and the line a session ended with (why the Mac
         // closed it), which is already set when this screen comes back. A changed Text alone is
@@ -694,18 +782,21 @@ struct ConnectScreen: View {
         VStack(alignment: .leading, spacing: 6) {
             // Leading, so the title never jumps sideways when the hint, a row or the card widens the
             // column. Vertically it is still centred (ColumnOverFooter): what adds height moves it up
-            // by half as much.
-            Text(adding || client.pendingLink != nil ? "Add a Mac" : "Connect to a Mac")
+            // by half as much. It wraps, never truncates, under the home card ("Pair with" and a
+            // long Mac name).
+            Text(title)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 10)
-                .accessibilityAddTraits(adding ? .isHeader : [])
+                .accessibilityAddTraits(carded ? .isHeader : [])
                 .accessibilityFocused($titleFocused)
 
             if let link = client.pendingLink {
                 LinkConfirmation(link: link, pair: {
                     // The card shows the pairing's progress; should it fail, the scanner (or the
-                    // typed path where there is none) is there to try again.
+                    // typed path where there is none) is there to try again. Add a Mac's card, even
+                    // over the home card: the link may name another Mac.
                     typed = !scannerUsable
                     adding = true
                     client.confirmPendingLink()
@@ -714,6 +805,12 @@ struct ConnectScreen: View {
                 .padding(.top, 4)
             } else if adding {
                 AddMacCard(client: client, layout: layout, typed: $typed, scannerMode: scannerMode, close: fold, editing: $editing)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            } else if let mac = homeCard {
+                AddMacCard(client: client, layout: layout, typed: $typed, scannerMode: scannerMode, close: fold, editing: $editing,
+                           home: mac)
                     .padding(.horizontal, 10)
                     .padding(.top, 4)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
@@ -750,8 +847,12 @@ struct ConnectScreen: View {
         ForEach(client.macs) { mac in
             // The kind of link, never the Wi-Fi network's name: that needs Location access, which
             // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
-            // from home.
-            DrawerRow(height: 50, highlighted: false, title: mac.name, trailing: mac.word,
+            // from home; at home, what a tap does first when it pairs ("Not paired", "Wired" over
+            // the cable) or cannot connect ("Update Sill"), with VoiceOver's label and hint for it
+            // (DiscoveryPolicy.RowWord). The row a tap's ask is waiting on is lit, as the drawer
+            // lights the app on screen, while the status line says "Pairing with…".
+            DrawerRow(height: 50, highlighted: client.homeAsk.map { $0.phase == .asking && $0.target.row == mac.id } ?? false,
+                      title: mac.name, trailing: mac.word,
                       action: { client.connect(to: mac) }) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
@@ -761,9 +862,9 @@ struct ConnectScreen: View {
                 }
                 .frame(width: 32, height: 32)
             }
-            .accessibilityLabel(mac.word.map { "\(mac.name), \($0)" } ?? mac.name)
-            .accessibilityHint(mac.direct ? "Connects without a shared Wi\u{2011}Fi network"
-                               : mac.route == .remote ? "Connects through your VPN or the internet." : "")
+            .accessibilityLabel(mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name))
+            .accessibilityHint(mac.route == .remote ? "Connects through your VPN or the internet."
+                               : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct))
             .contextMenu { menu(for: mac) }
         }
 
@@ -828,16 +929,41 @@ struct ConnectScreen: View {
     }
 
     private func unfold() {
+        client.cancelHomeAsk()      // a tap's ask still waiting for its answer: Add a Mac is another way
         client.pairing = .idle
         typed = !scannerUsable
         withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) { adding = true }
         titleFocused = true
     }
 
+    /// The Mac shows its code: its card, on the scanner (the typed path where there is none). The
+    /// pairing is left as it is: the DEBUG gates type the code as the answer arrives.
+    private func unfoldHome(_ mac: String) {
+        typed = !scannerUsable
+        editing = false
+        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : .spring(duration: 0.3, bounce: 0.1)) {
+            adding = false
+            homeCard = mac
+        }
+        titleFocused = true
+    }
+
+    /// Cancel, Esc and the escape gesture, on either card: the ask or pairing in flight stops, and
+    /// the rows come back.
     private func fold() {
         client.cancelPairing()
         editing = false
-        withAnimation(.easeOut(duration: 0.18)) { adding = false }
+        withAnimation(.easeOut(duration: 0.18)) {
+            adding = false
+            homeCard = nil
+        }
+        titleFocused = true
+    }
+
+    /// The home card's ask ended some other way: nothing left to cancel.
+    private func foldHome() {
+        editing = false
+        withAnimation(.easeOut(duration: 0.18)) { homeCard = nil }
         titleFocused = true
     }
 

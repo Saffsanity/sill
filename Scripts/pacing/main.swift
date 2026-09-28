@@ -160,11 +160,23 @@ door.newConnectionHandler = { c in
     c.stateUpdateHandler = { state in
         switch state {
         case .ready:
+            // `serve` as this side's StreamServer has it: with the hello a TLS door's gate read (none
+            // here) and a home route's peer (none: the harness's door sees no key) since pairing at
+            // home, without both before it (build.sh defines PACING_SERVE_BEFORE_HOME_PAIRING then).
             if home {
+                #if PACING_SERVE_BEFORE_HOME_PAIRING
                 server.serve(c, route: .home(.loopback))
+                #else
+                server.serve(c, route: .home(.loopback, peer: nil), hello: nil)
+                #endif
                 print("Home client connected: \(c.endpoint)")
             } else {
-                server.serve(c, route: .remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness"))
+                let route = ClientRoute.remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness")
+                #if PACING_SERVE_BEFORE_HOME_PAIRING
+                server.serve(c, route: route)
+                #else
+                server.serve(c, route: route, hello: nil)
+                #endif
                 print("Remote client connected: harness through Tailscale (\(c.endpoint))")
             }
         case .failed:

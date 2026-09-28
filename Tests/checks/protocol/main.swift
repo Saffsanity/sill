@@ -363,9 +363,10 @@ func header(_ kind: UInt8) -> StreamHeader? {
 }
 check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, goodbye",
       [header(18)?.kind, header(19)?.kind, header(20)?.kind, header(21)?.kind, header(22)?.kind] == [.macInfo, .pairRequest, .pairResult, .pairingWanted, .goodbye])
-check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer; 28 unknown (skipped)",
+check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
-      && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer && header(28)?.kind == .unknown)
+      && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
+check("kind 28 is gesture (trackpad gestures), 29 unknown (skipped)", header(28)?.kind == .gesture && header(29)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -452,6 +453,13 @@ check("TLS: the client's pin does not match — waiting -9808, never ready (\(r.
       !r.clientReady && r.box.lines.contains { $0.contains("-9808") })
 r = handshake(dev, alpn: "sill/2", pin: mac.fingerprint, paired: [dev.fingerprint], pairingOpen: false)
 check("TLS: an ALPN the host does not offer — refused (\(r.box.lines.joined(separator: "; ")))", !r.clientReady && !r.echo)
+// The floor (CLAUDE.md): a host offers sill/1 and sill-pair/1 for good, and a later generation only
+// ever adds to them. A 1.0 device offers exactly one of the two and hears kind 22 "update" only
+// inside a sill/1 session: a host without sill/1 would leave it a failed handshake (-9838, as the
+// sill/2 case above shows from the other side) and a redial for ever.
+check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs))",
+      RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
+check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

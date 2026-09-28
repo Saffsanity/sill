@@ -28,6 +28,9 @@ struct CodeScanner: View {
     let onLink: (PairLink, _ tapped: Bool) -> Void
     /// A scan failed and the same code is held: the caption says a tap on it tries again.
     var retryNeedsTap = false
+    /// The Mac whose code it reads, for the caption and VoiceOver: the home card's names it
+    /// ("Point at the code on Mac mini", docs/home-pairing-plan.md §7.7); nil for "your Mac".
+    var mac: String? = nil
     @State private var notSill = false
     @State private var notSillToken = 0
     /// The camera as this view knows it. DataScannerViewController never asks by itself (it only
@@ -83,9 +86,10 @@ struct CodeScanner: View {
                 }
             }
             .accessibilityElement(children: denied ? .contain : .ignore)
-            .accessibilityLabel(denied ? "" : "Camera. Point it at the code on your Mac.")
+            .accessibilityLabel(denied ? "" : mac.map(DiscoveryPolicy.HomeCopy.viewfinderLabel) ?? "Camera. Point it at the code on your Mac.")
             if !denied {
-                Text(notSill ? "That’s not a Sill code." : retryNeedsTap ? "Tap the code to try again." : "Point at the code on your Mac")
+                Text(notSill ? "That’s not a Sill code." : retryNeedsTap ? "Tap the code to try again."
+                     : mac.map(DiscoveryPolicy.HomeCopy.viewfinderCaption) ?? "Point at the code on your Mac")
                     .font(.system(size: 13))
                     .foregroundStyle(notSill ? Color.orange : Palette.muted)
                     .accessibilityHidden(!notSill && !retryNeedsTap)

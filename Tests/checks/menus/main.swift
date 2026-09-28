@@ -22,7 +22,8 @@ check(StreamMessageKind.macMenu.rawValue == 24 && StreamMessageKind.pressMenuIte
       && StreamMessageKind.fetchMenu.rawValue == 27, "kinds: macMenu 24, pressMenuItem 25, fetchMenu 27")
 check(header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem && header(27)?.kind == .fetchMenu,
       "kinds 24, 25 and 27 parse")
-check(header(26)?.kind == .macPointer && header(28)?.kind == .unknown, "kind 26 is the Mac's pointer, between the menus' kinds; 28 unknown")
+check(header(26)?.kind == .macPointer && header(28)?.kind == .gesture && header(29)?.kind == .unknown,
+      "kind 26 is the Mac's pointer, between the menus' kinds; 28 the trackpad gesture; 29 unknown")
 check(header(23)?.kind == .hello && header(22)?.kind == .goodbye, "kinds 22 and 23 unchanged")
 let m24 = StreamMessage(kind: .macMenu, timestamp: 1, isKeyframe: false, payload: Wire.encode(MacMenu(version: 3, menus: [])))
 check(StreamMessage.parseHeader(m24.serialized())?.kind == .macMenu

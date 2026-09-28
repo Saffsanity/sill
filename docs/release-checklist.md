@@ -181,6 +181,79 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       `https://apps.apple.com/app/id6816359860`, so a Mac that needs a newer Sill on the device
       shows "Update Sill in the App Store" under its notice (TestFlight §2).
 
+### 5. The keychain provisioning profile (for the hardened identity keychain)
+
+Recommended before the first public build (docs/keychain-plan.md): it moves Sill's remote‑access
+identity (the Mac's key, the trust list, Require pairing) from the legacy login keychain to the
+data‑protection keychain, which no other process can pre‑create or read. Without it, a release
+still builds and runs — it keeps the identity in the login keychain, and `make-app.sh --release`
+and `release.sh` say so in the log. Landing it before the first public build means new installs
+write straight to the strong keychain and only your own dev Macs need the reset below.
+
+- [x] **Made 2026-09-27** on developer.apple.com (Certificates, Identifiers & Profiles): the App ID
+      "Sill for Mac", `me.saffer.sill.mac`, and the Developer ID provisioning profile **"Sill
+      Developer ID"**, UUID `18e9509f-5498-4533-ba59-293461a61a0d`, platform macOS, team
+      9B2KKVM937, all Macs, for the Developer ID Application certificate (SHA‑1 `42424F38…71D8D6`).
+      It grants `com.apple.application-identifier` `9B2KKVM937.me.saffer.sill.mac`,
+      `com.apple.developer.team-identifier` 9B2KKVM937 and `keychain-access-groups`
+      `9B2KKVM937.*`, which covers the group `9B2KKVM937.me.saffer.sill.mac`. It expires
+      **2044‑09‑22** (Apple issues them for 18 years).
+- Where it lives: `Packaging/embedded.provisionprofile` (git‑ignored; the copy make-app.sh embeds),
+      backed up as `~/Library/Developer/Xcode/UserData/Provisioning Profiles/18e9509f-5498-4533-ba59-293461a61a0d.provisionprofile`
+      and as the download, `~/Downloads/Sill_Developer_ID.provisionprofile`; all three byte for
+      byte the same (SHA‑256 `4f9f99b0…d996ed65`). It holds no secret (Apple's signature, the
+      public certificate, the entitlements), and the developer site downloads it again at any time.
+      `SILL_PROVISION_PROFILE` points make-app.sh at another copy.
+- Check: `security cms -D -i Packaging/embedded.provisionprofile` prints its plist; a Mac profile
+      names the app `Entitlements › com.apple.application-identifier` (`application-identifier` is
+      the iOS key, and an app signed with it is killed at launch: docs/keychain-plan.md §9b).
+      `make-app.sh --release` prints `identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)`. It refuses, before it writes an app that macOS would kill
+      at launch, a profile that doesn't grant what `Packaging/SillRelease.entitlements` asks for
+      (the application identifier, the team, the keychain group, and any entitlement added to
+      that file later), doesn't list the certificate that signed the build, has expired, or
+      doesn't decode. Proved with this profile on 2026‑09‑27 (docs/keychain-plan.md §9b): the
+      build launches, and only an entitled build reads the group.
+- [ ] **By 2027‑02‑01: the certificate, then the profile.** The profile outlives the certificate it
+      lists: the Developer ID Application certificate ends on 2027‑02‑01, with the Apple CA that
+      issued it ("Developer ID Certification Authority", 2012–2027). Apple says a build signed with a
+      secure timestamp before then keeps launching (not something this Mac can test yet); a build
+      after it needs a new Developer ID certificate (§1) and then the profile with it: on the
+      developer site, edit "Sill Developer ID" to use the new certificate (or make a new Developer ID
+      profile for `me.saffer.sill.mac`), download it, and replace
+      `Packaging/embedded.provisionprofile` and the backups. Until then make-app.sh refuses: "lists
+      the certificates […], not the one that signed this build".
+- To make one again from nothing (another team, a lost account): on developer.apple.com register
+      the explicit App ID `me.saffer.sill.mac`, then a provisioning profile of type Developer ID
+      for macOS with that App ID and the Developer ID Application certificate, and download it. (The
+      plan's other way, `xcodebuild -allowProvisioningUpdates` from a throwaway macOS target with
+      Keychain Sharing, registers the same things from Xcode and may prompt for your Apple Account;
+      a background or CI run must not do either.)
+- One team, two certificates: both identities on this Mac are team **9B2KKVM937** (the
+      Apple Development certificate's name ends in HG877AGTQ7, your own member ID, not a team). The
+      profile lists only the Developer ID certificate, so only the Developer ID build carries the
+      profile and the access group; a development build (make-app.sh's default) must **not** — it
+      keeps `SillDebug.entitlements` and the login keychain. Signed with the Apple Development
+      certificate, the same entitlements and this profile, a build is killed at launch (measured
+      2026‑09‑27).
+- Profile validity: Gatekeeper checks the profile at **every launch**, so an expired one stops the
+      app launching. `make-app.sh` refuses an expired profile and warns within 30 days. A
+      **missing** profile is the safe fallback — the release builds on the login keychain with a log
+      line — but an **expired** one is an error, not a fallback, because it would already be
+      embedded.
+- Releases from GitHub Actions: the runner has no `Packaging/embedded.provisionprofile` (it is
+      git‑ignored), so a release the release workflow makes ships on the login keychain, and its log
+      says so. To harden those too, the workflow needs the profile (a secret written to that path
+      before `release.sh`, or the file committed, which holds no secret): not done yet
+      (docs/keychain-plan.md §10).
+- No auto‑migration (the security review, docs/keychain-plan.md §9a): an entitled build never reads
+      the login keychain, so a dev Mac that used remote access on the legacy store gets a **fresh**
+      key and Mac ID on its first hardened launch (any device paired to it re‑pairs). Remote access
+      is off by default and home pairing has not shipped publicly, so this is near zero. To start
+      clean, delete the legacy items by hand — `for a in recognition-key paired-devices
+      require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a $a; done`, and
+      the "Sill Remote Access" key in Keychain Access — and re‑pair. On a Mac you own, never in CI.
+
 ## Part 2: every release
 
 - [ ] Versions: Sill for Mac's is `CFBundleShortVersionString` in `Packaging/Info.plist`; its
@@ -671,8 +744,10 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
   Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
-  The mutants (CI started by hand with "mutants" ticked) take about two hours of macOS time across
-  their fifteen jobs: some 1,200 included minutes, more than half of Free's month, or about $7.50.
+  The mutants (CI started by hand with "mutants" ticked) run a job for each of the 32 checks with
+  mutants, about four hours of macOS time in all (their scripts took 205 minutes here on
+  2026-09-27, several at once; each job also checks out and selects Xcode, and is rounded up to
+  the minute): some 2,400 included minutes, more than Free's month, or about $15.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.

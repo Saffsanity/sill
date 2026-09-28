@@ -2,7 +2,8 @@
 # The device's remote-access rules, compiled with StreamProtocol's sources as one module (build.sh
 # strips `import StreamProtocol`): DiscoveryPolicy's Remote rows and automatic remote dial,
 # RemoteDialPolicy (the order a saved Mac's addresses are tried in, what a failure means, scans)
-# and SavedMacs.
+# and SavedMacs; and pairing at home's model (home.swift: the home rules against the wire's own
+# values, pairing at home end to end, the saved Macs' home fields).
 #   Tests/checks/remote-rules/run.sh             compile and run the check
 #   Tests/checks/remote-rules/run.sh --mutants   one-line mutants of the three files; each must fail it
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -153,6 +153,22 @@ enum IPBytes {
         a.count == 4 ? (a[0] == 169 && a[1] == 254) : (a[0] == 0xFE && a[1] & 0xC0 == 0x80)
     }
 
+    /// An IPv4-mapped IPv6 address (::ffff:a.b.c.d) as its 4 IPv4 bytes; any other address as it is.
+    static func unmapped(_ a: [UInt8]) -> [UInt8] {
+        guard a.count == 16, a[0..<10].allSatisfy({ $0 == 0 }), a[10] == 0xFF, a[11] == 0xFF else { return a }
+        return Array(a[12...])
+    }
+
+    /// An IPv6 link-local address with bytes 2–3 cleared, where the kernel embeds the scope in
+    /// the addresses getifaddrs returns (InterfaceSnapshot stores them so); any other address as
+    /// it is. Comparing a source with this Mac's own addresses goes through it on both sides.
+    static func unscoped(_ a: [UInt8]) -> [UInt8] {
+        guard a.count == 16, isLinkLocal(a) else { return a }
+        var b = a
+        b[2] = 0; b[3] = 0
+        return b
+    }
+
     /// RFC 1918 (10/8, 172.16/12, 192.168/16) or a unique local IPv6 address (fc00::/7).
     static func isPrivate(_ a: [UInt8]) -> Bool {
         if a.count == 4 { return a[0] == 10 || (a[0] == 172 && a[1] & 0xF0 == 16) || (a[0] == 192 && a[1] == 168) }

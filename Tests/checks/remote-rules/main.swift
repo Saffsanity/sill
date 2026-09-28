@@ -197,5 +197,8 @@ check("2,000 tags of random keys match no saved Mac", wrong == 0)
 let parsed = try! AddressParser.parse("100.101.102.103:7460").get()
 check("a linked address gets its kind and Tailscale's name", R.address(for: parsed) == MacAddress(host: "100.101.102.103", port: 7460, kind: "vpn", via: "Tailscale"))
 
+// Pairing at home (docs/home-pairing-plan.md): the home model and the saved Macs' home fields, in home.swift.
+homeRemote()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)
