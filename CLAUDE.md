@@ -9,115 +9,71 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **The stuck command after Spotlight (2026-09-27, branch `spotlight-modifier-fix`
-from main at 643af6b).** Noah: "The stuck command after Spotlight", found by the
-trackpad-gestures review (PR #38). The device's Spotlight key sent ⌘Space as one
-key down and up, each carrying command, and the host posted both as they came.
-Each keyboard event the injector posts leaves its flags in the HID system's
-state table that its source reads (CGEventSource.h), and every pointer and
-scroll event made from that source afterwards starts from them: after the
-Spotlight key the next tap was a ⌘-click until something was typed (text goes
-out with no flags). The key row's keys with a latched modifier and a latched ⌘,
-⌃ or ⌥ on the software keyboard did the same, and a hardware keyboard's ⌘ was
-left down: the device judged each release afresh, so ⌘'s own release reached
-the Mac with command still on it or not at all (UIKit's flags at a modifier's
-release are those before it or after it). Inferred, not observed: nothing may
-be posted while this is built; text typed into Spotlight inheriting ⌘ the same
-way (2026-09-23) is the one observation.
-- Host (`KeyStrokes`, pure; Layout): each key event carries what a keyboard
-  would, from the modifier keys each device holds down (by usage and
-  connection). A key's down carries the modifiers its device sent and whatever
-  modifier keys are down; its up only what those still hold. A modifier's own
-  key (the trackpad's latched ones around a click, a hardware keyboard's) is a
-  flags-changed event with what is held once it is down or up, never its own
-  flag after its up, whatever the device said. A device's key or text that no
-  longer says a modifier it holds lets go of that key first. A device that
-  leaves has every key it holds let go (onClientDisconnected, after input held
-  for an activation), and the host lets go of every key at its end
-  (`shutdownForExit`: the app's Quit, a signal it catches). A key's up reaches
-  the Mac with nothing streaming, and when a switch drops input held for an
-  activation, if that key is down there. Pointer and scroll events start from
-  the table as before. As the gestures' chords do (PR #38), a quarter of a
-  second after a chord's up the table is read again (a read), and a modifier
-  the chord carried that is still set is counted, `in.keyModifiersLeft`, and
-  said once ("Keys: after a device's shortcut this Mac's modifier keys still
-  read command (not before it); …"); a key let go is `in.keyLetGo`.
-- Device (`KeyChords`, pure; Layout): a shortcut goes out as a keyboard sends
-  it, each modifier's own key down, the key down and up, each modifier's key up
-  (`KeyChord.press`: the Spotlight key's ⌘Space, the key row, a latched ⌘, ⌃ or
-  ⌥ on the software keyboard), as the trackpad's modified clicks already did,
-  so it leaves nothing held on a Mac from before this fix either (Sill.app
-  0.3.0 and 0.3.1 are out: the compatibility floor). A hardware key keeps the
-  path it went down on (`ForwardedKeys`): its up goes to the Mac whenever its
-  down did, a modifier's key and every up carry only the modifier keys down
-  there, a cancelled press comes up (`pressesCancelled`), and the overlay lets
-  go of its keys when it stops taking them (it resigns: the Settings panel, the
-  Keyboard button, the tour) or leaves the screen; ⌘, ⌃ and ⌥ themselves always
-  go as keys. A trackpad drag whose view goes (a rotation) ends: the button and
-  the modifiers around it come up, and the latch is spent a turn later. The
-  latch itself was already right (the Spotlight key and the key row spend it).
-- `Tests/checks/key-strokes` (279 checks, 54 mutants; CI's mutants matrix): the
-  exact events of every shortcut, modifier key, lost release, leave, quit, move
-  and two-device case and of a trackpad gesture's shortcut (PR #38's rule,
-  `KeyStrokes.chord` since the merge), each latched combination on this Mac and
-  on one from before, the hardware keyboard's paths both ways UIKit may report a
-  modifier, and random sessions: 3,000 of two devices (moves, leaves, a hardware
-  keyboard losing releases, gestures) and 2,000 of this device alone, against
-  the invariant that whatever modifier the table holds, and every pointer
-  event's, is accounted for by a key down on the Mac (and, on a Mac from before,
-  that nothing is held once nothing is pressed). Against main's rules (at
-  da43f6b: bbe43dd's KeyStrokes.swift, the key path extracted unchanged, with
-  #38's gesture chord, and f6e5691's KeyChords.swift with the hardware forward
-  rule, behind the check's API) 205 of 279 fail and all 3,000 sessions break;
-  main's host with this device 36 (none of its sessions on an older Mac), this
-  host with main's device 94 (1,767 of 2,000 on an older Mac); here all pass.
-  (Before the merge, against 643af6b's: 203 of 272.)
-- The dry run (TEST ONLY `SILL_TEST_INPUT_LOG=1`, Build and run; a synthetic
-  host posts nothing), sillclient's input against this build: an older
-  device's Spotlight key then a tap, "key 49 down (command)", "key 49 up
-  (none)", "left mouse down (none)"; this device's, "key 55 flags changed
-  (command)", 49 down and up with command, "key 55 flags changed (none)", the
-  tap from none; a latched ⌘-click still a ⌘-click and the tap after plain; a
-  lost ⌘ release, the tap a ⌘-click (⌘ is down as the device said), then text
-  lets ⌘ go first; a device leaving with ⌘ down, ⌘ let go; the stream stopped
-  with ⌘ down, its up still goes and a key down after it does not.
-- End to end on a private simulator (an iPad Pro 11-inch, deleted after):
-  this build's app with `-SillLayout 710x1000 -SillLive 1 -SillConnect
-  127.0.0.1:P -SillInputTest 1` against that host, a test client keeping the
-  Desktop streaming: the key row's own code sent ⌘esc as "key 55 flags changed
-  (command)", 53 down and up with command, "key 55 flags changed (none)"; the
-  trackpad's tap with ⌃⇧ latched as before (control, then control + shift, the
-  click with both, then down to none); the scroll after it from none.
-- Merged with main at da43f6b (PR #38, trackpad gestures, which landed while
-  this was built; one merge commit, not a rebase). #38's `InputInjector.chord`
-  already put the table back with a gesture's key up (the table read before it),
-  and its `checkModifiersLeft` sits beside `checkKeyModifiersLeft`; after the
-  merge its flags come from `KeyStrokes.chord` (the same rule), which the check
-  puts among the devices' keys. Where they met: the coordinator's `Held` keeps
-  the device in `.input`, and a switch's drop sends, in order, #38's held chords
-  and the ups of keys down; the `.input` case keeps a key's up without a source
-  and #38's `gestureChords.input` after it; the touch rig (`Tests/touchrig`)
-  compiles KeyChords.swift where the sources have it; ci.yml's matrix, the
-  checks' README, DEVELOPMENT.md and CLAUDE.md keep both sides.
-- Verified: `swift build -c release`, only the CaptureProbe warning; iOS Debug
-  for the simulator, only the StreamClient warning; `Tests/checks/run-all.sh`,
-  all 27 after the merge; the key-strokes mutants, 54 of 54; the CLI
-  against main's (from `git archive`), synthetic on the software encoder, idle
-  and with a client sending a key, a bare ⌘Space and a tap: against 643af6b
-  identical, masked, in order; against da43f6b the same but the second after
-  the client left, whose counters vary run to run (three runs); the dry run
-  again after the merge, line for line, and the simulator run above again on
-  the merged build, the same events; the touch rig (`Tests/touchrig`, on a
-  private simulator deleted after), this tree's surfaces against main's at
-  da43f6b: 72 checks, none failed.
+from main at 643af6b, with main at da43f6b (PR #38) merged in; not pushed).**
+Noah: "The stuck command after Spotlight", found by PR #38's review. The
+Spotlight key sent ⌘Space as one key down and up, each carrying command, and
+the host posted both as they came; every keyboard event posted leaves its flags
+in the HID state table its source reads (CGEventSource.h), and pointer and
+scroll events start from them, so the next tap was a ⌘-click until something
+was typed. The key row, a latched ⌘, ⌃ or ⌥ on the software keyboard and a
+hardware keyboard's ⌘ did the same. Inferred, not observed: nothing may be
+posted while this is built.
+- Host (`KeyStrokes`, pure): a key's down carries its device's modifiers and
+  what the modifier keys down hold, its up only what they hold; a modifier's
+  own key is a flags-changed event with what is held; a key or text that no
+  longer says a modifier lets go of that key first; a device that leaves, and
+  the host at its end (Sill.app's Quit, a Ctrl-C, kill or hangup; the CLI
+  without --virtual-display then dies of the signal as before,
+  `HostShutdown.installKeyRelease`), let go of every key and button. Input
+  with nowhere to land (nothing streams, or a switch drops held input) is
+  dropped but for the up of a key or a button the Mac has down
+  (`DroppedInput`), a button's where the pointer is.
+- The tripwire (`KeyUpCheck`, pure): a quarter of a second after every key's
+  up whose down put a modifier in the table (a modifier key's own, a
+  shortcut's key, the ups KeyStrokes makes), the table is read again; a
+  modifier the up should have taken out and the table still holds, that no
+  key down holds and no key since carried, is counted, `in.keyModifiersLeft`,
+  and said once with the key ("Keys: a quarter of a second after a device's
+  key 55 came up, …"). TEST ONLY `SILL_TEST_INPUT_LOG=1` (Build and run)
+  prints what a `--synthetic` host would post and each check it arms.
+- Device (`KeyChords`, pure): a shortcut goes out as a keyboard sends it, its
+  modifiers' own keys around it (`KeyChord.press`: the Spotlight key, the key
+  row, a latched ⌘S), so Sill.app 0.3.x is left nothing held either; a
+  hardware key's up follows its down (`ForwardedKeys`), a cancelled press
+  comes up, and the overlay lets go of its keys when it stops taking them.
+- `Tests/checks/key-strokes` (329 checks, 72 mutants; CI and its mutants
+  matrix): every path's exact events on this Mac and on one from before, the
+  tripwire armed for each path and reporting on Macs that keep their table
+  through a modifier key's up or another key's, input with nowhere to land,
+  and random sessions of two older devices (3,000, and 1,000 on each such Mac)
+  and of this device (2,000, and 500 each). Against main's rules, 205 of the
+  279 checks before the review failed.
+- Review (2026-09-27; each reproduced first, then fixed in a commit of its
+  own): the tripwire was armed for none of this device's paths; the CLI's
+  default path died of a signal with a device's modifier down; the drag guard
+  this branch had added to `TrackpadSurface.didMoveToWindow` never ran (UIKit
+  cancels the long press first, and its end lets the button and the modifiers
+  up and spends the latch: a rig on a private simulator) and is gone; and,
+  older than the branch, a button's up with nowhere to land was dropped,
+  leaving the Mac's button down and every later move a drag.
+- Verified: `swift build -c release`; iOS Debug for the simulator (CI's
+  command), only the StreamClient warning; `run-all.sh`, all 27; the dry run on
+  a synthetic host against 84ddd9c's (this device's Spotlight key arms a check
+  for command at key 55's up; a drag whose stream stops ends "left mouse up
+  (none) at 454,285" and the moves after are moves, where 84ddd9c's are
+  drags); SIGINT, SIGTERM and SIGHUP with ⌘ and the button held let go of both
+  and end with 84ddd9c's wait status; the app's `-SillInputTest` against that host, a
+  rotation rig and the touch rig (72 of 72 against main's) on a private
+  simulator, deleted after.
 - **Untested, for Noah:** with this Sill.app and this iPad build, the Spotlight
-  key and then a tap on a file in Finder selects it (not a ⌘-click); the key
-  row's ⌘esc and a latched ⌘S on the software keyboard the same; a hardware
-  keyboard's ⌘C, then a Pencil tap; ⌘ held on it while tapping with the Pencil
-  (a ⌘-click, as before), then let go (plain again); ⌘ held while Wi-Fi drops
-  (let go at the eviction); Quit Sill.app while holding ⌘. With the iPad's
-  build from before this branch against this Sill.app, the same taps, and the
-  log has no "Keys: … still read" line (if it does, a key up's flags do not
-  put the table back: note which key); with this iPad build against Sill.app
+  key and then a tap on a file in Finder selects it (not a ⌘-click), and the
+  same after the key row's ⌘esc, a latched ⌘S and a hardware ⌘C; a latched
+  ⌘-click stays a ⌘-click and the next tap is plain; ⌘ held while Wi-Fi drops,
+  and Quit Sill.app while holding it: plain clicks after; a drag held on the
+  trackpad while the window is closed on the Mac (⌘W there), let go, then
+  another window picked: the pointer moves there, nothing drags. Sill.log
+  should have no "Keys: … came up, this Mac's modifier keys still read" line;
+  if it has, note the key (55 is ⌘). With this iPad build against Sill.app
   0.3.1, the Spotlight key then a tap is a plain click.
 
 **Three-finger trackpad gestures (2026-09-27, branch `trackpad-gestures` from
@@ -3706,17 +3662,22 @@ good.
   `InputInjector` (CGEvents: pointer, scroll with phases, text with modifier
   flags cleared explicitly (a ⌘Space before typing otherwise tainted the text
   events and Spotlight ignored them), HID keys as KeyStrokes gives them, each
-  device's keys let go when it leaves and every key at the host's end; the
-  TEST ONLY input log), `KeyStrokes` (a device's key as the Mac's: its
-  virtual key, and the flags each event carries from the modifier keys the
-  devices hold down, so a key's up leaves only what is held; pure,
+  device's keys let go when it leaves and every key and button at the host's
+  end, the check after each key's up, a button's up with nowhere to land where
+  the pointer is; the TEST ONLY input log), `KeyStrokes` (a device's key as the
+  Mac's: its virtual key, and the flags each event carries from the modifier
+  keys the devices hold down, so a key's up leaves only what is held;
+  `KeyUpCheck`, whether an up took its modifiers out of the HID state table;
+  `DroppedInput`, what of input with nowhere to land still goes; pure,
   `Tests/checks/key-strokes`),
   `WindowSizer` (Accessibility resize for the Aa scale; `placement/move/
   restore` for the virtual display), `VirtualDisplay` (private-API wrapper),
   `VirtualStage` (`--virtual-display`: owns the display and the moved window,
   geometry, prepare/release, emergency restore), `HostShutdown` (signal
   sources + atexit, installed only with the flag in the CLI, always in the app;
-  `releaseForQuit` for the app's Quit), `VirtualDisplaySelfTest`
+  `releaseForQuit` for the app's Quit; `installKeyRelease` for the CLI's
+  default path: a device's keys let go, then the signal's own end),
+  `VirtualDisplaySelfTest`
   (`--virtual-display-selftest`), `Stats` (1 s lines while active, 30 s
   heartbeat when idle). Remote access: `OriginPolicy` + `InterfaceSnapshot`
   (who may use which door; pure), `RefusalSummary` (one refusal line a minute),
@@ -4242,8 +4203,10 @@ no launch probe and no re-check, so a test never touches the hardware encoder
 no-device check); `SILL_TEST_INPUT_LOG=1` prints each event the dry run would
 post, "Test input: key 49 down (command)" with the flags it was made with, and
 a pointer or scroll event with those the last keyboard event would have left
-in the HID state table ("Test input: left mouse down (none)"): what a device's
-keys leave for its next click (KeyStrokes), without posting anything.
+in the HID state table, a button's with where it goes ("Test input: left mouse
+down (none) at 756,474"), and each check a key's up arms ("Test input: key 55
+up: the table read again in 0.25 s for command"): what a device's keys and
+buttons leave for its next click (KeyStrokes), without posting anything.
 The device floor, headless: `SILL_TEST_MIN_DEVICE_VERSION=1.2` raises the floor
 of a host that does not advertise (a device below it, or one that sends no
 hello, gets kind 22 "update" and is closed; a value that does not parse is

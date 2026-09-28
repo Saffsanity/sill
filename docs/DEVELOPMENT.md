@@ -473,9 +473,11 @@ how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 Input (`--move`, `--tap`, `--key`, `--input`) goes only to a `--synthetic` host
 on this Mac, which posts nothing. With `SILL_TEST_INPUT_LOG=1` such a host
 prints each event it would have posted, a key with its flags and a click with
-the modifiers the last key would have left for it, so what a device's keys
-leave behind (the Spotlight key's ⌘, a modifier held when a device leaves) can
-be seen without touching the Mac:
+the modifiers the last key would have left for it and where it goes, and the
+check each key's up arms (`KeyUpCheck`, read on a real host a quarter of a
+second later), so what a device's keys and buttons leave behind (the Spotlight
+key's ⌘, a modifier held when a device leaves or the host stops, a button
+whose stream stopped under a drag) can be seen without touching the Mac:
 
 ```
 SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic
