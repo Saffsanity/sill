@@ -14,6 +14,11 @@ import Foundation
 // accounted for by a key down on the Mac, a modifier's own key or a key whose down carried it (a
 // chord still under way), and so is every pointer event's. With nothing down, none is set.
 //
+// The inference has a tripwire, the check a quarter of a second after each key's up (KeyUpCheck): on
+// a Mac that keeps its table through some ups (a modifier key's own, or any other key's), every
+// modifier such an up leaves set that no key down accounts for is reported by the read after it, and
+// on a Mac as the model says none ever is.
+//
 // Compiled with Sources/StreamProtocol and Sources/SillHost/KeyStrokes.swift as one module
 // (-package-name sill), as build.sh does.
 
@@ -100,15 +105,52 @@ struct Mac {
     var log: [Event] = []
     var broken: [String] = []
 
+    /// The check after each key's up (KeyUpCheck), as InputInjector runs it: every up that should take
+    /// modifiers out of the table, until `read`, and a gesture's shortcut, checked its own way (#38's
+    /// checkModifiersLeft: the chord's modifiers not set before it).
+    var upCheck = KeyUpCheck()
+    var armed: [(key: UInt16, id: Int, cleared: UInt64)] = []
+    var gestureArmed: [UInt64] = []
+    /// The table as the Mac holds it: what this host's events left (`real`: `table`, unless the Mac
+    /// ignores some ups, `ignore`) with the Mac's own keyboard (`own`) on top.
+    enum Ignore { case nothing, modifierUps, keyUps }
+    var ignore = Ignore.nothing
+    var real: UInt64 = 0
+    var own: UInt64 = 0
+    var macTable: UInt64 { real | own }
+
     /// The modifiers the keys down on the Mac account for: a modifier key its own flag, any other key
     /// the flags its down carried.
     var accounted: UInt64 { down.reduce(0) { $0 | (macModifiers[$1.key] ?? $1.value) } }
 
-    mutating func post(_ s: KeyStroke) {
+    /// One keyboard event posted; `checked`, as every device key's is (a gesture's are not).
+    mutating func post(_ s: KeyStroke, checked: Bool = true) {
+        if checked, let check = upCheck.posting(s, table: macTable, posted: table) { armed.append((s.virtualKey, check.id, check.cleared)) }
         log.append(.key(s.virtualKey, s.down, s.flags))
         table = s.flags
+        if !ignores(s) { real = s.flags }
         if s.down { down[s.virtualKey] = s.flags } else { down[s.virtualKey] = nil }
         judge("after \(log.last!)")
+    }
+    func ignores(_ s: KeyStroke) -> Bool {
+        switch ignore {
+        case .nothing: return false
+        case .modifierUps: return !s.down && macModifiers[s.virtualKey] != nil
+        case .keyUps: return !s.down && macModifiers[s.virtualKey] == nil
+        }
+    }
+    /// The checks armed so far, read now (as a quarter of a second after the last of them, with no key
+    /// posted since): what each reports, keycode and modifiers (a gesture's as key 0); then none is armed.
+    mutating func read() -> [(key: UInt16, left: UInt64)] {
+        let keysLeft = armed.compactMap { a -> (key: UInt16, left: UInt64)? in
+            let left = upCheck.read(a.id, table: macTable, posted: table, held: keys.heldFlags)
+            return left == 0 ? nil : (a.key, left)
+        }
+        let gesturesLeft = gestureArmed.compactMap { carried -> (key: UInt16, left: UInt64)? in
+            macTable & carried == 0 ? nil : (0, macTable & carried)
+        }
+        armed = []; gestureArmed = []
+        return keysLeft + gesturesLeft
     }
     mutating func judge(_ when: String) {
         let stray = table & (modifierBits | fn) & ~accounted
@@ -123,7 +165,7 @@ struct Mac {
             for s in keys.key(usage: usage, down: isDown, modifiers: modifiers, from: d) ?? [] { post(s) }
         case .text(let string):
             for s in keys.text(from: d) { post(s) }
-            for _ in string { log.append(.text); table = 0 }
+            for _ in string { log.append(.text); table = 0; real = 0 }   // a character's down, with no flags
             judge("after text")
         case .pointer, .scroll, .scrollGesture:
             log.append(.pointer(table))
@@ -133,9 +175,12 @@ struct Mac {
     }
     mutating func send(_ events: [InputEvent], from c: Conn) { for e in events { input(e, from: c) } }
     mutating func leave(_ c: Conn) { for s in keys.release(ObjectIdentifier(c)) { post(s) } }
-    /// A trackpad gesture's shortcut (InputInjector.chord): the table read just before it.
+    /// A trackpad gesture's shortcut (InputInjector.chord): the table read just before it, and its
+    /// own check after it.
     mutating func gesture(_ keyCode: UInt16, _ flags: UInt64) {
-        for s in KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: table) { post(s) }
+        let before = macTable
+        for s in KeyStrokes.chord(virtualKey: keyCode, flags: flags, before: before) { post(s, checked: false) }
+        if flags & (modifierBits | fn) & ~before != 0 { gestureArmed.append(flags & (modifierBits | fn) & ~before) }
     }
     /// Everything posted since `from`.
     func since(_ from: Int) -> [Event] { Array(log[from...]) }
@@ -531,6 +576,149 @@ do {
     check(!keys.isDown(uRCmd) && keys.heldFlags == 0, "right ⌘ is up")
 }
 
+// MARK: The check after a key's up (KeyUpCheck, InputInjector.checkKeyModifiersLeft)
+//
+// A quarter of a second after an up whose down put a modifier in the table, the table is read again.
+// The review found none armed for anything this device sends: its shortcut's key comes up while the
+// modifier's own key is still down (so that up keeps ⌘), and a modifier key's own up was never
+// checked. Every key's up is judged now, whichever path made it.
+
+/// `events` from one device on a Mac that ignores `ignoring`, with the Mac's own keyboard holding
+/// `own`: each check armed ("keycode: modifiers"), and each report, read right after the event that
+/// armed it.
+func upChecks(_ events: [InputEvent], ignoring: Mac.Ignore = .nothing, own: UInt64 = 0) -> (armed: [String], reported: [String]) {
+    var mac = Mac(); mac.ignore = ignoring; mac.own = own
+    let a = Conn()
+    var armed: [String] = [], reported: [String] = []
+    for e in events {
+        mac.input(e, from: a)
+        armed += mac.armed.map { "\($0.key): \(names($0.cleared))" }
+        reported += mac.read().map { "\($0.key): \(names($0.left))" }
+    }
+    return (armed, reported)
+}
+/// The same for the check's report: on a Mac as the model says, nothing; on a Mac ignoring `ups`,
+/// `want`.
+func tripwire(_ events: [InputEvent], _ want: [String], ignoring ups: Mac.Ignore, _ what: String, line: Int = #line) {
+    let fine = upChecks(events), bad = upChecks(events, ignoring: ups)
+    check(fine.armed == want && fine.reported.isEmpty, "\(what): armed \(fine.armed), reported \(fine.reported) on a Mac as the model says; expected \(want) armed", line: line)
+    check(bad.reported == want, "\(what) on a Mac ignoring \(ups): reported \(bad.reported), expected \(want)", line: line)
+}
+
+// This device's Spotlight key: ⌘'s key up is checked for command (Space's up keeps it: ⌘ is down).
+tripwire(KeyChord.spotlight, ["55: command"], ignoring: .modifierUps, "this device's Spotlight key")
+// The key row's ⌘esc, a latched ⌘S on the software keyboard, and ⌃⇧→: each modifier key's up.
+tripwire(KeyChord.press(uEsc, with: .command), ["55: command"], ignoring: .modifierUps, "the key row's ⌘esc")
+tripwire(KeyChord.press(uS, with: .command), ["55: command"], ignoring: .modifierUps, "a latched ⌘S")
+tripwire(KeyChord.press(uRight, with: [.control, .shift]), ["56: shift", "59: control"], ignoring: .modifierUps, "⌃⇧→")
+// The trackpad's ⌘-click, and a drag that ends.
+tripwire(aroundClick(command), ["55: command"], ignoring: .modifierUps, "the trackpad's ⌘-click")
+tripwire(KeyChord.modifiersDown(.option) + [.pointer(.leftDown, x: 0.2, y: 0.2), .pointer(.move, x: 0.3, y: 0.3), .pointer(.leftUp, x: 0.3, y: 0.3)]
+         + KeyChord.modifiersUp(.option), ["58: option"], ignoring: .modifierUps, "the trackpad's ⌥-drag")
+// A hardware ⌘C (ForwardedKeys): C's up keeps command, ⌘'s up is checked.
+do {
+    var kb = Keyboard()
+    tripwire(kb.press(uLCmd) + kb.press(uC) + kb.release(uC) + kb.release(uLCmd), ["55: command"], ignoring: .modifierUps, "a hardware ⌘C")
+}
+// An older device's shortcut, one key down and up: the key's up is checked, for what it carried
+// (caps lock is no modifier a click or a scroll starts from).
+tripwire(bare(uSpace, command), ["49: command"], ignoring: .keyUps, "an older device's Spotlight key")
+tripwire(bare(uLeft, capsLock | option), ["123: option"], ignoring: .keyUps, "an older device's ⌥← with caps lock on")
+// The ups KeyStrokes makes itself: a lost ⌘ release let go before text (whose characters, with no
+// flags, then put the table back on any Mac), and a device that leaves.
+for ignoring in [Mac.Ignore.nothing, .modifierUps] {
+    let lost = upChecks([key(uLCmd, true, command), key(uC, true, command), key(uC, false, command), .text("x")], ignoring: ignoring)
+    check(lost.armed == ["55: command"] && lost.reported.isEmpty, "a lost ⌘ release, then text, on a Mac ignoring \(ignoring): \(lost)")
+}
+do {
+    for ignoring in [Mac.Ignore.nothing, .modifierUps] {
+        var mac = Mac(); mac.ignore = ignoring; let a = Conn()
+        mac.send([key(uLCtrl, true, control), key(uLCmd, true, control | command), .pointer(.leftDown, x: 0.5, y: 0.5)], from: a)
+        mac.leave(a)
+        let armed = mac.armed.map { "\($0.key): \(names($0.cleared))" }, reported = mac.read().map { "\($0.key): \(names($0.left))" }
+        check(armed == ["55: command", "59: control"] && reported == (ignoring == .nothing ? [] : ["55: command", "59: control"]),
+              "a device leaving mid-⌃⌘-drag on a Mac ignoring \(ignoring): armed \(armed), reported \(reported)")
+    }
+}
+// Nothing to check: plain keys, and a key's up while its modifier's key is still down.
+check(upChecks(bare(uReturn, 0) + bare(uLeft, 0) + [.text("ab")] + tap).armed.isEmpty, "plain keys and text arm nothing")
+check(upChecks([key(uLCmd, true, command)] + bare(uC, command) + bare(uS, command)).armed.isEmpty, "⌘ held for ⌘C and ⌘S: nothing yet")
+// The Mac's own ⌘ held since before the Spotlight key: its up leaves it, and no check says otherwise;
+// also once an earlier check for command has been read (a read check is done with).
+do {
+    let own = upChecks(KeyChord.spotlight + bare(uSpace, command), own: command)
+    check(own.armed.isEmpty && own.reported.isEmpty, "the Mac's own ⌘ held: armed \(own.armed), reported \(own.reported)")
+    var mac = Mac(); let a = Conn()
+    mac.send(KeyChord.spotlight, from: a)
+    let first = mac.read()
+    mac.own = command
+    mac.send(KeyChord.spotlight, from: a)
+    check(first.isEmpty && mac.armed.isEmpty && mac.read().isEmpty, "the Mac's own ⌘ pressed after a check was read: armed \(mac.armed)")
+}
+// A down while a check is unread finds its modifiers in the table: on a Mac that left them, they are
+// no keyboard's, and the down's own up is checked for them. (⌃⇧ let go around a drag, and the right
+// ⌃ pressed before the read: the drag's ups are read with ⌃ held again, then ⌃'s up alone.)
+do {
+    var mac = Mac(); mac.ignore = .modifierUps; let a = Conn()
+    mac.send([key(uLCtrl, true, control), key(uLShift, true, control | shift), .pointer(.leftDown, x: 0.5, y: 0.5),
+              .pointer(.leftUp, x: 0.5, y: 0.5), key(uLShift, false, control), key(uLCtrl, false, 0), key(uRCtrl, true, control)], from: a)
+    let masked = mac.read()
+    mac.send([key(uRCtrl, false, 0)], from: a)
+    check(masked.isEmpty && mac.read().map { "\($0.key): \(names($0.left))" } == ["62: control"],
+          "an up left control while right ⌃ went down before the read: its up reports it")
+}
+// Left and right ⌘: only the last up takes command out.
+check(upChecks([key(uLCmd, true, command), key(uRCmd, true, command), key(uLCmd, false, command), key(uRCmd, false, 0)]).armed == ["54: command"],
+      "left then right ⌘ up: \(upChecks([key(uLCmd, true, command), key(uRCmd, true, command), key(uLCmd, false, command), key(uRCmd, false, 0)]).armed)")
+// Each down is checked once: a second up of the same key (a move's next connection releasing what the
+// old one's leaving let go) arms nothing more, and a key another device presses after an older
+// device left mid-shortcut starts afresh.
+do {
+    var mac = Mac(); let a = Conn(), a2 = Conn()
+    mac.send([key(uLCmd, true, command)], from: a)
+    mac.leave(a)
+    mac.send([key(uLCmd, false, 0)], from: a2)
+    check(mac.armed.map(\.key) == [55], "⌘ let go by a leaving connection, then released on the next: \(mac.armed)")
+    var two = Mac(); let b = Conn(), c = Conn()
+    two.send([key(uSpace, true, command)], from: b)
+    two.leave(b)
+    two.send(bare(uSpace, 0), from: c)
+    check(two.armed.map { "\($0.key): \(names($0.cleared))" } == ["49: command"], "an older device leaving mid-⌘Space, then a plain Space: \(two.armed)")
+}
+// A modifier pressed again before the read, or held by another key down: not reported.
+check(KeyUpCheck.left(command, table: command, posted: 0, held: 0) == command, "the read: command still set")
+check(KeyUpCheck.left(command, table: command, posted: command, held: 0) == 0, "the read: command pressed again since")
+check(KeyUpCheck.left(command, table: command, posted: 0, held: command) == 0, "the read: command held by a key down")
+check(KeyUpCheck.left(command, table: command | shift, posted: 0, held: 0) == command, "the read: only what the up should have taken out")
+check(KeyUpCheck.left(command | option, table: 0, posted: 0, held: 0) == 0, "the read: the table put back")
+// A gesture's shortcut is checked its own way (#38), not here.
+do {
+    var mac = Mac()
+    mac.gesture(124, control | fn)
+    check(mac.armed.isEmpty, "a gesture arms no key check: \(mac.armed)")
+}
+// Before the review: only a key sent with a modifier (not a modifier's own key) was remembered at its
+// down and judged at its up, with what the up carried. This device's paths armed nothing.
+do {
+    struct Before {
+        var keys = KeyStrokes(); var chords: [UInt16: UInt64] = [:]; var armed = 0
+        mutating func send(_ events: [InputEvent], from c: Conn) {
+            for e in events {
+                guard case .key(let u, let d, let m) = e, let strokes = keys.key(usage: u, down: d, modifiers: m, from: ObjectIdentifier(c)) else { continue }
+                let chord = KeyStrokes.flags(fromDevice: m) & modifierBits
+                if d, chord != 0, KeyStrokes.modifierKeys[u] == nil { chords[u] = chord }
+                if !d, let carried = chords.removeValue(forKey: u), let up = strokes.last, carried & ~up.flags != 0 { armed += 1 }
+            }
+        }
+    }
+    var before = Before(); let a = Conn()
+    before.send(KeyChord.spotlight + KeyChord.press(uEsc, with: .command) + aroundClick(command), from: a)
+    check(before.armed == 0, "the rule before the review arms nothing for this device's keys (\(before.armed))")
+    var now = Mac()
+    now.send(KeyChord.spotlight + KeyChord.press(uEsc, with: .command) + aroundClick(command), from: a)
+    check(now.armed.count == 3, "now each arms one: \(now.armed)")
+}
+
 // MARK: Random sessions
 //
 // Two devices sending what devices from before this fix send: shortcuts as one key down and up with
@@ -602,15 +790,37 @@ struct Device {
 /// Launchpad keys, ⌃ and an arrow with fn, F11, and ⌘ with the Mission Control key.
 let gestureShortcuts: [(key: UInt16, flags: UInt64)] = [(160, fn), (126, control | fn), (125, control | fn), (124, control | fn),
                                                         (123, control | fn), (131, fn), (103, fn), (160, command | fn)]
+/// The check after each key's up across a session (KeyUpCheck): its reads after every step, and
+/// every modifier the Mac's table holds that no key down accounts for must have been reported by
+/// then. On a Mac as the model says none is ever reported; on one that keeps its table through
+/// some ups, what such an up leaves is.
+struct Tripwire {
+    var reported: UInt64 = 0
+    var missed: String? = nil
+    var falseReport: String? = nil
+    mutating func step(_ mac: inout Mac, _ when: String) {
+        let got = mac.read().reduce(0) { $0 | $1.left }
+        if mac.ignore == .nothing, got != 0, falseReport == nil { falseReport = "\(when): \(names(got)) reported on a Mac as the model says" }
+        reported |= got
+        let stray = mac.macTable & (modifierBits | fn) & ~mac.accounted & ~reported
+        if stray != 0, missed == nil { missed = "\(when): the Mac's table holds \(names(stray)), which no key down accounts for and no check reported" }
+    }
+}
+
 var rng = Rng(state: 0x5111_5EED)
-var runs = 0, events = 0, brokenRuns = 0
+var runs = 0, events = 0, brokenRuns = 0, missedRuns = 0, falseReports = 0
+var reportedRuns: [Mac.Ignore: Int] = [:]
 let hardwareKeys: [UInt16] = [0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE7, uC, uS, uLeft, uEsc]
-for run in 0..<3000 {
-    var mac = Mac()
+// A Mac as the model says (the invariant and no report), then Macs that keep their table through a
+// modifier key's up, or through any other key's (every modifier left set reported).
+for (ignore, count) in [(Mac.Ignore.nothing, 3000), (.modifierUps, 1000), (.keyUps, 1000)] {
+for run in 0..<count {
+    var mac = Mac(); mac.ignore = ignore
+    var tripwire = Tripwire()
     var devices = [Device(), Device()]
     for i in devices.indices { devices[i].keyboard.before = rng.chance(30) }
     let steps = 20 + rng.below(60)
-    for _ in 0..<steps {
+    for step in 0..<steps {
         let i = rng.below(devices.count)
         var d = devices[i]
         let c = d.conn
@@ -656,6 +866,7 @@ for run in 0..<3000 {
         for old in d.lingering where old.steps <= 0 { mac.leave(old.conn) }
         d.lingering.removeAll { $0.steps <= 0 }
         devices[i] = d
+        tripwire.step(&mac, "step \(step)")
     }
     // The session ends: the host quits (its keys all let go first), or every device leaves.
     if rng.chance(30) { for s in mac.keys.releaseAll() { mac.post(s) } }
@@ -663,16 +874,33 @@ for run in 0..<3000 {
         for old in d.lingering { mac.leave(old.conn) }
         mac.leave(d.conn)
     }
-    mac.judge("once every device left")
+    tripwire.step(&mac, "once every device left")
+    // The invariant is the model's Mac's: a gesture's up gives back the table as it read it, which on
+    // a Mac keeping it through some ups holds what they left.
+    if ignore == .nothing { mac.judge("once every device left") } else { mac.broken = [] }
     if !mac.down.isEmpty { mac.broken.append("once every device left, keys \(mac.down.keys.sorted()) are still down") }
     runs += 1; events += mac.log.count
     if !mac.broken.isEmpty {
         brokenRuns += 1
         if brokenRuns <= 3 { print("FAIL: random run \(run): \(mac.broken.first!) (and \(mac.broken.count - 1) more)") }
     }
+    if let missed = tripwire.missed {
+        missedRuns += 1
+        if missedRuns <= 3 { print("FAIL: random run \(run) on a Mac ignoring \(ignore): \(missed)") }
+    }
+    if let report = tripwire.falseReport {
+        falseReports += 1
+        if falseReports <= 3 { print("FAIL: random run \(run): \(report)") }
+    }
+    if tripwire.reported != 0 { reportedRuns[ignore, default: 0] += 1 }
+}
 }
 check(brokenRuns == 0, "random sessions: \(brokenRuns) of \(runs) broke the invariant")
-print("random: \(runs) sessions, \(events) events posted")
+check(missedRuns == 0, "random sessions on a Mac keeping its table through some ups: \(missedRuns) of 2000 left a modifier set that no check reported")
+check(falseReports == 0 && reportedRuns[.nothing] == nil, "random sessions on a Mac as the model says: \(falseReports) reported a modifier")
+check((reportedRuns[.modifierUps] ?? 0) > 500 && (reportedRuns[.keyUps] ?? 0) > 500,
+      "the Macs keeping their table report in most sessions: \(reportedRuns)")
+print("random: \(runs) sessions, \(events) events posted; checks reported in \(reportedRuns[.modifierUps] ?? 0) of 1000 sessions on a Mac ignoring modifier keys' ups and \(reportedRuns[.keyUps] ?? 0) of 1000 ignoring other keys' ups")
 
 // MARK: - The device (iOSClient/KeyChords.swift)
 //
@@ -889,16 +1117,21 @@ do {
 // modifier whenever nothing is pressed on the device, and at the end.
 do {
     var rng = Rng(state: 0xDE71_CE5E)
-    var sessions = 0, oldBroken = 0, newBroken = 0
-    for run in 0..<2000 {
+    var sessions = 0, oldBroken = 0, newBroken = 0, missed = 0, falseReports = 0
+    var reported: [Mac.Ignore: Int] = [:]
+    for (ignore, count) in [(Mac.Ignore.nothing, 2000), (.modifierUps, 500), (.keyUps, 500)] {
+    for run in 0..<count {
         var mac = Mac(), old = OldMac(); let a = Conn()
+        mac.ignore = ignore
+        var tripwire = Tripwire()
         var kb = Keyboard(); kb.before = rng.chance(40)
         var drag: KeyModifiers? = nil
         var overlay = true
         var oldHeld: String? = nil
         func latched() -> KeyModifiers { KeyModifiers(rawValue: rng.modifiers() & modifierBits) }
         func send(_ events: [InputEvent]) { mac.send(events, from: a); old.send(events) }
-        for _ in 0..<(20 + rng.below(60)) {
+        for step in 0..<(20 + rng.below(60)) {
+            defer { tripwire.step(&mac, "step \(step)") }
             switch rng.below(12) {
             case 0: send(KeyChord.press(rng.pick([uSpace, uEsc, uS, uLeft, uRight, uReturn]), with: latched()))
             case 1: send(KeyChord.spotlight)
@@ -930,19 +1163,29 @@ do {
         if oldHeld == nil, old.table & modifierBits != 0 || !old.down.filter({ macModifiers[$0.key] != nil }).isEmpty {
             oldHeld = "at the end an older Mac holds \(names(old.table & modifierBits)), down \(old.down.keys.sorted())"
         }
-        if let oldHeld {
+        if let oldHeld, ignore == .nothing {
             oldBroken += 1; if oldBroken <= 3 { print("FAIL: device run \(run): \(oldHeld)") }
         }
         mac.leave(a)
-        mac.judge("at the end")
-        if !mac.broken.isEmpty || mac.table & modifierBits != 0 {
-            newBroken += 1; if newBroken <= 3 { print("FAIL: device run \(run): \(mac.broken.first ?? "the table holds \(names(mac.table))")") }
+        tripwire.step(&mac, "at the end")
+        if ignore == .nothing {
+            mac.judge("at the end")
+            if !mac.broken.isEmpty || mac.table & modifierBits != 0 {
+                newBroken += 1; if newBroken <= 3 { print("FAIL: device run \(run): \(mac.broken.first ?? "the table holds \(names(mac.table))")") }
+            }
         }
+        if let m = tripwire.missed { missed += 1; if missed <= 3 { print("FAIL: device run \(run) on a Mac ignoring \(ignore): \(m)") } }
+        if let f = tripwire.falseReport { falseReports += 1; if falseReports <= 3 { print("FAIL: device run \(run): \(f)") } }
+        if tripwire.reported != 0 { reported[ignore, default: 0] += 1 }
         sessions += 1
     }
-    check(newBroken == 0, "device sessions on this Mac: \(newBroken) of \(sessions) broke the invariant")
-    check(oldBroken == 0, "device sessions on a Mac from before this fix: \(oldBroken) of \(sessions) left a modifier held")
-    print("device: \(sessions) sessions")
+    }
+    check(newBroken == 0, "device sessions on this Mac: \(newBroken) of 2000 broke the invariant")
+    check(oldBroken == 0, "device sessions on a Mac from before this fix: \(oldBroken) of 2000 left a modifier held")
+    check(missed == 0, "device sessions on a Mac keeping its table through some ups: \(missed) of 1000 left a modifier set that no check reported")
+    check(falseReports == 0 && reported[.nothing] == nil, "device sessions on a Mac as the model says: \(falseReports) reported a modifier")
+    check((reported[.modifierUps] ?? 0) > 250, "this device's modifier keys' ups are checked: \(reported)")
+    print("device: \(sessions) sessions; checks reported in \(reported[.modifierUps] ?? 0) of 500 on a Mac ignoring modifier keys' ups and \(reported[.keyUps] ?? 0) of 500 ignoring other keys' ups")
 }
 
 print(failures == 0 ? "ok: \(checks) checks" : "FAILED: \(failures) of \(checks) checks")

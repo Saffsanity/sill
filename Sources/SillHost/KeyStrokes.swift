@@ -2,6 +2,7 @@ import Foundation
 
 // A device's key (kind 8's `.key`: a USB HID usage going down or up, with UIKeyModifierFlags bits) as
 // the keyboard events InputInjector posts for it: the Mac's virtual key, and the flags each carries.
+// Beside it, the check a quarter of a second after each key's up (`KeyUpCheck`).
 //
 // The flags are what a keyboard would give (2026-09-27, the stuck command after Spotlight). The Mac
 // keeps the modifier state of the source InputInjector posts from in the HID system's state table:
@@ -24,8 +25,9 @@ import Foundation
 //   - a trackpad gesture's shortcut (`chord`) goes down with its own flags and up with those the table
 //     held before it.
 // Pointer and scroll events are made from the source as before, so they start from what is held.
-// Inferred, not observed: nothing may be posted while this is built. Typed text is InputInjector's:
-// it goes out with no flags, after `text` has let go of the device's modifier keys.
+// Inferred, not observed: nothing may be posted while this is built, so every key's up is checked a
+// quarter of a second later (`KeyUpCheck`). Typed text is InputInjector's: it goes out with no flags,
+// after `text` has let go of the device's modifier keys.
 //
 // Pure: Foundation only, checked on its own with swiftc (Tests/checks/key-strokes; its `package`
 // access needs -package-name sill). Nothing here posts anything: InputInjector makes each event from
@@ -226,4 +228,63 @@ package struct KeyStrokes: Sendable {
         0xE6: 61,   // Right Option
         0xE7: 54,   // Right Command
     ]
+}
+
+/// The check a quarter of a second after a key's up (InputInjector, `in.keyModifiersLeft`): whether
+/// the up took out of the HID state table the modifiers its down put there, as KeyStrokes' flags infer
+/// it does. Every key's up is judged, whichever path made it: a modifier's own key (this device's
+/// Spotlight key, the key row and a latched ⌘S press ⌘ around the key; the trackpad around a click; a
+/// hardware ⌘), a shortcut's key (an older device's ⌘Space, whose up takes command out), and the ups
+/// KeyStrokes makes itself (a lost release, a device that left). A device test then shows at once,
+/// in the log, a key whose up did not put the table back. As the gestures' chords are checked
+/// (InputInjector.checkModifiersLeft, #38).
+package struct KeyUpCheck: Sendable {
+    /// Each key whose down went to the Mac and whose up has not (by its Mac keycode, which names one
+    /// key: KeyStrokes' table has no two alike): the modifiers the down carried, and those the table
+    /// held that this host had not put there (the Mac's own keyboard), which its up leaves alone.
+    private var downs: [UInt16: (carried: UInt64, outside: UInt64)] = [:]
+    /// The checks armed and not read yet, by number, with the modifiers each reads for. A down meanwhile
+    /// that finds them in the table cannot tell an up that left them from the Mac's own keyboard, and
+    /// takes them for this host's: taken for the Mac's own, its up would go unchecked.
+    private var unread: [Int: UInt64] = [:]
+    private var armed = 0
+
+    package init() {}
+
+    /// A stroke about to be posted: `table` is the HID state table's flags read just before it (only
+    /// a down's are used) and `posted` those of the last keyboard event this host posted. For an up
+    /// whose post should take modifiers out of the table, the check to read later: its number and
+    /// those modifiers, the ones its down carried that it does not, and that were not the Mac's own
+    /// before the down. Nil for a down, and for an up that leaves every modifier where it is (Space's
+    /// up while ⌘'s key is still down).
+    package mutating func posting(_ stroke: KeyStroke, table: UInt64, posted: UInt64) -> (id: Int, cleared: UInt64)? {
+        if stroke.down {
+            let unreadFlags = unread.values.reduce(0, |)
+            downs[stroke.virtualKey] = (stroke.flags & Self.modifiers, table & ~posted & ~unreadFlags & Self.modifiers)
+            return nil
+        }
+        guard let down = downs.removeValue(forKey: stroke.virtualKey) else { return nil }
+        let cleared = down.carried & ~stroke.flags & ~down.outside
+        guard cleared != 0 else { return nil }
+        armed += 1
+        unread[armed] = cleared
+        return (armed, cleared)
+    }
+
+    /// The read of check `id`, a quarter of a second after its up, with the table's flags now: what
+    /// it still holds that it should not (`left`). The check is done.
+    package mutating func read(_ id: Int, table: UInt64, posted: UInt64, held: UInt64) -> UInt64 {
+        guard let cleared = unread.removeValue(forKey: id) else { return 0 }
+        return Self.left(cleared, table: table, posted: posted, held: held)
+    }
+
+    /// Of `cleared`, what the table (`table`) still holds that neither the last keyboard event posted
+    /// since (`posted`: a modifier pressed again meanwhile) nor a modifier key down on the Mac (`held`)
+    /// accounts for. Not 0: the up did not put the table back.
+    package static func left(_ cleared: UInt64, table: UInt64, posted: UInt64, held: UInt64) -> UInt64 {
+        table & cleared & ~posted & ~held
+    }
+
+    /// Shift, control, option and command: the modifiers that change a click or a scroll.
+    package static let modifiers = KeyStrokes.shift | KeyStrokes.control | KeyStrokes.option | KeyStrokes.command
 }
