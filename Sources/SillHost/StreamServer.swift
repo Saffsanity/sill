@@ -955,7 +955,10 @@ final class StreamServer {
     func serve(_ connection: NWConnection, route: ClientRoute, hello: Hello?, admitted: () -> Void = {}) {
         let client = Client(connection)
         client.route = route
-        client.encrypted = true
+        // As its route says: every session a Door admits is TLS (a remote one, or a home one with its
+        // peer's key); a home route without a peer is a plain connection and keeps the plain door's
+        // tick rule (the pacing harness's home client, Scripts/pacing).
+        client.encrypted = route.encrypted
         client.onCable = route.cableDevice != nil
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
