@@ -548,8 +548,9 @@ extension StreamClient {
         func matches(_ m: FoundMac) -> Bool {
             // A row whose key was another's when the reconnect took it by name: never again (§7.6).
             if pinRefusedRows.contains(m.id) { return false }
-            if let id = r.macID, let rowID = m.macID { return rowID == id }
-            return r.bonjourName == m.name
+            // By its tag; else by name, never a row whose tag names another Mac (DiscoveryPolicy.rowMac).
+            return DiscoveryPolicy.reconnectMatches(savedID: r.macID, bonjourName: r.bonjourName, rowMacID: m.macID,
+                                                    rowName: m.name, rowCarriesTag: m.carriesTag)
         }
         let network = macs.first { $0.route == .network && matches($0) }
         let direct = macs.first { $0.route == .direct && matches($0) }
@@ -579,12 +580,16 @@ extension StreamClient {
             // A row that waits for a tap (an unsaved Mac that now asks devices to pair, a saved one
             // that removed this device): the reconnect never asks, so it ends here, with the words
             // a goodbye would have brought, rather than "…reconnects when it's back" for ever.
-            if let end = DiscoveryPolicy.reconnectEnd(decision, saved: id.flatMap { savedMac($0) } != nil) {
+            let savedRow = id.flatMap { savedMac($0) }
+            if let end = DiscoveryPolicy.reconnectEnd(decision, saved: savedRow != nil, newKey: savedRow?.newKey == true) {
                 reconnect = nil
                 if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
                 cancelRemoteDial()
-                status = end == .removed ? DiscoveryPolicy.HomeCopy.removed(mac: r.name, device: Self.deviceWord)
-                                         : DiscoveryPolicy.HomeCopy.pairingRequired(mac: r.name, device: Self.deviceWord)
+                switch end {
+                case .removed: status = DiscoveryPolicy.HomeCopy.removed(mac: r.name, device: Self.deviceWord)
+                case .newKey: status = DiscoveryPolicy.HomeCopy.newKey(mac: r.name, device: Self.deviceWord)
+                case .pairingRequired: status = DiscoveryPolicy.HomeCopy.pairingRequired(mac: r.name, device: Self.deviceWord)
+                }
                 #if DEBUG
                 print("reconnect: \(mac.name) waits for a tap (\(end)); the reconnect ends")
                 #endif

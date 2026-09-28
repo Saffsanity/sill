@@ -20,11 +20,18 @@ import StreamProtocol
 enum DeviceTLS {
     /// The TLS options of one connection: `alpn` is `sill/1` for a session, `sill-pair/1` for
     /// pairing; `pin` the Mac's key, or nil for any P-256 key (a key of another kind matches
-    /// nothing). RemoteConnector's dials from afar use them too.
-    static func options(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue) -> NWProtocolTLS.Options {
+    /// nothing). RemoteConnector's dials from afar use them too. `onPinRefused` runs on `queue`
+    /// each time `pin` refuses the key that answered (-9808): a connection to a Bonjour service
+    /// whose pin fails is never reported as waiting or failed, it goes back to preparing and tries
+    /// again (the simulator against a synthetic host with another key, 2026-09-27: "Connecting to…"
+    /// for good, no state after `.preparing`), so a dial that must end at a refused pin hears it
+    /// here.
+    static func options(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
+                        onPinRefused: (() -> Void)? = nil) -> NWProtocolTLS.Options {
         RemoteTLS.options(identity: identity.tls, role: .client(alpn: alpn), verify: { fp in
-            guard let fp else { return false }
-            return pin.map { $0 == fp } ?? true
+            guard let pin else { return fp != nil }
+            guard fp == pin else { onPinRefused?(); return false }
+            return true
         }, queue: queue)
     }
 
@@ -33,12 +40,12 @@ enum DeviceTLS {
     /// for a Direct row (RemoteTLS.parameters). `ipv6Only` for the ask's dial over a row's wired
     /// interface: the cable counts only over IPv6 link-local, at both ends.
     static func home(identity: RemoteIdentity, alpn: String, pin: Data?, peerToPeer: Bool, queue: DispatchQueue,
-                     ipv6Only: Bool = false, connectTimeout: Int? = nil) -> NWParameters {
+                     ipv6Only: Bool = false, connectTimeout: Int? = nil, onPinRefused: (() -> Void)? = nil) -> NWParameters {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         if let connectTimeout { tcp.connectionTimeout = connectTimeout }
-        let params = RemoteTLS.parameters(tls: options(identity: identity, alpn: alpn, pin: pin, queue: queue), tcp: tcp,
-                                          peerToPeer: peerToPeer)
+        let params = RemoteTLS.parameters(tls: options(identity: identity, alpn: alpn, pin: pin, queue: queue, onPinRefused: onPinRefused),
+                                          tcp: tcp, peerToPeer: peerToPeer)
         if ipv6Only, let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options { ip.version = .v6 }
         return params
     }
@@ -76,6 +83,12 @@ enum DeviceTLS {
 /// both ends), then, that dial not ready within DiscoveryPolicy.wiredWait or unable to go on, the
 /// row as listed; or one endpoint. Each dial gives up after RemoteTLS.dialTimeout. A pairing is
 /// single-use, so one connection at a time. Every callback on `queue`, which the winner keeps.
+/// The connection a TLS option's callback belongs to, set once the connection exists (its
+/// parameters, and so the callback, are made first).
+final class WeakConnection {
+    weak var connection: NWConnection?
+}
+
 final class HomeDialer {
     struct Target: Equatable {
         let endpoint: NWEndpoint
@@ -157,9 +170,16 @@ final class HomeDialer {
 
     private func dial(_ endpoint: NWEndpoint, ipv6Only: Bool, wait: Double) {
         let t = targets[index]
+        let refused = WeakConnection()
         let c = NWConnection(to: endpoint, using: DeviceTLS.home(identity: identity, alpn: RemoteTLS.pairingALPN, pin: pin,
                                                                  peerToPeer: t.peerToPeer, queue: queue, ipv6Only: ipv6Only,
-                                                                 connectTimeout: RemoteTLS.dialTimeout))
+                                                                 connectTimeout: RemoteTLS.dialTimeout,
+                                                                 onPinRefused: { [weak self] in
+            // A Bonjour row's connection whose pin fails goes on retrying, unreported: it ends here.
+            guard let self, let c = refused.connection, !self.finished, self.current === c else { return }
+            self.ended(c, status: DiscoveryPolicy.pinRefused)
+        }))
+        refused.connection = c
         current = c
         c.stateUpdateHandler = { [weak self] state in self?.changed(c, endpoint, state) }
         c.start(queue: queue)
@@ -241,6 +261,9 @@ struct HomeAsk: Equatable {
     let tagNamed: Bool
     /// Rows of that Mac a pin failure already tried (§7.6).
     var tried: [String] = []
+    /// A saved Mac marked SavedMac.newKey whose row was tapped: the pairing that follows saves the
+    /// Mac in its place (SavedMacs.replacingNewKey).
+    var replaces: String? = nil
     /// The ask's attempt (`pairingAttempt`): an answer to an older one is dropped.
     var attempt = 0
     var phase = Phase.asking
@@ -276,7 +299,8 @@ extension StreamClient {
     /// The parameters of a session connection at home with `trust` (§7.2): TLS `sill/1` pinned as
     /// the trust says (DiscoveryPolicy.pin), or plain for a plain door. Nil, with the status line
     /// saying why, when a TLS dial finds no key and none can be made.
-    func sessionParameters(_ trust: DiscoveryPolicy.HomeTrust, peerToPeer: Bool) -> NWParameters? {
+    func sessionParameters(_ trust: DiscoveryPolicy.HomeTrust, peerToPeer: Bool,
+                           onPinRefused: (() -> Void)? = nil) -> NWParameters? {
         let pin: Data?
         switch DiscoveryPolicy.pin(trust) {
         case .plainTCP: return DeviceTLS.plain(peerToPeer: peerToPeer)
@@ -284,7 +308,8 @@ extension StreamClient {
         case .key(let key): pin = key
         }
         guard let identity = deviceIdentity() else { return nil }
-        return DeviceTLS.home(identity: identity, alpn: RemoteTLS.sessionALPN, pin: pin, peerToPeer: peerToPeer, queue: queue)
+        return DeviceTLS.home(identity: identity, alpn: RemoteTLS.sessionALPN, pin: pin, peerToPeer: peerToPeer, queue: queue,
+                              onPinRefused: onPinRefused)
     }
 
     /// A browse result's home door, from its TXT record's `p` (HomeDoorTXT, entry by entry: a bare
@@ -374,27 +399,45 @@ extension StreamClient {
             endAtHome(DiscoveryPolicy.HomeCopy.pairingRequired(mac: name, device: Self.deviceWord))
         case .wrongKey:
             let tried = s.row.map { $0.tried + [$0.id] } ?? []
-            if let mac = saved, let pin = mac.fingerprintData,
-               let next = DiscoveryPolicy.nextPinnedRow(macID: mac.macID, tried: tried, rows: homeRows()),
-               let row = macs.first(where: { $0.id == next }) {
+            guard let mac = saved, let pin = mac.fingerprintData else {
+                endAtHome(RemoteCopy.dialFailure(.wrongMac, mac: name, candidate: nil, vpnName: nil, device: Self.deviceWord))
+                return true
+            }
+            switch DiscoveryPolicy.afterPinRefused(macID: mac.macID, tried: tried, rows: homeRows(), tagNamed: s.row?.tagNamed ?? true,
+                                                   tapped: s.row?.tapped ?? true) {
+            case .nextRow(let next):
+                guard let row = macs.first(where: { $0.id == next }) else { fallthrough }
                 #if DEBUG
                 print("home: another key answered at \(s.row?.id ?? "the address"); dialing \(row.name) pinned")
                 #endif
                 tearDown(status: status, restartSearch: false)
                 dialRow(row, macID: mac.macID, trust: .saved(pin: pin), tagNamed: row.macID != nil, tried: tried, tap: s.row?.tapped ?? false)
-                return true
-            }
-            guard s.row?.tagNamed ?? true else {
-                // A row taken by its Bonjour name alone is not that Mac: the reconnect skips it from
-                // now on and goes on without it; a tap says what happened, and reconnects nothing.
+            case .newKey:
+                // No other row of it: the Mac was set up again with a new key (or a look-alike holds
+                // the only row). Paired again as a Mac never seen: a tap asks, with any key, and the
+                // code the Mac shows proves it; nothing reconnects meanwhile.
+                pinRefusedRows.formUnion(tried.filter { id in macs.first { $0.id == id }.map { $0.macID == nil } ?? false })
+                markNewKey(mac.macID)
+                endAtHome(DiscoveryPolicy.HomeCopy.newKey(mac: name, device: Self.deviceWord))
+            case .skipRow:
+                // The reconnect's row taken by its Bonjour name alone is not that Mac: skipped from
+                // now on, and the reconnect goes on without it.
                 pinRefusedRows.formUnion(tried)
-                guard s.row?.tapped == true else { return false }
-                endAtHome(RemoteCopy.dialFailure(.wrongMac, mac: name, candidate: nil, vpnName: nil, device: Self.deviceWord))
-                return true
+                return false
             }
-            endAtHome(RemoteCopy.dialFailure(.wrongMac, mac: name, candidate: nil, vpnName: nil, device: Self.deviceWord))
         }
         return true
+    }
+
+    /// SavedMac.newKey on `id`, written, the rows read again.
+    func markNewKey(_ id: String) {
+        #if DEBUG
+        print("home: \(id) answered with another key; it is paired again with a tap")
+        #endif
+        if let next = SavedMacs.markingNewKey(id, in: savedMacs) {
+            savedMacs = next
+            persistSavedMacs()
+        }
     }
 
     private func endAtHome(_ words: String) {
@@ -416,13 +459,13 @@ extension StreamClient {
     /// connection runs over the USB cable, and kind 20 within 15 s. `savedID`: a saved Mac that
     /// removed this device, whose key the ask and the proofs are pinned to; otherwise any key, and
     /// the one the ask saw is kept (`askedKey`).
-    func ask(_ mac: FoundMac, savedID: String?, tagNamed: Bool, tried: [String] = []) {
+    func ask(_ mac: FoundMac, savedID: String?, tagNamed: Bool, tried: [String] = [], replaces: String? = nil) {
         guard let endpoint = mac.endpoint else { return }
         let wired = wiredDial(for: mac)
         let target = HomeDialer.Target(endpoint: wired?.endpoint ?? endpoint, fallback: wired != nil ? endpoint : nil,
                                        peerToPeer: mac.direct, row: mac.id, label: wired?.via ?? mac.name)
         startAsk(HomeAsk(target: target, name: mac.name, cableRow: mac.homeWord == .pairsOverCable, savedID: savedID,
-                         tagNamed: tagNamed, tried: tried))
+                         tagNamed: tagNamed, tried: tried, replaces: replaces))
     }
 
     func startAsk(_ start: HomeAsk, busyRetried: Bool = false) {
@@ -502,7 +545,7 @@ extension StreamClient {
         switch answer {
         case .pairedOverCable:
             homeAsk = nil
-            guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: PairResult.cable, name: ask.name,
+            guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: PairResult.cable, name: ask.name, replacing: ask.replaces,
                                             bonjourName: Self.bonjourName(ask.target.fallback ?? ask.target.endpoint)) else { return }
             // The session's dial first, then the pairing's words: the dial sets "Connecting to…" in
             // this same turn, and a status line set twice in one turn is drawn and spoken once, as
@@ -564,12 +607,19 @@ extension StreamClient {
             let tried = ask.tried + [ask.target.row].compactMap { $0 }
             // Rows taken by their Bonjour name alone whose key was another's: not that Mac.
             pinRefusedRows.formUnion(tried.filter { id in macs.first { $0.id == id }.map { $0.macID == nil } ?? false })
-            if let next = DiscoveryPolicy.nextPinnedRow(macID: id, tried: tried, rows: homeRows()),
-               let row = macs.first(where: { $0.id == next }) {
-                self.ask(row, savedID: id, tagNamed: ask.tagNamed, tried: tried)
-                return
+            switch DiscoveryPolicy.afterPinRefused(macID: id, tried: tried, rows: homeRows(), tagNamed: ask.tagNamed, tapped: true) {
+            case .nextRow(let next):
+                if let row = macs.first(where: { $0.id == next }) {
+                    self.ask(row, savedID: id, tagNamed: ask.tagNamed, tried: tried)
+                    return
+                }
+                fallthrough
+            case .newKey, .skipRow:
+                // The pinned ask of a Mac that removed this device met another key: set up again.
+                let name = displayName(id)
+                markNewKey(id)
+                status = DiscoveryPolicy.HomeCopy.newKey(mac: name, device: Self.deviceWord)
             }
-            status = RemoteCopy.dialFailure(.wrongMac, mac: displayName(id), candidate: nil, vpnName: nil, device: Self.deviceWord)
             return
         }
         status = DiscoveryPolicy.HomeCopy.noAnswer(mac: ask.name)
@@ -892,7 +942,7 @@ extension StreamClient {
         let sessionKey: Data? = session.flatMap { $0.home }.flatMap { if case .key(let k) = DiscoveryPolicy.pin($0) { return k }; return nil }
         let sameMac = overlay && connected && sessionKey == w.fingerprint
         let info = sameMac ? macInfoVerified.flatMap { $0.fingerprint == w.fingerprint ? $0.info : nil } : nil
-        guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: method, name: name,
+        guard let id = savePairedAtHome(r, fingerprint: w.fingerprint, method: method, name: name, replacing: homeAsk?.replaces,
                                         bonjourName: sameMac ? session?.bonjourName : Self.bonjourName(w.target.fallback ?? w.target.endpoint),
                                         info: info) else { return }
         pairing = .paired(displayName(id))
@@ -932,7 +982,7 @@ extension StreamClient {
     /// (§7.5). The port and addresses come from the session's first kind 18, or from `info`, the
     /// verified kind 18 of a session with this very Mac. Returns its Mac ID.
     private func savePairedAtHome(_ r: PairResult, fingerprint: Data, method: String, name fallbackName: String,
-                                  bonjourName: String?, info: MacInfo? = nil) -> String? {
+                                  replacing replaces: String? = nil, bonjourName: String?, info: MacInfo? = nil) -> String? {
         guard let macID = r.macID, let recognition = r.recognitionKey else { return nil }
         let label = SafeText.label(r.name ?? fallbackName)
         var mac = SavedMac(macID: macID, fingerprint: Base64URL.encode(fingerprint), name: label.isEmpty ? "Mac" : label,
@@ -941,6 +991,7 @@ extension StreamClient {
                            lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
         if let info { mac = SavedMacs.refreshed(mac, info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? mac }
         savedMacs = SavedMacs.adding(mac, to: savedMacs)
+        if let old = replaces { savedMacs = SavedMacs.replacingNewKey(old: old, new: macID, in: savedMacs) }
         persistSavedMacs()
         return macID
     }

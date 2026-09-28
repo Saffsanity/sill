@@ -627,19 +627,54 @@ enum DiscoveryPolicy {
     enum HomeDoor: Hashable { case plain, pairingRequired, open }
 
     /// The saved Mac a network or Direct row is (§7.3): the one its TXT tag names (`tagged`, the
-    /// tag this device resolved), else, for a row whose tag names none, the saved Mac last reached
-    /// under the row's Bonjour name (`saved`: each saved Mac's ID and that name, most recently used
-    /// first), taken by name alone (`tagNamed` false). The automatic reconnect has always taken
-    /// such a row as that Mac, dialed pinned to its key; a tap does the same (the security review,
-    /// 2026-09-27: a tap dialed a tagless look-alike with any key, or in plain TCP in DEBUG, while
-    /// its row read exactly like the paired Mac's). A host always advertises its tag, so a row
-    /// under a saved Mac's name without it is a stranger's until its key says otherwise: its pin
-    /// then fails (-9808), and nothing of this device reaches it. The price: another Mac of the
-    /// same name, reached only while the saved one is not listed, cannot be tapped until the saved
-    /// one is forgotten.
-    static func rowMac(tagged: String?, name: String, saved: [(macID: String, bonjourName: String?)]) -> (macID: String, tagNamed: Bool)? {
+    /// tag this device resolved), else, for a row that carries no tag at all (`carriesTag` false),
+    /// the saved Mac last reached under the row's Bonjour name (`saved`: each saved Mac's ID and that
+    /// name, most recently used first), taken by name alone (`tagNamed` false). The automatic
+    /// reconnect has always taken such a row as that Mac, dialed pinned to its key; a tap does the
+    /// same (the security review, 2026-09-27: a tap dialed a tagless look-alike with any key, or in
+    /// plain TCP in DEBUG, while its row read exactly like the paired Mac's). A host with an
+    /// identity always advertises its tag (whatever Require pairing, Remote Access or its paired
+    /// devices, HostIdentity.txtRecord), so a TLS row under a saved Mac's name without one is a
+    /// stranger's until its key says otherwise: its pin then fails (-9808), and nothing of this
+    /// device reaches it. The price: another Mac of the same name, reached only while the saved one
+    /// is not listed, cannot be tapped until the saved one is forgotten.
+    ///
+    /// A row whose tag names no saved Mac is not one, by its name or otherwise (Noah, 2026-09-27:
+    /// Sill for Mac 0.4.0 made the Mac a new key and a new recognition key, its row read the saved
+    /// Mac's "Wi‑Fi", and a tap dialed the old key for ever). It is a Mac this device has not
+    /// paired with (a Mac set up again, whose tag no saved record resolves), and a tap asks
+    /// (`rowDoor`).
+    static func rowMac(tagged: String?, carriesTag: Bool, name: String,
+                       saved: [(macID: String, bonjourName: String?)]) -> (macID: String, tagNamed: Bool)? {
         if let tagged { return (tagged, true) }
+        guard !carriesTag else { return nil }
         return saved.first { $0.bonjourName == name }.map { ($0.macID, false) }
+    }
+
+    /// Whether a row carries a tag that names no saved Mac under a saved Mac's Bonjour name: the
+    /// Mac set up again with a new key (its tag is its new recognition key's), or a look-alike that
+    /// made up a tag to shed the name rule (`rowMac`).
+    static func otherTagUnderSavedName(tagged: String?, carriesTag: Bool, name: String,
+                                       saved: [(macID: String, bonjourName: String?)]) -> Bool {
+        tagged == nil && carriesTag && saved.contains { $0.bonjourName == name }
+    }
+
+    /// The door a row is dialed by: its record's, except that a row `otherTagUnderSavedName` on an
+    /// open door (`p=0`) is dialed as one that requires pairing, so a tap asks and the Mac proves
+    /// itself with its code. Any key there would hand a look-alike that took a saved Mac's name,
+    /// and any tag, the session a tap meant for that Mac (the security review's finding again).
+    static func rowDoor(_ door: HomeDoor, otherTagUnderSavedName: Bool) -> HomeDoor {
+        otherTagUnderSavedName && door == .open ? .pairingRequired : door
+    }
+
+    /// The automatic reconnect's match for a network or Direct row (`reconnectIfListed`): the saved
+    /// Mac it looks for (`savedID`) by the row's tag, else by the Bonjour name it was reached under;
+    /// never a row whose tag names no saved Mac while it looks for a saved one (`rowMac`).
+    static func reconnectMatches(savedID: String?, bonjourName: String?, rowMacID: String?, rowName: String,
+                                 rowCarriesTag: Bool) -> Bool {
+        if let savedID, let rowMacID { return rowMacID == savedID }
+        if savedID != nil, rowCarriesTag { return false }
+        return bonjourName == rowName
     }
 
     /// What a network or Direct row of a Mac at home ends in, and what VoiceOver says for it (§7.3).
@@ -692,18 +727,19 @@ enum DiscoveryPolicy {
 
     /// A row's word (§7.3). `saved`: the row is a saved Mac (`rowMac`: its TXT tag named one, or,
     /// without a tag of a saved Mac's, its Bonjour name did); `revoked`: that Mac removed this device or refused
-    /// its key (SavedMac.revoked); `homeTLS`: this device has seen that Mac's home door speak TLS
+    /// its key (SavedMac.revoked); `newKey`: another key answered as that Mac (SavedMac.newKey), so
+    /// it is paired again as a Mac never seen; `homeTLS`: this device has seen that Mac's home door speak TLS
     /// (SavedMac.homeTLS; false for an unsaved Mac); `debug`: a DEBUG build, the only kind that
     /// dials a plain door; `cable`: the row's wired interface carries only link-local addresses on
     /// this device (`carriesOnlyLinkLocal`), which counts only for a row that says Wired.
     static func rowWord(door: HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool,
-                        method: Method?, cable: Bool) -> RowWord {
+                        method: Method?, cable: Bool, newKey: Bool = false) -> RowWord {
         switch door {
         case .plain:
             // No downgrade: once a Mac was seen over TLS, a row of it without `p` is not dialed.
             return debug && !homeTLS ? .method(method) : .updateSill
         case .pairingRequired, .open:
-            if saved && !revoked { return .method(method) }
+            if saved && !revoked && !newKey { return .method(method) }
             if !saved && door == .open { return .openDoor }
             return method == .wired && cable ? .pairsOverCable : .notPaired
         }
@@ -729,12 +765,15 @@ enum DiscoveryPolicy {
 
     /// A tap on a row (`tap`), or an automatic reconnect of it, which follows the same table but
     /// never asks: a saved Mac that removed this device, and an unsaved one that requires pairing,
-    /// wait for a tap.
-    static func homeDial(door: HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool, tap: Bool) -> HomeDial {
+    /// wait for a tap. A saved Mac another key answered as (`newKey`) is asked with any key: its
+    /// old key cannot answer any more, and the code the Mac shows is what proves it.
+    static func homeDial(door: HomeDoor, saved: Bool, revoked: Bool, homeTLS: Bool, debug: Bool, tap: Bool,
+                         newKey: Bool = false) -> HomeDial {
         switch door {
         case .plain:
             return debug && !homeTLS ? .plain : .updateSill
         case .pairingRequired, .open:
+            if saved && newKey { return tap ? .ask(pinned: false) : .waitForTap }
             if saved { return revoked ? (tap ? .ask(pinned: true) : .waitForTap) : .pinned }
             if door == .open { return .anyKey }
             return tap ? .ask(pinned: false) : .waitForTap
@@ -752,13 +791,15 @@ enum DiscoveryPolicy {
         case pairingRequired
         /// "‹Mac› removed this ‹iPad›. Tap it to pair again."
         case removed
+        /// "‹Mac› has a new key since this ‹iPad› paired. Tap it to pair again."
+        case newKey
     }
 
     /// Nil unless `dial` (the reconnect's `homeDial`, `tap` false) waits for a tap; `saved`: the
     /// row is a saved Mac (and so one that removed this device, the other way to wait).
-    static func reconnectEnd(_ dial: HomeDial, saved: Bool) -> ReconnectEnd? {
+    static func reconnectEnd(_ dial: HomeDial, saved: Bool, newKey: Bool = false) -> ReconnectEnd? {
         guard dial == .waitForTap else { return nil }
-        return saved ? .removed : .pairingRequired
+        return saved ? (newKey ? .newKey : .removed) : .pairingRequired
     }
 
     /// The status line after a tap that dialed nothing because the Mac's Sill is too old.
@@ -917,7 +958,8 @@ enum DiscoveryPolicy {
         /// reconnects; the row reads Not paired once the Mac's new record arrives.
         case pairingRequired
         /// Another key answered as the saved Mac (-9808: this device's pin refused it): the other
-        /// rows its tag names are dialed, pinned, before any words; never a plain retry.
+        /// rows its tag names are dialed, pinned, before any words; never a plain retry. With none
+        /// left the Mac is paired again (`afterPinRefused`: SavedMac.newKey, a tap asks).
         case wrongKey
         /// Anything else: the words and the reconnect as before.
         case other
@@ -952,6 +994,34 @@ enum DiscoveryPolicy {
     static func nextPinnedRow(macID: String, tried: [String], rows: [(id: String, macID: String?)]) -> String? {
         rows.first { $0.macID == macID && !tried.contains($0.id) }?.id
     }
+
+    /// What a pinned dial of a saved Mac does once this device's pin refused the key that answered
+    /// (-9808, the session's or the pinned ask's; Noah, 2026-09-27): the next row its tag names
+    /// (`nextPinnedRow`) first; with none left, the Mac is paired again (`newKey`: SavedMac.newKey
+    /// set, "‹Mac› has a new key since this ‹iPad› paired. Tap it to pair again.", no automatic
+    /// reconnect, and a tap asks with any key, the Mac proving itself with its code), except that
+    /// the automatic reconnect's row taken by its Bonjour name alone (`tagNamed` false, not
+    /// `tapped`) is only skipped from then on: nobody chose it, and a stranger's tagless row under
+    /// the saved Mac's name must not unpair the real one. The words never end a dial that came to
+    /// nothing: before, a pin refused on a Bonjour row's connection was never reported, and the
+    /// tap's "Connecting to ‹Mac›…" stayed for good.
+    enum PinRefusedNext: Equatable {
+        case nextRow(String)
+        case newKey
+        case skipRow
+    }
+
+    static func afterPinRefused(macID: String, tried: [String], rows: [(id: String, macID: String?)],
+                                tagNamed: Bool, tapped: Bool) -> PinRefusedNext {
+        if let next = nextPinnedRow(macID: macID, tried: tried, rows: rows) { return .nextRow(next) }
+        return tagNamed || tapped ? .newKey : .skipRow
+    }
+
+    /// How long a dial that is not the automatic reconnect's (a tap's, the session after a pairing)
+    /// may take to its first window list before it ends with `HomeCopy.noAnswer`'s words, so
+    /// "Connecting to ‹Mac›…" never stays: 10 s, as a remote dial's first list. The automatic
+    /// reconnect's own dial keeps its 5 s (StreamClient.reconnectDialWait) and looks again.
+    static let tapDialDeadline: Double = 10
 
     /// What the device makes of the Mac's answer to its ask (kind 20, §7.5).
     enum AskAnswer: Equatable {
@@ -1141,6 +1211,10 @@ enum DiscoveryPolicy {
         }
         static func locked(mac: String) -> String { "Unlock \(mac), then tap it again." }
         static func removed(mac: String, device: String) -> String { "\(mac) removed this \(device). Tap it to pair again." }
+        /// Another key answered as the saved Mac and no other row of it was left (`afterPinRefused`).
+        static func newKey(mac: String, device: String) -> String {
+            "\(mac) has a new key since this \(device) paired. Tap it to pair again."
+        }
         static func pairingRequired(mac: String, device: String) -> String {
             "\(mac) now asks devices to pair. Tap it to pair this \(device)."
         }

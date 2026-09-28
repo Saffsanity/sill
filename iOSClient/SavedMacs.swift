@@ -44,6 +44,12 @@ struct SavedMac: Codable, Hashable, Identifiable {
     /// and a tap asks, pinned to this record's key. Cleared by the next pairing, whose record
     /// replaces this one. Optional, so a record from before it decodes.
     var revoked: Bool?
+    /// Another key answered as this Mac on a pinned home dial (-9808) and no other row of it was
+    /// left (DiscoveryPolicy.afterPinRefused): the Mac was set up again (Noah, 2026-09-27: Sill for
+    /// Mac 0.4.0 made a new key). No automatic reconnect, its rows read "Not paired", and a tap
+    /// asks with any key, the Mac proving itself with its code; the pairing that follows replaces
+    /// this record (`replacingNewKey`). Optional, so a record from before it decodes.
+    var newKey: Bool?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }
@@ -163,6 +169,28 @@ enum SavedMacs {
             next.revoked = true
             return next
         }
+    }
+
+    /// `newKey` set on `id` (SavedMac.newKey). Nil when `id` is not saved or is marked already.
+    static func markingNewKey(_ id: String, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { $0.macID == id && $0.newKey != true }) else { return nil }
+        return list.map { mac in
+            guard mac.macID == id else { return mac }
+            var next = mac
+            next.newKey = true
+            return next
+        }
+    }
+
+    /// After a pairing that the re-pairing of `old` started (a tap on a row of a Mac marked
+    /// `newKey`): `old` is gone once the Mac it paired with is saved as `new`, another Mac ID (its
+    /// new key), since the person paired that Mac, by its code, in its place. Nothing changes when
+    /// `old` is not marked or is `new` itself (the same key answered after all: `adding` replaced
+    /// it already).
+    static func replacingNewKey(old: String, new: String, in list: [SavedMac]) -> [SavedMac] {
+        guard old != new, list.contains(where: { $0.macID == new }),
+              list.contains(where: { $0.macID == old && $0.newKey == true }) else { return list }
+        return list.filter { $0.macID != old }
     }
 
     /// DEBUG `-SillForgetHomeTLS 1` (§3.4, §7.9): `homeTLS` cleared on every saved Mac, so a DEBUG

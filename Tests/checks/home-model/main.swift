@@ -136,7 +136,7 @@ check("8 a link naming another key after a look-alike answered the ask: the othe
 // 2026-09-27): the row is M by its name alone (as the reconnect always took it), dialed pinned to
 // M's key, so the stranger's key fails the pin; a tap once dialed it with any key.
 let byName = saved.map { (macID: $0.macID, bonjourName: $0.bonjourName) }
-let named = P.rowMac(tagged: SavedMacs.recognize(tag: nil, in: saved), name: "Mac mini", saved: byName)
+let named = P.rowMac(tagged: SavedMacs.recognize(tag: nil, in: saved), carriesTag: false, name: "Mac mini", saved: byName)
 check("9 a tagless row under M's Bonjour name is M, by its name alone", named.map { $0.macID == macM && !$0.tagNamed } == true)
 let lookMac = named.flatMap { n in saved.first { $0.macID == n.macID } }
 let lookTap = P.homeDial(door: .open, saved: lookMac != nil, revoked: lookMac?.revoked == true, homeTLS: lookMac?.homeTLS == true, debug: true, tap: true)
@@ -145,7 +145,7 @@ check("9 a tap on it dials M pinned (never any key), as the reconnect does", loo
 check("9 the stranger's key fails that pin (-9808): another key as M, never a session", P.homeEnd(trust: .saved(pin: fpM), goodbye: nil, tls: -9808) == .wrongKey)
 check("9 without p, M seen over TLS: nothing dialed, in DEBUG too", P.homeDial(door: .plain, saved: true, revoked: false, homeTLS: lookMac?.homeTLS == true,
       debug: true, tap: true) == .updateSill)
-check("9 a tagless row under another name is no saved Mac: an open door's reads Not paired", P.rowMac(tagged: nil, name: "Office", saved: byName) == nil
+check("9 a tagless row under another name is no saved Mac: an open door's reads Not paired", P.rowMac(tagged: nil, carriesTag: false, name: "Office", saved: byName) == nil
       && P.rowWord(door: .open, saved: false, revoked: false, homeTLS: false, debug: true, method: .wifi, cable: false) == .openDoor)
 
 // MARK: The Mac's quiet rule and the device's words, together (the security review, 2026-09-27)
@@ -223,6 +223,54 @@ if let keyM = RemoteKey.generate(), let idM = RemoteIdentity(privateKey: keyM), 
 } else {
     check("10 two P-256 keys and M's signed kind 18", false)
 }
+
+// MARK: 12. The Mac set up again with a new key (Noah, 2026-09-27: Sill for Mac 0.4.0 made the Mac a
+// new key and a new recognition key; the row read the saved Mac's word by its name, and a tap dialed
+// the old key for ever)
+
+let fpN = Data((0..<32).map { UInt8(90 &+ $0) }), macN = MacID.make(fingerprint: fpN)
+let rkN = Data(repeating: 0x33, count: 32), tagN = RecognitionTag.make(recognitionKey: rkN)!
+func savedMac(_ id: String, fp: Data, rk: Data) -> SavedMac {
+    SavedMac(macID: id, fingerprint: Base64URL.encode(fp), name: "Mac mini", recognitionKey: Base64URL.encode(rk), remotePort: 7455,
+             addresses: [], typedAddresses: nil, infoIssuedAt: 0, bonjourName: "Mac mini", lastWorked: nil, pairedAt: Date(),
+             method: "code", lastConnectedAt: nil, lastRoute: nil, homeTLS: true, revoked: nil)
+}
+var keep = [savedMac(macM, fp: fpM, rk: rkM)]
+let keepNames = keep.map { (macID: $0.macID, bonjourName: $0.bonjourName) }
+// Its row now: the new tag, which no saved record resolves, under M's Bonjour name.
+let newTagged = SavedMacs.recognize(tag: tagN, in: keep)
+let newRowMac = P.rowMac(tagged: newTagged, carriesTag: true, name: "Mac mini", saved: keepNames)
+check("12 the new tag names no saved Mac, and the row is not M by its name", newTagged == nil && newRowMac == nil)
+for (d, label) in [(P.HomeDoor.pairingRequired, "p=1"), (.open, "p=0")] {
+    let door = P.rowDoor(d, otherTagUnderSavedName: P.otherTagUnderSavedName(tagged: newTagged, carriesTag: true, name: "Mac mini", saved: keepNames))
+    check("12 its row (\(label)): Not paired; a tap asks with any key, never a session with any key",
+          P.rowWord(door: door, saved: false, revoked: false, homeTLS: false, debug: false, method: .wifi, cable: false) == .notPaired
+          && P.homeDial(door: door, saved: false, revoked: false, homeTLS: false, debug: false, tap: true) == .ask(pinned: false))
+}
+// The same Mac when its tag still named M (a replayed tag, or the old recognition key kept): pinned, refused, paired again.
+check("12 M's tag with another key: -9808 on the pinned dial is wrongKey", P.homeEnd(trust: .saved(pin: fpM), goodbye: nil, tls: P.pinRefused) == .wrongKey)
+check("12 no other row of M: paired again", P.afterPinRefused(macID: macM, tried: ["network:Mac mini"], rows: [("network:Mac mini", macM)],
+                                                              tagNamed: true, tapped: true) == .newKey)
+keep = SavedMacs.markingNewKey(macM, in: keep)!
+check("12 markingNewKey marks M, once; an unknown Mac is nothing", keep[0].newKey == true && SavedMacs.markingNewKey(macM, in: keep) == nil
+      && SavedMacs.markingNewKey(macN, in: keep) == nil)
+check("12 marked: SavedMacs keeps it across a relaunch", SavedMacs.decode(SavedMacs.encode(keep)).first?.newKey == true)
+let mMarked = keep[0]
+check("12 M's row reads Not paired; a tap asks with any key; the reconnect waits for a tap and ends with the new-key words",
+      P.rowWord(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, method: .wifi, cable: false, newKey: mMarked.newKey == true) == .notPaired
+      && P.homeDial(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, tap: true, newKey: mMarked.newKey == true) == .ask(pinned: false)
+      && P.reconnectEnd(P.homeDial(door: .pairingRequired, saved: true, revoked: false, homeTLS: true, debug: false, tap: false, newKey: true),
+                        saved: true, newKey: true) == .newKey)
+// The ask's pairing saves N; M goes (the person paired N, by its code, in M's place).
+var paired = SavedMacs.adding(savedMac(macN, fp: fpN, rk: rkN), to: keep)
+paired = SavedMacs.replacingNewKey(old: macM, new: macN, in: paired)
+check("12 the pairing saves N in M's place", paired.map(\.macID) == [macN] && SavedMacs.recognize(tag: tagN, in: paired) == macN)
+check("12 replacingNewKey keeps M unmarked, M itself, and M while N is not saved",
+      SavedMacs.replacingNewKey(old: macM, new: macN, in: SavedMacs.adding(savedMac(macN, fp: fpN, rk: rkN), to: [savedMac(macM, fp: fpM, rk: rkM)])).count == 2
+      && SavedMacs.replacingNewKey(old: macM, new: macM, in: keep).map(\.macID) == [macM]
+      && SavedMacs.replacingNewKey(old: macM, new: macN, in: keep).map(\.macID) == [macM])
+check("12 the same key answering after all: its pairing replaces the marked record, unmarked",
+      SavedMacs.adding(savedMac(macM, fp: fpM, rk: rkM), to: keep).first.map { $0.macID == macM && $0.newKey == nil } == true)
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }
