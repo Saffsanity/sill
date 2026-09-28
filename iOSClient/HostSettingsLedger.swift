@@ -5,9 +5,9 @@ import Foundation
 import StreamProtocol
 #endif
 
-/// One of the six settings a device can change on the Mac.
+/// One of the seven settings a device can change on the Mac.
 enum SettingsField: CaseIterable, Hashable {
-    case maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay, directWireless
+    case maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay, directWireless, sendAudio
 }
 
 extension HostSettingsChange {
@@ -20,6 +20,7 @@ extension HostSettingsChange {
         if prioritizeSpeed != nil { f.append(.prioritizeSpeed) }
         if virtualDisplay != nil { f.append(.virtualDisplay) }
         if directWireless != nil { f.append(.directWireless) }
+        if sendAudio != nil { f.append(.sendAudio) }
         return f
     }
 
@@ -32,6 +33,7 @@ extension HostSettingsChange {
         case .prioritizeSpeed: HostSettingsChange(prioritizeSpeed: prioritizeSpeed)
         case .virtualDisplay: HostSettingsChange(virtualDisplay: virtualDisplay)
         case .directWireless: HostSettingsChange(directWireless: directWireless)
+        case .sendAudio: HostSettingsChange(sendAudio: sendAudio)
         }
     }
 
@@ -41,7 +43,8 @@ extension HostSettingsChange {
                            captureScale: other.captureScale ?? captureScale,
                            prioritizeSpeed: other.prioritizeSpeed ?? prioritizeSpeed,
                            virtualDisplay: other.virtualDisplay ?? virtualDisplay,
-                           directWireless: other.directWireless ?? directWireless)
+                           directWireless: other.directWireless ?? directWireless,
+                           sendAudio: other.sendAudio ?? sendAudio)
     }
 }
 
@@ -66,8 +69,9 @@ extension HostSettingsChange {
 /// 7. Reset on every tear-down, and never persisted: a Mac's settings are only ever the ones it
 ///    sent on this connection.
 /// 8. Nothing is sent on its own: only `pick`, called from a control's action, produces a change.
-/// 9. A field this Mac did not report (nil in its state: an older host) is never sent, so an older
-///    host is never asked for what it cannot show. A property of the model, not of the view.
+/// 9. A field this Mac did not report (nil in its state: an older host; Direct Wireless and Send
+///    Audio) is never sent, so an older host is never asked for what it cannot show. A property of the
+///    model, not of the view.
 struct SettingsLedger: Equatable {
     /// One field's unanswered pick. `change` names that field only.
     struct Entry: Equatable {
@@ -98,6 +102,7 @@ struct SettingsLedger: Equatable {
         for field in change.fields {
             // Rule 9: applied(to:) would set the field anyway, and a nil differs from any value.
             if field == .directWireless, shown.directWireless == nil { continue }
+            if field == .sendAudio, shown.sendAudio == nil { continue }
             let single = change.only(field)
             guard single.applied(to: shown) != shown else { continue }
             pending[field] = Entry(change: single, token: token, sentAt: now)

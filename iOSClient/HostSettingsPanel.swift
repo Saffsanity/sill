@@ -16,9 +16,10 @@ import StreamProtocol
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
-/// This iPad (or iPhone), whose switch is a preference here (`StreamClient.gesturesKey`) and sends
-/// nothing to the Mac, and whose rows, as accessibility actions, do their gestures
-/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
+/// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (the Mac's
+/// sound, while it sends it, `StreamClient.soundMuted`; three-finger gestures, `StreamClient.gesturesKey`),
+/// and whose gesture rows, as accessibility actions, do their gestures (`client.sendGesture`), since
+/// VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -53,16 +54,21 @@ struct HostSettingsPanel: View {
         #endif
     }
     /// DEBUG `-SillSettingsScroll gestures`: the rows start scrolled to the This iPad group, so a
-    /// photo of a short screen shows its switch and rows, which the footnote under them pushes out
-    /// of `-SillSettingsEnd`'s view.
-    private static var startsAtGestures: Bool {
+    /// photo of a short screen shows its switches and rows, which the footnote under them pushes out
+    /// of `-SillSettingsEnd`'s view; `sound`, to the Send Audio row.
+    private static var startsAt: String? {
         #if DEBUG
-        return UserDefaults.standard.string(forKey: "SillSettingsScroll") == "gestures"
+        switch UserDefaults.standard.string(forKey: "SillSettingsScroll") {
+        case "gestures"?: return gesturesGroupID
+        case "sound"?: return sendAudioID
+        default: return nil
+        }
         #else
-        return false
+        return nil
         #endif
     }
     private static let gesturesGroupID = "thisDevice"
+    private static let sendAudioID = "sendAudio"
     /// `UIAccessibility.isVoiceOverRunning`; DEBUG `-SillVoiceOver 1` says it is, for the harness's
     /// photos of the group's VoiceOver footnote.
     static var voiceOverRunning: Bool {
@@ -83,7 +89,7 @@ struct HostSettingsPanel: View {
                         .scrollIndicatorsFlash(onAppear: true)
                         .scrollBounceBehavior(.basedOnSize)
                         .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
-                        .onAppear { if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) } }
+                        .onAppear { if let id = Self.startsAt { reader.scrollTo(id, anchor: .top) } }
                 }
             }
             foot
@@ -251,6 +257,23 @@ struct HostSettingsPanel: View {
                     Footnote(text: "The window you pick moves onto an invisible display on \(mac) while it streams, so it keeps updating when covered.")
                 }
                 Footnote(text: "Applies to every device streaming from \(mac). The stream restarts for a moment.")
+                // Send Audio (docs/audio-plan.md §7.7): after the closing footer, whose "the stream restarts"
+                // is not true of it (the sound has a stream of its own), like Direct Wireless after it. No
+                // row for a Mac without sound; why no sound comes, when the Mac says, under it.
+                if let send = shown.sendAudio {
+                    Rows {
+                        Toggle(isOn: binding(send) { HostSettingsChange(sendAudio: $0) }) {
+                            RowTitle(title: "Send Audio", since: client.settings.pendingSince(.sendAudio))
+                        }
+                        .rowFrame()
+                    }
+                    .id(Self.sendAudioID)
+                    if send, let note = state.audioNote {
+                        Footnote(text: note, warning: true)
+                    }
+                    Footnote(text: send ? "Every device hears what streams; \(mac) keeps playing it too. Sound mutes it on this \(device) alone."
+                                        : "\(mac) plays the sound of what streams on every connected device, and keeps playing it too.")
+                }
                 // Direct Wireless Connection: how devices reach the Mac, not how it streams; after the
                 // closing footer, whose "the stream restarts" is not true of it, and last, the least
                 // changed row with the longest footer (the compact halves' 259 pt shows the rest
@@ -423,6 +446,17 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        // The Mac's sound, first: the bars' Sound button as a switch, on every layout while the Mac sends
+        // it; in a Slide Over, where no bar holds the button, the only way to it (docs/audio-plan.md §7.6).
+        if client.soundAvailable {
+            Rows {
+                Toggle(isOn: Binding(get: { !client.soundMuted }, set: { client.setSoundMuted(!$0) })) {
+                    Text("Sound from \(mac)").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: "Mutes it on this \(device) alone; \(mac) keeps sending it.")
+        }
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)

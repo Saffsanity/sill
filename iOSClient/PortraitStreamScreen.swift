@@ -262,10 +262,12 @@ struct PortraitStreamScreen: View {
     /// Keyboard button (it is in the key row) but with the Aa control, whose ruler opens centred on
     /// it; the strip's end and the Desktop button fade while it is open. `width`: the bar's row.
     private func windowBar(width: CGFloat) -> some View {
-        // Apps, Menus, Aa, Desktop, Settings, and the strip: Menus only where the row holds it and
-        // still a whole thumbnail (not in a 320 pt Slide Over).
+        // Apps, Menus, Aa, Desktop, Sound, Settings, and the strip: Menus only where the row holds it and
+        // still a whole thumbnail (not in a 320 pt Slide Over), then Sound where it holds one more.
         let menusFit = MacMenuButton.fits(width: width, buttons: 5, buttonWidth: metrics.buttonWidth, gap: 12,
                                           thumbWidth: metrics.thumbWidth)
+        let soundFits = MacMenuButton.fits(width: width, buttons: client.menus.hasMenus && menusFit ? 6 : 5,
+                                           buttonWidth: metrics.buttonWidth, gap: 12, thumbWidth: metrics.thumbWidth)
         return HStack(spacing: 12) {
             appsButton()
 
@@ -292,6 +294,15 @@ struct PortraitStreamScreen: View {
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
+            // The Mac's sound, as in the landscape bar: only while it sends it.
+            if client.soundAvailable, soundFits {
+                SoundButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                            radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing)
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
+
             settingsButton()
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
@@ -299,6 +310,7 @@ struct PortraitStreamScreen: View {
         .frame(height: metrics.barHeight)
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
         .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
+        .animation(.easeOut(duration: 0.18), value: client.soundAvailable)
     }
 
     // MARK: A phone held upright
@@ -393,23 +405,34 @@ struct PortraitStreamScreen: View {
     /// Row 2: the thumbnails, and at the row's end, under Settings, the Menus button while the Mac
     /// sent menus (`PhonePortraitLayout.menus`), which it takes from the strip's width: next to the
     /// thumbnails because its menus are the picked window's app's, as in the other bars, and out of
-    /// row 1, whose five share the row (the approved mockup's). The strip still shows a whole
-    /// thumbnail and more on every phone.
+    /// row 1, whose five share the row (the approved mockup's). While the Mac sends its sound, the
+    /// Sound button ends the row under Settings instead, and Menus moves one place left, under Desktop
+    /// (docs/audio-plan.md §7.6). The strip still shows a whole thumbnail and more on every phone.
     private func phoneRow2(_ layout: PhonePortraitLayout) -> some View {
         let menus = client.menus.hasMenus
-        let strip = menus ? layout.stripBesideMenus : layout.strip
+        let sound = client.soundAvailable
+        let strip = menus && sound ? layout.stripBesideBoth : menus || sound ? layout.stripBesideMenus : layout.strip
+        let menusAt = sound ? layout.menusBesideSound : layout.menus
         return ZStack(alignment: .topLeading) {
             windowStrip.frame(width: strip.width, height: strip.height)
             if menus {
-                MacMenuButton(client: client, width: layout.menus.width, height: layout.menus.height,
+                MacMenuButton(client: client, width: menusAt.width, height: menusAt.height,
                               radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
                               iconBox: PortraitMetrics.phoneIconBox, onOpen: menusOpened, onClose: menusClosed)
-                    .offset(x: layout.menus.minX - layout.strip.minX, y: layout.menus.minY - layout.strip.minY)
+                    .offset(x: menusAt.minX - layout.strip.minX, y: menusAt.minY - layout.strip.minY)
+                    .transition(.opacity)
+            }
+            if sound {
+                SoundButton(client: client, width: layout.sound.width, height: layout.sound.height,
+                            radius: metrics.buttonRadius, iconSize: metrics.buttonIcon, spacing: metrics.buttonSpacing,
+                            iconBox: PortraitMetrics.phoneIconBox)
+                    .offset(x: layout.sound.minX - layout.strip.minX, y: layout.sound.minY - layout.strip.minY)
                     .transition(.opacity)
             }
         }
         .frame(width: layout.strip.width, height: layout.strip.height, alignment: .topLeading)
         .animation(.easeOut(duration: 0.18), value: menus)
+        .animation(.easeOut(duration: 0.18), value: sound)
     }
 
     // MARK: Shared by both

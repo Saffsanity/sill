@@ -268,6 +268,9 @@ enum MockCatalog {
         case remotepair      // at home, Remote Access on, not saved: Pair This iPad…
         case remoteoff       // at home, Remote Access off: the footnote only
         case noremote        // at home, an older Mac without kind 18: no Away from home group
+        case sound           // the Mac sends its sound: the Send Audio row on, the Sound button and switch
+        case soundoff        // a Mac with sound, Send Audio off: the row off, no button
+        case soundnote       // on, and the Mac could not capture it: the note under the row
     }
 
     /// The Mac's kind 18 in the remote cases: Tailscale's name and addresses, and Wi‑Fi.
@@ -303,8 +306,10 @@ enum MockCatalog {
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
+            // A Mac without sound (every one before it, Sill for Mac 0.3.1 among them), but in the sound's
+            // cases and under `-SillSound`, so every other photo is as it was.
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                                     directWireless: false, sendAudio: nil),   // a Mac without sound until the device plays it
+                                     directWireless: false, sendAudio: nil),
             persistent: true, virtualDisplayAvailable: true, softwareEncoder: false,
             stream: RunningStream(width: 2880, height: 1800, fps: 60, mbps: 15, onVirtualDisplay: false))
         switch c {
@@ -347,8 +352,23 @@ enum MockCatalog {
             client.macInfo = macInfo()
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+        case .sound:
+            state.settings.sendAudio = true
+        case .soundoff:
+            state.settings.sendAudio = false
+        case .soundnote:
+            state.settings.sendAudio = true
+            // The host's words (HostStatusSnapshot.Audio.note) for a start that ran out of time.
+            state.audioNote = "Couldn’t capture the sound of Safari: the stream did not start within 2 s."
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
             break
+        }
+        // `-SillSound on|muted`: the Mac sends its sound, and this device plays it or has it muted (the
+        // button and the switch in that state; the mock plays nothing). Never saved.
+        switch UserDefaults.standard.string(forKey: "SillSound") {
+        case "on"?: state.settings.sendAudio = true; client.soundMuted = false
+        case "muted"?: state.settings.sendAudio = true; client.soundMuted = true
+        default: break
         }
         if client.macInfo != nil { client.macInfoAt = Date().addingTimeInterval(-59) }
         var ledger = SettingsLedger()

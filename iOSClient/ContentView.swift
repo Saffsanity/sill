@@ -160,8 +160,8 @@ struct ContentView: View {
 /// * `-SillSettingsEnd 1` — with `-SillSettings 1`: the panel's rows start scrolled to their end,
 ///   so a photo of a short screen shows the last groups (Direct Wireless, Away from home, This
 ///   iPad, Take the Tour). `-SillSettingsScroll gestures` starts them at the This iPad group
-///   instead (its switch and rows, which the footnotes under them push out of the end's view on a
-///   short screen).
+///   instead (its switches and rows, which the footnotes under them push out of the end's view on a
+///   short screen), and `-SillSettingsScroll sound` at the Send Audio row.
 /// * `-SillSettingsCase <case>` — what the mock Mac's settings look like: `default` (Sill.app),
 ///   `cli`, `software`, `custom`, `vdproblem`, `vdstream`, `legacy`, `pending`, `timeout`,
 ///   `direct`, `directlink` (connected over it), `nodirect` (a host without it), `wired` or
@@ -274,6 +274,20 @@ struct ContentView: View {
 ///   as under VoiceOver. The console says what happened ("tour: …").
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
 ///   orientation at launch (a phone simulator sideways, with its real safe areas).
+/// * The Mac's sound (docs/audio-plan.md §7.8). In the mock: `-SillSound on|muted` makes the mock Mac
+///   send its sound and this device play it or have it muted (the Sound button and switch in that
+///   state; the mock plays nothing), and `-SillSettingsCase sound|soundoff|soundnote` the Send Audio
+///   row on, off, or on with the Mac's note (why no sound comes). In the normal app and under
+///   `-SillLive 1`: `-SillSoundSink manual|device` (the engine renders offline and opens no output
+///   device, the simulator's default in every build, or it plays to the output; `device` in the
+///   simulator plays through the Mac's speakers: never in a gate), `-SillSoundVolume 0` (the player's
+///   volume, a second guard), `-SillSoundToggle <s>[,<s>…]` (the Sound button used at those seconds
+///   after the stream screen shows, as a tap would) and `-SillSoundSwitchAt <s>` (the panel's switch
+///   off, then on a second later). The console's "audio: …" lines say what happened: the format, the
+///   engine and its latencies, a line a second while sound plays (how far it trails the picture, the
+///   need, late packets, the error, frames added and dropped, jumps, duplicates), and in manual
+///   rendering where each click of a synthetic host's test tone was heard, against where it was placed
+///   and when it was due.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back

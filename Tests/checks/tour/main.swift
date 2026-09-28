@@ -351,6 +351,77 @@ check(proMax.stream == CGRect(x: 8, y: 8, width: 424, height: 265) && proMax.tar
       && proMax.targets[.trackpad]! == CGRect(x: 14, y: 489, width: 412, height: 389), "the 18 Pro Max's rows: \(proMax.targets)")
 check(seTall.stream.height == 224 && seTall.targets[.settings]!.minY == 256 && seTall.targets[.keys]!.minY == 394, "the SE's rows")
 
+// The Mac's sound (docs/audio-plan.md §7.6): its Sound button is no tour target, and no step's lit part
+// takes it in, wherever it shows. A phone upright: Sound ends row 2 under Settings (Menus, when it shows
+// too, under Desktop), and the strip ends 8 pt before the first of them. Sideways and in the halves:
+// Sound comes after Desktop, before Settings.
+do {
+    var worst: String?
+    for w in stride(from: 300 as CGFloat, through: 599, by: 1) {
+        for h in [w + 180, w * 1.8, 1000] as [CGFloat] {
+            let l = PhonePortraitLayout(size: CGSize(width: w, height: h))
+            for strip in [l.stripBesideMenus, l.stripBesideBoth] {
+                let pad = (PhonePortraitLayout.stripHeight - 50) / 2
+                let band = CGRect(x: strip.minX, y: strip.minY + max(0, pad - 5), width: strip.width,
+                                  height: strip.height - max(0, pad - 5) - max(0, pad - 6))
+                let s = Screen(size: l.size, layout: F, stream: l.picture, targets: [
+                    .stream: l.picture, .strip: band,
+                    .textSize: l.buttons[PhonePortraitLayout.Button.textSize.rawValue],
+                    .keyboard: l.buttons[PhonePortraitLayout.Button.keyboard.rawValue],
+                    .settings: l.buttons[PhonePortraitLayout.Button.settings.rawValue],
+                    .keys: l.keys, .trackpad: l.trackpad])
+                for topic in all {
+                    guard let t = s.union(topic), let lit = TourPolicy.cutout([t], screen: s.size) else { continue }
+                    if lit.intersects(l.sound), worst == nil { worst = "\(w)×\(h) \(topic): lit \(lit), Sound \(l.sound)" }
+                }
+            }
+        }
+    }
+    check(worst == nil, "a phone upright, every width from 300 to 599 pt: no step lights the Sound button\(worst.map { " — \($0)" } ?? "")")
+}
+do {
+    /// Sideways and in the halves, with Sound before Settings: each button's frame from the right, as the
+    /// bars lay them out (Settings, Sound, Desktop, then Keyboard sideways, then Aa).
+    func withSound(_ w: CGFloat, _ h: CGFloat) -> (Screen, CGRect) {
+        let landscape = w > h && !(h > w && w < 600)
+        if landscape {
+            let compact = h < 560
+            let (barH, pad, bw, bh): (CGFloat, CGFloat, CGFloat, CGFloat) = compact ? (78, 14, 64, 58) : (86, 22, 66, 66)
+            let settingsX = w - pad - bw, soundX = settingsX - 12 - bw, desktopX = soundX - 12 - bw
+            let keyboardX = desktopX - 12 - bw, aaX = keyboardX - 12 - bw, stripX = pad + bw + 12, by = (barH - bh) / 2
+            let stream = CGRect(x: 8, y: barH + 8, width: w - 16, height: h - barH - 16)
+            return (Screen(size: CGSize(width: w, height: h), layout: L, stream: stream, targets: [
+                .stream: stream, .strip: CGRect(x: stripX, y: 5, width: aaX - 12 - stripX, height: barH - 9),
+                .textSize: CGRect(x: aaX, y: by, width: bw, height: bh), .keyboard: CGRect(x: keyboardX, y: by, width: bw, height: bh),
+                .settings: CGRect(x: settingsX, y: by, width: bw, height: bh)]), CGRect(x: soundX, y: by, width: bw, height: bh))
+        }
+        let regular = !(h > w && w < 600)
+        let half = (h / 2).rounded()
+        let (padTop, padSide, barH, bw, bh, thumbPad): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) =
+            regular ? (12, 14, 78, 64, 58, 10) : (10, 14, 62, 56, 50, 6)
+        let barY = half + padTop
+        let settingsX = w - padSide - bw, soundX = settingsX - 12 - bw, desktopX = soundX - 12 - bw, aaX = desktopX - 12 - bw
+        let stripX = padSide + bw + 12, by = barY + (barH - bh) / 2
+        let stream = CGRect(x: 8, y: 8, width: w - 16, height: half - 16)
+        return (Screen(size: CGSize(width: w, height: h), layout: P, stream: stream, targets: [
+            .stream: stream,
+            .strip: CGRect(x: stripX, y: barY + thumbPad - 5, width: aaX - 12 - stripX, height: barH - (thumbPad - 5) - (thumbPad - 6)),
+            .textSize: CGRect(x: aaX, y: by, width: bw, height: bh), .settings: CGRect(x: settingsX, y: by, width: bw, height: bh),
+            .keys: CGRect(x: padSide, y: barY + barH + 10, width: w - 2 * padSide, height: 48),
+            .trackpad: CGRect(x: padSide, y: barY + barH + 68, width: w - 2 * padSide, height: max(0, h - 22 - (barY + barH + 68)))]),
+            CGRect(x: soundX, y: by, width: bw, height: bh))
+    }
+    var worst: String?
+    for (w, h) in [(1000, 710), (1133, 744), (1376, 1032), (710, 500), (667, 375), (932, 430), (710, 1000), (744, 1133), (1032, 1376), (560, 800)] as [(CGFloat, CGFloat)] {
+        let (s, sound) = withSound(w, h)
+        for topic in all {
+            guard let t = s.union(topic), let lit = TourPolicy.cutout([t], screen: s.size) else { continue }
+            if lit.intersects(sound), worst == nil { worst = "\(w)×\(h) \(topic): lit \(lit), Sound \(sound)" }
+        }
+    }
+    check(worst == nil, "sideways and in the halves, with Sound before Settings: no step lights it\(worst.map { " — \($0)" } ?? "")")
+}
+
 // MARK: - Where the card goes: an oracle from the plan's words
 
 /// §6.3 in its own words, to hold `place` to them.

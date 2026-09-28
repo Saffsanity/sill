@@ -23,7 +23,7 @@ func dec<T: Decodable>(_ t: T.Type, _ d: Data) -> T? { try? decoder.decode(t, fr
 /// The host's acceptance rule, as Sources/SillHost/DeviceSettings.swift has it (that file needs
 /// SillHostCore, so the model carries a copy).
 func accepted(_ c: HostSettingsChange, virtualDisplayAvailable: Bool) -> HostSettingsChange {
-    var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: c.directWireless)
+    var ok = HostSettingsChange(prioritizeSpeed: c.prioritizeSpeed, directWireless: c.directWireless, sendAudio: c.sendAudio)
     if let v = c.maxFPS, SettingsChoices.maxFPS.contains(v) { ok.maxFPS = v }
     if let v = c.bitrate, SettingsChoices.bitrate.contains(v) { ok.bitrate = v }
     if let v = c.captureScale, SettingsChoices.captureScale.contains(v) { ok.captureScale = v }
@@ -169,6 +169,40 @@ do {   // unanswered: back at the timeout; a late answer still applies
     var h = base; h.directWireless = true
     check(l.receive(st(h, answering: 1)).isEmpty && l.displayed?.directWireless == true, "Direct Wireless: a late answer still applies")
 }
+// Send Audio, the seventh field (optional: a host without sound does not report it; `base` is one).
+do {   // rule 9: a host without sound is never sent it
+    var l = SettingsLedger(); _ = l.receive(st(base))
+    check(l.pick(HostSettingsChange(sendAudio: true), token: 1, now: 0) == nil && l.pending.isEmpty && l.displayed?.sendAudio == nil,
+          "rule 9: pick(sendAudio: true) against a host without sound sends nothing and shows nothing")
+    let mixed = l.pick(HostSettingsChange(bitrate: 25_000_000, sendAudio: true), token: 2, now: 0)
+    check(mixed == HostSettingsChange(token: 2, bitrate: 25_000_000) && l.pending[.sendAudio] == nil,
+          "rule 9: a two-field pick to it sends only the field it reported")
+    let old = #"{"settings":{"maxFPS":120,"bitrate":15000000,"captureScale":2,"prioritizeSpeed":false,"virtualDisplay":false,"directWireless":false},"persistent":true,"virtualDisplayAvailable":true,"softwareEncoder":false}"#
+    check(dec(HostSettingsState.self, Data(old.utf8))?.settings.sendAudio == nil, "a state without the key (Sill for Mac 0.3.1) decodes with it nil")
+}
+do {   // on at once, cleared by its answer; refused, back; on → off → on; unanswered, back at the timeout
+    var withSound = base; withSound.sendAudio = false
+    var l = SettingsLedger(); _ = l.receive(st(withSound))
+    let out = l.pick(HostSettingsChange(sendAudio: true), token: 1, now: 0)
+    check(out == HostSettingsChange(token: 1, sendAudio: true) && l.displayed?.sendAudio == true, "a Send Audio pick sends exactly its field and shows at once")
+    let wire = String(data: enc(out!), encoding: .utf8)
+    check(wire == #"{"sendAudio":true,"token":1}"# || wire == #"{"token":1,"sendAudio":true}"#, "on the wire: {token, sendAudio}")
+    var h = withSound; h.sendAudio = true
+    check(l.receive(st(h, answering: 1)).isEmpty && l.pending.isEmpty && l.displayed?.sendAudio == true, "its answer settles it on")
+    var r = SettingsLedger(); _ = r.receive(st(withSound))
+    _ = r.pick(HostSettingsChange(sendAudio: true), token: 1, now: 0)
+    check(r.receive(st(withSound, answering: 1)) == [.sendAudio] && r.displayed?.sendAudio == false, "a refused Send Audio pick goes back and is reported")
+    var t = SettingsLedger(); _ = t.receive(st(withSound))
+    _ = t.pick(HostSettingsChange(sendAudio: true), token: 1, now: 0)
+    _ = t.pick(HostSettingsChange(sendAudio: false), token: 2, now: 0.1)
+    _ = t.pick(HostSettingsChange(sendAudio: true), token: 3, now: 0.2)
+    _ = t.receive(st(h, answering: 1)); var off = h; off.sendAudio = false; _ = t.receive(st(off, answering: 2))
+    check(t.displayed?.sendAudio == true, "on → off → on: the answer to 2 (off) does not show off")
+    var x = SettingsLedger(); _ = x.receive(st(withSound))
+    _ = x.pick(HostSettingsChange(sendAudio: true), token: 1, now: 100)
+    check(!x.expire(now: 104, timeout: 4) && x.expire(now: 104.01, timeout: 4) && x.displayed?.sendAudio == false,
+          "Send Audio unanswered: back to off just past the timeout")
+}
 do {   // wire shapes and tolerance
     let change = HostSettingsChange(token: 7, bitrate: 25_000_000)
     print("     change: " + String(data: enc(change), encoding: .utf8)!)
@@ -265,6 +299,8 @@ final class Host {
     let persistent: Bool
     /// A host from before Direct Wireless: its state has no such key and it ignores the field.
     let old: Bool
+    /// A host without sound (every Sill for Mac before the sound, 0.3.1 the public one): no sendAudio.
+    let noSound: Bool
     var softwareEncoder = false
     var note: String?
     var lastPublished: HostSettingsState?
@@ -277,10 +313,12 @@ final class Host {
     var answersQueued = 0
     var broadcasts = 0
 
-    init(target: StreamSettings, app: Bool, old: Bool) {
+    init(target: StreamSettings, app: Bool, old: Bool, noSound: Bool) {
         self.target = target
         self.old = old
+        self.noSound = noSound || old
         if old { self.target.directWireless = nil }
+        if self.noSound { self.target.sendAudio = nil }
         persistent = app
         virtualDisplayAvailable = app   // the CLI in this model runs without --virtual-display
         if !app { self.target.virtualDisplay = false; note = "Start SillHost with --virtual-display to use it." }
@@ -314,6 +352,7 @@ final class Host {
         changesHandled += 1
         var ok = accepted(change, virtualDisplayAvailable: virtualDisplayAvailable)
         if old { ok.directWireless = nil }   // JSONDecoder dropped the unknown key
+        if noSound { ok.sendAudio = nil }
         // An older host (before Direct Wireless) knows 8, 15, 25 and 40 Mbps only: Low, Ultra and
         // Extreme are not among its choices (the union of the two branches' rules).
         if old, let b = ok.bitrate, [QualityPreset.low, .ultra, .extreme].map(\.rawValue).contains(b) {
@@ -327,7 +366,7 @@ final class Host {
         let named = Set(ok.fields)
         let t = HostSettingsChange(maxFPS: target.maxFPS, bitrate: target.bitrate, captureScale: target.captureScale,
                                    prioritizeSpeed: target.prioritizeSpeed, virtualDisplay: target.virtualDisplay,
-                                   directWireless: target.directWireless)
+                                   directWireless: target.directWireless, sendAudio: target.sendAudio)
         for f in SettingsField.allCases where !named.contains(f) && t.only(f).applied(to: before) != before {
             fail("field \(f) changed by a change that does not name it")
         }
@@ -338,6 +377,7 @@ final class Host {
     func macMenu(_ change: HostSettingsChange) {   // Sill.app: HostSettings.config → setTarget, synchronously
         var change = change
         if old { change.directWireless = nil }   // an older Mac has no such control
+        if noSound { change.sendAudio = nil }
         if old, let b = change.bitrate, [QualityPreset.low, .ultra, .extreme].map(\.rawValue).contains(b) { change.bitrate = nil }   // nor these items
         guard !change.isEmpty else { return }
         for f in change.fields { intended[f] = change.only(f) }
@@ -371,7 +411,8 @@ final class Device {
 
 func randomChange(_ rng: inout RNG, validOnly: Bool) -> HostSettingsChange {
     var c = HostSettingsChange()
-    switch Int.random(in: 0..<6, using: &rng) {
+    switch Int.random(in: 0..<7, using: &rng) {
+    case 6: c.sendAudio = Bool.random(using: &rng)
     case 5: c.directWireless = Bool.random(using: &rng)
     case 0: c.maxFPS = validOnly ? SettingsChoices.maxFPS.randomElement(using: &rng)! : [30, 60, 90, 120, 240].randomElement(using: &rng)!
     case 1: c.bitrate = validOnly ? SettingsChoices.bitrate.randomElement(using: &rng)! : [8_000_000, 12_000_000, 100_000_000, 200_000_000, 250_000_000, 500_000_000].randomElement(using: &rng)!
@@ -387,13 +428,15 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     var rng = RNG(state: seed)
     let app = Bool.random(using: &rng)
     let old = Int.random(in: 0..<4, using: &rng) == 0
+    let noSound = old || Int.random(in: 0..<3, using: &rng) == 0
     let start = StreamSettings(maxFPS: 120, bitrate: [15_000_000, 12_000_000].randomElement(using: &rng)!,   // 12 = a Mac-side custom value
                                captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
-                               directWireless: Bool.random(using: &rng), sendAudio: nil)
-    let host = Host(target: start, app: app, old: old)
+                               directWireless: Bool.random(using: &rng), sendAudio: Bool.random(using: &rng))
+    let host = Host(target: start, app: app, old: old, noSound: noSound)
     var intentBase = start
     if !app { intentBase.virtualDisplay = false }
     if old { intentBase.directWireless = nil }
+    if noSound { intentBase.sendAudio = nil }
     let devices = (0..<Int.random(in: 1...3, using: &rng)).map { Device(name: $0) }
     var nextConn = 1
     var now = 0.0
@@ -474,6 +517,9 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
         if out.directWireless != nil, d.ledger.host?.settings.directWireless == nil {
             fail("rule 9: device \(d.name) sent directWireless to a host that never reported it (seed \(seed))")
         }
+        if out.sendAudio != nil, d.ledger.host?.settings.sendAudio == nil {
+            fail("rule 9: device \(d.name) sent sendAudio to a host without sound (seed \(seed))")
+        }
         let touched = out.fields
         for f in touched { d.picks[f] = (out.only(f), out.token!, now) }
         d.nextToken += 1
@@ -532,17 +578,20 @@ func run(seed: UInt64) -> (steps: Int, answers: Int, broadcasts: Int, expiries: 
     for f in SettingsField.allCases {
         let want = host.intended[f]?.applied(to: intentBase) ?? intentBase
         if HostSettingsChange(maxFPS: want.maxFPS, bitrate: want.bitrate, captureScale: want.captureScale, prioritizeSpeed: want.prioritizeSpeed,
-                              virtualDisplay: want.virtualDisplay, directWireless: want.directWireless).only(f).applied(to: host.target) != host.target {
+                              virtualDisplay: want.virtualDisplay, directWireless: want.directWireless, sendAudio: want.sendAudio).only(f).applied(to: host.target) != host.target {
             fail("lost update: \(f) is not the last value anyone chose for it (seed \(seed))")
         }
     }
     if host.answersQueued != host.changesHandled { fail("answers \(host.answersQueued) != changes \(host.changesHandled)") }
     if old, host.target.directWireless != nil { fail("an older host ended up reporting directWireless (seed \(seed))") }
+    if noSound, host.target.sendAudio != nil { fail("a host without sound ended up reporting sendAudio (seed \(seed))") }
     if old { oldHostRuns += 1 }
+    if noSound { noSoundRuns += 1 }
     return (steps, host.answersQueued, host.broadcasts, expiries, refusals)
 }
 
 var oldHostRuns = 0
+var noSoundRuns = 0
 var newAccepted = 0
 var newRefusedByOld = 0
 let runs = CommandLine.arguments.count > 1 ? Int(CommandLine.arguments[1]) ?? 5_000 : 5_000
@@ -554,5 +603,5 @@ for seed in 1...runs {
 }
 print("ok   \(runs) random two-device + Mac-menu runs converged: \(totals.steps) steps, \(totals.answers) answers (one per change, in order), "
       + "\(totals.broadcasts) broadcasts (none duplicate), \(totals.expiries) device timeouts, \(totals.refusals) refusals reported; "
-      + "\(oldHostRuns) runs against an older host (no directWireless), where rule 9 held")
+      + "\(oldHostRuns) runs against an older host (no directWireless) and \(noSoundRuns) against one without sound (no sendAudio), where rule 9 held")
 print("ok   Low, Ultra or Extreme picked and applied \(newAccepted) times; refused by an older host \(newRefusedByOld) times (never applied there)")

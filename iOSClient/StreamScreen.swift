@@ -371,6 +371,7 @@ struct StreamScreen: View {
             }
         }
         guard live else { return }
+        client.runSoundArguments()
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
@@ -758,14 +759,19 @@ struct StreamScreen: View {
     }
 
     private func landscape(bar: BarMetrics, width: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        // Apps, Menus, Aa, Keyboard, Desktop, Sound, Settings, and the strip: Menus where the row holds it
+        // and a whole thumbnail, then Sound where it holds that one more.
+        let row = width - 2 * bar.padding
+        let menusFit = MacMenuButton.fits(width: row, buttons: 6, buttonWidth: bar.buttonWidth, gap: bar.gap, thumbWidth: bar.thumbWidth)
+        let menusShown = client.menus.hasMenus && menusFit
+        return VStack(spacing: 0) {
             TopBar(client: client, metrics: bar, drawerOpen: $drawerOpen,
                    keyboardShown: $keyboardShown,
                    textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
                    settingsOpen: settingsOpen,
-                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
-                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
-                                                gap: bar.gap, thumbWidth: bar.thumbWidth),
+                   menusFit: menusFit,
+                   soundFits: MacMenuButton.fits(width: row, buttons: menusShown ? 7 : 6, buttonWidth: bar.buttonWidth,
+                                                 gap: bar.gap, thumbWidth: bar.thumbWidth),
                    toggleKeyboard: { overlay.toggleKeyboard() },
                    setSettings: { setSettings($0, restoreKeyboard: $1) },
                    menusOpened: menusOpened, menusClosed: menusClosed)
@@ -903,6 +909,9 @@ private struct TopBar: View {
     let settingsOpen: Bool
     /// Whether the bar holds the Menus button and still a whole thumbnail (`MacMenuButton.fits`).
     let menusFit: Bool
+    /// Whether it holds the Sound button too, after Menus where Menus shows (the Menus button keeps its
+    /// place where only one more fits).
+    let soundFits: Bool
     let toggleKeyboard: () -> Void
     /// Opens or closes the Settings panel; the second argument says whether closing puts the
     /// keyboard back (see `StreamScreen.setSettings`).
@@ -959,6 +968,15 @@ private struct TopBar: View {
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
+            // The Mac's sound, while it sends it: this device's mute (docs/audio-plan.md §7.6).
+            if client.soundAvailable, soundFits {
+                SoundButton(client: client, width: metrics.buttonWidth, height: metrics.buttonHeight,
+                            spacing: metrics.buttonSpacing)
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+                    .transition(.opacity)
+            }
+
             // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
             button(open: settingsOpen, symbol: "gearshape", label: "Settings",
                    accessibilityLabel: settingsOpen ? "Close settings" : "Settings for \(client.macName.isEmpty ? "the Mac" : client.macName)",
@@ -969,6 +987,7 @@ private struct TopBar: View {
         }
         .animation(.easeOut(duration: 0.16), value: scaleOpen)
         .animation(.easeOut(duration: 0.18), value: client.menus.hasMenus)
+        .animation(.easeOut(duration: 0.18), value: client.soundAvailable)
         .frame(height: metrics.height)
         .padding(.horizontal, metrics.padding)
         // The bar's colour runs to the screen edge; its contents stay inside the safe area.
@@ -1041,6 +1060,52 @@ struct BarButton<Content: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+// MARK: - Sound
+
+/// The Sound button (docs/audio-plan.md §7.6): this device's mute of the Mac's sound, at once and
+/// locally (the Mac keeps sending), remembered; only while the Mac sends it (`soundAvailable`). A
+/// speaker with waves over "Sound", crossed out when muted, and never the accent colour: it is not
+/// something open. VoiceOver: "Sound from ‹Mac›", On or Muted, a toggle. On the phone its symbol sits in
+/// row 1's 24 pt box, and at the accessibility text sizes a long press shows it large.
+struct SoundButton: View {
+    @ObservedObject var client: StreamClient
+    let width: CGFloat
+    let height: CGFloat
+    var radius: CGFloat = 16
+    var iconSize: CGFloat = 22
+    var spacing: CGFloat = 4
+    /// The phone's: the symbol in a box this tall, as row 1's buttons draw theirs.
+    var iconBox: CGFloat? = nil
+
+    static func symbol(muted: Bool) -> String { muted ? "speaker.slash.fill" : "speaker.wave.2.fill" }
+
+    var body: some View {
+        let muted = client.soundMuted
+        let button = BarButton(open: false, width: width, height: height, radius: radius,
+                               accessibilityLabel: "Sound from \(client.macName.isEmpty ? "the Mac" : client.macName)",
+                               action: { client.toggleSound() }) {
+            VStack(spacing: spacing) {
+                Image(systemName: Self.symbol(muted: muted))
+                    .font(.system(size: iconSize))
+                    .foregroundStyle(Palette.text)
+                    .frame(height: iconBox)
+                Text("Sound")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.barLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+        }
+        .accessibilityValue(muted ? "Muted" : "On")
+        .accessibilityAddTraits(.isToggle)
+        if iconBox != nil {
+            button.accessibilityShowsLargeContentViewer { Label("Sound", systemImage: Self.symbol(muted: muted)) }
+        } else {
+            button
+        }
     }
 }
 

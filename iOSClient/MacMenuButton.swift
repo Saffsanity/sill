@@ -62,6 +62,9 @@ struct MacMenuButton: View {
     /// padding, `buttons` its buttons with Menus, and there is one gap between every two of its parts
     /// (the strip one of them). Narrower, the bar would push its last buttons off the window (a
     /// Slide Over, 320 pt), so the button is left out: the iPad's menu bar has the menus on iPadOS 26.
+    /// The Sound button asks the same with one more button, after Menus where Menus shows, so where
+    /// only one of them fits Menus keeps its place and Sound is in the Settings panel's switch alone
+    /// (docs/audio-plan.md §7.6).
     static func fits(width: CGFloat, buttons: Int, buttonWidth: CGFloat, gap: CGFloat, thumbWidth: CGFloat) -> Bool {
         width >= CGFloat(buttons) * (buttonWidth + gap) + thumbWidth + 16
     }

@@ -234,7 +234,8 @@ let panelsRule = Rule("the drawer and the panel from 8 under row 1 to the trackp
 let anchorRule = Rule("the panel's anchor is its top-trailing corner")
 let dimRule = Rule("the dim covers everything but row 1's buttons, in two pieces")
 let menusRule = Rule("row 2 with the Mac's menus: the Menus button under Settings and as wide, 50 tall, centred in the strip's 62; the strip from 6 to 8 before it, a whole 80 pt thumbnail and its 8 pt ends in it")
-let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule, menusRule]
+let soundRule = Rule("row 2 with the Mac's sound (docs/audio-plan.md §7.6): Sound under Settings and as wide, 50 tall, centred in the strip's 62; with Menus too, Menus under Desktop beside it and the strip from 6 to 8 before Menus, a whole 80 pt thumbnail and its 8 pt ends in it; Sound alone takes Menus' place (the strip 8 before it)")
+let rules = [inside, ordered, gaps, pictureRule, buttonsRule, capsRule, alignRule, spanRule, rulerRule, panelsRule, anchorRule, dimRule, menusRule, soundRule]
 
 func within(_ r: CGRect, _ size: CGSize) -> Bool {
     r.minX >= -0.001 && r.minY >= -0.001 && r.maxX <= size.width + 0.001 && r.maxY <= size.height + 0.001 && r.width >= 0 && r.height >= 0
@@ -248,7 +249,8 @@ for w in 300...599 {
         let l = L(size: size)
         gridSizes += 1
 
-        let all = [l.picture, l.row1, l.strip, l.menus, l.stripBesideMenus, l.keys, l.trackpad, l.ruler, l.drawer, l.settings]
+        let all = [l.picture, l.row1, l.strip, l.menus, l.stripBesideMenus, l.sound, l.menusBesideSound, l.stripBesideBoth,
+                   l.keys, l.trackpad, l.ruler, l.drawer, l.settings]
             + l.buttons + l.caps + l.dim
         inside.expect(all.allSatisfy { within($0, size) }, size, all.first { !within($0, size) }.map(str) ?? "")
 
@@ -308,6 +310,16 @@ for w in 300...599 {
                          && l.stripBesideMenus.minY == l.strip.minY && l.stripBesideMenus.height == l.strip.height
                          && near(l.menus.minX - l.stripBesideMenus.maxX, 8) && l.stripBesideMenus.width - 16 >= 80, size,
                          "menus \(str(l.menus)), strip \(str(l.stripBesideMenus))")
+
+        soundRule.expect(near(l.sound.minX, b[4].minX) && near(l.sound.width, b[4].width) && l.sound.height == 50
+                         && near(l.sound.midY, l.strip.midY) && l.sound == l.menus
+                         && near(l.menusBesideSound.minX, b[3].minX) && near(l.menusBesideSound.width, b[3].width)
+                         && l.menusBesideSound.minY == l.sound.minY && l.menusBesideSound.height == 50
+                         && near(l.sound.minX - l.menusBesideSound.maxX, 8) && !l.menusBesideSound.intersects(l.sound)
+                         && l.stripBesideBoth.minX == l.strip.minX && l.stripBesideBoth.minY == l.strip.minY
+                         && l.stripBesideBoth.height == l.strip.height && near(l.menusBesideSound.minX - l.stripBesideBoth.maxX, 8)
+                         && l.stripBesideBoth.width - 16 >= 80, size,
+                         "sound \(str(l.sound)), menus \(str(l.menusBesideSound)), strip \(str(l.stripBesideBoth))")
     }
 }
 for rule in rules {
@@ -338,6 +350,23 @@ do {
     check("320 pt (Display Zoom): the button 52 wide at 254, the strip 240 (two whole thumbnails)",
           near(w320.menus.minX, 254) && near(w320.menus.width, 52) && near(w320.stripBesideMenus.width, 240)
             && (w320.stripBesideMenus.width - 16) / (80 + 12) >= 2.4)
+}
+// Row 2 with the Mac's sound, and its menus too (docs/audio-plan.md §7.6): a whole thumbnail left at
+// 320 pt, two from 375.
+do {
+    let se = L(size: se.container)
+    check("iPhone SE (375 wide): Sound \(str(se.sound)) under Settings, Menus \(str(se.menusBesideSound)) under Desktop, the strip 6 to \(se.stripBesideBoth.maxX): two whole thumbnails",
+          near(se.sound, CGRect(x: 298, y: se.strip.minY + 6, width: 63, height: 50))
+            && near(se.menusBesideSound, CGRect(x: 227, y: se.strip.minY + 6, width: 63, height: 50))
+            && near(se.stripBesideBoth.width, 213) && (se.stripBesideBoth.width - 16 + 12) / (80 + 12) >= 2)
+    let w320 = L(size: CGSize(width: 320, height: 548))
+    check("320 pt (Display Zoom): Sound at 254, Menus at 194, the strip 180: one whole thumbnail and most of the next",
+          near(w320.sound.minX, 254) && near(w320.menusBesideSound.minX, 194) && near(w320.stripBesideBoth.width, 180)
+            && (w320.stripBesideBoth.width - 16) / (80 + 12) >= 1.7)
+    let pm = L(size: proMax.container)
+    check("iPhone 18 Pro Max: Sound under Settings (\(str(pm.sound))), Menus under Desktop, the strip 6 to \(pm.stripBesideBoth.maxX)",
+          near(pm.sound.minX, pm.buttons[4].minX) && near(pm.menusBesideSound.minX, pm.buttons[3].minX)
+            && near(pm.stripBesideBoth.maxX, pm.buttons[3].minX - 8))
 }
 check("the size is all it depends on", L(size: pro.container) == L(size: pro.container) && L(size: pro.container) != L(size: proMax.container))
 
