@@ -74,7 +74,7 @@ M = [
     (R, "SUP itself", "mac.macID != old.macID && mac.revoked != true", "mac.revoked != true"),
     (S, "SUP the old record kept", "            if mac.macID == old { return nil }\n", ""),
     (S, "SUP typed addresses not carried", "            if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }\n", ""),
-    (S, "SUP typed addresses repeated", "let carried = (o.typedAddresses ?? []).filter { !have.contains(", "let carried = (o.typedAddresses ?? []).filter { have.contains(\"\") || !have.contains("),
+    (S, "SUP typed addresses repeated", "let carried = (o.typedAddresses ?? []).filter { !have.contains(\"\\($0.host.lowercased())|\\($0.port ?? next.remotePort)\") }", "let carried = o.typedAddresses ?? []"),
     (S, "SUP homeTLS not carried", "            if o.homeTLS == true { next.homeTLS = true }\n", ""),
     (S, "SUP the proof not remembered", "            next.lastWorked = proof\n", ""),
     (S, "SUP with the newer unsaved", "guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else", "guard old != new, let o = list.first(where: { $0.macID == old }) else"),

@@ -229,11 +229,13 @@ var newKeyNew = newRec; newKeyNew.newKey = true
 check("successor: never a revoked or new-key record, nor the record itself",
       succ(cand("100.64.0.9", "vpn"), [oldRec, revokedNew]).isEmpty && succ(cand("100.64.0.9", "vpn"), [oldRec, newKeyNew]).isEmpty
       && succ(cand("100.64.0.9", "vpn"), [oldRec]).isEmpty)
+var odd = oldRec; odd.pairedAt = Date(timeIntervalSince1970: 600)
+check("successor: never the record itself, even one last reached before its pairing date", succ(cand("100.64.0.9", "vpn"), [odd], old: odd).isEmpty)
 var oldTLS = oldRec; oldTLS.homeTLS = true
-let after = SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "100.64.0.9|7455", in: [oldTLS, newRec, office])
+let after = SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "mac.tail1.ts.net|7455", in: [oldTLS, newRec, office])
 check("superseding: the old record goes, the others stay in order", after.map(\.macID) == [newRec.macID, office.macID])
 check("superseding: the newer takes the typed addresses, homeTLS and the proof as the address that worked",
-      after[0].typedAddresses?.map(\.host) == ["home.example.net"] && after[0].homeTLS == true && after[0].lastWorked == "100.64.0.9|7455"
+      after[0].typedAddresses?.map(\.host) == ["home.example.net"] && after[0].homeTLS == true && after[0].lastWorked == "mac.tail1.ts.net|7455"
       && after[0].fingerprint == newRec.fingerprint && after[0].addresses == newRec.addresses)
 var typedBoth = newRec; typedBoth.typedAddresses = [a("home.example.net", "internet", "")]
 check("superseding: a typed address the newer has already is not repeated",
