@@ -607,13 +607,14 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 
 - A public repository: nothing. Standard GitHub-hosted runners, `xcode-27` included, are free and
   unlimited there.
-- A private repository, as Saffsanity/sill is today: each run's minutes count against the
-  account's included minutes (2,000 a month on GitHub Free, 3,000 on Pro). Count a macOS minute
-  as about ten of them: GitHub's billing pages no longer print the multiplier table they used to
-  (macOS 10, Linux 1), but they still speak of minute multipliers, and today's prices keep that
-  ratio ($0.062 a macOS minute against $0.006 for Linux). So plan on roughly 200 macOS minutes a
-  month on Free and 300 on Pro. After that, $0.062 a minute, rounded up per job, and only with a
-  payment method on file: without one, runs stop when the included minutes are used up.
+- A private repository (Saffsanity/sill was one until 2026-09-26; it is public now, so none of this
+  is charged): each run's minutes count against the account's included minutes (2,000 a month on
+  GitHub Free, 3,000 on Pro). Count a macOS minute as about ten of them: GitHub's billing pages no
+  longer print the multiplier table they used to (macOS 10, Linux 1), but they still speak of
+  minute multipliers, and today's prices keep that ratio ($0.062 a macOS minute against $0.006 for
+  Linux). So plan on roughly 200 macOS minutes a month on Free and 300 on Pro. After that, $0.062 a
+  minute, rounded up per job, and only with a payment method on file: without one, runs stop when
+  the included minutes are used up.
 - To be sure nothing is ever charged while the repository is private (zero operating costs is a
   hard rule): with no payment method on file, nothing can be. With one, add a budget: Settings ›
   Billing and licensing › Budgets and alerts › New budget, product Actions, $0, and tick "Stop
@@ -629,8 +630,10 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
   Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
-  The mutants (CI started by hand with "mutants" ticked) take about two hours of macOS time across
-  their fifteen jobs: some 1,200 included minutes, more than half of Free's month, or about $7.50.
+  The mutants (CI started by hand with "mutants" ticked) run a job for each of the 32 checks with
+  mutants, about four hours of macOS time in all (their scripts took 205 minutes here on
+  2026-09-27, several at once; each job also checks out and selects Xcode, and is rounded up to
+  the minute): some 2,400 included minutes, more than Free's month, or about $15.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.

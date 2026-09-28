@@ -117,10 +117,8 @@ final class RemoteConnector {
         let alpn = sequential ? RemoteTLS.pairingALPN : RemoteTLS.sessionALPN
         let pin: Data? = { switch mode { case .session(let p): return p; case .pairing(let p): return p } }()
         // The whole of trust: the pin, or on the typed pairing path any P-256 key (nil is no P-256).
-        let tls = RemoteTLS.options(identity: identity.tls, role: .client(alpn: alpn), verify: { fp in
-            guard let fp else { return false }
-            return pin.map { $0 == fp } ?? true
-        }, queue: queue)
+        // The one TLS builder every connection to a Mac goes through (DeviceTLS).
+        let tls = DeviceTLS.options(identity: identity, alpn: alpn, pin: pin, queue: queue)
         let connection = NWConnection(host: NWEndpoint.Host(candidate.host), port: port,
                                       using: RemoteTLS.parameters(tls: tls, dialing: true))
         let attempt = Attempt(candidate, connection)

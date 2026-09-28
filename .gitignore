@@ -18,3 +18,6 @@ AuthKey_*
 
 # The sizzle reel's renders (design/reel, over a gigabyte): kept out of git.
 design/reel/
+
+# Python's bytecode caches (Tests/checks/module.py, which its checks' mutants.py import).
+__pycache__/

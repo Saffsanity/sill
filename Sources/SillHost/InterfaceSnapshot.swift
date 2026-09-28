@@ -1,12 +1,15 @@
 import Foundation
 import Darwin
+import IOKit
 
 /// The Mac's interfaces and addresses as `getifaddrs` reports them: names, flags (up,
 /// point-to-point, loopback), each address with its prefix length. Both doors' origin checks read
 /// it (`interfaces()`), and the remote door's address list reads the point-to-point tunnels that
 /// are not network services from it. Cached for 2 s, so a burst of connections costs one read and
 /// neither door needs a SystemConfiguration watcher. `routeSource(to:)` asks the kernel which of
-/// these addresses its route to a peer uses.
+/// these addresses its route to a peer uses. `readCable(_:)` reads what IOKit says is above one
+/// interface (the USB cable to an iPhone or iPad, docs/home-pairing-plan.md §4.3); it is never
+/// cached, because a device swapped for another keeps the interface's name.
 ///
 /// Thread-safe: the doors call it on the network queue, the address list on its own queue.
 final class InterfaceSnapshot: @unchecked Sendable {
@@ -103,6 +106,105 @@ final class InterfaceSnapshot: @unchecked Sendable {
 
     private static func ones(_ mask: [UInt8]) -> Int {
         mask.reduce(0) { $0 + $1.nonzeroBitCount }
+    }
+
+    /// This Mac's own addresses (4 or 16 bytes, link-local ones without their embedded scope), read
+    /// afresh: what CableLink's rule 2 and the ask rule's "from this Mac" compare a source with. A
+    /// cached table could miss an address the Mac gained a moment ago.
+    static func ownAddresses() -> Set<[UInt8]> {
+        Set(read().map(\.address))
+    }
+
+    // MARK: The USB cable (IOKit, read-only)
+
+    /// What IOKit says is above one network interface, read afresh (about 0.2 ms). Nothing is
+    /// written and no permission is needed. Plain values, so this file still compiles on its own
+    /// with OriginPolicy (the origin check); Door turns it into a CableLink.Ancestry.
+    struct CableReading: Equatable, Sendable {
+        /// The interface has an entry in the IOService plane (awdl0, the tunnels and bridges have none).
+        var registered = false
+        /// An IOUSBHostDevice is above it (none above Wi-Fi, Thunderbolt or this Mac's own USB
+        /// device ports); the fields below are that device's.
+        var usbDevice = false
+        /// The chain passes a CDC NCM IOUSBHostInterface (bInterfaceClass 2, bInterfaceSubClass 13).
+        var ncm = false
+        var vendor: Int?
+        var product: Int?
+        /// "USB Product Name", else "kUSBProductString".
+        var productName: String?
+        /// "USB Serial Number": never logged or saved as it is (CableLink.deviceID).
+        var serial: String?
+        /// Its sessionID: one plug-in.
+        var session: UInt64?
+        /// The chain passes an IOUSBDeviceInterface: this Mac's own USB device port (anpi0, en4–en6).
+        var deviceMode = false
+    }
+
+    /// Walks the IOService plane up from the interface named `bsdName`: notes a CDC NCM
+    /// IOUSBHostInterface (class 2, subclass 13) on the way and stops at the first IOUSBHostDevice,
+    /// reading its idVendor, idProduct, product name ("USB Product Name", else
+    /// "kUSBProductString"), "USB Serial Number" and sessionID. Anything missing stays nil, which
+    /// CableLink reads as no cable (its rule 3).
+    static func readCable(_ bsdName: String) -> CableReading {
+        var reading = CableReading()
+        guard let matching = IOBSDNameMatching(kIOMainPortDefault, 0, bsdName) else { return reading }
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, matching)   // consumes `matching`
+        guard service != 0 else { return reading }
+        reading.registered = true
+        var entry = service
+        var ncm = false
+        defer { IOObjectRelease(entry) }
+        for _ in 0..<64 {
+            var parent: io_registry_entry_t = 0
+            guard IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent) == KERN_SUCCESS else { break }
+            IOObjectRelease(entry)
+            entry = parent
+            if IOObjectConformsTo(entry, "IOUSBDeviceInterface") != 0 { reading.deviceMode = true }
+            if IOObjectConformsTo(entry, "IOUSBHostInterface") != 0,
+               number(entry, "bInterfaceClass") == 2, number(entry, "bInterfaceSubClass") == 13 {
+                ncm = true
+            }
+            if IOObjectConformsTo(entry, "IOUSBHostDevice") != 0 {
+                reading.usbDevice = true
+                reading.ncm = ncm
+                reading.vendor = number(entry, "idVendor")
+                reading.product = number(entry, "idProduct")
+                reading.productName = string(entry, "USB Product Name") ?? string(entry, "kUSBProductString")
+                reading.serial = string(entry, "USB Serial Number")
+                reading.session = (property(entry, "sessionID") as? NSNumber)?.uint64Value
+                break
+            }
+        }
+        return reading
+    }
+
+    /// The interfaces the cable rule looks at: up, and neither loopback, a tunnel nor peer-to-peer
+    /// Wi-Fi, in getifaddrs' order (--print-cable).
+    static func cableCandidates() -> [String] {
+        var names: [String] = []
+        var ifap: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifap) == 0, let first = ifap else { return names }
+        defer { freeifaddrs(ifap) }
+        for p in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let flags = p.pointee.ifa_flags
+            let name = String(cString: p.pointee.ifa_name)
+            guard flags & UInt32(IFF_UP) != 0, !names.contains(name) else { continue }
+            let kind = OriginPolicy.interfaceKind(name: name, pointToPoint: flags & UInt32(IFF_POINTOPOINT) != 0,
+                                                  loopback: flags & UInt32(IFF_LOOPBACK) != 0)
+            guard kind == .lan || kind == .other else { continue }
+            names.append(name)
+        }
+        return names
+    }
+
+    private static func property(_ e: io_registry_entry_t, _ key: String) -> Any? {
+        IORegistryEntryCreateCFProperty(e, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+    }
+    private static func number(_ e: io_registry_entry_t, _ key: String) -> Int? {
+        (property(e, key) as? NSNumber)?.intValue
+    }
+    private static func string(_ e: io_registry_entry_t, _ key: String) -> String? {
+        property(e, key) as? String
     }
 
     /// The address of this Mac that the kernel's route to `destination` (4 or 16 bytes) sends

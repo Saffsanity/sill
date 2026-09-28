@@ -18,6 +18,17 @@ import Security
 /// - The recognition key: a generic password, service `me.saffer.sill.remote`, account
 ///   `recognition-key`, 32 bytes.
 /// - The trust list: a generic password, same service, account `paired-devices`, JSON.
+/// - Require pairing: a generic password, same service, account `require-pairing`: "1", or "0."
+///   and a signature by the Mac's key (RequirePairingValue, docs/home-pairing-plan.md §4.8). A
+///   missing item, or one without that signature, reads as on, so deleting it only turns pairing
+///   on, and one another app made first (listing Sill as allowed to read it) cannot turn it off;
+///   another app reading or writing Sill's own gets the keychain's prompt.
+///
+/// The trust list is made, empty, at the first launch that finds none: it then carries Sill's
+/// own access control from then on. Left missing until the first pairing, another process of this
+/// user could create it first, with a key of its own in it and Sill listed as allowed to read it,
+/// and be trusted at Sill's next launch (the security review, 2026-09-27). What stays open: a
+/// process that ran before Sill's first launch could have made every item, the key included.
 ///
 /// Only an item that does not exist yet is created. Any other failure to read one throws: a new
 /// key would be a new Mac ID (every device's pin broken), and an empty list saved over an
@@ -29,6 +40,7 @@ package final class KeychainIdentityStore: IdentityStore {
     static let service = "me.saffer.sill.remote"
     static let recognitionAccount = "recognition-key"
     static let pairedAccount = "paired-devices"
+    static let requirePairingAccount = "require-pairing"
 
     package init() {}
 
@@ -78,7 +90,12 @@ package final class KeychainIdentityStore: IdentityStore {
     }
 
     package func loadPaired() throws -> [PairedDevice] {
-        guard let data = try read(Self.pairedAccount) else { return [] }
+        guard let data = try read(Self.pairedAccount) else {
+            // None saved yet: made now, empty, so the item is Sill's own from here on (see the type).
+            // A write that fails changes nothing: the list is empty either way.
+            try? savePaired([])
+            return []
+        }
         guard let list = try? JSONDecoder().decode([PairedDevice].self, from: data) else {
             throw IdentityStoreError("the paired devices in the keychain are damaged")
         }
@@ -89,6 +106,14 @@ package final class KeychainIdentityStore: IdentityStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try write(try encoder.encode(devices), account: Self.pairedAccount, label: "\(Self.label) (paired devices)")
+    }
+
+    package func loadRequirePairing() throws -> Data? {
+        try read(Self.requirePairingAccount)
+    }
+
+    package func saveRequirePairing(_ record: Data) throws {
+        try write(record, account: Self.requirePairingAccount, label: "\(Self.label) (require pairing)")
     }
 
     // MARK: Generic passwords

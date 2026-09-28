@@ -1731,9 +1731,12 @@ struct DrawerRow<Leading: View>: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let trailing {
+                    // Whole, on one line, whatever the title's length: the title truncates instead
+                    // ("Not paired", "Update Sill" and "3 windows" hold a space).
                     Text(trailing)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.muted)
+                        .fixedSize()
                 }
             }
             .padding(.horizontal, 10)
