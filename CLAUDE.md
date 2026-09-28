@@ -10,7 +10,7 @@ Formerly winstream; the folder still carries the old name.
 
 **Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2) (2026-09-27, branch `release-next` from
 main at 643af6b, main merged in once PRs #37, #38, #42 and #43 were on it; #39, away from home, deferred to 0.4.1;
-PR #N).** Noah: "Once all are
+PR #41).** Noah: "Once all are
 merged I want to try the latest build", then the go. The first release that needs both apps at
 once: pairing at home (#37) made the home door TLS 1.3 with pairing, so a device from before it
 cannot connect to 0.4.0 at home (a plain dial, a failed handshake, and a redial at once while the
