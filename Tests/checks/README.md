@@ -7,7 +7,7 @@ the Mac does with a trackpad gesture, how a session ends, how the device reads t
 what the update check makes of GitHub's answer, who moves the Mac's pointer and what the device's
 pointer sprite shows, how the Mac download's disk image lays out its window, where everything goes on
 a phone held upright, what the Mac sends of its menus and what the device makes of it, how the Mac's
-sound becomes packets and back) are plain
+sound becomes packets and back, and when and where the device plays them) are plain
 Swift files that compile on their own. Each folder here compiles one or a few of those files,
 exactly as they are in `Sources/`, `iOSClient/` and `Scripts/`, together with its own `main.swift`,
 and runs the result. Nothing here needs a device, Screen Recording, Accessibility, the video encoder
@@ -32,6 +32,7 @@ exit status is the number of checks that failed. Binaries, data and logs go to
 | `addresses` | `Sources/SillHost/AddressList.swift`, `PairingWindow.swift` and `OriginPolicy.swift` with `Sources/StreamProtocol` (`build.sh`) | the addresses the Mac offers for remote access, from its services and tunnels; the pairing window's proofs, tries and back-off | 41 | 15 |
 | `audio-codec` | `Sources/SillHost/AudioEncoder.swift`, `AudioPacketizer.swift` and `TestTone.swift` with `iOSClient/AudioDecoder.swift`; a binary that links a media framework but AudioToolbox is refused | the Mac's sound through AAC-ELD in memory (docs/audio-plan.md H4): the test tone through the packetizer, the encoder and the decoder, every decoded sample placed by its packet's stamp, each click at its whole second at 480 and 512 frames a packet and across gaps; a segment starting clean on both ends; a late join; one packet a block; the bitrate | 21 | 9 |
 | `audio-packetizer` | `Sources/SillHost/AudioPacketizer.swift` | how the Mac's sound becomes packet-sized blocks (docs/audio-plan.md §4.3): the packet size from the first chunk, the stamps against each chunk's anchor (a jitter oracle), the continuity tolerance, gaps that end a segment with nothing flushed or filled, a format change; `AudioSourceRule`'s table; `PCMLayout`'s conversions; the first minute's tally | 89 | 27 |
+| `audio-playout` | `iOSClient/AudioPlayout.swift` | the device's playout of the Mac's sound on a simulated clock (docs/audio-plan.md §7.2): the floor, the need and its cover (start, bounds, rising at once), the picture's lag and the guard, placement by time and packet after packet, each packet's last 5 ms held for its fade, late packets, duplicates and a move's hand-over, gaps and joins on a reset decoder, drift by single frames at 1.9 ms a second or better, jumps and steps (a clock stepped either way, a slower path, the round trip's threshold), an engine starting, mute, fades and a frame gained or lost; then 5,000 random runs against the invariants (nothing before it arrives, no overlap, never ahead of the picture, never under the IO buffer + 2 ms ahead of its render, no noise played, nothing twice, a frame at most a packet) | 205 | 36 |
 | `clientlink` | `Sources/SillHost/ClientLink.swift` (`-package-name sill`) | which route a device came by, from its endpoint's scope and path, and the menu card's word for it | 89 | 14 |
 | `dmg-layout` | `Scripts/dmg-layout/DSStore.swift`, `FinderAlias.swift`, `DMGLayout.swift` (with make-dmg.sh's layout arguments and `design/DMGBackground.svg`) | the `.DS_Store` of Sill.dmg's window byte by byte against Finder's own layout of the file (blocks, free lists, header), the window's bounds (the picture and macOS 27's 32-point title bar), view options and icon places; the background's alias field by field; the encoder and decoder, a two-level tree among them; the volume icon's flag; an alias for a real file where it runs; that make-dmg.sh and the SVG still give that window | 70 | 43 |
 | `encoder-mailbox` | `Sources/SillHost/EncoderMailbox.swift` | HEVCEncoder's frames on their way into VideoToolbox (one inside, the one-slot mailbox, the watchdog's clock, timestamps, keyframe requests, `abandon`, the teardown) through a copy of HEVCEncoder's glue around a stand-in for VideoToolbox, in virtual time; a binary that links VideoToolbox is refused | 38,256 | 27 |
@@ -71,8 +72,8 @@ kinds to `pointer-control`'s (152 before) and the Menus button to `phone-portrai
 `compatibility`'s, `gesture-chords`' and `gestures`' are the `trackpad-gestures` branch's, which
 added kind 28's cases to the first and brought the other two, and at its merge with main (643af6b)
 kind 28 to `pointer-control`'s (155 before) and `protocol`'s (188 before). The `audio` branch brought
-`audio-packetizer` and `audio-codec`, and added the sound's cases to `compatibility` (130 with the
-gestures'), `protocol` (218) and the kind tables (`pointer-control` 157).
+`audio-packetizer`, `audio-codec` and `audio-playout`, and added the sound's cases to `compatibility`
+(130 with the gestures'), `protocol` (218) and the kind tables (`pointer-control` 157).
 
 A mutant changes the checked file in one place and must make the check fail: `run.sh --mutants`
 (or `run-all.sh --mutants`) passes only when the script's last line counts every mutant as caught.
