@@ -29,9 +29,17 @@ check(!out(g("busy")).remoteAllowed, "busy, unsaved: rows only")
 // The five ignore a message and reconnect a newer host might add: their rules are this build's.
 check(out(g("quit", "x", reconnect: false), saved: true).text.hasPrefix("Mac mini quit Sill") && out(g("quit", reconnect: false)).reconnect, "quit keeps its rule")
 check(!out(g("removed", reconnect: true)).reconnect, "removed never reconnects")
-for r in ["quit", "removed", "remoteOff", "internetOff", "busy"] { check(!GoodbyePolicy.isNotice(g(r)), "\(r) is not a notice") }
+for r in ["quit", "removed", "remoteOff", "internetOff", "busy", "pairingRequired"] { check(!GoodbyePolicy.isNotice(g(r)), "\(r) is not a notice") }
+// "pairingRequired" (pairing at home, docs/home-pairing-plan.md §7.6): Require pairing was turned on
+// while this unpaired device was connected at home. Its own words and no reconnect, whatever the
+// host adds: a tap on the Mac's row asks to pair.
+check(out(g("pairingRequired"), saved: true) == O(text: "Mac mini now asks devices to pair. Tap it to pair this iPad.", reconnect: false,
+                                                  remoteAllowed: false, isNotice: false), "pairingRequired")
+check(out(g("pairingRequired", "x", reconnect: true), device: "iPhone") == O(text: "Mac mini now asks devices to pair. Tap it to pair this iPhone.",
+                                                                          reconnect: false, remoteAllowed: false, isNotice: false),
+      "pairingRequired keeps its rule")
 // A reason this build does not know: the Mac's words, a reconnect only when asked.
-let later = g("pairingRequired", "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false)
+let later = g("pairAgain", "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false)
 check(out(later, saved: true) == O(text: "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false, remoteAllowed: true, isNotice: true), "a later reason, reconnect false")
 check(out(g("later", "Back soon.", reconnect: true), saved: true) == O(text: "Back soon.", reconnect: true, remoteAllowed: true, isNotice: true), "a later reason, reconnect true")
 check(out(g("later", "Back soon.")).reconnect == false, "reconnect nil is false")

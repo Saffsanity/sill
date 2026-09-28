@@ -19,7 +19,8 @@
 // above "// review fixes" the 253 of follow-best-path at 75e4ff9 (reconnectNow now names its method; the
 // grid also spans refused listings and failed moves up, and its rule for reconnectNow is the new one).
 import Foundation
-//   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift -o .build/checks/policy/check && .build/checks/policy/check
+//   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift Tests/checks/policy/home.swift \
+//     -o .build/checks/policy/check && .build/checks/policy/check
 typealias P = DiscoveryPolicy
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if !ok { fails += 1; print("FAIL", name) } else { passes += 1; print("ok  ", name) } }
@@ -1077,6 +1078,9 @@ while true {
     if case .stay(.remote, nil) = P.pathPlan(i) {} else { remoteEvents.append(String(format: "%.2f %@", t, "\(P.pathPlan(i))")) }
 }
 check("model (remote): the cable in at 3 and out at 10, the connection dead at 12: never a move (\(remoteEvents))", remoteEvents.isEmpty)
+
+// Pairing at home (docs/home-pairing-plan.md): sessions and pairing at home over TLS, in home.swift.
+homePolicy()
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

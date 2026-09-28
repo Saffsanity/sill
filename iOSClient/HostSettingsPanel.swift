@@ -366,8 +366,13 @@ struct HostSettingsPanel: View {
     /// This connection's way in from afar, when it is one.
     private var remoteRoute: RemoteRoute? { client.remoteRoute }
 
-    /// The last group (docs/remote-access-plan.md §7.11): whether this device can reach the Mac
-    /// away from home, from the Mac's kind 18. None from an older Mac (no kind 18 on this connection).
+    /// The Mac's last group (docs/remote-access-plan.md §7.11, docs/home-pairing-plan.md §7.6):
+    /// whether this device is paired with the Mac and can reach it away from home, from the Mac's
+    /// kind 18 (DiscoveryPolicy.awayFromHome). "Paired" for a saved Mac, however it paired; Pair This
+    /// iPad… only in an unpaired session: at home over TLS on a Mac that lets any device in (it pairs
+    /// at this session's own door, Remote Access on or not), or over a plain door with Remote Access
+    /// on (through the remote door, as before). None from an older Mac (no kind 18 on this
+    /// connection).
     @ViewBuilder private var awayFromHome: some View {
         if let info = client.macInfo {
             Text("Away from home")
@@ -377,18 +382,23 @@ struct HostSettingsPanel: View {
                 .padding(.top, 6)
                 .padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
-            if client.macInfoSaved {
+            switch DiscoveryPolicy.awayFromHome(saved: client.macInfoSaved, remoteSession: remoteRoute != nil,
+                                                remoteAccess: info.remoteAccess, tlsAtHome: client.sessionAtHomeOverTLS) {
+            case .paired(let reach):
                 Rows {
-                    Label("Paired for remote access", systemImage: "checkmark.circle.fill")
+                    Label("Paired", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(Palette.text)
                         .rowFrame()
                 }
-                if let r = remoteRoute {
-                    Footnote(text: "Connected \(r.phrase).")
-                } else {
+                switch reach {
+                case .connected:
+                    if let r = remoteRoute { Footnote(text: "Connected \(r.phrase).") }
+                case .reaches:
                     Footnote(text: "Away from home, Sill reaches \(mac) \(Self.reach(info)).")
+                case .turnOnRemoteAccess:
+                    Footnote(text: Self.turnOnRemoteAccess(mac))
                 }
-            } else if info.remoteAccess {
+            case .pairThisDevice(let atHome):
                 Rows {
                     Button(action: pairThisDevice) {
                         Text("Pair This \(device)…")
@@ -399,11 +409,17 @@ struct HostSettingsPanel: View {
                     .buttonStyle(.plain)
                     .rowFrame()
                 }
-                Footnote(text: "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device).")
-            } else {
-                Footnote(text: "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac.")
+                Footnote(text: atHome ? DiscoveryPolicy.HomeCopy.pairThisDeviceAtHome(mac: mac, device: device)
+                                      : "Pair once to reach \(mac) through your VPN or the internet. \(mac) shows a code; scan it with this \(device).")
+            case .turnOnRemoteAccess:
+                Footnote(text: Self.turnOnRemoteAccess(mac))
             }
         }
+    }
+
+    /// With Remote Access off on the Mac: how to reach it away from home.
+    static func turnOnRemoteAccess(_ mac: String) -> String {
+        "To reach \(mac) away from home, turn on Remote Access in Sill’s Settings on the Mac."
     }
 
     // MARK: This device
