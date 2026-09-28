@@ -159,6 +159,8 @@ if virtualDisplay {
     startHost()
     app.run()
 } else {
+    // A signal ends the process as it always did, a device's keys let go first (HostShutdown).
+    HostShutdown.installKeyRelease { coordinator }
     startHost()
     dispatchMain()   // today, byte for byte
 }

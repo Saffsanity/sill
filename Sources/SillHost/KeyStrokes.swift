@@ -23,7 +23,8 @@ import StreamProtocol
 //     (unless the same modifier's other key is down), whatever the device said;
 //   - a device's key or text saying it no longer holds a modifier lets go of that modifier's key
 //     first (a device from before this fix never sent a hardware ⌘'s release);
-//   - a device that leaves has every key it still holds down let go, and so does the host at its end;
+//   - a device that leaves has every key it still holds down let go, and so does the host at its end
+//     (Sill.app's Quit, and a signal: the CLI's default path lets go of them and then dies of it);
 //   - a trackpad gesture's shortcut (`chord`) goes down with its own flags and up with those the table
 //     held before it.
 // Pointer and scroll events are made from the source as before, so they start from what is held.
@@ -100,8 +101,8 @@ package struct KeyStrokes: Sendable {
     /// another device pressed last stays down.
     package mutating func release(_ device: Device) -> [KeyStroke] { letGoOfKeys { $0 == device } }
 
-    /// The host is going (the app's Quit, a signal it catches): the ups of every key down, whoever
-    /// pressed it, in `release`'s order, so no modifier outlives Sill on the Mac.
+    /// The host is going (the app's Quit, a signal): the ups of every key down, whoever pressed it, in
+    /// `release`'s order, so no modifier outlives Sill on the Mac.
     package mutating func releaseAll() -> [KeyStroke] { letGoOfKeys { _ in true } }
 
     private mutating func letGoOfKeys(pressedBy owner: (Device) -> Bool) -> [KeyStroke] {

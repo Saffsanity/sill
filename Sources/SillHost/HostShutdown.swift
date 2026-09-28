@@ -6,10 +6,11 @@ import Darwin
 /// the window somewhere on a real display when the virtual one vanishes with the process, which
 /// is "not lost" but not where the user left it either.
 ///
-/// The CLI installs it only under the flag; its default path exits on a signal exactly as it did.
-/// The menu bar app always installs it, because Settings can turn the virtual display on while it
-/// runs; its Quit (NSApp.terminate: the menu, logout, "Quit & Reopen") comes through
-/// `releaseForQuit` instead, and AppKit does the exit.
+/// The CLI installs it only under the flag; its default path installs `installKeyRelease` instead,
+/// which lets go of a device's keys and then dies of the signal exactly as it did. The menu bar app
+/// always installs it, because Settings can turn the virtual display on while it runs; its Quit
+/// (NSApp.terminate: the menu, logout, "Quit & Reopen") comes through `releaseForQuit` instead, and
+/// AppKit does the exit.
 ///
 /// Threading: the signal sources fire on the main queue, i.e. on the main thread at a point where
 /// no main-actor code is mid-statement (an in-flight `select` is parked at an await), so the
@@ -62,5 +63,52 @@ package enum HostShutdown {
         }
         MainActor.assumeIsolated { coordinator()?.shutdownForExit() }
         exit(code)
+    }
+
+    /// The CLI's default path (no --virtual-display): a Ctrl-C, `kill` or hangup still ends the
+    /// process by that signal as it always did, with nothing printed and the same exit status, but
+    /// first every key and button a device holds down on the Mac goes up
+    /// (StreamCoordinator.releaseKeysForExit), so a modifier held there (a ⌘-drag on the trackpad, a
+    /// hardware ⌘) does not outlive the host and make the Mac's next click a ⌘-click. No goodbye and
+    /// no window restore: those are the flag's (`install`). A signal the process was started ignoring
+    /// (nohup's hangup) stays ignored.
+    ///
+    /// Under dispatchMain the main queue runs on a worker thread, where MainActor.assumeIsolated
+    /// traps: the keys go from a main-actor Task. A second signal ends the process at once, and so
+    /// does a watchdog a second after the first (a main actor held by an Accessibility call into a
+    /// wedged app).
+    package static func installKeyRelease(coordinator: @escaping () -> StreamCoordinator?) {
+        for sig in [SIGINT, SIGTERM, SIGHUP] {
+            // The default disposition would kill the process before the source fires.
+            if isIgnore(signal(sig, SIG_IGN)) { continue }
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                if began { die(of: sig) }
+                began = true
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1) { die(of: sig) }
+                Task { @MainActor in
+                    coordinator()?.releaseKeysForExit()
+                    die(of: sig)
+                }
+            }
+            source.resume()
+            sources.append(source)
+        }
+    }
+
+    /// Whether a disposition signal() returned is SIG_IGN (Swift compares no C function pointers).
+    private static func isIgnore(_ handler: sig_t?) -> Bool {
+        unsafeBitCast(handler, to: Int.self) == unsafeBitCast(SIG_IGN, to: Int.self)
+    }
+
+    /// Ends the process of `sig`, as its default disposition always did: the same status for the
+    /// shell and for a parent's wait, and no exit handlers. Sent to the process, not raised on this
+    /// thread (a dispatch worker may block it), which ends while this waits; only if nothing takes
+    /// it, an exit with the shell's status for it.
+    private static func die(of sig: Int32) -> Never {
+        signal(sig, SIG_DFL)
+        kill(getpid(), sig)
+        usleep(500_000)
+        _exit(128 + sig)
     }
 }

@@ -1621,13 +1621,21 @@ package final class StreamCoordinator {
     /// before AppKit exits): every key and button a device holds down on the Mac goes up (a modifier
     /// left down would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why
     /// (kind 22 "quit", at most 0.1 s), then window home, display gone. Capture and encoder need no
-    /// stop; the process is about to end. The CLI without --virtual-display dies on a plain SIGINT
-    /// with no goodbye, as before: its devices notice by liveness.
+    /// stop; the process is about to end. The CLI without --virtual-display lets go of the keys and
+    /// dies of the signal with no goodbye, as before (`releaseKeysForExit`): its devices notice by
+    /// liveness.
     package func shutdownForExit() {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()
+    }
+
+    /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
+    /// every key and button a device holds down on the Mac goes up, and nothing else happens (no
+    /// goodbye, nothing printed), as before.
+    package func releaseKeysForExit() {
+        injector.releaseAll()
     }
 
     /// An encoder's watchdog fired. A hardware hang is remembered whichever encoder reports it, as
