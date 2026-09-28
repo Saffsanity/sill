@@ -512,6 +512,7 @@ encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
 on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
 ends, which three-finger strokes are gestures and what the Mac does with one,
+which modifiers a device's keys leave set on the Mac,
 the first-run tour, and pairing at home: the doors, the cable, the device's
 rows) on their own with a check each, and runs them: about five minutes, no
 device, permission or encoder. `--mutants` also checks that each check fails
@@ -537,8 +538,25 @@ before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
 
-`--gesture=NAME[,FINGERS]@T` sends a trackpad gesture (kind 28), and, like its
-input flags, only to a `--synthetic` host on this Mac, which posts nothing.
+Input (`--move`, `--tap`, `--key`, `--input`) goes only to a `--synthetic` host
+on this Mac, which posts nothing. With `SILL_TEST_INPUT_LOG=1` such a host
+prints each event it would have posted, a key with its flags and a click with
+the modifiers the last key would have left for it and where it goes, and the
+check each key's up arms (`KeyUpCheck`, read on a real host a quarter of a
+second later), so what a device's keys and buttons leave behind (the Spotlight
+key's ⌘, a modifier held when a device leaves or the host stops, a button
+whose stream stopped under a drag) can be seen without touching the Mac:
+
+```
+SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic
+python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' \
+    --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5
+```
+
+(`$T/path` holds one line, `0 756 474`: the scripted pointer gives the test
+pattern a place for input to land.) `--gesture=NAME[,FINGERS]@T` sends a
+trackpad gesture (kind 28), and, like the input flags, only to a `--synthetic`
+host on this Mac, which posts nothing.
 
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
