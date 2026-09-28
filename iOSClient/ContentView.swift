@@ -96,7 +96,7 @@ struct ContentView: View {
 ///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
 ///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
-/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, [::1] or
+/// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, ::1, [::1] or
 ///   localhost), once per launch, in the portrait key row's and trackpad's own code: the key row
 ///   taps cmd, esc, shift and ctrl through its caps' action 1.0, 1.4, 1.8 and 2.0 s after it shows
 ///   (⌘esc goes out; shift and ctrl stay latched), then the trackpad checks that a touch at its
@@ -565,11 +565,11 @@ enum InputScript {
     }
 
     /// Why the script must not run against this session, or nil when it may: it runs only when the
-    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT` or
-    /// `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is) and the host's
-    /// first window list carries no `hostVersion`, which Sill.app always sends. (`[::1]:PORT` never
-    /// arrives: UserDefaults reads a launch argument that starts with `[` as a property list, and
-    /// drops it.)
+    /// session was dialled to a loopback address (`-SillConnect 127.0.0.1:PORT`, `::1:PORT`,
+    /// `[::1]:PORT` or `localhost:PORT`; a Bonjour row, a saved Mac or any other address never is)
+    /// and the host's first window list carries no `hostVersion`, which Sill.app always sends.
+    /// (UserDefaults drops `[::1]:PORT`, a launch argument that starts like a property list but is
+    /// not one; StreamClient.init puts it back from the command line.)
     static func refusal(endpoint: NWEndpoint?, hostVersion: String?) -> String? {
         guard let endpoint, isLoopback(endpoint) else {
             return "the session was not dialled to a loopback address (-SillConnect 127.0.0.1:PORT)"
