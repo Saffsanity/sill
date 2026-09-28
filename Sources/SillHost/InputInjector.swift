@@ -55,18 +55,22 @@ final class InputInjector {
     /// event a dry run would post is printed, a keyboard event with the flags it was made with ("Test
     /// input: key 49 up (none)"), a pointer or scroll event with those the last keyboard event would
     /// have left in the HID state table, which it would start from ("Test input: left mouse down
-    /// (none)"): what a device's keys leave for its next click, without posting anything; and the
-    /// check a key's up arms (`KeyUpCheck`).
+    /// (none) at 756,474", a button's with where it goes): what a device's keys leave for its next
+    /// click, without posting anything; and the check a key's up arms (`KeyUpCheck`).
     var testLog = false
     /// The flags of the last keyboard event posted (a dry run's: that would have been), which the HID
     /// state table holds by KeyStrokes' inference: the check after a key's up reads the table against
     /// it, and the TEST ONLY log gives it to each pointer event.
     private var lastKeyFlags: UInt64 = 0
+    /// Where the last pointer event went: a synthetic host's pointer, which it never reads.
+    private var lastPointerLocation: CGPoint = .zero
 
     // MARK: Entry point
 
     /// One device's input. `device` is its connection, whose keys KeyStrokes keeps down until they
-    /// come up or it leaves (`releaseKeys`).
+    /// come up or it leaves (`releaseKeys`). `rect` is the streamed source's rectangle, or `.null` for
+    /// input with nowhere to land that still goes (`isUpOfSomethingDown`: StreamCoordinator), a
+    /// button's up then going where the pointer is.
     func apply(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
         if !dryRun { remindAboutAccessibilityIfNeeded() }
         switch event {
@@ -95,8 +99,18 @@ final class InputInjector {
         }
     }
 
+    /// Where a device's position lands on the Mac: its fraction of `rect`; with no source to place it
+    /// on (`.null`), where the pointer is now.
     private func point(_ x: Double, _ y: Double, in rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+        if rect.isNull { return pointerNow() }
+        return CGPoint(x: rect.minX + CGFloat(x) * rect.width, y: rect.minY + CGFloat(y) * rect.height)
+    }
+
+    /// Where the Mac's pointer is: read (no permission) on a host that posts; on a synthetic host,
+    /// which never reads the real pointer, where its last pointer event went.
+    private func pointerNow() -> CGPoint {
+        if !dryRun, let location = CGEvent(source: nil)?.location { return location }
+        return lastPointerLocation
     }
 
     /// The one place an event reaches the Mac: posted, or in a dry run only counted. True when it
@@ -133,7 +147,10 @@ final class InputInjector {
         case .scrollWheel: what = "scroll"
         default: what = "event \(event.type.rawValue)"
         }
-        print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))")
+        // A button's event says where it goes: a button's up with no source goes where the pointer is.
+        let button = event.type != .mouseMoved && event.type != .scrollWheel
+        let at = button ? " at \(Int(event.location.x.rounded())),\(Int(event.location.y.rounded()))" : ""
+        print("Test input: \(what) (\(KeyStrokes.names(lastKeyFlags)))\(at)")
     }
 
     /// TEST ONLY: SILL_TEST_INPUT_LOG, read once at the coordinator's start. "1" on a synthetic host
@@ -180,7 +197,15 @@ final class InputInjector {
         // One synthetic "finger": a constant event number keeps a down/drag/up sequence coherent.
         event.setIntegerValueField(.mouseEventNumber, value: 0)
         watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
+        lastPointerLocation = location
         if post(event) { Stats.shared.bump("in.pointer") }
+    }
+
+    /// Whether this input is the up of a key or a button the Mac has down, which still goes when the
+    /// input has nowhere to land (DroppedInput, StreamCoordinator): its down was posted, its up has
+    /// not been.
+    func isUpOfSomethingDown(_ event: InputEvent) -> Bool {
+        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown)
     }
 
     private func beginClick(_ state: inout ButtonState, at location: CGPoint) {
@@ -428,9 +453,6 @@ final class InputInjector {
     /// in the HID state table that the next click and scroll start from.
     private var keys = KeyStrokes()
 
-    /// Whether a device's key is down on the Mac: its down was posted and its up has not been.
-    func isKeyDown(_ usage: UInt16) -> Bool { keys.isDown(usage) }
-
     private func key(hidUsage: UInt16, down: Bool, modifiers: UInt64, from device: KeyStrokes.Device) {
         guard let strokes = keys.key(usage: hidUsage, down: down, modifiers: modifiers, from: device) else {
             Stats.shared.bump("in.unknownKey")
@@ -465,9 +487,12 @@ final class InputInjector {
         post(keys.release(device), letGo: true)
     }
 
-    /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll).
-    func releaseAllKeys() {
+    /// The host is going: every key any device holds down goes up (KeyStrokes.releaseAll), then a
+    /// button still down, where the pointer is, so nothing a device pressed outlives Sill on the Mac.
+    func releaseAll() {
         post(keys.releaseAll(), letGo: true)
+        if left.isDown { pointer(.leftUp, at: pointerNow()) }
+        if right.isDown { pointer(.rightUp, at: pointerNow()) }
     }
 
     /// Shift, control, option and command: the modifiers that change a click or a scroll.

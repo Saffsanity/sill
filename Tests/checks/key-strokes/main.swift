@@ -17,7 +17,8 @@ import Foundation
 // The inference has a tripwire, the check a quarter of a second after each key's up (KeyUpCheck): on
 // a Mac that keeps its table through some ups (a modifier key's own, or any other key's), every
 // modifier such an up leaves set that no key down accounts for is reported by the read after it, and
-// on a Mac as the model says none ever is.
+// on a Mac as the model says none ever is. And input with nowhere to land (DroppedInput) is dropped
+// but for the up of a key or a button the Mac has down, so neither stays down there.
 //
 // Compiled with Sources/StreamProtocol and Sources/SillHost/KeyStrokes.swift as one module
 // (-package-name sill), as build.sh does.
@@ -717,6 +718,116 @@ do {
     var now = Mac()
     now.send(KeyChord.spotlight + KeyChord.press(uEsc, with: .command) + aroundClick(command), from: a)
     check(now.armed.count == 3, "now each arms one: \(now.armed)")
+}
+
+// MARK: Input with nowhere to land (DroppedInput, StreamCoordinator)
+//
+// Nothing streams (between sources, or the stream stopped: the window closed under a drag), or a
+// switch drops what was held for an activation: the coordinator drops the input but for the up of a
+// key or a button the Mac has down, which InputInjector posts, a button's where the pointer is. Before
+// the review a button's up was dropped there: the Mac's button stayed down, and InputInjector posted
+// every later move as a drag.
+
+/// InputInjector's buttons and keys as the coordinator reaches them, the input placed on a source or
+/// with nowhere to land.
+struct Glue {
+    var keys = KeyStrokes()
+    var left = false, right = false
+    var log: [String] = []
+    mutating func input(_ e: InputEvent, placed: Bool, from c: Conn) {
+        guard placed || DroppedInput.stillGoes(e, keyDown: keys.isDown, leftDown: left, rightDown: right) else { return }
+        let at = placed ? "" : " where the pointer is"
+        switch e {
+        case .pointer(.move, _, _): log.append(left ? "left drag" : right ? "right drag" : "move")
+        case .pointer(.leftDown, _, _): left = true; log.append("left down")
+        case .pointer(.leftUp, _, _): left = false; log.append("left up" + at)
+        case .pointer(.rightDown, _, _): right = true; log.append("right down")
+        case .pointer(.rightUp, _, _): right = false; log.append("right up" + at)
+        case .key(let u, let d, let m):
+            for s in keys.key(usage: u, down: d, modifiers: m, from: ObjectIdentifier(c)) ?? [] {
+                log.append("key \(s.virtualKey) \(s.down ? "down" : "up") (\(names(s.flags)))")
+            }
+        case .text: log.append("text")
+        case .scroll, .scrollGesture: log.append("scroll")
+        }
+    }
+    mutating func send(_ events: [InputEvent], placed: Bool, from c: Conn) { for e in events { input(e, placed: placed, from: c) } }
+}
+let move: InputEvent = .pointer(.move, x: 0.5, y: 0.5)
+// A drag whose window closes: the moves with nowhere to land are dropped, the button's up goes where
+// the pointer is, and on the next source a move is a move.
+do {
+    var g = Glue(); let a = Conn()
+    g.send([.pointer(.leftDown, x: 0.5, y: 0.5), move], placed: true, from: a)
+    g.send([move, .pointer(.leftUp, x: 0.6, y: 0.6)], placed: false, from: a)
+    g.send([move], placed: true, from: a)
+    check(g.log == ["left down", "left drag", "left up where the pointer is", "move"], "a drag whose window closed: \(g.log)")
+}
+// The right button alike, and one button's up says nothing of the other's.
+do {
+    var g = Glue(); let a = Conn()
+    g.send([.pointer(.rightDown, x: 0.5, y: 0.5)], placed: true, from: a)
+    g.send([.pointer(.leftUp, x: 0.5, y: 0.5), .pointer(.rightUp, x: 0.5, y: 0.5), .pointer(.rightUp, x: 0.5, y: 0.5)], placed: false, from: a)
+    g.send([move], placed: true, from: a)
+    check(g.log == ["right down", "right up where the pointer is", "move"], "a right drag cut off: \(g.log)")
+}
+// A switch drops what was held: a click held whole goes nowhere (its down never went), a key's up
+// whose down went goes, and downs, moves, scrolls and text never do.
+do {
+    var g = Glue(); let a = Conn()
+    g.send([key(uLCmd, true, command)], placed: true, from: a)
+    g.send([.pointer(.leftDown, x: 0.5, y: 0.5), move, .pointer(.leftUp, x: 0.5, y: 0.5), key(uC, true, command), key(uC, false, command),
+            key(uLCmd, false, 0), .text("x"), scroll, .scrollGesture(.ended, x: 0.5, y: 0.5), .pointer(.rightDown, x: 0.5, y: 0.5)],
+           placed: false, from: a)
+    check(g.log == ["key 55 down (command)", "key 55 up (none)"], "a switch's drop: \(g.log)")
+    check(!g.left && !g.right && !g.keys.isDown(uLCmd) && !g.keys.isDown(uC), "nothing down after it")
+}
+// A stray up (nothing down) goes nowhere either.
+check(!DroppedInput.stillGoes(.pointer(.leftUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: false, rightDown: true)
+      && !DroppedInput.stillGoes(.pointer(.rightUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: true, rightDown: false)
+      && !DroppedInput.stillGoes(key(uC, false, 0), keyDown: { _ in false }, leftDown: true, rightDown: true)
+      && DroppedInput.stillGoes(key(uC, false, 0), keyDown: { $0 == uC }, leftDown: false, rightDown: false),
+      "an up goes only for what is down")
+// Random: a device's finger and keys, each event placed or not; whatever it does, once it has let go
+// of everything nothing is down on the Mac, and a move while none of its buttons is down is a move.
+do {
+    var rng = Rng(state: 0x0D_0A7E)
+    var bad = 0
+    for run in 0..<2000 {
+        var g = Glue(); let a = Conn()
+        var finger: PointerAction? = nil       // the device's button down (leftDown or rightDown)
+        var held: [UInt16] = []                 // the device's keys down
+        var problem: String? = nil
+        for _ in 0..<(10 + rng.below(40)) {
+            let placed = rng.chance(60)
+            var e: InputEvent
+            switch rng.below(8) {
+            case 0, 1:
+                if let f = finger { e = .pointer(f == .leftDown ? .leftUp : .rightUp, x: 0.5, y: 0.5); finger = nil }
+                else { finger = rng.chance(70) ? .leftDown : .rightDown; e = .pointer(finger!, x: 0.5, y: 0.5) }
+            case 2, 3: e = move
+            case 4, 5:
+                let u = rng.pick([uLCmd, uLShift, uC, uEsc])
+                if let i = held.firstIndex(of: u) { held.remove(at: i); e = key(u, false, 0) }
+                else { held.append(u); e = key(u, true, u == uLCmd ? command : u == uLShift ? shift : 0) }
+            case 6: e = .text("z")
+            default: e = scroll
+            }
+            let n = g.log.count
+            g.input(e, placed: placed, from: a)
+            if placed, e == move, finger == nil, g.log.count > n, g.log.last != "move", problem == nil {
+                problem = "a move with no button down went as \(g.log.last!)"
+            }
+        }
+        // It lets go of everything, each up placed or not.
+        if let f = finger { g.input(.pointer(f == .leftDown ? .leftUp : .rightUp, x: 0.5, y: 0.5), placed: rng.chance(50), from: a) }
+        for u in held { g.input(key(u, false, 0), placed: rng.chance(50), from: a) }
+        if problem == nil, g.left || g.right || !g.keys.down.isEmpty {
+            problem = "after it let go: left \(g.left), right \(g.right), keys \(g.keys.down.keys.sorted())"
+        }
+        if let problem { bad += 1; if bad <= 3 { print("FAIL: nowhere-to-land run \(run): \(problem)") } }
+    }
+    check(bad == 0, "input with nowhere to land: \(bad) of 2000 runs left something down")
 }
 
 // MARK: Random sessions

@@ -703,10 +703,12 @@ package final class StreamCoordinator {
             guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
-                // Nothing streams (between sources, or the stream stopped): input has nowhere to land.
-                // A key's up still goes when the Mac has that key down, so a key or a modifier this
-                // device pressed comes up (KeyStrokes) and never turns a later click into a ⌘-click.
-                if case .key(let usage, false, _) = event, injector.isKeyDown(usage) { deliver(event, in: .zero, from: device) }
+                // Nothing streams (between sources, or the stream stopped: the window closed under a
+                // drag): input has nowhere to land. The up of a key or a button the Mac has down still
+                // goes (DroppedInput), a button's where the pointer is (`.null`), so no modifier this
+                // device pressed stays down to make a later click a ⌘-click, and no button to make
+                // every later move a drag.
+                if injector.isUpOfSomethingDown(event) { deliver(event, in: .null, from: device) }
                 return
             }
             // A click, a key or text may close a view a gesture opened; a move or a scroll does not.
@@ -1001,15 +1003,16 @@ package final class StreamCoordinator {
         capture.onFrame = nil; syntheticCapture.onFrame = nil   // both queues drained: let the old encoder go
         rectCache = nil
         // Input held for the old source must not replay into the new one, but what acts on the whole
-        // Mac still goes, in order: a gesture's chord held behind it, and the up of a key the Mac has
-        // down (a key or a modifier left down makes the next click a ⌘-click). The keys of devices
-        // that left meanwhile go up after them.
+        // Mac still goes, in order: a gesture's chord held behind it, and the up of a key or a button
+        // the Mac has down (DroppedInput: a modifier left down makes the next click a ⌘-click, a
+        // button every move a drag), a button's where the pointer is (`.null`), not where the old
+        // source would have put it. The keys of devices that left meanwhile go up after them.
         let dropped = heldInput
         heldInput = []; holdUntil = 0
         for item in dropped {
             switch item {
-            case .input(let event, let rect, let device):
-                if case .key(let usage, false, _) = event, injector.isKeyDown(usage) { injector.apply(event, in: rect, from: device) }
+            case .input(let event, _, let device):
+                if injector.isUpOfSomethingDown(event) { injector.apply(event, in: .null, from: device) }
             case .chord(let keyCode, let flags):
                 injector.chord(keyCode: keyCode, flags: flags)
             }
@@ -1615,13 +1618,13 @@ package final class StreamCoordinator {
     }
 
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
-    /// before AppKit exits): every key a device holds down on the Mac goes up (a modifier left down
-    /// would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why (kind 22
-    /// "quit", at most 0.1 s), then window home, display gone. Capture and encoder need no stop; the
-    /// process is about to end. The CLI without --virtual-display dies on a plain SIGINT with no
-    /// goodbye, as before: its devices notice by liveness.
+    /// before AppKit exits): every key and button a device holds down on the Mac goes up (a modifier
+    /// left down would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why
+    /// (kind 22 "quit", at most 0.1 s), then window home, display gone. Capture and encoder need no
+    /// stop; the process is about to end. The CLI without --virtual-display dies on a plain SIGINT
+    /// with no goodbye, as before: its devices notice by liveness.
     package func shutdownForExit() {
-        injector.releaseAllKeys()
+        injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()

@@ -97,6 +97,15 @@ MUTANTS = [
     ("the read counts a modifier pressed again since", STROKES, "table & cleared & ~posted & ~held", "table & cleared & ~held"),
     ("the read counts a modifier key down", STROKES, "table & cleared & ~posted & ~held", "table & cleared & ~posted"),
     ("the read reports whatever the table holds", STROKES, "table & cleared & ~posted & ~held", "table & ~posted & ~held"),
+    # Input with nowhere to land (DroppedInput)
+    ("a button's up with nowhere to land is dropped (before the review)", STROKES,
+     "        case .pointer(.leftUp, _, _): return leftDown\n        case .pointer(.rightUp, _, _): return rightDown\n", ""),
+    ("the right button's up judged by the left", STROKES, "case .pointer(.rightUp, _, _): return rightDown", "case .pointer(.rightUp, _, _): return leftDown"),
+    ("a button's up goes whether or not it is down", STROKES, "case .pointer(.leftUp, _, _): return leftDown", "case .pointer(.leftUp, _, _): return true"),
+    ("a key's up goes whether or not its key is down", STROKES, "case .key(let usage, false, _): return keyDown(usage)", "case .key(_, false, _): return true"),
+    ("every key event goes, downs too", STROKES, "case .key(let usage, false, _): return keyDown(usage)", "case .key: return true"),
+    ("a key's up never goes (before this branch)", STROKES, "case .key(let usage, false, _): return keyDown(usage)", "case .key: return false"),
+    ("everything goes", STROKES, "        default: return false\n        }\n    }\n}", "        default: return true\n        }\n    }\n}"),
     # The device: its shortcuts
     ("a shortcut without its modifiers' keys going down", CHORDS, "        modifiersDown(modifiers)\n            + [.key(", "        [.key("),
     ("a shortcut without its modifiers' keys coming up", CHORDS, "\n            + modifiersUp(modifiers)\n", "\n"),

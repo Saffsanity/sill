@@ -3,9 +3,10 @@
 # they leave in its HID state table, which every click and scroll after them starts from (CLAUDE.md,
 # "The stuck command after Spotlight"): a key's up leaves only the modifiers still held down, a
 # modifier's own key goes up without its flag, a device's own word on its modifiers lets go of the
-# keys it no longer holds, and a device that leaves, or the host that goes, lets go of its keys; and the
+# keys it no longer holds, and a device that leaves, or the host that goes, lets go of its keys; the
 # check after every key's up (KeyUpCheck), which reports what an up left set on a Mac that keeps its
-# table through some ups.
+# table through some ups; and input with nowhere to land (DroppedInput), of which only the up of a key
+# or a button the Mac has down still goes.
 # KeyChords (iOSClient): what the device sends, a shortcut with its modifiers' own keys around it and
 # a hardware key's up after its down, which leaves nothing held on this Mac or on one from before.
 # Scenarios with the exact events, and random sessions against the model's invariant and the check's.

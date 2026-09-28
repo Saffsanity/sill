@@ -1,8 +1,10 @@
 import Foundation
+import StreamProtocol
 
 // A device's key (kind 8's `.key`: a USB HID usage going down or up, with UIKeyModifierFlags bits) as
 // the keyboard events InputInjector posts for it: the Mac's virtual key, and the flags each carries.
-// Beside it, the check a quarter of a second after each key's up (`KeyUpCheck`).
+// Beside it, the check a quarter of a second after each key's up (`KeyUpCheck`) and what of the input
+// with nowhere to land still goes (`DroppedInput`).
 //
 // The flags are what a keyboard would give (2026-09-27, the stuck command after Spotlight). The Mac
 // keeps the modifier state of the source InputInjector posts from in the HID system's state table:
@@ -29,9 +31,9 @@ import Foundation
 // quarter of a second later (`KeyUpCheck`). Typed text is InputInjector's: it goes out with no flags,
 // after `text` has let go of the device's modifier keys.
 //
-// Pure: Foundation only, checked on its own with swiftc (Tests/checks/key-strokes; its `package`
-// access needs -package-name sill). Nothing here posts anything: InputInjector makes each event from
-// its source and posts it.
+// Pure: Foundation and StreamProtocol only, checked on its own with swiftc (Tests/checks/key-strokes;
+// its `package` access needs -package-name sill). Nothing here posts anything: InputInjector makes
+// each event from its source and posts it.
 
 /// One keyboard event to post: a virtual key (Carbon's kVK_*) going down or up, carrying these flags
 /// (CGEventFlags bits). A modifier's own key (54 to 62) becomes a flags-changed event: CoreGraphics
@@ -287,4 +289,24 @@ package struct KeyUpCheck: Sendable {
 
     /// Shift, control, option and command: the modifiers that change a click or a scroll.
     package static let modifiers = KeyStrokes.shift | KeyStrokes.control | KeyStrokes.option | KeyStrokes.command
+}
+
+/// Input with nowhere to land (StreamCoordinator): nothing streams (between sources, or the stream
+/// stopped: the window closed under a drag), or a switch dropped what was held for an activation.
+/// It is dropped, all but the up of a key or a button the Mac has down (its down was posted, its up
+/// has not been), which still goes, a button's where the pointer is: a modifier left down makes every
+/// later click a ⌘-click, and a button left down every later move a drag.
+package enum DroppedInput {
+    /// Whether `event` still goes: a key's up when `keyDown` says that key is down on the Mac, a
+    /// button's up when that button is (`leftDown`, `rightDown`). Downs, moves, scrolls, text and a
+    /// scroll gesture's boundaries never do (an open scroll gesture the Mac closes by itself,
+    /// InputInjector's scroll watchdog).
+    package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool) -> Bool {
+        switch event {
+        case .key(let usage, false, _): return keyDown(usage)
+        case .pointer(.leftUp, _, _): return leftDown
+        case .pointer(.rightUp, _, _): return rightDown
+        default: return false
+        }
+    }
 }
