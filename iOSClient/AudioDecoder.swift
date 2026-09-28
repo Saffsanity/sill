@@ -1,4 +1,7 @@
 import AudioToolbox
+#if os(iOS)
+import CoreAudio   // UnsafeMutableAudioBufferListPointer, which AudioToolbox brings with it on macOS only
+#endif
 import Foundation
 
 /// The Mac's sound, decoded (docs/audio-plan.md §7.3): AAC-ELD packets in, 48 kHz stereo Float32 out,
