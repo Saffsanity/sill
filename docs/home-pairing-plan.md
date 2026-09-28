@@ -3124,3 +3124,88 @@ Noah's Sill.app at each host's start.
   TLS, and the host logged both and posted neither.
 - Not run: Noah's devices (his try of PR #37 came before this merge); photos of the harness's
   cases; the rest of the H and S lists on the merge.
+
+### The review of the merge (2026-09-27)
+
+`$SP` here is `scratchpad/merge37/fix` in the session's scratchpad: the pacing harness's tick count
+(`ticks.py`, `kindcount.py`), the CLI's ticks by door (`livetick.py`), the reconnect's scenarios on
+the simulator (`lib2.py`, `rt.py`, `rtour2.py`), their logs and photos (`out/`) and the builds'
+logs. The merge's tree built from `git archive` (`base-tree/`), every DerivedData and the private
+simulator ("Sill merge37", an iPad Pro 11-inch (M5), iOS 27.0) were deleted after.
+
+A read-only review of 70a75e7 (the host and the wire live, the device on a private simulator, the
+docs against the code) reported eight findings. Each was checked here first; all eight were real,
+and each is fixed in a commit of its own theme (4889e62 to 553ad58, and this one):
+- **The pacing harness's `home` case measured the TLS tick rule** (4889e62). `serve` set
+  `client.encrypted = true` for every session. Every session a Door admits is TLS, but the harness
+  serves its plain-TCP home client as `.home(.loopback, peer: nil)`, which then skipped a tick after
+  every other message: 15 ticks in 8 s against its base's 267, while the case compares only frames
+  and drops, so it passed. Now `client.encrypted = route.encrypted` (a home route is TLS with a
+  peer; the Door always gives one). Checked: the case's client read by a raw frame counter for 8 s,
+  base (da43f6b) 267 ticks and 455 frames, this 268 and 454; `Scripts/pacing/run.sh --base da43f6b
+  --cases home` passed, 60.0 fps on both with nothing dropped
+  (`.build/pacing/runs/20260927-205256`); the CLI (`--synthetic`, 127.0.0.1, the software encoder):
+  a client paired by the link at the TLS home door and streaming got 13 ticks in 10 s (the TLS rule,
+  as before the fix), one on the plain door 31 to 34 a second.
+- **The automatic reconnect could hang for good** (0d628fe; on the branch before the merge, and
+  main's `reconnectIfListed` has the same guard). After a loss without a goodbye the reconnect dials
+  the Mac's row while its registration is still listed; that row's Bonjour resolve then never ends,
+  so the dial stays in `.preparing`, which had no limit (`.waiting` has 5 s), and every later look
+  needs `connection == nil` (a home dial is not `why == .automatic`), the remote dial included. Now
+  the automatic reconnect's own dial (a tap clears `reconnect` first) that is not ready 5 s after it
+  started (`StreamClient.reconnectDialWait`) is let go as the reconnect already replaces its remote
+  dial: dropped, `tearDown` with the status as it is, whose `discoveryChanged` looks again, with
+  the reconnect as it was (its loss, its remote dials' timing, the tour's decision). A wired dial
+  gets it through its fallback; a tap's dial, `-SillConnect`'s and a ready TLS session waiting for
+  its first window list are as before. Checked on the simulator (`rt.py`), a TLS home session by the
+  tapped row of a `--pairing --remote` host whose key the app had paired through the link, the host
+  stopped with SIGTERM: on 70a75e7's build a host back under another name 3 s later, or 0.3 s later,
+  was never reached in 40 s and 42 s, and with no host after, no remote dial came in 30 s (the app
+  held no TCP socket; 4 of 7: the pairing and the three first sessions); on this build the session was back
+  6.4 s and 8.1 s after the kill ("reconnect: Sill test … not ready in 5.0 s (preparing); letting it
+  go and looking again", then the new row dialed pinned over TLS), and with no host the remote dial
+  started 10.3 s after it (7 of 7). The tour's rule across that reconnect (`rtour2.py`): a first
+  session decided "not this session" by a stand-in touch kept its decision ("the automatic
+  reconnect's session keeps the last one's decision", no tour, 5 of 5), and a tour on screen at the
+  loss came back on the reconnect's session (4 of 4).
+- **`-SillPairURL` skips a confirmed link's path** (356e2c8). It calls `pair(link:)`, the link's own
+  addresses, while `confirmPendingLink` tries the home rows pinned to the link's key first, so a
+  home-only link pairs nothing that way. The flag stays as the remote-access gates use it; the
+  harness contract, `startRemote`'s comment and CLAUDE.md's Build and run say what it does and
+  name the gates' way to the home rows (`-SillTapRow`, then `-SillHomeLink`).
+- **The App Store material still described the plain home door** (0cb4966):
+  docs/app-store-metadata.md's export compliance (plain TCP at both ends), its review notes' CONNECT
+  (a tap shows the desktop) and the description's any-device bullet. The file is for the first
+  upload, which carries pairing at home, so it now describes it: Before you submit asks for a Sill
+  for Mac with pairing at home at the download URL (a Release build shows "Update Sill" for 0.3.1);
+  App Privacy says what pairing sends and keeps (Data Not Collected still); the description pairs
+  once by a code, or by itself over the cable, "By default" only paired devices get in, every
+  connection encrypted; export compliance names TLS 1.3 through Network.framework for every
+  connection (the key stays NO); the review notes pair in step 6 (3,891 bytes, all ASCII); the demo
+  video and the screenshot steps pair too (the simulator through Pair iPhone or iPad… and Enter
+  Code Instead: a Mac opens no window for an ask from itself).
+- **Two slips in the docs** (62be05d): DEVELOPMENT.md put Pair This iPad… "at the end of its
+  Settings panel" (it is in Away from home; the panel ends with This iPad's gestures and Take the
+  Tour); CLAUDE.md's floor had kinds 0–28 "inside `sill/1` at both doors", which took in 19 and 20,
+  a `sill-pair/1` connection's.
+- **Stale costs and timings** (553ad58): the checklist priced the mutants at fifteen jobs, two
+  hours and $7.50 (32 jobs now; their scripts took 205 minutes here, so about four hours, some
+  2,400 included minutes or $15 on a private repository) and called Saffsanity/sill private (public
+  since 2026-09-26); run-all.sh's header said two minutes and most of an hour (five, and well over
+  an hour).
+- **Nothing for Noah's devices after the third merge** (this commit): CLAUDE.md's untested list
+  gains the merge's device-side changes and the reconnect's let-go.
+
+**Verified** (2026-09-27, 20:25–21:00), every host on 127.0.0.1 alone (`SILL_TEST_LOOPBACK=1`,
+checked with `lsof`), the software encoder and no router, `no-device.sh` finding no device on
+Noah's Sill.app before each; identities in scratch `SILL_TEST_REMOTE_DIR`s, never the keychain:
+- `swift build -c release` (only StreamServer.swift changed on the host); iOS Debug for the
+  simulator (ad hoc signed, for the simulator's keychain) and Release for the simulator and Debug
+  for `generic/platform=iOS`, unsigned, each in its own DerivedData, only the old `StreamClient`
+  capture warning (`StreamClient.swift:3011` now).
+- `Tests/checks/run-all.sh`: all 33 pass (303 s). No mutants were affected: no check compiles
+  StreamServer.swift, StreamClient.swift, StreamClient+Remote.swift or ContentView.swift, and
+  run-all.sh changed in its comment only.
+- `Scripts/pacing` against da43f6b: the `home` case above. The other cases serve `.remote` routes,
+  whose rule the fix does not change.
+- Not run: Noah's devices.

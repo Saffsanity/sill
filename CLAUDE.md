@@ -142,6 +142,31 @@ before 1.0 (the Compatibility floor below).
   before the third merge): "home pairing looks good!", and asked for it to
   merge after PRs #34 and #38. The P1–P16 list below was not reported item by
   item.
+- The review of the third merge (2026-09-27, 4889e62 and the six commits after
+  it; the plan's Results, "The review of the merge"): eight findings, each
+  checked here and fixed, one commit per theme. The host: `serve` marks a
+  session TLS by its route (`route.encrypted`), so the pacing harness's plain
+  home client keeps the plain door's tick rule again (every session a Door
+  admits is TLS, as before). The device: the automatic reconnect's own dial
+  that is not ready 5 s after it started is let go and the reconnect looks
+  again (`StreamClient.reconnectDialWait`): a row dialed as its registration
+  went (Sill.app gone without a goodbye) left the Bonjour resolve waiting for
+  good and held the reconnect, its remote dial included (on the branch before
+  the merge; main's guard is the same). Docs: `-SillPairURL` pairs at a link's
+  own addresses only; docs/app-store-metadata.md describes pairing at home
+  (the download it needs, export compliance, the review notes, the
+  description, the demo video, the screenshots); Pair This iPad… is in Away
+  from home; the floor's kinds 19 and 20 are `sill-pair/1`'s; the mutants' 32
+  jobs and their cost. Verified: `swift build -c release`; iOS Debug and
+  Release for the simulator and Debug for a device, only the old
+  `StreamClient` capture warning (StreamClient.swift:3011);
+  `Tests/checks/run-all.sh`, all 33 (no check compiles a changed source); the
+  pacing harness's `home` case 268 ticks in 8 s against its base's 267 (15 on
+  the merge) and its gate passing; a TLS home session still on the TLS tick
+  rule; on a private simulator the merge's build never reconnected to a host
+  back under another name, nor dialed remotely with none (4 of 7), and this
+  build did both (7 of 7), the tour's reconnect rule holding across the let-go
+  (9 of 9).
 - **Untested, for Noah:** the plan's §11, P1 to P16, on his devices, the iPad
   build first (Debug, the usual route), then Sill.app: P1 the upgrade (the
   iPad, paired for remote access on 2026-09-25, connects at home with no
@@ -163,6 +188,14 @@ before 1.0 (the Compatibility floor below).
   Require pairing off then on again saves (the keychain store's own writes
   ran nowhere else); Pair This iPad… over an open door says "…is showing a
   code now." only when the Mac shows one, and its Cancel closes that window.
+  After the third merge, which no device has run: a fresh install's tour
+  after pairing at home, and its reconnect rule (the tour's P13) across a
+  TLS reconnect; the Mac's menus and a three-finger gesture over a paired
+  session at home; Force Quit Sill.app while the iPad streams (no goodbye),
+  reopen it 10 s later: "Reconnecting to ‹Mac›…" meanwhile (the console:
+  "reconnect: ‹Mac› not ready in 5.0 s …" about 5 s after the loss), and the
+  session back soon after Sill is; with Remote Access on and Sill left
+  closed, a remote dial about 10 s after the loss.
   When this ships: the site's words (privacy.html says connections at home
   are not encrypted, as Sill for Mac 0.3.1's are; index.html and support.html
   pair only for Remote Access), and the README's sentence on 0.3.1.
