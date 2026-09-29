@@ -92,6 +92,34 @@ enum RemoteDialPolicy {
         return isTailscaleName(host)
     }
 
+    /// The saved Macs whose key a dial of `old` at `candidate` takes in its place (Noah, 2026-09-28:
+    /// Sill for Mac 0.4.0 made the Mac a new key, the device paired it again, and the old record
+    /// stayed as a dead "‹Mac›" Remote row beside the working "‹Mac› (2)"). Only when the key that
+    /// answers is one of these, and the handshake completes with it (TLS 1.3's CertificateVerify:
+    /// the Mac holds that key), is `old` superseded (`SavedMacs.superseding`). Never on the name
+    /// alone: all of these must hold.
+    /// - Another record, not revoked or marked `newKey`, whose key is readable.
+    /// - The same name (a Mac set up again keeps its name; two Macs of one name at home and at the
+    ///   office are told apart by the rest).
+    /// - Paired after `old` was last reached (`lastConnectedAt ?? pairedAt`): a record reached
+    ///   since the other was paired is a Mac in use, not one set up again.
+    /// - An address that names one machine wherever this device is: Tailscale's shapes, or an
+    ///   internet address or name. A private or `.local` address can be another Mac on another
+    ///   network (the home Mac's 192.168.1.10 is the office Mac's at the office), and a pin refused
+    ///   there is no wrong Mac either (`classify`). Loopback only with `allowLoopback` (DEBUG: the
+    ///   simulator's test hosts on this Mac).
+    static func successors(of old: SavedMac, at candidate: Candidate, in list: [SavedMac], allowLoopback: Bool) -> [SavedMac] {
+        let h = candidate.host.lowercased()
+        let loopback = h.hasPrefix("127.") || h == "::1" || h == "localhost"
+        let unique = isVPNAddress(h) || (candidate.kind != MacAddress.lan && kind(ofHost: h) == MacAddress.internet)
+        guard unique || (loopback && allowLoopback) else { return [] }
+        let lastReached = old.lastConnectedAt ?? old.pairedAt
+        return list.filter { mac in
+            mac.macID != old.macID && mac.revoked != true && mac.newKey != true && mac.fingerprintData != nil
+                && mac.name == old.name && mac.pairedAt > lastReached
+        }
+    }
+
     static func isTailscaleName(_ host: String) -> Bool {
         let h = host.lowercased()
         return h.hasSuffix(".ts.net") || h.hasSuffix(".ts.net.")

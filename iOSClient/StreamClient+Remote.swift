@@ -305,12 +305,41 @@ extension StreamClient {
         #if DEBUG
         print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map(\.key))")
         #endif
-        let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue)
+        // A Mac set up again (a new key) that this device paired again: at an address that names
+        // one machine, its newer record's key may answer for this one, and a handshake completed
+        // with it retires this record (RemoteDialPolicy.successors, SavedMacs.superseding).
+        var successors: [String: [Data]] = [:]
+        for c in candidates {
+            let keys = RemoteDialPolicy.successors(of: mac, at: c, in: savedMacs, allowLoopback: Self.keepsLoopback)
+                .compactMap(\.fingerprintData)
+            if !keys.isEmpty { successors[c.key] = keys }
+        }
+        let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue,
+                                        successors: successors)
         remoteDial = connector
         connector.onWinner = { [weak self, weak connector] winner in
             DispatchQueue.main.async {
                 guard let self, let connector, self.remoteDial === connector else { winner.connection.cancel(); return }
                 self.remoteDial = nil
+                var macID = macID
+                if winner.fingerprint != pin,
+                   let newer = self.savedMacs.first(where: { $0.fingerprintData == winner.fingerprint && $0.macID != macID }),
+                   RemoteDialPolicy.successors(of: mac, at: winner.candidate, in: self.savedMacs,
+                                               allowLoopback: Self.keepsLoopback).contains(where: { $0.macID == newer.macID }) {
+                    #if DEBUG
+                    print("remote: \(winner.candidate.key) answered with the key of \(newer.macID), saved after \(macID): \(macID) superseded")
+                    #endif
+                    self.savedMacs = SavedMacs.superseding(old: macID, by: newer.macID, proof: winner.candidate.key, in: self.savedMacs)
+                    self.persistSavedMacs()
+                    if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
+                    macID = newer.macID
+                    self.hostName = self.displayName(macID)
+                    self.status = why == .automatic ? "Reconnecting to \(self.hostName) remotely…" : "Connecting to \(self.hostName) remotely…"
+                } else if winner.fingerprint != pin {
+                    winner.connection.cancel()           // cannot happen: the verify block took no other key
+                    self.remoteDialFailed(macID: macID, why: why, failure: .wrongMac, candidate: winner.candidate)
+                    return
+                }
                 self.remoteWinner(winner, macID: macID, why: why)
             }
         }
