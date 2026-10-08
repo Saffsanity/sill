@@ -75,12 +75,22 @@ struct ContentView: View {
 // MARK: - Layout harness (DEBUG only)
 
 /// Renders `StreamScreen` at an exact point size so an iPad simulator can stand in for the iPhone
-/// Duo's screens — 1000×710 for the unfolded inner display, 710×1000 for portrait and the folded
-/// laptop posture, 500×710 and 710×500 for the outer display.
+/// Duo's screens — 951×669 for the inner display sideways (open flat, or the book pose), 669×951
+/// upright (open flat, or the laptop pose), 466×678 and 678×466 for the cover (the first guesses,
+/// 1000×710, 710×1000, 500×710 and 710×500, still work as before).
 ///
 /// Only a launch argument turns it on. The whole contract:
 ///
-/// * `-SillLayout 1000x710` — required; the fake screen's size in points.
+/// * `-SillLayout 1000x710` — required; the fake screen's size in points. At the Duo's four sizes
+///   (951x669, 669x951, 466x678, 678x466) the fake screen has the safe area that display gives Sill
+///   (DuoPosture.displayInsets: the home indicator's 34 at the bottom, and on the cover the
+///   camera's 84 pt strip, at the right upright and the left on its side); every other size has
+///   none, as before. `-SillSafeArea T,L,B,R` sets it (`none` for none).
+/// * `-SillHinge closed|half|flat` — stands in for the Duo's hinge (iOS 27.1's `onHingeChange`) and
+///   its fold (the `.division` reserved region): `half` the fold in the way, 40 pt across the middle
+///   of the fake screen's longer side (the book pose sideways, the laptop pose upright); `flat` the
+///   same fold, open flat; `closed` none, as on the cover. Without it the harness knows no hinge,
+///   on the Duo's simulator too, and every layout is what the size alone gives, as before.
 /// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
 ///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
 ///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
@@ -302,7 +312,8 @@ struct ContentView: View {
 ///   presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its words
 ///   as under VoiceOver. The console says what happened ("tour: …").
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
-///   orientation at launch (a phone simulator sideways, with its real safe areas).
+///   orientation at launch (a phone simulator sideways, with its real safe areas). The Duo's inner
+///   display refuses it (UISceneErrorDomain 101): fold and turn its simulator with Tests/duorig.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -349,6 +360,15 @@ struct LayoutHarness: View {
         /// when `live`.
         let pointer: String?
         let pencilPointer: Bool
+        /// The Duo's hinge stand-in (`-SillHinge`), nil for none; the fake screen's safe area.
+        let hinge: DuoPosture.Hinge?
+        let insets: EdgeInsets?
+
+        /// What the screens read of the hinge here: the stand-in, or nothing (never the device's).
+        var duoEnvironment: DuoEnvironment {
+            guard let hinge else { return DuoEnvironment() }
+            return DuoEnvironment(hinge: hinge, source: .standIn(hinge == .closed ? nil : DuoPosture.standInFold(size)))
+        }
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -370,7 +390,19 @@ struct LayoutHarness: View {
                         scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
                         macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code,
                         pointer: defaults.string(forKey: "SillPointer"),
-                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
+                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"),
+                        hinge: DuoPosture.hinge(argument: defaults.string(forKey: "SillHinge")),
+                        insets: insets(defaults.string(forKey: "SillSafeArea"), size: CGSize(width: width, height: height)))
+        }
+
+        /// `-SillSafeArea T,L,B,R` (or `none`), else the Duo's display's own at its four sizes.
+        private static func insets(_ raw: String?, size: CGSize) -> EdgeInsets? {
+            if let raw {
+                let n = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                guard n.count == 4 else { return nil }
+                return EdgeInsets(top: n[0], leading: n[1], bottom: n[2], trailing: n[3])
+            }
+            return DuoPosture.displayInsets(size).map { EdgeInsets(top: $0.top, leading: $0.leading, bottom: $0.bottom, trailing: $0.trailing) }
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -402,8 +434,10 @@ struct LayoutHarness: View {
             let fit = Fit(screen: spec.size, room: geo.size)
             ZStack {
                 Color.black
-                screen
+                insetScreen
+                    .environment(\.duoEnvironment, spec.duoEnvironment)
                     .frame(width: spec.size.width, height: spec.size.height)
+                    .coordinateSpace(.named(DuoPosture.displaySpace))
                     .clipped()
                     .padding(1)
                     .background(Color(hex: 0x333333))
@@ -452,6 +486,21 @@ struct LayoutHarness: View {
                 turned = onItsSide > upright
                 scale = max(0.01, max(upright, onItsSide))
             }
+        }
+    }
+
+    /// The fake screen with the safe area it stands for: what the simulator's own already gives it
+    /// where they overlap (the Duo's simulator at the display's size), and the rest added.
+    @ViewBuilder private var insetScreen: some View {
+        if let want = spec.insets {
+            GeometryReader { g in
+                let have = g.safeAreaInsets
+                screen.safeAreaPadding(EdgeInsets(top: max(0, want.top - have.top), leading: max(0, want.leading - have.leading),
+                                                  bottom: max(0, want.bottom - have.bottom),
+                                                  trailing: max(0, want.trailing - have.trailing)))
+            }
+        } else {
+            screen
         }
     }
 
