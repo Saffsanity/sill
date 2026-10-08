@@ -44,7 +44,7 @@ wire change.
   six poses and the tour in five, at App Store sizes, in `~/Downloads/sill-handoff/duo/after/`
   (private: this Mac's windows and name), and the harness's mock in every pose in
   `~/Downloads/sill-handoff/duo/mock/`. The harness at 25 earlier cases (the guessed Duo, an iPad, a
-  phone) against main's build: 24 identical, one 427 pixels by Δ1. `git merge-tree` with PR #39
+  phone) against main's build, twice: 24 and 23 identical, the rest Δ1 in 2–427 pixels. `git merge-tree` with PR #39
   (c3d06f0): ci.yml's mutants matrix line (take both lists) and this entry beside #39's at the top
   (keep both); the five iOS files merge by themselves and the merged tree builds.
 - **Untested, for Noah:** the plan's P1–P8 on a real iPhone Duo with a build from Xcode 27.1

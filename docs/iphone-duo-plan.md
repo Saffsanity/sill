@@ -356,10 +356,11 @@ Verified 2026-10-08 (11:20–13:00) on this Mac, Xcode 27.1 RC (27A9275), the "S
 - **Nothing changes off the Duo**: the harness at 25 earlier cases (the guessed Duo's four sizes with
   the drawer, Settings, connect screens, Add a Mac, the pairing overlay, the tour, the Aa ruler; an
   iPad's 834×1194, 1194×834, 744×1133 and a 700×1000 window; a phone's 440×894 and 402×812),
-  photographed on the Duo's simulator with main's build (e6b3265) and this branch's: 24 identical byte
-  for byte, the 25th (the drawer at 1000×710) 427 pixels apart by Δ1, anti-aliasing (a first pass,
-  through a stale intermediate build that lacked the harness's override, differed on every portrait
-  case; rebuilt, none did).
+  photographed on the Duo's simulator with main's build (e6b3265) and this branch's, twice: 24 and
+  23 of 25 identical byte for byte, the others apart by Δ1 in 2 to 427 pixels, a different case each
+  pass (anti-aliasing), and no harness case knew a hinge (an earlier pass, through a stale
+  intermediate build that lacked the harness's override, differed on every portrait case; rebuilt,
+  none did).
 - **The merge with PR #39** (`remote-away` at c3d06f0): `git merge-tree` finds one conflict, ci.yml's
   mutants matrix line (take both lists: #39's `away-*` and `link-judge`, this branch's `duo`); with
   this document's commit CLAUDE.md's Current step also meets (both add an entry at the top: keep
