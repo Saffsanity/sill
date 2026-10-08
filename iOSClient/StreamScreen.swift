@@ -925,9 +925,23 @@ struct StreamScreen: View {
 /// width less 32 pt, footnote text on the bar's colour; two lines at most, the text no larger than
 /// xxLarge. It never takes a touch meant for the Mac, and comes and goes with a fade (with Reduce
 /// Motion too). VoiceOver hears it once a spell (StreamScreen.updateLinkLine) and can read it here.
+/// In the iPhone Duo's book pose it is centred on the leading page instead, off the fold
+/// (docs/iphone-duo-plan.md).
 struct LinkLineView: View {
     let text: String?
+    /// The Duo's hinge (iOS 27.1): with the fold, where the line goes.
+    @Environment(\.duoEnvironment) private var duoEnvironment
     var body: some View {
+        GeometryReader { geo in
+            let page = DuoPosture.leadingPage(DuoPosture.read(geo, duoEnvironment).info(in: geo.size))
+            line
+                .frame(width: page ?? geo.size.width)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var line: some View {
         ZStack {
             if let text {
                 Text(text)
