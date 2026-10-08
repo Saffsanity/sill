@@ -227,7 +227,8 @@ struct StreamScreen: View {
                 // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
                 // outside link puts the tour aside until the overlay has closed.
                 if let run = tour, !overlayShown {
-                    TourOverlay(run: run, copy: tourCopy(run, layout), layout: layout, targets: tourTargets,
+                    TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay),
+                                layout: layout, targets: tourTargets,
                                 screen: geo.size, bottomInset: geo.safeAreaInsets.bottom,
                                 next: tourNext, skip: tourSkip)
                         .transition(.opacity)
@@ -569,9 +570,10 @@ struct StreamScreen: View {
         return nil
     }
 
-    private func tourCopy(_ run: TourRun, _ layout: TourLayout) -> TourCopy {
+    /// `keysOnItsSide`: the iPhone Duo open, whose keys and trackpad come with the device on its side.
+    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false) -> TourCopy {
         TourPolicy.copy(run.at, layout, mac: client.macName, device: StreamClient.deviceWord,
-                        voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun)
+                        voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun, keysOnItsSide: keysOnItsSide)
     }
 
     private func tourLog(_ line: @autoclosure () -> String) {

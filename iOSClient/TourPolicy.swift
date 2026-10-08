@@ -328,12 +328,13 @@ enum TourPolicy {
 
     /// The card's width: 360 pt; 480 on a screen held sideways that is under 520 pt tall (a phone,
     /// the Duo's outer display), where height is what runs out; 560 at accessibility text sizes;
-    /// never more than the screen less its margins, nor, across the book pose's fold, than the
-    /// wider page (DuoPosture.pageWidth).
-    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool, fold: FoldInfo = .inferred) -> CGFloat {
+    /// never more than the screen less its margins, nor, across the book pose's fold, than the page
+    /// its `targets` are on (DuoPosture.pageWidth), so the card stays beside them.
+    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool, fold: FoldInfo = .inferred,
+                      targets: CGRect? = nil) -> CGFloat {
         let short = layout == .landscape && screen.height < 520
         let preferred: CGFloat = accessibilityText ? 560 : (short ? 480 : 360)
-        let page = DuoPosture.pageWidth(screenWidth: screen.width, margin: margin, fold: fold) ?? .infinity
+        let page = DuoPosture.pageWidth(screenWidth: screen.width, margin: margin, fold: fold, for: targets) ?? .infinity
         return max(0, min(preferred, page, screen.width - 2 * margin))
     }
 
@@ -492,9 +493,11 @@ enum TourPolicy {
 
     /// A step's card. ‹Mac› is the Mac's name ("your Mac" when there is none yet); ‹device› is
     /// "iPad" or "iPhone". Under VoiceOver the rows that name a gesture say VoiceOver's way instead,
-    /// and the trackpad's rows go (the trackpad is no accessibility element).
+    /// and the trackpad's rows go (the trackpad is no accessibility element). `keysOnItsSide`: the
+    /// iPhone Duo open (its inner display), which shows the keys and the trackpad with the device
+    /// turned on its side, so its words say so where an iPhone's say upright.
     static func copy(_ t: TourTopic, _ layout: TourLayout, mac: String, device: String,
-                     voiceOver: Bool, firstOfRun: Bool) -> TourCopy {
+                     voiceOver: Bool, firstOfRun: Bool, keysOnItsSide: Bool = false) -> TourCopy {
         let mac = mac.isEmpty ? "your Mac" : mac
         let iPad = device == "iPad"
         let keyboardRow = row("keyboard", [strong("Keyboard"), plain(" types on \(mac), on screen or with a hardware keyboard.")])
@@ -536,7 +539,8 @@ enum TourPolicy {
             var rows = [row("xmark.circle", [strong("Disconnect"), plain(" is at the bottom of Settings.")]),
                         row("questionmark.circle", [strong("Take the Tour"), plain(" is there too, to see this again.")])]
             if layout == .landscape {
-                rows.append(row(iPad ? "ipad" : "iphone", [strong("Hold your \(device) upright"), plain(" for a trackpad and keys.")]))
+                let turn = keysOnItsSide ? "Turn your \(device) on its side" : "Hold your \(device) upright"
+                rows.append(row(iPad ? "ipad" : "iphone", [strong(turn), plain(" for a trackpad and keys.")]))
             }
             return TourCopy(title: "Settings", subtitle: nil, rows: rows,
                             hint: layout == .phone ? "The last button in the row under the picture." : "The last button in the bar.")
@@ -557,7 +561,8 @@ enum TourPolicy {
                 rows.append(row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" on the trackpad to right-click.")]))
                 rows.append(row("hand.draw", [strong("Touch and hold"), plain(" the trackpad, "), strong("then drag"), plain(", to move a window or select text.")]))
             }
-            return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? "Upright, Sill adds keys and a trackpad." : nil,
+            let subtitle = keysOnItsSide ? "On its side, Sill adds keys and a trackpad." : "Upright, Sill adds keys and a trackpad."
+            return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? subtitle : nil,
                             rows: rows, hint: layout == .phone ? "Under the windows: the row of keys, then the trackpad."
                                                                : "Below the bar: the row of keys, then the trackpad.")
         }

@@ -223,7 +223,7 @@ struct TourOverlay: View {
         return TourGeometry(screen: screen, layout: layout, stream: targets[.stream] ?? CGRect(origin: .zero, size: screen),
                             bottomInset: bottomInset, targets: union, isStream: run.at == .touch,
                             width: TourPolicy.width(screen: screen, layout: layout, accessibilityText: typeSize.isAccessibilitySize,
-                                                    fold: duoFold),
+                                                    fold: duoFold, targets: union),
                             fold: duoFold)
     }
 

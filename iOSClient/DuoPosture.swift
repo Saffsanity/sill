@@ -286,11 +286,16 @@ extension DuoPosture {
         return (left + size.width / 2, rect(below: down).midY, down)
     }
 
-    /// The wider page beside a vertical fold, less the margin at the screen's edge: the most a card
-    /// may be wide there. Nil without one.
-    static func pageWidth(screenWidth: CGFloat, margin: CGFloat, fold: FoldInfo) -> CGFloat? {
+    /// The page beside a vertical fold that `target`'s middle is on (the leading one on a tie, as
+    /// `offTheFold` decides), less the margin at the screen's edge: the most a card about it may be
+    /// wide, so that it stays beside what it points at (with the status bar's strip shown, 867 pt,
+    /// the trailing page is 355.5 and a 360 pt card about Settings would otherwise go to the far
+    /// page). Without a target, the wider page. Nil without a vertical fold.
+    static func pageWidth(screenWidth: CGFloat, margin: CGFloat, fold: FoldInfo, for target: CGRect? = nil) -> CGFloat? {
         guard let band = fold.verticalBand else { return nil }
-        return max(0, max(band.minX - margin, screenWidth - margin - band.maxX))
+        let leading = max(0, band.minX - margin), trailing = max(0, screenWidth - margin - band.maxX)
+        guard let target, !target.isNull else { return max(leading, trailing) }
+        return target.midX <= band.midX ? leading : trailing
     }
 
     /// The connect screen's column across the book pose's fold: centred in the leading page while

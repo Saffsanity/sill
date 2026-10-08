@@ -251,6 +251,29 @@ for x in stride(from: CGFloat(-50), through: 1000, by: 3.5) {
 }
 check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: .known(bookFold)) == 439.5, "the book pose's page: 439.5")
 check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: offMiddle) == 595, "the wider page")
+// The page a card's targets are on: with the status bar shown (867 pt) the trailing page is 355.5,
+// so a card about Settings stays beside it rather than go to the far page.
+let settingsButton = rect(781, 10, 64, 66), stripTargets = rect(93, 5, 355.5, 77)
+check(DuoPosture.pageWidth(screenWidth: 867, margin: 16, fold: .known(bookFold), for: settingsButton) == 355.5, "867: Settings' page, 355.5")
+check(DuoPosture.pageWidth(screenWidth: 867, margin: 16, fold: .known(bookFold), for: stripTargets) == 439.5, "867: the strip's page, 439.5")
+check(DuoPosture.pageWidth(screenWidth: 867, margin: 16, fold: .known(bookFold)) == 439.5, "867, no target: the wider page")
+check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: .known(bookFold), for: rect(8, 94, 935, 567)) == 439.5
+      && DuoPosture.pageWidth(screenWidth: 867, margin: 16, fold: .known(bookFold), for: rect(455.5, 94, 40, 567)) == 439.5,
+      "a target centred on the fold: the leading page, as offTheFold's tie")
+check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: .known(bookFold), for: rect(476, 0, 10, 10)) == 439.5, "past the middle: the trailing page")
+check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: .known(bookFold), for: .null) == 439.5, "a null target: as none")
+check(DuoPosture.pageWidth(screenWidth: 669, margin: 16, fold: .known(laptopFold), for: settingsButton) == nil, "no vertical fold: no page")
+// A card as wide as its targets' page, placed on it, never goes to the far page.
+for w in stride(from: CGFloat(800), through: 1000, by: 1) {
+    let fold = FoldInfo.known(rect(455.5, 0, 40, 669))
+    for target in [rect(w - 22 - 64, 10, 64, 66), rect(22, 10, 64, 66), rect(500, 10, 64, 66), rect(380, 10, 64, 66)] {
+        let width = min(360, DuoPosture.pageWidth(screenWidth: w, margin: 16, fold: fold, for: target)!)
+        let centred = min(max(target.midX - width / 2, 16), w - 16 - width)
+        let x = page(centred, width, fold, screen: w)
+        let onTargetsPage = target.midX <= 475.5 ? x + width <= 455.5 + 0.001 : x >= 495.5 - 0.001
+        check(onTargetsPage, "\(w): a card about \(target) on its page (at \(x), \(width) wide)")
+    }
+}
 check(DuoPosture.pageWidth(screenWidth: 951, margin: 16, fold: .inferred) == nil && DuoPosture.pageWidth(screenWidth: 669, margin: 16, fold: .known(laptopFold)) == nil,
       "no vertical fold: no page")
 // The connect column: centred in the leading page while it holds it with 16 pt each side.
