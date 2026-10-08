@@ -83,9 +83,11 @@ struct ContentView: View {
 ///
 /// * `-SillLayout 1000x710` — required; the fake screen's size in points. At the Duo's four sizes
 ///   (951x669, 669x951, 466x678, 678x466) the fake screen has the safe area that display gives Sill
-///   (DuoPosture.displayInsets: the home indicator's 34 at the bottom, and on the cover the
-///   camera's 84 pt strip, at the right upright and the left on its side); every other size has
-///   none, as before. `-SillSafeArea T,L,B,R` sets it (`none` for none).
+///   (DuoPosture.displayInsets: the home indicator's 34 at the bottom; on the inner display the
+///   status bar's strip, 84 pt at the right sideways and 82 at the top upright, but on the stream
+///   screen upright with `-SillHinge half` or `flat`, which hides it; on the cover the camera's
+///   84 pt strip, at the right upright and the left on its side); every other size has none, as
+///   before. `-SillSafeArea T,L,B,R` sets it (`none` for none).
 /// * `-SillHinge closed|half|flat` — stands in for the Duo's hinge (iOS 27.1's `onHingeChange`) and
 ///   its fold (the `.division` reserved region): `half` the fold in the way, 40 pt across the middle
 ///   of the fake screen's longer side (the book pose sideways, the laptop pose upright); `flat` the
@@ -385,9 +387,11 @@ struct LayoutHarness: View {
         let hinge: DuoPosture.Hinge?
         let insets: EdgeInsets?
 
-        /// What the screens read of the hinge here: the stand-in, or nothing (never the device's).
+        /// What the screens read of the hinge here: the stand-in, or nothing (never the device's:
+        /// without `-SillHinge`, a stand-in of no hinge and no fold, so that the Duo simulator's own
+        /// fold, which DuoPosture.read goes by before a hinge is reported, never reaches the screen).
         var duoEnvironment: DuoEnvironment {
-            guard let hinge else { return DuoEnvironment() }
+            guard let hinge else { return DuoEnvironment(hinge: .unknown, source: .standIn(nil)) }
             return DuoEnvironment(hinge: hinge, source: .standIn(hinge == .closed ? nil : DuoPosture.standInFold(size)))
         }
 
@@ -413,17 +417,24 @@ struct LayoutHarness: View {
                         pointer: defaults.string(forKey: "SillPointer"),
                         pencilPointer: defaults.bool(forKey: "SillPencilPointer"),
                         hinge: DuoPosture.hinge(argument: defaults.string(forKey: "SillHinge")),
-                        insets: insets(defaults.string(forKey: "SillSafeArea"), size: CGSize(width: width, height: height)))
+                        insets: insets(defaults.string(forKey: "SillSafeArea"), size: CGSize(width: width, height: height),
+                                       streamScreen: defaults.bool(forKey: "SillLive")
+                                           || MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? "") == nil,
+                                       hinge: DuoPosture.hinge(argument: defaults.string(forKey: "SillHinge"))))
         }
 
-        /// `-SillSafeArea T,L,B,R` (or `none`), else the Duo's display's own at its four sizes.
-        private static func insets(_ raw: String?, size: CGSize) -> EdgeInsets? {
+        /// `-SillSafeArea T,L,B,R` (or `none`), else the Duo's display's own at its four sizes, with
+        /// the status bar as this build shows it there: hidden on the stream screen upright with a
+        /// hinge open (DuoPosture.hidesStatusBar), shown on every other screen and pose.
+        private static func insets(_ raw: String?, size: CGSize, streamScreen: Bool, hinge: DuoPosture.Hinge?) -> EdgeInsets? {
             if let raw {
                 let n = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
                 guard n.count == 4 else { return nil }
                 return EdgeInsets(top: n[0], leading: n[1], bottom: n[2], trailing: n[3])
             }
-            return DuoPosture.displayInsets(size).map { EdgeInsets(top: $0.top, leading: $0.leading, bottom: $0.bottom, trailing: $0.trailing) }
+            let hidden = streamScreen && DuoPosture.hidesStatusBar(DuoPosture(hinge: hinge ?? .unknown).pose(size))
+            return DuoPosture.displayInsets(size, statusBarHidden: hidden)
+                .map { EdgeInsets(top: $0.top, leading: $0.leading, bottom: $0.bottom, trailing: $0.trailing) }
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {

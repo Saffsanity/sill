@@ -16,8 +16,18 @@ MUTANTS = {
     "M4 a fold off the screen kept": ("return .known(band.isNull || band.isEmpty ? nil : band)", "return .known(band.isNull ? nil : band)"),
     "M5 the book pose upright": ("case .partiallyOpen: return sideways ? .book : .laptop", "case .partiallyOpen: return sideways ? .laptop : .book"),
     "M6 the cover's poses swapped": ("case .closed: return sideways ? .closedSide : .closedUpright", "case .closed: return sideways ? .closedUpright : .closedSide"),
-    "M7 the status bar hidden on the cover": ("hinge == .partiallyOpen || hinge == .fullyOpen\n    }",
-                                              "hinge == .partiallyOpen || hinge == .fullyOpen || hinge == .closed\n    }"),
+    "M7 the status bar hidden on the cover": ("pose == .laptop || pose == .flatPortrait\n    }",
+                                              "pose == .laptop || pose == .flatPortrait || pose == .closedUpright\n    }"),
+    "M7b the status bar hidden sideways too": ("pose == .laptop || pose == .flatPortrait\n    }",
+                                               "pose == .laptop || pose == .flatPortrait || pose == .book\n    }"),
+    "M7c the status bar shown open flat upright": ("pose == .laptop || pose == .flatPortrait\n    }", "pose == .laptop\n    }"),
+    "M7d the inner display closed": ("var onInnerDisplay: Bool { hinge == .partiallyOpen || hinge == .fullyOpen }",
+                                     "var onInnerDisplay: Bool { hinge != .unknown }"),
+    "M7e no fold before the first report": ("guard reported == .unknown, let regionActive else { return reported }",
+                                            "guard reported == .unknown, let regionActive, false else { return reported }"),
+    "M7f the fold over a report": ("guard reported == .unknown, let regionActive else { return reported }",
+                                   "guard let regionActive else { return reported }"),
+    "M7g an active fold read as flat": ("return regionActive ? .partiallyOpen : .fullyOpen", "return regionActive ? .fullyOpen : .partiallyOpen"),
     "M8 a vertical fold read as across": ("guard let band, band.width >= band.height else { return nil }", "guard let band else { return nil }"),
     "M9 a fold across read as vertical": ("guard let band, band.height > band.width else { return nil }", "guard let band, band.height >= band.width else { return nil }"),
     # The crease, as before iOS 27.1, and the laptop pose's.
@@ -77,7 +87,11 @@ MUTANTS = {
     "M46 half for flat": ('case "flat"?: return .fullyOpen', 'case "flat"?: return .partiallyOpen'),
     "M47 the stand-in 30 pt": ("CGRect(x: size.width / 2 - 20, y: 0, width: 40, height: size.height)", "CGRect(x: size.width / 2 - 15, y: 0, width: 30, height: size.height)"),
     "M48 the cover's strip on the right on its side": ("case (678, 466): return (0, 84, 34, 0)", "case (678, 466): return (0, 0, 34, 84)"),
-    "M49 the inner display's status bar shown": ("case (951, 669), (669, 951): return (0, 0, 34, 0)", "case (951, 669), (669, 951): return (0, 0, 34, 84)"),
+    "M49 the inner display's status bar at the top sideways": ("case (951, 669): return statusBarHidden ? (0, 0, 34, 0) : (0, 0, 34, 84)",
+                                                               "case (951, 669): return statusBarHidden ? (0, 0, 34, 0) : (84, 0, 34, 0)"),
+    "M49b the status bar never hidden upright": ("case (669, 951): return statusBarHidden ? (0, 0, 34, 0) : (82, 0, 34, 0)",
+                                                 "case (669, 951): return (82, 0, 34, 0)"),
+    "M49c the cover's strip gone with the status bar": ("case (466, 678): return (0, 0, 34, 84)", "case (466, 678): return statusBarHidden ? (0, 0, 34, 0) : (0, 0, 34, 84)"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

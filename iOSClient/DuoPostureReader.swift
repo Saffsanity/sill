@@ -10,7 +10,10 @@ import SwiftUI
 // - The fold: each screen reads it from its own GeometryReader (`DuoPosture.read`), as
 //   `GeometryProxy.reservedRegions(kind: .division, options: .includeInactive)` gives it: in that
 //   reader's own space. The stream screen hands it to its layouts and overlays as `\.duoFold`.
-// - The status bar hides while the hinge is open (DuoPosture.hidesStatusBar).
+//   Before the hinge's first report the fold alone says which display this is and whether it is
+//   folded (DuoPosture.hinge(reported:regionActive:)), so the first layout is already the pose's.
+// - The stream screen hides the status bar on the inner display held upright
+//   (DuoPosture.hidesStatusBar, `duoStatusBar`); every other screen keeps it.
 //
 // DEBUG: the harness's `-SillHinge closed|half|flat` stands in for all of it (ContentView's
 // LayoutHarness): a hinge, and a fold given in the fake display's named space.
@@ -52,9 +55,20 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// The app's root: the Duo's hinge into the environment, and the status bar hidden while the
-    /// hinge is open. Nothing at all before iOS 27.1.
+    /// The app's root: the Duo's hinge into the environment. Nothing at all before iOS 27.1.
     func readsDuoPosture() -> some View { modifier(DuoPostureReader()) }
+
+    /// The stream screen's status bar (DuoPosture.hidesStatusBar): hidden on the inner display held
+    /// upright, as the approved boards drew those poses, so the picture keeps the 82 pt above the
+    /// fold; shown everywhere else, as before. In a background, so that hiding and showing it never
+    /// rebuilds the screen's views; off the Duo it adds nothing.
+    func duoStatusBar(_ posture: DuoPosture, size: CGSize) -> some View {
+        background {
+            if DuoPosture.hidesStatusBar(posture.pose(size)) {
+                Color.clear.statusBarHidden(true)
+            }
+        }
+    }
 
     /// The stream screen's fold for everything under it, and, in DEBUG, one console line each time
     /// the posture changes ("duo: stream screen: book, the fold x 455.5–495.5 in the way, 951×669").
@@ -76,14 +90,6 @@ private struct DuoPostureReader: ViewModifier {
         if #available(iOS 27.1, *) {
             content
                 .environment(\.duoEnvironment, DuoEnvironment(hinge: hinge))
-                // In a background, so that hiding and showing it never rebuilds the app's views (an
-                // `if` around the content would: a new client, the session gone). Off the Duo it adds
-                // nothing at all.
-                .background {
-                    if DuoPosture.hidesStatusBar(hinge) {
-                        Color.clear.statusBarHidden(true)
-                    }
-                }
                 .onHingeChange { _, new in
                     let now = DuoPosture.Hinge(new)
                     guard now != hinge else { return }      // it repeats itself while it settles
@@ -114,20 +120,23 @@ extension DuoPosture.Hinge {
 }
 
 extension DuoPosture {
-    /// The posture as the view `geo` measures sees it: the hinge from the environment, the fold in
-    /// that view's own space (the reserved region's frame, as iOS 27.1 gives it to a GeometryProxy;
-    /// or the harness's stand-in, moved into that space). `unknown` before iOS 27.1 and on a device
-    /// without a hinge.
+    /// The posture as the view `geo` measures sees it: the hinge from the environment (before its
+    /// first report, from the fold: `hinge(reported:regionActive:)`), the fold in that view's own
+    /// space (the reserved region's frame, as iOS 27.1 gives it to a GeometryProxy; or the harness's
+    /// stand-in, moved into that space). `unknown` before iOS 27.1, on a device without a hinge, and
+    /// in the harness without `-SillHinge`.
     static func read(_ geo: GeometryProxy, _ environment: DuoEnvironment) -> DuoPosture {
-        guard environment.hinge != .unknown else { return .unknown }
         switch environment.source {
         case .standIn(let fold):
+            guard environment.hinge != .unknown else { return .unknown }
             let origin = geo.frame(in: .named(displaySpace)).origin
             return DuoPosture(hinge: environment.hinge, fold: fold?.offsetBy(dx: -origin.x, dy: -origin.y))
         case .reservedRegions:
             if #available(iOS 27.1, *) {
                 let region = geo.reservedRegions(kind: .division, options: .includeInactive).first
-                return DuoPosture(hinge: environment.hinge, fold: region?.frame)
+                let hinge = hinge(reported: environment.hinge, regionActive: region?.isActive)
+                guard hinge != .unknown else { return .unknown }
+                return DuoPosture(hinge: hinge, fold: region?.frame)
             }
             return .unknown
         }

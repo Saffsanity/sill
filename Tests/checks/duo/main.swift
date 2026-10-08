@@ -57,9 +57,31 @@ check(FoldInfo.known(bookFold).verticalBand == bookFold && FoldInfo.known(bookFo
 check(FoldInfo.known(laptopFold).horizontalBand == laptopFold && FoldInfo.known(laptopFold).verticalBand == nil, "the laptop pose's is horizontal")
 check(FoldInfo.inferred.band == nil && FoldInfo.known(nil).band == nil && FoldInfo.known(bookFold).band == bookFold, "band")
 check(FoldInfo.known(rect(0, 0, 40, 40)).horizontalBand != nil && FoldInfo.known(rect(0, 0, 40, 40)).verticalBand == nil, "a square counts as across")
-// The status bar hides while the hinge is open, never on the cover or off the Duo.
-check(DuoPosture.hidesStatusBar(.partiallyOpen) && DuoPosture.hidesStatusBar(.fullyOpen), "hidden open")
-check(!DuoPosture.hidesStatusBar(.closed) && !DuoPosture.hidesStatusBar(.unknown), "shown closed and off the Duo")
+// The stream screen hides the status bar on the inner display held upright (the laptop pose and
+// open flat upright), as the approved boards drew those poses; it stays sideways (the book pose and
+// open flat sideways: its strip kept clear, as drawn), on the cover and off the Duo.
+check(DuoPosture.hidesStatusBar(.laptop) && DuoPosture.hidesStatusBar(.flatPortrait), "hidden upright on the inner display")
+check(!DuoPosture.hidesStatusBar(.book) && !DuoPosture.hidesStatusBar(.flatLandscape), "shown sideways")
+check(!DuoPosture.hidesStatusBar(.closedUpright) && !DuoPosture.hidesStatusBar(.closedSide) && !DuoPosture.hidesStatusBar(.unknown),
+      "shown on the cover and off the Duo")
+// Whichever way it goes, the pose stays: shown upright the stream screen is 669×869, hidden 669×951;
+// sideways 867×669 shown. So hiding it never turns the screen and loops.
+for (hinge, shown, hidden) in [(DuoPosture.Hinge.partiallyOpen, size(669, 869), upright), (.fullyOpen, size(669, 869), upright),
+                               (.partiallyOpen, size(867, 669), book), (.fullyOpen, size(867, 669), book)] {
+    let p = DuoPosture(hinge: hinge)
+    check(DuoPosture.hidesStatusBar(p.pose(shown)) == DuoPosture.hidesStatusBar(p.pose(hidden)), "\(hinge) \(shown): the same rule either way")
+}
+check(DuoPosture(hinge: .partiallyOpen).onInnerDisplay && DuoPosture(hinge: .fullyOpen).onInnerDisplay
+      && !DuoPosture(hinge: .closed).onInnerDisplay && !DuoPosture.unknown.onInnerDisplay, "the inner display: the hinge open")
+// Before the hinge's first report: the fold says which display and whether it is folded.
+check(DuoPosture.hinge(reported: .unknown, regionActive: true) == .partiallyOpen, "no report yet, the fold in the way: half-folded")
+check(DuoPosture.hinge(reported: .unknown, regionActive: false) == .fullyOpen, "no report yet, the fold flat: open flat")
+check(DuoPosture.hinge(reported: .unknown, regionActive: nil) == .unknown, "no report, no fold: unknown (any other device, the cover)")
+for reported in [DuoPosture.Hinge.closed, .partiallyOpen, .fullyOpen] {
+    for active in [true, false, nil] as [Bool?] {
+        check(DuoPosture.hinge(reported: reported, regionActive: active) == reported, "a report wins: \(reported) \(String(describing: active))")
+    }
+}
 check(DuoPosture(hinge: .partiallyOpen, fold: bookFold).describe(book) == "book, the fold x 455.5–495.5 in the way, 951×669", "the console's book")
 check(DuoPosture(hinge: .fullyOpen, fold: laptopFold).describe(upright) == "flat-portrait, the fold y 455.5–495.5 flat, 669×951", "the console's flat")
 check(DuoPosture(hinge: .closed).describe(cover) == "closed-upright, 382×678", "the console's cover")
@@ -285,9 +307,14 @@ check(DuoPosture.hinge(argument: nil) == nil && DuoPosture.hinge(argument: "open
 check(DuoPosture.standInFold(book) == bookFold && DuoPosture.standInFold(upright) == laptopFold, "the stand-in is the device's fold")
 check(DuoPosture.standInFold(size(1000, 710)) == rect(480, 0, 40, 710) && DuoPosture.standInFold(size(710, 1000)) == rect(0, 480, 710, 40), "at any size")
 check(DuoPosture.displaySpace == "sill.display", "the fake display's space")
-func insets(_ s: CGSize) -> [CGFloat]? { DuoPosture.displayInsets(s).map { [$0.top, $0.leading, $0.bottom, $0.trailing] } }
-check(insets(book) == [0, 0, 34, 0] && insets(upright) == [0, 0, 34, 0], "the inner display: the home indicator alone")
-check(insets(size(466, 678)) == [0, 0, 34, 84] && insets(size(678, 466)) == [0, 84, 34, 0], "the cover: its camera's strip")
+func insets(_ s: CGSize, hidden: Bool = false) -> [CGFloat]? {
+    DuoPosture.displayInsets(s, statusBarHidden: hidden).map { [$0.top, $0.leading, $0.bottom, $0.trailing] }
+}
+check(insets(book) == [0, 0, 34, 84] && insets(upright) == [82, 0, 34, 0], "the inner display with its status bar: 84 at the side, 82 at the top")
+check(insets(book, hidden: true) == [0, 0, 34, 0] && insets(upright, hidden: true) == [0, 0, 34, 0], "hidden: the home indicator alone")
+check(insets(size(466, 678)) == [0, 0, 34, 84] && insets(size(678, 466)) == [0, 84, 34, 0]
+      && insets(size(466, 678), hidden: true) == [0, 0, 34, 84] && insets(size(678, 466), hidden: true) == [0, 84, 34, 0],
+      "the cover: its camera's strip, either way")
 check(insets(size(1000, 710)) == nil && insets(size(382, 678)) == nil && insets(size(710, 1000)) == nil, "any other size: none")
 // The stand-in through the whole chain gives what the device gave.
 for (hinge, s, info) in [(DuoPosture.Hinge.partiallyOpen, book, FoldInfo.known(bookFold)), (.partiallyOpen, upright, .known(laptopFold)),

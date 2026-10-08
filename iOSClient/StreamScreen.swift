@@ -244,8 +244,10 @@ struct StreamScreen: View {
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
             .background(TouchWatcher(watch: touches))
-            // The layouts and the overlays share this screen's space, and so its fold.
+            // The layouts and the overlays share this screen's space, and so its fold; the inner
+            // display held upright gives the picture the status bar's strip.
             .duoFold(posture, size: geo.size, screen: "stream screen")
+            .duoStatusBar(posture, size: geo.size)
         }
         .background(Color.black)
         .overlayPreferenceValue(WindowMenuAnchorKey.self) { anchor in

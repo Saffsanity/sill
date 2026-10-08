@@ -93,12 +93,27 @@ struct DuoPosture: Equatable {
         }
     }
 
-    /// While the hinge is open Sill is on the inner display, and hides the status bar there: shown,
-    /// it keeps an 84 pt strip at the side sideways and 82 pt at the top upright out of Sill's safe
-    /// area, for a clock in its corner. The cover keeps its strip (the camera's) either way, and its
-    /// status bar, as an iPhone does.
-    static func hidesStatusBar(_ hinge: Hinge) -> Bool {
-        hinge == .partiallyOpen || hinge == .fullyOpen
+    /// The hinge open: Sill is on the inner display (the book, laptop and open flat poses).
+    var onInnerDisplay: Bool { hinge == .partiallyOpen || hinge == .fullyOpen }
+
+    /// The hinge to go by: what `onHingeChange` reported, or, before its first call (a frame or two
+    /// after launch on a device, longer in the simulator), what the display's fold says where it has
+    /// one (only the inner display does): in the way, half-folded; not, open flat. Neither: unknown,
+    /// as on every device without a hinge, where no display has a fold.
+    static func hinge(reported: Hinge, regionActive: Bool?) -> Hinge {
+        guard reported == .unknown, let regionActive else { return reported }
+        return regionActive ? .partiallyOpen : .fullyOpen
+    }
+
+    /// Whether the stream screen hides the status bar: on the inner display held upright (the
+    /// laptop pose, and open flat upright), where it would take 82 pt at the top out of the picture
+    /// above the fold, and the approved boards for those poses drew none. Sideways (the book pose,
+    /// open flat sideways) it stays, its 84 pt strip at the side kept clear as the approved boards
+    /// drew it; so it does on the cover, as on an iPhone, and on every other screen in every pose
+    /// (the connect screen keeps the clock and the Wi-Fi it asks about). To hide it sideways too:
+    /// `pose == .book || pose == .flatLandscape` here.
+    static func hidesStatusBar(_ pose: Pose) -> Bool {
+        pose == .laptop || pose == .flatPortrait
     }
 
     /// "book, the fold x 455.5–495.5 in the way, 951×669", for the DEBUG console.
@@ -309,13 +324,15 @@ extension DuoPosture {
     }
 
     /// The safe area (top, leading, bottom, trailing) each of the Duo's displays gives Sill, as the
-    /// probe measured it on the iOS 27.1 simulator: the inner display, the status bar hidden while
-    /// open, the home indicator's 34 alone; the cover its camera's 84 pt strip at the right upright
-    /// and at the left on its side (the duorig pose closed-side), and the home indicator's 34. Nil for
-    /// any other size.
-    static func displayInsets(_ size: CGSize) -> (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat)? {
+    /// probe measured it on the iOS 27.1 simulator: the inner display with its status bar, a strip
+    /// of 84 pt at the side sideways and 82 at the top upright, and the home indicator's 34; with the
+    /// status bar hidden (the stream screen upright, `hidesStatusBar`), the 34 alone; the cover its
+    /// camera's 84 pt strip at the right upright and at the left on its side (the duorig pose
+    /// closed-side), and the 34, either way. Nil for any other size.
+    static func displayInsets(_ size: CGSize, statusBarHidden: Bool = false) -> (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat)? {
         switch (size.width, size.height) {
-        case (951, 669), (669, 951): return (0, 0, 34, 0)
+        case (951, 669): return statusBarHidden ? (0, 0, 34, 0) : (0, 0, 34, 84)
+        case (669, 951): return statusBarHidden ? (0, 0, 34, 0) : (82, 0, 34, 0)
         case (466, 678): return (0, 0, 34, 84)
         case (678, 466): return (0, 84, 34, 0)
         default: return nil
