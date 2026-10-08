@@ -498,6 +498,8 @@ struct LayoutHarness: View {
                 screen.safeAreaPadding(EdgeInsets(top: max(0, want.top - have.top), leading: max(0, want.leading - have.leading),
                                                   bottom: max(0, want.bottom - have.bottom),
                                                   trailing: max(0, want.trailing - have.trailing)))
+                    // Black under the insets too, as the app's own root is (ContentView's `app`).
+                    .background(Color.black)
             }
         } else {
             screen
