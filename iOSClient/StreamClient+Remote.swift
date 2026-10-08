@@ -687,11 +687,12 @@ extension StreamClient {
         }
         macInfoSaved = true
         session?.macID = info.macID
-        // A remote session's newest verified kind 18: the move home's must be at least as new. The
-        // first one lets the move home start (a Mac the network lists already moves 2 s after).
+        // A remote session's newest verified kind 18: the move home's must be at least as new as it
+        // was when the move started (DiscoveryPolicy.HomeMoveInfo). The first one lets the move home
+        // start (a Mac the network lists already moves 2 s after).
         if session?.route.isRemote == true {
-            let first = remoteInfoIssuedAt == nil
-            remoteInfoIssuedAt = max(remoteInfoIssuedAt ?? 0, info.issuedAt)
+            let first = homeInfo.latest == nil
+            homeInfo.remote(info.issuedAt)
             if first { moveHomeIfListed() }
         }
         var mac = SavedMacs.refreshed(savedMacs[i], info: info, fingerprint: fingerprint, allowLoopback: Self.keepsLoopback) ?? savedMacs[i]

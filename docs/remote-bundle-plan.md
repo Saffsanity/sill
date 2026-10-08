@@ -931,7 +931,9 @@ refused, forgotten with the row), picks the row among those with the Mac's tag (
   - `lastHomeMove: Double?`;
   - `failedHomeMoves: (listing: Double, count: Int)?`;
   - `refusedHomeListing: Double?` (since the merge's review `homeMoveRows`, by row);
-  - `remoteInfoIssuedAt: Double?`: the `issuedAt` of the remote session's last verified kind 18.
+  - `remoteInfoIssuedAt: Double?`: the `issuedAt` of the remote session's last verified kind 18
+    (since the merge with main `homeInfo`, `DiscoveryPolicy.HomeMoveInfo`: the newest, and the floor
+    taken as a move starts).
 
   All are cleared in `tearDown`, `abandonMove` and at a new session.
 - **`moveHomeIfListed()`,** modelled on `moveToNetworkIfListed` (:886-901). It is called from
@@ -972,7 +974,9 @@ refused, forgotten with the row), picks the row among those with the Mac's tag (
   - the window list's launch ID equals the session's (`DiscoveryPolicy.sameHost`);
   - kind 18 verifies against the saved pin (`SignedMacInfo.verified()`, fingerprint and Mac ID
     equal to the saved Mac's);
-  - its `issuedAt` ≥ `remoteInfoIssuedAt`.
+  - its `issuedAt` ≥ `remoteInfoIssuedAt` (since the merge with main: ≥ the newest one as the move
+    started, `HomeMoveInfo`'s floor, so a kind 18 the Mac broadcasts during the move cannot refuse
+    the Mac's own row).
 
   The Mac signs kind 18 afresh for every catalog (RemoteAccess.swift:537-542). A signature at
   least as new as the one this session received was made by the Mac since this session began, so
@@ -1013,7 +1017,7 @@ refused, forgotten with the row), picks the row among those with the Mac's tag (
     before it goes out on the remote connection (the fence has the Mac read it there, as away),
     and one after it waits for the home connection's state.
 - **`receiveMacInfo`** (StreamClient+Remote.swift:521-545) records `remoteInfoIssuedAt` for a
-  verified kind 18 on a remote session.
+  verified kind 18 on a remote session (since the merge with main `homeInfo.remote`).
 - **`StreamScreen`** also re-sends the viewport on a change of `client.remoteRoute`, so a session
   that stops being away asks for its full rate whatever path it took.
 
@@ -1992,11 +1996,15 @@ features kept whole. Where they meet, beyond the text:
   home pin. The DEBUG row of `-SillMoveHomeTest` stands for the session's Mac (main's `stands`) at a
   door that requires pairing, so its host runs `--remote --pairing`.
 - **The kind 18 floor (the adversarial review's race), fixed.** The move home's kind 18 is now held
-  to the remote session's newest one as the move began (`homeMoveInfoFloor`), not as the probe is
-  judged, so a kind 18 the Mac broadcasts meanwhile (its addresses changed), read on the remote
-  connection between the home door's catalog and the probe's verdict, no longer refuses the Mac's
-  own listing. A capture from before the session is still refused (the floor is at least the
-  session's first). The check stays, a millisecond: the pinned handshake has proved the Mac already.
+  to the remote session's newest one as the move began, not as the probe is judged, so a kind 18
+  the Mac broadcasts meanwhile (its addresses changed), read on the remote connection between the
+  home door's catalog and the probe's verdict, no longer refuses the Mac's own row. A capture from
+  before the session is still refused (the floor is at least the session's first). The check stays,
+  a millisecond: the pinned handshake has proved the Mac already. Since the merge's review the rule
+  is pure (`DiscoveryPolicy.HomeMoveInfo`: the newest, the floor taken as a move starts, `accepts`;
+  StreamClient's `homeInfo`), and `policy` checks it, the race among its cases, with mutants K1–K7
+  (K1 is the rule before the fix: held to the newest). That StreamClient takes the floor at the
+  move's start is the glue's, one line in `moveHome`.
 - **The host.** RemoteServer's admission moved into `Door` (#37), so SILL_TEST_REMOTE_ORIGIN's
   `remoteDoor` flag is passed from there (`kind == .remote`), and TestHooks lists the variable among
   the door hooks a host that is not a test host ignores. StreamCoordinator keeps both sides' connect

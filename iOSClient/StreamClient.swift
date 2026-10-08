@@ -544,15 +544,13 @@ final class StreamClient: ObservableObject {
     /// the session's row afterwards (a pin that fails later, docs/home-pairing-plan.md §7.6).
     private var homeMoveTrust: DiscoveryPolicy.HomeTrust?
     private var homeMoveRow: HomeRow?
-    /// The `issuedAt` of this remote session's last verified kind 18 (StreamClient+Remote's
-    /// `receiveMacInfo`): the move's connection must bring one at least as new, signed by the saved
-    /// Mac's key, so a tag and a kind 18 captured before this session cannot take it over.
-    var remoteInfoIssuedAt: Double?
-    /// `remoteInfoIssuedAt` as the move under way started, which its kind 18 is held to: a kind 18
-    /// the Mac broadcasts meanwhile (its addresses changed) reaches the remote connection too, and
-    /// read there before the probe is judged it would be newer than the one the home door's catalog
-    /// carried, and refuse the Mac's own listing (the adversarial review, docs/remote-bundle-plan.md).
-    private var homeMoveInfoFloor: Double?
+    /// This remote session's verified kind 18s (StreamClient+Remote's `receiveMacInfo`: the newest
+    /// `issuedAt`) and, while a move home is under way, the newest as it started, which the move's
+    /// own kind 18, signed by the saved Mac's key, must reach (DiscoveryPolicy.HomeMoveInfo): a tag
+    /// and a kind 18 captured before this session cannot take it over, and a kind 18 the Mac
+    /// broadcasts during the move (read on the remote connection before the probe is judged) cannot
+    /// refuse the Mac's own row (the adversarial review's race).
+    var homeInfo = DiscoveryPolicy.HomeMoveInfo()
     /// The move home's next look (the listing's 2 s, the back-off).
     private var homeMoveCheck: DispatchWorkItem?
     #if DEBUG
@@ -1606,7 +1604,7 @@ final class StreamClient: ObservableObject {
         // A row no longer listed is forgotten, its refusal and its tries: listed again, it is tried afresh.
         homeMoveRows = homeMoveRows.keeping(listed: Set(macs.filter { $0.route == .network }.map(\.id)))
         guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
-              connection != nil, remoteInfoIssuedAt != nil, let id = s.macID, let saved = savedMac(id) else { return }
+              connection != nil, homeInfo.latest != nil, let id = s.macID, let saved = savedMac(id) else { return }
         // Every network row whose tag names the session's saved Mac, by row: one not refused, at a door
         // that speaks TLS, dialed pinned to the saved Mac's key, never plain, never an ask (a plain door
         // is passed over; a Mac that removed this device or has a new key keeps the session remote).
@@ -1649,7 +1647,7 @@ final class StreamClient: ObservableObject {
         homeMoveName = mac.name
         homeMoveTrust = trust
         homeMoveRow = HomeRow(id: mac.id, tagNamed: true)
-        homeMoveInfoFloor = remoteInfoIssuedAt
+        homeInfo.moveStarted()
         homeMoveViewport = lastViewport.map { v -> Viewport in
             var home = v
             home.fps = StreamClient.wantedFPS(remote: false)
@@ -1670,13 +1668,12 @@ final class StreamClient: ObservableObject {
 
     /// The move home's kind 18 speaks for the saved Mac this session is with: its signature checks, the
     /// key that signed it is the saved pin, its Mac ID is the session's, and it is at least as new as
-    /// the one this remote session had received when the move started (`homeMoveInfoFloor`; the Mac
-    /// signs one afresh for every catalog). Main thread.
+    /// the newest one this remote session had received when the move started (DiscoveryPolicy.
+    /// HomeMoveInfo's floor; the Mac signs one afresh for every catalog). Main thread.
     private func homeInfoChecks(_ signed: SignedMacInfo?) -> Bool {
         guard let verified = signed?.verified(), let id = session?.macID, let saved = savedMac(id),
-              saved.fingerprintData == verified.fingerprint, verified.info.macID == id,
-              let floor = homeMoveInfoFloor else { return false }
-        return verified.info.issuedAt >= floor
+              saved.fingerprintData == verified.fingerprint, verified.info.macID == id else { return false }
+        return homeInfo.accepts(verified.info.issuedAt)
     }
 
     /// The move home's pinned dial met another key (-9808, DeviceTLS's `onPinRefused`): not the
@@ -1702,8 +1699,7 @@ final class StreamClient: ObservableObject {
         homeMoveViewport = nil
         homeMoveTrust = nil
         homeMoveRow = nil
-        homeMoveInfoFloor = nil
-        remoteInfoIssuedAt = nil
+        homeInfo = DiscoveryPolicy.HomeMoveInfo()
         #if DEBUG
         testHomeRows = []
         homeMoveAnnounced = nil
@@ -2089,11 +2085,10 @@ final class StreamClient: ObservableObject {
                 persistSavedMacs()
             }
             remoteRoute = nil
-            remoteInfoIssuedAt = nil
+            homeInfo = DiscoveryPolicy.HomeMoveInfo()
             failedHomeMoves = nil
             homeMoveTrust = nil
             homeMoveRow = nil
-            homeMoveInfoFloor = nil
         }
         connectedDirectly = false
         session?.route = .network
@@ -2199,7 +2194,7 @@ final class StreamClient: ObservableObject {
             homeMoveViewport = nil
             homeMoveTrust = nil
             homeMoveRow = nil
-            homeMoveInfoFloor = nil
+            homeInfo.moveEnded()
             moveHomeIfListed()
         case .fromDirect:
             #if DEBUG

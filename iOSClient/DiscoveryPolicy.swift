@@ -393,6 +393,31 @@ enum DiscoveryPolicy {
         return best.map { (id: $0.id, trust: $0.trust) }
     }
 
+    /// The move home's second look at its Mac (docs/remote-bundle-plan.md §7.3; the merge's review,
+    /// 2026-10-08): the home door's kind 18, signed by the saved key for the session's Mac ID (the
+    /// caller checks both), must be at least as new as the newest one this remote session had when
+    /// the move started (`floor`), not as the newest one when the probe is judged (`latest`): a kind
+    /// 18 the Mac broadcasts meanwhile (its addresses changed) reaches the remote connection too, and
+    /// read there between the home door's catalog and the probe's verdict it is newer than the one
+    /// that catalog carried, so the Mac's own row would be refused. A capture from before this session
+    /// is still refused: the floor is at least the session's first kind 18.
+    struct HomeMoveInfo: Equatable {
+        /// The newest `issuedAt` of the verified kind 18s on the remote connection; nil before the first.
+        var latest: Double?
+        /// `latest` as the move under way started; nil while no move home is under way.
+        var floor: Double?
+
+        /// A verified kind 18 from the saved Mac on the remote connection. One read late never lowers
+        /// the newest.
+        mutating func remote(_ issuedAt: Double) { latest = max(latest ?? issuedAt, issuedAt) }
+        /// A move home starts: its kind 18 is held to the newest one so far.
+        mutating func moveStarted() { floor = latest }
+        /// The move ended, either way.
+        mutating func moveEnded() { floor = nil }
+        /// Whether the move's kind 18, issued at `issuedAt`, is new enough. Nothing is, with no move.
+        func accepts(_ issuedAt: Double) -> Bool { floor.map { issuedAt >= $0 } ?? false }
+    }
+
     /// How the move home dials the saved Mac's network row (since pairing at home,
     /// docs/home-pairing-plan.md §7.2): TLS `sill/1` pinned to the saved Mac's key, the key the
     /// session through the remote door is pinned to, and the trust a tap's dial of that row takes

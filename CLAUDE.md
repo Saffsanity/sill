@@ -124,7 +124,7 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   hand-over (`session.home`, `session.row`; `homeTLS` marked); a pin refused on
   the move home refuses that listing (never #44's `newKey`: the session holds
   the Mac's key through the remote door); the kind 18 floor taken as the move
-  starts (`homeMoveInfoFloor`), which fixes the review's broadcast race. Host:
+  starts (`DiscoveryPolicy.HomeMoveInfo`), which fixes the review's broadcast race. Host:
   SILL_TEST_REMOTE_ORIGIN reaches `Door` (`remoteDoor: kind == .remote`) and
   TestHooks; StreamCoordinator, StreamServer and HostConfig keep both sides;
   the pacing harness defines LINK_JUDGE by what its StreamServer has. Device:

@@ -4,7 +4,8 @@
 # a Direct row, the move from AWDL to the network, a live session following the best path (the cable,
 # Wi-Fi, Direct; pathPlan, upWait) and the remote rule, with grids and models of plugs and pulls; a
 # remote session's move home (moveHome; moveHomeTrust: pinned TLS only; moveHomeRow and HomeRows: the row,
-# chosen and refused by row; with a model of the glue);
+# chosen and refused by row; with a model of the glue; HomeMoveInfo: its kind 18 against the floor taken
+# as it starts);
 # and pairing at home's session rules (home.swift: the pin, the trust a dial starts, how a session at
 # home ends, the ask's answer, the words).
 #   Tests/checks/policy/run.sh             compile and run the check

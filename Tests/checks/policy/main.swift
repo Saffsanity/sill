@@ -1210,6 +1210,38 @@ check("model (home rows): a look-alike that never answers, first: the next try, 
 ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .refused)], until: 120)
 check("model (home rows): a look-alike alone: one try, never again while listed (\(ht.starts))", ht.starts == ["12.00 Look-alike"] && !ht.home)
 
+// HomeMoveInfo (the merge's review, 2026-10-08): the move home's kind 18 is held to the remote session's
+// newest one as the move started, not as the probe is judged. The adversarial review's race: the Mac signs a
+// kind 18 for the home door's catalog, then broadcasts another (its addresses changed), which the remote
+// connection carries to the device before the home door's catalog has been read; held to the newest, the
+// Mac's own row was refused.
+var info = P.HomeMoveInfo()
+check("home info: no kind 18 on the remote session yet: no floor, nothing accepted", info.latest == nil && info.floor == nil && !info.accepts(100))
+info.remote(100)
+check("home info: the session's kind 18, and no move: nothing accepted (no floor)", info.latest == 100 && info.floor == nil && !info.accepts(200))
+info.moveStarted()
+check("home info: a move's floor is the session's newest kind 18 as it starts", info.floor == 100)
+check("home info: the home door's kind 18, signed since: the Mac's", info.accepts(101))
+check("home info: ...one exactly as new as the floor too", info.accepts(100))
+check("home info: one from before the session's (a capture): refused", !info.accepts(99.5))
+info.remote(105)
+check("home info: a kind 18 the Mac broadcasts mid-move raises the newest, not the move's floor", info.latest == 105 && info.floor == 100)
+check("home info: the race: the home door's catalog kind 18 (103), signed before that broadcast (105), is still the Mac's", info.accepts(103))
+info.moveEnded()
+check("home info: the move over: no floor, nothing accepted", info.floor == nil && !info.accepts(200))
+info.moveStarted()
+check("home info: the next move's floor is the newest since (105)", info.floor == 105 && !info.accepts(103) && info.accepts(105))
+info.remote(90)
+check("home info: an older kind 18 read late never lowers the newest", info.latest == 105 && info.floor == 105)
+// The race as a sequence: the session's kind 18 at 100; the move starts; the home door's catalog signs 103
+// and the Mac broadcasts 104 before the device reads that catalog; the probe judged after both.
+var race = P.HomeMoveInfo()
+race.remote(100); race.moveStarted(); race.remote(104)
+check("home info (the race): the Mac's own row is not refused for a broadcast in the same moment", race.accepts(103))
+var replay = P.HomeMoveInfo()
+replay.remote(100); replay.moveStarted()
+check("home info (a replay): a kind 18 captured before this session is refused, whatever came after", !replay.accepts(50))
+
 // moveHomeTrust (the merge of remote-away with pairing at home, 2026-10-08): the move home dials the
 // saved Mac's network row pinned to its key, at a door that speaks TLS, as a tap's dial of that row
 // would be; never plain (DEBUG or not), never any key, never an ask.
