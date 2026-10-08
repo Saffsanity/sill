@@ -58,16 +58,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
-      # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had no 27.1 release
-      # in October 2026); without either, a warning and the newest Xcode there, whose iOS build then
-      # fails if it is older.
-      - name: Select Xcode 27.1
+      # The Mac side (SwiftPM, the pure checks, the CLI) on the newest Xcode 27 that is not a beta, as
+      # Sill for Mac's releases are built; without one, a warning and the newest Xcode there. The iOS
+      # app picks its own below.
+      - name: Select Xcode 27
         id: xcode
         uses: ./.github/actions/select-xcode
         with:
-          version: '27.1'
-          allow-beta: 'true'
+          version: '27'
 
       # The package has no dependencies (so no Package.resolved yet): the key is the toolchain and
       # the manifest. A checkout gives every source a new modification time, so most of them compile
@@ -90,6 +88,17 @@ jobs:
 
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
+
+      # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
+      # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had only
+      # Xcode_27.1_beta.app, 27A9269, in October 2026); without either, a warning and the newest Xcode
+      # there, whose iOS build then fails if it is older. Selected only here, after the Mac side, so
+      # nothing of Sill for Mac is ever built with a beta.
+      - name: Select Xcode 27.1 for the iOS app
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27.1'
+          allow-beta: 'true'
 
       # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
       # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
