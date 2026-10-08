@@ -894,7 +894,9 @@ a break, the session moves to the home door.
 - **Never:**
   - for a session made with **Connect Remotely** (`DialReason.connectRemotely`), which exists to
     test the VPN path from home;
-  - to a listing found to be another launch of Sill, or another Mac, while that listing lasts;
+  - to a listing found to be another launch of Sill, or another Mac, while that listing lasts
+    (since the merge's review, 2026-10-08: to a row found so, while that row is listed; another
+    row with the Mac's tag is tried, `moveHomeRow`);
   - while a move of any kind is under way.
 
 #### 7.2 `DiscoveryPolicy.moveHome` (pure, beside `moveToNetwork` :290-295)
@@ -917,13 +919,18 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
 `upWait` is PR #12's: `min(pathHysteresis × 2^min(failures, 4), upBackoffCap)`, which gives 10, 20,
 40 and 60 s for 1, 2, 3 and 4 failures (5 × 16 = 80 is capped at 60).
 
+Since the merge's review (2026-10-08) a refusal is a row's, not the listing's: `moveHome` has no
+`refusedListing`, and `DiscoveryPolicy.moveHomeRow`, with `HomeRows` (each row's tries and the rows
+refused, forgotten with the row), picks the row among those with the Mac's tag ("Merged with main",
+"The merge's review").
+
 #### 7.3 `StreamClient` (on PR #12; re-read its merged file before editing)
 
 - **`MoveKind`** (PR #12) gains `.fromRemote`.
 - **State:**
   - `lastHomeMove: Double?`;
   - `failedHomeMoves: (listing: Double, count: Int)?`;
-  - `refusedHomeListing: Double?`;
+  - `refusedHomeListing: Double?` (since the merge's review `homeMoveRows`, by row);
   - `remoteInfoIssuedAt: Double?`: the `issuedAt` of the remote session's last verified kind 18.
 
   All are cleared in `tearDown`, `abandonMove` and at a new session.
@@ -935,7 +942,8 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
   for the next discovery change), and after a move ends. It needs:
   - `connected`, `session.route.isRemote`, `session.why != .connectRemotely`, `sessionListed`;
   - no move under way, and a connection;
-  - `let id = session.macID`, and a row `macs.first { $0.route == .network && $0.macID == id }`.
+  - `let id = session.macID`, and a row `macs.first { $0.route == .network && $0.macID == id }`
+    (since the merge's review the one `moveHomeRow` picks among them).
 
   Then it runs `DiscoveryPolicy.moveHome(…)` and moves, or schedules the look again.
 - **The move:**
@@ -973,7 +981,8 @@ static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, 
   (anyone on its network) can fetch a fresh kind 18 and the launch ID there and relay them, the
   plaintext home door's exposure until M5, as for every reconnect over it today.
 
-  A mismatch: "remote: move home refused: …" and `refusedHomeListing = savedSightings.since[id]`.
+  A mismatch: "remote: move home refused: …" and `refusedHomeListing = savedSightings.since[id]`
+  (since the merge's review: that row joins `homeMoveRows.refused`).
 - **`finishMove(c, kind: .fromRemote, kept:)`** (PR #12):
   - guard: `connected`, `let old = connection`, `session?.route.isRemote == true`;
   - fenced: `link.handOver(from: old, to: c, …)`, with `fenceTimeout` 3 s;
@@ -1966,15 +1975,19 @@ features kept whole. Where they meet, beyond the text:
   "removed" revokes, pinned to the saved key), and the saved Mac is marked as one whose home door
   speaks TLS (`homeTLS`). The policy check covers the trust (seven cases, one a grid of every door,
   removal, new key and build against `homeDial`) and five mutants (H7–H11).
-- **A pin refused on the move home refuses the listing.** The move's dial passes DeviceTLS's
+- **A pin refused on the move home refuses that row.** The move's dial passes DeviceTLS's
   `onPinRefused`: another key at the tag-named row is not the saved Mac, whose key the session holds
-  through the remote door at that moment, so the listing is refused as another launch's is (not
-  tried again while it lasts) and nothing is paired again: #44's `afterPinRefused` and `newKey` are
+  through the remote door at that moment, so the row is refused as another launch's is (not dialed
+  again while it is listed; since the merge's review a refusal is a row's, and another row with the
+  Mac's tag is tried at once) and nothing is paired again: #44's `afterPinRefused` and `newKey` are
   a session dial's, and taken here they would end a working session's Mac. Without it the row's
   connection would prepare again and again until the move's 5 s, and then count as a failure.
 - **Which row.** The move home takes only a network row whose TXT tag resolves to the session's
   saved Mac (`FoundMac.macID`), never a row by its Bonjour name alone, nor one whose tag names no
-  saved Mac (#44's `rowMac`): main's `recomputeMacs` gives such rows no Mac ID. After #46's
+  saved Mac (#44's `rowMac`): main's `recomputeMacs` gives such rows no Mac ID. Among those, since
+  the merge's review, by row (`DiscoveryPolicy.moveHomeRow`, `HomeRows`): a plain door passed over, a
+  row found not to be the Mac never dialed again while it is listed, the fewest tries first, so a
+  look-alike replaying the public tag cannot keep the session from the Mac's own row. After #46's
   `superseding` the session goes on as the newer record, whose key both the remote dial and the move
   home pin. The DEBUG row of `-SillMoveHomeTest` stands for the session's Mac (main's `stands`) at a
   door that requires pairing, so its host runs `--remote --pairing`.

@@ -528,8 +528,11 @@ final class StreamClient: ObservableObject {
     private var lastHomeMove: Double?
     /// Moves home in a row to one listing (its `savedSightings.since`) that did not complete.
     private var failedHomeMoves: (listing: Double, count: Int)?
-    /// A listing found to be another launch of Sill, or another Mac: not tried again while it lasts.
-    private var refusedHomeListing: Double?
+    /// The rows that carry the saved Mac's tag, by row (DiscoveryPolicy.HomeRows): each one's tries,
+    /// and those found not to be this session's Mac (another key at the pin, another launch, a kind 18
+    /// not the Mac's, a goodbye), never dialed again while listed. A row's is forgotten once it is no
+    /// longer listed (`moveHomeIfListed`).
+    private var homeMoveRows = DiscoveryPolicy.HomeRows()
     /// The listing the move under way went to, and its row's Bonjour name (the session's afterwards).
     private var homeMoveListing: Double?
     private var homeMoveName: String?
@@ -1588,7 +1591,11 @@ final class StreamClient: ObservableObject {
     /// for DiscoveryPolicy.moveAfter without a break, move the session home to the network door
     /// (DiscoveryPolicy.moveHome), by the make-before-break move from AWDL, over the door's TLS pinned
     /// to the saved Mac's key (DiscoveryPolicy.moveHomeTrust: never plain; a plain door, a Mac that
-    /// removed this device or one to pair with again keeps the session remote). The Mac then runs the
+    /// removed this device or one to pair with again keeps the session remote). Which row is chosen by
+    /// row among those with the Mac's tag (DiscoveryPolicy.moveHomeRow, `homeMoveRows`): a plain door is
+    /// passed over, a row found not to be the Mac is not dialed again while listed, and the fewest
+    /// tries go first, so a look-alike replaying the tag cannot keep the session from the Mac's own
+    /// row (the merge's review, 2026-10-08). The Mac then runs the
     /// home quality in one restart, at this device's full rate (docs/remote-bundle-plan.md §7). Never
     /// for a session made with Connect Remotely (it tests the VPN path from home), never to a Direct
     /// row (not home), never beside another move, and not before the session's first window list and
@@ -1596,20 +1603,24 @@ final class StreamClient: ObservableObject {
     func moveHomeIfListed() {
         homeMoveCheck?.cancel()
         homeMoveCheck = nil
+        // A row no longer listed is forgotten, its refusal and its tries: listed again, it is tried afresh.
+        homeMoveRows = homeMoveRows.keeping(listed: Set(macs.filter { $0.route == .network }.map(\.id)))
         guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
-              connection != nil, remoteInfoIssuedAt != nil, let id = s.macID, let saved = savedMac(id),
-              let mac = macs.first(where: { $0.route == .network && $0.macID == id }),
-              // Pinned TLS to the saved Mac's key at a door that speaks it, never plain, never an ask:
-              // a plain door, or a Mac that removed this device or has a new key, keeps it remote.
-              let trust = DiscoveryPolicy.moveHomeTrust(door: mac.door, revoked: saved.revoked == true, newKey: saved.newKey == true,
-                                                        savedPin: saved.fingerprintData) else { return }
+              connection != nil, remoteInfoIssuedAt != nil, let id = s.macID, let saved = savedMac(id) else { return }
+        // Every network row whose tag names the session's saved Mac, by row: one not refused, at a door
+        // that speaks TLS, dialed pinned to the saved Mac's key, never plain, never an ask (a plain door
+        // is passed over; a Mac that removed this device or has a new key keeps the session remote).
+        let rows = macs.filter { $0.route == .network && $0.macID == id }
+        guard let pick = DiscoveryPolicy.moveHomeRow(rows: rows.map { (id: $0.id, door: $0.door) }, known: homeMoveRows,
+                                                     revoked: saved.revoked == true, newKey: saved.newKey == true,
+                                                     savedPin: saved.fingerprintData),
+              let mac = rows.first(where: { $0.id == pick.id }) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let listing = savedSightings.since[id]
         let failures = failedHomeMoves.map { $0.listing == listing ? $0.count : 0 } ?? 0
-        let decision = DiscoveryPolicy.moveHome(listedSince: listing, lastAttempt: lastHomeMove, failures: failures,
-                                                refusedListing: refusedHomeListing, now: now)
+        let decision = DiscoveryPolicy.moveHome(listedSince: listing, lastAttempt: lastHomeMove, failures: failures, now: now)
         if decision.move {
-            moveHome(to: mac, listing: listing, trust: trust)
+            moveHome(to: mac, listing: listing, trust: pick.trust)
         } else if let at = decision.recheckAt {
             #if DEBUG
             if failures == 0, homeMoveAnnounced != listing {
@@ -1633,6 +1644,7 @@ final class StreamClient: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         lastHomeMove = now
         lastMoveUp = now
+        homeMoveRows.tries[mac.id, default: 0] += 1
         homeMoveListing = listing
         homeMoveName = mac.name
         homeMoveTrust = trust
@@ -1670,8 +1682,9 @@ final class StreamClient: ObservableObject {
     /// The move home's pinned dial met another key (-9808, DeviceTLS's `onPinRefused`): not the
     /// saved Mac, whose key this session holds through the remote door right now, so nothing is
     /// paired again (DiscoveryPolicy.afterPinRefused is a session dial's, and a new key there would
-    /// end this working session's Mac): a look-alike replaying the Mac's tag, or another Mac. Its
-    /// listing is refused as another launch's is, and the session stays remote. Main thread.
+    /// end this working session's Mac): a look-alike replaying the Mac's tag, or another Mac. Its row
+    /// is refused as another launch's is (`refuseHomeMove`: not dialed again while listed), and the
+    /// session stays remote unless another row with the Mac's tag is the Mac. Main thread.
     private func homeMovePinRefused(_ c: NWConnection) {
         guard let move = moving, move.connection === c, move.kind == .fromRemote else { return }
         refuseHomeMove(c, why: "\(homeMoveName ?? hostName) on the network answered with another key (-9808)")
@@ -1683,7 +1696,7 @@ final class StreamClient: ObservableObject {
         homeMoveCheck = nil
         lastHomeMove = nil
         failedHomeMoves = nil
-        refusedHomeListing = nil
+        homeMoveRows = DiscoveryPolicy.HomeRows()
         homeMoveListing = nil
         homeMoveName = nil
         homeMoveViewport = nil
@@ -1923,11 +1936,11 @@ final class StreamClient: ObservableObject {
         probeMove(c, kept: kept, untilMacInfo: true, listed: .some(host))
     }
 
-    /// A listing the move home found not to be this session's Mac: not tried again while it lasts.
-    /// Main thread.
+    /// A row the move home found not to be this session's Mac: not dialed again while it is listed
+    /// (DiscoveryPolicy.HomeRows); another row with the Mac's tag is tried at once. Main thread.
     private func refuseHomeMove(_ c: NWConnection, why: String) {
         print("remote: move home refused: \(why)")
-        refusedHomeListing = homeMoveListing
+        if let row = homeMoveRow { homeMoveRows.refused.insert(row.id) }
         c.cancel()   // moveEnded, from .cancelled
     }
 
@@ -1997,8 +2010,8 @@ final class StreamClient: ObservableObject {
         }
         switch move.kind {
         case .fromRemote:
-            print("remote: move home refused: \(hostName) on the network said goodbye (\(reason))")
-            refusedHomeListing = homeMoveListing
+            print("remote: move home refused: \(homeMoveName ?? hostName) on the network said goodbye (\(reason))")
+            if let row = homeMoveRow { homeMoveRows.refused.insert(row.id) }
         case .fromDirect:
             print("move to the network refused: \(hostName) on the network said goodbye (\(reason))")
             refusedListing = sightings.since[hostName]
@@ -2173,19 +2186,20 @@ final class StreamClient: ObservableObject {
         if connected { status = "Connected to \(hostName)" }
         switch move.kind {
         case .fromRemote:
-            // Still remote. The next try waits DiscoveryPolicy.upWait, counted for this listing.
-            if let listing = homeMoveListing, refusedHomeListing != listing {
-                failedHomeMoves = (listing, failedHomeMoves.map { $0.listing == listing ? $0.count + 1 : 1 } ?? 1)
+            // Still remote. A move that did not complete: the next try waits DiscoveryPolicy.upWait,
+            // counted for this listing, and goes to the row tried least (DiscoveryPolicy.moveHomeRow). A
+            // refused row is not a failure: another row with the Mac's tag is tried at once.
+            if let listing = homeMoveListing, !(homeMoveRow.map { homeMoveRows.refused.contains($0.id) } ?? false) {
+                let count = failedHomeMoves.map { $0.listing == listing ? $0.count + 1 : 1 } ?? 1
+                failedHomeMoves = (listing, count)
+                #if DEBUG
+                print("remote: the move home did not complete (\(count) in a row); the next try in \(Int(DiscoveryPolicy.upWait(failures: count))) s")
+                #endif
             }
             homeMoveViewport = nil
             homeMoveTrust = nil
             homeMoveRow = nil
             homeMoveInfoFloor = nil
-            #if DEBUG
-            if let f = failedHomeMoves, f.listing == homeMoveListing {
-                print("remote: the move home did not complete (\(f.count) in a row); the next try in \(Int(DiscoveryPolicy.upWait(failures: f.count))) s")
-            }
-            #endif
             moveHomeIfListed()
         case .fromDirect:
             #if DEBUG

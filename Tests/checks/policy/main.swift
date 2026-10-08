@@ -1081,10 +1081,10 @@ check("model (remote): the cable in at 3 and out at 10, the connection dead at 1
 
 // moveHome (remote-bundle, docs/remote-bundle-plan.md §7.2, H15): a session through the remote door moves
 // home once the network has listed its saved Mac (by Mac ID) for moveAfter without a break; moves that did
-// not complete wait upWait (10, 20, 40, then 60 s) from the last one's start, counted for one listing; a
-// listing found to be another launch is never tried again while it lasts; a new listing is tried afresh.
-func home(_ since: Double?, last: Double? = nil, failures: Int = 0, refused: Double? = nil, _ now: Double) -> (Bool, Double?) {
-    let r = P.moveHome(listedSince: since, lastAttempt: last, failures: failures, refusedListing: refused, now: now); return (r.move, r.recheckAt)
+// not complete wait upWait (10, 20, 40, then 60 s) from the last one's start, counted for one listing; a new
+// listing is tried afresh. A refusal is a row's since the merge's review (moveHomeRow, HomeRows, below).
+func home(_ since: Double?, last: Double? = nil, failures: Int = 0, _ now: Double) -> (Bool, Double?) {
+    let r = P.moveHome(listedSince: since, lastAttempt: last, failures: failures, now: now); return (r.move, r.recheckAt)
 }
 check("home: not listed on the network, nothing to do", home(nil, 5) == (false, nil))
 check("home: listed at 10, look again at 12", home(10, 10) == (false, 12))
@@ -1095,57 +1095,120 @@ check("home: one move that did not complete, from 12: the next at 22", home(10, 
       && home(10, last: 12, failures: 1, 21.9) == (false, 22) && home(10, last: 12, failures: 1, 22) == (true, nil))
 check("home: retries 10, 20, 40, 60, 60 s after 1 to 5 moves that did not complete",
       [1, 2, 3, 4, 5].map { home(10, last: 100, failures: $0, 100.5).1 } == [110, 120, 140, 160, 160])
-check("home: an earlier move with no failure counted (a new listing) holds nothing back", home(30, last: 20, failures: 0, 32) == (true, nil))
+check("home: an earlier move with no failure counted (a new listing, or a refused row) holds nothing back", home(30, last: 20, failures: 0, 32) == (true, nil))
 check("home: ...even one that started a moment before the listing (a blink during a move): 2 s from the listing, not upWait(0)",
       home(51, last: 49, failures: 0, 53) == (true, nil) && home(51, last: 49, failures: 0, 52) == (false, 53))
-check("home: a refused listing, never", home(10, refused: 10, 50) == (false, nil) && home(10, last: 12, failures: 3, refused: 10, 500) == (false, nil))
-check("home: a new listing after a refused one is tried afresh", home(60, refused: 10, 62) == (true, nil))
 check("home: the same rule as moveToNetwork's first look (moveAfter)", home(5, 7) == mv(5, nil, 7) && home(5, 6.999) == mv(5, nil, 6.999))
 
-// The model: the glue as StreamClient.moveHomeIfListed runs it. The saved Mac's network row by Mac ID
-// through P.sightings; failures kept by the listing they were to; a refused listing kept; a move to it
-// that takes `lasts` and ends as `end` (not completing, refused as another launch, or taking over).
+// moveHomeRow and HomeRows (the merge's review, 2026-10-08): the move home chooses and refuses by row. The
+// Mac's tag is public on the network, so a look-alike can copy it onto a row at another key or with no `p`,
+// and the browser lists rows in no fixed order: a row that is not the Mac never keeps the session from one
+// that is. Among the rows with the session's Mac's tag: not refused, at a door a pinned dial takes (a plain
+// one passed over), the fewest tries first, then the connect screen's order; a row's refusal and tries are
+// forgotten once it is no longer listed.
+let rowPin = Data(repeating: 0x5A, count: 32)
+func pick(_ rows: [(String, P.HomeDoor)], refused: Set<String> = [], tries: [String: Int] = [:], revoked: Bool = false,
+          newKey: Bool = false, pin: Data? = rowPin) -> String? {
+    P.moveHomeRow(rows: rows.map { (id: $0.0, door: $0.1) }, known: P.HomeRows(tries: tries, refused: refused), revoked: revoked,
+                  newKey: newKey, savedPin: pin)?.id
+}
+let lookalike = ("network:Look-alike", P.HomeDoor.pairingRequired), macRow = ("network:Studio", P.HomeDoor.pairingRequired)
+check("home row: the Mac's one row at a door that requires pairing", pick([macRow]) == "network:Studio")
+check("home row: dialed pinned to the saved key",
+      P.moveHomeRow(rows: [(id: "network:Studio", door: .open)], known: P.HomeRows(), revoked: false, newKey: false, savedPin: rowPin)?.trust == .saved(pin: rowPin))
+check("home row: a pin-refused row does not block another row with the same tag", pick([lookalike, macRow], refused: ["network:Look-alike"]) == "network:Studio")
+check("home row: ...whichever comes first", pick([macRow, lookalike], refused: ["network:Look-alike"]) == "network:Studio")
+check("home row: a plain row ahead of a TLS row of the same Mac does not stop the move",
+      pick([("network:Plain", .plain), macRow]) == "network:Studio" && pick([("network:Plain", .plain), ("network:Studio", .open)]) == "network:Studio")
+check("home row: plain rows alone: none (never a plain dial)", pick([("network:Plain", .plain), ("network:Plain 2", .plain)]) == nil)
+check("home row: every row refused, or plain: none", pick([lookalike, ("network:Plain", .plain)], refused: ["network:Look-alike"]) == nil)
+check("home row: no row: none", pick([]) == nil)
+check("home row: a Mac that removed this device, with a new key, or without a pin: none, whatever its rows",
+      pick([lookalike, macRow], revoked: true) == nil && pick([lookalike, macRow], newKey: true) == nil && pick([lookalike, macRow], pin: nil) == nil)
+check("home row: the fewest tries first: a row whose move did not complete gives the next try to another",
+      pick([lookalike, macRow], tries: ["network:Look-alike": 1]) == "network:Studio")
+check("home row: ...and back to the first once each was tried as often", pick([lookalike, macRow], tries: ["network:Look-alike": 1, "network:Studio": 1]) == "network:Look-alike")
+check("home row: ...a tie in the connect screen's order", pick([macRow, lookalike]) == "network:Studio" && pick([lookalike, macRow]) == "network:Look-alike")
+check("home row: a refused row's few tries do not make it the pick", pick([lookalike, macRow], refused: ["network:Look-alike"], tries: ["network:Studio": 3]) == "network:Studio")
+let knownRows = P.HomeRows(tries: ["network:Look-alike": 2, "network:Studio": 1], refused: ["network:Look-alike"])
+check("home rows: a row no longer listed is forgotten, its refusal and its tries",
+      knownRows.keeping(listed: ["network:Studio"]) == P.HomeRows(tries: ["network:Studio": 1], refused: []))
+check("home rows: rows still listed keep both", knownRows.keeping(listed: ["network:Look-alike", "network:Studio", "network:Other"]) == knownRows)
+check("home rows: nothing listed, nothing kept", knownRows.keeping(listed: []) == P.HomeRows())
+
+// The model: the glue as StreamClient.moveHomeIfListed runs it, by row. Each row with the saved Mac's tag is
+// listed from `at` (but for a second from `blinkAt`, or for good from `goneAt`), and a move to it takes
+// `lasts` and ends as `end`: not completing, refused (another key at the pin, another launch), or taking
+// over. The Mac's listing (P.sightings by Mac ID) times the move and counts its failures; HomeRows, kept to
+// the rows listed, chooses the row.
 enum MoveHomeEnd { case fails, refused, moves }
-func homeTries(_ end: MoveHomeEnd, until: Double, blinkAt: Double? = nil, listedAt: Double = 10, lasts: Double = 5) -> (starts: [Double], home: Bool) {
-    var sight = P.NetworkSightings()
-    var starts: [Double] = [], failed: (listing: Double, count: Int)? = nil, refused: Double? = nil
-    var last: Double? = nil, busyUntil = -1.0, atHome = false
+struct ModelRow { var id: String; var door: P.HomeDoor = .pairingRequired; var at: Double = 10; var blinkAt: Double? = nil
+                  var goneAt: Double? = nil; var end: MoveHomeEnd }
+func homeTries(_ modelRows: [ModelRow], until: Double, lasts: Double = 5) -> (starts: [String], home: Bool) {
+    var sight = P.NetworkSightings(), known = P.HomeRows()
+    var starts: [String] = [], failed: (listing: Double, count: Int)? = nil
+    var last: Double? = nil, busy: (row: ModelRow, until: Double)? = nil, atHome = false
     var t = 0.0
     while t <= until, !atHome {
-        let listed = t >= listedAt && !(blinkAt.map { t >= $0 && t < $0 + 1 } ?? false)
-        sight = P.sightings(sight, listed: listed ? ["A3C5"] : [], now: t)
-        if t >= busyUntil, let started = starts.last, busyUntil > 0 {
-            busyUntil = -1
-            let listing = failed?.listing
-            switch end {
+        let listed = modelRows.filter { r in t >= r.at && !(r.blinkAt.map { t >= $0 && t < $0 + 1 } ?? false) && !(r.goneAt.map { t >= $0 } ?? false) }
+        sight = P.sightings(sight, listed: listed.isEmpty ? [] : ["A3C5"], now: t)
+        known = known.keeping(listed: Set(listed.map(\.id)))
+        if let b = busy, t >= b.until {
+            busy = nil
+            switch b.row.end {
             case .fails:
-                let l = sight.since["A3C5"] ?? started
-                failed = (l, (listing == l ? failed!.count : 0) + 1)
-            case .refused: refused = sight.since["A3C5"]
+                let l = sight.since["A3C5"] ?? b.until
+                failed = (l, (failed?.listing == l ? failed!.count : 0) + 1)
+            case .refused: known.refused.insert(b.row.id)
             case .moves: atHome = true
             }
         }
-        if busyUntil < 0, !atHome {
+        if busy == nil, !atHome,
+           let row = P.moveHomeRow(rows: listed.map { (id: $0.id, door: $0.door) }, known: known, revoked: false, newKey: false, savedPin: rowPin) {
             let listing = sight.since["A3C5"]
             let failures = failed.map { $0.listing == listing ? $0.count : 0 } ?? 0
-            if P.moveHome(listedSince: listing, lastAttempt: last, failures: failures, refusedListing: refused, now: t).move {
-                starts.append(t); last = t; busyUntil = t + lasts
+            if P.moveHome(listedSince: listing, lastAttempt: last, failures: failures, now: t).move {
+                starts.append(String(format: "%.2f %@", t, row.id.replacingOccurrences(of: "network:", with: "")))
+                known.tries[row.id, default: 0] += 1
+                last = t
+                busy = (listed.first { $0.id == row.id }!, t + lasts)
             }
         }
         t = (t * 100 + 5).rounded() / 100   // 0.05 s steps
     }
     return (starts, atHome)
 }
-var ht = homeTries(.moves, until: 60)
-check("model (home): listed at 10: one move at 12, home after it (\(ht.starts))", ht.starts == [12] && ht.home)
-ht = homeTries(.fails, until: 300)
-check("model (home): moves that never complete: 12, 22, 42, 82, 142, 202, 262 (\(ht.starts))", ht.starts == [12, 22, 42, 82, 142, 202, 262])
-ht = homeTries(.fails, until: 120, blinkAt: 50)
-check("model (home): the row gone at 50 and back at 51: tried afresh at 53, then 63, 83 (\(ht.starts))", ht.starts == [12, 22, 42, 53, 63, 83])
-ht = homeTries(.refused, until: 120)
-check("model (home): another launch: one try at 12, never again while it stays listed (\(ht.starts))", ht.starts == [12])
-ht = homeTries(.refused, until: 120, blinkAt: 40)
-check("model (home): ...listed afresh at 41: tried once more at 43, then never (\(ht.starts))", ht.starts == [12, 43])
+func oneRow(_ end: MoveHomeEnd, until: Double, blinkAt: Double? = nil) -> (starts: [String], home: Bool) {
+    homeTries([ModelRow(id: "network:Studio", blinkAt: blinkAt, end: end)], until: until)
+}
+var ht = oneRow(.moves, until: 60)
+check("model (home): listed at 10: one move at 12, home after it (\(ht.starts))", ht.starts == ["12.00 Studio"] && ht.home)
+ht = oneRow(.fails, until: 300)
+check("model (home): moves that never complete: 12, 22, 42, 82, 142, 202, 262 (\(ht.starts))",
+      ht.starts == ["12.00", "22.00", "42.00", "82.00", "142.00", "202.00", "262.00"].map { $0 + " Studio" })
+ht = oneRow(.fails, until: 120, blinkAt: 50)
+check("model (home): the row gone at 50 and back at 51: tried afresh at 53, then 63, 83 (\(ht.starts))",
+      ht.starts == ["12.00", "22.00", "42.00", "53.00", "63.00", "83.00"].map { $0 + " Studio" })
+ht = oneRow(.refused, until: 120)
+check("model (home): another launch: one try at 12, never again while it stays listed (\(ht.starts))", ht.starts == ["12.00 Studio"])
+ht = oneRow(.refused, until: 120, blinkAt: 40)
+check("model (home): ...listed afresh at 41: tried once more at 43, then never (\(ht.starts))", ht.starts == ["12.00 Studio", "43.00 Studio"])
+// The review's runs (2026-10-08, a private simulator): a look-alike replaying the Mac's tag at another key,
+// listed at 4.85, and the Mac's own row from 20.0; the look-alike gone at 45.
+ht = homeTries([ModelRow(id: "network:Look-alike", at: 4.85, goneAt: 45, end: .refused), ModelRow(id: "network:Studio", at: 20, end: .moves)], until: 120)
+check("model (home rows): a look-alike refused at its pin, then the Mac's own row: tried at once, home (\(ht.starts))",
+      ht.starts == ["6.85 Look-alike", "20.00 Studio"] && ht.home)
+ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .refused), ModelRow(id: "network:Studio", at: 10, end: .moves)], until: 120)
+check("model (home rows): both listed together, the look-alike first: refused, then the Mac at once (\(ht.starts))",
+      ht.starts == ["12.00 Look-alike", "17.00 Studio"] && ht.home)
+ht = homeTries([ModelRow(id: "network:Plain", door: .plain, end: .moves), ModelRow(id: "network:Studio", end: .moves)], until: 60)
+check("model (home rows): the Mac's tag on a plain row listed first: the TLS row is the move (\(ht.starts))",
+      ht.starts == ["12.00 Studio"] && ht.home)
+ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .fails), ModelRow(id: "network:Studio", at: 10, end: .moves)], until: 120)
+check("model (home rows): a look-alike that never answers, first: the next try, 10 s on, is the Mac's row (\(ht.starts))",
+      ht.starts == ["12.00 Look-alike", "22.00 Studio"] && ht.home)
+ht = homeTries([ModelRow(id: "network:Look-alike", at: 10, end: .refused)], until: 120)
+check("model (home rows): a look-alike alone: one try, never again while listed (\(ht.starts))", ht.starts == ["12.00 Look-alike"] && !ht.home)
 
 // moveHomeTrust (the merge of remote-away with pairing at home, 2026-10-08): the move home dials the
 // saved Mac's network row pinned to its key, at a door that speaks TLS, as a tap's dial of that row
