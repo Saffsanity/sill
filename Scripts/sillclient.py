@@ -3,6 +3,9 @@ r"""Minimal Sill wire-format client for testing a host without a device.
 
 usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --junk             also send two unknown message kinds (the host must skip them)
+  --no-select        send no select at the start (the positional source is not sent): a device that
+                     joins while something streams, as a device asks for the Desktop only when nothing
+                     does (docs/remote-bundle-plan.md, H8: the flip waits for its viewport)
   --fps=N            send a viewport asking for N fps right after the select
   --fps-after=N@T    send a second viewport asking for N fps after T seconds
   --set=K=V[,K=V]@T  send a settings change (kind 17) T seconds in, with integer tokens 1, 2, 3...
@@ -13,7 +16,11 @@ usage: sillclient.py PORT [seconds] [desktop|none|window:ID] [flags...]
   --stats            send ClientStats (kind 12) once a second as device "sillclient", so the host
                      logs a name for this client
   --expect=K=V[,...] at exit, compare the last kind 16's settings (and its top-level persistent
-                     and virtualDisplayAvailable): prints EXPECT ok or EXPECT FAIL, exits 1 on failure
+                     and virtualDisplayAvailable; away from home, docs/remote-bundle-plan.md: its
+                     away's homeBitrate, homeCaptureScale, awayBitrate, awayCaptureScale,
+                     thisConnectionAway and awayRunning, missing when the host sent no away; and
+                     linkState, its link's state, "fine" when it sent none): prints EXPECT ok or
+                     EXPECT FAIL, exits 1 on failure
   --host=H           connect to H instead of 127.0.0.1 (an IPv4 or IPv6 address, or a name)
   --device=NAME      the name ClientStats reports (implies --stats); \n, \t, \xHH and \uXXXX escapes
                      are decoded, so control and bidi characters can be sent
@@ -104,7 +111,9 @@ same clock when both run on one Mac).
 Once a second it prints the frames, their payload in kB (the encoder's output), ticks, cursor
 shapes and the last ping's round trip. Every kind 16 (host settings) is printed on one line with
 its arrival time; dw= is Direct Wireless
-(1, 0, or - when the host did not report it: an older host). Flags may come in any
+(1, 0, or - when the host did not report it: an older host); away= (only when the host sent it) is
+h:HOME_BITRATE/SCALE,a:AWAY_BITRATE/SCALE,this=1|0,run=1|0, and link= (only while the host reports
+the link behind or stalled) STATE,withheld=N,bitrate=B,carried=KBPS|-,suggested=B/SCALE|-. Flags may come in any
 order after the positional arguments. Everything is checked before connecting: an unknown flag, a
 --set or --expect key that is not one of theirs, or a value that does not parse stops the script
 with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>.
@@ -113,11 +122,14 @@ import json, re, socket, struct, sys, time
 
 KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
-BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable"}
+BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable",
+             "thisConnectionAway", "awayRunning"}
 # What --set may send: HostSettingsChange's six fields. The host drops any other key without a
 # word, so a misspelt one would only show up as an unchanged answer.
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable"}
+# Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
+AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState"} | AWAY_KEYS
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
          "move", "tap", "key", "input", "gesture", "raw28")
 INPUT = ("move", "tap", "key", "input")
@@ -146,7 +158,10 @@ def value(k, v):
     if k in BOOL_KEYS:
         if v.lower() not in BOOL: raise ValueError(f"{k}: not a boolean: {v!r} (1/0/true/false/on/off)")
         return BOOL[v.lower()]
-    if k == "captureScale":
+    if k == "linkState":
+        if v not in ("fine", "behind", "stalled"): raise ValueError(f"linkState: fine, behind or stalled, got {v!r}")
+        return v
+    if k in ("captureScale", "homeCaptureScale", "awayCaptureScale"):
         f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
     return number(v, k)
 
@@ -453,8 +468,8 @@ try:
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--pair-ask", "--pair-ask=cable",
-                       "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--no-select", "--pair-ask",
+                       "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
     expect = next((pairs(a[9:], EXPECT_KEYS, "--expect") for a in flags if a.startswith("--expect=")), None)
@@ -591,7 +606,7 @@ try:
         if hello_delay:
             time.sleep(hello_delay)
         s.sendall(msg(23, json.dumps(hello).encode())); print(f"  sent hello {json.dumps(hello)}" + (f" after {hello_delay:g} s" if hello_delay else ""))
-    s.sendall(msg(6, json.dumps(sel).encode()))
+    if "--no-select" not in flags: s.sendall(msg(6, json.dumps(sel).encode()))
     if "--menus" in flags:
         # The subscription (kind 27 without an id); its token is the first of the shared counter.
         s.sendall(msg(27, json.dumps({"token": 1}).encode())); print("  sent menus subscription (token 1)")
@@ -623,9 +638,19 @@ def describe(d):
                if stream else "none")
     note = d.get("virtualDisplayNote")
     dw = "-" if st.get("directWireless") is None else b(st.get("directWireless"))   # "-": an older host
+    away = d.get("away"); link = d.get("link")
+    dash = lambda x: "-" if x is None else x
+    extra = ""
+    if isinstance(away, dict):
+        extra += (f" away=h:{away.get('homeBitrate')}/{away.get('homeCaptureScale')},a:{away.get('awayBitrate')}/{away.get('awayCaptureScale')},"
+                  f"this={b(away.get('thisConnectionAway'))},run={b(away.get('awayRunning'))}")
+    if isinstance(link, dict):
+        suggested = "-" if link.get("suggestedBitrate") is None else f"{link.get('suggestedBitrate')}/{dash(link.get('suggestedCaptureScale'))}"
+        extra += (f" link={link.get('state')},withheld={link.get('withheldPerSecond')},bitrate={link.get('bitrate')},"
+                  f"carried={dash(link.get('carriedKbps'))},suggested={suggested}")
     return (f"maxFPS={st.get('maxFPS')} bitrate={st.get('bitrate')} scale={st.get('captureScale')} speed={b(st.get('prioritizeSpeed'))} "
             f"vd={b(st.get('virtualDisplay'))} dw={dw} persistent={b(d.get('persistent'))} vdAvail={b(d.get('virtualDisplayAvailable'))} "
-            f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else ""))
+            f"sw={b(d.get('softwareEncoder'))} stream={running}" + (f" note={note!r}" if note else "") + extra)
 
 buf = b""; t0 = time.time(); last = t0; nextping = t0; nextstats = t0
 per = {}; tot = {}; frames = 0; keys = 0; kb = 0; kb_sec = 0; rtt = None; first_frame = None; ps_seen = []
@@ -819,8 +844,12 @@ if expect is not None:
         problems.append("no settings received")
     else:
         for k, want in expect.items():
-            got = last_state.get(k) if k in ("persistent", "virtualDisplayAvailable") else last_state.get("settings", {}).get(k)
-            same = (got == want) if isinstance(want, bool) else (got is not None and not isinstance(got, bool) and float(got) == float(want))
+            if k in ("persistent", "virtualDisplayAvailable"): got = last_state.get(k)
+            elif k in AWAY_KEYS: got = (last_state.get("away") or {}).get(k)
+            elif k == "linkState": got = (last_state.get("link") or {}).get("state", "fine")
+            else: got = last_state.get("settings", {}).get(k)
+            if isinstance(want, str): same = got == want
+            else: same = (got == want) if isinstance(want, bool) else (got is not None and not isinstance(got, bool) and float(got) == float(want))
             if not same: problems.append(f"{k}: want {want}, got {got}")
     print("EXPECT ok" if not problems else "EXPECT FAIL " + "; ".join(problems))
     if problems: sys.exit(1)

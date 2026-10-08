@@ -3,14 +3,18 @@ import StreamProtocol
 
 // A device's view of the host's settings (kinds 16 and 17): the conversions between the host's
 // `HostConfig` and the wire types, and what a device may set. The coordinator's `.changeSettings`
-// handler and `settingsState` are the only users, plus the app's hook (`applying`).
+// handler and `settingsState` are the only users, plus the app's hook (`applying`, `applyingAway`).
+// Pure (CoreGraphics, StreamProtocol and HostConfig): checked with swiftc (Tests/checks/away-quality).
 
 extension HostConfig {
-    /// As a device sees them.
-    var streamSettings: StreamSettings {
-        StreamSettings(maxFPS: maxFPS, bitrate: bitrate, captureScale: Double(captureScale),
-                       prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
-                       directWireless: directWireless)
+    /// As a device sees them: the quality its connection controls in `bitrate` and `captureScale`,
+    /// the away pair for a connection the Mac counts as away (docs/remote-bundle-plan.md §4.2), the
+    /// home pair for any other; the other four are shared.
+    func streamSettings(away: Bool) -> StreamSettings {
+        let pair = effective(away: away)
+        return StreamSettings(maxFPS: maxFPS, bitrate: pair.bitrate, captureScale: Double(pair.captureScale),
+                              prioritizeSpeed: prioritizeSpeed, virtualDisplay: virtualDisplay,
+                              directWireless: directWireless)
     }
 
     /// This config with a device's change laid over it; nil fields keep their value. `package`:
@@ -25,10 +29,25 @@ extension HostConfig {
         if let v = change.directWireless { c.directWireless = v }
         return c
     }
+
+    /// A change from a device away from home (docs/remote-bundle-plan.md §5.3): its Quality and
+    /// Resolution land on the away pair, never on the home one, and its other fields as `applying`
+    /// lays them. `package`: the app's hook lays such a change over its own settings with it.
+    package func applyingAway(_ change: HostSettingsChange) -> HostConfig {
+        var c = self
+        if let v = change.bitrate { c.awayBitrate = v }
+        if let v = change.captureScale { c.awayCaptureScale = CGFloat(v) }
+        var rest = change
+        rest.bitrate = nil
+        rest.captureScale = nil
+        return c.applying(rest)
+    }
 }
 
 /// What a device may change on this host. There is no generic "write a default": a device moves
-/// these six knobs, to exactly the Mac menu's values, and nothing else. Remote access, its port and
+/// these six knobs, to exactly the Mac menu's values, and nothing else. From a connection the Mac
+/// counts as away, its bitrate and capture scale land on the away pair (`applyingAway`): the same
+/// whitelist decides both routes. Remote access, its port and
 /// internet access can never enter this whitelist: they widen who reaches the Mac, and only the
 /// Mac's own user may do that.
 enum DeviceSettings {
@@ -61,12 +80,5 @@ enum DeviceSettings {
             if !v || virtualDisplayAvailable { ok.virtualDisplay = v } else { refused.append("virtual display (needs SillHost --virtual-display)") }
         }
         return (ok, refused)
-    }
-}
-
-extension HostStatusSnapshot.Stream {
-    /// The running pipeline as a device sees it.
-    var wire: RunningStream {
-        RunningStream(width: width, height: height, fps: fps, mbps: mbps, onVirtualDisplay: onVirtualDisplay)
     }
 }

@@ -6,7 +6,14 @@ import CoreMedia
 /// its software fallback and the network path can be exercised without Screen Recording.
 /// Diagnostics only; the coordinator uses it for the Desktop source in that mode.
 /// `pool` and `frameIndex` live on `queue`; `timer` is touched only by the main actor.
+///
+/// TEST ONLY: `SILL_TEST_PATTERN=noise` adds a square of random pixels, new every frame, so what the
+/// encoder puts out follows its bitrate: the sweeping bar alone compresses to about 56 kbit/s on the
+/// software encoder whatever the quality, and a link's end-to-end tests need a stream that picking a
+/// lower quality makes smaller (docs/remote-bundle-plan.md, H12 and S3). Read once; this type runs
+/// only on a --synthetic host.
 final class SyntheticCapture: @unchecked Sendable {   // state is confined to `queue` (see above)
+    static let noise: Bool = ProcessInfo.processInfo.environment["SILL_TEST_PATTERN"] == "noise"
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
     private let queue = DispatchQueue(label: "sill.synthetic", qos: .userInteractive)
     private var timer: DispatchSourceTimer?
@@ -27,7 +34,7 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
         timer.setEventHandler { [weak self] in self?.tick() }
         timer.resume()
         self.timer = timer
-        print("Synthetic capture: \(width)×\(height) @\(fps) fps")
+        print("Synthetic capture: \(width)×\(height) @\(fps) fps" + (Self.noise ? ", a square of noise (SILL_TEST_PATTERN)" : ""))
     }
 
     /// Returns once no tick is running any more, so no late frame reaches the next encoder.
@@ -54,6 +61,15 @@ final class SyntheticCapture: @unchecked Sendable {   // state is confined to `q
             let barWidth = max(8, w / 20)
             let x0 = (frameIndex * max(1, w / fps)) % max(1, w - barWidth)   // one sweep a second at any rate
             for row in 0..<h { memset(y.advanced(by: row * stride + x0), 235, barWidth) }
+            if Self.noise {
+                // TEST ONLY: a square of random pixels, new every frame, a third of the frame's height
+                // on a side: more than any quality carries whole, so what the encoder puts out follows
+                // its bitrate (at 1512×948 the software encoder keeps about 14 frames a second of it:
+                // about 3.6 Mbit/s at Low, 10.6 at Balanced).
+                let side = min(w, h) / 3
+                let left = (w - side) / 2
+                for row in (h - side) / 2 ..< (h + side) / 2 { arc4random_buf(y.advanced(by: row * stride + left), side) }
+            }
         }
         if let uv = CVPixelBufferGetBaseAddressOfPlane(pb, 1) {
             memset(uv, 128, CVPixelBufferGetBytesPerRowOfPlane(pb, 1) * CVPixelBufferGetHeightOfPlane(pb, 1))

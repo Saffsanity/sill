@@ -110,11 +110,12 @@ final class AppModel {
                 settings.onChange = { [settings, weak c] in c?.setTarget(settings.config) }
                 // A device's change goes through HostSettings like a menu click: saved (only the keys
                 // it changed) and shown live in Settings and the menu. Laid over settings.config, never
-                // over the host's value. No validated(): the host accepted only menu values, and
-                // validating here would rewrite unrelated hand-set keys (which save(changedFrom:)
-                // would then write).
-                c.onDeviceSettingsChange = { [settings] change in
-                    settings.config = settings.config.applying(change)
+                // over the host's value: over the away quality for a device away from home, which
+                // never changes the home one (docs/remote-bundle-plan.md §5). No validated(): the host
+                // accepted only menu values, and validating here would rewrite unrelated hand-set
+                // keys (which save(changedFrom:) would then write).
+                c.onDeviceSettingsChange = { [settings] change, away in
+                    settings.config = away ? settings.config.applyingAway(change) : settings.config.applying(change)
                     return settings.config
                 }
                 // Not in HostConfig (it moves no listener): handed over on its own.

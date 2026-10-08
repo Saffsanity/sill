@@ -340,6 +340,97 @@ enum DiscoveryPolicy {
         return now >= due ? (true, nil) : (false, due)
     }
 
+    /// While this device's session runs through the remote door (docs/remote-bundle-plan.md §7): whether
+    /// to move it home now, to the saved Mac's network row listed since `listedSince` (nil: not
+    /// listed), or when to look again. Once the network has listed that Mac (by its Mac ID, never its
+    /// name) for `moveAfter` without a break; after `failures` moves in a row to this listing that did
+    /// not complete, not before `upWait(failures:)` from the last one's start (10, 20, 40, then 60 s).
+    /// A new listing (every row of the Mac went and one came back) is tried afresh: the caller counts
+    /// `failures` for this listing only. Which row, never one found not to be the Mac, is
+    /// `moveHomeRow`'s: a refusal is a row's, not the listing's (the merge's review, 2026-10-08).
+    static func moveHome(listedSince: Double?, lastAttempt: Double?, failures: Int, now: Double) -> (move: Bool, recheckAt: Double?) {
+        guard let since = listedSince else { return (false, nil) }
+        var due = since + moveAfter
+        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// What a remote session's moves home have learnt of the network rows that carry its saved Mac's
+    /// tag (the merge's review, 2026-10-08). By row, never by the Mac's listing: the tag is public on
+    /// the network, so anyone there can copy it onto a row of their own, at another key or with no
+    /// `p`, and the browser lists rows in no fixed order; a row that is not the Mac must not keep the
+    /// session from one that is (a look-alike refused first held the Mac's own row back for as long as
+    /// any row of it stayed listed). Forgotten with the session, and a row's with the row
+    /// (`keeping(listed:)`): listed again, it is tried afresh.
+    struct HomeRows: Equatable {
+        /// The moves home started to each row while it stays listed.
+        var tries: [String: Int] = [:]
+        /// The rows found not to be this session's Mac: another key at the pin (-9808), another launch
+        /// of Sill, a kind 18 not the Mac's or older than the session's, a goodbye. Never dialed again
+        /// while listed.
+        var refused: Set<String> = []
+
+        /// What is kept of the rows still listed (`listed`: the network rows' ids).
+        func keeping(listed: Set<String>) -> HomeRows {
+            HomeRows(tries: tries.filter { listed.contains($0.key) }, refused: refused.intersection(listed))
+        }
+    }
+
+    /// The row a move home dials, and its trust (the merge's review, 2026-10-08): among the network
+    /// rows whose tag resolves to the session's saved Mac (`rows`: each row's id and home door, in the
+    /// connect screen's order), those not refused (`known.refused`) whose door a pinned dial takes
+    /// (`moveHomeTrust`: a plain door is passed over, not the end of the look), the fewest tries
+    /// first, then that order: a row whose moves did not complete gives the next try to another. Nil:
+    /// no move; the session stays remote.
+    static func moveHomeRow(rows: [(id: String, door: HomeDoor)], known: HomeRows, revoked: Bool, newKey: Bool,
+                            savedPin: Data?) -> (id: String, trust: HomeTrust)? {
+        var best: (id: String, trust: HomeTrust, tries: Int)?
+        for row in rows where !known.refused.contains(row.id) {
+            guard let trust = moveHomeTrust(door: row.door, revoked: revoked, newKey: newKey, savedPin: savedPin) else { continue }
+            let tries = known.tries[row.id] ?? 0
+            if best == nil || tries < best!.tries { best = (row.id, trust, tries) }
+        }
+        return best.map { (id: $0.id, trust: $0.trust) }
+    }
+
+    /// The move home's second look at its Mac (docs/remote-bundle-plan.md §7.3; the merge's review,
+    /// 2026-10-08): the home door's kind 18, signed by the saved key for the session's Mac ID (the
+    /// caller checks both), must be at least as new as the newest one this remote session had when
+    /// the move started (`floor`), not as the newest one when the probe is judged (`latest`): a kind
+    /// 18 the Mac broadcasts meanwhile (its addresses changed) reaches the remote connection too, and
+    /// read there between the home door's catalog and the probe's verdict it is newer than the one
+    /// that catalog carried, so the Mac's own row would be refused. A capture from before this session
+    /// is still refused: the floor is at least the session's first kind 18.
+    struct HomeMoveInfo: Equatable {
+        /// The newest `issuedAt` of the verified kind 18s on the remote connection; nil before the first.
+        var latest: Double?
+        /// `latest` as the move under way started; nil while no move home is under way.
+        var floor: Double?
+
+        /// A verified kind 18 from the saved Mac on the remote connection. One read late never lowers
+        /// the newest.
+        mutating func remote(_ issuedAt: Double) { latest = max(latest ?? issuedAt, issuedAt) }
+        /// A move home starts: its kind 18 is held to the newest one so far.
+        mutating func moveStarted() { floor = latest }
+        /// The move ended, either way.
+        mutating func moveEnded() { floor = nil }
+        /// Whether the move's kind 18, issued at `issuedAt`, is new enough. Nothing is, with no move.
+        func accepts(_ issuedAt: Double) -> Bool { floor.map { issuedAt >= $0 } ?? false }
+    }
+
+    /// How the move home dials the saved Mac's network row (since pairing at home,
+    /// docs/home-pairing-plan.md §7.2): TLS `sill/1` pinned to the saved Mac's key, the key the
+    /// session through the remote door is pinned to, and the trust a tap's dial of that row takes
+    /// (`homeDial`'s `.pinned`). Nil, and no move, for a row a tap would not dial pinned: a plain
+    /// door (an older Sill, the CLI without --pairing: never a plain dial, which a Release build never
+    /// makes and a session over TLS never steps down to, DEBUG or not), a Mac that removed this device
+    /// (`revoked`), or one to pair with again (`newKey`); or no pin. The session then stays remote.
+    static func moveHomeTrust(door: HomeDoor, revoked: Bool, newKey: Bool, savedPin: Data?) -> HomeTrust? {
+        guard homeDial(door: door, saved: true, revoked: revoked, homeTLS: true, debug: false, tap: false, newKey: newKey) == .pinned
+        else { return nil }
+        return sessionTrust(.pinned, savedPin: savedPin)
+    }
+
     /// Whether the network connection a move opened reaches the host this session runs on: both
     /// window lists carry the same `WindowList.launchID`, a random ID a host picks at launch. The
     /// Bonjour name the move went by cannot tell: two Macs can share one when they share no link
@@ -361,8 +452,8 @@ enum DiscoveryPolicy {
     // cable once the network browser has listed the Mac on it for `cableSettle`, down to Wi-Fi at
     // once when the cable's path is gone. Never from Wi-Fi to Wi-Fi, never off a cable that works
     // (a connection the Mac closed while the cable stays listed is made again over the cable),
-    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (only
-    // the remote reconnect moves one, and not home: remote access's merge left that for later), and
+    // never off a Direct session but to the network (`moveToNetwork`), never a remote session (the
+    // plan keeps it where it is; `moveHome` brings it home once the network lists its Mac), and
     // at most one move per `pathHysteresis` each way; a cable listing that reaches another Mac is not
     // tried again, and one whose moves do not complete is tried less and less often (`upWait`).
 
@@ -480,8 +571,8 @@ enum DiscoveryPolicy {
         var upFailures = 0
         /// The session runs through the remote door (a saved Mac dialed away from home): it never
         /// moves here, whatever its path and the browser say, as a Direct session does not; it
-        /// moves only by the remote reconnect's rules (StreamClient+Remote), and never home to the
-        /// network (docs/remote-access-plan.md).
+        /// moves only home, once the network lists its Mac (`moveHome`, docs/remote-bundle-plan.md
+        /// §7), and its end is the remote reconnect's (StreamClient+Remote).
         var remote = false
     }
 
@@ -493,7 +584,7 @@ enum DiscoveryPolicy {
             switch self {
             case .routeUnknown: return "the session's path is not known"
             case .direct: return "over Direct, the session moves only to the network"
-            case .remote: return "a remote session moves only by the remote reconnect"
+            case .remote: return "a remote session moves only home, once the network lists its Mac"
             case .cable: return "on the cable"
             case .cableUnlisted: return "on the cable, which the network no longer lists; its pongs say it works"
             case .wifi: return "on Wi\u{2011}Fi, and the Mac is on no cable"

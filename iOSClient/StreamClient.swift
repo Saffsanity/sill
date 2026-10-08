@@ -491,7 +491,8 @@ final class StreamClient: ObservableObject {
     var sightings = DiscoveryPolicy.NetworkSightings()
     /// A move under way: the connection opened beside the session's, until it has shown it reaches
     /// this session's host and takes over (`finishMove`), or gives up (`moveEnded`), and what the
-    /// move is for. Only a session at home moves: a remote one never does (DiscoveryPolicy.pathPlan).
+    /// move is for. A session at home follows its path (DiscoveryPolicy.pathPlan); a remote one moves
+    /// only home, once the network lists its Mac (`moveHomeIfListed`).
     private var moving: Move?
     private struct Move {
         let connection: NWConnection
@@ -499,8 +500,10 @@ final class StreamClient: ObservableObject {
     }
     /// What a move does: brings a session over AWDL to the network (`fromDirect`,
     /// `moveToNetworkIfListed`), or, `followBestPath`'s, one over Wi-Fi to the cable that came
-    /// (`toCable`) or one over the cable that went to Wi-Fi (`toWifi`).
-    private enum MoveKind { case fromDirect, toCable, toWifi }
+    /// (`toCable`) or one over the cable that went to Wi-Fi (`toWifi`), or brings a session through the
+    /// remote door home to the network door once the network lists its Mac (`fromRemote`,
+    /// `moveHomeIfListed`, docs/remote-bundle-plan.md §7).
+    private enum MoveKind { case fromDirect, toCable, toWifi, fromRemote }
     /// A move is under way, or carries on a session whose connection has gone (`sessionDead`): the
     /// automatic reconnect (StreamClient+Remote's `reconnectIfListed`) never runs meanwhile, so it
     /// cannot dial beside the move. Main thread.
@@ -517,6 +520,43 @@ final class StreamClient: ObservableObject {
     /// The network listing (its `sightings.since`) a move found to be another Mac: not tried again
     /// while it lasts (DiscoveryPolicy.moveToNetwork).
     private var refusedListing: Double?
+
+    // The move home (docs/remote-bundle-plan.md §7): a session through the remote door moves to the
+    // home door once the network has listed its saved Mac, by Mac ID, for DiscoveryPolicy.moveAfter.
+    // Main thread; all of it forgotten with the session (`resetHomeMove`).
+    /// When the last move home started (DiscoveryPolicy.moveHome's `lastAttempt`).
+    private var lastHomeMove: Double?
+    /// Moves home in a row to one listing (its `savedSightings.since`) that did not complete.
+    private var failedHomeMoves: (listing: Double, count: Int)?
+    /// The rows that carry the saved Mac's tag, by row (DiscoveryPolicy.HomeRows): each one's tries,
+    /// and those found not to be this session's Mac (another key at the pin, another launch, a kind 18
+    /// not the Mac's, a goodbye), never dialed again while listed. A row's is forgotten once it is no
+    /// longer listed (`moveHomeIfListed`).
+    private var homeMoveRows = DiscoveryPolicy.HomeRows()
+    /// The listing the move under way went to, and its row's Bonjour name (the session's afterwards).
+    private var homeMoveListing: Double?
+    private var homeMoveName: String?
+    /// The home viewport the move sends first on its connection: this session's last, at this
+    /// device's full rate (no cap away from home), taken as the move starts.
+    private var homeMoveViewport: Viewport?
+    /// How the move's connections speak to the home door: TLS `sill/1` pinned to the saved Mac's key
+    /// (DiscoveryPolicy.moveHomeTrust), the session's trust once it is home; and the row it went to,
+    /// the session's row afterwards (a pin that fails later, docs/home-pairing-plan.md §7.6).
+    private var homeMoveTrust: DiscoveryPolicy.HomeTrust?
+    private var homeMoveRow: HomeRow?
+    /// This remote session's verified kind 18s (StreamClient+Remote's `receiveMacInfo`: the newest
+    /// `issuedAt`) and, while a move home is under way, the newest as it started, which the move's
+    /// own kind 18, signed by the saved Mac's key, must reach (DiscoveryPolicy.HomeMoveInfo): a tag
+    /// and a kind 18 captured before this session cannot take it over, and a kind 18 the Mac
+    /// broadcasts during the move (read on the remote connection before the probe is judged) cannot
+    /// refuse the Mac's own row (the adversarial review's race).
+    var homeInfo = DiscoveryPolicy.HomeMoveInfo()
+    /// The move home's next look (the listing's 2 s, the back-off).
+    private var homeMoveCheck: DispatchWorkItem?
+    #if DEBUG
+    /// The listing whose "is on this network" line the console has printed.
+    private var homeMoveAnnounced: Double?
+    #endif
     /// How long a move's hand-over waits for the Mac to have read everything sent on the direct
     /// connection before what waits goes out anyway (SessionLink): past the worst direct round trip
     /// of Noah's sessions on 2026-09-24 (2.4 s), and no longer, since input waits meanwhile.
@@ -577,6 +617,9 @@ final class StreamClient: ObservableObject {
     /// move to the network runs against synthetic hosts, which no browser lists and which are not
     /// on AWDL (see `beginMoveTest`).
     private var testNetworkRows: [(name: String, endpoint: NWEndpoint)] = []
+    /// `-SillMoveHomeTest`: the remote session's saved Mac as a network row, with its Mac ID (see
+    /// `beginMoveHomeTest`).
+    private var testHomeRows: [(name: String, endpoint: NWEndpoint, macID: String)] = []
     /// `-SillPathTest`: the session's Mac as a network row whose interfaces the test changes, and
     /// the addresses its "cable" and "Wi-Fi" are dialled at (see `beginPathTest`).
     private var pathTest: PathTest?
@@ -864,6 +907,7 @@ final class StreamClient: ObservableObject {
         reconnectIfListed()
         moveToNetworkIfListed()
         followBestPath()
+        moveHomeIfListed()
     }
 
     /// The rows, each with the endpoint of the browser that listed it: a network row always the
@@ -887,7 +931,8 @@ final class StreamClient: ObservableObject {
         #endif
         // Each result's interfaces twice, as NWInterface, to dial on, and as the policy spells them,
         // its TXT tag, which names a saved Mac, and its home door (`p`). `stands` is the DEBUG test
-        // rows' saved Mac (they carry no tag): the one a `-SillConnect` address counts as.
+        // rows' saved Mac (they carry no tag): the one a `-SillConnect` address counts as, and the
+        // remote session's for `-SillMoveHomeTest`'s row.
         typealias Seen = (name: String, endpoint: NWEndpoint, interfaces: [NWInterface], policy: [DiscoveryPolicy.Interface],
                           tag: String?, door: DiscoveryPolicy.HomeDoor, stands: String?)
         var network: [Seen] = networkResults.map {
@@ -899,6 +944,9 @@ final class StreamClient: ObservableObject {
         // one saved Mac when exactly one is saved (docs/home-pairing-plan.md §7.9).
         let stands = Self.testHomeDoor != .plain && savedMacs.count == 1 ? savedMacs[0].macID : nil
         network += testNetworkRows.map { ($0.name, $0.endpoint, [], [], nil, Self.testHomeDoor, stands) }
+        // The move home test's row is the remote session's saved Mac at a home door that speaks TLS
+        // (`-SillMoveHomeTest`: its host runs --pairing, as Sill.app's home door does).
+        network += testHomeRows.map { ($0.name, $0.endpoint, [], [], nil, .pairingRequired, $0.macID) }
         if let row = pathTest?.row { network.append((row.name, row.endpoint, [], row.interfaces, nil, Self.testHomeDoor, stands)) }
         #endif
         let nearby: [Seen] = nearbyResults.map {
@@ -1231,6 +1279,7 @@ final class StreamClient: ObservableObject {
         sessionListed = false // …and its host is not yet known
         sessionHost = nil
         refusedListing = nil
+        resetHomeMove()       // …and what a remote session knew of its move home
         resetPointerFeed()    // …and the Mac has the pointer until this device's first input (Q6)
         hostName = name
         var bonjourName: String?
@@ -1421,11 +1470,23 @@ final class StreamClient: ObservableObject {
 
     /// A move's connection (from AWDL, to the cable, to Wi-Fi, a reconnect over the cable): as the
     /// session's own connections are dialed (`sessionParameters`), never peer-to-peer (a move goes
-    /// to the network), pinned to the key the session trusts. Should this device's key be
-    /// unreadable (it cannot be: the session's first connection was made with it, and it stays in
-    /// memory), parameters that never connect, so the move fails as any failed move does and
-    /// nothing goes out plain to a TLS door.
-    private func moveParameters() -> NWParameters {
+    /// to the network), pinned to the key the session trusts. The move home's (`fromRemote`) has a
+    /// trust of its own, the saved Mac's key pinned (`homeMoveTrust`: a remote session has no home
+    /// trust, and its door is the remote one), and a pin refused ends it at once
+    /// (`homeMovePinRefused` through `refused`, the connection these parameters are for), where a
+    /// Bonjour row's connection would prepare again and again until the move's 5 s. Should this
+    /// device's key be unreadable (it cannot be: the session's first connection was made with it,
+    /// and it stays in memory), parameters that never connect, so the move fails as any failed move
+    /// does and nothing goes out plain to a TLS door.
+    private func moveParameters(_ kind: MoveKind, refused: WeakConnection) -> NWParameters {
+        if kind == .fromRemote {
+            if let trust = homeMoveTrust, let params = sessionParameters(trust, peerToPeer: false, onPinRefused: { [weak self] in
+                guard let self, let c = refused.connection else { return }
+                refused.connection = nil   // once per connection
+                DispatchQueue.main.async { self.homeMovePinRefused(c) }
+            }) { return params }
+            return DeviceTLS.refusing(peerToPeer: false, queue: queue)
+        }
         let trust = session?.home ?? .plain
         if let params = sessionParameters(trust, peerToPeer: false) { return params }
         return DeviceTLS.refusing(peerToPeer: false, queue: queue)
@@ -1518,6 +1579,170 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    // MARK: Moving a remote session home
+
+    /// A move home is under way (`fromRemote`). Main thread.
+    var moveHomeUnderWay: Bool { moving?.kind == .fromRemote }
+
+    /// This session runs through the remote door (a saved Mac dialed away from home) and the network
+    /// lists that same Mac, by its Mac ID (a TXT tag this device resolves), never by name: once it has
+    /// for DiscoveryPolicy.moveAfter without a break, move the session home to the network door
+    /// (DiscoveryPolicy.moveHome), by the make-before-break move from AWDL, over the door's TLS pinned
+    /// to the saved Mac's key (DiscoveryPolicy.moveHomeTrust: never plain; a plain door, a Mac that
+    /// removed this device or one to pair with again keeps the session remote). The row is chosen one
+    /// by one among those with the Mac's tag (DiscoveryPolicy.moveHomeRow, `homeMoveRows`): a plain
+    /// door is passed over, a row found not to be the Mac is not dialed again while listed, and the
+    /// fewest tries go first, so a look-alike replaying the tag cannot keep the session from the Mac's
+    /// own row (the merge's review, 2026-10-08). The Mac then runs the home quality in one restart,
+    /// at this device's full rate (docs/remote-bundle-plan.md §7). Never
+    /// for a session made with Connect Remotely (it tests the VPN path from home), never to a Direct
+    /// row (not home), never beside another move, and not before the session's first window list and
+    /// its own verified kind 18. Main thread.
+    func moveHomeIfListed() {
+        homeMoveCheck?.cancel()
+        homeMoveCheck = nil
+        // A row no longer listed is forgotten, its refusal and its tries: listed again, it is tried afresh.
+        homeMoveRows = homeMoveRows.keeping(listed: Set(macs.filter { $0.route == .network }.map(\.id)))
+        guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
+              connection != nil, homeInfo.latest != nil, let id = s.macID, let saved = savedMac(id) else { return }
+        // Every network row whose tag names the session's saved Mac, by row: one not refused, at a door
+        // that speaks TLS, dialed pinned to the saved Mac's key, never plain, never an ask (a plain door
+        // is passed over; a Mac that removed this device or has a new key keeps the session remote).
+        let rows = macs.filter { $0.route == .network && $0.macID == id }
+        guard let pick = DiscoveryPolicy.moveHomeRow(rows: rows.map { (id: $0.id, door: $0.door) }, known: homeMoveRows,
+                                                     revoked: saved.revoked == true, newKey: saved.newKey == true,
+                                                     savedPin: saved.fingerprintData),
+              let mac = rows.first(where: { $0.id == pick.id }) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let listing = savedSightings.since[id]
+        let failures = failedHomeMoves.map { $0.listing == listing ? $0.count : 0 } ?? 0
+        let decision = DiscoveryPolicy.moveHome(listedSince: listing, lastAttempt: lastHomeMove, failures: failures, now: now)
+        if decision.move {
+            moveHome(to: mac, listing: listing, trust: pick.trust)
+        } else if let at = decision.recheckAt {
+            #if DEBUG
+            if failures == 0, homeMoveAnnounced != listing {
+                homeMoveAnnounced = listing
+                print("remote: \(mac.name) (\(id)) is on this network: moving the session home in \(String(format: "%.1f", at - now)) s")
+            }
+            #endif
+            let work = DispatchWorkItem { [weak self] in self?.moveHomeIfListed() }
+            homeMoveCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
+        }
+    }
+
+    /// Opens a network connection to the saved Mac's row beside the remote one (the cable first when
+    /// the row says Wired, as a tap dials it), with `trust`, TLS pinned to the saved Mac's key, its
+    /// hello first inside TLS (`startMove`), sends it the home viewport, reads it to its window list
+    /// and kind 18 (`probeMove`, `moveProbed`), and hands the session over with a fence
+    /// (`finishMove`). It counts as a move up for `followBestPath`. Main thread.
+    private func moveHome(to mac: FoundMac, listing: Double?, trust: DiscoveryPolicy.HomeTrust) {
+        guard let endpoint = mac.endpoint else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        lastHomeMove = now
+        lastMoveUp = now
+        homeMoveRows.tries[mac.id, default: 0] += 1
+        homeMoveListing = listing
+        homeMoveName = mac.name
+        homeMoveTrust = trust
+        homeMoveRow = HomeRow(id: mac.id, tagNamed: true)
+        homeInfo.moveStarted()
+        homeMoveViewport = lastViewport.map { v -> Viewport in
+            var home = v
+            home.fps = StreamClient.wantedFPS(remote: false)
+            return home
+        }
+        if let wired = wiredDial(for: mac) {
+            #if DEBUG
+            print("remote: moving the session home on \(wired.via)")
+            #endif
+            startMove(to: wired.endpoint, kind: .fromRemote, fallback: endpoint)
+        } else {
+            #if DEBUG
+            print("remote: moving the session home (the row as listed)")
+            #endif
+            startMove(to: endpoint, kind: .fromRemote, fallback: nil)
+        }
+    }
+
+    /// The move home's kind 18 speaks for the saved Mac this session is with: its signature checks, the
+    /// key that signed it is the saved pin, its Mac ID is the session's, and it is at least as new as
+    /// the newest one this remote session had received when the move started (DiscoveryPolicy.
+    /// HomeMoveInfo's floor; the Mac signs one afresh for every catalog). Main thread.
+    private func homeInfoChecks(_ signed: SignedMacInfo?) -> Bool {
+        guard let verified = signed?.verified(), let id = session?.macID, let saved = savedMac(id),
+              saved.fingerprintData == verified.fingerprint, verified.info.macID == id else { return false }
+        return homeInfo.accepts(verified.info.issuedAt)
+    }
+
+    /// The move home's pinned dial met another key (-9808, DeviceTLS's `onPinRefused`): not the
+    /// saved Mac, whose key this session holds through the remote door right now, so nothing is
+    /// paired again (DiscoveryPolicy.afterPinRefused is a session dial's, and a new key there would
+    /// end this working session's Mac): a look-alike replaying the Mac's tag, or another Mac. Its row
+    /// is refused as another launch's is (`refuseHomeMove`: not dialed again while listed), and the
+    /// session stays remote unless another row with the Mac's tag is the Mac. Main thread.
+    private func homeMovePinRefused(_ c: NWConnection) {
+        guard let move = moving, move.connection === c, move.kind == .fromRemote else { return }
+        refuseHomeMove(c, why: "\(homeMoveName ?? hostName) on the network answered with another key (-9808)")
+    }
+
+    /// Forgets what a remote session knew of its move home (a new session, or none). Main thread.
+    private func resetHomeMove() {
+        homeMoveCheck?.cancel()
+        homeMoveCheck = nil
+        lastHomeMove = nil
+        failedHomeMoves = nil
+        homeMoveRows = DiscoveryPolicy.HomeRows()
+        homeMoveListing = nil
+        homeMoveName = nil
+        homeMoveViewport = nil
+        homeMoveTrust = nil
+        homeMoveRow = nil
+        homeInfo = DiscoveryPolicy.HomeMoveInfo()
+        #if DEBUG
+        testHomeRows = []
+        homeMoveAnnounced = nil
+        #endif
+    }
+
+    #if DEBUG
+    /// `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` with `-SillDialSaved 1` (docs/remote-bundle-
+    /// plan.md S4): a second after the remote session's first window list, the saved Mac is listed as
+    /// a network row with the session's Mac ID at a door that requires pairing, so the move home runs
+    /// for real against a synthetic host (`SillHost --synthetic --remote --pairing`, its remote door
+    /// counting loopback as a VPN, SILL_TEST_REMOTE_ORIGIN=vpn, and its home door at home, speaking
+    /// TLS: the move dials it pinned to the saved Mac's key). `to:` lists that address (the host's home
+    /// door, 127.0.0.1:PORT); `refused` lists port 1 of the remote session's own host, where nothing
+    /// listens (each try fails; the back-off); `other:PORT` that host's PORT, another synthetic host:
+    /// another launch (the same identity) or another key, refused once and not again while listed.
+    /// Main thread.
+    private func beginMoveHomeTest(_ mode: String) {
+        guard session?.route.isRemote == true, let id = session?.macID, testHomeRows.isEmpty,
+              let host = session?.candidate?.host else { return }
+        let listed: NWEndpoint
+        if mode == "refused" {
+            listed = .hostPort(host: NWEndpoint.Host(host), port: 1)
+        } else if mode.hasPrefix("other:"), let number = UInt16(mode.dropFirst(6)), let port = NWEndpoint.Port(rawValue: number) {
+            listed = .hostPort(host: NWEndpoint.Host(host), port: port)
+        } else if mode.hasPrefix("to:"), let address = Self.address(String(mode.dropFirst(3))) {
+            listed = address
+        } else {
+            print("remote: move home test: \(mode)? (to:HOST:PORT, refused or other:PORT)")
+            return
+        }
+        // A name of its own: on this Mac the simulator's browser also lists Sill.app under the Mac's
+        // name, and a row of the same name would hide this one.
+        let name = hostName + " (home test)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, self.connected, self.session?.route.isRemote == true else { return }
+            self.testHomeRows = [(name, listed, id)]
+            print("remote: move home test: \(name) (\(id)) listed on the network at \(listed)")
+            self.discoveryChanged()
+        }
+    }
+    #endif
+
     /// The move's connection, to `endpoint`, with its own 5 s. With a `fallback` its first dial is
     /// pinned to an interface (the cable, for a move from AWDL to a Wired row; Wi-Fi, for a move off
     /// the cable), and gives way to `fallback` dialled unconstrained when not ready within
@@ -1525,7 +1750,9 @@ final class StreamClient: ObservableObject {
     /// none (the row as listed could be Wi-Fi again, and never Wi-Fi to Wi-Fi): its wired dial not
     /// ready within wiredWait, or unable to go on, ends the move (`giveUpMove`). Main thread.
     private func startMove(to endpoint: NWEndpoint, kind: MoveKind, fallback: NWEndpoint?) {
-        let c = NWConnection(to: endpoint, using: moveParameters())
+        let refused = WeakConnection()
+        let c = NWConnection(to: endpoint, using: moveParameters(kind, refused: refused))
+        refused.connection = c
         // Its own hello first, written to `c` as it is made, as `connect(to:)` does: every move's
         // connection (from AWDL, to the cable, to Wi-Fi, a rescue's, each fallback's) is a new
         // session connection to the Mac, and a Mac with a device floor judges it by its first
@@ -1537,6 +1764,15 @@ final class StreamClient: ObservableObject {
         // A move up gives up; a reconnect over the cable (`sessionDead`) has the row as listed for
         // its fallback instead, whose own dial has the move's 5 s.
         let givesUp = kind == .toCable && !sessionDead
+        // The move home's first message after the hello, at `.ready` and before the probe: the home
+        // viewport, straight to `c` (not through SessionLink: a viewport reorders no input, and the
+        // Mac keeps a rate per connection). It is the new connection's first viewport, which the Mac
+        // waits for to take the home quality and this device's full rate in one restart. Built here,
+        // on the main thread (UIScreen, `lastViewport`).
+        let homeViewport: Data? = kind == .fromRemote
+            ? homeMoveViewport.map { StreamMessage(kind: .viewport, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                                   payload: Wire.encode($0)).serialized() }
+            : nil
         var wasReady = false   // the handler runs on `queue`, one state at a time
         // One handler for both lives of `c`: until it takes over, `moveEnded` acts (it checks
         // `moving`); after, `connectionLost` and `sessionWaiting` do (they check `connection`).
@@ -1546,7 +1782,8 @@ final class StreamClient: ObservableObject {
             case .ready:
                 guard !wasReady else { self.sessionReadyAgain(c); return }   // as in `connect`
                 wasReady = true
-                self.probeMove(c)
+                if let homeViewport { c.send(content: homeViewport, completion: .contentProcessed { _ in }) }
+                self.probeMove(c, untilMacInfo: kind == .fromRemote)
             case .waiting(let e):
                 self.sessionWaiting(c)
                 if let fallback {
@@ -1555,7 +1792,8 @@ final class StreamClient: ObservableObject {
                     DispatchQueue.main.async { self.giveUpMove(c, why: "is waiting (\(e))") }
                 }
             case .failed(let e):
-                print(kind == .fromDirect ? "move to the network failed: \(e)" : "path: the move's connection failed: \(e)")
+                print(kind == .fromDirect ? "move to the network failed: \(e)"
+                      : kind == .fromRemote ? "remote: the move home's connection failed: \(e)" : "path: the move's connection failed: \(e)")
                 if let fallback {   // queued first: the moveEnded below then finds the move gone on
                     DispatchQueue.main.async { self.moveUnconstrained(after: c, fallback, why: "failed (\(e))") }
                 }
@@ -1598,6 +1836,7 @@ final class StreamClient: ObservableObject {
         guard let move = moving, move.connection === c, c.state != .ready else { return }
         #if DEBUG
         switch move.kind {
+        case .fromRemote: print("remote: the move home's dial on the cable \(why); dialing the row as listed")
         case .fromDirect: print("discovery: the wired move \(why); moving unconstrained")
         case .toCable: print("path: the dial on the cable \(why); dialing the row as listed")
         case .toWifi: print("path: the dial on Wi\u{2011}Fi \(why); dialing the row as listed")
@@ -1625,8 +1864,12 @@ final class StreamClient: ObservableObject {
     /// before the list goes to `moveSaidGoodbye`, and the reading goes on to the Mac's close. A read
     /// that fails, a message cut short, or one bigger than the session's reader takes
     /// (MessageReader's caps), cancels `c`, which ends the move (`moveEnded`). Its own reads, whole
-    /// messages at a time: its 5 s bound it, and it reads only up to the first window list.
-    private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = []) {
+    /// messages at a time: its 5 s bound it, and it reads only up to the first window list. The move
+    /// home (`untilMacInfo`) hands that list to `homeListProbed`, which reads on (`listed`: its launch
+    /// ID) to the kind 18 that follows it when it comes from this session's launch (the catalog's
+    /// order is 2, 16, 18: a millisecond more), and `moveProbed` checks that against the saved Mac.
+    private func probeMove(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)] = [], untilMacInfo: Bool = false,
+                           listed: String?? = nil) {
         c.receive(minimumIncompleteLength: StreamMessage.headerLength, maximumLength: StreamMessage.headerLength) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             guard let data, let header = StreamMessage.parseHeader(data) else {
@@ -1651,8 +1894,16 @@ final class StreamClient: ObservableObject {
                     let goodbye = Wire.decode(Goodbye.self, from: payload) ?? Goodbye(reason: "")
                     DispatchQueue.main.async { self.moveSaidGoodbye(c, goodbye) }
                 }
-                guard header.kind == .windowList else { self.probeMove(c, kept: kept); return }
+                if untilMacInfo, let host = listed {
+                    // The move home: after the window list, read on to kind 18.
+                    guard header.kind == .macInfo else { self.probeMove(c, kept: kept, untilMacInfo: true, listed: listed); return }
+                    let signed = Wire.decode(SignedMacInfo.self, from: payload)
+                    DispatchQueue.main.async { self.moveProbed(c, kept: kept, host: host, macInfo: signed) }
+                    return
+                }
+                guard header.kind == .windowList else { self.probeMove(c, kept: kept, untilMacInfo: untilMacInfo, listed: listed); return }
                 guard let list = Wire.decode(WindowList.self, from: payload) else { c.cancel(); return }
+                if untilMacInfo { DispatchQueue.main.async { self.homeListProbed(c, kept: kept, host: list.launchID) }; return }
                 DispatchQueue.main.async { self.moveProbed(c, kept: kept, host: list.launchID) }
             }
             if header.payloadLength == 0 { next(Data()); return }
@@ -1668,12 +1919,55 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// The move home's first window list is in: another launch of Sill, or another Mac, is refused at
+    /// once (a host without an identity sends no kind 18 to wait for); the same launch is read on
+    /// to its kind 18 (`probeMove`, then `moveProbed`). Main thread.
+    private func homeListProbed(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)], host: String?) {
+        guard let move = moving, move.connection === c else { c.cancel(); return }   // given up meanwhile
+        guard c.state == .ready else { c.cancel(); return }                          // its moveEnded follows
+        guard DiscoveryPolicy.sameHost(sessionHost, host) else {
+            refuseHomeMove(c, why: "\(hostName) on the network is another launch of Sill, or another Mac")
+            return
+        }
+        probeMove(c, kept: kept, untilMacInfo: true, listed: .some(host))
+    }
+
+    /// A row the move home found not to be this session's Mac: not dialed again while it is listed
+    /// (DiscoveryPolicy.HomeRows); another row with the Mac's tag is tried at once. Main thread.
+    private func refuseHomeMove(_ c: NWConnection, why: String) {
+        print("remote: move home refused: \(why)")
+        if let row = homeMoveRow { homeMoveRows.refused.insert(row.id) }
+        c.cancel()   // moveEnded, from .cancelled
+    }
+
     /// The move's connection's first window list is in: the session goes over if the list comes
     /// from the host this session runs on (DiscoveryPolicy.sameHost). Main thread.
-    private func moveProbed(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)], host: String?) {
+    private func moveProbed(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)], host: String?,
+                            macInfo: SignedMacInfo? = nil) {
         guard let move = moving, move.connection === c else { c.cancel(); return }   // given up meanwhile (its 5 s, a new session)
         // Failed since its list came: its handler's `moveEnded` follows, so `moving` is left for it.
         guard c.state == .ready else { c.cancel(); return }
+        if move.kind == .fromRemote {
+            // The same launch of Sill, and a kind 18 the saved Mac signed at least as recently as this
+            // session's own when the move began. The handshake, pinned to the saved Mac's key, has
+            // proved the Mac already (pairing at home: the home door speaks TLS, and nothing of this
+            // device reaches another key); this says it a second time, for a millisecond: a TXT tag
+            // and a kind 18 captured before this session are not enough either way.
+            let why: String?
+            if !DiscoveryPolicy.sameHost(sessionHost, host) {
+                why = "\(hostName) on the network is another launch of Sill, or another Mac"
+            } else if !homeInfoChecks(macInfo) {
+                why = "the home door's kind 18 is not this Mac's, or older than this session's"
+            } else {
+                why = nil
+            }
+            if let why {
+                refuseHomeMove(c, why: why)
+                return
+            }
+            finishMove(c, kind: move.kind, kept: kept)
+            return
+        }
         guard DiscoveryPolicy.sameHost(sessionHost, host) else {
             if move.kind == .fromDirect {
                 // Another Mac of this name, on the network while this one is reached over AWDL: the
@@ -1711,6 +2005,9 @@ final class StreamClient: ObservableObject {
             return
         }
         switch move.kind {
+        case .fromRemote:
+            print("remote: move home refused: \(homeMoveName ?? hostName) on the network said goodbye (\(reason))")
+            if let row = homeMoveRow { homeMoveRows.refused.insert(row.id) }
         case .fromDirect:
             print("move to the network refused: \(hostName) on the network said goodbye (\(reason))")
             refusedListing = sightings.since[hostName]
@@ -1738,8 +2035,9 @@ final class StreamClient: ObservableObject {
         moving = nil
         // The session this move was for must still run: over AWDL for a move from AWDL (a direct
         // session that ended meanwhile reconnects by itself, to the network row), not over it for
-        // `followBestPath`'s.
-        guard connected, let old = connection, connectedDirectly == (kind == .fromDirect) else { c.cancel(); return }
+        // `followBestPath`'s, and through the remote door for the move home.
+        guard connected, let old = connection, connectedDirectly == (kind == .fromDirect),
+              kind != .fromRemote || session?.route.isRemote == true else { c.cancel(); return }
         // From here `c` is the session's: the old connection's pings and one-second windows stop at
         // their next turn, since each checks that it is still `connection`, and its read loop goes on
         // only until the fence's pong (`deliver`), or stops at once without a fence.
@@ -1769,6 +2067,29 @@ final class StreamClient: ObservableObject {
             #endif
         }
         if kind == .toCable, !reconnected { failedUps = nil }   // a move up that completed: the back-off starts again
+        if kind == .fromRemote {
+            // Home: the session is a network one from here, its route line gone and its readout's
+            // word read from the new connection (below). Its liveness and pings are the home rule's
+            // (`startMeasuring(remote: false)`). Its connections from now on, a move to the cable or
+            // to Wi-Fi included, are pinned to the saved Mac's key as the move's were (`session.home`,
+            // `moveParameters`), and how it ends is a session at home's (StreamClient+Home's
+            // `homeSessionEnded`: a goodbye "removed" revokes, the Mac's key pinned); the row it came
+            // to is its row. The saved Mac's home door speaks TLS: never dialed plain again.
+            session?.candidate = nil
+            if let name = homeMoveName { session?.bonjourName = name; hostName = name }
+            session?.home = homeMoveTrust
+            session?.row = homeMoveRow
+            session?.endpoint = c.endpoint
+            if let id = session?.macID, let next = SavedMacs.seenOverTLS([id], in: savedMacs) {
+                savedMacs = next
+                persistSavedMacs()
+            }
+            remoteRoute = nil
+            homeInfo = DiscoveryPolicy.HomeMoveInfo()
+            failedHomeMoves = nil
+            homeMoveTrust = nil
+            homeMoveRow = nil
+        }
         connectedDirectly = false
         session?.route = .network
         sessionDead = false
@@ -1785,6 +2106,7 @@ final class StreamClient: ObservableObject {
         lastAutoDesktop = .distantPast
         #if DEBUG
         switch kind {
+        case .fromRemote: print(reconnected ? "remote: the session carried on over the move home (its remote connection went)" : "remote: the session moved home")
         case .fromDirect: print("discovery: the session moved to the network")
         case .toCable: print(reconnected ? "path: the session carried on over a new connection (the cable's dial)" : "path: the session moved to the cable")
         case .toWifi: print("path: the session moved to Wi\u{2011}Fi")
@@ -1797,8 +2119,12 @@ final class StreamClient: ObservableObject {
         }
         // The Mac keeps a frame rate per connection: this one's viewport is the first thing the new
         // connection carries once the fence is down, and the old one closes half a second after
-        // that (`fenceEnded`), so the stream's rate never falls back to the default.
-        if let v = lastViewport { sendViewport(v) }
+        // that (`fenceEnded`), so the stream's rate never falls back to the default. After the move
+        // home, the home viewport it already sent at `.ready` (the away one's 60 fps would take the
+        // new connection's rate down, and StreamScreen's re-send on `remoteRoute` up again: two more
+        // restarts); through `sendViewport` it becomes `lastViewport`, and the Mac finds it unchanged.
+        if let v = kind == .fromRemote ? (homeMoveViewport ?? lastViewport) : lastViewport { sendViewport(v) }
+        if kind == .fromRemote { homeMoveViewport = nil }
         // The Mac sends its menus only to a connection that asked, and answers a request on the
         // connection it came on, which the session no longer reads: the menus waiting settle, and
         // the new connection asks for the top level (the same Mac: its menus stay meanwhile).
@@ -1806,7 +2132,8 @@ final class StreamClient: ObservableObject {
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
-                self.fenceEnded(old, released, why: kind == .fromDirect ? "no pong on the direct connection" : "no pong on the old connection")
+                self.fenceEnded(old, released, why: kind == .fromDirect ? "no pong on the direct connection"
+                                : kind == .fromRemote ? "no pong on the remote connection" : "no pong on the old connection")
             }
         }
         updateDiscovery()
@@ -1845,6 +2172,7 @@ final class StreamClient: ObservableObject {
         if sessionDead {
             #if DEBUG
             print(move.kind == .toCable ? "path: the reconnect over the cable did not complete, and the old connection is gone: the session ends"
+                  : move.kind == .fromRemote ? "remote: the move home did not complete, and the remote connection is gone: the session ends"
                   : "path: the move to Wi\u{2011}Fi did not complete, and the old connection is gone: the session ends")
             #endif
             endSession()
@@ -1852,6 +2180,22 @@ final class StreamClient: ObservableObject {
         }
         if connected { status = "Connected to \(hostName)" }
         switch move.kind {
+        case .fromRemote:
+            // Still remote. A move that did not complete: the next try waits DiscoveryPolicy.upWait,
+            // counted for this listing, and goes to the row tried least (DiscoveryPolicy.moveHomeRow). A
+            // refused row is not a failure: another row with the Mac's tag is tried at once.
+            if let listing = homeMoveListing, !(homeMoveRow.map { homeMoveRows.refused.contains($0.id) } ?? false) {
+                let count = failedHomeMoves.map { $0.listing == listing ? $0.count + 1 : 1 } ?? 1
+                failedHomeMoves = (listing, count)
+                #if DEBUG
+                print("remote: the move home did not complete (\(count) in a row); the next try in \(Int(DiscoveryPolicy.upWait(failures: count))) s")
+                #endif
+            }
+            homeMoveViewport = nil
+            homeMoveTrust = nil
+            homeMoveRow = nil
+            homeInfo.moveEnded()
+            moveHomeIfListed()
         case .fromDirect:
             #if DEBUG
             print("discovery: the move did not complete; the session stays direct")
@@ -2029,6 +2373,20 @@ final class StreamClient: ObservableObject {
     /// words that goodbye deserves rather than after a dial to a Mac that is going). Main thread.
     private func rescue(from c: NWConnection) -> Bool {
         guard connected, sessionListed, goodbye == nil else { return false }
+        // The remote connection went while the move home is under way (the hotspot dropped as the
+        // home Wi-Fi joined): the move carries the session, without a fence (nothing sent on a dead
+        // connection comes back). What the device sends waits from this moment: unlike a move to
+        // Wi-Fi, this one held nothing when it started. Settings picks are not held but refused
+        // meanwhile (`changeSettings`): made against the away state the panel shows, held they would
+        // reach the Mac on the home connection and set the home quality.
+        if let move = moving, move.kind == .fromRemote, session?.route.isRemote == true {
+            sessionDead = true
+            holdSends(c)
+            #if DEBUG
+            print("remote: the remote connection went while the move home is under way: the move carries the session")
+            #endif
+            return true
+        }
         let now = ProcessInfo.processInfo.systemUptime
         var input = pathInput(now: now)
         input.dead = true
@@ -2397,6 +2755,7 @@ final class StreamClient: ObservableObject {
         sessionListed = false
         sessionHost = nil
         refusedListing = nil
+        resetHomeMove()
         resetPointerFeed()   // the Mac has the pointer until this device's first input (Q6)
         session = s
         goodbye = nil
@@ -2494,6 +2853,7 @@ final class StreamClient: ObservableObject {
         sessionListed = false
         sessionHost = nil
         refusedListing = nil
+        resetHomeMove()
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         firstListDeadline?.cancel()
         firstListDeadline = nil
@@ -3018,11 +3378,14 @@ final class StreamClient: ObservableObject {
                     #endif
                     self.moveToNetworkIfListed()
                     self.followBestPath()
+                    self.moveHomeIfListed()
                     // Once per connection, now that the Mac has let this device in: the Mac's menus,
                     // their top level now and again whenever it changes (a Mac from before them skips it).
                     self.subscribeToMenus()
                     #if DEBUG
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
+                    SettingsScript.sessionListed(self)   // -SillSettingsScript: and this one's
+                    if let test = UserDefaults.standard.string(forKey: "SillMoveHomeTest") { self.beginMoveHomeTest(test) }
                     #endif
                 }
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
@@ -3272,6 +3635,9 @@ extension StreamClient {
     /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
     func changeSettings(_ change: HostSettingsChange) {
         noteAction()
+        // The move home carries a session whose remote connection went (`rescue`): a pick now was
+        // made against the away state, and held it would reach the Mac on the home connection.
+        guard !(sessionDead && moveHomeUnderWay) else { return }
         guard let out = settings.pick(change, token: settingsToken, now: ProcessInfo.processInfo.systemUptime) else { return }
         settingsToken += 1
         settingsProblem = nil
@@ -3284,12 +3650,39 @@ extension StreamClient {
 
     /// A state from the Mac: a broadcast, or the answer to one of this device's picks. Main thread.
     private func receiveSettings(_ state: HostSettingsState) {
+        #if DEBUG
+        let linkBefore = settings.host?.link
+        #endif
         let refused = settings.receive(state)
         if state.answering != nil { settingsProblem = nil }
         if !refused.isEmpty { settingsRefusals += 1 }
         scheduleSettingsExpiry()
         rememberDirectWireless(state)
+        #if DEBUG
+        logLink(from: linkBefore, to: state.link)
+        #endif
     }
+
+    #if DEBUG
+    /// The console's link lines (docs/remote-bundle-plan.md §6.8), on a change of the Mac's report
+    /// only: "link: behind (cannot carry Pro; suggesting Low · Standard)", "link: stalled (…)",
+    /// "link: keeping up".
+    private func logLink(from old: LinkReport?, to new: LinkReport?) {
+        guard old?.state != new?.state || old?.suggestedBitrate != new?.suggestedBitrate
+                || old?.suggestedCaptureScale != new?.suggestedCaptureScale else { return }
+        guard let new else {
+            print("link: keeping up")
+            return
+        }
+        let quality = QualityPreset.name(forBitrate: new.bitrate)
+        guard new.isBehind else {
+            print("link: \(new.state) (cannot carry \(quality); the Mac's alone: nothing shown)")
+            return
+        }
+        let suggesting = AwayCopy.suggestion(new).map { "suggesting \($0.title)" } ?? "nothing lower to suggest"
+        print("link: behind (cannot carry \(quality); \(suggesting))")
+    }
+    #endif
 
     /// Direct Wireless as this Mac last reported it, for discovery (DiscoveryPolicy.remember): every
     /// state carries it. Keyed by the Bonjour name this connection was made to, which is what the
