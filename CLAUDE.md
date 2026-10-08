@@ -137,7 +137,10 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   `SillHost --synthetic --remote --pairing`, 28 of 28: S4 (moved over the TLS
   home door, one restart at the home quality), `refused`'s back-off, another
   key refused by the pin once, another launch once, S5, and S4race (the
-  remote path cut mid-move: carried, the pick not sent).
+  remote path cut mid-move: carried, the pick not sent); the pacing harness
+  against main, every gate passing with main's figures and the link's
+  verdicts; Sill.app's previews main's but for the away section and the new
+  cards; photos of the panel and the stream's line, the phone's included.
 - **Untested, for Noah:** the plan's P4–P13 (P1–P3 and P14 are PR A's and
   still open): away starts at Low · Standard with `bitrate` untouched (P4);
   the away choice saved and kept (P5); mixed home and away, one restart each

@@ -2057,6 +2057,25 @@ encoder never used; hosts on loopback alone and the software encoder):
   not sent, no connect screen, the session carried on 2.7 s after the cut without a fence (3 held
   messages), the host never changing a setting and running the home quality after one "Home
   quality again".
+- **H3 and H11, the pacing harness** (`Scripts/pacing/run.sh`, its gate cases, this tree against
+  origin/main at e6b3265, which has PR A: both sides built, the base without LINK_JUDGE and the new
+  with it, as build.sh now reads them; one linkdown run again for the load): every gate passed, and
+  the pacing figures are main's (real24 60.0 → 59.3 fps with nothing dropped, kf25m32 60.1 → 60.1,
+  ext120 120.0 → 120.0, slowkfB 64.8 → 64.9, restartkf 60.1 → 60.1, bigkf8 59.9 → 59.9, dip 52.8 →
+  52.8 with the frame age back in 6.0 s, relay2 62.4 → 62.5 without loss, blackhole dropped at 13.1
+  s on both, stillend 3 of 3). The link: real24, slowkfB and linkstill never behind; dip behind at
+  28.0 s and fine at 38.0; linkdead stalled 5 s after the blackhole; linkdown behind and never
+  stalled; linkrestart behind at 3.0 s and through both restarts.
+- **H16, Sill.app's previews** (the bare binaries of main and of this tree, run from one path): 124
+  of main's files byte for byte the same; only `pane-streaming` (light and dark, the Away from home
+  section) and `menu.txt` (the `remote-away` sample) differ, and the six cards `remote-away`,
+  `link-behind` and `link-stalled` are new, as on the branch.
+- **S1, a few photos** of the harness's mock on the same simulator: the panel at 1000x710 away
+  (the header's "Away: Low · Standard" beside the Menus button), `linkbehind` (the callout and "Use
+  Low · Standard"), `awayhome` (a TLS session at home: the footnote), `linkmixed` at 500x710, and
+  the stream's line at 1000x710, 710x1000 and on a phone's arrangement (440x894, `-SillIdiom
+  phone`); with `-SillTourState fresh -SillTour touch` the tour's card shows and the line stays
+  away.
 
 ### Open questions for Noah
 
