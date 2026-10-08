@@ -1586,10 +1586,12 @@ final class StreamClient: ObservableObject {
     /// This session runs through the remote door (a saved Mac dialed away from home) and the network
     /// lists that same Mac, by its Mac ID (a TXT tag this device resolves), never by name: once it has
     /// for DiscoveryPolicy.moveAfter without a break, move the session home to the network door
-    /// (DiscoveryPolicy.moveHome), by the make-before-break move from AWDL. The Mac then runs the home
-    /// quality in one restart, at this device's full rate (docs/remote-bundle-plan.md §7). Never for a
-    /// session made with Connect Remotely (it tests the VPN path from home), never to a Direct row
-    /// (not home), never beside another move, and not before the session's first window list and
+    /// (DiscoveryPolicy.moveHome), by the make-before-break move from AWDL, over the door's TLS pinned
+    /// to the saved Mac's key (DiscoveryPolicy.moveHomeTrust: never plain; a plain door, a Mac that
+    /// removed this device or one to pair with again keeps the session remote). The Mac then runs the
+    /// home quality in one restart, at this device's full rate (docs/remote-bundle-plan.md §7). Never
+    /// for a session made with Connect Remotely (it tests the VPN path from home), never to a Direct
+    /// row (not home), never beside another move, and not before the session's first window list and
     /// its own verified kind 18. Main thread.
     func moveHomeIfListed() {
         homeMoveCheck?.cancel()
@@ -1698,12 +1700,14 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` with `-SillDialSaved 1` (docs/remote-bundle-
     /// plan.md S4): a second after the remote session's first window list, the saved Mac is listed as
-    /// a network row with the session's Mac ID, so the move home runs for real against a synthetic
-    /// host (`SillHost --synthetic --remote`, its remote door counting loopback as a VPN,
-    /// SILL_TEST_REMOTE_ORIGIN=vpn, and its home door at home). `to:` lists that address (the host's
-    /// home door, 127.0.0.1:PORT); `refused` lists port 1 of the remote session's own host, where
-    /// nothing listens (each try fails; the back-off); `other:PORT` that host's PORT, another
-    /// synthetic host: another launch, refused once and not again while listed. Main thread.
+    /// a network row with the session's Mac ID at a door that requires pairing, so the move home runs
+    /// for real against a synthetic host (`SillHost --synthetic --remote --pairing`, its remote door
+    /// counting loopback as a VPN, SILL_TEST_REMOTE_ORIGIN=vpn, and its home door at home, speaking
+    /// TLS: the move dials it pinned to the saved Mac's key). `to:` lists that address (the host's home
+    /// door, 127.0.0.1:PORT); `refused` lists port 1 of the remote session's own host, where nothing
+    /// listens (each try fails; the back-off); `other:PORT` that host's PORT, another synthetic host:
+    /// another launch (the same identity) or another key, refused once and not again while listed.
+    /// Main thread.
     private func beginMoveHomeTest(_ mode: String) {
         guard session?.route.isRemote == true, let id = session?.macID, testHomeRows.isEmpty,
               let host = session?.candidate?.host else { return }

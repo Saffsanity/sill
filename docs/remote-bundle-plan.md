@@ -2010,7 +2010,7 @@ encoder never used; hosts on loopback alone and the software encoder):
   the checks went on, so everything ran again on it): `swift build -c release` from a clean scratch
   path, only the CaptureProbe warning; the iOS app for the simulator, Debug and Release, and Debug
   for a generic device, unsigned, only the old `StreamClient` capture warning
-  (StreamClient.swift:3417); Release's Info.plist with `_sill._tcp` alone and none of the harness's
+  (StreamClient.swift:3421); Release's Info.plist with `_sill._tcp` alone and none of the harness's
   arguments in its binary. The pbxproj: 101 objects, no ID twice, every one of the 39 sources once.
 - **The pure checks** (`Tests/checks/run-all.sh`): all 39 pass; `policy` 360 (main's 336, the
   branch's 17 for the move home, the merge's 7 for its trust).
@@ -2086,4 +2086,7 @@ the iPad: the line and the callout stay, and VoiceOver does not say it again; an
 button, then Done at once: no line comes up and nothing is spoken; and how VoiceOver reads the
 callout's "Low · Standard". Nothing here ran on a device, a real path or the hardware encoder: the
 link's timing on a hotspot, the move's on a real network, and VoiceOver on a device are all
-untested.
+untested. Since the merge with main the move home goes through the Mac's TLS home door, pinned to its key:
+with Sill.app built from this branch, P10 and P11 show "Client connected" on the Mac (never "Home
+door refused") and no pairing is asked; against Sill for Mac 0.4.0 (main's, which has the TLS door
+but no away quality) the move home works too; against 0.3.1 (a plain door) the session stays remote.

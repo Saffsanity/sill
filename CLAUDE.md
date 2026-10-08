@@ -5023,9 +5023,10 @@ away line, the footnote, the callout; `linkstalled` shows none) and
 synthetic host on loopback: the panel's controls and the link callout's button,
 t seconds after the first window list), `-SillMoveHomeTest to:HOST:PORT|refused|
 other:PORT` (with `-SillDialSaved 1`: the saved Mac listed as a network row a
-second into the remote session, so the move home runs against a synthetic
-`--remote` host with SILL_TEST_REMOTE_ORIGIN), `-SillDialSaved remotely` (as
-Connect Remotely: never moves home),
+second into the remote session at a door that speaks TLS, so the move home
+runs against a synthetic `--remote --pairing` host with SILL_TEST_REMOTE_ORIGIN
+and SILL_TEST_REMOTE_DIR, dialed pinned to the saved Mac's key), `-SillDialSaved
+remotely` (as Connect Remotely: never moves home),
 `-SillConnectCase looking|hint|nearby|methods|denied|update|notice` (the connect screen in a discovery
 state; `methods` has a row ending in each word, none, and long names; `update` a
 Mac's refusal with "Update Sill in the App Store" when `-SillAppStoreURL
