@@ -1679,8 +1679,9 @@ kind 18 check, and the host's view of the link (no device-side byte count).
   Its test row (`-SillMoveHomeTest`) is named "‹Mac› (home test)": on this Mac the simulator's
   browser also lists Sill.app under the Mac's name, and a row of the same name hid it.
 - **The fence check** gains two modes, `remotehome` (the fenced hand-over from a TLS connection to a
-  plain one, the old one closed once what waited went out) and `remotedead` (the remote connection
-  gone mid-move: held, adopted, delivered): 17 modes.
+  plain one, the old one closed once what waited went out; since the merge's review, 2026-10-08, TLS
+  to TLS, as the move home dials the home door now) and `remotedead` (the remote connection gone
+  mid-move: held, adopted, delivered): 17 modes.
 - **Headless taps:** `-SillSettingsScript '<t> set K=V | suggestion; …'` (DEBUG, under
   `-SillInputScript`'s guard: a loopback session to a host with no version) takes the panel's
   controls, and the callout's button, for S3. The device's console prints "link: behind (cannot

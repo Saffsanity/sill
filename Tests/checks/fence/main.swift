@@ -57,19 +57,22 @@
 // changes on one thread, no senders, pings or read loops, so each fence ends only where the script ends
 // it: the count after every step, then what each of eleven connections delivered, read to its end).
 // remote-bundle (2026-09-27, docs/remote-bundle-plan.md §7), the move home: a session through the remote
-// door handed to the home door. remotehome (the first connection is TLS 1.3, the remote door's own
-// parameters and keys (RemoteTLS, RemoteIdentity) with any key trusted both ways, the second plain TCP,
-// the home door's: as `ok`, the fence's ping and pong inside TLS) and remotedead (the remote connection
-// dies while the move home is under way, its home connection already made: the stand-in closes it, the
-// client sees its end and only then holds, as StreamClient.rescue does after the loss, and adopts the
-// home connection without a fence). The check compiles all of Sources/StreamProtocol for them.
+// door handed to the home door. remotehome (both connections TLS 1.3 `sill/1`, the doors' own parameters
+// and keys (RemoteTLS, RemoteIdentity) with any key trusted both ways: the remote door's, then the home
+// door's, which since pairing at home (the merge with main, 2026-10-08) speaks the same TLS and which the
+// move dials pinned; as `ok`, the fence's ping and pong inside TLS, and nothing goes out on the home
+// connection before its handshake is done) and remotedead (the remote connection dies while the move home
+// is under way, its home connection already made: the stand-in closes it, the client sees its end and only
+// then holds, as StreamClient.rescue does after the loss, and adopts the home connection without a fence).
+// The stand-in's one TLS listener stands for both doors: this check is about order, not trust or ports.
+// The check compiles all of Sources/StreamProtocol for them.
 //   (the old SessionLink needs $SP/review/fencecheck/oldshim.swift, which gives Released its `waiting`)
 import Foundation
 import Network
 
 let modes = ["ok", "nofence", "timeout", "oldcloses", "hold", "holdclosed", "unhold", "adoptfence", "twofences", "twomoves",
              "holdfence", "holdadopt", "newsession", "newsessionhold", "count", "remotehome", "remotedead"]
-/// The modes whose first connection is the remote door's TLS.
+/// The modes whose connections are TLS: the remote door's, then the home door's (the move home).
 let remoteModes: Set<String> = ["remotehome", "remotedead"]
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ok"
 if !modes.contains(mode) { print("unknown mode \(mode); modes: \(modes.joined(separator: " "))"); exit(2) }
@@ -285,8 +288,9 @@ let stalePayload = withUnsafeBytes(of: (now() - 1).bitPattern.bigEndian) { Data(
 var staleRead = false
 var staleEnded: Int?            // the ends that came with the stale pong (none), once it has been read
 
-/// A connection to the stand-in: plain TCP (the home door), or with `tls` its TLS door, as a device
-/// dials the remote door (any key trusted: this check is about order, not trust).
+/// A connection to the stand-in: plain TCP (a home door before pairing at home, the moves at home here),
+/// or with `tls` its TLS door, as a device dials the remote door and, since pairing at home, the home door
+/// (any key trusted: this check is about order, not trust).
 func connect(tls: Bool = false) -> NWConnection {
     let c: NWConnection
     if tls, let identity = deviceIdentity {
@@ -701,8 +705,8 @@ case "newsession", "newsessionhold":
     slowLine.resume()
     timeout([old, new1])
 case "remotehome":
-    // The move home: from the remote door's TLS connection (slow, like a VPN's) to the home door's.
-    let new = connect()
+    // The move home: from the remote door's TLS connection (slow, like a VPN's) to the home door's TLS.
+    let new = connect(tls: true)
     handOverFromSlow(to: new)
     send(5)                                     // these wait behind the fence, which crosses TLS both ways,
     allow()                                     // the rest go on while it comes down
@@ -712,8 +716,8 @@ case "remotehome":
 case "remotedead":
     // The remote connection dies while the move home is under way: its home connection is made and
     // ready, then the stand-in closes the remote one, the client sees the end and only then holds (the
-    // rescue), and adopts the home connection without a fence.
-    let new = connect()
+    // rescue), and adopts the home connection, TLS too, without a fence.
+    let new = connect(tls: true)
     stub.close(0)
     _ = wait(patience) { stateLock.lock(); defer { stateLock.unlock() }; return sawEnd.contains(ObjectIdentifier(old)) }
     stateLock.lock()
@@ -744,11 +748,16 @@ clientQueue.sync {
     for c in connections { c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in }) }
 }
 if remoteModes.contains(mode) {
-    // TLS's end does not reach the stand-in's reads while the device leaves the stand-in's frames on
-    // that connection unread (it stopped reading it at the fence): the device resets it instead, once
-    // the stand-in has read everything the fence let through (nothing is sent on it after the fence).
-    _ = wait(patience) { stub.queue.sync { stub.finished.count >= connections.count - 1 } }
-    clientQueue.sync { if old.state == .ready { old.forceCancel() } }
+    // A TLS connection's final message never reaches the stand-in's reads as its end: Network.framework's
+    // TLS carries no half-close (seen here since the home connection is TLS too, the merge's review,
+    // 2026-10-08: its end never came in 20 s, with every input read and the device reading it), nor does
+    // the old one's, which the device stopped reading at the fence. So once the stand-in has read every
+    // input that must arrive (all, or for remotedead those sent after its hold; or `patience` has gone
+    // by, and the verdict below says what is missing), the device resets each TLS connection still up,
+    // which the stand-in reads as its end: nothing sent can still be on its way.
+    let first: UInt32 = mode == "remotedead" ? seqAtHandOver + 1 : 1
+    _ = wait(patience) { stub.queue.sync { Set(stub.arrived).isSuperset(of: first...total) } }
+    clientQueue.sync { for c in connections where c.state == .ready { c.forceCancel() } }
 }
 require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
 let arrived = stub.queue.sync { stub.arrived }
