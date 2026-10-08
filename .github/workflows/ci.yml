@@ -48,8 +48,8 @@ jobs:
   build:
     name: Build and check
     # The newest macOS image GitHub offers, and the only one with Xcode 27, which Sill is built
-    # with: macOS 27 with Xcode 27.0, 27.1 and a 27.2 beta, a public preview in September 2026.
-    # macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
+    # with: macOS 27 with Xcode 27.0, Xcode_27.1_beta.app and a 27.2 beta, a public preview, in
+    # October 2026. macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -58,12 +58,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # The newest Xcode 27 that is not a beta; without one, a warning and the newest Xcode there.
-      - name: Select Xcode 27
+      # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
+      # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had no 27.1 release
+      # in October 2026); without either, a warning and the newest Xcode there, whose iOS build then
+      # fails if it is older.
+      - name: Select Xcode 27.1
         id: xcode
         uses: ./.github/actions/select-xcode
         with:
-          version: '27'
+          version: '27.1'
+          allow-beta: 'true'
 
       # The package has no dependencies (so no Package.resolved yet): the key is the toolchain and
       # the manifest. A checkout gives every source a new modification time, so most of them compile
@@ -120,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, ask-limits, cable-link, clientlink, compatibility, device-gate, dmg-layout, door-policy, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, home-device, home-model, home-records, home-txt, key-strokes, keychain, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
+        check: [addresses, ask-limits, cable-link, clientlink, compatibility, device-gate, dmg-layout, door-policy, duo, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, home-device, home-model, home-records, home-txt, key-strokes, keychain, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

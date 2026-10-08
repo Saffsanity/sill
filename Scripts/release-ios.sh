@@ -45,8 +45,12 @@
 # Apple Account, Xcode holds the sign-in, as it does for Product › Archive.
 #
 # Why each step:
-# - Xcode 27 or nothing: App Store Connect takes builds made with a current SDK only, and the
-#   project, CI and Sill for Mac are all built with Xcode 27. Raise `xcode_major` with them.
+# - Xcode 27.1 or a later Xcode 27, or nothing: App Store Connect takes builds made with a current
+#   SDK only, the project, CI and Sill for Mac are all built with Xcode 27, and the app needs the iOS
+#   27.1 SDK (`xcode_minimum`): its iPhone Duo layouts read the hinge and the fold through it, and an
+#   app built with the 27.0 SDK runs on the Duo in a compatibility window (871×669, sideways only;
+#   docs/iphone-duo-plan.md). The .ipa's app must say it was built with that SDK (DTPlatformVersion).
+#   Raise `xcode_major` and `xcode_minimum` with them.
 # - --bump and --upload refuse a working tree with changes (a build that stays on this Mac only
 #   gets a warning): --bump commits the new number alone, and an uploaded build then names exactly
 #   one commit. New files count where the build takes files the project doesn't list: the asset
@@ -111,7 +115,7 @@ usage: Scripts/release-ios.sh [--bump] [--upload] [--sign-at-export] [--api-key 
   -v, --verbose
       also shows xcodebuild's own output (it always goes to .build/ios/*.log).
 
-Every mode that builds refuses to start unless Xcode 27 is selected.
+Every mode that builds refuses to start unless Xcode 27.1 or a later Xcode 27 is selected.
 docs/release-checklist.md, "TestFlight", has the App Store Connect side.
 USAGE
 }
@@ -122,6 +126,7 @@ scheme=Sill
 bundle_id=me.saffer.sill
 team=9B2KKVM937
 xcode_major=27
+xcode_minimum=27.1   # the iOS 27.1 SDK: the iPhone Duo's hinge and fold (docs/iphone-duo-plan.md)
 export_options=Packaging/ExportOptions-appstore.plist
 links=iOSClient/SillLinks.swift
 out=.build/ios
@@ -152,6 +157,23 @@ xcode_version() {
         || true
 }
 
+# Whether the dotted version $1 is $2 or later, part by part as numbers ("27.10" is after "27.9";
+# a missing part counts as 0, and anything after a part's digits is ignored).
+version_at_least() {
+    local IFS=. i x y
+    local -a a b
+    read -r -a a <<< "$1"
+    read -r -a b <<< "$2"
+    for i in 0 1 2; do
+        x="${a[$i]:-0}"; y="${b[$i]:-0}"
+        x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"
+        x="${x:-0}"; y="${y:-0}"
+        if [ "$((10#$x))" -gt "$((10#$y))" ]; then return 0; fi
+        if [ "$((10#$x))" -lt "$((10#$y))" ]; then return 1; fi
+    done
+    return 0
+}
+
 # Why the selected Xcode can't make this build, or nothing.
 xcode_problem() {
     local info version dir
@@ -159,9 +181,9 @@ xcode_problem() {
     version="${info%% *}"
     dir="${DEVELOPER_DIR:-$(xcode-select -p 2>/dev/null || echo nothing)}"
     if [ -z "$info" ]; then
-        echo "xcodebuild doesn't answer (the developer directory is $dir). Select Xcode $xcode_major: sudo xcode-select -s /Applications/Xcode.app"
-    elif [ "${version%%.*}" != "$xcode_major" ]; then
-        echo "The selected Xcode is $version ($dir), and Sill for iPhone and iPad is built for App Store Connect with Xcode $xcode_major. Select it with sudo xcode-select -s /Applications/Xcode.app, or for one run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer Scripts/release-ios.sh"
+        echo "xcodebuild doesn't answer (the developer directory is $dir). Select Xcode $xcode_minimum or later: sudo xcode-select -s /Applications/Xcode.app"
+    elif [ "${version%%.*}" != "$xcode_major" ] || ! version_at_least "$version" "$xcode_minimum"; then
+        echo "The selected Xcode is $version ($dir), and Sill for iPhone and iPad is built for App Store Connect with Xcode $xcode_minimum or a later Xcode $xcode_major (the iOS $xcode_minimum SDK, which the iPhone Duo's layouts need). Select it with sudo xcode-select -s /Applications/Xcode.app, or for one run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer Scripts/release-ios.sh"
     fi
 }
 
@@ -326,8 +348,11 @@ check_app() {
     plist_value NSCameraUsageDescription "$plist" >/dev/null || fail "$app has no NSCameraUsageDescription: Add a Mac…'s scanner would crash it."
     [ -f "$app/PrivacyInfo.xcprivacy" ] || fail "$app has no PrivacyInfo.xcprivacy: App Store Connect refuses an upload whose required-reason APIs aren't declared (ITMS-91053)."
     plutil -lint -s "$app/PrivacyInfo.xcprivacy" || fail "$app/PrivacyInfo.xcprivacy is not a valid property list."
+    value="$(plist_value DTPlatformVersion "$plist")" || value=""
+    [ -n "$value" ] && version_at_least "$value" "$xcode_minimum" \
+        || fail "$app was built with the iOS ${value:-(unknown)} SDK, and the iPhone Duo's layouts need the iOS $xcode_minimum SDK (Xcode $xcode_minimum; docs/iphone-duo-plan.md)."
     if [ "$quiet" = 0 ]; then
-        say "Checked its Sill.app: $version ($build), $bundle_id, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, PrivacyInfo.xcprivacy"
+        say "Checked its Sill.app: $version ($build), $bundle_id, the iOS $value SDK, ITSAppUsesNonExemptEncryption NO, the Local Network, Bonjour (_sill._tcp) and camera entries, PrivacyInfo.xcprivacy"
     fi
 }
 
