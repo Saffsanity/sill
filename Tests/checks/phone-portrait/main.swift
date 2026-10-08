@@ -1,6 +1,7 @@
 // H2 (docs/iphone-portrait-plan.md): iOSClient/PhonePortraitLayout.swift on its own, the rectangles of
 // a phone held upright. The plan's two tables pinned phone by phone (the layout, then the keyboard:
-// row 1 clear of it on every phone, and on the Duo's outer display up to a 326 pt keyboard), the
+// row 1 clear of it on every phone, and on the Duo's outer display up to a 326 pt keyboard; and the
+// iPhone Duo's real cover, docs/iphone-duo-plan.md), the
 // approved mockup's numbers, 320 pt wide, and a grid of every width from 300 to 599 pt and every
 // height from the width + 1 to 1,400: everything inside the screen and in order, the gaps, five
 // equal buttons and six equal caps across the row, the picture 16:10 unless the trackpad would drop
@@ -57,6 +58,9 @@ let seventeenE = Phone(name: "iPhone 17e", screen: CGSize(width: 390, height: 84
 let mini = Phone(name: "iPhone 13 mini", screen: CGSize(width: 375, height: 812), inset: 50, keyboard: 301)
 let se = Phone(name: "iPhone SE (3rd generation)", screen: CGSize(width: 375, height: 667), inset: 20, keyboard: 216)
 let duoOuter = Phone(name: "the Duo's outer display (the harness)", screen: CGSize(width: 500, height: 710), inset: 0, keyboard: nil)
+/// The iPhone Duo's cover upright on the iOS 27.1 simulator (docs/iphone-duo-plan.md): 466×678 with its
+/// camera's 84 pt strip down the right edge (a side inset, so the container is 382 wide) and no top one.
+let duoCover = Phone(name: "the iPhone Duo's cover (iOS 27.1, less its camera's strip)", screen: CGSize(width: 382, height: 678), inset: 0, keyboard: nil)
 
 let table: [Row] = [
     // today: trackpad 243, panel room 351
@@ -80,6 +84,10 @@ let table: [Row] = [
     // today: 151, 259
     Row(phone: duoOuter, picture: CGSize(width: 484, height: 302), row1: (334, 384), button: 88, row2: (400, 462),
         row3: (472, 516), cap: 72, trackpad: CGSize(width: 472, height: 168), panelRoom: 302),
+    // The real cover (the approved (c1): the phone's arrangement, narrower by the camera's strip):
+    // the picture 366×228 the probe photographed.
+    Row(phone: duoCover, picture: CGSize(width: 366, height: 228), row1: (260, 310), button: 64.4, row2: (326, 388),
+        row3: (398, 442), cap: 314.0 / 6, trackpad: CGSize(width: 354, height: 210), panelRoom: 344),
 ]
 
 for row in table {
