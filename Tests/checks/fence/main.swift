@@ -752,11 +752,18 @@ if remoteModes.contains(mode) {
     // TLS carries no half-close (seen here since the home connection is TLS too, the merge's review,
     // 2026-10-08: its end never came in 20 s, with every input read and the device reading it), nor does
     // the old one's, which the device stopped reading at the fence. So once the stand-in has read every
-    // input that must arrive (all, or for remotedead those sent after its hold; or `patience` has gone
-    // by, and the verdict below says what is missing), the device resets each TLS connection still up,
-    // which the stand-in reads as its end: nothing sent can still be on its way.
+    // input that must arrive (all, or for remotedead those sent after its hold), the device resets each
+    // TLS connection still up, which the stand-in reads as its end: nothing sent can still be on its way.
+    // Short of that it waits while inputs still arrive (a slow runner), and stops once none has come for
+    // `patience` (a mode that lost some: the verdict below says what is missing), within `deadline`.
     let first: UInt32 = mode == "remotedead" ? seqAtHandOver + 1 : 1
-    _ = wait(patience) { stub.queue.sync { Set(stub.arrived).isSuperset(of: first...total) } }
+    var seen = -1, since = now()
+    _ = wait(deadline) {
+        let (all, count) = stub.queue.sync { (Set(stub.arrived).isSuperset(of: first...total), stub.arrived.count) }
+        if all { return true }
+        if count != seen { seen = count; since = now() }
+        return now() - since > patience
+    }
     clientQueue.sync { for c in connections where c.state == .ready { c.forceCancel() } }
 }
 require("the stand-in reading every connection to its end") { stub.queue.sync { stub.finished.count >= connections.count } }
