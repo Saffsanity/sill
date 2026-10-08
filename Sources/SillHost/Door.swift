@@ -170,7 +170,7 @@ final class Door {
         // The origin before the connection starts: once started, TLS answers a ClientHello that is
         // already waiting with the whole server flight, the Mac's certificate included, before any
         // state callback could refuse it. A source this door does not admit gets no byte.
-        if let a = server.arrivalBeforeStart(of: c),
+        if let a = server.arrivalBeforeStart(of: c, remoteDoor: kind == .remote),
            let word = DoorPolicy.refusalBeforeStart(kind, origin: a.origin, internetAccess: trust.snapshot.internetAccess) {
             c.cancel()
             refusals.count(word)
@@ -225,7 +225,7 @@ final class Door {
     private func checkOrigin(_ id: ObjectIdentifier, _ c: NWConnection) -> Bool {
         guard var p = pending[id], let server else { return false }
         if p.origin == nil {
-            let (origin, interface) = server.arrival(of: c)
+            let (origin, interface) = server.arrival(of: c, remoteDoor: kind == .remote)
             p.origin = origin
             p.interface = interface
             pending[id] = p

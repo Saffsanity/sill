@@ -72,7 +72,14 @@ the App Store yet; until it is, you can build it from source (below).
 - **Away from home**, Remote Access (off by default) lets the devices you
   paired reach your Mac through your own VPN or a port you forward on your
   router; a device learns how the next time it connects at home with Remote
-  Access on.
+  Access on. A device away from home gets a quality of its own, Low at Standard
+  resolution until you pick another there or in Sill's settings, so a slow
+  connection never starts at your home quality; your home quality comes back
+  as soon as a device at home connects. When your device comes home and your
+  network lists your Mac, the session moves to your network by itself.
+- **When the link can't keep up**, Sill for Mac notices that it is holding
+  frames back and tells your device, which says so over the picture and, in
+  its Settings, offers a quality the link can carry.
 - **The virtual display** (off by default) moves a window you stream onto a
   display of its own on your Mac, so it keeps updating when other windows
   cover it. It uses a private macOS API, which is one reason Sill for Mac comes

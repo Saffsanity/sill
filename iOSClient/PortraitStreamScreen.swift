@@ -155,6 +155,9 @@ struct PortraitStreamScreen: View {
     let onPanelSize: (CGSize) -> Void
     /// Pair This iPad… in the panel (see `StreamScreen.openPairingOverlay`).
     var pairThisDevice: () -> Void = {}
+    /// The line over the stream while the link cannot carry the quality, as StreamScreen shows it
+    /// (docs/remote-bundle-plan.md §6.7); nil for none.
+    var linkLine: String? = nil
     /// Take the Tour in the panel (see `StreamScreen.takeTour`).
     var takeTour: () -> Void = {}
 
@@ -410,6 +413,7 @@ struct PortraitStreamScreen: View {
                          sendGesture: { client.sendGesture($0, fingers: $1) })
         }
         .background(Palette.panel)
+        .overlay(alignment: .top) { LinkLineView(text: linkLine) }
         .clipShape(streamShape)
         .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onPanelSize)

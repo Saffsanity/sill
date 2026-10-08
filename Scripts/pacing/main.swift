@@ -22,17 +22,25 @@ import StreamProtocol
 // usage: Harness [--port P] [--kf BYTES] [--delta BYTES] [--fps N] [--gop S] [--icons N]
 //                [--icon-bytes B] [--thumbs N] [--thumb-bytes B] [--seconds S] [--log PATH]
 //                [--plain | --home] [--sizes-at T:KF:DELTA,…] [--still-at T:D,…]
-//                [--restart-at T:D,…]
+//                [--restart-at T:D,…] [--bitrate B]
 // --plain: the remote door without TLS; --home: plain TCP served as a home client (run.py's
 // DOOR=Home).
-// --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change).
+// --bitrate: the running quality the link's reports speak of (default Pro, 40000000): each change of
+//   a device's link (LinkJudge, docs/remote-bundle-plan.md §6) prints "Link: behind (withheld 52 of
+//   58; carried 7.9 Mbps; suggesting Low)", the suggestion LinkJudge.suggestion gives for B at the
+//   run's fps and Standard (the harness has no resolution). The lines compile under LINK_JUDGE, which
+//   build.sh defines for a side whose StreamServer has onClientLinkChanged (a base from before away
+//   from home, PR #39, has none); summarize.py reads the new build's.
+// --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change: the
+//   links are judged afresh, StreamServer.resetLinks, as the coordinator does for another quality).
 // --still-at: from T seconds for D seconds no frame is captured (a still window: the motion stopped).
 //   A keyframe asked for meanwhile is the last frame encoded again, once the window has been still
 //   for 50 ms, as HEVCEncoder.requestKeyframe does; nothing else is sent. It prints "Still: …" with
 //   the stamp of the last frame before it, and "Moving again" after it (summarize.py's still rows).
 // --restart-at: D seconds after the first keyframe at or after T seconds, the stream restarts with
-//   the same sizes (a window picked, a rotation, a settings change), so its first keyframe goes out
-//   while that keyframe may still be crossing the link. It prints "Restart: …".
+//   the same sizes (a window picked, a rotation: the quality kept, so the links keep their
+//   judgement), so its first keyframe goes out while that keyframe may still be crossing the link.
+//   It prints "Restart: …".
 // --log: the host's lines with Sill.log's timestamps (HostLog), which summarize.py reads.
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -69,6 +77,7 @@ func pairs(_ name: String) -> [(t: Double, d: Double)] {
 }
 let stills = pairs("--still-at")
 let restarts = pairs("--restart-at")
+let linkBitrate = Int(value("--bitrate", "40000000"))!
 
 if !logPath.isEmpty { HostLog.shared.configure(keepLines: 0, fileURL: URL(fileURLWithPath: logPath)) }
 
@@ -103,6 +112,16 @@ let server = try StreamServer(advertise: false)
 let psPayload = ParameterSets(nalUnitHeaderLength: 4, sets: [Data(count: 24), Data(count: 40), Data(count: 8)]).encoded()
 
 server.onKeyframeNeeded = { encoder.requestKeyframe() }
+#if LINK_JUDGE
+server.onClientLinkChanged = { _, v in
+    let suggestion = LinkJudge.suggestion(carriedKbps: v.carriedKbps, bitrate: linkBitrate, fps: fps, captureScale: 1)
+    var parts = ["withheld \(v.withheld) of \(v.offered)"]
+    if let carried = v.carriedKbps { parts.append("carried \(LinkJudge.mbps(kbps: carried)) Mbps") }
+    if v.state == .stalled { parts.append("\(LinkJudge.bytes(v.waiting)) waiting") }
+    if v.state != .fine { parts.append(suggestion.map { "suggesting \(LinkJudge.title($0))" } ?? "nothing lower") }
+    print("Link: \(v.state)\(v.reset ? " (reset)" : "") (\(parts.joined(separator: "; ")))")
+}
+#endif
 server.onClientCountChanged = { n in Stats.shared.activeClients = n }
 server.onClientConnected = { connection, route, _ in
     // The coordinator hops to the main actor first; so does this.
@@ -207,6 +226,9 @@ frameTimer.setEventHandler {
         print("Sizes: keyframe \(s.kf) B, delta \(s.delta) B")
         encoder.requestKeyframe()
         server.resetForNewStream()          // a settings change restarts the stream
+        #if LINK_JUDGE
+        server.resetLinks()                 // …at another quality: the links are judged afresh
+        #endif
     }
     if let due = restartDue, t >= due {
         restartDue = nil

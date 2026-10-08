@@ -242,6 +242,25 @@ private struct StreamingPane: View {
             } footer: {
                 Footnote("Each device asks for its own screen’s rate, up to this limit. Quality is per 60 fps; a 120 fps stream gets twice as much. \(QualityPreset.fastLinkNote) Changes apply at once: the current stream restarts for a moment.")
             }
+            // Away from home (docs/remote-bundle-plan.md §5): its own quality, which a device away
+            // sets too; the menu's Quality and Resolution stay the home ones.
+            Section {
+                Picker("Quality", selection: $settings.config.awayBitrate) {
+                    ForEach(QualityPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    if QualityPreset(rawValue: settings.config.awayBitrate) == nil {
+                        Text(QualityPreset.title(forBitrate: settings.config.awayBitrate)).tag(settings.config.awayBitrate)
+                    }
+                }
+                Picker("Resolution", selection: $settings.config.awayCaptureScale) {
+                    Text("Retina").tag(CGFloat(2))
+                    Text("Standard").tag(CGFloat(1))
+                }
+            } header: {
+                Text("Away from home")
+            } footer: {
+                Footnote("Sill streams at these while every connected device is away from home, through a VPN or over the internet, so a slow connection never starts at your home quality. A device away from home changes these, and never your Quality and Resolution above."
+                         + (model.coordinator?.status.snapshot.away == true ? " Streaming at these now." : ""))
+            }
             Section {
                 Toggle("Prioritize encoding speed", isOn: $settings.config.prioritizeSpeed)
             } footer: {
