@@ -40,7 +40,10 @@ selected, the default build system fails to start; `swift build -c release
 --build-system native` works there as a fallback.
 
 Sill is built with Xcode 27, for macOS 14 or later and iOS 17 or later (the
-deployment targets).
+deployment targets). The iOS app needs Xcode 27.1 or a later 27: it reads the
+iPhone Duo's hinge and fold through the iOS 27.1 SDK (`if #available(iOS
+27.1, *)`, so it still runs on iOS 17), and built with the 27.0 SDK it would
+run on the Duo in a compatibility window, 871×669 and sideways only.
 
 ### Sill.app, the menu bar host
 
@@ -193,6 +196,18 @@ changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Three-Finger Gestures
 (below, Trackpad gestures), on unless turned off and never sent to the Mac,
 and last Take the Tour.
+
+On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
+which iOS 27.1 reports with the fold's place. Open, Sill has the inner display
+to itself (the status bar hides; 951×669 sideways, 669×951 upright). Half
+folded sideways, the book pose, the picture runs across the fold, but nothing
+you touch sits on it: the thumbnails end short of it and the bar's buttons, the
+Settings panel, the tour's cards and the window lights stay on one side.
+Half folded upright, the laptop pose, the picture is above the fold and the
+bar, the keys and the trackpad below it; open flat upright, the picture takes
+its own shape across the width and the trackpad the rest. Closed, the cover is
+a phone (below) beside its camera's strip. Folding moves the session to the
+other display, and every layout is what it was on any other device.
 
 On a phone held upright (and on the Duo's outer display) the picture sits in
 a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
@@ -615,14 +630,26 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
 Debug builds of the iOS app take launch arguments that set up a screen in the
 simulator:
 
-- `-SillLayout 1000x710` or `710x1000` (the inner display of iPhone Duo, in
-  landscape and portrait), `500x710` or `710x500` (its outer display), or a
-  phone's stream screen (its screen less the status bar: `402x812` for an
-  iPhone 18 Pro upright, `440x894` for a Pro Max): a fake screen of that
-  size. One larger than the simulator is drawn scaled down to fit, laid out
-  at its own size. One that reaches into the simulator's own safe area (a
-  phone's whole size on that phone) runs its trackpad past its bottom edge:
-  photograph it on a larger simulator, or in the normal app.
+- `-SillLayout 951x669` or `669x951` (the inner display of iPhone Duo, in
+  landscape and portrait), `466x678` or `678x466` (its cover), or a phone's
+  stream screen (its screen less the status bar: `402x812` for an iPhone 18
+  Pro upright, `440x894` for a Pro Max): a fake screen of that size. The
+  Duo's four sizes have the safe area that display gives Sill (the home
+  indicator's 34, and on the cover its camera's 84 pt strip, at the right
+  upright and the left on its side); `-SillSafeArea T,L,B,R` sets another.
+  The first guesses, `1000x710`, `710x1000`, `500x710` and `710x500`, still
+  work, with none. One larger than the simulator is drawn scaled down to fit,
+  laid out at its own size. One that reaches into the simulator's own safe
+  area (a phone's whole size on that phone) runs its trackpad past its bottom
+  edge: photograph it on a larger simulator, or in the normal app.
+- `-SillHinge half|flat|closed` stands in for the Duo's hinge and fold (a
+  40 pt band across the middle of the fake screen's longer side): `half` is
+  the book pose sideways and the laptop pose upright. Without it the harness
+  knows no hinge, even on the Duo's simulator. To fold and turn that
+  simulator itself, `Tests/duorig/run.sh UDID pose book` (or `laptop`,
+  `flat-portrait`, `flat-landscape`, `closed-upright`, `closed-side`) and
+  `run.sh UDID shot <pose> FILE.png` (TEST ONLY: Device Hub's own events,
+  posted inside the simulator; its README).
 - `-SillLive 1`: a real client inside that frame. Otherwise the Mac is a mock,
   and `-SillActive none|desktop|<windowID>` picks what it streams.
 - `-SillDrawer 1`, `-SillSettings 1` (with `-SillSettingsCase …` for the
@@ -852,7 +879,8 @@ version the next build number, alone in a commit; both refuse uncommitted
 changes, so every uploaded build is a commit's. It signs and uploads
 through the Apple Account in Xcode › Settings › Accounts, or through an App
 Store Connect API key with the Admin role (`--api-key`, `--api-issuer`),
-and it needs Xcode 27.
+and it needs Xcode 27.1 or a later 27 (the iOS 27.1 SDK the iPhone Duo's
+layouts need: the app it checks must say it was built with it).
 `--privacy-report` lists what the archive's privacy manifest declares and the
 required-reason APIs its binary uses. The TestFlight workflow
 (`.github/workflows/testflight.yml`) runs it on GitHub, by hand only.
@@ -889,8 +917,10 @@ record field by field.
   for the update check's tests), `pacing/` (the pacing harness, above), and
   `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
   reader's checks against it).
-- `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
-  TestFlight workflows, and the Sponsor button.
+- `Tests/checks/`: the pure checks (above). `Tests/touchrig/`: the touch rig
+  (above). `Tests/duorig/`: folds and turns the iPhone Duo simulator (TEST
+  ONLY, above). `.github/`: the CI, release and TestFlight workflows, and the
+  Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy and support. Preview it with
   `python3 -m http.server 8000 --directory site`.

@@ -263,9 +263,156 @@ laptop), 366×228 (closed-upright), 578×372 (closed-side).
 - On every screen the status bar shows (the time and Wi-Fi in the strip), which is what makes the
   inner display's strips.
 
+## The build: decisions
+
+Each one a default the approval left open, reversible in a line or two (where is said).
+
+1. **The status bar hides while the hinge is open** (`DuoPosture.hidesStatusBar`, applied at the
+   app's root by `DuoPostureReader`): on the inner display Sill then has 951×669 and 669×951 but the
+   home indicator, where the shown status bar kept an 84 pt strip at the side sideways and 82 pt at
+   the top upright out of the safe area for a clock in its corner. It is what the 27.1 SDK's "the
+   whole display" buys; the approved laptop and flat boards had no strip at the top; and the book
+   pose's bar then clears the fold as it is. The cover keeps its status bar (its camera's strip is
+   there either way), as an iPhone does. Off the Duo nothing changes: the modifier adds nothing
+   unless the hinge is open. To keep the status bar, drop the `.background { … statusBarHidden }` in
+   `DuoPostureReader`; the bar rule below then steps down by itself (at 867 pt: the compact width
+   and 7 pt gaps, Menus at 497).
+2. **Where the fold is, from the region; whether it is in the way, from the hinge.** Each screen
+   reads the `.division` region with `.includeInactive` from its own GeometryReader (in that screen's
+   space, clipped to it); the region is in the way exactly while the hinge is partly open, which is
+   what iOS reports (the probe) and what redraws the screens (`onHingeChange` into the environment).
+   Before iOS 27.1, and on a device whose hinge is nil, the posture is `unknown` and every rule is the
+   inferred one, as before (`FoldInfo.inferred`).
+3. **(a) The book pose's bar keeps its size where it can.** At 951 pt the regular right group (five
+   buttons, Menus counted whether it shows or not, so nothing moves when the Mac's menus come and go)
+   begins at 551, 55.5 pt past the fold, so it stays as it is, the same bar as open flat; the approved
+   step to the compact width, then smaller gaps down to 6, comes in only where the group would reach
+   the fold (`DuoPosture.bookBar`). The strip ends 12 pt short of the fold (343.5 pt: three
+   thumbnails, scrolling), and a spacer holds the fold's band empty. The Settings panel is never wider
+   than the room past the fold (360 at 951 pt, at 569), the drawer stays on the leading page (22–402).
+4. **(b1) The laptop pose** splits at the fold's real band in whole points: the picture's pane above
+   it (0–455), the window bar, keys and trackpad from 496; the drawer and the Settings panel hang
+   from the bar, below the fold.
+5. **(b2) Open flat upright**, the pane takes the picture's own shape across the width (the video's
+   pixels: the synthetic Desktop's 1512×948 gives a 653×409 picture, a 16:10 one 653×408) and the
+   trackpad the rest; never under 160 pt, always leaving the trackpad 200. While the Mac fits a
+   window to the pane (a window with Aa set, or on the virtual display) the pane stays 16:10, so it
+   never follows a shape it gave the window (an app's least size would shrink it step by step). The
+   split is not animated: an iPad's halves keep exactly what they had.
+6. **One page for what you touch**, not only the bar: in the book pose the connect screen's column
+   and footer and the pairing overlay sit on the leading page; a tour card that would cross the fold
+   goes onto the page its middle is on, against the fold, never wider than a page (439.5 at
+   accessibility sizes); the window lights go onto a page beside the fold, and in the laptop pose
+   below their thumbnail (above it they would sit on the fold, the window bar being just under it).
+   Upright the connect column, the pairing overlay and the tour's cards stay above the fold (as they
+   kept to the inferred top half before); open flat they use the whole height.
+7. **(c1, c2) The cover** needed nothing: the phone's arrangement at 382×678 and the compact landscape
+   bar at 594×466 already sit beside the camera's strip (its safe area).
+8. **The harness**: `-SillLayout 951x669`, `669x951`, `466x678`, `678x466` with the safe areas the
+   probe measured (status bar hidden on the inner display), and `-SillHinge closed|half|flat`, a
+   stand-in fold in the fake display's named space; without `-SillHinge` the harness knows no hinge,
+   even on the Duo's simulator. The first guesses (1000×710 …) work as before.
+
+## The build: what changed
+
+New files: `iOSClient/DuoPosture.swift` (the pure model and rules), `iOSClient/DuoPostureReader.swift`
+(the hinge, the region, the environment keys `\.duoEnvironment` and `\.duoFold`, `BarMetrics.clearing`,
+`PortraitMetrics.controlsHeight`, `StreamClient.duoPaneAspect`), `Tests/checks/duo` (run.sh,
+main.swift, mutants.py). Project file: AB01/FB01 and AB02/FB02. Hooks, a few lines each:
+`SillApp` (`.readsDuoPosture()`), `StreamScreen` (the posture read once and handed down;
+`landscape(…fold:)`, TopBar's `stripWidth`; WindowLightsMenu; DuoLayout's notes), `PortraitStreamScreen`
+(`halves`), `AddMacCard` (`ConnectLayout`'s `fold`, `topRoom`, `leadingPage`), `ContentView` (the
+connect screen; the harness), `PairingOverlay`, `TourPolicy` and `TourOverlay`. CI and the App Store
+build: `.github/actions/select-xcode` (`allow-beta`), `ci.yml` (27.1 with betas; `duo` in the mutants
+matrix), `testflight.yml` (a note), `Scripts/release-ios.sh` (Xcode 27.1 or a later 27; the app it
+checks must have been built with the iOS 27.1 SDK). Checks extended: `tour` (the Duo's real sizes and
+folds), `phone-portrait` (the real cover). Nothing on the wire, nothing in the host.
+
+## The build: results
+
+Verified 2026-10-08 (11:20–13:00) on this Mac, Xcode 27.1 RC (27A9275), the "Sill duo" simulator:
+
+- **Checks**: `duo` 251,723 checks, 54 of 54 mutants caught; `tour` 49,614 checks, 68 of 68 (its
+  crease mutant follows the call into DuoPosture, five new ones); `phone-portrait` 165, 31 of 31;
+  `Tests/checks/run-all.sh`, all 36 pass (333 s).
+- **Builds**: iOS Debug for the Duo simulator, Release for the simulator (generic, arm64) and Debug for
+  a generic device (CODE_SIGNING_ALLOWED=NO), each with only the known StreamClient capture warning;
+  `swift build -c release`, only the CaptureProbe warning. The built app says DTPlatformVersion 27.1.
+- **Live, every pose** (the app against `SillHost --synthetic` on 127.0.0.1 with the software encoder,
+  `-SillConnect`, posed by duorig): photos at App Store sizes in
+  `/Users/noah/Downloads/sill-handoff/duo/after/` — `stream-*`, `connect-*` and `settings-*` in all
+  six poses, `tour-*` (book, laptop, flat-portrait) and `tourbar-*` (book, laptop, flat-portrait and
+  the cover both ways). Private: they show this Mac's windows and its name. The console, pose by pose:
+  "duo: stream screen: book, the fold x 455.5–495.5 in the way, 951×669" and viewports 935×567 (book
+  and flat sideways: the status bar gone, 851×567 before), 653×439 (laptop: the pane above the fold),
+  653×409 (flat upright: the picture's shape), 366×228 (the cover), 578×372 (the cover on its side).
+  The bar in the book pose: the strip to 443.5, nothing from 455.5 to 551, Aa at 629; the tour's touch
+  card at 95.5–455.5 and its bar card at 95.5, tail at 427.5; the Settings panel at 569–929.
+- **The harness at the Duo's sizes** (`-SillHinge`, the mock Mac with its menus): photos in
+  `/Users/noah/Downloads/sill-handoff/duo/mock/` — the stream, Settings and connect screens in all six
+  poses, the tour (book, laptop, flat-portrait, the cover), the bar card, the drawer, the window
+  lights (book: on the leading page; laptop: below the thumbnail) and the pairing overlay (book: the
+  leading page; laptop: above the fold). With the Mac's menus the book pose's Menus button is at 551.
+- **Nothing changes off the Duo**: the harness at 25 earlier cases (the guessed Duo's four sizes with
+  the drawer, Settings, connect screens, Add a Mac, the pairing overlay, the tour, the Aa ruler; an
+  iPad's 834×1194, 1194×834, 744×1133 and a 700×1000 window; a phone's 440×894 and 402×812),
+  photographed on the Duo's simulator with main's build (e6b3265) and this branch's: 24 identical byte
+  for byte, the 25th (the drawer at 1000×710) 427 pixels apart by Δ1, anti-aliasing (a first pass,
+  through a stale intermediate build that lacked the harness's override, differed on every portrait
+  case; rebuilt, none did).
+- **The merge with PR #39** (`remote-away` at c3d06f0): `git merge-tree` finds one conflict, ci.yml's
+  mutants matrix line (take both lists: #39's `away-*` and `link-judge`, this branch's `duo`); with
+  this document's commit CLAUDE.md's Current step also meets (both add an entry at the top: keep
+  both). StreamScreen, PortraitStreamScreen, ContentView, the project file and Tests/checks/README.md
+  merge by themselves, and the merged tree's iOS app builds (Debug, simulator) with only the known
+  warning.
+- **Seen, left**: while the device turns or folds, a frame can pair the new size with the old fold
+  (the console shows it once: "laptop, the fold x 455.5–495.5 …"), and the next layout pass has the
+  new one; closing, the inner display takes the status bar back for a moment before the window moves
+  to the cover.
+
+## For Noah, on an iPhone Duo (a build made with Xcode 27.1)
+
+TestFlight 0.5 (3) was built with Xcode 27.0: on a Duo it runs in the compatibility window (871×669,
+sideways only). These need a Debug or TestFlight build from this branch (release-ios.sh now refuses
+Xcode 27.0):
+
+- P1 Book pose, streaming a window with menus: the picture across the fold; no thumbnail, button,
+  panel, card or menu on the fold; Menus, Aa, Keyboard, Desktop and Settings on the right page; the
+  strip scrolls and ends short of the fold; hold the last visible thumbnail: its lights beside the
+  fold, not on it; the Menus pull-down (iOS places it): whether it keeps off the fold.
+- P2 Laptop pose: the picture above the fold, the bar from just under it; the lights below a held
+  thumbnail; the drawer and Settings below the fold; Pair This iPhone… above it.
+- P3 Open flat upright: the picture at the window's own shape, the trackpad taller; pick a 16:9 and a
+  tall window (the pane follows); set Aa: the pane goes 16:10 and the window takes that shape.
+- P4 Flat sideways: today's landscape at the full 951 pt; the status bar gone on the inner display,
+  back on the cover.
+- P5 The cover upright and on its side: the phone's arrangement and the compact bar beside the
+  camera, as on an iPhone.
+- P6 Fold and unfold while streaming (book → laptop → flat → closed and back): the session goes on,
+  the layout follows within a frame or two, and the Mac's window keeps its size (unless Aa is set
+  or it is on the virtual display, which fit it to each new pane).
+- P7 The connect screen and Add a Mac… in the book and laptop poses (the column on the leading page,
+  above the fold); the tour (Settings › Take the Tour) in each pose.
+- P8 The screens' rates (120 Hz on the real displays?), and VoiceOver's order in the book pose.
+
+## Left
+
+- After PR #39 merges: its link line (`LinkLineView`, a capsule centred at the top of the stream)
+  would sit across the book pose's fold; put it on a page with `DuoPosture.offTheFold`, as the tour's
+  cards are.
+- CI builds the iOS app with Xcode_27.1_beta.app until the xcode-27 image has a 27.1 release (the
+  notice says so); TestFlight's workflow stops at release-ios.sh until then.
+- (d) TestFlight 0.5.1 waits until the iPhone Duo is out (Oct 23+); nothing was uploaded.
+
 ## Progress
 
 - 2026-10-08 Probe (this step): the worktree and the simulator made; the probe app and duorig built
   and run through every pose; today's Sill photographed in every pose; this document. Nothing of the
   app changed. The simulator "Sill duo" and the DerivedData in the session's scratchpad (`duo/`)
   stay for the next steps; the finish step deletes both.
+- 2026-10-08 Build: the pure model and its check, the reader and the hooks, the tour's fold rules,
+  the harness's Duo sizes and stand-in, CI and release-ios.sh on Xcode 27.1, this document's build
+  sections; every pose photographed live and in the harness; the old harness sizes compared with
+  main's build; the merge with PR #39 tried. The simulator and the scratch DerivedData stay for the
+  review step; the finish step deletes both.
