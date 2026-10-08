@@ -129,10 +129,15 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   TestHooks; StreamCoordinator, StreamServer and HostConfig keep both sides;
   the pacing harness defines LINK_JUDGE by what its StreamServer has. Device:
   the link's line also stays away under the tour's card; `awayhome` is a TLS
-  session at home. Verified so far: the builds on Xcode 27.1 (the App Store
-  replaced 27.0 mid-run), all 39 pure checks, `policy` 360 and 116 of 116
-  mutants (five new), `home-device` 124, `fence` 32, `key-strokes` 72 of
-  theirs; H2 against main's CLI; H7 and H8 over the TLS doors 16 of 16.
+  session at home. Verified (the plan's numbers): the builds on Xcode 27.1
+  (the App Store replaced 27.0 mid-run), only the known warnings; all 39 pure
+  checks (`policy` 360); the mutants of the 27 checks whose files the merge
+  changed, 952, every one caught (`policy`'s five new); H2 against main's CLI;
+  H7 and H8 over the TLS doors, 16 of 16; on a private simulator against
+  `SillHost --synthetic --remote --pairing`, 28 of 28: S4 (moved over the TLS
+  home door, one restart at the home quality), `refused`'s back-off, another
+  key refused by the pin once, another launch once, S5, and S4race (the
+  remote path cut mid-move: carried, the pick not sent).
 - **Untested, for Noah:** the plan's P4–P13 (P1–P3 and P14 are PR A's and
   still open): away starts at Low · Standard with `bitrate` untouched (P4);
   the away choice saved and kept (P5); mixed home and away, one restart each
@@ -142,7 +147,15 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   (the line stays, not spoken again) and the button then Done at once (no
   line, nothing spoken) (P8); a dip (P9); coming home on Wi‑Fi and by the
   cable, drag and type through the move, the Mac's card once (P10, P11);
-  Connect Remotely at home stays remote (P12); mixed builds (P13).
+  Connect Remotely at home stays remote (P12); mixed builds (P13). Since the
+  merge with main, coming home goes through the Mac's TLS home door pinned to
+  its key: with Sill.app built from this branch, P10 and P11 show "Client
+  connected" on the Mac and no pairing asked; against Sill for Mac 0.4.0 (main's,
+  no away quality) the move home works too, and against 0.3.1 (a plain door) the
+  session stays remote. Then it merges and ships as Sill for Mac 0.4.1 with the
+  iOS app's build 4; the release drafts' lines held back for it (the notes,
+  What to Test, the site, the metadata) are in sill-handoff's
+  `release-next/drafts/for-0.4.1.md`.
 
 **A Mac set up again: the old saved record retires itself (2026-09-28, branch `stale-duplicate-fix`
 from main at 72d8d1d).** Noah: "When using Tailscale, it shows Noah's MacBook Pro and Noah's MacBook

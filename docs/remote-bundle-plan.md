@@ -1909,7 +1909,8 @@ one of them live in a new simulator run.
 
 ### Where home pairing meets this (branch `home-pairing`, PR #37)
 
-When both have landed, whichever merges second:
+Written before either had landed; done in the merge with main (2026-10-08, the next section) as it
+says, the kind 18 check kept with its floor fixed. When both have landed, whichever merges second:
 - **The routes.** home-pairing's `ClientRoute.home(origin, peer:)` carries the TLS key; AwayPolicy
   reads only `isRemote` and `origin`, so `ClientRoute.isAway` (StreamCoordinator.swift's last lines)
   stands as it is: a TLS home session is at home.
@@ -2013,9 +2014,17 @@ encoder never used; hosts on loopback alone and the software encoder):
   arguments in its binary. The pbxproj: 101 objects, no ID twice, every one of the 39 sources once.
 - **The pure checks** (`Tests/checks/run-all.sh`): all 39 pass; `policy` 360 (main's 336, the
   branch's 17 for the move home, the merge's 7 for its trust).
-- **The mutants** of the checks whose files the merge changed against the parent their mutants last
-  ran on: so far `policy` 116 of 116 (H7–H11 the merge's), `home-device` 124 of 124, `fence` 32 of
-  32 and `key-strokes` 72 of 72.
+- **The mutants** of the 27 checks whose files the merge changed against the parent their mutants
+  last ran on (every check that compiles StreamProtocol's `HostSettings.swift`, the four that compile
+  `DiscoveryPolicy.swift`, and this branch's four), five at a time: 952 mutants, every one caught.
+  `policy` 116 of 116 (H7–H11 the merge's), `home-device` 124, `remote-rules` 72, `key-strokes` 72,
+  `door-policy` 58, `menus` 43, `pointer-watch` 40, `pairing-address` 35, `pointer-control` 33,
+  `fence` 32, `menu-state` 29, `link-judge` 26, `home-txt` 24, `protocol` 23, `home-model` 21,
+  `home-records` 21, `ask-limits` 20, `cable-link` 20, `compatibility` 19, `goodbye` 18,
+  `update-policy` 18, `away-copy` 17, `message-reader` 17, `away-quality` 16, `addresses` 15,
+  `device-gate` 14, `away-wire` 9. The other eleven checks compile their files exactly as main had
+  them. The checks' README had `home-model` and `remote-rules` at their counts before #44 and #46
+  (51 and 15, 107 and 52): now 62 and 21, 123 and 72.
 - **H2** (the CLI's default path, the plain door, against main's at e6b3265 built from `git archive`,
   both on loopback and the software encoder): idle 35 s and with `sillclient.py PORT 5 desktop`,
   every line identical masked and sorted, the stats lines' counts equal, and the client's kind 16
@@ -2029,6 +2038,25 @@ encoder never used; hosts on loopback alone and the software encoder):
   at the TLS home door with the same key ("Client connected"), "Home quality again: … Balanced ·
   Retina." and one restart at 15 Mbps once its viewport came, its kind 16 the home pair with
   `away.thisConnectionAway` 0; then, once it left, the away quality again and one restart at 8.
+- **S4, S4race and S5 over pairing at home's doors** (a private iPad mini simulator, "Sill merge39",
+  iOS 27.0, the app Debug signed ad hoc; the host as above, the remote session through
+  `Scripts/sillrelay.py` so it could be cut; the app paired by the typed code at the remote door),
+  28 of 28. S4 (`-SillMoveHomeTest to:` the host's home door): listed a second after the remote
+  session's first window list, the move 2.07 s after the listing, its hello inside TLS ("Client
+  hello" on the host for the move's connection), the host's TLS home door admitting the paired key
+  ("Client connected"), "Home quality again", the stream restarting once at 15 Mbps (4 before), the
+  fence down by its pong after 31 ms with 3 held messages, the remote connection leaving; no refusal
+  at the home door. `refused` (port 1): tries 2 s after the listing, then 10 and 20 s after the tries
+  before, the session staying remote. Another key (a second host with an identity of its own): the
+  pin refused it 10 ms into the move, "move home refused: … answered with another key (-9808)",
+  never tried again, and that host served nothing. Another launch (a second host with the first's
+  identity copied): admitted at its TLS door, refused at its window list, tried once. S5
+  (`-SillDialSaved remotely`): no move in 25 s. S4race (the home door behind a relay holding 0.8 s
+  each way, so TLS and the catalog take their round trips within the move's 5 s; the remote relay
+  killed 0.5 s into the move; a pick of High 0.8 s later): "the move carries the session", the pick
+  not sent, no connect screen, the session carried on 2.7 s after the cut without a fence (3 held
+  messages), the host never changing a setting and running the home quality after one "Home
+  quality again".
 
 ### Open questions for Noah
 
