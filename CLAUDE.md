@@ -63,13 +63,14 @@ ONLY host picture aside).
   Connect's Duo sizes in `~/Downloads/sill-handoff/duo/final/` (INDEX.md; `live/` private: this
   Mac's windows and name). The harness at 46 earlier cases against main's build (05f2bb8): 39
   identical, 7 differing only as main's build differs from itself. The branch contains main: the
-  pull request merges without a conflict.
+  pull request merges without a conflict. CI run by hand on the branch (37835771799): green, the
+  Mac side on Xcode 27.0, the iOS app on `Xcode_27.1_beta.app` (27A9269).
 - **Untested, for Noah (on an iPhone Duo from Oct 23, a build from Xcode 27.1; TestFlight 0.5 (3),
   from Xcode 27.0, runs there in an 871×669 compatibility window, sideways only):** the plan's
   P1–P13: every pose, folding mid-stream by hand, the keyboard on the cover, 120 Hz on each display,
   Split View if iOS offers it, VoiceOver in the book pose, the iPad mini and iPhone 15 Pro on a 27.1
-  build (P9), folds while away (P10), and the status bar decision. Left: CI's first run on the 27.1
-  beta (the pull request's); (d) TestFlight 0.5.1 waits for the Duo's release.
+  build (P9), folds while away (P10), and the status bar decision. Left: (d) TestFlight 0.5.1 waits
+  for the Duo's release.
 
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
 c564142, PR #39, stacked on PR #34, which merged during its review; main at

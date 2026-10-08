@@ -411,7 +411,7 @@ the rest by itself) and fixed on the merge, one commit per theme. Each finding, 
 | Hiding the status bar goes past the approved book board | the same as the fourth | the same |
 | docs/release-checklist.md still says Xcode 27.0 for release-ios.sh, CI and TestFlight | real | its three passages: release-ios.sh's 27.1 floor, CI's two selections, TestFlight from GitHub Actions waiting for a 27.1 that is not a beta |
 | The README says Sill is built with Xcode 27, but the iOS app needs 27.1 | real | the README says so (iOS 17 stays the deployment target) |
-| CI never ran on the branch, and its build job built the Mac side with a beta toolchain | real (no pull request yet) | CI selects Xcode 27 (not a beta) for the Mac side and 27.1 (beta allowed) only for the iOS build (9e4f36c); select-xcode tried under /bin/bash 3.2 against the xcode-27 image's own layout (below); the pull request's run is the first on GitHub |
+| CI never ran on the branch, and its build job built the Mac side with a beta toolchain | real (no pull request yet) | CI selects Xcode 27 (not a beta) for the Mac side and 27.1 (beta allowed) only for the iOS build (9e4f36c); select-xcode tried under /bin/bash 3.2 against the xcode-27 image's own layout, then CI run by hand on the branch: green (below) |
 | PR #39's link line would cross the book pose's fold (this plan's Left) | done | centred on the leading page in the book pose (e75ea48) |
 
 Also: `SILL_TEST_PATTERN=picture:<path>` (TEST ONLY, c70a04c) makes a synthetic host's Desktop a
@@ -455,8 +455,11 @@ Verified 2026-10-08 (14:30–16:10) on this Mac, Xcode 27.1 RC (27A9275), "Sill 
   `Xcode_27.2_beta_2.app` 27.2 27B5028f, with their symlinks) and three others (27.1 released, 27.0
   alone, a 27.1 release candidate), for CI's Mac side (27), CI's iOS app (27.1, betas allowed) and
   TestFlight (27, no fallback): 12 of 12 picks as expected (the image: Xcode_27.app for the Mac
-  side and TestFlight, Xcode_27.1_beta.app with a notice for the iOS app). Whether that beta's SDK
-  has the hinge and fold APIs only the pull request's run will tell.
+  side and TestFlight, Xcode_27.1_beta.app with a notice for the iOS app). Then CI on GitHub, run by
+  hand on the branch at 23ca79f (run 37835771799, 13 min, every step green): the Mac side and the
+  pure checks on Xcode 27.0 (27A266a), the notice "This runner has no release of Xcode 27.1;
+  building with Xcode_27.1_beta.app", and the iOS app built with it (27.1, 27A9269: its SDK has the
+  hinge and fold APIs) with only the known warning.
 - **Nothing changes off the Duo**: the harness at 46 cases of the sizes it had before (the guessed
   Duo's four with the drawer, Settings, the connect screens, Add a Mac and its typed code, the
   pairing overlay, the tour's steps, the lights, the Aa ruler, eight Macs and the link line; an
@@ -512,10 +515,9 @@ inner display upright, kept sideways and on every other screen; or hidden sidewa
 
 ## Left
 
-- CI builds the iOS app with `Xcode_27.1_beta.app` (27A9269) until the xcode-27 image has a 27.1
-  that is not a beta (a notice says so); whether that beta's SDK has the hinge and fold APIs, the
-  pull request's first run tells (this Mac's 27.1 RC, 27A9275, has them). TestFlight's workflow
-  stops at release-ios.sh until then: upload from this Mac.
+- CI builds the iOS app with `Xcode_27.1_beta.app` (27A9269, which builds it) until the xcode-27
+  image has a 27.1 that is not a beta (a notice says so). TestFlight's workflow stops at
+  release-ios.sh until then: upload from this Mac.
 - An unlabeled button element sits beside "‹App› menus" on the phone row's Menus button under
   VoiceOver (PortraitStreamScreen's `phoneRow2`, MacMenuButton): older than this branch, on every
   phone, so a task of its own.
