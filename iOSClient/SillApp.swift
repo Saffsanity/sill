@@ -7,7 +7,10 @@ struct SillApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // iOS 27.1 on the iPhone Duo: the hinge for the layouts, and the status bar hidden while
+            // it is open (DuoPostureReader); nothing before iOS 27.1 or on a device without a hinge.
             ContentView()
+                .readsDuoPosture()
         }
     }
 }

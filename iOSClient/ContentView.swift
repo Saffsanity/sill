@@ -661,6 +661,8 @@ struct ConnectScreen: View {
     let scannerOverride: CodeScanner.Mode?
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The Duo's hinge (iOS 27.1): with the fold, where the column goes (ConnectLayout).
+    @Environment(\.duoEnvironment) private var duoEnvironment
 
     init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
@@ -695,7 +697,8 @@ struct ConnectScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            let layout = ConnectLayout(size: geo.size)
+            let posture = DuoPosture.read(geo, duoEnvironment)
+            let layout = ConnectLayout(size: geo.size, fold: posture.info(in: geo.size))
             // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
             // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
             // safe area below, so nothing else moves (the footer stays under the keyboard).
@@ -710,11 +713,11 @@ struct ConnectScreen: View {
             VStack(spacing: 0) {
                 ScrollView(.vertical) {
                     ColumnOverFooter(
-                        // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing
-                        // crosses the crease and the keyboard has the lower half (the footer stays along
-                        // the bottom, under the keyboard while it is up). Elsewhere centred in the whole
+                        // The Duo half-folded: centred above the fold, at most 500 pt tall, so nothing
+                        // crosses it and the keyboard has the lower half (the footer stays along the
+                        // bottom, under the keyboard while it is up). Elsewhere centred in the whole
                         // height, as before.
-                        centreHeight: layout.topHalf ? min(geo.size.height / 2, 500) : geo.size.height,
+                        centreHeight: layout.topRoom.map { min($0, 500) } ?? geo.size.height,
                         visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
                         column(layout)
                             .frame(width: carded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
@@ -745,6 +748,7 @@ struct ConnectScreen: View {
                 }
                 footer(layout)
             }
+            .duoLog(posture, size: geo.size, screen: "connect screen")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onChange(of: client.pairing) { old, new in
