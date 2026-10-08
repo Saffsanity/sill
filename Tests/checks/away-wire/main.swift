@@ -121,7 +121,7 @@ do {
     check(decode(HostSettingsState.self, awayOnlyJSON) == awayOnly, "…and it round-trips")
     let linkOnly = HostSettingsState(settings: settings, persistent: false, virtualDisplayAvailable: false, softwareEncoder: true, link: link)
     let linkOnlyJSON = encode(linkOnly)
-    check(keys(linkOnlyJSON).contains("link") && !keys(linkOnlyJSON).contains("away"), "link without away (SillHost without --remote): no away key")
+    check(keys(linkOnlyJSON).contains("link") && !keys(linkOnlyJSON).contains("away"), "link without away (SillHost without --remote or --pairing): no away key")
     check(decode(HostSettingsState.self, linkOnlyJSON)?.link == link, "…and the link decodes")
     // A malformed field fails the whole state, as any field does: a host sends both whole or not at all.
     var broken = object(newJSON)

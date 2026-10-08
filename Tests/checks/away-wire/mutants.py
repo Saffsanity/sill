@@ -8,8 +8,8 @@ os.makedirs(OUT, exist_ok=True)
 SRC = os.path.join(ROOT, "Sources/StreamProtocol/HostSettings.swift")
 orig = open(SRC).read()
 MUTANTS = {
-    "W1 away under another name on the wire": [("    /// Away from home: nil from a host without a remote door, and from older hosts.\n",
-        "    enum CodingKeys: String, CodingKey { case settings, persistent, virtualDisplayAvailable, virtualDisplayNote, softwareEncoder, stream, answering, away = \"awayQuality\", link }\n    /// Away from home: nil from a host without a remote door, and from older hosts.\n")],
+    "W1 away under another name on the wire": [("    /// Away from home: nil from a host without an identity (SillHost without --remote or\n",
+        "    enum CodingKeys: String, CodingKey { case settings, persistent, virtualDisplayAvailable, virtualDisplayNote, softwareEncoder, stream, answering, away = \"awayQuality\", link }\n    /// Away from home: nil from a host without an identity (SillHost without --remote or\n")],
     "W2 the link never set by the init": [("self.away = away; self.link = link", "self.away = away; self.link = nil")],
     "W3 isBehind for anything not stalled": [("public var isBehind: Bool { state == Self.behind }", "public var isBehind: Bool { state != Self.stalled }")],
     "W4 behind spelt otherwise": [('public static let behind = "behind"', 'public static let behind = "Behind"')],

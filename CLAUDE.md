@@ -5170,7 +5170,8 @@ device keeps working with Macs from the first public build on, or each says why
   kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.4.1 (away
   from home, docs/remote-bundle-plan.md §4): its `settings` the pair that connection's controls
   set (the away quality for a device away), and its optional `away` (AwayQuality, from a host with
-  a remote door) and `link` (LinkReport, only while a link does not keep up; its `state` a string,
+  an identity: Sill.app, SillHost --remote or --pairing) and `link` (LinkReport, only while a link
+  does not keep up; its `state` a string,
   which a device reads as keeping up when it does not know it); kind 22's `reason`, `message` and
   `reconnect`; the
   Mac's menus as MacMenu.swift has them (docs/menu-bar-plan.md §3):

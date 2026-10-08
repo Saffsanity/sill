@@ -212,8 +212,10 @@ package final class StreamCoordinator {
     /// In every window list (`WindowList.hostVersion`, with `protocol`): Sill.app's version; nil
     /// from the CLI, which has no bundle. For later devices, which can then say which Mac to update.
     private let hostVersion: String?
-    /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote. Nil: no
-    /// identity, no TXT tag, no kind 18, no remote door, exactly the host as before.
+    /// Remote access (RemoteAccess): Sill.app always, SillHost only with --remote or --pairing
+    /// (with --pairing alone, an identity for the TLS home door and no remote door). Nil: no
+    /// identity, no TXT tag, no kind 18, no remote door, no `away` in kind 16: exactly the host
+    /// as before.
     package let remote: RemoteAccess?
     /// Each admitted connection's route (home and its origin, or the remote door's), from the server.
     private var routes: [ObjectIdentifier: ClientRoute] = [:]
@@ -2274,7 +2276,8 @@ package final class StreamCoordinator {
 
     /// Connection `id`'s state (docs/remote-bundle-plan.md §5.4): the pair its controls set (the
     /// away quality for a device away), the home and away qualities with which one is the target
-    /// (`away`, from a host with a remote door), and the rest shared. A pure function of the target,
+    /// (`away`, from a host with an identity, `remote`: SillHost --pairing alone too, where no
+    /// connection is ever away), and the rest shared. A pure function of the target,
     /// `awayWanted`, the connection's route, the status snapshot and two constants (appKitLoop,
     /// whether the hook is set). The target changes only in `setTarget`, the snapshot only in
     /// `HostStatus.update`, and `awayWanted` only in `routesChanged`, which updates the snapshot

@@ -97,9 +97,11 @@ public struct RunningStream: Codable, Hashable, Sendable {
 }
 
 /// Away from home (docs/remote-bundle-plan.md §5): the Mac's two qualities, which one runs, and
-/// which one this connection's controls set. From a host with a remote door (Sill.app; SillHost
-/// --remote); nil from any other host, which has one quality for every device. Every field is
-/// required: a host that sends it sends all of it.
+/// which one this connection's controls set. From a host with an identity (Sill.app; SillHost
+/// --remote or --pairing); nil from any other host, which has one quality for every device. One
+/// without a remote door (SillHost --pairing alone) sends it too, and no connection there is ever
+/// away (`thisConnectionAway` and `awayRunning` false). Every field is required: a host that sends
+/// it sends all of it.
 public struct AwayQuality: Codable, Hashable, Sendable {
     /// What runs while any connected device is at home: the Mac menu's Quality and Resolution.
     public var homeBitrate: Int
@@ -162,7 +164,7 @@ public struct LinkReport: Codable, Hashable, Sendable {
 /// Host → device (`.hostSettings`): on connect (right after the window list), whenever it changes,
 /// and, with `answering` set, as the reply to one device's `HostSettingsChange`. Each connection gets
 /// its own (`away` and `link` are the connection's, and so are `settings.bitrate` and
-/// `settings.captureScale` on a host with a remote door).
+/// `settings.captureScale` on a host that sends `away`).
 public struct HostSettingsState: Codable, Hashable, Sendable {
     /// The target: a change still waiting for its restart is already reported, because the Mac's
     /// menu checks it too. `bitrate` and `captureScale` are the quality this connection's controls
@@ -186,7 +188,8 @@ public struct HostSettingsState: Codable, Hashable, Sendable {
     public var stream: RunningStream?
     /// Only in the reply to one device: the token of the change it answers.
     public var answering: Int?
-    /// Away from home: nil from a host without a remote door, and from older hosts.
+    /// Away from home: nil from a host without an identity (SillHost without --remote or
+    /// --pairing), and from older hosts.
     public var away: AwayQuality?
     /// This connection's link while it cannot keep up; nil while it does, and from older hosts.
     public var link: LinkReport?

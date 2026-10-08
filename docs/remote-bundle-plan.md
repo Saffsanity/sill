@@ -343,8 +343,10 @@ None new, on either side.
 
 ```swift
 /// Away from home (docs/remote-bundle-plan.md §5): the Mac's two qualities, which one runs, and
-/// which one this connection's controls set. From a host with a remote door (Sill.app; SillHost
-/// --remote); nil from any other host, which has one quality for every device.
+/// which one this connection's controls set. From a host with an identity (Sill.app; SillHost
+/// --remote or --pairing); nil from any other host, which has one quality for every device. One
+/// without a remote door (SillHost --pairing alone) sends it too, and no connection there is ever
+/// away (`thisConnectionAway` and `awayRunning` false).
 public struct AwayQuality: Codable, Hashable, Sendable {
     /// What runs while any connected device is at home: the Mac menu's Quality and Resolution.
     public var homeBitrate: Int
@@ -388,7 +390,8 @@ public struct LinkReport: Codable, Hashable, Sendable {
 `HostSettingsState` (:86-111) gains, with `= nil` defaults in its init:
 
 ```swift
-    /// Away from home: nil from a host without a remote door, and from older hosts.
+    /// Away from home: nil from a host without an identity (SillHost without --remote or
+    /// --pairing), and from older hosts.
     public var away: AwayQuality?
     /// This connection's link while it cannot keep up; nil while it does, and from older hosts.
     public var link: LinkReport?
@@ -433,8 +436,9 @@ the away quality without knowing it.
 | Older (PR #13's, or main's up to cea195c), away | This host | Its Quality and Resolution show the away quality and set it. No "Away:" line. It ignores `link`, and keeps its rtt callout; the Mac's card still names the link. Its liveness still counts whole messages: a keyframe that takes more than 6 s to arrive still ends its session (§3.4), which this host's pacing makes rarer and cannot prevent |
 | Older, at home | This host | As today |
 | This device | Older host (PR #13's Sill.app, or main's up to cea195c) | No `away`, no `link`: the panel as today (one quality, the rtt callout). The move home works: that host sends a launch ID and a signed kind 18 |
-| This device | CLI without `--remote` | `away` nil (no remote door); `link` works; nobody is ever away |
-| `sillclient.py` from ba91136 | This host, default path | Identical output: no `away` (no remote door) and no `link` while the link keeps up, so the JSON is byte for byte today's |
+| This device | CLI without `--remote` or `--pairing` | `away` nil (no identity); `link` works; nobody is ever away |
+| This device | CLI with `--pairing` alone (since the merge with main: an identity for the TLS home door, no remote door) | `away` sent, with `thisConnectionAway` and `awayRunning` always false: nobody is ever away, so no header line and no footnote (its kind 18 says Remote Access is off); `link` works |
+| `sillclient.py` from ba91136 | This host, default path | Identical output: no `away` (no identity) and no `link` while the link keeps up, so the JSON is byte for byte today's |
 | Any | Any | Items 1 and 4 change nothing on the wire |
 
 Kinds 16 and 17 stay compatible both ways; no kind is added.
@@ -824,7 +828,7 @@ and frame age speak for a dead path.
   (rule 2), the Mac restarts once, and from away it changes the away quality only. At least 44 pt
   tall, like the panel's rows; spoken "Use Low, Standard".
 - **The old callout** (the rtt test, :183-187, `client.slowLink`) shows only while the
-  Mac sent no `away`: an older host. A host with a remote door judges the link itself, and a high
+  Mac sent no `away`: an older host. A host that sends `away` judges the link itself, and a high
   round trip with nothing withheld is no reason to lower the quality.
 
 **The stream screen's line** (`StreamScreen.contentArea` and `PortraitStreamScreen`):
@@ -1783,7 +1787,7 @@ actor, and the device's UI and the move (fences, the kind 18 check, the back-off
   every pure check, `swift build -c release` from clean, and policy's 76 mutants again.
 - **Found while verifying, fixed before their commits:** the answer to the pick that lowers the
   quality carried the report it made stale (H12); the move home waited for a kind 18 that a host
-  without a remote door never sends before refusing another launch (S4's `other:`); the footnote
+  without an identity never sends before refusing another launch (S4's `other:`); the footnote
   wrapped "Low" from "· Standard" (S1); `-SillLinkLine` suggested Low at Low · Standard, a pick that
   changes nothing (S1); the device's console lacked §6.8's "link: behind …" and "link: keeping
   up"; the move home's end with its remote connection gone printed the move to Wi‑Fi's words; one

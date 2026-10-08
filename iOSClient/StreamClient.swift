@@ -1911,7 +1911,7 @@ final class StreamClient: ObservableObject {
     }
 
     /// The move home's first window list is in: another launch of Sill, or another Mac, is refused at
-    /// once (a host without a remote door sends no kind 18 to wait for); the same launch is read on
+    /// once (a host without an identity sends no kind 18 to wait for); the same launch is read on
     /// to its kind 18 (`probeMove`, then `moveProbed`). Main thread.
     private func homeListProbed(_ c: NWConnection, kept: [(header: StreamHeader, payload: Data)], host: String?) {
         guard let move = moving, move.connection === c else { c.cancel(); return }   // given up meanwhile

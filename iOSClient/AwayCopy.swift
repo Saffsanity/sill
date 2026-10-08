@@ -32,7 +32,7 @@ enum AwayCopy {
     /// The header's line under the route line, while the Mac counts this connection as away:
     /// "Away: Low · Standard" while the away quality runs, "Home quality: Pro · Retina (a device at
     /// home is connected)" while it does not; and what VoiceOver adds to the header for it. Nil at
-    /// home, and from a Mac that sends no `away` (an older one, SillHost without --remote).
+    /// home, and from a Mac that sends no `away` (an older one, SillHost without --remote or --pairing).
     static func headerLine(_ away: AwayQuality?) -> (text: String, spoken: String)? {
         guard let a = away, a.thisConnectionAway else { return nil }
         if a.awayRunning {
