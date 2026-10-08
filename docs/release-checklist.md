@@ -533,8 +533,10 @@ Scripts/release-ios.sh --bump --upload    # every later upload of 0.5: the build
 Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest declares, and its required-reason APIs
 ```
 
-- It needs Xcode 27 selected (it refuses any other) and the Apple Account of team 9B2KKVM937 in
-  Xcode › Settings › Accounts, which signs and uploads. Uploading takes Account Holder, Admin, App
+- It needs Xcode 27.1 or a later Xcode 27 selected (it refuses any other: since the iPhone Duo's
+  layouts, the app needs the iOS 27.1 SDK, and it checks that the .ipa's app was built with it,
+  docs/iphone-duo-plan.md) and the Apple Account of team 9B2KKVM937 in Xcode › Settings ›
+  Accounts, which signs and uploads. Uploading takes Account Holder, Admin, App
   Manager or Developer; signing with the cloud-managed certificate takes Account Holder or Admin
   (or the permission Access to Cloud Managed Distribution Certificate in Users and Access). Or an
   App Store Connect API key instead, kept outside the repository:
@@ -640,6 +642,9 @@ screens of each set, the capture commands and what may appear in the picture. Th
 
 `.github/workflows/testflight.yml` runs only by hand: Actions › TestFlight › Run workflow, on a
 branch or tag (GitHub lists it once it is on main). It never runs on a push or a pull request.
+It selects the newest Xcode 27 that is not a beta, and `release-ios.sh` refuses one before 27.1:
+until the `xcode-27` image has a 27.1 that is not a beta (in October 2026 it had only
+`Xcode_27.1_beta.app`, 27A9269), every run stops at that refusal. Upload from this Mac meanwhile.
 
 - Without the key below: `release-ios.sh --unsigned`. The Release archive is built without
   signing and checked; `Sill-<version>-<build>-unsigned.ipa` is the artifact for 14 days, to look
@@ -831,14 +836,21 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 
 All three workflows run on `xcode-27`, the newest macOS image GitHub offers and the only one with
 Xcode 27, which Sill is built with: macOS 27.0 with Xcode 27.0 (the default), 27.1 and a 27.2 beta
-in September 2026. GitHub calls it a public preview, so jobs can wait in a queue longer and
+in September 2026 (image 20261006.0244: `Xcode_27.app` 27.0 27A266a, `Xcode_27.1_beta.app` 27.1
+27A9269, `Xcode_27.2_beta_2.app` 27.2 27B5028f). GitHub calls it a public preview, so jobs can wait in a queue longer and
 software on it can change. `macos-latest` is macOS 26 with Xcode 26.0.1 to 26.6, and `macos-15`
 has Xcode 16.0 to 16.4 and 26.0.1 to 26.3; Sill has not been built with those. A step
 (`.github/actions/select-xcode`, asked for version 27) selects the newest Xcode 27 that is not a
-beta and prints `xcodebuild -version`: on today's image that is Xcode 27.0 (27A266a), the same
-build as on Noah's Mac, since the image installs 27.1 under a name that says beta. On an image
-without an Xcode 27, CI warns and builds with the newest Xcode there, and the release and
-TestFlight workflows stop: a release is built with Xcode 27 or not at all. When GitHub replaces the
+beta and prints `xcodebuild -version`: on today's image that is Xcode 27.0 (27A266a), since the
+image installs 27.1 under a name that says beta. CI's build job takes it for the Mac side (SwiftPM,
+the pure checks, the CLI) and, right before the iOS app, asks again for version 27.1 with
+`allow-beta`: the newest 27.1 that is not a beta, else its newest release candidate or beta (with
+a notice; today `Xcode_27.1_beta.app`), because the iOS app needs the iOS 27.1 SDK
+(docs/iphone-duo-plan.md). The mutants job asks for 27. On an image without an Xcode 27, CI warns
+and builds with the newest Xcode there, and the release and TestFlight workflows stop: a release
+is built with Xcode 27 or not at all, and an App Store build with Xcode 27.1 or later
+(`release-ios.sh` refuses an older one), so TestFlight from GitHub Actions waits for a 27.1 that
+is not a beta. When GitHub replaces the
 preview with a regular macOS 27 image, change `runs-on` in the three files. The image's `bash` is
 3.2, macOS's own, and runs every `run:` step: write steps it can parse (it ends a `$(` at the `)`
 of a `case` pattern inside it) and try them with `/bin/bash`, not zsh.

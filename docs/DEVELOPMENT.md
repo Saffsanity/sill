@@ -117,6 +117,7 @@ swift run -c release SillHost Safari                 # optional: preselect a mat
 swift run -c release SillHost --virtual-display      # each streamed window on its own HiDPI display; Ctrl-C restores it
 swift run -c release SillHost --direct-wireless      # also over peer-to-peer Wi-Fi, for a device with no shared network
 swift run -c release SillHost --synthetic            # the Desktop streams a test pattern; no Screen Recording needed
+SILL_TEST_PATTERN=picture:/path/to.jpg swift run -c release SillHost --synthetic   # the Desktop a still picture instead (TEST ONLY)
 swift run -c release SillHost --remote               # the remote door for this run, on any free port (--remote=PORT)
 swift run -c release SillHost --remote --internet    # also admit paired devices from the internet
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
@@ -198,16 +199,20 @@ come the device's own: This iPad (or iPhone), with Three-Finger Gestures
 and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
-which iOS 27.1 reports with the fold's place. Open, Sill has the inner display
-to itself (the status bar hides; 951×669 sideways, 669×951 upright). Half
-folded sideways, the book pose, the picture runs across the fold, but nothing
-you touch sits on it: the thumbnails end short of it and the bar's buttons, the
-Settings panel, the tour's cards and the window lights stay on one side.
-Half folded upright, the laptop pose, the picture is above the fold and the
-bar, the keys and the trackpad below it; open flat upright, the picture takes
-its own shape across the width and the trackpad the rest. Closed, the cover is
-a phone (below) beside its camera's strip. Folding moves the session to the
-other display, and every layout is what it was on any other device.
+which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
+display (951×669 sideways, 669×951 upright); while streaming upright the
+status bar hides, so the picture has the top, and sideways it stays in its
+84 pt strip at the side, as on every other screen. Half folded sideways, the
+book pose, the picture runs across the fold, but nothing you touch sits on
+it: the thumbnails end short of it, the bar's buttons go to their compact
+width to begin past it, and the Settings panel, the tour's cards, the window
+lights, the link's line and the connect screen stay on one side. Half folded
+upright, the laptop pose, the picture is above the fold and the bar, the keys
+and the trackpad below it, and the connect screen's list scrolls above the
+fold; open flat upright, the picture takes its own shape across the width and
+the trackpad the rest. Closed, the cover is a phone (below) beside its
+camera's strip. Folding moves the session to the other display, and every
+layout is what it was on any other device.
 
 On a phone held upright (and on the Duo's outer display) the picture sits in
 a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
@@ -665,8 +670,11 @@ simulator:
   stream screen (its screen less the status bar: `402x812` for an iPhone 18
   Pro upright, `440x894` for a Pro Max): a fake screen of that size. The
   Duo's four sizes have the safe area that display gives Sill (the home
-  indicator's 34, and on the cover its camera's 84 pt strip, at the right
-  upright and the left on its side); `-SillSafeArea T,L,B,R` sets another.
+  indicator's 34; on the inner display the status bar's strip, 84 pt at the
+  right sideways and 82 at the top upright, but on the stream screen upright
+  with `-SillHinge half` or `flat`, which hides it; on the cover its camera's
+  84 pt strip, at the right upright and the left on its side);
+  `-SillSafeArea T,L,B,R` sets another.
   The first guesses, `1000x710`, `710x1000`, `500x710` and `710x500`, still
   work, with none. One larger than the simulator is drawn scaled down to fit,
   laid out at its own size. One that reaches into the simulator's own safe
