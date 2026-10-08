@@ -435,7 +435,8 @@ the away quality without knowing it.
 |---|---|---|
 | Older (PR #13's, or main's up to cea195c), away | This host | Its Quality and Resolution show the away quality and set it. No "Away:" line. It ignores `link`, and keeps its rtt callout; the Mac's card still names the link. Its liveness still counts whole messages: a keyframe that takes more than 6 s to arrive still ends its session (§3.4), which this host's pacing makes rarer and cannot prevent |
 | Older, at home | This host | As today |
-| This device | Older host (PR #13's Sill.app, or main's up to cea195c) | No `away`, no `link`: the panel as today (one quality, the rtt callout). The move home works: that host sends a launch ID and a signed kind 18 |
+| This device | Older host with a plain home door (PR #13's Sill.app, main's up to cea195c, Sill for Mac 0.3.1) | No `away`, no `link`: the panel as today (one quality, the rtt callout). No move home since the merge with main (2026-10-08): the move goes only to a TLS home door, pinned to the saved Mac's key, so the session stays remote (before the merge it moved home over the plain door, that host sending a launch ID and a signed kind 18) |
+| This device | Sill for Mac 0.4.0 (main's at e6b3265: a TLS home door with pairing, no `away`) | No `away`, no `link`: the panel as today. The move home works, pinned to the saved key: that host sends a launch ID and a signed kind 18 |
 | This device | CLI without `--remote` or `--pairing` | `away` nil (no identity); `link` works; nobody is ever away |
 | This device | CLI with `--pairing` alone (since the merge with main: an identity for the TLS home door, no remote door) | `away` sent, with `thisConnectionAway` and `awayRunning` always false: nobody is ever away, so no header line and no footnote (its kind 18 says Remote Access is off); `link` works |
 | `sillclient.py` from ba91136 | This host, default path | Identical output: no `away` (no identity) and no `link` while the link keeps up, so the JSON is byte for byte today's |
@@ -983,7 +984,9 @@ refused, forgotten with the row), picks the row among those with the Mac's tag (
   a TXT tag and a kind 18 captured earlier and replayed are not enough to take the session over
   (§10). It does not prove the home door is the Mac: anyone who can reach the Mac's home door
   (anyone on its network) can fetch a fresh kind 18 and the launch ID there and relay them, the
-  plaintext home door's exposure until M5, as for every reconnect over it today.
+  plaintext home door's exposure until M5, as for every reconnect over it today. (Since the merge
+  with main the home door speaks TLS and the move home dials it pinned to the saved Mac's key, so a
+  relay's key is refused at the handshake, -9808, and this check is a second look.)
 
   A mismatch: "remote: move home refused: …" and `refusedHomeListing = savedSightings.since[id]`
   (since the merge's review: that row joins `homeMoveRows.refused`).
@@ -1133,7 +1136,7 @@ remote: move home refused: the home door's kind 18 is not this Mac's, or older t
 | Link: one drop on a remote device beside a home device | It waits for a keyframe up to 4 s (the spacing beside a home device), which can read as 3 short seconds: behind for about 8 s though the link recovered at once. Accepted: its picture did stop |
 | Link: a stream carried whole but late (bigkf8's good runs, §3.7) | Fine: nothing is withheld. The device's frame age shows the lag |
 | Move home: another Mac of the same name on the network | Rows match by Mac ID (the tag), never by name |
-| Move home: an impostor replays the Mac's TXT tag | Its connection must show this launch's ID and a kind 18 signed by the pinned key at least as new as this session's, which only the Mac makes: a capture from before this session is refused. Anyone who can reach the Mac's home door can fetch both there and relay them: the home door is plaintext until M5, as it is for every reconnect over it today |
+| Move home: an impostor replays the Mac's TXT tag | Since the merge with main the move dials the TLS home door pinned to the saved Mac's key: an impostor's key is refused at the handshake (-9808, S4's other key), nothing of this device reaches it, and its row is not dialed again while listed; the Mac's own row is still tried (by row, since the merge's review), and a row with the tag and no `p` is passed over. The connection must also show this launch's ID and a kind 18 signed by the pinned key at least as new as this session's was when the move started: a capture from before this session is refused. (Before the merge the home door was plaintext, and anyone who could reach it could fetch both there and relay them, as for every reconnect over it.) |
 | Move home at the edge of the home Wi‑Fi | A home connection that dies soon after a move home reconnects remotely (the network no longer lists the Mac) and moves home again once it is listed 2 s: each round costs the Mac two restarts (home, then away). Not damped: the back-off counts moves that did not complete within one session, and each round is a new session. P10 notes how often it happens |
 | A home device joins while only away devices stream | One restart, at its first viewport: its rate and the home quality together (§5.4); 1 s after it connected when no viewport comes (a test client) |
 | A pick on the panel while the move home carries a dead remote session | Not sent (§7.3): it would set the home quality from an away panel |
@@ -1253,10 +1256,10 @@ for P6.
 | P7 | **The Mac.** Settings › Streaming shows both sections. Changing the away pickers while the iPad is away restarts once. The menu's Quality subtitle says "Away from home now: …" |
 | P8 | **The link.** Away at Extreme. Within about 5 s: the callout with its button, the stream's line, one VoiceOver announcement, and the Mac's card "iPad: … the link can’t carry Extreme". Tap the button: one restart; the callout and the line go; the card's row is normal within about 5 s |
 | P9 | **A dip.** Cover the iPhone, or walk away from it, for 15 s. The line appears, then goes about 5 s after the link recovers; no reconnect |
-| P10 | **Coming home.** Streaming away through Tailscale, join the home Wi‑Fi. Within about 5 s of the network listing the Mac: "Client connected: fe80::…%en0", "Home quality again", "Client left: 100.x". The route line gives way to "Wi‑Fi"; one restart; drag and type through it (no button stays down, no letters swap); the Mac's card shows the iPad once, "Wi‑Fi". At the edge of the home Wi‑Fi, note how often it goes back and forth (§10) |
+| P10 | **Coming home.** Streaming away through Tailscale, join the home Wi‑Fi. Within about 5 s of the network listing the Mac: "Client connected: fe80::…%en0" (since the merge with main at the Mac's TLS home door, pinned: never "Home door refused", no pairing asked), "Home quality again", "Client left: 100.x". The route line gives way to "Wi‑Fi"; one restart; drag and type through it (no button stays down, no letters swap); the Mac's card shows the iPad once, "Wi‑Fi". At the edge of the home Wi‑Fi, note how often it goes back and forth (§10) |
 | P11 | **Coming home by cable.** An away session; at home, plug the cable in. The move goes to the cable ("Wired"; the Mac logs `%en14` or `%anri0`) |
 | P12 | **Connect Remotely at home** stays remote |
-| P13 | **Mixed builds.** PR #13's iPad against this Sill.app, away: starts at Low · Standard; its Quality shows Low; no header line. This iPad against PR #13's Sill.app: no header line, no link callout, the move home works |
+| P13 | **Mixed builds.** PR #13's iPad against this Sill.app, away: starts at Low · Standard; its Quality shows Low; no header line. This iPad against PR #13's Sill.app, or Sill for Mac 0.3.1 (a plain home door): no header line, no link callout, and no move home: the session stays remote (since the merge with main the move home goes only to a TLS home door). This iPad against Sill for Mac 0.4.0: no header line, no link callout, and the move home works, pinned |
 | P14 | **Extreme through the remote door on a fast path.** Connect Remotely at home through Tailscale's LAN path (rtt under 15 ms), Extreme · Retina picked away, two minutes on a busy window: no `net.dropped` in Sill.log's `[1s]` lines, the `client iPad` lines at its 60 fps. With a 120 Hz device on a remote session by address, the same at 120 fps (§3.2: the harness's host sends over loopback, and a real path's send buffer may stay smaller) |
 
 ---
@@ -1375,7 +1378,9 @@ after PR A or with PR A's commits first. Cherry-pick this plan's commit.
 10. **The move home checks kind 18** (the pinned key, as new as the session's). Default: **yes.**
     It costs a millisecond and stops a tag and a kind 18 captured before this session. A device
     on the home network can still fetch fresh ones from the Mac's home door and relay them: the
-    home door stays plaintext until M5.
+    home door stays plaintext until M5. (Settled since the merge with main: the home door speaks
+    TLS and the move home pins the saved Mac's key, so a relay is refused at the handshake; the
+    check stays as a second look, held to the floor taken as the move starts.)
 11. **Ship PR A (pacing) on its own first.** Default: **yes.** It is independent of PR #12, and it
     removes the livelock for every build of the device.
 12. **The 512 KB hold cap** keeps up to about a second of Low's deltas behind a keyframe instead of
