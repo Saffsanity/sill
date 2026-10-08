@@ -2010,7 +2010,8 @@ features kept whole. Where they meet, beyond the text:
   is pure (`DiscoveryPolicy.HomeMoveInfo`: the newest, the floor taken as a move starts, `accepts`;
   StreamClient's `homeInfo`), and `policy` checks it, the race among its cases, with mutants K1–K7
   (K1 is the rule before the fix: held to the newest). That StreamClient takes the floor at the
-  move's start is the glue's, one line in `moveHome`.
+  move's start is the glue's, one line in `moveHome`; the race is staged live in the review's runs
+  (the next section): this build moves home through it, the rule before the fix refuses the Mac.
 - **The host.** RemoteServer's admission moved into `Door` (#37), so SILL_TEST_REMOTE_ORIGIN's
   `remoteDoor` flag is passed from there (`kind == .remote`), and TestHooks lists the variable among
   the door hooks a host that is not a test host ignores. StreamCoordinator keeps both sides' connect
@@ -2108,6 +2109,103 @@ encoder never used; hosts on loopback alone and the software encoder):
   phone`); with `-SillTourState fresh -SillTour touch` the tour's card shows and the line stays
   away.
 
+### The merge's review (2026-10-08)
+
+Three reviews of the merge (the host and the wire; the device; the checks and the docs) ran against
+c3d06f0 on this Mac, each with live runs of its own on loopback-only test hosts (the host review's
+H2, H7/H8 and floor runs, the pacing harness and the previews matched both parents). Seven findings,
+two of them the same; each was verified here, and each fixed in a commit of its own:
+
+- **The move home chose by the Mac's listing, not by row** (the device review, reproduced on a private
+  simulator). A row whose TXT tag names the saved Mac is not proof of the Mac: the tag is public on
+  the network. A look-alike replaying it at another key, listed first, had its pin refused, and the
+  refusal went to the Mac's whole listing (`savedSightings.since` by Mac ID), so the Mac's own row,
+  listed 15 s later, was never tried while any row of the Mac stayed listed (52 s, 27 of them after
+  the look-alike had gone). A row with the tag and no `p`, listed first in `macs` (the browser's
+  order, random per launch), stopped the move outright: `moveHomeIfListed` took `macs.first` and its
+  trust was nil. Not a security exposure (the pin refused the key, and nothing of this device
+  reached it), but anyone on the home network could keep a session away. Now
+  `DiscoveryPolicy.moveHomeRow` (pure) picks among the network rows with the Mac's tag: not refused,
+  at a door a pinned dial takes (a plain one passed over, never dialed), the fewest tries first,
+  then the connect screen's order, so a row that does not answer gives the next try to another; and
+  `HomeRows` keeps each row's tries and the rows found not to be the Mac (another key at the pin,
+  another launch, a kind 18 not the Mac's, a goodbye), forgetting a row once it is no longer listed.
+  A refused row is no failure, so another row is tried at once. `moveHome` lost `refusedListing`
+  (its back-off still counts per listing). `policy`: 13 row cases, 3 for HomeRows, and the model by
+  row (the review's look-alike, a plain row first, a look-alike that never answers); mutants H1 and H5
+  re-anchored, H12–H18 new.
+- **The kind 18 floor's fix had no check** (the checks' review). The floor taken as the move starts
+  lived in StreamClient, which no check compiles, and no scenario broadcast a kind 18 mid-move, so
+  nothing told the fix from its absence. Now `DiscoveryPolicy.HomeMoveInfo` (pure: the newest
+  verified kind 18 on the remote connection, never lowered by one read late; the floor taken as a
+  move starts and cleared as it ends; `accepts`, at least the floor, nothing without a move), and
+  StreamClient's `homeInfo` replaces `remoteInfoIssuedAt` and `homeMoveInfoFloor`. `policy`: 13 cases,
+  the broadcast race and a replay among them, and mutants K1–K7 (K1 is the rule before the fix). The
+  glue is one line in `moveHome` (`moveStarted`), which S4 exercises (a move without its floor would
+  accept nothing), and the race is now staged live (below).
+- **`SillHost --pairing` without `--remote` sends kind 16's `away`** (the host and checks reviews,
+  live). Since the merge the CLI makes a RemoteAccess for `--pairing` alone (its TLS home door's
+  identity), and `away` is built whenever `remote` is set; no connection there is ever away, so a
+  device shows nothing for it (the header needs `thisConnectionAway`, the footnote kind 18's Remote
+  Access). The docs said "from a host with a remote door": now "from a host with an identity" in
+  HostSettings.swift (the away-wire mutant W1 re-anchored), the coordinator, AwayCopy, StreamClient,
+  §4.1, §4.4 (a row for `--pairing` alone) and the compatibility floor in CLAUDE.md.
+- **The plan still said the move home works against a plain home door** (the checks' review): §4.4's
+  older-host row, §10's impostor row, §7.3's paragraph and rule, P13 and open question 10. Each now
+  says what the merge does: against a plain door (PR #13's Sill.app, Sill for Mac 0.3.1) no move home
+  and the session stays remote; against 0.4.0 the move home works, pinned; a relay's key is refused
+  at the handshake; the kind 18 floor is taken as the move starts.
+- **The fence check's move home handed over to plain TCP** (the checks' review), a path the move home
+  never takes since the merge. `remotehome` and `remotedead` are TLS to TLS now. With the session's
+  connection TLS, its final message never reached the stand-in's reads as its end (Network.framework's
+  TLS carries no half-close: 20 s with every input read), so those modes now wait for every input
+  that must arrive (as long as inputs still arrive, for a slow runner) and then reset the TLS
+  connections still up.
+- **The privacy policy had no line for the link report** (the checks' review): site/privacy.html's
+  "From your Mac" list now ends "Sill's streaming settings, and whether the connection keeps up with
+  them.", the 0.4.1 drafts' line (a policy naming a little more than an older Mac sends is safe to
+  publish first). Its date and the drafts' feature lines wait for the release.
+
+Verified after the fixes (this Mac, no device, Sill.app untouched, nothing posted, every host on
+127.0.0.1 alone and the software encoder):
+
+- **The builds** (Xcode 27.1, 27A9275): `swift build -c release` from a clean scratch path, only the
+  CaptureProbe warning; the iOS app for the simulator, Debug and Release, and Debug for a generic
+  device, unsigned, only the old `StreamClient` capture warning (StreamClient.swift:3430); Release's
+  Info.plist with `_sill._tcp` alone and none of the harness's arguments in its binary.
+- **The pure checks** (`Tests/checks/run-all.sh`): all 39 pass; `policy` 392. **The mutants** of the
+  checks the fixes changed or that compile a changed file, 388, every one caught: `policy` 130 (H1
+  and H5 re-anchored, H12–H18 and K1–K7 new), `remote-rules` 72, `home-device` 124 and `home-model`
+  21 (the other checks that compile DiscoveryPolicy.swift), `fence` 32 (its move home TLS to TLS,
+  and again after its end-wait) and `away-wire` 9 (W1 re-anchored).
+- **By row, live** (a private iPad mini simulator, "Sill merge39", iOS 27.0, the app Debug signed ad
+  hoc and browsing `_silltest._tcp` alone; hosts `SillHost --synthetic --remote --pairing` with
+  identities in test folders; host A paired at its TLS home door through its own Bonjour row, then run
+  unadvertised, and rows carrying A's tag registered by `dns-sd` on lo0 under the test type), 29 of 29:
+  A's row alone moved home 2 s after it was listed. A look-alike (A's tag at another host's TLS door,
+  another key) listed first: its pin refused 2 s after the listing, and A's own row, listed beside it
+  5 s later, moved home 70 ms after it was listed (the review's run of c3d06f0: never in 52 s); the
+  look-alike tried once, its host serving nothing. A row with A's tag and no `p` first, three
+  launches (first in `macs` each time): no move while it was alone, and A's row moved home as soon as
+  it was listed (the review's run: no move). A row with A's tag at port 1 with `p=1` (nothing answers)
+  first, twice: its move did not complete in its 5 s, and the next try, 10 s after the first, went to
+  A's row and moved home.
+- **The merge's simulator scenarios again** (its `simtest.py`, the app browsing the test type alone):
+  S4, `refused`'s back-off, another key refused by the pin once, another launch once, S5 and S4race,
+  28 of 28.
+- **The kind 18 race, staged live.** The host is the bare SillMenuBar binary in test pattern mode,
+  the only host whose Mac info can change on cue: `-SillSetAfter` turns internet access on and off
+  every 0.25 s, and each turn broadcasts a fresh kind 18 to every device (its identity in a test
+  folder, no keychain; on 127.0.0.1 alone, the software encoder; its defaults emptied after). The app
+  paired by the typed code at its remote door, dialed it remotely, and `-SillMoveHomeTest to:` listed
+  its home door behind a relay holding 0.8 s each way, so the home door's catalog kind 18 reaches the
+  device after kind 18s the Mac broadcast meanwhile on the remote connection. This build moved home
+  through it, 2 of 2; a scratch copy of it whose `accepts` is held to the newest kind 18 (the rule
+  before the fix, mutant K1) refused the Mac's own row, 2 of 2 ("the home door's kind 18 is not this
+  Mac's, or older than this session's"), about 3.2 s into the move each time.
+- **CI:** "Build and check" passed on ea4de23 (the fixes, before this section and the fence's
+  end-wait).
+
 ### Open questions for Noah
 
 14. **A link only a little too slow.** Behind needs 3 short seconds of 5, and under PR A's pacing
@@ -2140,3 +2238,5 @@ untested. Since the merge with main the move home goes through the Mac's TLS hom
 with Sill.app built from this branch, P10 and P11 show "Client connected" on the Mac (never "Home
 door refused") and no pairing is asked; against Sill for Mac 0.4.0 (main's, which has the TLS door
 but no away quality) the move home works too; against 0.3.1 (a plain door) the session stays remote.
+The merge's review adds nothing for the devices: the move home's choice by row and its kind 18 floor
+ran on a simulator against test hosts (above), and P10 and P11 cover them on the real network.

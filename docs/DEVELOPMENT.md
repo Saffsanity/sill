@@ -502,8 +502,11 @@ hand-over as a move off Direct Wireless, and the Mac goes back to the home
 quality in one restart. It dials the home door over TLS, pinned to the Mac's
 key the session already trusts, never plain: a Mac whose home door is plain (a
 Sill for Mac from before 0.4.0, the CLI without `--pairing`), one that removed
-this device or one to pair with again keeps the session remote. A session made
-with Connect Remotely stays remote.
+this device or one to pair with again keeps the session remote. It chooses
+among the rows carrying the Mac's tag one by one: a row that turns out not to
+be the Mac (another key, another launch) is not dialed again while it is
+listed, and the Mac's own row is still tried. A session made with Connect
+Remotely stays remote.
 
 The command-line host: `swift run -c release SillHost --remote` opens the
 remote door for one run on any free port (`--remote=PORT` for a fixed one, but

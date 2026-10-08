@@ -1589,12 +1589,12 @@ final class StreamClient: ObservableObject {
     /// for DiscoveryPolicy.moveAfter without a break, move the session home to the network door
     /// (DiscoveryPolicy.moveHome), by the make-before-break move from AWDL, over the door's TLS pinned
     /// to the saved Mac's key (DiscoveryPolicy.moveHomeTrust: never plain; a plain door, a Mac that
-    /// removed this device or one to pair with again keeps the session remote). Which row is chosen by
-    /// row among those with the Mac's tag (DiscoveryPolicy.moveHomeRow, `homeMoveRows`): a plain door is
-    /// passed over, a row found not to be the Mac is not dialed again while listed, and the fewest
-    /// tries go first, so a look-alike replaying the tag cannot keep the session from the Mac's own
-    /// row (the merge's review, 2026-10-08). The Mac then runs the
-    /// home quality in one restart, at this device's full rate (docs/remote-bundle-plan.md §7). Never
+    /// removed this device or one to pair with again keeps the session remote). The row is chosen one
+    /// by one among those with the Mac's tag (DiscoveryPolicy.moveHomeRow, `homeMoveRows`): a plain
+    /// door is passed over, a row found not to be the Mac is not dialed again while listed, and the
+    /// fewest tries go first, so a look-alike replaying the tag cannot keep the session from the Mac's
+    /// own row (the merge's review, 2026-10-08). The Mac then runs the home quality in one restart,
+    /// at this device's full rate (docs/remote-bundle-plan.md §7). Never
     /// for a session made with Connect Remotely (it tests the VPN path from home), never to a Direct
     /// row (not home), never beside another move, and not before the session's first window list and
     /// its own verified kind 18. Main thread.

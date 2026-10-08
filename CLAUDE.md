@@ -11,8 +11,8 @@ Formerly winstream; the folder still carries the old name.
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
 c564142, PR #39, stacked on PR #34, which merged during its review; main at
 e6b3265 merged in on 2026-10-08, one merge commit, not rebased, so the pull
-request goes to main; PR B of docs/remote-bundle-plan.md, whose "Results: PR B"
-and "Merged with main" have every number).** Items 2–4 of the away-from-home
+request goes to main; PR B of docs/remote-bundle-plan.md, whose "Results: PR B",
+"Merged with main" and "The merge's review" have every number).** Items 2–4 of the away-from-home
 bundle, on PR A's pacing: an away session starts low, the Mac says when the
 link cannot carry the quality, and a session away comes home by itself. Home
 sessions are as they were (H2: the CLI's output and kind 16 unchanged).
@@ -122,7 +122,7 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   its hello first inside TLS, only to a row whose tag names the session's saved
   Mac (#44's `rowMac`), the session taking the move's trust and row at the
   hand-over (`session.home`, `session.row`; `homeTLS` marked); a pin refused on
-  the move home refuses that listing (never #44's `newKey`: the session holds
+  the move home refuses that row (never #44's `newKey`: the session holds
   the Mac's key through the remote door); the kind 18 floor taken as the move
   starts (`DiscoveryPolicy.HomeMoveInfo`), which fixes the review's broadcast race. Host:
   SILL_TEST_REMOTE_ORIGIN reaches `Door` (`remoteDoor: kind == .remote`) and
@@ -141,24 +141,85 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
   against main, every gate passing with main's figures and the link's
   verdicts; Sill.app's previews main's but for the away section and the new
   cards; photos of the panel and the stream's line, the phone's included.
-- **Untested, for Noah:** the plan's P4–P13 (P1–P3 and P14 are PR A's and
-  still open): away starts at Low · Standard with `bitrate` untouched (P4);
-  the away choice saved and kept (P5); mixed home and away, one restart each
-  way (P6); Settings › Streaming and the menu's subtitle (P7); the link at
-  Extreme away, the callout, the line, one announcement, the card's row, the
-  button's one restart, and with the line up a window picked and a rotation
-  (the line stays, not spoken again) and the button then Done at once (no
-  line, nothing spoken) (P8); a dip (P9); coming home on Wi‑Fi and by the
-  cable, drag and type through the move, the Mac's card once (P10, P11);
-  Connect Remotely at home stays remote (P12); mixed builds (P13). Since the
-  merge with main, coming home goes through the Mac's TLS home door pinned to
-  its key: with Sill.app built from this branch, P10 and P11 show "Client
-  connected" on the Mac and no pairing asked; against Sill for Mac 0.4.0 (main's,
-  no away quality) the move home works too, and against 0.3.1 (a plain door) the
-  session stays remote. Then it merges and ships as Sill for Mac 0.4.1 with the
-  iOS app's build 4; the release drafts' lines held back for it (the notes,
-  What to Test, the site, the metadata) are in sill-handoff's
-  `release-next/drafts/for-0.4.1.md`.
+- The merge's review (2026-10-08; the plan's "The merge's review"): seven
+  findings, two the same, each verified here and fixed in a commit of its own.
+  The move home chose by the Mac's listing: a look-alike replaying the Mac's
+  public tag at another key, listed first, had its pin refused and the refusal
+  held the Mac's own row back while any row of it stayed listed (52 s on a
+  private simulator), and a row with the tag and no `p` listed first stopped
+  the move. Now by row (`DiscoveryPolicy.moveHomeRow`, `HomeRows`, pure): not
+  refused, at a door a pinned dial takes, the fewest tries first; a row's
+  refusal and tries forgotten once it is no longer listed; `moveHome` lost
+  `refusedListing`. The kind 18 floor is a pure rule (`HomeMoveInfo`), checked:
+  the broadcast race among `policy`'s cases, and mutant K1 the rule before the
+  fix. Docs: kind 16's `away` comes from a host with an identity (SillHost
+  `--pairing` alone sends it, nobody ever away); the plan's §4.4, §7.3, §10,
+  P13 and open question 10 say the move home goes only to a TLS home door (a
+  plain one: no move, the session stays remote). The fence check's move home
+  is TLS to TLS. site/privacy.html names the link report (the 0.4.1 drafts'
+  line). Verified: the builds (only the known warnings); `run-all.sh`, all 39
+  (`policy` 392); the mutants of `policy` (130), `remote-rules` (72),
+  `home-device` (124), `home-model` (21), `fence` (32) and `away-wire` (9),
+  388, every one caught; on a private simulator 29 of 29 by row (a look-alike
+  refused at its pin, then the Mac's own row moving home 70 ms after it was
+  listed; a plain row first, three launches; a row that never answers first,
+  twice) and the merge's S4 to S4race again, 28 of 28; the kind 18 race staged
+  live (the bare SillMenuBar binary broadcasting a kind 18 every 0.25 s, the
+  home door 0.8 s away): this build moved home 2 of 2, the rule before the fix
+  refused the Mac's own row 2 of 2; CI's "Build and check" passed on the
+  fixes' head (ea4de23).
+- **Untested, for Noah (the plan's P4–P13; P1–P3 and P14 are PR A's and
+  still open):** with Sill.app built from this branch on the Mac and this
+  build on the iPad mini, away on the iPhone 15 Pro's hotspot through
+  Tailscale, then home:
+  - P4, away starts on Low and Standard: at home set Pro · Retina in the Mac's
+    menu, then leave for the hotspot. The session through Tailscale starts at
+    Low · Standard: Sill.log "Away from home: every connected device is away;
+    streaming at Low · Standard (4 Mbps per 60 fps, points). The home quality
+    stays Pro · Retina.", the iPad's panel "Away: Low · Standard", and
+    `defaults read me.saffer.sill.mac bitrate` still 40000000.
+  - P5, the away choice: pick Balanced away: one restart at 15 Mbps,
+    `awayBitrate` 15000000, the home bitrate unchanged; the next away session
+    starts at Balanced.
+  - P6, mixed: with the iPad away, connect the iPhone at home on Wi‑Fi: one
+    restart, the iPad's header "Home quality: Pro · Retina (a device at home is
+    connected)"; disconnect the iPhone: the away quality again, one restart.
+  - P7, the Mac: Settings › Streaming shows both sections; the away pickers
+    restart once while the iPad is away; the menu's Quality subtitle "Away
+    from home now: …".
+  - P8, the can't-keep-up message: away at Extreme on the hotspot, within
+    about 5 s the panel's callout ("The link can’t carry Extreme. … is
+    recommended.", its button "Use …"), the line over the stream ("The link
+    can’t keep up with Extreme. Lower it in Settings."), one VoiceOver
+    announcement, and the Mac's card "the link can’t carry Extreme"; the
+    button: one restart, the callout and the line go. With the line up, pick
+    another window and rotate: it stays, not spoken again; the button, then
+    Done at once: no line, nothing spoken; how VoiceOver reads "Low ·
+    Standard".
+  - P9, a dip: cover the iPhone, or walk away from it, for 15 s: the line
+    comes, then goes about 5 s after the link recovers; no reconnect.
+  - P10, coming home: streaming away through Tailscale, join the home Wi‑Fi.
+    Within about 5 s of the network listing the Mac the session moves back by
+    itself over the Mac's TLS home door, pinned to its key: Sill.log "Client
+    connected: …%en0" (never "Home door refused", no pairing asked), "Home
+    quality again", then "Client left" for the Tailscale address; the route
+    line gives way to "Wi‑Fi", one restart; drag and type through it (no button
+    stays down, no letters swap); the Mac's card shows the iPad once. At the
+    edge of the home Wi‑Fi, note how often it goes back and forth.
+  - P11, coming home by the cable: an away session, then at home plug the
+    cable in: the move goes to the cable ("Wired"; the Mac logs `%en14` or
+    `%anri0`).
+  - P12: Connect Remotely at home stays remote.
+  - P13, mixed builds: PR #13's iPad against this Sill.app, away: Low ·
+    Standard, its Quality Low, no header line. This iPad against Sill for Mac
+    0.4.0 (main's: a TLS home door, no away quality): no header line, no
+    callout, and the move home works, pinned; against 0.3.1 (a plain home
+    door) the session stays remote.
+  Then it merges and ships as Sill for Mac 0.4.1 with the iOS app's build 4;
+  the release drafts' lines held back for it (the notes, What to Test, the
+  site's support and index lines, the privacy page's date, the metadata) are
+  in sill-handoff's `release-next/drafts/for-0.4.1.md` (its privacy line is in
+  since the merge's review).
 
 **A Mac set up again: the old saved record retires itself (2026-09-28, branch `stale-duplicate-fix`
 from main at 72d8d1d).** Noah: "When using Tailscale, it shows Noah's MacBook Pro and Noah's MacBook
@@ -4601,7 +4662,9 @@ good.
   when a reconnect may take a Direct row, when a session over AWDL moves to
   the network, when a live session at home moves to the cable or to Wi-Fi or is
   made again (`pathPlan`, `upWait`; a remote one only home: `moveHome`, over
-  TLS pinned to the saved Mac's key: `moveHomeTrust`), the memory of Macs with
+  TLS pinned to the saved Mac's key: `moveHomeTrust`, to a row chosen and
+  refused by row: `moveHomeRow`, `HomeRows`, its kind 18 held to the floor taken
+  as the move starts: `HomeMoveInfo`), the memory of Macs with
   Direct Wireless on, the Remote rows and when a lost saved Mac is dialed away
   from home; pairing at home's rows and words, a tap's dial, the device's
   cable check and how a session at home ends: `rowWord`, `homeDial`,
