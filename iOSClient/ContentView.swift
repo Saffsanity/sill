@@ -860,10 +860,13 @@ struct ConnectScreen: View {
                     ColumnOverFooter(
                         // The Duo half-folded: centred above the fold, at most 500 pt tall, so nothing
                         // crosses it and the keyboard has the lower half (the footer stays along the
-                        // bottom, under the keyboard while it is up). Elsewhere centred in the whole
+                        // bottom, under the keyboard while it is up); where the device reports the
+                        // fold (iOS 27.1) the room above it is the scroll view's, so a long list
+                        // scrolls there rather than run onto it. Elsewhere centred in the whole
                         // height, as before.
                         centreHeight: layout.topRoom.map { min($0, 500) } ?? geo.size.height,
-                        visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
+                        visibleHeight: geo.size.height, scrollHeight: layout.roomAboveFold,
+                        gap: Self.footerGap, atTop: toTop) {
                         column(layout)
                             .frame(width: carded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
                                    alignment: .leading)
@@ -891,6 +894,9 @@ struct ConnectScreen: View {
                         Color.clear.frame(height: Self.footerGap / 2)
                     }
                 }
+                // The laptop pose: the room above the fold, and nothing between it and the footer.
+                .frame(height: layout.roomAboveFold)
+                if layout.roomAboveFold != nil { Spacer(minLength: 0) }
                 footer(layout)
             }
             .duoLog(posture, size: geo.size, screen: "connect screen")
@@ -1199,12 +1205,16 @@ struct ConnectScreen: View {
 /// jumps: it rises until it is 16 pt from the top, and from there it scrolls.
 ///
 /// The second subview is the footer again, hidden, which only gives the footer's height: the scroll
-/// view is `visibleHeight` less that, and its content never learns its container's height.
+/// view is `visibleHeight` less that, and its content never learns its container's height. In the
+/// Duo's laptop pose the scroll view is the room above the fold instead (`scrollHeight`).
 private struct ColumnOverFooter: Layout {
     /// The height the column is centred in, from the top.
     let centreHeight: CGFloat
     /// The scroll view and the footer together: the screen's height.
     let visibleHeight: CGFloat
+    /// The scroll view's own height when it is not the screen less the footer: the laptop pose's
+    /// room above the fold.
+    var scrollHeight: CGFloat? = nil
     let gap: CGFloat
     /// A field has the keyboard: the column at the top.
     let atTop: Bool
@@ -1214,7 +1224,7 @@ private struct ColumnOverFooter: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let (column, footer) = sizes(width: proposal.width, subviews) else { return .zero }
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(column.width, footer.width)
-        let room = visibleHeight - footer.height
+        let room = scrollHeight ?? (visibleHeight - footer.height)
         // A point short of the scroll view while it fits, so no rounding ever lets it scroll.
         return CGSize(width: width, height: fits(column: column.height, room: room) ? max(0, room - 1)
                                                                                    : topRoom + column.height + gap)
@@ -1222,7 +1232,7 @@ private struct ColumnOverFooter: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
-        let room = visibleHeight - footer.height
+        let room = scrollHeight ?? (visibleHeight - footer.height)
         let y: CGFloat
         if !fits(column: column.height, room: room) || atTop {
             y = topRoom

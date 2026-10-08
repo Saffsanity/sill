@@ -262,6 +262,12 @@ check(DuoPosture.columnX(columnWidth: 380, screenWidth: 669, fold: .known(laptop
 check(DuoPosture.leadingPage(.known(bookFold)) == 455.5 && DuoPosture.leadingPage(.known(laptopFold)) == nil
       && DuoPosture.leadingPage(.inferred) == nil && DuoPosture.leadingPage(.known(nil)) == nil, "the leading page")
 check(DuoPosture.leadingPage(.known(rect(-10, 0, 40, 669))) == 0, "never negative")
+// The connect screen's room above the laptop pose's fold: only where the device said.
+check(DuoPosture.roomAboveFold(upright, .known(laptopFold)) == 455.5, "the laptop pose: 455.5 above the fold")
+check(DuoPosture.roomAboveFold(size(669, 835), .known(rect(0, 373.5, 669, 40))) == 373.5, "with the status bar: 373.5")
+check(DuoPosture.roomAboveFold(size(710, 1000), .inferred) == nil && DuoPosture.roomAboveFold(upright, .inferred) == nil,
+      "the inferred crease: none (only centred in the top half, as before)")
+check(DuoPosture.roomAboveFold(upright, .known(nil)) == nil && DuoPosture.roomAboveFold(book, .known(bookFold)) == nil, "open flat, the book pose: none")
 
 // The window lights' menu: as before where nothing folds; beside the book pose's fold onto a page,
 // and below its thumbnail in the laptop pose, whose window bar sits just under the fold.

@@ -23,11 +23,15 @@ struct ConnectLayout {
     /// is the middle of a 710×1000-like screen (DuoPosture.crease); open flat there is none.
     var topRoom: CGFloat? { DuoPosture.crease(size, fold)?.top }
     var topHalf: Bool { topRoom != nil }
+    /// The laptop pose as the device reports it (iOS 27.1): the room above the fold, all the
+    /// connect screen's column has; it scrolls there. Nil elsewhere, the inferred crease included.
+    var roomAboveFold: CGFloat? { DuoPosture.roomAboveFold(size, fold) }
     /// The book pose: the leading page's width, which holds what would cross the fold.
     var leadingPage: CGFloat? { DuoPosture.leadingPage(fold) }
-    /// Any height under 520 pt (the Duo's outer display on its side, an iPhone in landscape): the
-    /// card goes side by side.
-    var short: Bool { size.height < 520 }
+    /// Any height under 520 pt (the Duo's outer display on its side, an iPhone in landscape), or a
+    /// room above the laptop pose's fold under that (373.5 pt with the status bar): the card goes
+    /// side by side.
+    var short: Bool { size.height < 520 || (roomAboveFold ?? .infinity) < 520 }
     /// The Duo's outer display upright (500×710) and phones: the column anchors to the top while a
     /// field has the keyboard.
     var compactPortrait: Bool { size.height > size.width && size.width < 600 }

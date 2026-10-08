@@ -146,6 +146,15 @@ extension DuoPosture {
         }
     }
 
+    /// The room above a fold the device reported across the screen (the laptop pose), from the
+    /// screen's top: the connect screen's column lives and scrolls there, so that a long list or a
+    /// card never runs onto the fold. Nil for the inferred crease (as before iOS 27.1, where the
+    /// column is only centred in the top half) and without a fold across.
+    static func roomAboveFold(_ size: CGSize, _ fold: FoldInfo) -> CGFloat? {
+        guard case .known = fold, let crease = crease(size, fold) else { return nil }
+        return max(0, crease.top)
+    }
+
     /// The portrait halves' split (the inner display upright, an iPad's window): how tall the
     /// picture's pane is, from the top, and where the controls begin.
     struct PortraitSplit: Equatable {

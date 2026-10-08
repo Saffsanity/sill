@@ -49,6 +49,10 @@ MUTANTS = {
     "M23 16:9 for no picture": ("static let defaultAspect: CGFloat = 1.6", "static let defaultAspect: CGFloat = 16.0 / 9.0"),
     "M24 the pane follows a fitted window": ("guard !fitsWindowToPane, video.width > 0", "guard video.width > 0"),
     "M25 the picture's shape upside down": ("return video.width / video.height", "return video.height / video.width"),
+    # The connect screen's room above the laptop pose's fold.
+    "M45b the inferred crease bounds the column": ("guard case .known = fold, let crease = crease(size, fold) else { return nil }",
+                                                   "guard let crease = crease(size, fold) else { return nil }"),
+    "M45c the room to the fold's bottom": ("        return max(0, crease.top)\n", "        return max(0, crease.bottom)\n"),
     # The book pose's bar.
     "M26 no compact step": ("if start(button, g) < band.maxX { button = min(button, compactButtonWidth) }", "if false { button = min(button, compactButtonWidth) }"),
     "M27 the compact step always": ("if start(button, g) < band.maxX { button = min(button, compactButtonWidth) }", "button = min(button, compactButtonWidth)"),
