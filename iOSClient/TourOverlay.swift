@@ -209,6 +209,8 @@ struct TourOverlay: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// The Duo's fold across the stream screen (StreamScreen, iOS 27.1): no card crosses it.
+    @Environment(\.duoFold) private var duoFold
     /// Where the card is (reported by the card): the dim's tap area leaves it out.
     @State private var card: TourCardReport? = nil
     @State private var nudges = 0
@@ -220,7 +222,9 @@ struct TourOverlay: View {
         let union = found.first.map { first in found.dropFirst().reduce(first) { $0.union($1) } }
         return TourGeometry(screen: screen, layout: layout, stream: targets[.stream] ?? CGRect(origin: .zero, size: screen),
                             bottomInset: bottomInset, targets: union, isStream: run.at == .touch,
-                            width: TourPolicy.width(screen: screen, layout: layout, accessibilityText: typeSize.isAccessibilitySize))
+                            width: TourPolicy.width(screen: screen, layout: layout, accessibilityText: typeSize.isAccessibilitySize,
+                                                    fold: duoFold),
+                            fold: duoFold)
     }
 
     var body: some View {
@@ -280,10 +284,11 @@ struct TourGeometry: Equatable {
     var targets: CGRect?
     var isStream: Bool
     var width: CGFloat
+    var fold: FoldInfo = .inferred
 
     func place(height: CGFloat) -> TourPlacement {
         TourPolicy.place(card: CGSize(width: width, height: height), targets: targets, isStream: isStream,
-                         screen: screen, layout: layout, stream: stream, bottomInset: bottomInset)
+                         screen: screen, layout: layout, stream: stream, bottomInset: bottomInset, fold: fold)
     }
 }
 

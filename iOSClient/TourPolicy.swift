@@ -328,19 +328,23 @@ enum TourPolicy {
 
     /// The card's width: 360 pt; 480 on a screen held sideways that is under 520 pt tall (a phone,
     /// the Duo's outer display), where height is what runs out; 560 at accessibility text sizes;
-    /// never more than the screen less its margins.
-    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool) -> CGFloat {
+    /// never more than the screen less its margins, nor, across the book pose's fold, than the
+    /// wider page (DuoPosture.pageWidth).
+    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool, fold: FoldInfo = .inferred) -> CGFloat {
         let short = layout == .landscape && screen.height < 520
         let preferred: CGFloat = accessibilityText ? 560 : (short ? 480 : 360)
-        return max(0, min(preferred, screen.width - 2 * margin))
+        let page = DuoPosture.pageWidth(screenWidth: screen.width, margin: margin, fold: fold) ?? .infinity
+        return max(0, min(preferred, page, screen.width - 2 * margin))
     }
 
-    /// The crease of the Duo half-folded, or in its laptop posture: `ConnectLayout.topHalf`'s rule
-    /// (taller than wide, 600 to 740 pt wide, under 1100 pt tall), where it is the portrait
-    /// layout's own split. Nothing of the tour crosses it.
-    static func crease(_ screen: CGSize) -> CGFloat? {
-        guard screen.height > screen.width, screen.width >= 600, screen.width < 740, screen.height < 1100 else { return nil }
-        return (screen.height / 2).rounded()
+    /// The crease of the Duo half-folded upright, its laptop pose: on iOS 27.1 the top of the fold's
+    /// real band; before it `ConnectLayout.topHalf`'s rule (taller than wide, 600 to 740 pt wide,
+    /// under 1100 pt tall), where it is the portrait layout's own split (DuoPosture.crease). Nothing
+    /// of the tour crosses it.
+    static func crease(_ screen: CGSize, _ fold: FoldInfo = .inferred) -> CGFloat? {
+        guard let band = DuoPosture.crease(screen, fold) else { return nil }
+        if case .inferred = fold { return band.top.rounded() }
+        return band.top
     }
 
     /// The lit part: the step's targets as one rectangle, `cutoutOutset` larger all round and
@@ -383,17 +387,22 @@ enum TourPolicy {
     ///   the top sideways, toward the bottom margin upright), with no tail, `coversTargets`.
     /// - Past the whole screen less its margins (with a crease, the upper half), a card is as tall
     ///   as the room, and its words scroll.
+    /// - The book pose (the Duo half-folded sideways, `info` its fold): a card that would cross the
+    ///   fold goes onto the page its middle is on, or the other when only that one holds it.
     static func place(card: CGSize, targets: CGRect?, isStream: Bool, screen: CGSize, layout: TourLayout,
-                      stream: CGRect, bottomInset: CGFloat) -> TourPlacement {
+                      stream: CGRect, bottomInset: CGFloat, fold info: FoldInfo = .inferred) -> TourPlacement {
         let w = card.width
         let h = max(0, card.height)
         let top = margin
         let bottom = max(top, screen.height - margin - max(0, bottomInset))
-        let fold = crease(screen)
+        let fold = crease(screen, info)
         // Upright, how low a card goes while it stays in the picture's half.
         let pictureBottom = min(bottom, max(top, min(stream.maxY - gap, fold.map { $0 - margin } ?? .infinity)))
 
         func x(centredOn mid: CGFloat) -> CGFloat {
+            DuoPosture.offTheFold(x: clamped(mid), width: w, screenWidth: screen.width, margin: margin, fold: info)
+        }
+        func clamped(_ mid: CGFloat) -> CGFloat {
             let lo = margin, hi = screen.width - margin - w
             return hi < lo ? (screen.width - w) / 2 : min(max(mid - w / 2, lo), hi)
         }
