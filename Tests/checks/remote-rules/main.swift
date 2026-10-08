@@ -197,5 +197,60 @@ check("2,000 tags of random keys match no saved Mac", wrong == 0)
 let parsed = try! AddressParser.parse("100.101.102.103:7460").get()
 check("a linked address gets its kind and Tailscale's name", R.address(for: parsed) == MacAddress(host: "100.101.102.103", port: 7460, kind: "vpn", via: "Tailscale"))
 
+// MARK: A Mac set up again: the old record superseded (2026-09-28)
+// Noah's devices: "Noah's MacBook Pro" (the old key, last reached at 500) and "(2)" (the new key,
+// paired at 900). A dial of the old one that completes with the new key at an address naming one
+// machine retires it; the name alone, a private address, or a record reached since never do.
+let oldRec = savedMac(20, name: "Noah’s MacBook Pro", paired: 100, last: 500)
+var newRec = savedMac(21, name: "Noah’s MacBook Pro", paired: 900); newRec.typedAddresses = nil
+let office = savedMac(22, name: "Studio", paired: 950)
+let dup = [oldRec, newRec, office]
+func cand(_ host: String, _ kind: String) -> R.Candidate { R.Candidate(host: host, port: 7455, kind: kind, via: "") }
+func succ(_ c: R.Candidate, _ list: [SavedMac] = dup, old: SavedMac = oldRec, loop: Bool = false) -> [String] {
+    R.successors(of: old, at: c, in: list, allowLoopback: loop).map(\.macID)
+}
+check("successor: the newer record of the name at a Tailscale address", succ(cand("100.64.0.9", "vpn")) == [newRec.macID])
+check("successor: at a MagicDNS name, Tailscale IPv6, a public address or an internet name",
+      succ(cand("mac.tail1.ts.net", "vpn")) == [newRec.macID] && succ(cand("fd7a:115c:a1e0::9", "vpn")) == [newRec.macID]
+      && succ(cand("203.0.113.7", "internet")) == [newRec.macID] && succ(cand("home.example.net", "internet")) == [newRec.macID])
+check("successor: none at a private, .local or other VPN's address (another network's Mac can hold it)",
+      succ(cand("192.168.1.10", "lan")).isEmpty && succ(cand("10.8.0.6", "vpn")).isEmpty && succ(cand("172.16.0.2", "internet")).isEmpty
+      && succ(cand("mac.local", "lan")).isEmpty && succ(cand("fd00::5", "lan")).isEmpty && succ(cand("home.example.net", "lan")).isEmpty)
+check("successor: loopback only when allowed", succ(cand("127.0.0.1", "lan")).isEmpty && succ(cand("127.0.0.1", "lan"), loop: true) == [newRec.macID])
+check("successor: never another name", succ(cand("100.64.0.9", "vpn"), [oldRec, office]).isEmpty)
+var reached = oldRec; reached.lastConnectedAt = Date(timeIntervalSince1970: 950)
+check("successor: none paired before the old one was last reached (two Macs in use)", succ(cand("100.64.0.9", "vpn"), old: reached).isEmpty)
+var neverReached = oldRec; neverReached.lastConnectedAt = nil
+check("successor: without a connection, the old one's pairing date counts", succ(cand("100.64.0.9", "vpn"), old: neverReached) == [newRec.macID])
+var sameTime = newRec; sameTime.pairedAt = Date(timeIntervalSince1970: 500)
+check("successor: paired at the very moment of the last reach is not after it", succ(cand("100.64.0.9", "vpn"), [oldRec, sameTime]).isEmpty)
+var revokedNew = newRec; revokedNew.revoked = true
+var newKeyNew = newRec; newKeyNew.newKey = true
+check("successor: never a revoked or new-key record, nor the record itself",
+      succ(cand("100.64.0.9", "vpn"), [oldRec, revokedNew]).isEmpty && succ(cand("100.64.0.9", "vpn"), [oldRec, newKeyNew]).isEmpty
+      && succ(cand("100.64.0.9", "vpn"), [oldRec]).isEmpty)
+var odd = oldRec; odd.pairedAt = Date(timeIntervalSince1970: 600)
+check("successor: never the record itself, even one last reached before its pairing date", succ(cand("100.64.0.9", "vpn"), [odd], old: odd).isEmpty)
+var oldTLS = oldRec; oldTLS.homeTLS = true
+let after = SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "mac.tail1.ts.net|7455", in: [oldTLS, newRec, office])
+check("superseding: the old record goes, the others stay in order", after.map(\.macID) == [newRec.macID, office.macID])
+check("superseding: the newer takes the typed addresses, homeTLS and the proof as the address that worked",
+      after[0].typedAddresses?.map(\.host) == ["home.example.net"] && after[0].homeTLS == true && after[0].lastWorked == "mac.tail1.ts.net|7455"
+      && after[0].fingerprint == newRec.fingerprint && after[0].addresses == newRec.addresses)
+var typedBoth = newRec; typedBoth.typedAddresses = [a("home.example.net", "internet", "")]
+check("superseding: a typed address the newer has already is not repeated",
+      SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [oldRec, typedBoth])[0].typedAddresses?.count == 1)
+check("superseding: nothing when either is not saved, or they are one record",
+      SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [oldRec, office]) == [oldRec, office]
+      && SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [newRec, office]) == [newRec, office]
+      && SavedMacs.superseding(old: oldRec.macID, by: oldRec.macID, proof: "x|1", in: dup) == dup)
+let twoOffice = savedMac(23, name: "Studio", paired: 50)
+check("remote order: by pairing date, one name's records together, newest first",
+      SavedMacs.remoteOrder([office, newRec, twoOffice, oldRec]).map(\.macID) == [office.macID, twoOffice.macID, newRec.macID, oldRec.macID])
+check("remote order: distinct names keep the pairing date's order", SavedMacs.remoteOrder([savedMac(7, name: "B", paired: 20), savedMac(8, name: "A", paired: 10)]).map(\.name) == ["A", "B"])
+
+// Pairing at home (docs/home-pairing-plan.md): the home model and the saved Macs' home fields, in home.swift.
+homeRemote()
+
 print("\(passes) passed, \(fails) failed")
 exit(fails == 0 ? 0 : 1)

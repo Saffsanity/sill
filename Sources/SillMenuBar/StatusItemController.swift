@@ -24,6 +24,9 @@ struct MenuEntry: Equatable {
         case showSettingsTab(SettingsTab)
         /// Pair iPhone or iPad…: a pairing window, or the open one brought forward.
         case showPairing
+        /// "‹device› Wants to Pair": the window that shows its code brought forward, else one
+        /// opened on the Mac, asked by that device.
+        case showPairingRequest(name: String, showing: Bool)
         /// Sill 0.4 Is Available…: the release's page on GitHub, in the browser (UpdateChecker).
         case openUpdate(URL)
     }
@@ -66,6 +69,8 @@ enum MenuBuilder {
             case .allowScreenRecording: .allowScreenRecording
             case .allowAccessibility: .allowAccessibility
             case .showRemoteAccess: .showSettingsTab(.remoteAccess)
+            case .showDevices: .showSettingsTab(.devices)
+            case .pairingRequest(let name, let showing): .showPairingRequest(name: name, showing: showing)
             case .none: .none
             }
             menu.append(MenuEntry(kind: .item, title: a.title, subtitle: a.subtitle, enabled: action != .none,
@@ -293,6 +298,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .showSettings: model.showSettings?(nil)
         case .showSettingsTab(let tab): model.showSettings?(tab)
         case .showPairing: model.pairDevice()
+        case .showPairingRequest(let name, let showing): model.showPairingRequest(name: name, showing: showing)
         case .openUpdate(let url): NSWorkspace.shared.open(url)   // the browser; no modal loop
         case .quit: NSApp.terminate(nil)
         }

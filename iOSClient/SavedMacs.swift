@@ -33,6 +33,23 @@ struct SavedMac: Codable, Hashable, Identifiable {
     var lastConnectedAt: Date?
     /// "Tailscale", "your VPN", "the internet" or "by address".
     var lastRoute: String?
+    /// This device has seen the Mac's home door speak TLS: a TXT record with `p`, or a TLS session
+    /// at home (docs/home-pairing-plan.md §7.3). Its rows are then dialed only over TLS, in DEBUG
+    /// too, and a row of it without `p` reads "Update Sill" (no downgrade: its own Sill never goes
+    /// back to plain, and someone may be replaying its tag). Kept by a new pairing with the same
+    /// Mac (`SavedMacs.adding`). Optional, so a record from before it decodes.
+    var homeTLS: Bool?
+    /// The Mac removed this device (goodbye `removed`), or refused its key on a pinned home dial
+    /// (-9825, -9829): no automatic reconnect, its row reads "Not paired" ("Wired" on the cable),
+    /// and a tap asks, pinned to this record's key. Cleared by the next pairing, whose record
+    /// replaces this one. Optional, so a record from before it decodes.
+    var revoked: Bool?
+    /// Another key answered as this Mac on a pinned home dial (-9808) and no other row of it was
+    /// left (DiscoveryPolicy.afterPinRefused): the Mac was set up again (Noah, 2026-09-27: Sill for
+    /// Mac 0.4.0 made a new key). No automatic reconnect, its rows read "Not paired", and a tap
+    /// asks with any key, the Mac proving itself with its code; the pairing that follows replaces
+    /// this record (`replacingNewKey`). Optional, so a record from before it decodes.
+    var newKey: Bool?
 
     var id: String { macID }
     var fingerprintData: Data? { Base64URL.decode(fingerprint).flatMap { $0.count == 32 ? $0 : nil } }
@@ -82,8 +99,13 @@ enum SavedMacs {
     }
 
     /// After a pairing: replaces the record with the same Mac ID, then keeps at most `cap`,
-    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`).
+    /// dropping the one used longest ago (`lastConnectedAt ?? pairedAt`). The record it replaces
+    /// is the same Mac (the Mac ID is its key's), so what this device has seen of its home door
+    /// stays (`homeTLS`): a pairing from away after a removal must not let a plain row of that Mac
+    /// be dialed again. `revoked` goes with the old record.
     static func adding(_ mac: SavedMac, to list: [SavedMac]) -> [SavedMac] {
+        var mac = mac
+        if list.contains(where: { $0.macID == mac.macID && $0.homeTLS == true }) { mac.homeTLS = true }
         var next = list.filter { $0.macID != mac.macID }
         next.append(mac)
         while next.count > cap {
@@ -123,6 +145,95 @@ enum SavedMacs {
             out[mac.macID] = n == 1 ? mac.name : "\(mac.name) (\(n))"
         }
         return out
+    }
+
+    /// `homeTLS` set on the Macs of `ids`: seen with `p`, or a TLS session at home with them ran
+    /// (docs/home-pairing-plan.md §7.3). Nil when none changes, so a caller writes only a change.
+    static func seenOverTLS(_ ids: Set<String>, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { ids.contains($0.macID) && $0.homeTLS != true }) else { return nil }
+        return list.map { mac in
+            guard ids.contains(mac.macID) else { return mac }
+            var next = mac
+            next.homeTLS = true
+            return next
+        }
+    }
+
+    /// `revoked` set on `id`: the Mac removed this device (goodbye `removed`), or refused its key on
+    /// a pinned home dial (§7.6). Nil when `id` is not saved or is revoked already.
+    static func revoking(_ id: String, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { $0.macID == id && $0.revoked != true }) else { return nil }
+        return list.map { mac in
+            guard mac.macID == id else { return mac }
+            var next = mac
+            next.revoked = true
+            return next
+        }
+    }
+
+    /// `newKey` set on `id` (SavedMac.newKey). Nil when `id` is not saved or is marked already.
+    static func markingNewKey(_ id: String, in list: [SavedMac]) -> [SavedMac]? {
+        guard list.contains(where: { $0.macID == id && $0.newKey != true }) else { return nil }
+        return list.map { mac in
+            guard mac.macID == id else { return mac }
+            var next = mac
+            next.newKey = true
+            return next
+        }
+    }
+
+    /// After a pairing that the re-pairing of `old` started (a tap on a row of a Mac marked
+    /// `newKey`): `old` is gone once the Mac it paired with is saved as `new`, another Mac ID (its
+    /// new key), since the person paired that Mac, by its code, in its place. Nothing changes when
+    /// `old` is not marked or is `new` itself (the same key answered after all: `adding` replaced
+    /// it already).
+    static func replacingNewKey(old: String, new: String, in list: [SavedMac]) -> [SavedMac] {
+        guard old != new, list.contains(where: { $0.macID == new }),
+              list.contains(where: { $0.macID == old && $0.newKey == true }) else { return list }
+        return list.filter { $0.macID != old }
+    }
+
+    /// After a dial of `old` completed its handshake with `new`'s key at `proof` ("host|port", one of
+    /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
+    /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
+    /// typed addresses, `homeTLS`, and `proof` as the address that last worked. Nothing changes
+    /// when either is not saved or they are the same record.
+    static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
+        guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
+        return list.compactMap { mac in
+            if mac.macID == old { return nil }
+            guard mac.macID == new else { return mac }
+            var next = mac
+            let have = Set(next.allAddresses.map { "\($0.host.lowercased())|\($0.port ?? next.remotePort)" })
+            let carried = (o.typedAddresses ?? []).filter { !have.contains("\($0.host.lowercased())|\($0.port ?? next.remotePort)") }
+            if !carried.isEmpty { next.typedAddresses = (next.typedAddresses ?? []) + carried }
+            if o.homeTLS == true { next.homeTLS = true }
+            next.lastWorked = proof
+            return next
+        }
+    }
+
+    /// The Remote rows' order: by pairing date, except that the records of one name go together,
+    /// newest first, so that while an old record of a Mac set up again is still saved (it goes the
+    /// first time it is dialed where `superseding` can prove it), the one that works leads.
+    static func remoteOrder(_ list: [SavedMac]) -> [SavedMac] {
+        let byDate = list.sorted { ($0.pairedAt, $0.macID) < ($1.pairedAt, $1.macID) }
+        var out: [SavedMac] = []
+        var done = Set<String>()
+        for mac in byDate where done.insert(mac.name).inserted {
+            out += byDate.filter { $0.name == mac.name }.reversed()
+        }
+        return out
+    }
+
+    /// DEBUG `-SillForgetHomeTLS 1` (§3.4, §7.9): `homeTLS` cleared on every saved Mac, so a DEBUG
+    /// build dials an older Sill.app (another branch's) plainly again.
+    static func forgettingHomeTLS(_ list: [SavedMac]) -> [SavedMac] {
+        list.map { mac in
+            var next = mac
+            next.homeTLS = nil
+            return next
+        }
     }
 
     /// The saved Mac whose recognition key made `tag`, if any.

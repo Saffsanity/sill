@@ -61,10 +61,25 @@ if let remoteFlag {
     }
 }
 
+// `SillHost --pairing`: the home door speaks TLS 1.3 with both keys pinned and pairing required
+// (docs/home-pairing-plan.md §5), as Sill.app's does: a device pairs once, over the USB cable by
+// itself or with the code or link printed here. A throwaway identity (the one --remote uses when
+// both are given); a pairing window is always open, and its code goes to this process's stdout
+// only. Without it the home door stays plain and open, as it always was: a development host.
+let pairingFlag = CommandLine.arguments.contains("--pairing")
+
 // `SillHost --print-reachability`: the addresses this Mac would give devices away from home, as
 // its Remote Access pane lists them, read once (read-only SystemConfiguration); then exits.
 if CommandLine.arguments.contains("--print-reachability") {
     for line in ReachabilityReport.lines() { print(line) }
+    exit(0)
+}
+
+// `SillHost --print-cable`: what the USB cable rule reads on this Mac (read-only IOKit and
+// CGSession): each interface it looks at, whether it is the cable to an iPhone or iPad, and whether
+// the console is unlocked; then exits.
+if CommandLine.arguments.contains("--print-cable") {
+    for line in CableReport.lines() { print(line) }
     exit(0)
 }
 
@@ -73,6 +88,14 @@ if CommandLine.arguments.contains("--print-reachability") {
 // fallback can be exercised without Screen Recording. Exits when done.
 if CommandLine.arguments.contains("--encoder-selftest") {
     EncoderSelfTest.run()
+}
+
+// `SillHost --menu-selftest[=APP]`: the menus a device would be sent for APP (a pid, or the start of
+// a running app's name; the frontmost app without it), one level deep, with each read's time. Read-
+// only: nothing is activated or pressed, though each menu read makes the app validate that menu.
+// The "=" is needed: a bare argument is the window match above. Exits 0, or 1 when nothing was read.
+if let app = MenuSelfTest.requested(in: CommandLine.arguments) {
+    MenuSelfTest.run(app: app)
 }
 
 // ScreenCaptureKit talks to the window server through CoreGraphics, which must be
@@ -95,8 +118,9 @@ var coordinator: StreamCoordinator?
 func startHost() {
     Task { @MainActor in
         do {
-            let remote = config.remoteAccess ? makeRemoteAccess() : nil
-            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay, remote: remote)
+            let remote = config.remoteAccess || pairingFlag ? makeRemoteAccess() : nil
+            let c = try StreamCoordinator(config: config, synthetic: synthetic, appKitLoop: virtualDisplay, remote: remote,
+                                          homePairing: pairingFlag, testHooks: true)
             coordinator = c
             await c.start(preselect: preselect)
             if remote != nil, internetFlag {
@@ -116,8 +140,9 @@ func startHost() {
     }
 }
 
-/// --remote's identity and pairing: in memory (or, TEST ONLY on a --synthetic host, in
-/// SILL_TEST_REMOTE_DIR), with the code printed here whenever a window opens or is asked for again.
+/// --remote's and --pairing's identity and pairing: in memory (or, TEST ONLY on a --synthetic host,
+/// in SILL_TEST_REMOTE_DIR), with the code printed here whenever a window opens or is asked for
+/// again. With --pairing alone the window is the home door's only: no remote door, no addresses.
 @MainActor
 func makeRemoteAccess() -> RemoteAccess {
     var store: IdentityStore = MemoryIdentityStore()
@@ -128,11 +153,19 @@ func makeRemoteAccess() -> RemoteAccess {
     if let problem = remote.identityProblem { print("Remote access unavailable: \(problem)") }
     remote.reopensPairing = true
     remote.logsPairingWindows = false
+    remote.userWindowsOpenRemoteDoor = config.remoteAccess
     var first = true
     remote.onPairingOffer = { offer in
         if first {
             first = false
-            print("Remote access for this run on port \(offer.port) (TLS, paired devices only). Pair with \(offer.groupedCode) or \(offer.url)")
+            if config.remoteAccess {
+                print("Remote access for this run on port \(offer.port) (TLS, paired devices only). Pair with \(offer.groupedCode) or \(offer.url)")
+                if pairingFlag { print("Pairing required for this run (TLS on the home door).") }
+            } else {
+                print("Pairing required for this run (TLS on the home door). Pair with \(offer.groupedCode) or \(offer.url)")
+            }
+        } else if let who = offer.askedBy {
+            print("Pairing: \(who) asked; code \(offer.groupedCode) or \(offer.url)")
         } else {
             print("Pairing: \(offer.again ? "code" : "new code") \(offer.groupedCode) or \(offer.url)")
         }
@@ -151,6 +184,8 @@ if virtualDisplay {
     startHost()
     app.run()
 } else {
+    // A signal ends the process as it always did, a device's keys let go first (HostShutdown).
+    HostShutdown.installKeyRelease { coordinator }
     startHost()
     dispatchMain()   // today, byte for byte
 }

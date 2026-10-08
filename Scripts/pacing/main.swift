@@ -28,9 +28,9 @@ import StreamProtocol
 // --bitrate: the running quality the link's reports speak of (default Pro, 40000000): each change of
 //   a device's link (LinkJudge, docs/remote-bundle-plan.md §6) prints "Link: behind (withheld 52 of
 //   58; carried 7.9 Mbps; suggesting Low)", the suggestion LinkJudge.suggestion gives for B at the
-//   run's fps and Standard (the harness has no resolution). Only the new build prints them: the lines
-//   compile under LINK_JUDGE, which build.sh defines for it alone (the base's StreamServer has no
-//   onClientLinkChanged).
+//   run's fps and Standard (the harness has no resolution). The lines compile under LINK_JUDGE, which
+//   build.sh defines for a side whose StreamServer has onClientLinkChanged (a base from before away
+//   from home, PR #39, has none); summarize.py reads the new build's.
 // --sizes-at: at T seconds the frame sizes change and the stream restarts (a settings change: the
 //   links are judged afresh, StreamServer.resetLinks, as the coordinator does for another quality).
 // --still-at: from T seconds for D seconds no frame is captured (a still window: the motion stopped).
@@ -179,11 +179,23 @@ door.newConnectionHandler = { c in
     c.stateUpdateHandler = { state in
         switch state {
         case .ready:
+            // `serve` as this side's StreamServer has it: with the hello a TLS door's gate read (none
+            // here) and a home route's peer (none: the harness's door sees no key) since pairing at
+            // home, without both before it (build.sh defines PACING_SERVE_BEFORE_HOME_PAIRING then).
             if home {
+                #if PACING_SERVE_BEFORE_HOME_PAIRING
                 server.serve(c, route: .home(.loopback))
+                #else
+                server.serve(c, route: .home(.loopback, peer: nil), hello: nil)
+                #endif
                 print("Home client connected: \(c.endpoint)")
             } else {
-                server.serve(c, route: .remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness"))
+                let route = ClientRoute.remote(origin: .vpn, label: "through Tailscale", fingerprint: Data([1, 2, 3]), name: "harness")
+                #if PACING_SERVE_BEFORE_HOME_PAIRING
+                server.serve(c, route: route)
+                #else
+                server.serve(c, route: route, hello: nil)
+                #endif
                 print("Remote client connected: harness through Tailscale (\(c.endpoint))")
             }
         case .failed:

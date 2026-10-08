@@ -19,7 +19,8 @@
 // above "// review fixes" the 253 of follow-best-path at 75e4ff9 (reconnectNow now names its method; the
 // grid also spans refused listings and failed moves up, and its rule for reconnectNow is the new one).
 import Foundation
-//   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift -o .build/checks/policy/check && .build/checks/policy/check
+//   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift Tests/checks/policy/home.swift \
+//     -o .build/checks/policy/check && .build/checks/policy/check
 typealias P = DiscoveryPolicy
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if !ok { fails += 1; print("FAIL", name) } else { passes += 1; print("ok  ", name) } }
@@ -1104,8 +1105,8 @@ check("home: the same rule as moveToNetwork's first look (moveAfter)", home(5, 7
 // The model: the glue as StreamClient.moveHomeIfListed runs it. The saved Mac's network row by Mac ID
 // through P.sightings; failures kept by the listing they were to; a refused listing kept; a move to it
 // that takes `lasts` and ends as `end` (not completing, refused as another launch, or taking over).
-enum HomeEnd { case fails, refused, moves }
-func homeTries(_ end: HomeEnd, until: Double, blinkAt: Double? = nil, listedAt: Double = 10, lasts: Double = 5) -> (starts: [Double], home: Bool) {
+enum MoveHomeEnd { case fails, refused, moves }
+func homeTries(_ end: MoveHomeEnd, until: Double, blinkAt: Double? = nil, listedAt: Double = 10, lasts: Double = 5) -> (starts: [Double], home: Bool) {
     var sight = P.NetworkSightings()
     var starts: [Double] = [], failed: (listing: Double, count: Int)? = nil, refused: Double? = nil
     var last: Double? = nil, busyUntil = -1.0, atHome = false
@@ -1145,6 +1146,39 @@ ht = homeTries(.refused, until: 120)
 check("model (home): another launch: one try at 12, never again while it stays listed (\(ht.starts))", ht.starts == [12])
 ht = homeTries(.refused, until: 120, blinkAt: 40)
 check("model (home): ...listed afresh at 41: tried once more at 43, then never (\(ht.starts))", ht.starts == [12, 43])
+
+// moveHomeTrust (the merge of remote-away with pairing at home, 2026-10-08): the move home dials the
+// saved Mac's network row pinned to its key, at a door that speaks TLS, as a tap's dial of that row
+// would be; never plain (DEBUG or not), never any key, never an ask.
+let homePin = Data(repeating: 0xA5, count: 32)
+func homeTrust(_ door: P.HomeDoor, revoked: Bool = false, newKey: Bool = false, pin: Data? = homePin) -> P.HomeTrust? {
+    P.moveHomeTrust(door: door, revoked: revoked, newKey: newKey, savedPin: pin)
+}
+check("home trust: a door that requires pairing: pinned to the saved key", homeTrust(.pairingRequired) == .saved(pin: homePin))
+check("home trust: an open door: pinned too (a saved Mac's every connection is)", homeTrust(.open) == .saved(pin: homePin))
+check("home trust: a plain door: no move (never a plain dial)", homeTrust(.plain) == nil)
+check("home trust: a Mac that removed this device: no move", homeTrust(.pairingRequired, revoked: true) == nil && homeTrust(.open, revoked: true) == nil)
+check("home trust: a Mac with a new key: no move", homeTrust(.pairingRequired, newKey: true) == nil && homeTrust(.open, newKey: true) == nil)
+check("home trust: no pin: no move", homeTrust(.pairingRequired, pin: nil) == nil && homeTrust(.open, pin: nil) == nil)
+var homeTrustGrid = true
+for door in [P.HomeDoor.plain, .pairingRequired, .open] {
+    for revoked in [false, true] {
+        for newKey in [false, true] {
+            for debug in [false, true] {
+                // A tap's dial of the saved Mac's row, as this build or a Release one would make it; the
+                // move home is pinned exactly when that dial is and the door speaks TLS, whatever the build.
+                let tap = P.homeDial(door: door, saved: true, revoked: revoked, homeTLS: true, debug: debug, tap: true, newKey: newKey)
+                let want: P.HomeTrust? = (tap == .pinned && door != .plain) ? .saved(pin: homePin) : nil
+                if homeTrust(door, revoked: revoked, newKey: newKey) != want { homeTrustGrid = false }
+                if homeTrust(door, revoked: revoked, newKey: newKey).map({ P.pin($0) == .key(homePin) }) == false { homeTrustGrid = false }
+            }
+        }
+    }
+}
+check("home trust: every door, removal, new key and build: pinned to the saved key exactly when a tap's dial is, never plain", homeTrustGrid)
+
+// Pairing at home (docs/home-pairing-plan.md): sessions and pairing at home over TLS, in home.swift.
+homePolicy()
 
 print(fails == 0 ? "ALL PASS (\(passes))" : "\(fails) FAIL, \(passes) pass")
 if fails > 0 { exit(1) }

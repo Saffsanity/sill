@@ -1934,6 +1934,102 @@ When both have landed, whichever merges second:
 - **Connect Remotely at home** stays remote on both (`DialReason.connectRemotely`); home pairing's
   cable pairing and asks never go through the remote door, so no move home starts from them.
 
+### Merged with main (2026-10-08)
+
+Main at e6b3265 merged into `remote-away` at da250bc, one merge commit, not rebased, so PR #39 can
+be retargeted to main and merged; Noah's request was "Start the #39 merge job". Since the branch
+point (c564142, PR A's branch) main had gained PR A itself (#34, 643af6b), the first-run tour (#35),
+the Mac's menus (#36), pairing at home (#37), the trackpad gestures (#38), the leftovers (#40),
+Sill for Mac 0.4.0 with iOS 0.5 (2) (#41), keychain hardening (#42), the stuck command after
+Spotlight (#43), a Mac set up again pairing again (#44), iOS build 3 (#45) and a Mac set up again
+retiring its old saved record (#46). Git stopped on 21 files; each was read on both sides and both
+features kept whole. Where they meet, beyond the text:
+
+- **The move home dials the TLS home door, pinned.** `startMove` built its connection from the
+  session's home trust, and a remote session has none (`Session.home` is nil), so the move home
+  dialed plain, which a TLS home door refuses and a Release build never makes. Now
+  `DiscoveryPolicy.moveHomeTrust` (new, pure) gives the move its own trust: the saved Mac's key,
+  pinned, at a row whose door speaks TLS, exactly when a tap's dial of that row would be pinned
+  (`homeDial`'s `.pinned`); a plain door (a Sill for Mac before 0.4.0, the CLI without
+  `--pairing`), a Mac that removed this device or one to pair with again (`newKey`) gets no move,
+  and the session stays remote: never a plain dial, DEBUG or not. The move's connections (the
+  cable's first, the row as listed after) say their hello first inside TLS (`startMove`), the
+  probe's window list still admits the move (with TLS 1.3 a connection is ready before the Mac has
+  judged the key), and at the hand-over the session takes the move's trust and row
+  (`session.home`, `session.row`), so its later connections, a move to the cable or to Wi-Fi
+  included, are pinned the same way, its end is a session at home's (`homeSessionEnded`: a goodbye
+  "removed" revokes, pinned to the saved key), and the saved Mac is marked as one whose home door
+  speaks TLS (`homeTLS`). The policy check covers the trust (seven cases, one a grid of every door,
+  removal, new key and build against `homeDial`) and five mutants (H7–H11).
+- **A pin refused on the move home refuses the listing.** The move's dial passes DeviceTLS's
+  `onPinRefused`: another key at the tag-named row is not the saved Mac, whose key the session holds
+  through the remote door at that moment, so the listing is refused as another launch's is (not
+  tried again while it lasts) and nothing is paired again: #44's `afterPinRefused` and `newKey` are
+  a session dial's, and taken here they would end a working session's Mac. Without it the row's
+  connection would prepare again and again until the move's 5 s, and then count as a failure.
+- **Which row.** The move home takes only a network row whose TXT tag resolves to the session's
+  saved Mac (`FoundMac.macID`), never a row by its Bonjour name alone, nor one whose tag names no
+  saved Mac (#44's `rowMac`): main's `recomputeMacs` gives such rows no Mac ID. After #46's
+  `superseding` the session goes on as the newer record, whose key both the remote dial and the move
+  home pin. The DEBUG row of `-SillMoveHomeTest` stands for the session's Mac (main's `stands`) at a
+  door that requires pairing, so its host runs `--remote --pairing`.
+- **The kind 18 floor (the adversarial review's race), fixed.** The move home's kind 18 is now held
+  to the remote session's newest one as the move began (`homeMoveInfoFloor`), not as the probe is
+  judged, so a kind 18 the Mac broadcasts meanwhile (its addresses changed), read on the remote
+  connection between the home door's catalog and the probe's verdict, no longer refuses the Mac's
+  own listing. A capture from before the session is still refused (the floor is at least the
+  session's first). The check stays, a millisecond: the pinned handshake has proved the Mac already.
+- **The host.** RemoteServer's admission moved into `Door` (#37), so SILL_TEST_REMOTE_ORIGIN's
+  `remoteDoor` flag is passed from there (`kind == .remote`), and TestHooks lists the variable among
+  the door hooks a host that is not a test host ignores. StreamCoordinator keeps both sides' connect
+  and disconnect work (paired keys' "last connected", menus, released keys, the away flip, the
+  per-connection states, the link reports) and both new cases of `handle` (#36's fetch and press,
+  and the away pick). HostConfig has both knobs (`requirePairing`, the away pair); StreamServer has
+  #37's `encrypted` and `onCable` beside the link's counters and keeps every client's
+  `pendingBytes`, the sweep for every client, `resetLinks` and `send(each:)`.
+- **The pacing harness** (`Scripts/pacing/build.sh`) compiles the Door's files and LinkJudge, and
+  defines LINK_JUDGE, like PACING_SERVE_BEFORE_HOME_PAIRING, from what the side's StreamServer has
+  (it was "the working tree's alone").
+- **The device's views.** The landscape and portrait screens keep #30's arrangements, the tour, the
+  menus, the gestures, and the link's line (the portrait one on the picture pane both arrangements
+  share). The line now also stays away while the tour's card is up (`tourOnScreen`), as it does for
+  the Settings panel, the drawer and the pairing overlay. `changeSettings` counts as the tour's
+  activity (`noteAction`) before the move home's guard. MockCatalog's `awayhome` is a TLS session at
+  home, as `paired` is.
+- **Checks.** `policy` keeps `home.swift` and the branch's cases (its model's enum renamed
+  `MoveHomeEnd`, beside `DiscoveryPolicy.HomeEnd`); the mutants' names do not clash (H1–H11, R, S,
+  P, D, G and the pairing at home ones). CI's mutants matrix, the checks' README, CLAUDE.md (both
+  Current step entries, the Layout, Build and run, and the floor's kind 16) and DEVELOPMENT.md are
+  united; README's Away bullet is the release drafts' (`for-0.4.1.md`).
+
+Verified on this Mac (an M2 Pro; no device, Sill.app untouched, nothing posted, the hardware
+encoder never used; hosts on loopback alone and the software encoder):
+
+- **The builds** (Xcode 27.1, 27A9275: the App Store replaced 27.0 with it while the first run of
+  the checks went on, so everything ran again on it): `swift build -c release` from a clean scratch
+  path, only the CaptureProbe warning; the iOS app for the simulator, Debug and Release, and Debug
+  for a generic device, unsigned, only the old `StreamClient` capture warning
+  (StreamClient.swift:3417); Release's Info.plist with `_sill._tcp` alone and none of the harness's
+  arguments in its binary. The pbxproj: 101 objects, no ID twice, every one of the 39 sources once.
+- **The pure checks** (`Tests/checks/run-all.sh`): all 39 pass; `policy` 360 (main's 336, the
+  branch's 17 for the move home, the merge's 7 for its trust).
+- **The mutants** of the checks whose files the merge changed against the parent their mutants last
+  ran on: so far `policy` 116 of 116 (H7–H11 the merge's), `home-device` 124 of 124, `fence` 32 of
+  32 and `key-strokes` 72 of 72.
+- **H2** (the CLI's default path, the plain door, against main's at e6b3265 built from `git archive`,
+  both on loopback and the software encoder): idle 35 s and with `sillclient.py PORT 5 desktop`,
+  every line identical masked and sorted, the stats lines' counts equal, and the client's kind 16
+  lines (2) identical masked.
+- **H7 and H8 over pairing at home's doors** (`SillHost --synthetic --remote --pairing`, the remote
+  door counting loopback as a VPN; a test client paired by the link at the remote door), 16 of 16:
+  the first session from away flips to the away quality ("Away from home: … Low · Standard (4 Mbps
+  per 60 fps, points). The home quality stays Balanced · Retina."), the flag kept while nobody is
+  connected; an away pick sets the away pair only ("Settings from sillclient: away bitrate 4 → 8
+  Mbps per 60 fps", one restart at 8, the home bitrate 15 in the answer); a device at home admitted
+  at the TLS home door with the same key ("Client connected"), "Home quality again: … Balanced ·
+  Retina." and one restart at 15 Mbps once its viewport came, its kind 16 the home pair with
+  `away.thisConnectionAway` 0; then, once it left, the away quality again and one restart at 8.
+
 ### Open questions for Noah
 
 14. **A link only a little too slow.** Behind needs 3 short seconds of 5, and under PR A's pacing

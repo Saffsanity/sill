@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Security
 import CryptoKit
 import CommonCrypto
@@ -171,6 +172,48 @@ public enum RecognitionTag {
         var message = Data(label.utf8)
         message.append(nonce)
         return Data(HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: recognitionKey)).prefix(6))
+    }
+}
+
+/// The Bonjour TXT record's `p` (docs/home-pairing-plan.md §3.2), beside the recognition tag `r`:
+/// how the home door speaks. "1": TLS, paired devices only (Require pairing on); "0": TLS, any
+/// device (Require pairing off). No `p`: a plain door (Sill.app from before pairing at home, or
+/// SillHost without --pairing). Any other value reads as "1", the safe side. A device reads it
+/// before it dials, so it never dials TLS at a plain door, nor plain at a TLS one, by accident.
+/// Not an identifier, and not authentication: anyone can advertise any `p`, which is why a saved
+/// Mac's rows are always dialed pinned, whatever its record says.
+public enum HomeDoorTXT {
+    /// The TXT key.
+    public static let key = "p"
+
+    public enum Door: Equatable, Sendable {
+        /// No `p`: plain TCP and no pairing.
+        case plain
+        /// `p=1`, or any value but "0": TLS, paired devices only.
+        case pairingRequired
+        /// `p=0`: TLS, any device.
+        case open
+    }
+
+    /// The value a TLS home door advertises.
+    public static func value(requirePairing: Bool) -> String { requirePairing ? "1" : "0" }
+
+    /// The door a TXT record's keys and values describe. Keys are case-insensitive (RFC 6763
+    /// §6.4): "p", else "P".
+    public static func door(_ txt: [String: String]) -> Door {
+        guard let value = txt[key] ?? txt[key.uppercased()] else { return .plain }
+        return value == "0" ? .open : .pairingRequired
+    }
+
+    /// The door a received record describes, entry by entry: what a device reads. A `p` without a
+    /// value (a boolean attribute, which NWTXTRecord's `dictionary` leaves out: measured
+    /// 2026-09-25) reads as "1", like any value but "0", rather than as a plain door.
+    public static func door(_ record: NWTXTRecord) -> Door {
+        switch record.getEntry(for: key) {
+        case nil: return .plain
+        case .string(let value)?: return value == "0" ? .open : .pairingRequired
+        default: return .pairingRequired          // no value, an empty one, or bytes
+        }
     }
 }
 

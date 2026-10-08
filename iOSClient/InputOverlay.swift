@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import StreamProtocol
 
 /// The touch layer over the streamed video. Direct-touch model: where you touch is where the Mac's
@@ -41,6 +42,16 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// True once the hover in progress has shown itself to be a Pencil. Sticky for the session so a
     /// Pencil reading zero for a moment at the bottom of its range does not flicker the pointer.
     private var hoverIsPencil = false
+    /// A three- or four-finger gesture this view decided, for the Mac (`StreamClient.sendGesture`,
+    /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
+    /// a window streams). True when it went.
+    var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
+    /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
+    /// line).
+    private let strokes = StrokeObserver()
+    /// The finger pan, for where a scroll that a stroke's silence closes ends.
+    private weak var scrollPan: UIPanGestureRecognizer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -79,6 +90,14 @@ final class InputOverlayView: UIView, UIKeyInput {
         // Pencil hover on the iPads that support it, and the trackpad/mouse pointer everywhere.
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
         addGestureRecognizer(hover)
+
+        // Three fingers or more: a gesture for the Mac, never a click, a right click or a scroll
+        // (StrokeObserver, TrackpadGestures). It only watches: it takes no touch from the
+        // recognizers above and delays none.
+        scrollPan = pan
+        strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
+        strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
+        addGestureRecognizer(strokes)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -117,6 +136,7 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// Single tap: put the pointer there first, then click. The move matters — the Mac's cursor is
     /// wherever the last event left it, and hover state (menus, tooltips) follows it.
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard !strokes.silent else { return }
         tap(at: gesture.location(in: self))
     }
 
@@ -130,6 +150,7 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     /// Long press: the right button, since there is no second finger to spare for it.
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard !strokes.silent else { return }
         guard gesture.state == .began else { return }
         setOwnPointer(nil, .none)
         let point = gesture.location(in: self)
@@ -144,6 +165,7 @@ final class InputOverlayView: UIView, UIKeyInput {
     /// Deltas are fractions of the video rect, natural sign (finger down = content down =
     /// positive dy).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard !strokes.silent else { return }
         let rect = videoRect
         switch gesture.state {
         case .began:
@@ -177,6 +199,17 @@ final class InputOverlayView: UIView, UIKeyInput {
         }
     }
 
+    /// A stroke just went silent (TrackpadGestures: three fingers down): a scroll it had begun (a first
+    /// finger that slid before the others landed) ends here, with no coast; the Mac got deltas of less
+    /// than `chordTravel`. Nothing else of the stroke goes out but its gesture.
+    private func strokeSilenced() {
+        lastPanTranslation = .zero
+        guard scrollGestureOpen else { return }
+        scrollGestureOpen = false
+        let p = scrollPan.flatMap { normalized($0.location(in: self), clamped: true) } ?? (x: 0.5, y: 0.5)
+        send(.scrollGesture(.ended, x: p.x, y: p.y))
+    }
+
     /// The coast after a flick, at the point the finger lifted. Steps are converted to fractions
     /// of the video rect exactly as live pan deltas are, so the coast continues at the speed the
     /// content was moving under the finger.
@@ -199,7 +232,7 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { momentum.stop() }
+        if window == nil { momentum.stop(); releaseForwardedKeys() }
         #if DEBUG
         if window != nil {
             InputScript.overlay = self
@@ -309,6 +342,12 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     override var canBecomeFirstResponder: Bool { true }
 
+    /// None of iPadOS's three-finger editing gestures (undo and redo, copy, cut and paste, the edit
+    /// bar): three fingers here are the Mac's (docs/trackpad-gestures-plan.md §6.5). This view is the
+    /// one responder Sill makes first, in every layout, and holds no text of its own; the Mac's undo
+    /// is ⌘Z.
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
+
     @objc var keyboardType: UIKeyboardType = .default
     @objc var autocorrectionType: UITextAutocorrectionType = .no
     @objc var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -356,8 +395,7 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     /// One key, down and up, carrying the latched modifier bits, then the latch is spent.
     private func sendLatched(_ usage: UInt16) {
-        send(.key(hidUsage: usage, down: true, modifiers: latchedModifiers.rawValue))
-        send(.key(hidUsage: usage, down: false, modifiers: latchedModifiers.rawValue))
+        KeyChord.press(usage, with: latchedModifiers).forEach(send)
         consumeLatch()
     }
 
@@ -380,7 +418,10 @@ final class InputOverlayView: UIView, UIKeyInput {
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        if resigned { onKeyboardShownChange?(false) }
+        if resigned {
+            releaseForwardedKeys()
+            onKeyboardShownChange?(false)
+        }
         return resigned
     }
 
@@ -394,31 +435,26 @@ final class InputOverlayView: UIView, UIKeyInput {
     //     which is exactly what we want to send as `.text`.
     //
     //   • Raw path (`.key`) owns only what the text path never delivers: the arrows, escape, the
-    //     function keys, home/end/page up/down, forward delete, and *any* key while command,
-    //     control or option is held, because those combinations are shortcuts (⌘S, ⌃A, ⌥←) and
-    //     never reach `insertText`. Shift alone is not in that list: shift makes characters.
+    //     function keys, home/end/page up/down, forward delete, ⌘, ⌃ and ⌥ themselves, and *any* key
+    //     while command, control or option is held, because those combinations are shortcuts (⌘S,
+    //     ⌃A, ⌥←) and never reach `insertText`. Shift alone is not in that list: shift makes
+    //     characters. (ForwardedKeys.goesAsKey.)
     //
-    // Presses we do not take are handed to super so the text input system still sees them.
+    // Which path a key takes is decided when it goes down, and its up takes the same one whatever the
+    // flags say by then (ForwardedKeys): ⌘'s own release and a key let go after ⌘ reach the Mac, and
+    // a key the text system took never sends a stray up. Presses we do not take are handed to super
+    // so the text input system still sees them.
 
-    private static let rawUsages: Set<UIKeyboardHIDUsage> = [
-        .keyboardUpArrow, .keyboardDownArrow, .keyboardLeftArrow, .keyboardRightArrow,
-        .keyboardEscape, .keyboardDeleteForward,
-        .keyboardHome, .keyboardEnd, .keyboardPageUp, .keyboardPageDown,
-        .keyboardF1, .keyboardF2, .keyboardF3, .keyboardF4, .keyboardF5, .keyboardF6,
-        .keyboardF7, .keyboardF8, .keyboardF9, .keyboardF10, .keyboardF11, .keyboardF12
-    ]
-
-    private func isRawKey(_ key: UIKey) -> Bool {
-        if !key.modifierFlags.intersection([.command, .control, .alternate]).isEmpty { return true }
-        return Self.rawUsages.contains(key.keyCode)
-    }
+    /// The hardware keys down on the Mac, so each one's up follows its down.
+    private var forwarded = ForwardedKeys()
 
     private func forward(_ presses: Set<UIPress>, down: Bool) -> Set<UIPress> {
         var unhandled: Set<UIPress> = []
         for press in presses {
-            guard let key = press.key, isRawKey(key) else { unhandled.insert(press); continue }
-            send(.key(hidUsage: UInt16(key.keyCode.rawValue), down: down,
-                      modifiers: UInt64(key.modifierFlags.rawValue)))
+            guard let key = press.key else { unhandled.insert(press); continue }
+            let usage = UInt16(key.keyCode.rawValue)
+            let event = down ? forwarded.began(usage, modifiers: UInt64(key.modifierFlags.rawValue)) : forwarded.ended(usage)
+            if let event { send(event) } else { unhandled.insert(press) }
         }
         return unhandled
     }
@@ -433,6 +469,20 @@ final class InputOverlayView: UIView, UIKeyInput {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         let unhandled = forward(presses, down: false)
         if !unhandled.isEmpty { super.pressesEnded(unhandled, with: event) }
+    }
+
+    /// A press cancelled (the app going to the background, the keyboard disconnected): its key comes
+    /// up on the Mac as if released, so neither it nor a modifier stays down there.
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled = forward(presses, down: false)
+        if !unhandled.isEmpty { super.pressesCancelled(unhandled, with: event) }
+    }
+
+    /// Every hardware key still down on the Mac comes up: this view no longer takes keys (the Settings
+    /// panel took the keyboard, the tour showed) or is leaving the screen, and UIKit sends it no
+    /// release for them.
+    private func releaseForwardedKeys() {
+        for up in forwarded.releaseAll() { send(up) }
     }
 }
 
@@ -462,6 +512,8 @@ struct InputOverlay: UIViewRepresentable {
     @Binding var isKeyboardShown: Bool
     var latchedModifiers: KeyModifiers = []
     var onModifiersConsumed: () -> Void = {}
+    /// `StreamClient.sendGesture`; see `InputOverlayView.sendGesture`.
+    var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
 
     func makeUIView(context: Context) -> InputOverlayView {
         let view = InputOverlayView(frame: .zero)
@@ -474,6 +526,7 @@ struct InputOverlay: UIViewRepresentable {
         uiView.send = send
         uiView.setOwnPointer = setOwnPointer
         uiView.latchedModifiers = latchedModifiers
+        uiView.sendGesture = sendGesture
         // Called straight from a UIKit text-input callback, never from inside a SwiftUI update,
         // so writing the binding here needs no hop.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -483,6 +536,102 @@ struct InputOverlay: UIViewRepresentable {
             // view update" warning waiting to happen.
             DispatchQueue.main.async { isKeyboardShown = shown }
         }
+    }
+}
+
+// MARK: - Stroke observer
+
+/// Feeds a surface's `TrackpadGestures` with every direct touch, so a stroke that has three fingers
+/// down before any has moved sends the Mac nothing but its gesture, if it makes one
+/// (docs/trackpad-gestures-plan.md §6.2). One on each glass surface: the portrait trackpad and the
+/// stream.
+///
+/// An observer, not the view's own touch callbacks: the pans, taps and long presses cancel the
+/// view's touches as they recognize, after which the view hears no more of the stroke. This one sees
+/// every direct touch and never recognizes (it stays possible, so UIKit ends it with the last
+/// finger), takes none (`cancelsTouchesInView` off), delays none, can neither prevent another
+/// recognizer nor be prevented by one, and is its own delegate so it runs beside all of them.
+/// Only direct touches are fingers: a Pencil is the mouse, and a Magic Keyboard trackpad's click is
+/// one indirect touch. Those only end a finished stroke's silence (`otherTouch`), since the
+/// portrait trackpad's recognizers take them too.
+final class StrokeObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private var strokes = TrackpadGestures()
+    /// From three fingers down until the next stroke's first touch: the surface sends nothing.
+    var silent: Bool { strokes.silent }
+    /// A button the surface pressed is held (the trackpad's press-and-hold drag); asked as each
+    /// finger lands, and no stroke goes silent while it is (its button must still come up).
+    var holding: () -> Bool = { false }
+    /// The stroke just went silent: close what it had opened (a scroll).
+    var onSilenced: () -> Void = {}
+    /// The decision, at the first lift of a finger that armed the stroke: the gesture and its
+    /// fingers, 3 or 4.
+    var onGesture: (TrackpadGestures.Gesture, Int) -> Void = { _, _ in }
+    /// Each touch of the stroke, numbered as it lands.
+    private var ids: [ObjectIdentifier: Int] = [:]
+    private var nextID = 0
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+    /// Several touches of one event in a fixed order (by where they are), so the same touches always
+    /// make the same stroke.
+    private func ordered(_ touches: Set<UITouch>) -> [UITouch] {
+        touches.sorted { a, b in
+            let p = a.location(in: view), q = b.location(in: view)
+            return p.x != q.x ? p.x < q.x : p.y < q.y
+        }
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in ordered(touches) {
+            guard touch.type == .direct else { strokes.otherTouch(); continue }
+            let id = nextID
+            nextID += 1
+            ids[ObjectIdentifier(touch)] = id
+            if strokes.down(id, at: touch.location(in: view), time: touch.timestamp, holding: holding()) == .silenced { onSilenced() }
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in ordered(touches) {
+            guard let id = ids[ObjectIdentifier(touch)] else { continue }
+            strokes.moved(id, to: touch.location(in: view), time: touch.timestamp)
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in ordered(touches) {
+            guard let id = ids.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
+            if case .gesture(let gesture, let fingers) = strokes.up(id, at: touch.location(in: view), time: touch.timestamp) {
+                onGesture(gesture, fingers)
+            }
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in ordered(touches) {
+            guard let id = ids.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
+            strokes.cancelled(id)
+        }
+    }
+
+    /// UIKit ends the observer with the stroke's last finger, after its touches have ended. A touch
+    /// it never heard end (the observer ended early) counts as cancelled, so the next stroke starts
+    /// clean and this one decides nothing more.
+    override func reset() {
+        super.reset()
+        for id in ids.values.sorted() { strokes.cancelled(id) }
+        ids.removeAll()
     }
 }
 

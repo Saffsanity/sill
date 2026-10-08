@@ -18,6 +18,15 @@ struct FoundMac: Identifiable, Hashable {
     /// The saved Mac this row is: a network or Direct row whose TXT tag this device resolved, or
     /// a Remote row. Nil for any other Mac.
     let macID: String?
+    /// A network or Direct row whose tag names no saved Mac, under the Bonjour name a saved Mac was
+    /// last reached by: that Mac, taken by name alone (DiscoveryPolicy.rowMac). A tap dials it
+    /// pinned to that Mac's key, as the automatic reconnect does, and its word is that Mac's. Not
+    /// a sighting of the saved Mac (its Remote row stays), and no context menu: it may be a
+    /// stranger's until its key says otherwise.
+    let savedByName: String?
+    /// The row's TXT record carries a recognition tag (any, a saved Mac's or not). A row whose tag
+    /// names no saved Mac is never one (DiscoveryPolicy.rowMac, `reconnectMatches`).
+    let carriesTag: Bool
     /// How the Mac is reachable, the word at the end of a network or Direct row ("Wired", "Wi-Fi",
     /// "Direct"), or nil when the interfaces it was seen on do not say (DiscoveryPolicy.method), and
     /// for a Remote row. Only shown: which route a tap takes is `route`'s and `wired`'s.
@@ -30,21 +39,33 @@ struct FoundMac: Identifiable, Hashable {
     /// a session that lost the cable dials it on (`wifiDial`); nil for none, for a Direct row and for
     /// a Remote row.
     let wifi: NWInterface?
+    /// How the Mac's home door speaks, from its TXT record's `p` (HomeDoorTXT, docs/home-pairing-plan.md
+    /// §7.3): plain, TLS for paired devices only, or TLS for any device. What a tap on the row and
+    /// the automatic reconnect do follows from it (DiscoveryPolicy.homeDial). `.plain` for a Remote row.
+    let door: DiscoveryPolicy.HomeDoor
+    /// The row's word, and VoiceOver's label and hint for it (DiscoveryPolicy.rowWord): how the Mac is
+    /// reachable, as before, or "Not paired", "Wired" for an unpaired Mac over the cable, "Update Sill".
+    let homeWord: DiscoveryPolicy.RowWord
 
-    init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil,
-         method: DiscoveryPolicy.Method? = nil, wired: NWInterface? = nil, wifi: NWInterface? = nil) {
-        self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID
+    init(name: String, endpoint: NWEndpoint?, route: Route, macID: String? = nil, savedByName: String? = nil,
+         carriesTag: Bool = false, method: DiscoveryPolicy.Method? = nil, wired: NWInterface? = nil, wifi: NWInterface? = nil,
+         door: DiscoveryPolicy.HomeDoor = .plain, homeWord: DiscoveryPolicy.RowWord? = nil) {
+        self.name = name; self.endpoint = endpoint; self.route = route; self.macID = macID; self.savedByName = savedByName
+        self.carriesTag = carriesTag
         self.method = method; self.wired = wired; self.wifi = wifi
+        self.door = door; self.homeWord = homeWord ?? .method(method)
     }
 
     /// Reached over peer-to-peer Wi-Fi alone: the one kind of row connected with includePeerToPeer.
     var direct: Bool { route == .direct }
+    /// The saved Mac a tap dials this row as: its tag's, else its Bonjour name's (`savedByName`).
+    var savedID: String? { macID ?? savedByName }
     /// A network "Mac mini" and a Remote "Mac mini" are two rows. Names are unique per route
     /// (DiscoveryPolicy.rows lists a name once), Mac IDs among Remote rows.
     var id: String { route == .remote ? "remote:\(macID ?? name)" : "\(route.rawValue):\(name)" }
-    /// The word at the end of its row: "Remote" for a saved Mac dialed away from home, else how
-    /// its Mac is reachable (`method`), or nil.
-    var word: String? { route == .remote ? "Remote" : method?.word }
+    /// The word at the end of its row: "Remote" for a saved Mac dialed away from home, else its home
+    /// word (`homeWord`): how its Mac is reachable (`method`), "Not paired" or "Update Sill", or nil.
+    var word: String? { route == .remote ? "Remote" : homeWord.word }
 }
 
 /// How the current connection runs (`Session.route`): set when it starts, again at `.ready` and by
@@ -149,11 +170,46 @@ final class StreamClient: ObservableObject {
     var macInfoVerified: (info: MacInfo, fingerprint: Data)?
     /// When this connection's first kind 18 arrived (the panel hides Away from home without one).
     @Published var macInfoAt: Date?
-    /// Pairing, as the Add a Mac card and the overlay show it.
-    @Published var pairing = PairingPhase.idle
+    /// Pairing, as the Add a Mac card, the home card and the overlay show it.
+    @Published var pairing = PairingPhase.idle {
+        didSet {
+            #if DEBUG
+            // The simulator gates read what the card or the overlay says here.
+            if pairing != oldValue, case .failed(let p) = pairing { print("pairing: \(p.text)") }
+            #endif
+        }
+    }
     /// A sill://pair link from outside the app (Camera, Messages, simctl openurl): never acted on
     /// until the person confirms it.
     @Published var pendingLink: PairLink?
+
+    // Pairing at home (StreamClient+Home.swift). Published on main.
+    /// The ask a tap on a row that pairs first made, and what the Mac answered; the home card
+    /// follows it.
+    @Published var homeAsk: HomeAsk?
+    /// The home door's pairing dial in flight (an ask, or a proof): one at a time.
+    var homeDialer: HomeDialer?
+    /// The Cancel of an ask the Mac answered "shown", on its way to the Mac (`withdrawAsk`): kept
+    /// here until it is done, beside whatever the next tap dials.
+    var homeWithdrawal: HomeDialer?
+    /// Pair This iPad…'s ask over a session at home that speaks TLS (`askOverStream`): the line the
+    /// overlay shows under its title, from what the Mac answered; nil over any other session, where
+    /// kind 21 asks as before (a plain door always opens a window for it).
+    @Published var overlayAskLine: String?
+    /// That ask's dial while it runs, and, once the Mac showed a code for it, where the overlay's
+    /// Cancel withdraws it (`endOverlayAsk`).
+    var overlayAskDialer: HomeDialer?
+    var overlayAskShown: (target: HomeDialer.Target, key: Data)?
+    /// Rows taken by their Bonjour name alone (a tap's or the automatic reconnect's) whose key was
+    /// another's (-9808): the reconnect skips them until a session connects (docs/home-pairing-plan.md §7.3).
+    var pinRefusedRows = Set<String>()
+    #if DEBUG
+    /// `-SillTapRow <prefix>`: the first network or Direct row whose name starts so is tapped once,
+    /// as soon as it is listed (the gates drive no UI).
+    var pendingTapRow = UserDefaults.standard.string(forKey: "SillTapRow")
+    /// `-SillOverlayCode` was typed (once per launch).
+    var overlayCodeTyped = false
+    #endif
 
     /// The connect screen's idle status lines: only these follow the nearby search and Local Network
     /// access (updateDiscovery); any other status (a disconnect, a failure) stays as it was set.
@@ -169,6 +225,14 @@ final class StreamClient: ObservableObject {
     @Published private(set) var windowOrder: [UInt32] = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
+    /// DEBUG `-SillNoAutoDesktop 1`: the device never picks the Desktop by itself, so a live gate's
+    /// session streams nothing and no host encodes (a test host's software encoder included) while
+    /// it runs. Always false in a Release build.
+    #if DEBUG
+    private static let noAutoDesktop = UserDefaults.standard.bool(forKey: "SillNoAutoDesktop")
+    #else
+    private static let noAutoDesktop = false
+    #endif
     /// Picks and launches sent from this device (main thread). The automatic Desktop request that
     /// waits out a closed window stands down if this moved meanwhile: the user chose something,
     /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
@@ -213,9 +277,34 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// Harness `pending` case: the mock never answers and never times out.
     var mockFrozen = false
+    /// The harness's settings cases at home over TLS (`paired`, `pairedoff`, `openpair`): the
+    /// mock's session counts as one (`sessionAtHomeOverTLS`), having none of its own.
+    var mockHomeTLS: Bool?
     /// The harness's remote cases: one second's numbers, as the network queue would publish them,
     /// and whether five of them made a slow link.
     func showMockLinkStats(_ stats: LinkStats, slow: Bool = false) { linkStats = stats; slowLink = slow }
+    #endif
+
+    // The Mac's menus (kinds 24, 25 and 27; see the Mac's menus section below, MacMenuState.swift
+    // and MacMenuElements.swift). Main thread.
+    /// This connection's menus: the Mac's top level (the streamed app's menu bar), the menus this
+    /// device asked for and waits on, and the choices it sent. Reset on every tear-down.
+    @Published private(set) var menus = MacMenuState()
+    /// Each opened menu's completion, by its key, until `menus` settles it: exactly once.
+    private var menuCompletions: [Int: (MacMenuState.Content) -> Void] = [:]
+    private var menuKey = 0
+    /// The next kind 25 or 27's token: strictly increasing for the life of the process, never reset,
+    /// as the settings' are, so an answer can never be taken for one to an earlier connection's.
+    private var menuToken = 1
+    /// The waiting fetches' timeout check (one at a time, for the oldest).
+    private var menusExpiry: DispatchWorkItem?
+    #if DEBUG
+    /// What each waiting completion opened, for the console ("menus: File (2) in 41 ms, 24 items").
+    private var menuAsked: [Int: (title: String, id: String, at: Double)] = [:]
+    /// The harness's Mac menus (`-SillMacMenu`): what the mock Mac answers its fetches and choices with.
+    var mockMenus: MockCatalog.MacMenus?
+    /// `-SillMenuPress` has run on this client.
+    private var menuPressArgumentDone = false
     #endif
 
     /// Pixel size of the frames the host is sending, from the HEVC parameter sets. Input positions
@@ -248,6 +337,50 @@ final class StreamClient: ObservableObject {
     private var pointerRestatementLoggedAt = -Double.infinity
     private var pointerHeard = false
     #endif
+    /// When this device last sent the Mac input (`sendInput`; systemUptime). Not @Published: the
+    /// tour's rule reads it when it decides. Main thread.
+    var lastInputAt: Double?
+    /// When the person last used one of the stream screen's controls, by whatever means: a tap, or
+    /// VoiceOver's double tap, Switch Control, Voice Control or Full Keyboard Access, none of which
+    /// makes a touch (a pick, a launch, a window's command or place in the bar, a settings change;
+    /// StreamScreen stamps its own buttons with `noteAction`). systemUptime, not @Published: the
+    /// tour's rule reads it when it decides. The device's own requests (the Desktop at a
+    /// connection's start) are not the person's and leave it alone. Main thread.
+    private(set) var lastActionAt: Double?
+    func noteAction() { lastActionAt = ProcessInfo.processInfo.systemUptime }
+    /// The tour is on screen (StreamScreen): nothing this device does reaches the Mac as input
+    /// meanwhile. The one input it makes on its own, the pointer's move to the middle of a new frame
+    /// size (`pointerFrameChanged`), waits for the pause to end, and goes then only if this device
+    /// still has the pointer and its own still shows (the Mac, or another device, may have taken it
+    /// since); the DEBUG tripwire in `sendInput` names anything else. Cleared with the session.
+    /// Main thread.
+    var inputPaused = false {
+        didSet {
+            guard oldValue, !inputPaused, pointerMoveOwed else { return }
+            pointerMoveOwed = false
+            presence.follow(pointerFeed.current)
+            guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime), let p = presence.own else { return }
+            sendInput(.pointer(.move, x: Double(p.x), y: Double(p.y)))
+        }
+    }
+    /// A pointer move `pointerFrameChanged` held back while input was paused.
+    private var pointerMoveOwed = false
+    /// What the automatic tour decided (TourPolicy.nextSession): this session's, kept here rather
+    /// than with the stream screen, which goes with its session, so the automatic reconnect's
+    /// session can go on with it. StreamScreen reads and writes it. Main thread.
+    var tourSession = TourSession()
+
+    /// A session is connected: the automatic reconnect's goes on with the last one's tour decision
+    /// (TourPolicy.nextSession), any other decides afresh. Main thread.
+    func startTourSession(reconnected: Bool) {
+        tourSession = TourPolicy.nextSession(after: tourSession, reconnected: reconnected)
+        #if DEBUG
+        if tourSession.decided {
+            let layouts = [TourLayout.landscape, .portrait, .phone].filter { tourSession.offered.contains($0) }.map(\.rawValue)
+            print("tour: the automatic reconnect's session keeps the last one's decision (decided in: \(layouts.joined(separator: ", ")))")
+        }
+        #endif
+    }
     /// The last Viewport this session sent, so the local-cursor flag can be re-sent without
     /// re-measuring; nil once the session ends (`forgetViewport`). Main thread.
     var lastViewport: Viewport?
@@ -326,7 +459,15 @@ final class StreamClient: ObservableObject {
     // Discovery (main thread). Two browsers: the network one always runs and never uses
     // peer-to-peer; the nearby one runs only when DiscoveryPolicy says, never while connected.
     // Both read the TXT record, whose `r` tag names a saved Mac whatever its Bonjour name.
-    static let serviceType = "_sill._tcp"
+    /// `_sill._tcp`. DEBUG `-SillServiceType _silltest._tcp`: the browsers look for that type
+    /// instead, so a test host registered with SILL_TEST_SERVICE_TYPE shows as a real row with its
+    /// TXT record, and no real Mac is listed (the Debug build's Info.plist declares it).
+    static var serviceType: String {
+        #if DEBUG
+        if let type = UserDefaults.standard.string(forKey: "SillServiceType"), !type.isEmpty { return type }
+        #endif
+        return "_sill._tcp"
+    }
     private var networkBrowser: NWBrowser?
     private var nearbyBrowser: NWBrowser?
     private var networkResults: [NWBrowser.Result] = []
@@ -395,10 +536,20 @@ final class StreamClient: ObservableObject {
     /// The home viewport the move sends first on its connection: this session's last, at this
     /// device's full rate (no cap away from home), taken as the move starts.
     private var homeMoveViewport: Viewport?
+    /// How the move's connections speak to the home door: TLS `sill/1` pinned to the saved Mac's key
+    /// (DiscoveryPolicy.moveHomeTrust), the session's trust once it is home; and the row it went to,
+    /// the session's row afterwards (a pin that fails later, docs/home-pairing-plan.md §7.6).
+    private var homeMoveTrust: DiscoveryPolicy.HomeTrust?
+    private var homeMoveRow: HomeRow?
     /// The `issuedAt` of this remote session's last verified kind 18 (StreamClient+Remote's
     /// `receiveMacInfo`): the move's connection must bring one at least as new, signed by the saved
     /// Mac's key, so a tag and a kind 18 captured before this session cannot take it over.
     var remoteInfoIssuedAt: Double?
+    /// `remoteInfoIssuedAt` as the move under way started, which its kind 18 is held to: a kind 18
+    /// the Mac broadcasts meanwhile (its addresses changed) reaches the remote connection too, and
+    /// read there before the probe is judged it would be newer than the one the home door's catalog
+    /// carried, and refuse the Mac's own listing (the adversarial review, docs/remote-bundle-plan.md).
+    private var homeMoveInfoFloor: Double?
     /// The move home's next look (the listing's 2 s, the back-off).
     private var homeMoveCheck: DispatchWorkItem?
     #if DEBUG
@@ -505,8 +656,28 @@ final class StreamClient: ObservableObject {
         /// Remote: the address that won, and why it was dialed.
         var candidate: RemoteDialPolicy.Candidate?
         var why: DialReason?
+        /// At home: how its connections speak to the Mac's door (docs/home-pairing-plan.md §7.2),
+        /// plain or TLS, and the key each is pinned to; nil for a remote session.
+        var home: DiscoveryPolicy.HomeTrust? = nil
+        /// The row it was dialed from, for a pin that fails (§7.6); nil for an address.
+        var row: HomeRow? = nil
+        /// The endpoint dialed (the DEBUG move and path tests start from it).
+        var endpoint: NWEndpoint? = nil
     }
     var session: Session?
+
+    /// The row a session at home was dialed from.
+    struct HomeRow: Equatable {
+        /// FoundMac.id.
+        let id: String
+        /// Its TXT tag named the saved Mac; a row taken by its Bonjour name alone (a tap's or the
+        /// automatic reconnect's) did not.
+        let tagNamed: Bool
+        /// Rows of that Mac whose pin already failed in this dial (§7.6).
+        var tried: [String] = []
+        /// A tap dialed it (not the automatic reconnect): a pin that fails there gets words.
+        var tapped = false
+    }
 
     /// An automatic reconnect after a session ended on its own (docs/remote-access-plan.md §7.4).
     struct Reconnect {
@@ -556,6 +727,10 @@ final class StreamClient: ObservableObject {
     /// with the session.
     @Published var hostVersion: String?
     @Published var hostProtocol: Int?
+    /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
+    /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
+    /// session.
+    @Published var hostGestures: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -595,6 +770,9 @@ final class StreamClient: ObservableObject {
     static let livenessFloor = 6.0
     /// A remote path that is not viable for this long is a lost connection.
     static let viabilityLimit = 3.0
+    /// The automatic reconnect's dial of a row that is not ready this long after it started is let
+    /// go, and the reconnect looks again (`connect(to:)`), as a connection waiting that long is.
+    static let reconnectDialWait = 5.0
 
     // Measurement, all of it on `queue`: the open window's frames, frame ages and round trips, and
     // the two timers. Dispatch timers on the queue that counts the frames rather than main run loop
@@ -634,6 +812,15 @@ final class StreamClient: ObservableObject {
             savedMacsSeeded = true
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        }
+        // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
+        // the argument domain dropped goes into the registration domain (this run's memory, never
+        // saved), where every reader of UserDefaults finds it. Its readers are this client's
+        // methods, and statics first touched once it exists, so this runs before any of them.
+        for key in ["SillConnect", "SillWiredTest", "SillPairAddress"] {
+            guard UserDefaults.standard.object(forKey: key) == nil,
+                  let i = arguments.firstIndex(of: "-" + key), i + 1 < arguments.count else { continue }
+            UserDefaults.standard.register(defaults: [key: arguments[i + 1]])
         }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
@@ -732,41 +919,85 @@ final class StreamClient: ObservableObject {
     /// whose TXT tag this device resolves is that saved Mac, whatever its Bonjour name; a result
     /// without a tag is no saved Mac (an older host, or briefly during a re-registration: the
     /// reconnect still finds it by the Bonjour name last used with it). Then a Remote row for each
-    /// saved Mac neither browser lists, once the network has had its 3 s. Main thread.
+    /// saved Mac neither browser lists, once the network has had its 3 s. Each row also carries its
+    /// home door, from its TXT record's `p`, and the word that follows from it and from what this
+    /// device knows of that Mac (DiscoveryPolicy.rowWord: "Not paired", "Update Sill"…); a saved Mac
+    /// seen with `p` is remembered as one whose door speaks TLS (`homeTLS`, docs/home-pairing-plan.md
+    /// §7.3). Main thread.
     func recomputeMacs() {
         #if DEBUG
         if mockDiscovery { return }
         #endif
         // Each result's interfaces twice, as NWInterface, to dial on, and as the policy spells them,
-        // and its TXT tag, which names a saved Mac.
-        // `macID`: a DEBUG test row's saved Mac (`-SillMoveHomeTest`), which has no tag to resolve.
+        // its TXT tag, which names a saved Mac, and its home door (`p`). `stands` is the DEBUG test
+        // rows' saved Mac (they carry no tag): the one a `-SillConnect` address counts as, and the
+        // remote session's for `-SillMoveHomeTest`'s row.
         typealias Seen = (name: String, endpoint: NWEndpoint, interfaces: [NWInterface], policy: [DiscoveryPolicy.Interface],
-                          tag: String?, macID: String?)
+                          tag: String?, door: DiscoveryPolicy.HomeDoor, stands: String?)
         var network: [Seen] = networkResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0), nil)
+            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
+             Self.door(of: $0), nil)
         }
         #if DEBUG
-        network += testNetworkRows.map { ($0.name, $0.endpoint, [], [], nil, nil) }
-        network += testHomeRows.map { ($0.name, $0.endpoint, [], [], nil, $0.macID) }
-        if let row = pathTest?.row { network.append((row.name, row.endpoint, [], row.interfaces, nil, nil)) }
+        // The move and path tests' rows are the -SillConnect address's Mac: with `-SillHomeDoor`, the
+        // one saved Mac when exactly one is saved (docs/home-pairing-plan.md §7.9).
+        let stands = Self.testHomeDoor != .plain && savedMacs.count == 1 ? savedMacs[0].macID : nil
+        network += testNetworkRows.map { ($0.name, $0.endpoint, [], [], nil, Self.testHomeDoor, stands) }
+        // The move home test's row is the remote session's saved Mac at a home door that speaks TLS
+        // (`-SillMoveHomeTest`: its host runs --pairing, as Sill.app's home door does).
+        network += testHomeRows.map { ($0.name, $0.endpoint, [], [], nil, .pairingRequired, $0.macID) }
+        if let row = pathTest?.row { network.append((row.name, row.endpoint, [], row.interfaces, nil, Self.testHomeDoor, stands)) }
         #endif
         let nearby: [Seen] = nearbyResults.map {
-            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0), nil)
+            (Self.serviceName(of: $0), $0.endpoint, Array($0.interfaces), $0.interfaces.map(Self.policyInterface), Self.tag(of: $0),
+             Self.door(of: $0), nil)
         }
         let rows = DiscoveryPolicy.rows(network: network.map(\.name), nearby: nearby.map { ($0.name, $0.policy.map(\.name)) })
         let now = ProcessInfo.processInfo.systemUptime
         directSince = DiscoveryPolicy.directSince(directSince, rows: rows, now: now)
         sightings = DiscoveryPolicy.sightings(sightings, listed: Set(network.map(\.name)), now: now)
         paths = DiscoveryPolicy.pathSightings(paths, network: network.map { ($0.name, $0.policy) }, now: now)
+        // A saved Mac seen with `p` has a door that speaks TLS: remembered first, so a row of it
+        // without `p` (a replayed tag, or an older Sill.app put back) reads "Update Sill" at once.
+        let listed = rows.compactMap { row in (row.direct ? nearby : network).first { $0.name == row.name } }
+        let seenTLS = Set(listed.filter { $0.door != .plain }.compactMap { SavedMacs.recognize(tag: $0.tag, in: savedMacs) })
+        if let marked = SavedMacs.seenOverTLS(seenTLS, in: savedMacs) {
+            savedMacs = marked
+            storeSavedMacs()
+            #if DEBUG
+            print("home: \(seenTLS.sorted()) seen with p: never dialed plain again")
+            #endif
+        }
+        // This device's own addresses: whether a Wired row's interface carries only link-local ones
+        // (the USB cable to the Mac) or a network's (a USB Ethernet adapter), for its word.
+        let own = Self.ownAddresses()
+        // The saved Macs by the Bonjour name each was last reached under, most recently used first:
+        // a row whose tag names none of them is the one of its name (DiscoveryPolicy.rowMac).
+        let byName = savedMacs.sorted { ($0.lastConnectedAt ?? $0.pairedAt) > ($1.lastConnectedAt ?? $1.pairedAt) }
+            .map { (macID: $0.macID, bonjourName: $0.bonjourName) }
         var next = rows.compactMap { row -> FoundMac? in
             guard let seen = (row.direct ? nearby : network).first(where: { $0.name == row.name }) else { return nil }
             let wired = DiscoveryPolicy.dialInterface(direct: row.direct, interfaces: seen.policy)
             let wifi = DiscoveryPolicy.wifiInterface(direct: row.direct, interfaces: seen.policy)
+            let macID = SavedMacs.recognize(tag: seen.tag, in: savedMacs) ?? seen.stands
+            let carriesTag = !(seen.tag ?? "").isEmpty
+            let named = DiscoveryPolicy.rowMac(tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName)
+            let savedByName = named?.tagNamed == false ? named?.macID : nil
+            let saved = named.flatMap { n in savedMacs.first { $0.macID == n.macID } }
+            // A tag that names no saved Mac under a saved Mac's name: a Mac set up again (a new key),
+            // or a look-alike; either way a tap asks, whatever its `p` (DiscoveryPolicy.rowDoor).
+            let door = DiscoveryPolicy.rowDoor(seen.door, otherTagUnderSavedName: DiscoveryPolicy.otherTagUnderSavedName(
+                tagged: macID, carriesTag: carriesTag, name: row.name, saved: byName))
+            let method = DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy)
+            let word = DiscoveryPolicy.rowWord(door: door, saved: saved != nil, revoked: saved?.revoked == true,
+                                               homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, method: method,
+                                               cable: wired.map { DiscoveryPolicy.carriesOnlyLinkLocal($0, own: own) } ?? false,
+                                               newKey: saved?.newKey == true)
             return FoundMac(name: row.name, endpoint: seen.endpoint, route: row.direct ? .direct : .network,
-                            macID: seen.macID ?? SavedMacs.recognize(tag: seen.tag, in: savedMacs),
-                            method: DiscoveryPolicy.method(direct: row.direct, interfaces: seen.policy),
+                            macID: macID, savedByName: savedByName, carriesTag: carriesTag, method: method,
                             wired: wired.flatMap { name in seen.interfaces.first { $0.name == name } },
-                            wifi: wifi.flatMap { name in seen.interfaces.first { $0.name == name } })
+                            wifi: wifi.flatMap { name in seen.interfaces.first { $0.name == name } },
+                            door: door, homeWord: word)
         }
         for mac in next where mac.route == .network && paths.wifi[mac.name] != nil { lastWifiRow[mac.name] = mac }
         // The moment a saved Mac's network row goes is what holds back its remote dial; the last
@@ -774,7 +1005,7 @@ final class StreamClient: ObservableObject {
         let networkIDs = Set(next.filter { $0.route == .network }.compactMap(\.macID))
         savedSightings = DiscoveryPolicy.sightings(savedSightings, listed: networkIDs, now: now)
         let names = SavedMacs.displayNames(savedMacs)
-        let saved = savedMacs.sorted { $0.pairedAt < $1.pairedAt }.map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
+        let saved = SavedMacs.remoteOrder(savedMacs).map { (macID: $0.macID, name: names[$0.macID] ?? $0.name) }
         let remote = DiscoveryPolicy.remoteRows(saved: saved, listedIDs: Set(next.compactMap(\.macID)), now: now,
                                                 searchingSince: searchingSince, localNetworkDenied: localNetworkDenied)
         next += remote.map { FoundMac(name: $0.name, endpoint: nil, route: .remote, macID: $0.macID) }
@@ -784,10 +1015,19 @@ final class StreamClient: ObservableObject {
         for mac in next where mac.route != .remote {
             let seen = (mac.direct ? nearby : network).first { $0.name == mac.name }
             let named = seen.map { s in s.interfaces.isEmpty ? s.policy.map { "\($0.name) (\($0.type))" } : s.interfaces.map { "\($0.name) (\($0.type))" } } ?? []
-            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))")
+            let door = mac.door == .plain ? "" : " (p=\(mac.door == .open ? "0" : "1")\(mac.homeWord == .method(mac.method) ? "" : ", \(mac.homeWord.word ?? "no word")"))"
+            let byName = mac.savedByName.map { " (saved Mac \($0) by its name alone)" } ?? ""
+            print("discovery: \(mac.name): \(mac.method?.word ?? "no word"), seen on \(named.joined(separator: ", "))\(byName)\(door)")
         }
         #endif
         macs = next
+        #if DEBUG
+        if let prefix = pendingTapRow, let mac = macs.first(where: { $0.route != .remote && $0.name.hasPrefix(prefix) }) {
+            pendingTapRow = nil
+            print("harness: tapping \(mac.name)")
+            DispatchQueue.main.async { self.connect(to: mac) }
+        }
+        #endif
     }
 
     /// A result's recognition tag (TXT `r`), if it carries one.
@@ -797,7 +1037,7 @@ final class StreamClient: ObservableObject {
     }
 
     /// An interface as DiscoveryPolicy spells it, case for case.
-    private static func policyInterface(_ interface: NWInterface) -> DiscoveryPolicy.Interface {
+    static func policyInterface(_ interface: NWInterface) -> DiscoveryPolicy.Interface {
         let type: DiscoveryPolicy.Interface.Kind
         switch interface.type {
         case .wifi: type = .wifi
@@ -879,7 +1119,8 @@ final class StreamClient: ObservableObject {
 
     /// A row of the connect screen. Only a Direct row is connected with peer-to-peer allowed; a row
     /// that says "Wired" is dialled over its wired interface first (`wiredDial`); a Remote row dials
-    /// the saved Mac's addresses through the remote door.
+    /// the saved Mac's addresses through the remote door. At home the row's door decides the rest
+    /// (`dial`): a pinned session, the ask, a session on an open door, a plain one, or nothing.
     func connect(to mac: FoundMac) {
         #if DEBUG
         if mockDiscovery {
@@ -892,26 +1133,67 @@ final class StreamClient: ObservableObject {
         }
         #endif
         reconnect = nil      // a tap starts afresh
+        cancelHomeAsk()      // …and so does an ask still under way
         if mac.route == .remote, let id = mac.macID {
             dialSaved(id, why: .tap)
             return
         }
-        dial(mac, macID: mac.macID)
+        // As strict as the automatic reconnect: a row named like a saved Mac, without a tag of a
+        // saved Mac's, is dialed as that Mac, pinned to its key (FoundMac.savedByName).
+        dial(mac, macID: mac.savedID, tap: true)
     }
 
     /// A network or Direct row's dial, a tap's or the automatic reconnect's (which keeps its
-    /// `reconnect` until the connection is ready): over the row's wired interface first when it
-    /// says "Wired" (`wiredDial`), else as listed. `macID`: the saved Mac it is. Main thread.
-    func dial(_ mac: FoundMac, macID: String?) {
-        guard let endpoint = mac.endpoint else { return }
+    /// `reconnect` until the connection is ready), by the row's home door and what this device knows
+    /// of its Mac (DiscoveryPolicy.homeDial, docs/home-pairing-plan.md §7.4): a saved Mac's session
+    /// pinned to its key; an unsaved Mac's on an open door with any key; the ask (a tap's only) for
+    /// a Mac that requires pairing or removed this device; a plain one to a plain door (a DEBUG
+    /// build, a Mac never seen with `p`); nothing for a Mac whose Sill is too old for this build.
+    /// `macID`: the saved Mac it is (its tag's, or the reconnect's by Bonjour name). True when it
+    /// dialed something. Main thread.
+    @discardableResult
+    func dial(_ mac: FoundMac, macID: String?, tap: Bool) -> Bool {
+        let saved = macID.flatMap { savedMac($0) }
+        let decision = homeDecision(mac, macID: macID, tap: tap)
+        switch decision {
+        case .updateSill:
+            status = DiscoveryPolicy.updateSillStatus(mac: mac.name)
+            return false
+        case .waitForTap:
+            return false
+        case .ask(let pinned):
+            ask(mac, savedID: pinned ? saved?.macID : nil, tagNamed: mac.macID != nil,
+                replaces: saved?.newKey == true ? saved?.macID : nil)
+            return true
+        case .pinned, .anyKey, .plain:
+            guard let trust = DiscoveryPolicy.sessionTrust(decision, savedPin: saved?.fingerprintData) else { return false }
+            return dialRow(mac, macID: saved?.macID, trust: trust, tagNamed: mac.macID != nil, tap: tap)
+        }
+    }
+
+    /// DiscoveryPolicy.homeDial for a row, from what this device knows of its Mac (`macID`).
+    func homeDecision(_ mac: FoundMac, macID: String?, tap: Bool) -> DiscoveryPolicy.HomeDial {
+        let saved = macID.flatMap { savedMac($0) }
+        return DiscoveryPolicy.homeDial(door: mac.door, saved: saved != nil, revoked: saved?.revoked == true,
+                                        homeTLS: saved?.homeTLS == true, debug: Self.debugBuild, tap: tap,
+                                        newKey: saved?.newKey == true)
+    }
+
+    /// A row's session dial with `trust`: over the row's wired interface first when it says "Wired"
+    /// (`wiredDial`), else as listed. `tried`: rows of the same saved Mac whose pin already failed
+    /// (§7.6). True when it dialed. Main thread.
+    @discardableResult
+    func dialRow(_ mac: FoundMac, macID: String?, trust: DiscoveryPolicy.HomeTrust, tagNamed: Bool, tried: [String] = [],
+                 tap: Bool = false) -> Bool {
+        guard let endpoint = mac.endpoint else { return false }
+        let row = HomeRow(id: mac.id, tagNamed: tagNamed, tried: tried, tapped: tap)
         if let wired = wiredDial(for: mac) {
             #if DEBUG
             print("dialing \(mac.name) on \(wired.via)")
             #endif
-            connect(to: wired.endpoint, name: mac.name, macID: macID, fallback: endpoint)
-        } else {
-            connect(to: endpoint, name: mac.name, peerToPeer: mac.direct, macID: macID)
+            return connect(to: wired.endpoint, name: mac.name, macID: macID, fallback: endpoint, trust: trust, row: row)
         }
+        return connect(to: endpoint, name: mac.name, peerToPeer: mac.direct, macID: macID, trust: trust, row: row)
     }
 
     /// Where a row whose Mac the network browser saw on a wired interface (`FoundMac.wired`, the
@@ -919,7 +1201,7 @@ final class StreamClient: ObservableObject {
     /// the connection runs over the cable (with Wi-Fi up too, an unconstrained dial took either,
     /// 2026-09-25), and how the DEBUG console names it. Nil for any other row, dialled as listed.
     /// Main thread.
-    private func wiredDial(for mac: FoundMac) -> (endpoint: NWEndpoint, via: String)? {
+    func wiredDial(for mac: FoundMac) -> (endpoint: NWEndpoint, via: String)? {
         guard mac.route == .network else { return nil }
         #if DEBUG
         if let test = Self.wiredTest { return (test, "\(test) (wired test)") }
@@ -953,8 +1235,36 @@ final class StreamClient: ObservableObject {
     /// brings its own name. `peerToPeer` only for a Mac seen over peer-to-peer Wi-Fi alone. `macID`:
     /// the saved Mac the row is, when its tag said so. With a `fallback` this is a wired dial
     /// (`wiredDial`): not ready within DiscoveryPolicy.wiredWait, or unable to go on, it gives way
-    /// to `fallback`, the row as listed, dialled unconstrained (`dialUnconstrained`).
-    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false, macID: String? = nil, fallback: NWEndpoint? = nil) {
+    /// to `fallback`, the row as listed, dialled unconstrained (`dialUnconstrained`). `trust`: how
+    /// the session speaks to the door (docs/home-pairing-plan.md §7.2): plain, connected at `.ready`
+    /// as before; or TLS, pinned as the trust says, and connected at its first window list
+    /// (`homeSessionReady`), since with TLS 1.3 the connection is ready before the Mac has judged
+    /// this device's key. `row`: the row it was dialed from. False when a TLS dial finds no key and
+    /// none can be made (the status says so).
+    @discardableResult
+    func connect(to endpoint: NWEndpoint, name: String, peerToPeer: Bool = false, macID: String? = nil, fallback: NWEndpoint? = nil,
+                 trust: DiscoveryPolicy.HomeTrust = .plain, row: HomeRow? = nil) -> Bool {
+        // A TLS dial's parameters need this device's key, made now at its first one. A pin refused
+        // (-9808) ends the dial as its `.waiting` would have: a Bonjour row's connection never says
+        // so itself, it prepares again and again (DeviceTLS.options), and the tap's "Connecting to…"
+        // stayed for good (Noah, 2026-09-27).
+        let refused = WeakConnection()
+        guard let params = sessionParameters(trust, peerToPeer: peerToPeer, onPinRefused: { [weak self] in
+            guard let self, let c = refused.connection else { return }
+            refused.connection = nil   // once per connection
+            #if DEBUG
+            print("home: this device's pin refused the key that answered as \(name) (-9808)")
+            #endif
+            DispatchQueue.main.async {
+                guard self.connection === c, !self.connected else { return }
+                if let fallback {
+                    self.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row, why: "met another key (-9808)")
+                    return
+                }
+                self.connectionLost(c, error: .tls(DiscoveryPolicy.pinRefused))
+                c.cancel()
+            }
+        }) else { return false }
         // One connection at a time. A tap on the connect screen racing the reconnect timer used to
         // open two: both then read from whichever `connection` pointed at, interleaving headers
         // and payloads, while the other was never read and the host evicted it after 4 s.
@@ -973,16 +1283,21 @@ final class StreamClient: ObservableObject {
         hostName = name
         var bonjourName: String?
         if case .service(let service, _, _, _) = endpoint { bonjourName = service }
-        session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName)
+        session = Session(route: peerToPeer ? .direct : .network, macID: macID, bonjourName: bonjourName, home: trust, row: row,
+                          endpoint: endpoint)
         goodbye = nil
         status = peerToPeer ? "Connecting to \(name) directly…" : "Connecting to \(name)…"
-        let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: peerToPeer))
+        #if DEBUG
+        if trust.tls { print("home: dialing \(name) over TLS, \(DiscoveryPolicy.pin(trust) == .anyKey ? "any key" : "pinned")") }
+        #endif
+        let c = NWConnection(to: endpoint, using: params)
         // The hello first, written to `c` before it becomes the session's connection below: from
         // then on the session can send through the link before `.ready` (a coast's end as the
         // stream screen goes, the pointer's viewport 200 ms after a tear-down), and a send made
         // before `.ready` goes out once it is ready, in the order made. Sent at `.ready`, the hello
         // came after such a message, and a Mac with a device floor refuses a device whose first
-        // message is not its hello.
+        // message is not its hello. Over TLS (a TLS home door) the send waits for the handshake, so
+        // the hello is the first message inside TLS.
         sendHello(on: c)
         var wasReady = false   // the handler runs on `queue`, one state at a time
         c.stateUpdateHandler = { [weak self] state in
@@ -995,29 +1310,21 @@ final class StreamClient: ObservableObject {
                 wasReady = true
                 let direct = peerToPeer && Self.runsPeerToPeer(c.currentPath)
                 let path = c.currentPath
+                let seen = trust.tls ? RemoteTLS.peerFingerprint(c) : nil
                 DispatchQueue.main.async {
                     guard self.connection === c else { c.cancel(); return }   // replaced while connecting
-                    self.reconnect = nil
-                    self.connected = true
                     self.connectedDirectly = direct
                     self.session?.route = direct ? .direct : .network
+                    // An open door's session keeps the key its first connection saw: every later one pins it.
+                    if let t = self.session?.home { self.session?.home = DiscoveryPolicy.trust(t, readyWith: seen) }
                     self.setRoute(from: path, fresh: true)
                     self.pathSignals = PathSignals()
                     self.lastPongAt = ProcessInfo.processInfo.systemUptime
-                    self.askedNearby = false
-                    self.connectedAt = Date()
-                    self.status = "Connected to \(name)"
-                    self.updateDiscovery()   // stops the nearby browser; the network one keeps running
-                    #if DEBUG
-                    if let test = UserDefaults.standard.string(forKey: "SillMoveTest") {
-                        self.beginMoveTest(endpoint: endpoint, name: name, mode: test)
+                    if trust.tls {
+                        self.awaitFirstList(c)   // connected at its first window list (`homeSessionReady`)
+                    } else {
+                        self.markConnected(endpoint: endpoint, name: name)
                     }
-                    if let test = UserDefaults.standard.string(forKey: "SillPathTest") {
-                        self.beginPathTest(name: name, spec: test)
-                    }
-                    #endif
-                    self.moveToNetworkIfListed()   // over AWDL: the network may list this Mac already
-                    self.followBestPath()
                 }
                 self.startMeasuring(c, remote: false)   // before the first read, so the first window is this connection's alone
                 self.startReading(c)
@@ -1026,7 +1333,19 @@ final class StreamClient: ObservableObject {
                 // Once `c` carries the session (a wired dial's too), waiting again means its path is gone.
                 self.sessionWaiting(c)
                 if let fallback {   // a wired dial that cannot go on (the cable just pulled, say)
-                    DispatchQueue.main.async { self.dialUnconstrained(after: c, fallback, name: name, macID: macID, why: "is waiting (\(e))") }
+                    DispatchQueue.main.async {
+                        self.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row, why: "is waiting (\(e))")
+                    }
+                    return
+                }
+                // A TLS error while connecting (this device's pin refused the Mac's key, -9808): the
+                // dial is over at once, and its end says what it means (`homeSessionEnded`).
+                if trust.tls, RemoteTLS.status(of: e) != nil {
+                    DispatchQueue.main.async {
+                        guard self.connection === c, !self.connected else { return }
+                        self.connectionLost(c, error: e)
+                        c.cancel()
+                    }
                     return
                 }
                 DispatchQueue.main.async { self.status = "Waiting for \(name)…" }
@@ -1041,7 +1360,9 @@ final class StreamClient: ObservableObject {
                 if let fallback {
                     // Queued before the cancel's .cancelled, whose connectionLost then finds `c`
                     // replaced by the unconstrained dial.
-                    DispatchQueue.main.async { self.dialUnconstrained(after: c, fallback, name: name, macID: macID, why: "failed (\(e))") }
+                    DispatchQueue.main.async {
+                        self.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row, why: "failed (\(e))")
+                    }
                 } else {
                     self.connectionLost(c, error: e)
                 }
@@ -1053,14 +1374,80 @@ final class StreamClient: ObservableObject {
                 break
             }
         }
+        refused.connection = c
         followRoute(of: c)
         connection = c        // before start: .ready can be delivered before the next line runs
         c.start(queue: queue)
-        if let fallback {
-            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
-                self?.dialUnconstrained(after: c, fallback, name: name, macID: macID, why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
+        if reconnect == nil {
+            // Not the automatic reconnect's dial (a tap's, the session after a pairing, `-SillConnect`):
+            // its first window list within DiscoveryPolicy.tapDialDeadline, or it ends with words, so
+            // "Connecting to…" never stays (a wired dial's fallback counts afresh from its own dial).
+            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.tapDialDeadline) { [weak self] in
+                guard let self, self.connection === c, !self.connected, self.reconnect == nil else { return }
+                #if DEBUG
+                print("session: \(name) not connected in \(DiscoveryPolicy.tapDialDeadline) s (\(c.state)); giving up")
+                #endif
+                self.connection = nil
+                c.cancel()                                   // its .cancelled finds it replaced
+                self.tearDown(status: DiscoveryPolicy.HomeCopy.noAnswer(mac: name))
+                self.updateDiscovery()
             }
         }
+        if let fallback {
+            DispatchQueue.main.asyncAfter(deadline: .now() + DiscoveryPolicy.wiredWait) { [weak self] in
+                self?.dialUnconstrained(after: c, fallback, name: name, macID: macID, trust: trust, row: row,
+                                        why: "did not connect in \(DiscoveryPolicy.wiredWait) s")
+            }
+        } else if reconnect != nil {
+            // The automatic reconnect's dial (a tap clears `reconnect` first) must get ready. Every
+            // look of the reconnect needs `connection == nil` (its remote dial too), so a dial that
+            // never does would hold it for good, and one can: a row dialed as its registration goes
+            // (Sill quit or died without a goodbye, the row's last second) leaves the Bonjour resolve
+            // waiting with no end, in `.preparing`, where only `.waiting` has a limit (above). Let
+            // go after reconnectDialWait, the reconnect keeps what it was (its loss, its remote
+            // dials' timing, "Reconnecting…"), and tearDown's discoveryChanged looks again: the
+            // Mac's row listed by then (back under another name, say), else its remote dial when
+            // due. A wired dial gets this through its fallback, which has none.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectDialWait) { [weak self] in
+                guard let self, self.connection === c, !self.connected, self.reconnect != nil, c.state != .ready else { return }
+                #if DEBUG
+                print("reconnect: \(name) not ready in \(Self.reconnectDialWait) s (\(c.state)); letting it go and looking again")
+                #endif
+                self.connection = nil
+                c.cancel()                                                 // its .cancelled finds it replaced
+                self.tearDown(status: self.status, restartSearch: false)   // then its discoveryChanged looks again
+            }
+        }
+        return true
+    }
+
+    /// The session is connected: at `.ready` for a plain door, at its first window list over TLS
+    /// (`homeSessionReady`). The automatic reconnect's session (its `reconnect` is kept until now; a
+    /// tap clears it) goes on with the last session's tour decision. The reconnect ends, the nearby
+    /// search stops, and a session over AWDL or on Wi-Fi with the cable listed may move at once. Main
+    /// thread.
+    func markConnected(endpoint: NWEndpoint?, name: String) {
+        startTourSession(reconnected: reconnect != nil)
+        reconnect = nil
+        // Connected: no ask is left waiting (a pairing through a link's addresses leaves one), so the
+        // home card never comes back for it with the connect screen.
+        cancelHomeAsk(idleStatus: false)
+        connected = true
+        askedNearby = false
+        connectedAt = Date()
+        pinRefusedRows = []
+        status = "Connected to \(name)"
+        updateDiscovery()   // stops the nearby browser; the network one keeps running
+        #if DEBUG
+        if let endpoint, let test = UserDefaults.standard.string(forKey: "SillMoveTest") {
+            beginMoveTest(endpoint: endpoint, name: name, mode: test)
+        }
+        if let test = UserDefaults.standard.string(forKey: "SillPathTest") {
+            beginPathTest(name: name, spec: test)
+        }
+        #endif
+        moveToNetworkIfListed()   // over AWDL: the network may list this Mac already
+        followBestPath()
     }
 
     /// A wired dial, `c`, that has not connected: cancelled, and `fallback`, the row as listed,
@@ -1068,14 +1455,40 @@ final class StreamClient: ObservableObject {
     /// its own), under the status line the dial showed ("Reconnecting…" stays). Only while `c` is
     /// still the connection and not ready: a tap may have replaced it meanwhile, or it connected at
     /// the last moment. Main thread.
-    private func dialUnconstrained(after c: NWConnection, _ fallback: NWEndpoint, name: String, macID: String?, why: String) {
+    private func dialUnconstrained(after c: NWConnection, _ fallback: NWEndpoint, name: String, macID: String?,
+                                   trust: DiscoveryPolicy.HomeTrust, row: HomeRow?, why: String) {
         guard connection === c, !connected, c.state != .ready else { return }
         #if DEBUG
         print("wired dial \(why); dialing unconstrained")
         #endif
         let shown = status
-        connect(to: fallback, name: name, macID: macID)   // cancels `c`, whose .cancelled finds it replaced
+        // Cancels `c`, whose .cancelled finds it replaced; the same trust, so never plain for a TLS door.
+        connect(to: fallback, name: name, macID: macID, trust: trust, row: row)
         status = shown
+    }
+
+    /// A move's connection (from AWDL, to the cable, to Wi-Fi, a reconnect over the cable): as the
+    /// session's own connections are dialed (`sessionParameters`), never peer-to-peer (a move goes
+    /// to the network), pinned to the key the session trusts. The move home's (`fromRemote`) has a
+    /// trust of its own, the saved Mac's key pinned (`homeMoveTrust`: a remote session has no home
+    /// trust, and its door is the remote one), and a pin refused ends it at once
+    /// (`homeMovePinRefused` through `refused`, the connection these parameters are for), where a
+    /// Bonjour row's connection would prepare again and again until the move's 5 s. Should this
+    /// device's key be unreadable (it cannot be: the session's first connection was made with it,
+    /// and it stays in memory), parameters that never connect, so the move fails as any failed move
+    /// does and nothing goes out plain to a TLS door.
+    private func moveParameters(_ kind: MoveKind, refused: WeakConnection) -> NWParameters {
+        if kind == .fromRemote {
+            if let trust = homeMoveTrust, let params = sessionParameters(trust, peerToPeer: false, onPinRefused: { [weak self] in
+                guard let self, let c = refused.connection else { return }
+                refused.connection = nil   // once per connection
+                DispatchQueue.main.async { self.homeMovePinRefused(c) }
+            }) { return params }
+            return DeviceTLS.refusing(peerToPeer: false, queue: queue)
+        }
+        let trust = session?.home ?? .plain
+        if let params = sessionParameters(trust, peerToPeer: false) { return params }
+        return DeviceTLS.refusing(peerToPeer: false, queue: queue)
     }
 
     /// This device's hello (kind 23): its version, build, protocol and name, built once. DEBUG:
@@ -1093,10 +1506,11 @@ final class StreamClient: ObservableObject {
     /// anything else can go out on it: a Mac with a device floor judges the device by its first
     /// message. A tap's, a reconnect's, a wired dial's and its fallback's as the connection is
     /// made, before it becomes the session's (`connect(to:)`: a send made before `.ready` waits
-    /// for it, in order); a move's as it is made (`startMove`: from AWDL, to the cable, to Wi-Fi,
-    /// a rescue's reconnect, and each one's fallback; nothing else goes out on it before the
-    /// hand-over); a remote dial's winner before it becomes the session's (`adopt`). Never on a
-    /// pairing connection, whose one message is kind 19. Older Macs skip it. Any thread.
+    /// for it, in order, and over TLS for the handshake, so it is the first message inside TLS); a
+    /// move's as it is made (`startMove`: from AWDL, to the cable, to Wi-Fi, a rescue's reconnect,
+    /// and each one's fallback; nothing else goes out on it before the hand-over); a remote dial's
+    /// winner before it becomes the session's (`adopt`). Never on a pairing connection, whose one
+    /// message is kind 19. Older Macs skip it. Any thread.
     private func sendHello(on c: NWConnection) {
         let message = StreamMessage(kind: .hello, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Self.helloPayload)
         c.send(content: message.serialized(), completion: .contentProcessed { _ in })
@@ -1105,20 +1519,6 @@ final class StreamClient: ObservableObject {
             print("hello: sent Sill \(hello.appVersion ?? "?") (\(hello.build ?? "?")), protocol \(hello.protocol ?? 0)")
         }
         #endif
-    }
-
-    /// Every connection to a Mac: TCP without Nagle, the interactive video class, and peer-to-peer
-    /// (AWDL) only for a "Direct" row. A Mac the network lists is reached over the network (see
-    /// startBrowsing), so at home a connection never takes AWDL.
-    private static func connectionParameters(peerToPeer: Bool) -> NWParameters {
-        let tcp = NWProtocolTCP.Options()
-        tcp.noDelay = true
-        let params = NWParameters(tls: nil, tcp: tcp)
-        params.includePeerToPeer = peerToPeer
-        // Wi-Fi QoS: video + pointer traffic is latency-sensitive; the access point and the radio
-        // treat this class (WMM video) with shorter queues than best-effort.
-        params.serviceClass = .interactiveVideo
-        return params
     }
 
     // MARK: Moving a session over AWDL to the network
@@ -1195,15 +1595,19 @@ final class StreamClient: ObservableObject {
         homeMoveCheck?.cancel()
         homeMoveCheck = nil
         guard connected, let s = session, s.route.isRemote, s.why != .connectRemotely, sessionListed, moving == nil, !sessionDead,
-              connection != nil, remoteInfoIssuedAt != nil, let id = s.macID,
-              let mac = macs.first(where: { $0.route == .network && $0.macID == id }) else { return }
+              connection != nil, remoteInfoIssuedAt != nil, let id = s.macID, let saved = savedMac(id),
+              let mac = macs.first(where: { $0.route == .network && $0.macID == id }),
+              // Pinned TLS to the saved Mac's key at a door that speaks it, never plain, never an ask:
+              // a plain door, or a Mac that removed this device or has a new key, keeps it remote.
+              let trust = DiscoveryPolicy.moveHomeTrust(door: mac.door, revoked: saved.revoked == true, newKey: saved.newKey == true,
+                                                        savedPin: saved.fingerprintData) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         let listing = savedSightings.since[id]
         let failures = failedHomeMoves.map { $0.listing == listing ? $0.count : 0 } ?? 0
         let decision = DiscoveryPolicy.moveHome(listedSince: listing, lastAttempt: lastHomeMove, failures: failures,
                                                 refusedListing: refusedHomeListing, now: now)
         if decision.move {
-            moveHome(to: mac, listing: listing)
+            moveHome(to: mac, listing: listing, trust: trust)
         } else if let at = decision.recheckAt {
             #if DEBUG
             if failures == 0, homeMoveAnnounced != listing {
@@ -1218,16 +1622,20 @@ final class StreamClient: ObservableObject {
     }
 
     /// Opens a network connection to the saved Mac's row beside the remote one (the cable first when
-    /// the row says Wired, as a tap dials it), sends it the home viewport, reads it to its window list
+    /// the row says Wired, as a tap dials it), with `trust`, TLS pinned to the saved Mac's key, its
+    /// hello first inside TLS (`startMove`), sends it the home viewport, reads it to its window list
     /// and kind 18 (`probeMove`, `moveProbed`), and hands the session over with a fence
     /// (`finishMove`). It counts as a move up for `followBestPath`. Main thread.
-    private func moveHome(to mac: FoundMac, listing: Double?) {
+    private func moveHome(to mac: FoundMac, listing: Double?, trust: DiscoveryPolicy.HomeTrust) {
         guard let endpoint = mac.endpoint else { return }
         let now = ProcessInfo.processInfo.systemUptime
         lastHomeMove = now
         lastMoveUp = now
         homeMoveListing = listing
         homeMoveName = mac.name
+        homeMoveTrust = trust
+        homeMoveRow = HomeRow(id: mac.id, tagNamed: true)
+        homeMoveInfoFloor = remoteInfoIssuedAt
         homeMoveViewport = lastViewport.map { v -> Viewport in
             var home = v
             home.fps = StreamClient.wantedFPS(remote: false)
@@ -1248,12 +1656,23 @@ final class StreamClient: ObservableObject {
 
     /// The move home's kind 18 speaks for the saved Mac this session is with: its signature checks, the
     /// key that signed it is the saved pin, its Mac ID is the session's, and it is at least as new as
-    /// the one this remote session received (the Mac signs one afresh for every catalog). Main thread.
+    /// the one this remote session had received when the move started (`homeMoveInfoFloor`; the Mac
+    /// signs one afresh for every catalog). Main thread.
     private func homeInfoChecks(_ signed: SignedMacInfo?) -> Bool {
         guard let verified = signed?.verified(), let id = session?.macID, let saved = savedMac(id),
               saved.fingerprintData == verified.fingerprint, verified.info.macID == id,
-              let seen = remoteInfoIssuedAt else { return false }
-        return verified.info.issuedAt >= seen
+              let floor = homeMoveInfoFloor else { return false }
+        return verified.info.issuedAt >= floor
+    }
+
+    /// The move home's pinned dial met another key (-9808, DeviceTLS's `onPinRefused`): not the
+    /// saved Mac, whose key this session holds through the remote door right now, so nothing is
+    /// paired again (DiscoveryPolicy.afterPinRefused is a session dial's, and a new key there would
+    /// end this working session's Mac): a look-alike replaying the Mac's tag, or another Mac. Its
+    /// listing is refused as another launch's is, and the session stays remote. Main thread.
+    private func homeMovePinRefused(_ c: NWConnection) {
+        guard let move = moving, move.connection === c, move.kind == .fromRemote else { return }
+        refuseHomeMove(c, why: "\(homeMoveName ?? hostName) on the network answered with another key (-9808)")
     }
 
     /// Forgets what a remote session knew of its move home (a new session, or none). Main thread.
@@ -1266,6 +1685,9 @@ final class StreamClient: ObservableObject {
         homeMoveListing = nil
         homeMoveName = nil
         homeMoveViewport = nil
+        homeMoveTrust = nil
+        homeMoveRow = nil
+        homeMoveInfoFloor = nil
         remoteInfoIssuedAt = nil
         #if DEBUG
         testHomeRows = []
@@ -1315,12 +1737,15 @@ final class StreamClient: ObservableObject {
     /// none (the row as listed could be Wi-Fi again, and never Wi-Fi to Wi-Fi): its wired dial not
     /// ready within wiredWait, or unable to go on, ends the move (`giveUpMove`). Main thread.
     private func startMove(to endpoint: NWEndpoint, kind: MoveKind, fallback: NWEndpoint?) {
-        let c = NWConnection(to: endpoint, using: Self.connectionParameters(peerToPeer: false))
+        let refused = WeakConnection()
+        let c = NWConnection(to: endpoint, using: moveParameters(kind, refused: refused))
+        refused.connection = c
         // Its own hello first, written to `c` as it is made, as `connect(to:)` does: every move's
         // connection (from AWDL, to the cable, to Wi-Fi, a rescue's, each fallback's) is a new
         // session connection to the Mac, and a Mac with a device floor judges it by its first
-        // message. Nothing else goes out on it before the hand-over: what the session sends
-        // meanwhile waits in SessionLink (a fence, a hold), which releases it onto `c` only after.
+        // message (inside TLS at a TLS home door). Nothing else goes out on it before the
+        // hand-over: what the session sends meanwhile waits in SessionLink (a fence, a hold), which
+        // releases it onto `c` only after.
         sendHello(on: c)
         moving = Move(connection: c, kind: kind)
         // A move up gives up; a reconnect over the cable (`sessionDead`) has the row as listed for
@@ -1511,9 +1936,10 @@ final class StreamClient: ObservableObject {
         guard c.state == .ready else { c.cancel(); return }
         if move.kind == .fromRemote {
             // The same launch of Sill, and a kind 18 the saved Mac signed at least as recently as this
-            // session's own: a TXT tag and a kind 18 captured before this session are not enough.
-            // (Anyone who reaches the Mac's home door can fetch fresh ones and relay them: the home
-            // door is plaintext until M5, as for every reconnect over it.)
+            // session's own when the move began. The handshake, pinned to the saved Mac's key, has
+            // proved the Mac already (pairing at home: the home door speaks TLS, and nothing of this
+            // device reaches another key); this says it a second time, for a millisecond: a TXT tag
+            // and a kind 18 captured before this session are not enough either way.
             let why: String?
             if !DiscoveryPolicy.sameHost(sessionHost, host) {
                 why = "\(hostName) on the network is another launch of Sill, or another Mac"
@@ -1631,12 +2057,26 @@ final class StreamClient: ObservableObject {
         if kind == .fromRemote {
             // Home: the session is a network one from here, its route line gone and its readout's
             // word read from the new connection (below). Its liveness and pings are the home rule's
-            // (`startMeasuring(remote: false)`).
+            // (`startMeasuring(remote: false)`). Its connections from now on, a move to the cable or
+            // to Wi-Fi included, are pinned to the saved Mac's key as the move's were (`session.home`,
+            // `moveParameters`), and how it ends is a session at home's (StreamClient+Home's
+            // `homeSessionEnded`: a goodbye "removed" revokes, the Mac's key pinned); the row it came
+            // to is its row. The saved Mac's home door speaks TLS: never dialed plain again.
             session?.candidate = nil
             if let name = homeMoveName { session?.bonjourName = name; hostName = name }
+            session?.home = homeMoveTrust
+            session?.row = homeMoveRow
+            session?.endpoint = c.endpoint
+            if let id = session?.macID, let next = SavedMacs.seenOverTLS([id], in: savedMacs) {
+                savedMacs = next
+                persistSavedMacs()
+            }
             remoteRoute = nil
             remoteInfoIssuedAt = nil
             failedHomeMoves = nil
+            homeMoveTrust = nil
+            homeMoveRow = nil
+            homeMoveInfoFloor = nil
         }
         connectedDirectly = false
         session?.route = .network
@@ -1673,6 +2113,10 @@ final class StreamClient: ObservableObject {
         // restarts); through `sendViewport` it becomes `lastViewport`, and the Mac finds it unchanged.
         if let v = kind == .fromRemote ? (homeMoveViewport ?? lastViewport) : lastViewport { sendViewport(v) }
         if kind == .fromRemote { homeMoveViewport = nil }
+        // The Mac sends its menus only to a connection that asked, and answers a request on the
+        // connection it came on, which the session no longer reads: the menus waiting settle, and
+        // the new connection asks for the top level (the same Mac: its menus stay meanwhile).
+        menusMoved()
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
@@ -1730,6 +2174,9 @@ final class StreamClient: ObservableObject {
                 failedHomeMoves = (listing, failedHomeMoves.map { $0.listing == listing ? $0.count + 1 : 1 } ?? 1)
             }
             homeMoveViewport = nil
+            homeMoveTrust = nil
+            homeMoveRow = nil
+            homeMoveInfoFloor = nil
             #if DEBUG
             if let f = failedHomeMoves, f.listing == homeMoveListing {
                 print("remote: the move home did not complete (\(f.count) in a row); the next try in \(Int(DiscoveryPolicy.upWait(failures: f.count))) s")
@@ -2402,15 +2849,21 @@ final class StreamClient: ObservableObject {
         notice = nil
         hostVersion = nil
         hostProtocol = nil
+        hostGestures = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
         macInfoVerified = nil
         macInfoAt = nil
+        // Pair This iPad…'s ask was this session's: its window, if the Mac showed one, runs out.
+        endOverlayAsk(withdraw: false)
         linkStats = nil
         recentRttMedians = []
         slowLink = false
         resetPointer()
+        // A tour cut short by the session's end takes its pause with it, and a held pointer move.
+        pointerMoveOwed = false
+        inputPaused = false
         // After the pointer goes (hiding it re-sends the viewport 200 ms later): nothing of this
         // session's viewport may reach the next connection, which may already be dialling.
         forgetViewport()
@@ -2441,12 +2894,24 @@ final class StreamClient: ObservableObject {
         settingsExpiry?.cancel()
         settingsExpiry = nil
         lastRttMaxMs = nil
+        // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
+        // loses the Mac's menus at its next rebuild.
+        resetMenus()
     }
 
     // MARK: - Client → host
 
-    /// Ask the host to stream this source. The host answers with a fresh window list.
+    /// The person's pick (a thumbnail, Desktop, the Apps list): the host streams this source and
+    /// answers with a fresh window list. It counts for the tour as something happening.
     func select(_ source: StreamSource) {
+        noteAction()
+        request(source)
+    }
+
+    /// Asks the host to stream this source: the person's pick (`select`), or this device's own
+    /// request (the Desktop on a connection's first list, a pick made again after a move), which
+    /// is not the person's doing.
+    private func request(_ source: StreamSource) {
         choicesSent += 1
         send(.selectSource, Wire.encode(source))
         #if DEBUG
@@ -2457,6 +2922,7 @@ final class StreamClient: ObservableObject {
 
     /// The bar's long-press menu: close, minimize or full-screen a window on the Mac.
     func command(_ action: WindowCommand.Action, window id: UInt32) {
+        noteAction()
         send(.windowCommand, Wire.encode(WindowCommand(id: id, action: action)))
     }
 
@@ -2472,6 +2938,7 @@ final class StreamClient: ObservableObject {
 
     /// Moves a window to `index` of the arranged bar (a drag in progress). Main thread.
     func moveWindow(_ id: UInt32, to index: Int) {
+        noteAction()
         var order = orderedWindows.map(\.id)
         guard let from = order.firstIndex(of: id), index >= 0, index < order.count, from != index else { return }
         order.remove(at: from)
@@ -2498,6 +2965,7 @@ final class StreamClient: ObservableObject {
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
+        noteAction()
         choicesSent += 1   // the host picks the launched app's window: a choice, like a pick
         send(.launchApp, Wire.encode(LaunchApp(bundleID: bundleID)))
     }
@@ -2518,6 +2986,15 @@ final class StreamClient: ObservableObject {
     }
 
     func sendInput(_ event: InputEvent) {
+        // Every input passes here, a hover and a flick's coast included: the tour's rule counts it
+        // as something happening (StreamScreen.considerTour).
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
+        // The tour takes every touch and the keyboard while it shows, and holds back the pointer's
+        // move to a new frame's middle, so nothing should get here then; the one case expected is a
+        // flick's coast still running out under Take the Tour.
+        if inputPaused { print("tour: INPUT SENT WHILE THE TOUR SHOWED: \(event)") }
+        #endif
         queue.async { [weak self] in
             guard let self else { return }
             // Every input hands this device the pointer, coalesced moves included, here where the
@@ -2546,6 +3023,40 @@ final class StreamClient: ObservableObject {
                 }
             }
         }
+    }
+
+    /// This device's switch for three-finger gestures (the Settings panel's This iPad group): on
+    /// unless turned off. The device's own preference, never sent to the Mac; read at each gesture.
+    static let gesturesKey = "Sill.trackpadGestures"
+    static var gesturesOn: Bool {
+        // `bool(forKey:)`, not `as? Bool`: a launch argument's "0" is a string, which it reads as
+        // @AppStorage does, so the switch and the panel always agree.
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
+    }
+
+    /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
+    /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
+    /// only while this device's switch is on and the Mac says it takes gestures. While a window
+    /// streams, the Desktop first, as its button picks it: none of the views a gesture opens
+    /// (Mission Control, App Exposé, Apps, Show Desktop) is in a window's picture. A pointer move
+    /// still waiting goes before the gesture, as before any input but a move. Nothing else: no
+    /// pointer, no scroll, and a latched modifier stays latched. Main thread. True when it went.
+    @discardableResult
+    func sendGesture(_ gesture: TrackpadGestures.Gesture, fingers: Int) -> Bool {
+        var windowStreams = false
+        if case .window = active { windowStreams = true }
+        let plan = TrackpadGestures.sending(switchOn: Self.gesturesOn, connected: connected, hostGestures: hostGestures,
+                                            generation: TrackpadGesture.generation, windowStreams: windowStreams)
+        guard plan.send else { return false }
+        if plan.desktopFirst { select(.desktop) }
+        let payload = Wire.encode(TrackpadGesture(gesture: gesture.rawValue, fingers: fingers))
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.flushPendingMove()
+            self.send(.gesture, payload)
+        }
+        return true
     }
 
     /// On `queue`.
@@ -2638,6 +3149,8 @@ final class StreamClient: ObservableObject {
         presence.follow(pointerFeed.current)
         guard presence.recentresOnNewFrame(now: ProcessInfo.processInfo.systemUptime) else { return }
         setOwnPointer(CGPoint(x: 0.5, y: 0.5), from: presence.origin)
+        // While the tour shows nothing goes to the Mac as input: its cursor follows at the end.
+        if inputPaused { pointerMoveOwed = true; return }
         sendInput(.pointer(.move, x: 0.5, y: 0.5))
     }
 
@@ -2831,13 +3344,16 @@ final class StreamClient: ObservableObject {
                 // Only from the current connection: a list queued by a replaced one must not
                 // describe the next session.
                 guard self.connection === from else { return }
-                // A remote session is connected at its first window list, not at `.ready`.
+                // A remote session, and one at home over TLS, is connected at its first window list,
+                // not at `.ready`: the Mac has admitted this device's key.
                 self.remoteSessionReady()
+                self.homeSessionReady()
                 // The host this session runs on, which a move to the network must reach again
                 // (`moveProbed`); its first list is what lets a move start.
                 self.sessionHost = list.launchID
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
+                if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -2850,6 +3366,9 @@ final class StreamClient: ObservableObject {
                     self.moveToNetworkIfListed()
                     self.followBestPath()
                     self.moveHomeIfListed()
+                    // Once per connection, now that the Mac has let this device in: the Mac's menus,
+                    // their top level now and again whenever it changes (a Mac from before them skips it).
+                    self.subscribeToMenus()
                     #if DEBUG
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
                     SettingsScript.sessionListed(self)   // -SillSettingsScript: and this one's
@@ -2873,7 +3392,7 @@ final class StreamClient: ObservableObject {
                         #if DEBUG
                         print("path: nothing streams on the new connection: picking \(pick) again")
                         #endif
-                        self.select(pick)
+                        self.request(pick)
                         return
                     }
                 }
@@ -2881,11 +3400,11 @@ final class StreamClient: ObservableObject {
                 // connection, and again when the window being watched has closed. Not when a pick
                 // failed (the host still lists the window): that is the user's to retry. At most
                 // once every 10 s, so a host that cannot start the Desktop does not loop.
-                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10 {
+                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10, !Self.noAutoDesktop {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
-                        self.select(.desktop)
+                        self.request(.desktop)
                     case .window(let id) where !list.windows.contains(where: { $0.id == id }):
                         // A window can drop off the list for a second or two (a Space change,
                         // full screen): only a window still gone after that has really closed.
@@ -2899,7 +3418,7 @@ final class StreamClient: ObservableObject {
                             guard let self, self.connected, self.active == .none, self.choicesSent == choices,
                                   !self.windows.contains(where: { $0.id == id }) else { return }
                             self.lastAutoDesktop = Date()
-                            self.select(.desktop)
+                            self.request(.desktop)
                         }
                     default:
                         break
@@ -2941,12 +3460,15 @@ final class StreamClient: ObservableObject {
             let at = ProcessInfo.processInfo.systemUptime
             DispatchQueue.main.async { self.heardPong(at) }
         case .macInfo:
-            // Who this Mac is and how to reach it from afar (StreamClient+Remote).
+            // Who this Mac is and how to reach it from afar (StreamClient+Remote), with the key the
+            // connection it came on showed in its handshake (nil on a plain one): only a kind 18
+            // that key signed speaks for this session's Mac (DiscoveryPolicy.macInfoNamesSession).
             guard let signed = Wire.decode(SignedMacInfo.self, from: data) else { return }
             let from = connection
+            let key = from.flatMap { RemoteTLS.peerFingerprint($0) }
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
-                self.receiveMacInfo(signed, endpoint: from?.endpoint)
+                self.receiveMacInfo(signed, endpoint: from?.endpoint, connectionKey: key)
             }
         case .goodbye:
             // Why the Mac is about to close this connection: the words, and whether to reconnect
@@ -2957,6 +3479,16 @@ final class StreamClient: ObservableObject {
             DispatchQueue.main.async {
                 guard self.connection === from else { return }
                 self.goodbye = goodbye
+            }
+        case .macMenu:
+            // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
+            // (MacMenuState). One that does not decode is dropped: its completion times out.
+            guard let menu = Wire.decode(MacMenu.self, from: data) else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                // A replaced connection's answer must not settle, or describe, the next one's menus.
+                guard self.connection === from else { return }
+                self.receiveMenus(menu)
             }
         default:
             break // client → host kinds, and anything a newer host invents
@@ -3089,6 +3621,7 @@ extension StreamClient {
     /// shown, and nothing before this connection's first state (an older Mac never sends one).
     /// Nothing else ever sends a change: not a connect, not a broadcast, not an `onChange`. Main thread.
     func changeSettings(_ change: HostSettingsChange) {
+        noteAction()
         // The move home carries a session whose remote connection went (`rescue`): a pick now was
         // made against the away state, and held it would reach the Mac on the home connection.
         guard !(sessionDead && moveHomeUnderWay) else { return }
@@ -3210,17 +3743,50 @@ extension StreamClient {
     /// `-SillConnect host:port`: connect straight to an address, through the home door. The
     /// synthetic test hosts stay off Bonjour, so this is how the simulator reaches `SillHost
     /// --synthetic` and the bare `SillMenuBar --synthetic` (`address(argument:)` reads it). It never
-    /// saves anything. If such a connection drops, the reconnect timer looks for it on Bonjour,
-    /// never finds it and backs off to 10 s (or, when its kind 18 named a saved Mac, dials that Mac
-    /// remotely).
+    /// saves anything by itself. If such a connection drops, the reconnect timer looks for it on
+    /// Bonjour, never finds it and backs off to 10 s (or, when its kind 18 named a saved Mac, dials
+    /// that Mac remotely).
+    ///
+    /// An address has no TXT record, so `-SillHomeDoor paired|open|plain` says what it counts as
+    /// (docs/home-pairing-plan.md §7.9), as a tap on a row with that door: `plain` (the default) a
+    /// plain door, as before; `paired` the one saved Mac when exactly one is saved (dialed pinned,
+    /// as its row would be; also a later launch), else an unsaved Mac whose door requires pairing
+    /// (the ask); `open` that saved Mac, else an unsaved Mac on an open door (any key).
     func connectFromLaunchArgument() {
         guard let raw = UserDefaults.standard.string(forKey: "SillConnect"),
               let address = Self.address(argument: "SillConnect") else { return }
+        var trust = DiscoveryPolicy.HomeTrust.plain
+        var macID: String?
+        if Self.testHomeDoor != .plain {
+            let one = savedMacs.count == 1 ? savedMacs[0] : nil
+            let decision = DiscoveryPolicy.homeDial(door: Self.testHomeDoor, saved: one != nil, revoked: one?.revoked == true,
+                                                    homeTLS: one?.homeTLS == true, debug: true, tap: true, newKey: one?.newKey == true)
+            print("home: -SillConnect \(raw) counts as a \(Self.testHomeDoor) door\(one.map { " of \($0.name) (saved)" } ?? ""): \(decision)")
+            if case .ask(let pinned) = decision {
+                startAsk(HomeAsk(target: HomeDialer.Target(endpoint: address, label: raw), name: raw, cableRow: false,
+                                 savedID: pinned ? one?.macID : nil, tagNamed: true,
+                                 replaces: one?.newKey == true ? one?.macID : nil))
+                return
+            }
+            guard let t = DiscoveryPolicy.sessionTrust(decision, savedPin: one?.fingerprintData) else { return }
+            trust = t
+            macID = decision == .pinned ? one?.macID : nil
+        }
         if let test = Self.wiredTest {
             print("dialing \(raw) on \(test) (wired test)")
-            connect(to: test, name: raw, fallback: address)
+            connect(to: test, name: raw, macID: macID, fallback: address, trust: trust)
         } else {
-            connect(to: address, name: raw)
+            connect(to: address, name: raw, macID: macID, trust: trust)
+        }
+    }
+
+    /// `-SillHomeDoor paired|open|plain`: what a `-SillConnect` address, and the rows the move and
+    /// path tests list, count as (§7.9). `plain` unless given.
+    static var testHomeDoor: DiscoveryPolicy.HomeDoor {
+        switch UserDefaults.standard.string(forKey: "SillHomeDoor") {
+        case "paired": return .pairingRequired
+        case "open": return .open
+        default: return .plain
         }
     }
 
@@ -3251,6 +3817,275 @@ extension StreamClient {
               let number = UInt16(raw[raw.index(after: colon)...]),
               let port = NWEndpoint.Port(rawValue: number) else { return nil }
         return .hostPort(host: NWEndpoint.Host(String(raw[..<colon])), port: port)
+    }
+    #endif
+}
+
+// MARK: - The Mac's menus
+
+extension StreamClient {
+    /// The subscription: a kind 27 without an id, once per connection at its first window list (and
+    /// on a move's new connection). The Mac then sends its top level and every later one; a Mac from
+    /// before the menus skips it and sends nothing, so no Menus button shows. Main thread.
+    func subscribeToMenus() {
+        send(.fetchMenu, payload: Wire.encode(FetchMenu(token: nextMenuToken())))
+    }
+
+    /// A menu of the top level opened, in the iPad's bar or the Menus button's pull-down: built as
+    /// `id` under `title` from the top level of `builtVersion` (another session's, perhaps), it asks
+    /// by its title when the current top level's menu there has another (MacMenuState rule 11),
+    /// since UIKit rebuilds the bar lazily. With no menu of that title now, the menus changed, and
+    /// the bar is asked for a rebuild again. `completion` runs once, on the main queue. Main thread.
+    func fetchTopMenu(id: String, title: String, builtVersion: Int, completion: @escaping (MacMenuState.Content) -> Void) {
+        guard let current = menus.version else { completion(.message(MacMenuState.notConnected)); return }
+        guard let asked = menus.barMenuID(builtID: id, title: title) else {
+            #if DEBUG
+            print("menubar: \(title) was built from version \(builtVersion); version \(current) has none")
+            #endif
+            completion(.message(MacMenuState.changedNote))
+            MacMenuHub.shared.menusChanged(self)
+            return
+        }
+        #if DEBUG
+        if builtVersion != current || asked != id { print("menubar: \(title) was built from version \(builtVersion) as \(id); asked as \(asked) in version \(current)") }
+        #endif
+        fetchMenu(id: asked, version: current, title: title, completion: completion)
+    }
+
+    /// A submenu of a fetched menu opened: asked in the version its row came in. Main thread.
+    func fetchMenu(_ row: MacMenuState.Row, completion: @escaping (MacMenuState.Content) -> Void) {
+        guard let id = row.id else { completion(.message(MacMenuState.changedNote)); return }
+        fetchMenu(id: id, version: row.version, title: row.title, completion: completion)
+    }
+
+    private func fetchMenu(id: String, version: Int?, title: String, completion: @escaping (MacMenuState.Content) -> Void) {
+        menuKey += 1
+        let key = menuKey
+        let token = menuToken
+        let now = ProcessInfo.processInfo.systemUptime
+        switch menus.fetch(id, title: title, version: version, key: key, token: token, now: now) {
+        case .send(let request):
+            menuToken += 1
+            menuCompletions[key] = completion
+            #if DEBUG
+            menuAsked[key] = (title, id, now)
+            #endif
+            send(.fetchMenu, payload: Wire.encode(request))
+            scheduleMenusExpiry()
+            #if DEBUG
+            if connection == nil { mockAnswer(request) }
+            #endif
+        case .joined:
+            menuCompletions[key] = completion
+            #if DEBUG
+            menuAsked[key] = (title, id, now)
+            #endif
+        case .settled(let content):
+            completion(content)
+        }
+    }
+
+    /// An item chosen in a menu: a kind 25 with the version its row came in and the title shown, or
+    /// a refusal told at once (the app not answering on the Mac). Main thread.
+    func pressMenuItem(_ row: MacMenuState.Row) {
+        switch menus.press(row, token: menuToken) {
+        case .send(let request)?:
+            menuToken += 1
+            send(.pressMenuItem, payload: Wire.encode(request))
+            #if DEBUG
+            print("menus: chose \(row.title) (\(request.id ?? ""))")
+            if connection == nil { mockAnswer(request) }
+            #endif
+        case .refused(let refusal)?:
+            menuRefused(refusal)
+        case nil:
+            break
+        }
+    }
+
+    /// A kind 24 from the Mac, on this connection. Main thread.
+    private func receiveMenus(_ m: MacMenu) {
+        let (done, topChanged, refusal) = menus.receive(m, now: ProcessInfo.processInfo.systemUptime)
+        finishMenus(done)
+        if topChanged {
+            #if DEBUG
+            let count = menus.menus.count
+            let what = count == 0 && menus.app == nil ? "none" : "\(menus.app ?? "?"), \(count) menu\(count == 1 ? "" : "s")"
+            print("menus: \(what) (version \(menus.version.map(String.init) ?? "?"))"
+                  + (menus.stale ? ", stale" : "") + (menus.note.map { ": \($0)" } ?? ""))
+            pressFromLaunchArgument()
+            #endif
+            MacMenuHub.shared.menusChanged(self)
+        }
+        if let refusal { menuRefused(refusal) }
+        scheduleMenusExpiry()
+    }
+
+    /// A choice not made: the warning haptic (iPhones; an iPad has no Taptic Engine) and VoiceOver's
+    /// announcement. Nothing on screen: the Mac's picture says what happened (plan's Q9).
+    private func menuRefused(_ refusal: MacMenuState.Refusal) {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        UIAccessibility.post(notification: .announcement, argument: refusal.announcement)
+        #if DEBUG
+        print(refusal.byMac ? "menus: the Mac refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
+                            : "menus: not sent: \(refusal.title) (\(refusal.id)): \(refusal.note)")
+        #endif
+    }
+
+    /// Runs the completions `menus` settled, each once.
+    private func finishMenus(_ done: [MacMenuState.Done]) {
+        for d in done {
+            #if DEBUG
+            if let asked = menuAsked.removeValue(forKey: d.key) {
+                let ms = Int(((ProcessInfo.processInfo.systemUptime - asked.at) * 1000).rounded())
+                switch d.content {
+                case .sections(let sections, let more):
+                    let items = sections.flatMap { $0 }.filter { $0.kind != .note }.count
+                    print("menus: \(asked.title) (\(asked.id)) in \(ms) ms, \(items) item\(items == 1 ? "" : "s")" + (more > 0 ? ", \(more) more" : ""))
+                case .message(let text):
+                    print("menus: \(asked.title) (\(asked.id)) after \(ms) ms: \(text)")
+                }
+            }
+            #endif
+            menuCompletions.removeValue(forKey: d.key)?(d.content)
+        }
+    }
+
+    /// How long an opened menu waits for the Mac: 4 s, or four of the worst recent round trips on a
+    /// slow link, as a settings pick does.
+    private var menusTimeout: Double { settingsTimeout }
+
+    /// Arms the timeout check for the oldest waiting fetch, replacing any armed one.
+    private func scheduleMenusExpiry() {
+        menusExpiry?.cancel()
+        menusExpiry = nil
+        guard let oldest = menus.oldestWait else { return }
+        let work = DispatchWorkItem { [weak self] in self?.expireMenus() }
+        menusExpiry = work
+        let due = oldest + menusTimeout + 0.05 - ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, due), execute: work)
+    }
+
+    /// Menus the Mac never answered: "‹Mac› didn’t answer. Open the menu again."
+    private func expireMenus() {
+        finishMenus(menus.expire(now: ProcessInfo.processInfo.systemUptime, timeout: menusTimeout, mac: macName))
+        scheduleMenusExpiry()
+    }
+
+    /// The connection ended: every open menu says "Not connected.", and nothing of the Mac's menus is
+    /// kept. From `tearDown`. Main thread.
+    func resetMenus() {
+        finishMenus(menus.reset())
+        // Every completion is the state's, so none is left; one that were would wait for ever.
+        let left = menuCompletions
+        menuCompletions = [:]
+        for (_, completion) in left { completion(.message(MacMenuState.notConnected)) }
+        menusExpiry?.cancel()
+        menusExpiry = nil
+        #if DEBUG
+        menuAsked = [:]
+        #endif
+        MacMenuHub.shared.menusChanged(self)
+    }
+
+    /// A move handed the session to its new connection (`finishMove`): what waits settles, and the
+    /// new connection subscribes. Main thread.
+    func menusMoved() {
+        finishMenus(menus.connectionReplaced())
+        scheduleMenusExpiry()
+        subscribeToMenus()
+    }
+
+    private func nextMenuToken() -> Int {
+        defer { menuToken += 1 }
+        return menuToken
+    }
+
+    #if DEBUG
+    /// The harness's menus: the mock Mac's top level, as if the Mac had sent it on this connection.
+    func showMockMenus(_ mock: MockCatalog.MacMenus) {
+        mockMenus = mock
+        receiveMenus(mock.topLevel)
+    }
+
+    /// The mock Mac answers a fetch after its delay (never, for `timeout`), as a host would.
+    private func mockAnswer(_ request: FetchMenu) {
+        guard let mock = mockMenus, let delay = mock.fetchDelay else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.connection == nil, self.mockMenus != nil else { return }
+            self.receiveMenus(mock.answer(request))
+        }
+    }
+
+    /// …and a choice after 0.2 s: pressed, or refused (`refuse`).
+    private func mockAnswer(_ request: PressMenuItem) {
+        guard let mock = mockMenus else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.connection == nil, self.mockMenus != nil else { return }
+            self.receiveMenus(mock.answer(request))
+        }
+    }
+
+    /// A menu or item by its titles from the top level ("File/Save"), each level fetched as a tap on
+    /// it would fetch it: the harness's way to open a submenu or choose an item without a tap. The
+    /// row, and the top level's version when it is one of the Mac's menus; nil when a title is not
+    /// there.
+    func resolveMenuPath(_ titles: [String], completion: @escaping ((row: MacMenuState.Row, topLevelVersion: Int?)?) -> Void) {
+        guard let first = titles.first, let version = menus.version,
+              let top = menus.menus.first(where: { $0.title == first }) else { completion(nil); return }
+        var found: (row: MacMenuState.Row, topLevelVersion: Int?) = (top, version)
+        func step(_ rest: ArraySlice<String>) {
+            guard let next = rest.first else { completion(found); return }
+            let open: (MacMenuState.Content) -> Void = { content in
+                guard case .sections(let sections, _) = content,
+                      let row = sections.flatMap({ $0 }).first(where: { $0.title == next }) else { completion(nil); return }
+                found = (row, nil)
+                step(rest.dropFirst())
+            }
+            if let v = found.topLevelVersion, let id = found.row.id {
+                fetchTopMenu(id: id, title: found.row.title, builtVersion: v, completion: open)
+            } else {
+                fetchMenu(found.row, completion: open)
+            }
+        }
+        step(titles.dropFirst())
+    }
+
+    /// Why the harness must not open menus by their path or choose an item in this session
+    /// (`-SillMenusOpen 'File/…'`, `-SillMenuPress`), or nil when it may: the mock's menus, or the
+    /// test app's (Scripts/menufixture.swift) through a test host, a session dialled to a loopback
+    /// address whose Mac's window list gives no version (SillHost; Sill.app always gives one) and
+    /// whose top level is menufixture's. Never a real Mac's menus: a choice there is made in whatever
+    /// app it streams, and each menu opened is validated by that app.
+    var menuHarnessRefusal: String? {
+        guard connection != nil else { return nil }
+        if let why = InputScript.refusal(endpoint: connection?.endpoint, hostVersion: hostVersion) {
+            return why.replacingOccurrences(of: ", which posts input to this Mac", with: "")
+        }
+        guard menus.app == "menufixture" else { return "the menus are \(menus.app ?? "no app")'s, not the test app's (menufixture)" }
+        return nil
+    }
+
+    /// `-SillMenuPress 'File/Save'`: once the first top level is in, the item at that path is chosen
+    /// as a tap on it would choose it (the menus on the way fetched, the kind 25 sent), once per
+    /// client. The harness cannot tap; against a synthetic host with SILL_TEST_MENU_PID this is the
+    /// fixture's item pressed through the host. Only where `menuHarnessRefusal` lets it.
+    private func pressFromLaunchArgument() {
+        guard !menuPressArgumentDone, menus.version != nil, !menus.menus.isEmpty,
+              let raw = UserDefaults.standard.string(forKey: "SillMenuPress"), !raw.isEmpty else { return }
+        menuPressArgumentDone = true
+        if let why = menuHarnessRefusal {
+            print("menus: harness: -SillMenuPress \(raw) refused: \(why)")
+            return
+        }
+        let path = raw.split(separator: "/").map { String($0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.resolveMenuPath(path) { [weak self] found in
+                guard let self else { return }
+                guard let found, found.row.kind == .item else { print("menus: harness: nothing to choose at \(path.joined(separator: " › "))"); return }
+                self.pressMenuItem(found.row)
+            }
+        }
     }
     #endif
 }

@@ -122,13 +122,61 @@ MUTANTS = {
                                                        "        guard let since = listedSince, since != refusedListing else { return (false, nil) }\n        var due = since\n        if let last = lastAttempt, failures > 0 {"),
     "H6 the move home backs off from the listing, not the last try": ("        if let last = lastAttempt, failures > 0 { due = max(due, last + upWait(failures: failures)) }",
                                                                      "        if let last = lastAttempt, failures > 0 { due = max(due, since + upWait(failures: failures)) }"),
+    # moveHomeTrust (the merge with pairing at home): pinned TLS to the saved key only
+    "H7 the move home takes whatever a dial would": ("tap: false, newKey: newKey) == .pinned\n        else { return nil }",
+                                                     "tap: false, newKey: newKey) != .updateSill\n        else { return nil }"),
+    "H8 the move home dials a plain door": ("        guard homeDial(door: door, saved: true, revoked: revoked, homeTLS: true,",
+                                            "        guard door == .plain || homeDial(door: door, saved: true, revoked: revoked, homeTLS: true,"),
+    "H9 a Mac that removed this device moved home": ("homeDial(door: door, saved: true, revoked: revoked, homeTLS: true, debug: false, tap: false",
+                                                    "homeDial(door: door, saved: true, revoked: false, homeTLS: true, debug: false, tap: false"),
+    "H10 a Mac with a new key moved home": ("tap: false, newKey: newKey) == .pinned\n        else { return nil }",
+                                           "tap: false, newKey: false) == .pinned\n        else { return nil }"),
+    "H11 the move home takes any key": ("        return sessionTrust(.pinned, savedPin: savedPin)\n    }\n\n    /// Whether the network connection a move opened",
+                                       "        return sessionTrust(.anyKey, savedPin: savedPin)\n    }\n\n    /// Whether the network connection a move opened"),
+    # Pairing at home (docs/home-pairing-plan.md, step 4): sessions and pairing at home over TLS (home.swift).
+    "S4 pin: an open door's first connection plain": ("        case .open(nil): return .anyKey", "        case .open(nil): return .plainTCP"),
+    "S4 pin: an open session's later connections take any key": ("        case .open(let seen?): return .key(seen)", "        case .open(let seen?): return seen.isEmpty ? .key(seen) : .anyKey"),
+    "S4 pin: a saved Mac's session takes any key": ("        case .saved(let pin): return .key(pin)", "        case .saved(let pin): return pin.isEmpty ? .key(pin) : .anyKey"),
+    "S4 tls: an open session counted as plain": ("        var tls: Bool { self != .plain }", "        var tls: Bool { if case .saved = self { return true }; return false }"),
+    "S4 sessionTrust: an open door dialed plain": ("        case .anyKey: return .open(seen: nil)", "        case .anyKey: return .plain"),
+    "S4 sessionTrust: a saved Mac without a readable pin dialed with any key": ("        case .pinned: return savedPin.map { .saved(pin: $0) }", "        case .pinned: return savedPin.map { .saved(pin: $0) } ?? .open(seen: nil)"),
+    "S4 sessionTrust: the ask starts a session": ("        case .ask, .updateSill, .waitForTap: return nil", "        case .ask: return .open(seen: nil)\n        case .updateSill, .waitForTap: return nil"),
+    "S4 sessionTrust: a Mac too old dialed plain": ("        case .ask, .updateSill, .waitForTap: return nil", "        case .updateSill: return .plain\n        case .ask, .waitForTap: return nil"),
+    "S4 readyWith: a later connection's key replaces the first": ("        if case .open(nil) = trust, let fingerprint { return .open(seen: fingerprint) }", "        if case .open = trust, let fingerprint { return .open(seen: fingerprint) }"),
+    "S4 readyWith: an open session never keeps its key": ("        if case .open(nil) = trust, let fingerprint { return .open(seen: fingerprint) }\n", ""),
+    "S4 homeEnd: a plain door's goodbye read as removed": ("        guard let trust, trust.tls else { return .other }", "        guard let trust else { return .other }"),
+    "S4 homeEnd: removed not read": ("        if goodbye == \"removed\" { return .removed }\n", ""),
+    "S4 homeEnd: pairingRequired not read": ("        if goodbye == \"pairingRequired\" { return .pairingRequired }\n", ""),
+    "S4 homeEnd: a TLS error beside another goodbye": ("        guard goodbye == nil, let tls else { return .other }", "        guard let tls else { return .other }"),
+    "S4 homeEnd: a refused key never revokes": ("            if keyRefused.contains(tls) { return .removed }\n", ""),
+    "S4 homeEnd: a pin failure not told": ("            return tls == pinRefused ? .wrongKey : .other", "            return .other"),
+    "S4 homeEnd: an open session's refused key read as removed": ("            return keyRefused.contains(tls) ? .pairingRequired : .other", "            return keyRefused.contains(tls) ? .removed : .other"),
+    "S4 homeEnd: -9829 not a refusal": ("    static let keyRefused: Set<Int32> = [-9825, -9829]", "    static let keyRefused: Set<Int32> = [-9825]"),
+    "S4 nextPinnedRow: a tried row again": ("        rows.first { $0.macID == macID && !tried.contains($0.id) }?.id", "        rows.first { $0.macID == macID }?.id"),
+    "S4 nextPinnedRow: any row, tagged or not": ("        rows.first { $0.macID == macID && !tried.contains($0.id) }?.id", "        rows.first { ($0.macID == macID || $0.macID == nil) && !tried.contains($0.id) }?.id"),
+    "S4 askAnswer: the cable's ok without the device's claim": ("            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }", "            guard method == \"cable\", !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }"),
+    "S4 askAnswer: any ok taken": ("            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }", "            guard askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }"),
+    "S4 askAnswer: another Mac's ID taken": ("            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }", "            guard method == \"cable\", askedCable, !hasProof, recognitionKeyBytes == 32 else { return .invalid }"),
+    "S4 askAnswer: an ok with a proof taken": ("            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }", "            guard method == \"cable\", askedCable, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }"),
+    "S4 askAnswer: any recognition key": ("            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes == 32 else { return .invalid }", "            guard method == \"cable\", askedCable, !hasProof, macIDMatches, recognitionKeyBytes != nil else { return .invalid }"),
+    "S4 askAnswer: shown read as openOnMac": ("        case \"shown\"?: return .shown", "        case \"shown\"?: return .openOnMac"),
+    "S4 askAnswer: locked read as refused": ("        case \"locked\"?: return .locked\n", ""),
+    "S4 askAnswer: busy unbounded": ("        case \"busy\"?: return .busy(min(max(retryAfter ?? 1, 0.2), 10))", "        case \"busy\"?: return .busy(retryAfter ?? 1)"),
+    "S4 askAnswer: an unknown reason read as shown": ("        default: return .refused\n        }\n    }\n\n    /// What the home card says", "        default: return .shown\n        }\n    }\n\n    /// What the home card says"),
+    "S4 linkRows: the asked key goes to every row": ("        if let askedKey, askedKey == linkKey { return nil }\n", ""),
+    "S4 linkRows: plain doors dialed": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { !(askedKey != nil && $0.id == askedRow) }.map(\\.id)"),
+    "S4 linkRows: the asked row not left out": ("        return rows.filter { $0.door != .plain && !(askedKey != nil && $0.id == askedRow) }.map(\\.id)", "        return rows.filter { $0.door != .plain }.map(\\.id)"),
+    "S4 copy: over the cable dropped": ("            cable ? \"Pairing with \\(mac) over the cable\\u{2026}\" : \"Pairing with \\(mac)\\u{2026}\"", "            \"Pairing with \\(mac)\\u{2026}\""),
+    "S4 copy: removed says the old remote words": ("        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). Tap it to pair again.\" }", "        static func removed(mac: String, device: String) -> String { \"\\(mac) removed this \\(device). To use it again, pair it again.\" }"),
+    "S4 copy: openOnMac names no menu": ("\"\\(mac) didn\\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"", "\"\\(mac) didn\\u{2019}t show a code.\""),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():
     assert orig.count(old) == 1, f"{name}: pattern found {orig.count(old)} times"
     path = os.path.join(OUT, "mutant.swift")
     open(path, "w").write(orig.replace(old, new))
-    b = subprocess.run(["swiftc", "-O", path, os.path.join(SP, "main.swift"), "-o", os.path.join(OUT, "mutant")], capture_output=True, text=True)
+    b = subprocess.run(["swiftc", "-O", path, os.path.join(SP, "main.swift"), os.path.join(SP, "home.swift"), "-o", os.path.join(OUT, "mutant")],
+                       capture_output=True, text=True)
     if b.returncode != 0:
         print(f"{name}: DOES NOT COMPILE\n{b.stderr[:800]}"); continue
     r = subprocess.run([os.path.join(OUT, "mutant")], capture_output=True, text=True)

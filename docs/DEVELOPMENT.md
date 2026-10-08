@@ -11,20 +11,21 @@ progress, the decisions already made, and every test hook.
 ## Overview
 
 Pipeline: `SCStream (420f) → VTCompressionSession (HEVC, real time, no B-frames)
-→ Network.framework TCP + Bonjour → AVSampleBufferDisplayLayer`
+→ Network.framework TLS 1.3 over TCP + Bonjour → AVSampleBufferDisplayLayer`
 
 - `Sources/StreamProtocol/`: the wire format, shared by both sides. The iOS
   project links this package for it.
 - `Sources/SillHost/`: the host itself (the `SillHostCore` library): capture,
-  encode, network, input, the virtual display and remote access.
+  encode, network, input, the virtual display, pairing and remote access.
 - `Sources/SillMenuBar/`: Sill.app, the menu bar host. `Sources/SillHostCLI/`:
   `SillHost`, the same host on the command line.
 - `Sources/CaptureProbe/` and `Sources/VirtualDisplayProbe/`: tools for
   diagnosis and experiments, not shipped.
 - `iOSClient/`: the iPhone and iPad app, `Sill.xcodeproj`.
 - `Packaging/`: Sill.app's `Info.plist` and development entitlements.
-  `Scripts/`: `make-app.sh`, and the test tools below. `design/`: the icon (see
-  its README). `docs/`: the brief and the plans.
+  `Scripts/`: `make-app.sh`, and the test tools below. `design/`: the icon and
+  the disk image's background (see its README). `docs/`: the brief and the
+  plans.
 
 `CLAUDE.md`, Layout, goes through the code file by file.
 
@@ -65,8 +66,9 @@ rate, frame age, round trip and how it is connected ("Wired", "Wi-Fi" or
 "Direct"; from away, "through Tailscale" or "over the internet"), and what is
 streaming; it holds the
 virtual display, frame rate, quality and resolution controls, Direct Wireless
-Connection, Remote Access… and Pair iPhone or iPad… (see Remote access below),
-Launch at Login, Permissions, Show Log… and Settings… (⌘,).
+Connection, Remote Access… and Pair iPhone or iPad… (see Pairing at home and
+Remote access below), Launch at Login, Permissions, Show Log… and Settings…
+(⌘,). Settings › Devices lists the paired devices, with Require pairing.
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
@@ -115,12 +117,20 @@ swift run -c release SillHost --synthetic            # the Desktop streams a tes
 swift run -c release SillHost --remote               # the remote door for this run, on any free port (--remote=PORT)
 swift run -c release SillHost --remote --internet    # also admit paired devices from the internet
 swift run -c release SillHost --print-reachability   # the addresses a device would get away from home, then exit
+swift run -c release SillHost --pairing              # the home door speaks TLS with pairing required, as Sill.app's does
+swift run -c release SillHost --print-cable          # what the USB cable rule reads on this Mac, then exit
 swift run -c release SillHost --encoder-selftest     # is the hardware encoder alive? 5 s, then it exits
 swift run -c release SillHost --virtual-display-selftest   # create and destroy one display, report what sees it
+swift run -c release SillHost --menu-selftest=TextEdit     # the menus a device would get for an app (a pid, or its name), read once
 ```
 
 The argument matches an app name or window title. Leave it off to see the list
 of on-screen windows.
+
+Its home door stays as it always was, plain TCP with no pairing: any device
+on your network can connect to `SillHost`, without encryption, so use it only
+while developing Sill. `--pairing` gives it Sill.app's door (Pairing at home,
+below) with a new identity each run.
 
 A device can change the command-line host's settings from its Settings panel
 too; `SillHost` saves nothing, so a change lasts until it quits, and the
@@ -165,19 +175,24 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    identifier if `me.saffer.sill` collides with something (it does on any team
    but the project's own).
 3. Run on a real device on the same Wi-Fi (or with Direct Wireless Connection
-   on in Sill on the Mac). Tap the Mac's name. Its row ends in where the device
-   sees it: "Wi-Fi", "Wired" (a cable), "Direct", or nothing when it can't
-   tell. A "Wired" row connects over the cable, even with Wi-Fi up (should
-   that not connect within 2.5 s, over whichever link the device picks); the
-   Settings panel's readout ends in the link the connection does take. At
-   home a session follows the cable: plugged in, it moves there about 2 s
-   later; pulled, it moves to Wi-Fi at once, without the connect screen;
-   dropped by the Mac while the cable stays in (Sill away in the background,
-   say), it reconnects over the cable. A session from away (Remote access,
-   below) keeps its way in until it ends.
+   on in Sill on the Mac). Tap the Mac's name; the first time, pair it (Pairing
+   at home, below). Its row ends in where the device sees it: "Wi-Fi", "Wired"
+   (a cable), "Direct", or nothing when it can't tell; "Not paired" before a
+   pairing, and "Update Sill" for a Mac whose Sill is too old for this build. A
+   "Wired" row connects over the cable, even with Wi-Fi up (should that not
+   connect within 2.5 s, over whichever link the device picks); the Settings
+   panel's readout ends in the link the connection does take. At home a session
+   follows the cable: plugged in, it moves there about 2 s later; pulled, it
+   moves to Wi-Fi at once, without the connect screen; dropped by the Mac while
+   the cable stays in (Sill away in the background, say), it reconnects over
+   the cable. A session from away (Remote access, below) keeps its way in until
+   it ends.
 
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
-changed from the device, and Disconnect at the bottom.
+changed from the device, and Disconnect at the bottom. After the Mac's settings
+come the device's own: This iPad (or iPhone), with Three-Finger Gestures
+(below, Trackpad gestures), on unless turned off and never sent to the Mac,
+and last Take the Tour.
 
 On a phone held upright (and on the Duo's outer display) the picture sits in
 a fixed 16:10 pane at the top: a 16:9 window gets black bars above and below
@@ -190,13 +205,29 @@ trackpad counts a stroke down it as far as the same stroke across a 16:10
 picture, however tall it is. On its side, and on an iPad (a narrow window
 included), everything is as it was.
 
+The first time a Mac's picture shows on a device, and nothing is touched, sent,
+used (by any means, VoiceOver's double tap included) or opened in the second
+after it, a short tour dims the screen and lights one part at a time: the
+picture (tap, hold, drag), the thumbnails with Aa (and Keyboard, sideways and
+on a phone upright), Settings, and upright the key row and the trackpad. A card
+stays beside what it lights at every text size, its words scrolling there. Skip
+ends it for good on that device (in Take the Tour it only closes it); a step
+passed stays passed; the automatic reconnect's session keeps the decision the
+last one made; after a tour taken sideways, the upright card comes the first
+time the device is held upright and left alone for a second. Settings › Take
+the Tour, the panel's last row, shows it again. Nothing reaches the Mac while it shows, and it sends
+nothing. What it remembers is two keys in the app's own defaults,
+`Sill.tourSeen` and `Sill.tourSkipped` (delete the app, or `xcrun simctl
+uninstall`, to see it afresh). Debug builds show it by themselves only with
+`-SillTourState` (the harness below). docs/first-run-walkthrough-plan.md has
+the rules; `iOSClient/TourPolicy.swift` is them, checked in `Tests/checks/tour`.
+
 Every connection starts with the device's hello (its Sill version, build and
 name, sent only to the Mac it connects to). A later Mac that needs a newer Sill
 on the device answers with a notice instead of a stream: the connect screen
 shows the Mac's words ("Update Sill on your iPad to keep using Mac mini. It
-needs version 1.2 or later."), with "Update Sill in the App Store" under them
-once the app has its App Store address, and the device does not reconnect by
-itself. Today's Macs refuse no device.
+needs version 1.2 or later."), with "Update Sill in the App Store" under them,
+and the device does not reconnect by itself. Today's Macs refuse no device.
 
 The project is a plain Xcode project checked in by hand: its source files, an
 asset catalog, and the package reference. Nothing else. A new source file
@@ -237,6 +268,77 @@ me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`, `awayBitrate`,
 `awayCaptureScale`, `prioritizeSpeed`, `virtualDisplay` or `directWireless`)
 and open Sill again.
 
+## Trackpad gestures
+
+Three fingers on the device's glass, on the portrait trackpad or over the
+stream, are the Mac's own trackpad gestures: swipe up for Mission Control, down
+for App Exposé, left or right for the Space beside (the content follows the
+fingers, as on a Mac), pinch for Apps (Launchpad before macOS 26) and spread for
+Show Desktop. The device decides the gesture when one of the three fingers
+lifts, from how far they travelled together since they came down (a pinch or a
+spread led by the thumb is no swipe, however far the thumb goes), and sends only
+its name (kind 28). From the moment three fingers are down, before any has
+moved, a stroke clicks, drags and scrolls nothing, however slowly they came and
+with a thumb resting on the glass too; three fingers that take longer than
+0.15 s to come down decide nothing, and a thumb resting there is not one of
+the three.
+One- and two-finger strokes are what they always were. The Mac presses its own
+keyboard shortcut for that action, as System Settings › Keyboard › Keyboard
+Shortcuts has it at that moment (Mission Control, and Launchpad & Dock), so a
+shortcut changed there is followed and one turned off does nothing. While a
+window streams, a gesture shows the Desktop first, since none of these views is
+in a window's picture; the opposite gesture closes what one opened (a swipe
+down after Mission Control, a pinch after Show Desktop), until a click, a key or
+text from a device, a window picked, an app launched or one of the Mac's menu
+items chosen from one, or the last device leaving; a view closed with the Mac's
+own keyboard comes back with the same gesture made twice more. Four fingers do
+the same where iPadOS lets them through (Settings › Multitasking & Gestures); a
+Magic Keyboard trackpad's own three- and four-finger gestures stay with iPadOS.
+VoiceOver keeps three-finger gestures for itself, so with it on the rows of
+Settings › This iPad do them instead (each row is an accessibility action, for
+Voice Control and Switch Control too).
+
+Sill's log names what each gesture did: "Gesture from iPad (iPad14,1): swipe up
+→ Mission Control (shortcut 108: key 160, fn)", or "… pinch → nothing: no
+shortcut for Show Apps is on in Keyboard Shortcuts", which says which shortcut
+to turn on. A Mac from before them gets no gesture, and the device's group says
+to update Sill on it. Should a gesture's shortcut leave its modifiers set on
+the Mac (a tap after it would be a control-click), the log says "Gestures: after
+a gesture's shortcut this Mac's modifier keys still read …" once. A synthetic
+host (`SillHost --synthetic`) posts none: it
+logs the shortcut it would post with "(not posted: a test host)", so
+`python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3` tests the wire
+without touching the Mac, and `SILL_TEST_HOTKEYS=108=off` (or `defaults`) gives
+such a host a table of its own instead of this Mac's shortcuts.
+
+## The Mac's menus on the device
+
+The app a device streams keeps its menu bar on the Mac, and the device shows
+it: on an iPad with iPadOS 26 or later in the iPad's own menu bar (move the
+pointer to the top edge, or swipe down from it), and behind the Menus button in
+Sill's bar, between the window thumbnails and Aa (on a phone held upright, at
+the end of the thumbnails' row). A window too narrow for the button and a whole
+thumbnail beside it (a Slide Over) leaves the button out. With two Sill windows
+open, the iPad's menu bar shows none of the Mac's menus, since nothing says
+which window's session a choice there would reach; each window's Menus button
+still has its own. With the Desktop streaming, the menus are the frontmost
+app's, as the Mac's own menu bar shows. Each menu is read from the Mac as it
+opens, so what is checked, dimmed or listed (Open Recent, the Window menu) is
+what the Mac shows then; an item chosen on the device is chosen on the Mac, as
+if clicked there. The Mac's keyboard shortcuts show under the items, as text:
+typed on a hardware keyboard they reach the Mac as keys, as before, never the
+device's menus. The Apple menu and Sill's own are never shown.
+
+It needs Accessibility for Sill on the Mac, as the device's clicks do; without
+it the button shows where to allow it. Opening a menu of a window streamed on
+its own makes its app active on the Mac, as a click from the device does, since
+an app's menus read differently while it is in the background (Copy, Close and
+Minimize dimmed). A Mac from before this change sends no menus, and the device
+then shows no Menus button; a device from before it never asks, and the Mac
+reads nothing for it. An app that draws its menus in its own window (Blender's
+File and Edit) has there only what its menu bar lists; tap the rest in the
+picture.
+
 ## Direct Wireless Connection
 
 Direct Wireless Connection (Settings › General, and the status menu) lets an
@@ -258,6 +360,61 @@ on, anyone nearby running Sill can find and connect to the Mac. Turning Wi-Fi
 off in Control Center does not end a direct connection (it leaves the radio on
 for AirDrop); Settings › Wi-Fi does.
 
+## Pairing at home
+
+Sill.app's home door speaks TLS 1.3 with each end pinned to the other's key,
+as Remote Access does, and one list of paired devices serves both: a device
+paired at home connects nearby and, with Remote Access on, from away, and one
+paired for Remote Access connects at home with no further step.
+
+- **On the same network, or nearby with Direct Wireless Connection:** a Mac
+  this device has not paired with reads "Not paired". Tap it: the Mac opens
+  its pairing window by itself, in front of what you are doing but without
+  taking the keyboard, and the device opens its camera. Point it at the QR
+  code, or choose Enter Code Instead and type the 12 digits. Cancel on the Mac
+  closes a window you did not ask for. A Mac opens at most three such windows
+  in ten minutes, and none for ten minutes to a device after you click Cancel
+  on the Mac or after five wrong codes; the device then says to choose Pair
+  iPhone or iPad… in the Sill menu, which always works. A locked Mac shows no
+  code ("Unlock Mac mini, then tap it again."), and an ask from the Mac itself
+  (the Simulator, another app) never opens a window: pair those with Pair
+  iPhone or iPad….
+- **Over the USB cable:** an unpaired iPhone or iPad on the Mac's cable reads
+  "Wired". Tap it, and while the Mac is unlocked it pairs by itself, with no
+  code; the Mac shows a notice with Remove for ten seconds. Both ends check
+  that the connection really is the cable (the Mac: an IPv6 link-local source
+  under the iPhone's or iPad's own USB interface, never an address of the Mac
+  itself; the device: an interface with nothing but link-local addresses), so
+  a USB Ethernet adapter, or an iPhone sharing its connection over USB, gets
+  the code window instead. One key per iPhone or iPad pairs this way: another
+  key of the same device (another app, say) gets the code window until the
+  first is removed.
+- **Settings › Devices** on the Mac lists the paired devices, how each paired
+  and when and how it last connected, with Remove (the device can no longer
+  connect: "Mac mini removed this iPad. Tap it to pair again.") and rename
+  (double-click). **Require pairing** is on by default. Off, any device at
+  home, and any app on the Mac, connects without pairing, still encrypted;
+  turned on again, it disconnects the devices that are not paired ("Mac mini
+  now asks devices to pair."). Sill keeps it beside the paired devices in the
+  login keychain, not in its defaults.
+- **Older builds:** a device from before pairing at home dials the home door
+  without TLS and can no longer connect to this Sill.app; the menu says "An
+  iPhone or iPad Needs Sill Updated". Update the device first, then the Mac. A
+  Release build of the iPhone and iPad app never connects without TLS ("Update
+  Sill" on the row of a Mac with an older Sill); a Debug build still dials an
+  older Sill.app's plain door until it has seen that Mac speak TLS (launch it
+  once with `-SillForgetHomeTLS 1` to forget).
+- **The command-line host** keeps its plain, open door (The command-line host,
+  above). With `--pairing` it prints its code and link in Terminal, and again
+  after each device's ask; `--print-cable` prints what the cable rule reads on
+  each interface and exits.
+- **To start over:** remove the device in Settings › Devices, or on the device
+  touch and hold the Mac's row and choose Forget. The paired devices, Require
+  pairing's setting and the Mac's key are in Keychain Access › login (the key
+  "Sill Remote Access" and the passwords of service `me.saffer.sill.remote`);
+  deleting them makes this Mac new to every device, and every device pairs
+  again.
+
 ## Remote access (away from home)
 
 Sill reaches your Mac from anywhere through a VPN you already run, or through a
@@ -269,15 +426,17 @@ connect (TLS 1.3, each end pinned to the other's key).
    listens on TCP port 7455 (Change… picks another) and lists the addresses a
    device will use: your Tailscale address and its MagicDNS name, another VPN,
    this network's address.
-2. Pair each device once, at home or away: Pair iPhone or iPad… in the Sill
-   menu shows a QR code and a 12-digit code for five minutes. On the device,
-   tap Add a Mac… at the bottom of the connect screen and point it at the
-   code, or choose Enter Code Instead and type the address and the code the
-   window shows. With Tailscale, the address is the Mac's MagicDNS name or the
-   Tailscale IP address under it; otherwise it is this network's address, with
-   another VPN's address under it when the Mac runs one. A device already
-   connected at home can use Pair This iPad… at the end of its Settings panel
-   instead; the Mac shows its code by itself.
+2. Pair each device once, at home or away (a device already paired at home is
+   paired for this too): Pair iPhone or iPad… in the Sill menu shows a QR code
+   and a 12-digit code for five minutes. On the device, tap Add a Mac… at the
+   bottom of the connect screen and point it at the code, or choose Enter Code
+   Instead and type the address and the code the window shows. With Tailscale,
+   the address is the Mac's MagicDNS name or the Tailscale IP address under it;
+   otherwise it is this network's address, with another VPN's address under it
+   when the Mac runs one. A device connected at home without pairing (Require
+   pairing off) can use Pair This iPad… in the Away from home group of its
+   Settings panel instead: it asks the Mac for a code, as a tap on a "Not
+   paired" row does.
 3. Away from home the Mac is a "Remote" row about 3 s after the connect screen
    opens (the local network gets the first 3 s); tap it. After a drop the device
    reconnects by itself, first on the local network, then remotely. The
@@ -314,7 +473,7 @@ If it doesn't connect:
 - Testing a port forward from inside your home network can fail on routers
   without "hairpin" NAT: test over cellular.
 - "no longer accepts this iPad": the device was removed on the Mac (Settings ›
-  Remote Access › Paired Devices); pair it again.
+  Devices); pair it again.
 
 Away from home has its own quality (docs/remote-bundle-plan.md). While every
 connected device is away, through a VPN or over the internet, the Mac streams
@@ -340,7 +499,11 @@ before.
 Coming home: a session through the remote door moves to the home network by
 itself about 2 s after the network lists the Mac, by the same make-before-break
 hand-over as a move off Direct Wireless, and the Mac goes back to the home
-quality in one restart. A session made with Connect Remotely stays remote.
+quality in one restart. It dials the home door over TLS, pinned to the Mac's
+key the session already trusts, never plain: a Mac whose home door is plain (a
+Sill for Mac from before 0.4.0, the CLI without `--pairing`), one that removed
+this device or one to pair with again keeps the session remote. A session made
+with Connect Remotely stays remote.
 
 The command-line host: `swift run -c release SillHost --remote` opens the
 remote door for one run on any free port (`--remote=PORT` for a fixed one, but
@@ -353,10 +516,10 @@ is the host to pair with for good.
 
 To start over on the Mac: quit Sill, then `for k in remoteAccess remotePort
 internetAccess remoteAddressName remoteDevicesSeen; do defaults delete
-me.saffer.sill.mac $k; done`. The Mac's identity and its paired devices are in
-Keychain Access › login: the key "Sill Remote Access" and the passwords of
-service `me.saffer.sill.remote`; deleting them makes this Mac new to every
-device, which must pair again. On the device, a paired Mac's row has Forget in
+me.saffer.sill.mac $k; done`. The Mac's identity, its paired devices and
+Require pairing are in Keychain Access › login: the key "Sill Remote Access"
+and the passwords of service `me.saffer.sill.remote`; deleting them makes this
+Mac new to every device, which must pair again. On the device, a paired Mac's row has Forget in
 its menu (touch and hold).
 
 ## Test tools
@@ -372,9 +535,13 @@ the session's path, the settings ledger, the wire format, pairing, who may use
 which door, how frames go into the video encoder and when a stream gets a new
 encoder session, the device floor, how a session ends, how the device reads the
 Mac's messages, the update check, the disk image's window, where everything goes
-on a phone held upright) on their own with a check each, and runs them: about
-two minutes, no device, permission or encoder. `--mutants` also checks that each
-check fails when its file is changed in one place (most of an hour).
+on a phone held upright, who moves the Mac's pointer, the Mac's menus on both
+ends, which three-finger strokes are gestures and what the Mac does with one,
+which modifiers a device's keys leave set on the Mac,
+the first-run tour, and pairing at home: the doors, the cable, the device's
+rows) on their own with a check each, and runs them: about five minutes, no
+device, permission or encoder. `--mutants` also checks that each check fails
+when its file is changed in one place (well over an hour).
 `Tests/checks/README.md` lists them. CI (`.github/workflows/ci.yml`) runs them
 on every pull request and push to `main`, with `swift build -c release` and the
 iOS app's build for the simulator.
@@ -390,10 +557,31 @@ python3 Scripts/sillclient.py PORT 8 desktop --set=bitrate=25000000@3 --expect=b
 ```
 
 Its docstring lists every flag: timed changes and picks, stats as a named
-device, the remote door with pairing, and more. It checks every argument
+device, the remote door with pairing, the Mac's menus (`--menus`, `--fetch`,
+`--press`), and more. It checks every argument
 before it connects, and a bad one exits 2. The synthetic hosts do not
 advertise over Bonjour, so this client, or the simulator's `-SillConnect`, is
 how to reach them; `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>` finds the port.
+
+Input (`--move`, `--tap`, `--key`, `--input`) goes only to a `--synthetic` host
+on this Mac, which posts nothing. With `SILL_TEST_INPUT_LOG=1` such a host
+prints each event it would have posted, a key with its flags and a click with
+the modifiers the last key would have left for it and where it goes, and the
+check each key's up arms (`KeyUpCheck`, read on a real host a quarter of a
+second later), so what a device's keys and buttons leave behind (the Spotlight
+key's ⌘, a modifier held when a device leaves or the host stops, a button
+whose stream stopped under a drag) can be seen without touching the Mac:
+
+```
+SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_POINTER_PATH=$T/path .build/release/SillHost --synthetic
+python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' \
+    --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5
+```
+
+(`$T/path` holds one line, `0 756 474`: the scripted pointer gives the test
+pattern a place for input to land.) `--gesture=NAME[,FINGERS]@T` sends a
+trackpad gesture (kind 28), and, like the input flags, only to a `--synthetic`
+host on this Mac, which posts nothing.
 
 `Scripts/sillrelay.py --listen 0 --to HOST:PORT [--delay-ms N] [--rate-mbps R]
 [--blackhole-after S] [--record PREFIX]` sits between a client and a host, and
@@ -412,6 +600,23 @@ host judged of each device's link ("Link: behind …" in its log): about 25
 minutes, `--full` about 45, and it waits while the Mac is busy (a load average
 of 20 or more), since a busy Mac makes a stalled path of any link. `--list`
 shows the cases.
+
+### The menus' test app
+
+`Scripts/menufixture.swift` is a small AppKit app with menus of known contents
+(marks, shortcuts, a dimmed item, one retitled at every look, a slow action,
+submenus three deep, 300 and 600 items) that can never come to the front, and
+whose one window is off every display. Signals change its menus the way apps
+do: SIGUSR1 and SIGUSR2 give Probe › Rebuilt a new menu, SIGHUP inserts an item
+at the top of Probe in place, and SIGALRM gives Probe itself a new menu. A
+synthetic host started with `SILL_TEST_MENU_PID=<its pid>` streams the test
+pattern with the fixture's menus, so the menus are read and chosen without
+touching a real app; the fetches and choices of `sillclient.py` refuse to run
+without that variable (a fetch carries the title its menu was shown under, as a
+device's does: the host reads a menu only under that title).
+`Scripts/menu-check/run.sh` runs the host's menu reader and mirror against the
+fixture without a host (it needs Accessibility for whatever runs it). The
+file's header says how to build and run it.
 
 ### Test arguments for the bare app
 
@@ -470,6 +675,37 @@ simulator:
   drawn as an iPad draws such a window (the compact halves), not as a phone
   does, so an iPhone simulator can photograph it; `phone` the other way
   round.
+- Pairing at home: `-SillServiceType _silltest._tcp` (only test hosts
+  registered under that type are rows), `-SillHomeDoor paired|open|plain`
+  (what a `-SillConnect` address counts as), `-SillCableTest 1` (this
+  device's path counts as the cable) and the connect screen's `home…` cases;
+  `CLAUDE.md`, Build and run, has them all.
+- `-Sill.trackpadGestures 0` turns the device's Three-Finger Gestures off for
+  one run, `-SillSettingsScroll gestures` opens the Settings panel at that
+  group, and `-SillVoiceOver 1` shows it as with VoiceOver on. Under `-SillLive 1`, `-SillInputScript '3 gesture swipeUp'` sends a
+  gesture through the app's own path, only to a test host on this Mac.
+- `-SillMacMenu code|blender|long|stale|noaccess|none|slow|timeout|refuse`: the
+  mock Mac's menus. `-SillMenusOpen 1` opens the Menus pull-down after launch,
+  `-SillMenusOpen 'File/Open Recent'` opens it on that menu, and
+  `-SillMenuPress 'File/Save'` chooses that item. Live, both act only on the
+  test app's menus through a test host (dialled by `-SillConnect` to a loopback
+  address, no host version, menufixture's top level) and print "refused"
+  otherwise. `-SillMenusAt <s>` opens the pull-down `s` seconds after the
+  button shows, and `-SillMenusCloseAfter <s>` closes it `s` seconds later. On
+  an iPad, `-SillMenuDump 1` prints the main menu after each build,
+  `-SillMenuBarLayout perMenu|replace|one` moves the Mac's menus in it, and
+  `-SillSecondWindow 1` opens a second window 2 s after launch (the bar then
+  gets none of the Mac's menus).
+- The first-run tour, in the mock, under `-SillLive 1` and in the normal app:
+  `-SillTourState fresh|landscape|done|skipped|saved` turns the automatic tour
+  on (a Debug build never shows it by itself otherwise; `saved` reads and
+  writes the real keys, the others last one run), `-SillTour
+  touch|bar|settings|laptop` starts it at that step, and the stand-ins
+  `-SillTourPress next@S|skip@S`, `-SillTourActivityAt S`, `-SillTakeTourAt S`
+  and `-SillTourVoiceOver 1` press, touch, take it from Settings and speak as
+  VoiceOver would. `-SillOrientation landscape` turns the normal app sideways
+  in a phone simulator. The console's `tour:` lines say what happened;
+  ContentView's comment has the whole contract.
 - Away from home and the link: `-SillSettingsCase away`, `awaymixed`,
   `awayhome`, `linkbehind`, `linkmixed`, `linklow` or `linkstalled` (the
   Settings panel's header, callout and footnote in each case), and
@@ -478,10 +714,26 @@ simulator:
   setting, or takes the link callout's button, at those seconds after the
   first window list, only against a synthetic host on this Mac's loopback;
   `-SillMoveHomeTest to:HOST:PORT` (with `-SillDialSaved 1`) lists the saved
-  Mac on the network a second into a remote session, so the move home runs
-  against a synthetic host, and `-SillDialSaved remotely` dials it as Connect
-  Remotely does. `CLAUDE.md`, Build and run, has the host side
-  (`SILL_TEST_REMOTE_ORIGIN`, `SILL_TEST_PATTERN=noise`).
+  Mac on the network a second into a remote session, at a home door that
+  speaks TLS, so the move home runs against a synthetic host with `--remote
+  --pairing` (dialed pinned to the saved Mac's key, never plain), and
+  `-SillDialSaved remotely` dials it as Connect Remotely does. `CLAUDE.md`,
+  Build and run, has the host side (`SILL_TEST_REMOTE_ORIGIN`,
+  `SILL_TEST_PATTERN=noise`).
+
+### The touch rig
+
+`Tests/touchrig/run.sh NAME` compiles the real `TrackpadView.swift` and
+`InputOverlay.swift` into a scratch app for the iOS simulator, drives both
+surfaces with synthesized one- to five-finger touches, and logs every event
+each would send the Mac (nothing leaves the app). `--rev REV` builds the
+surfaces as they are at REV, and `Tests/touchrig/compare.py BASE.log NEW.log
+[OFF.log]` checks that one- and two-finger strokes send what they sent before
+(and the same right after a gesture as made fresh) and that each stroke of three
+or more fingers, placed slowly, beside a resting thumb or with a brief extra
+contact too, sends its one gesture, or nothing, and nothing else. It runs on
+a simulator of its own (`SILL_TOUCHRIG_SIM`, made and deleted when missing),
+never XCUITest or a recording.
 
 ## Measuring latency
 
@@ -654,10 +906,10 @@ record field by field.
   or QUIC with FEC; measure before deciding.
 - The encoder is fixed to one size, so a resized window restarts the pipeline
   (a brief black frame on the device).
-- Single window at a time. On the home network the stream is not encrypted
-  (only this Mac's own networks may connect); away from home it runs over TLS
-  1.3 to paired devices only. The device reconnects on a timer when the Mac
-  drops it.
+- Single window at a time. Every connection runs over TLS 1.3 to paired
+  devices only (with Require pairing off, to any device at home, still
+  encrypted); only the command-line host without `--pairing` keeps a plain,
+  open home door. The device reconnects on a timer when the Mac drops it.
 - Bonjour at home, your VPN or a port forward away (Remote access above).
   iCloud auto-pairing comes with milestone 5.
 
@@ -674,8 +926,10 @@ record field by field.
   disk image, and the tool that lays out its window), `release-ios.sh` (the
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
-  link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed, for
-  the update check's tests) and `pacing/` (the pacing harness, above).
+  link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
+  for the update check's tests), `pacing/` (the pacing harness, above), and
+  `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
+  reader's checks against it).
 - `Tests/checks/`: the pure checks (above). `.github/`: the CI, release and
   TestFlight workflows, and the Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
@@ -684,4 +938,4 @@ record field by field.
 - `docs/`: the brief, the plans, `app-store-metadata.md` (what App Store
   Connect asks for) and `release-checklist.md` (the order of work for a
   release).
-- `design/`: the app icon.
+- `design/`: the app icon, and the disk image's background.

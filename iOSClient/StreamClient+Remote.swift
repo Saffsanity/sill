@@ -38,12 +38,30 @@ enum PairingProblem: Equatable {
     case localNetwork(String)
     case notALink
     case noKey(String)
+    /// At home (docs/home-pairing-plan.md §7.7, DiscoveryPolicy.homeRefusal): the Mac stopped its
+    /// window after five wrong codes; the code expired; the code no longer works (the Mac's Cancel,
+    /// or another device used it); the Mac could not prove it knows the code; the row did not
+    /// answer the proof.
+    case homeStopped(String)
+    case homeExpired(String)
+    case homeClosed(String)
+    case homeProofFailed(String)
+    case homeNoAnswer(String)
+    /// Pair This iPad… over a stream at home, where there is no row to tap: the Mac could not prove
+    /// it knows the code; nothing answered the pairing connection.
+    case proofFailedOverStream(String)
+    case noAnswerOverStream(String)
+    /// The Mac refused for a reason this build does not know, and said why in its own words
+    /// (PairResult.unknownReasonMessage): shown as they are.
+    case macSaid(String)
 
     var field: Field {
         switch self {
         case .address, .zone, .nothingAnswered, .notSill, .localNetwork: return .address
-        case .codeLength, .codeTypo, .wrongCode, .expired, .stopped: return .code
-        case .notPairing, .proofFailed, .notALink, .noKey: return .card
+        case .codeLength, .codeTypo, .wrongCode, .expired, .stopped, .homeStopped, .homeExpired, .homeClosed: return .code
+        case .notPairing, .proofFailed, .notALink, .noKey, .homeProofFailed, .homeNoAnswer, .proofFailedOverStream, .noAnswerOverStream,
+             .macSaid:
+            return .card
         }
     }
 
@@ -54,7 +72,8 @@ enum PairingProblem: Equatable {
         case .codeLength: return "A code has 12 digits."
         case .codeTypo: return "That code has a typo. Check it against your Mac."
         case .wrongCode(let left):
-            return "That code didn’t work. Check the code on your Mac. \(left) tr\(left == 1 ? "y" : "ies") left."
+            // A no-break space keeps the count with its word when the line wraps ("4 / tries left").
+            return "That code didn’t work. Check the code on your Mac. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
         case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first."
         case .stopped(let mac):
             return "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code."
@@ -66,6 +85,14 @@ enum PairingProblem: Equatable {
         case .localNetwork(let host): return "To reach \(host), allow Local Network for Sill in Settings."
         case .notALink: return "That’s not a Sill code."
         case .noKey(let reason): return "This \(StreamClient.deviceWord) couldn’t make its key (\(reason))."
+        case .homeStopped(let mac): return DiscoveryPolicy.HomeCopy.stopped(mac: mac)
+        case .homeExpired(let mac): return DiscoveryPolicy.HomeCopy.expired(mac: mac)
+        case .homeClosed(let mac): return DiscoveryPolicy.HomeCopy.closed(mac: mac)
+        case .homeProofFailed(let mac): return DiscoveryPolicy.HomeCopy.proofFailed(mac: mac)
+        case .homeNoAnswer(let mac): return DiscoveryPolicy.HomeCopy.noAnswer(mac: mac)
+        case .proofFailedOverStream(let mac): return DiscoveryPolicy.HomeCopy.proofFailedOverStream(mac: mac)
+        case .noAnswerOverStream(let mac): return DiscoveryPolicy.HomeCopy.noAnswerOverStream(mac: mac)
+        case .macSaid(let words): return words
         }
     }
 }
@@ -136,11 +163,17 @@ extension StreamClient {
         SavedMacs.displayNames(savedMacs)[macID] ?? savedMac(macID)?.name ?? "Mac"
     }
 
-    /// Writes the list, except in a DEBUG run seeded with `-Sill.savedMacs` (for that run alone).
+    /// Writes the list, except in a DEBUG run seeded with `-Sill.savedMacs` (for that run alone), and
+    /// shows it.
     func persistSavedMacs() {
-        if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        storeSavedMacs()
         recomputeMacs()
         updateDiscovery()
+    }
+
+    /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
+    func storeSavedMacs() {
+        if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
@@ -155,11 +188,13 @@ extension StreamClient {
         status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
     }
 
-    /// The card's Cancel while a pairing dial runs: it stops, nothing is saved.
+    /// The card's Cancel while a pairing dial runs: it stops, nothing is saved. The home card's too:
+    /// the ask, or the proof at the home door, stops, and the card folds (`homeAsk`).
     func cancelPairing() {
         pairingAttempt += 1          // a "busy" retry still waiting stays cancelled
         pairingDial?.cancel()
         pairingDial = nil
+        cancelHomeAsk()
         // Only a change publishes: Cancel's shortcut runs inside a view update, where a needless
         // publish draws SwiftUI's "Publishing changes from within view updates" warning.
         if pairing != .idle { pairing = .idle }
@@ -168,9 +203,13 @@ extension StreamClient {
     /// At launch: saved Macs without this device's key (a restore from a backup: the key is
     /// ThisDeviceOnly) are useless, and cleared, but only when the Keychain says the key is not
     /// there (DeviceIdentity.knownMissing). DEBUG: `-SillForgetMacs 1` clears them and the key;
-    /// `-SillPairURL`, `-SillPairCode` with `-SillPairAddress`, and `-SillDialSaved 1` start a
-    /// pairing or a remote dial as the UI would, without the link's confirmation; `-SillDialSaved
-    /// remotely` dials the first saved Mac as Connect Remotely does (a session that never moves home).
+    /// `-SillForgetHomeTLS 1` clears what this device learned of their home doors (`homeTLS`), so it
+    /// dials an older Sill.app plainly again (docs/home-pairing-plan.md §3.4); `-SillPairURL`,
+    /// `-SillPairCode` with `-SillPairAddress`, and `-SillDialSaved 1` start a pairing or a remote
+    /// dial as Add a Mac… and a Remote row would, without the link's confirmation: `-SillPairURL`
+    /// pairs at the link's own addresses only, where a confirmed link tries the home rows first
+    /// (`confirmPendingLink`); `-SillDialSaved remotely` dials the first saved Mac as Connect
+    /// Remotely does (a session that never moves home).
     func startRemote() {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SillForgetMacs") {
@@ -178,6 +217,11 @@ extension StreamClient {
             DeviceIdentity.forget()
             persistSavedMacs()
             print("remote: saved Macs and the device key forgotten")
+        }
+        if UserDefaults.standard.bool(forKey: "SillForgetHomeTLS") {
+            savedMacs = SavedMacs.forgettingHomeTLS(savedMacs)
+            persistSavedMacs()
+            print("home: homeTLS forgotten on every saved Mac")
         }
         #endif
         if !savedMacs.isEmpty, DeviceIdentity.knownMissing() {
@@ -265,12 +309,41 @@ extension StreamClient {
         #if DEBUG
         print("remote: dialing \(name) (\(macID)) \(why): \(candidates.map(\.key))")
         #endif
-        let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue)
+        // A Mac set up again (a new key) that this device paired again: at an address that names
+        // one machine, its newer record's key may answer for this one, and a handshake completed
+        // with it retires this record (RemoteDialPolicy.successors, SavedMacs.superseding).
+        var successors: [String: [Data]] = [:]
+        for c in candidates {
+            let keys = RemoteDialPolicy.successors(of: mac, at: c, in: savedMacs, allowLoopback: Self.keepsLoopback)
+                .compactMap(\.fingerprintData)
+            if !keys.isEmpty { successors[c.key] = keys }
+        }
+        let connector = RemoteConnector(candidates: candidates, mode: .session(pin: pin), identity: identity, queue: queue,
+                                        successors: successors)
         remoteDial = connector
         connector.onWinner = { [weak self, weak connector] winner in
             DispatchQueue.main.async {
                 guard let self, let connector, self.remoteDial === connector else { winner.connection.cancel(); return }
                 self.remoteDial = nil
+                var macID = macID
+                if winner.fingerprint != pin,
+                   let newer = self.savedMacs.first(where: { $0.fingerprintData == winner.fingerprint && $0.macID != macID }),
+                   RemoteDialPolicy.successors(of: mac, at: winner.candidate, in: self.savedMacs,
+                                               allowLoopback: Self.keepsLoopback).contains(where: { $0.macID == newer.macID }) {
+                    #if DEBUG
+                    print("remote: \(winner.candidate.key) answered with the key of \(newer.macID), saved after \(macID): \(macID) superseded")
+                    #endif
+                    self.savedMacs = SavedMacs.superseding(old: macID, by: newer.macID, proof: winner.candidate.key, in: self.savedMacs)
+                    self.persistSavedMacs()
+                    if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
+                    macID = newer.macID
+                    self.hostName = self.displayName(macID)
+                    self.status = why == .automatic ? "Reconnecting to \(self.hostName) remotely…" : "Connecting to \(self.hostName) remotely…"
+                } else if winner.fingerprint != pin {
+                    winner.connection.cancel()           // cannot happen: the verify block took no other key
+                    self.remoteDialFailed(macID: macID, why: why, failure: .wrongMac, candidate: winner.candidate)
+                    return
+                }
                 self.remoteWinner(winner, macID: macID, why: why)
             }
         }
@@ -333,7 +406,10 @@ extension StreamClient {
         firstListDeadline = nil
         afterPairingWatch?.cancel()
         afterPairingWatch = nil
+        // The automatic reconnect's remote dial goes on with the last session's tour decision.
+        startTourSession(reconnected: s.why == .automatic)
         reconnect = nil
+        cancelHomeAsk(idleStatus: false)      // as at home (markConnected): no ask is left for the connect screen
         connected = true
         remoteRoute = r
         askedNearby = false
@@ -416,7 +492,20 @@ extension StreamClient {
             remoteDialFailed(macID: id, why: s.why ?? .tap, failure: failure, candidate: s.candidate)
             return
         }
+        // At home over TLS: removed, pairing now required, or another key as the saved Mac
+        // (StreamClient+Home). Every other end goes on below.
+        if homeSessionEnded(s, error: error, goodbye: goodbye?.reason) { return }
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        if goodbye?.reason == Goodbye.removed, let mac = saved,
+           DiscoveryPolicy.removalRevokes(remote: s?.route.isRemote == true, trust: s?.home, savedKey: mac.fingerprintData),
+           let next = SavedMacs.revoking(mac.macID, in: savedMacs) {
+            // One trust list on the Mac: removed away is removed at home too. The row reads Not
+            // paired, and a tap asks (docs/home-pairing-plan.md §7.6). Only a remote session's
+            // goodbye gets here with a key (a TLS one at home ends in homeSessionEnded), and a
+            // plain session's revokes nothing: it has no key, so anyone could have sent it.
+            savedMacs = next
+            persistSavedMacs()
+        }
         tearDown(status: outcome.text)
         reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
                                                       afterQuit: goodbye?.reason == Goodbye.quit) : nil
@@ -490,8 +579,11 @@ extension StreamClient {
         let dialingAutomatically = remoteDial != nil || session?.why == .automatic
         guard connection == nil || dialingAutomatically else { return false }
         func matches(_ m: FoundMac) -> Bool {
-            if let id = r.macID, let rowID = m.macID { return rowID == id }
-            return r.bonjourName == m.name
+            // A row whose key was another's when the reconnect took it by name: never again (§7.6).
+            if pinRefusedRows.contains(m.id) { return false }
+            // By its tag; else by name, never a row whose tag names another Mac (DiscoveryPolicy.rowMac).
+            return DiscoveryPolicy.reconnectMatches(savedID: r.macID, bonjourName: r.bonjourName, rowMacID: m.macID,
+                                                    rowName: m.name, rowCarriesTag: m.carriesTag)
         }
         let network = macs.first { $0.route == .network && matches($0) }
         let direct = macs.first { $0.route == .direct && matches($0) }
@@ -503,12 +595,39 @@ extension StreamClient {
                                                   networkLeftAt: listedName.flatMap { sightings.leftAt[$0] },
                                                   quitAt: r.afterQuit ? r.lostAt : nil, now: now)
         if let mac = choice.take, mac.endpoint != nil {
-            if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
-            cancelRemoteDial()
-            reconnect = r        // kept until the row's connection is ready
-            dial(mac, macID: mac.macID ?? r.macID)
-            status = mac.direct ? "Reconnecting to \(r.name) directly…" : "Reconnecting to \(r.name)…"
-            return true
+            // The row's door decides whether the reconnect dials it at all (DiscoveryPolicy.homeDial,
+            // never an ask): a Mac that removed this device, or an unsaved one that requires
+            // pairing, waits for a tap, and one whose Sill is too old for this build is not dialed.
+            let id = mac.macID ?? r.macID
+            let decision = homeDecision(mac, macID: id, tap: false)
+            if DiscoveryPolicy.sessionTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }) != nil {
+                if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
+                cancelRemoteDial()
+                reconnect = r        // kept until the row's connection is ready (a TLS one's: its first window list)
+                // False only when a TLS dial finds no key and none can be made: the status says why.
+                guard dial(mac, macID: id, tap: false) else { return false }
+                status = mac.direct ? "Reconnecting to \(r.name) directly…" : "Reconnecting to \(r.name)…"
+                return true
+            }
+            if decision == .updateSill { status = DiscoveryPolicy.updateSillStatus(mac: mac.name) }
+            // A row that waits for a tap (an unsaved Mac that now asks devices to pair, a saved one
+            // that removed this device): the reconnect never asks, so it ends here, with the words
+            // a goodbye would have brought, rather than "…reconnects when it's back" for ever.
+            let savedRow = id.flatMap { savedMac($0) }
+            if let end = DiscoveryPolicy.reconnectEnd(decision, saved: savedRow != nil, newKey: savedRow?.newKey == true) {
+                reconnect = nil
+                if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
+                cancelRemoteDial()
+                switch end {
+                case .removed: status = DiscoveryPolicy.HomeCopy.removed(mac: r.name, device: Self.deviceWord)
+                case .newKey: status = DiscoveryPolicy.HomeCopy.newKey(mac: r.name, device: Self.deviceWord)
+                case .pairingRequired: status = DiscoveryPolicy.HomeCopy.pairingRequired(mac: r.name, device: Self.deviceWord)
+                }
+                #if DEBUG
+                print("reconnect: \(mac.name) waits for a tap (\(end)); the reconnect ends")
+                #endif
+                return false
+            }
         }
         var wake = choice.recheckAt
         if let id = r.macID, r.remoteAllowed, savedMac(id) != nil, !dialingAutomatically {
@@ -545,12 +664,16 @@ extension StreamClient {
 
     // MARK: Kind 18
 
-    /// Who this connection's Mac is. Verified against a saved pin, it refreshes that Mac (name,
-    /// port, addresses, only when newer) and names the session's Mac; unverified, it is shown in
-    /// the panel's Away from home group and never saved.
-    func receiveMacInfo(_ signed: SignedMacInfo, endpoint: NWEndpoint?) {
+    /// Who this connection's Mac is. Signed by the key this connection showed in its handshake
+    /// (`connectionKey`, DiscoveryPolicy.macInfoNamesSession) and matching a saved pin, it
+    /// refreshes that Mac (name, port, addresses, only when newer) and names the session's Mac;
+    /// otherwise (unsigned, signed by another key, or on a plain connection, which has none) it is
+    /// shown in the panel's Away from home group and never saved: a Mac's kind 18 replayed on
+    /// another Mac's connection names nothing, renames nothing, and makes nothing "Paired".
+    func receiveMacInfo(_ signed: SignedMacInfo, endpoint: NWEndpoint?, connectionKey: Data?) {
         if macInfoAt == nil { macInfoAt = Date() }
-        guard let (info, fingerprint) = signed.verified() else {
+        guard let (info, fingerprint) = signed.verified(),
+              DiscoveryPolicy.macInfoNamesSession(signer: fingerprint, connectionKey: connectionKey) else {
             macInfo = signed.unverifiedInfo()
             macInfoVerified = nil
             macInfoSaved = false
@@ -583,8 +706,15 @@ extension StreamClient {
 
     // MARK: Pairing
 
-    /// "Pair This iPad…": asks the Mac this device is connected to at home to show its code.
-    func requestPairingCode() {
+    /// "Pair This iPad…": asks the Mac this device is connected to at home to show its code. Over a
+    /// session at home that speaks TLS, by the ask on a pairing connection of its own, whose answer
+    /// the overlay then says (StreamClient+Home's `askOverStream`); over a plain one, kind 21, for
+    /// which a plain door always opens a window. `mac`: what the overlay calls the Mac.
+    func requestPairingCode(mac: String? = nil) {
+        if let t = sessionPairingTarget {
+            askOverStream(t, mac: mac ?? (macName.isEmpty ? hostName : macName))
+            return
+        }
         send(.pairingWanted, payload: Data())
     }
 
@@ -617,10 +747,12 @@ extension StreamClient {
         }
     }
 
+    /// Confirmed: to the row the ask reached when it names that key, else the home rows pinned to
+    /// its key, then its addresses, as before (StreamClient+Home's `pairLinkAtHome`).
     func confirmPendingLink() {
         guard let link = pendingLink else { return }
         pendingLink = nil
-        pair(link: link, overlay: connected)
+        pairLinkAtHome(link, overlay: connected, scanned: false)
     }
 
     func cancelPendingLink() { pendingLink = nil }
@@ -656,6 +788,13 @@ extension StreamClient {
         }
         guard RemoteDialPolicy.scanStartsPairing(busy: busy, failed: failed, secret: link.secret,
                                                  lastScanned: lastScannedSecret, tapped: tapped) else { return }
+        // The home card's scanner, and Pair This iPad…'s over a session at home that speaks TLS: the
+        // code goes to the home door (the row the ask reached, else the home rows pinned to its key),
+        // never through kind 18's addresses. Add a Mac… pairs from afar, as before.
+        if homeAsk?.phase == .shown || (overlay && sessionPairingTarget != nil) {
+            pairLinkAtHome(link, overlay: overlay, scanned: true)
+            return
+        }
         pair(link: link, overlay: overlay, scanned: true)
     }
 
@@ -821,7 +960,11 @@ extension StreamClient {
         }
     }
 
-    private static func problem(for r: PairResult, mac: String) -> PairingProblem {
+    /// A refused pairing's words, as the remote path says them; also Pair This iPad…'s over a
+    /// stream at home (StreamClient+Home's `homeProblem`), which has no row to tap.
+    static func problem(for r: PairResult, mac: String) -> PairingProblem {
+        // A reason this build does not know, with the Mac's own words for it: those, not a guess.
+        if let words = r.unknownReasonMessage { return .macSaid(words) }
         switch r.reason {
         case PairResult.code?: return .wrongCode(triesLeft: max(0, r.triesLeft ?? 0))
         case PairResult.expired?: return .expired

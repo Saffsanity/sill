@@ -71,6 +71,11 @@ struct PhonePortraitLayout: Equatable {
     /// Row 1's buttons, in `Button` order.
     let buttons: [CGRect]
     let strip: CGRect
+    /// Row 2 while the Mac sent its menus: the Menus button at the row's end, under Settings and as
+    /// wide, as tall as row 1's buttons and centred in the strip's height, and the strip ending `gap`
+    /// before it (docs/menu-bar-plan.md §7.5). Row 1 keeps its five.
+    let menus: CGRect
+    let stripBesideMenus: CGRect
     /// Row 3.
     let keys: CGRect
     let caps: [CGRect]
@@ -116,9 +121,14 @@ struct PhonePortraitLayout: Equatable {
                       width: rowWidth, height: Self.buttonHeight)
         buttons = Self.split(row1, count: Button.allCases.count, gap: Self.gap)
 
-        // Row 2: the strip, under row 1's band, wider than the rows by its own padding.
+        // Row 2: the strip, under row 1's band, wider than the rows by its own padding. With the
+        // Mac's menus, the Menus button under Settings, and the strip up to `gap` before it.
         strip = CGRect(x: Self.side - Self.stripInset, y: row1.maxY + Self.band + Self.rowGap,
                        width: max(0, width - 2 * (Self.side - Self.stripInset)), height: Self.stripHeight)
+        let settingsButton = buttons[Button.settings.rawValue]
+        menus = CGRect(x: settingsButton.minX, y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,
+                       width: settingsButton.width, height: Self.buttonHeight)
+        stripBesideMenus = CGRect(x: strip.minX, y: strip.minY, width: max(0, menus.minX - Self.gap - strip.minX), height: strip.height)
 
         // Row 3: six equal caps, `gap` apart.
         keys = CGRect(x: Self.side, y: strip.maxY + Self.rowGap, width: rowWidth, height: Self.capHeight)

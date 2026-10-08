@@ -19,8 +19,10 @@ import SillHostCore
 /// is its source of truth (LoginItem.swift).
 ///
 /// Remote Access, its port and the internet switch are the Mac's alone: they come from here (the
-/// menu, the Remote Access pane, -SillSetAfter), never from a device. The trust list and the keys
-/// never live here: any process of the same user can write these defaults (KeychainIdentityStore).
+/// menu, the Remote Access pane, -SillSetAfter), never from a device. The trust list, the keys and
+/// Require pairing never live here: any process of the same user can write these defaults
+/// (KeychainIdentityStore; docs/home-pairing-plan.md §6.5). `config.requirePairing` only carries
+/// the stored value to the host (AppModel.setRequirePairing), and `save(changedFrom:)` never writes it.
 ///
 /// Away from home (docs/remote-bundle-plan.md §5): the away quality is saved under its own keys,
 /// `awayBitrate` and `awayCaptureScale`, never over `bitrate` and `captureScale`; a device away sets
@@ -119,7 +121,11 @@ final class HostSettings {
                             directWireless: defaults.bool(forKey: Key.directWireless),
                             remoteAccess: defaults.bool(forKey: Key.remoteAccess),
                             remotePort: defaults.integer(forKey: Key.remotePort),
-                            internetAccess: defaults.bool(forKey: Key.internetAccess)).validated()
+                            internetAccess: defaults.bool(forKey: Key.internetAccess),
+                            // Never a default or a launch argument: it lives with the trust list
+                            // (the identity store), from which AppModel reads it at launch, before
+                            // the host starts, and to which the Devices pane saves it.
+                            requirePairing: HostConfig.standard.requirePairing).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general

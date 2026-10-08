@@ -57,7 +57,7 @@ enum MockCatalog {
     /// draw it. `.none` is the state a fresh connection starts in — nothing picked yet, so the app
     /// drawer opens by itself — which the harness asks for with `-SillActive none`.
     static func client(active: StreamSource = .window(102), settings: SettingsCase = .default,
-                       pointer: String? = nil, pencilPointer: Bool = false) -> StreamClient {
+                       menus: MenuCase? = .code, pointer: String? = nil, pencilPointer: Bool = false) -> StreamClient {
         let client = StreamClient()
         // Never browses, not even after the panel's Disconnect, when a remembered Mac would look
         // missing from a network the mock never looked at.
@@ -83,6 +83,22 @@ enum MockCatalog {
         client.thumbnails = thumbnails
 
         seed(client, settings: settings)
+        // `-SillOverlayLine asking|shown|openonmac|locked|noanswer`: Pair This iPad…'s line over a
+        // session at home that speaks TLS, as the Mac's answer to its ask sets it (the mock never
+        // asks: over it the overlay reads "…is showing a code now." as over a plain door).
+        if let line = UserDefaults.standard.string(forKey: "SillOverlayLine") {
+            let device = StreamClient.deviceWord
+            switch line {
+            case "asking": client.overlayAskLine = DiscoveryPolicy.HomeCopy.overlayAsking(mac: "Mac mini")
+            case "shown": client.overlayAskLine = DiscoveryPolicy.overlayLine(.shown, mac: "Mac mini", device: device)
+            case "openonmac": client.overlayAskLine = DiscoveryPolicy.overlayLine(.openOnMac, mac: "Mac mini", device: device)
+            case "locked": client.overlayAskLine = DiscoveryPolicy.overlayLine(.locked, mac: "Mac mini", device: device)
+            case "noanswer": client.overlayAskLine = DiscoveryPolicy.overlayLine(nil, mac: "Mac mini", device: device)
+            default: break
+            }
+        }
+        // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
+        if let menus { client.showMockMenus(macMenus(menus)) }
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
         return client
     }
@@ -96,6 +112,149 @@ enum MockCatalog {
             return
         }
         client.displayView.debugFrameSize(client.videoSize)
+    }
+
+    // MARK: - The Mac's menus
+
+    /// `-SillMacMenu`: the Mac's menus in the harness (docs/menu-bar-plan.md §7.8). The mock Mac
+    /// answers a menu 0.2 s after it opens and a choice 0.2 s after it is made, unless a case says
+    /// otherwise.
+    enum MenuCase: String {
+        case code       // VS Code's ten menus: File with shortcuts, sections, a ✓, a disabled item and Open Recent ▸; Code › Settings ▸ Themes ▸ three deep; View › Appearance with ✓s and a mixed mark; Run with disabled items
+        case blender    // only Blender and Window, as Blender's menu bar reads over Accessibility
+        case long       // a Window menu of 300 windows, and a History of 600 (500 sent, and "100 more on the Mac")
+        case stale      // Code not answering on the Mac: every menu disabled under the note
+        case noaccess   // no Accessibility for Sill on the Mac: the note, no menus
+        case none       // no menus (nothing streams, Sill itself frontmost): no Menus button
+        case slow       // code's menus, each answered after 1.5 s (UIKit's placeholder meanwhile)
+        case timeout    // code's menus, never answered: "Mac mini didn’t answer. Open the menu again." after 4 s
+        case refuse     // code's menus, every choice refused: "The menus changed. Open the menu again."
+    }
+
+    /// What the mock Mac sends: its top level, every menu's items by id, and how it answers.
+    struct MacMenus {
+        let topLevel: MacMenu
+        let tree: [String: [MacMenuItem]]
+        /// How long a fetch waits for its answer; nil: for ever (`timeout`).
+        let fetchDelay: Double?
+        let refusesChoices: Bool
+
+        /// The answer to a kind 27, as a host sends it: at most 500 items, `more` for the rest.
+        func answer(_ r: FetchMenu) -> MacMenu {
+            let items = tree[r.id ?? ""] ?? []
+            let sent = Array(items.prefix(500))
+            return MacMenu(version: topLevel.version, answering: r.token, menu: r.id, items: sent,
+                           more: items.count > sent.count ? items.count - sent.count : nil)
+        }
+
+        /// The answer to a kind 25.
+        func answer(_ r: PressMenuItem) -> MacMenu {
+            refusesChoices
+                ? MacMenu(version: topLevel.version, answering: r.token, pressed: false, note: MacMenuState.changedNote)
+                : MacMenu(version: topLevel.version, answering: r.token, pressed: true)
+        }
+    }
+
+    static func macMenus(_ c: MenuCase) -> MacMenus {
+        func top(_ titles: [String], app: String?, bundleID: String? = nil, stale: Bool? = nil, note: String? = nil) -> MacMenu {
+            MacMenu(version: 3, app: app, bundleID: bundleID,
+                    menus: titles.enumerated().map { MacMenuItem(id: "\($0.offset + 1)", title: $0.element, submenu: true) },
+                    stale: stale, note: note)
+        }
+        let codeTitles = ["Code", "File", "Edit", "Selection", "View", "Go", "Run", "Terminal", "Window", "Help"]
+        let vscode = "com.microsoft.VSCode"
+        switch c {
+        case .code, .slow, .timeout, .refuse, .stale:
+            let stale = c == .stale
+            return MacMenus(topLevel: top(codeTitles, app: "Code", bundleID: vscode, stale: stale ? true : nil,
+                                          note: stale ? "Code isn’t responding." : nil),
+                            tree: codeTree,
+                            fetchDelay: c == .slow ? 1.5 : c == .timeout ? nil : 0.2,
+                            refusesChoices: c == .refuse)
+        case .blender:
+            return MacMenus(topLevel: top(["Blender", "Window"], app: "Blender", bundleID: "org.blenderfoundation.blender"),
+                            tree: ["1": items("1", ["About Blender", "—", "Preferences… | ⌘,", "—", "Services ▸", "—",
+                                                    "Hide Blender | ⌘H", "Hide Others | ⌥⌘H", "Show All", "—", "Quit Blender | ⌘Q"]),
+                                   "1.4": items("1.4", ["!No Services Apply"]),
+                                   "2": items("2", ["Minimize | ⌘M", "Zoom", "—", "Toggle Window Fullscreen | ⌃⌘F", "Toggle System Console",
+                                                    "—", "Bring All to Front", "—", "✓untitled.blend"])],
+                            fetchDelay: 0.2, refusesChoices: false)
+        case .long:
+            let windows = (1...300).map { "Window \($0) — notes-\($0).md" }
+            let history = (1...600).map { "Visited page \($0)" }
+            return MacMenus(topLevel: top(["Code", "File", "Window", "History"], app: "Code", bundleID: vscode),
+                            tree: ["1": codeTree["1"] ?? [], "2": codeTree["2"] ?? [],
+                                   "3": items("3", ["Minimize | ⌘M", "Zoom", "—"] + windows),
+                                   "4": items("4", history)],
+                            fetchDelay: 0.2, refusesChoices: false)
+        case .noaccess:
+            return MacMenus(topLevel: MacMenu(version: 3, app: "Code", bundleID: vscode, menus: [],
+                                              note: "Allow Accessibility for Sill on the Mac (System Settings › Privacy & Security › Accessibility)."),
+                            tree: [:], fetchDelay: 0.2, refusesChoices: false)
+        case .none:
+            return MacMenus(topLevel: MacMenu(version: 3, menus: []), tree: [:], fetchDelay: 0.2, refusesChoices: false)
+        }
+    }
+
+    /// VS Code's menus as a Mac with this build reads them (a selection of each).
+    private static let codeTree: [String: [MacMenuItem]] = [
+        "1": items("1", ["About Visual Studio Code", "—", "Settings ▸", "—", "Services ▸", "—", "Hide Visual Studio Code | ⌘H",
+                         "Hide Others | ⌥⌘H", "Show All", "—", "Quit Visual Studio Code | ⌘Q"]),
+        "1.2": items("1.2", ["Settings | ⌘,", "Extensions | ⇧⌘X", "Keyboard Shortcuts [⌘K ⌘S]", "Snippets", "Tasks", "—",
+                             "Themes ▸", "—", "Backup and Sync Settings…", "Online Services Settings"]),
+        "1.2.6": items("1.2.6", ["Color Theme [⌘K ⌘T]", "File Icon Theme", "Product Icon Theme"]),
+        "1.4": items("1.4", ["!No Services Apply", "—", "Services Settings"]),
+        "2": items("2", ["New Text File | ⌘N", "New File… | ⌃⌥⌘N", "—", "Open Recent ▸", "Open… | ⌘O", "Open Folder…",
+                         "New Window | ⇧⌘N", "—", "Save Workspace As…", "Save | ⌘S", "Save As… | ⇧⌘S", "—",
+                         "✓Auto Save", "—", "!Revert File", "Close Editor | ⌘W", "Close Window | ⇧⌘W"]),
+        "2.3": items("2.3", ["Reopen Closed Editor | ⇧⌘T", "—", "~/Downloads/winstream", "~/Code/site", "~/Notes/trip.md", "—",
+                             "More… | ⌃R", "—", "Clear Recently Opened"]),
+        "3": items("3", ["Undo | ⌘Z", "Redo | ⇧⌘Z", "—", "Cut | ⌘X", "Copy | ⌘C", "Paste | ⌘V", "—", "Find | ⌘F",
+                         "Replace | ⌥⌘F", "—", "Find in Files | ⇧⌘F", "Replace in Files | ⇧⌘H", "—",
+                         "Toggle Line Comment | ⌘/", "Toggle Block Comment | ⌥⇧A", "—", "Start Dictation… | fn D",
+                         "Emoji & Symbols | fn E"]),
+        "4": items("4", ["Select All | ⌘A", "Expand Selection | ⌃⇧⌘→", "Shrink Selection | ⌃⇧⌘←", "—", "Copy Line Up | ⌥⇧↑",
+                         "Copy Line Down | ⌥⇧↓", "Move Line Up | ⌥↑", "Move Line Down | ⌥↓", "—",
+                         "Add Cursor Above | ⌥⌘↑", "Add Cursor Below | ⌥⌘↓", "—", "Column Selection Mode"]),
+        "5": items("5", ["Command Palette… | ⇧⌘P", "Open View…", "—", "Appearance ▸", "Editor Layout ▸", "—",
+                         "Explorer | ⇧⌘E", "Search | ⇧⌘F", "Source Control | ⌃⇧G", "Run | ⇧⌘D", "Extensions | ⇧⌘X", "—",
+                         "Problems | ⇧⌘M", "Output | ⇧⌘U", "Terminal | ⌃`", "—", "✓Word Wrap | ⌥Z"]),
+        "5.3": items("5.3", ["Full Screen | ⌃⌘F", "Zen Mode [⌘K Z]", "Centered Layout", "—", "✓Primary Side Bar | ⌘B",
+                             "Secondary Side Bar | ⌥⌘B", "✓Status Bar", "~Minimap", "✓Panel | ⌘J"]),
+        "5.4": items("5.4", ["Split Up", "Split Down", "Split Left", "Split Right", "—", "Single", "Two Columns", "Three Columns"]),
+        "6": items("6", ["Back | ⌃-", "Forward | ⌃⇧-", "Last Edit Location [⌘K ⌘Q]", "—", "Go to File… | ⌘P",
+                         "Go to Symbol in Workspace… | ⌘T", "—", "Go to Symbol in Editor… | ⇧⌘O", "Go to Definition | F12",
+                         "Go to Line/Column… | ⌃G"]),
+        "7": items("7", ["Start Debugging | F5", "Run Without Debugging | ⌃F5", "!Stop Debugging | ⇧F5",
+                         "!Restart Debugging | ⇧⌘F5", "—", "Open Configurations", "Add Configuration…", "—",
+                         "!Step Over | F10", "!Step Into | F11", "!Step Out | ⇧F11", "—", "Toggle Breakpoint | F9"]),
+        "8": items("8", ["New Terminal | ⌃⇧`", "Split Terminal | ⌘\\", "—", "Run Task…", "Run Build Task… | ⇧⌘B",
+                         "Run Active File", "Run Selected Text"]),
+        "9": items("9", ["Minimize | ⌘M", "Zoom", "Fill | fn ⌃F", "Center | fn ⌃C", "—", "Bring All to Front", "—",
+                         "✓stream.py — winstream", "index.html — site"]),
+        "10": items("10", ["Welcome", "Show All Commands | ⇧⌘P", "Documentation", "Editor Playground", "Show Release Notes", "—",
+                           "Keyboard Shortcuts Reference [⌘K ⌘R]", "Video Tutorials", "Tips and Tricks", "—", "Report Issue",
+                           "—", "View License", "Privacy Statement", "—", "Toggle Developer Tools | ⌥⌘I"]),
+    ]
+
+    /// A menu's items from one line each: "—" a separator, "Title ▸" a submenu, "Title | ⌘S" a
+    /// shortcut, and a first "!" (disabled), "✓" (on) or "~" (mixed). Ids from `parent`, 0-based,
+    /// separators counted, as the Mac numbers them.
+    private static func items(_ parent: String, _ lines: [String]) -> [MacMenuItem] {
+        lines.enumerated().map { index, line in
+            let id = "\(parent).\(index)"
+            if line == "—" { return MacMenuItem(separator: true) }
+            var text = Substring(line)
+            var enabled: Bool?
+            var mark: String?
+            if text.hasPrefix("!") { enabled = false; text = text.dropFirst() }
+            if text.hasPrefix("✓") { mark = "✓"; text = text.dropFirst() } else if text.hasPrefix("~") && !text.hasPrefix("~/") { mark = "-"; text = text.dropFirst() }
+            let parts = text.components(separatedBy: " | ")
+            if parts[0].hasSuffix(" ▸") {
+                return MacMenuItem(id: id, title: String(parts[0].dropLast(2)), enabled: enabled, submenu: true)
+            }
+            return MacMenuItem(id: id, title: parts[0], enabled: enabled, mark: mark, key: parts.count > 1 ? parts[1] : nil)
+        }
     }
 
     // MARK: - The Mac's settings
@@ -117,12 +276,16 @@ enum MockCatalog {
         case nodirect    // a host without the setting (the ipad-host-settings build): no row
         case wired       // the session runs over the USB cable (or Ethernet): "Wired" in the readout
         case noroute     // a path that names no link (loopback, a VPN): the readout ends in the bitrate
-        case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired for remote access
+        case remote          // connected through Tailscale, 48 ms, a saved Mac: the route line, Paired
         case remoteinternet  // connected over the internet, 120 ms
         case remoteslow      // through Tailscale on a slow link (320 ms): the slow-link callout
-        case remotepair      // at home, Remote Access on, not saved: Pair This iPad…
-        case remoteoff       // at home, Remote Access off: the footnote only
+        case remotepair      // at home over a plain door, Remote Access on, not saved: Pair This iPad…
+        case remoteoff       // at home over a plain door, Remote Access off: the footnote only
         case noremote        // at home, an older Mac without kind 18: no Away from home group
+        // Pairing at home (docs/home-pairing-plan.md §7.6, §7.9): a session at home over TLS.
+        case paired          // a saved Mac, Remote Access on: Paired, and how Sill reaches it from afar
+        case pairedoff       // a saved Mac, Remote Access off: Paired, and how to turn it on
+        case openpair        // not saved, on a Mac that lets any device in (Require pairing off), Remote Access off: Pair This iPad…
         // Away from home and the link (docs/remote-bundle-plan.md §5.8, §6.7), through Tailscale:
         case away            // the away quality runs (Low · Standard; home Pro · Retina): "Away: Low · Standard"
         case awaymixed       // away, while a device at home is connected: "Home quality: Pro · Retina (…)"
@@ -153,6 +316,8 @@ enum MockCatalog {
                                          : RunningStream(width: 1440, height: 900, fps: 60, mbps: runs.bitrate / 1_000_000, onVirtualDisplay: false)
         client.macInfo = macInfo()
         client.macInfoSaved = true
+        // At home a saved Mac's session speaks TLS since pairing at home, as `paired`'s does.
+        if atHome { client.mockHomeTLS = true }
         if !atHome {
             client.remoteRoute = .vpn("Tailscale")
             client.showMockLinkStats(linkStats(rtt: c == .linkbehind || c == .linkmixed || c == .linklow || c == .linkstalled ? 180 : 48))
@@ -202,6 +367,9 @@ enum MockCatalog {
             client.route = nil
         default: client.route = .wifi
         }
+        // A Mac from this build takes the trackpad gestures (its window list says so); an older one
+        // does not, and its Settings panel says to update it.
+        client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,
@@ -248,6 +416,13 @@ enum MockCatalog {
             client.macInfo = macInfo()
         case .remoteoff:
             client.macInfo = macInfo(remoteAccess: false)
+        case .paired, .pairedoff:
+            client.macInfo = macInfo(remoteAccess: c == .paired)
+            client.macInfoSaved = true
+            client.mockHomeTLS = true
+        case .openpair:
+            client.macInfo = macInfo(remoteAccess: false)
+            client.mockHomeTLS = true
         case .away, .awaymixed, .awayhome, .linkbehind, .linkmixed, .linklow, .linkstalled:
             seedAway(client, &state, c)
         case .default, .legacy, .pending, .timeout, .wired, .noroute, .noremote:
@@ -295,15 +470,28 @@ enum MockCatalog {
         case remotefail    // a remote dial's failure, -SillRemoteFailure vpnoff|timeout|timeoutip|refused|dns|wrongmac|revoked|notsill|gaveup|quit|removed|remoteoff
         case camera        // Add a Mac with the camera refused
         case externalpair  // an outside sill://pair link waiting for its confirmation
+        // Pairing at home (docs/home-pairing-plan.md §7.3–7.9). Each row's word is DiscoveryPolicy.rowWord's.
+        case homerows        // a saved Wi-Fi row, Not paired, an unpaired Wired (the cable), a Wired row through a USB Ethernet adapter (Not paired), an open door's (Not paired), Update Sill, long names
+        case homeasking      // a tap on a Not paired row: "Pairing with Mac mini…", the row lit
+        case homecard        // the Mac shows its code: the home card, scanning (a drawn viewfinder)
+        case homecode        // the home card's typed path, empty
+        case homecodeerror   // the typed path after a wrong code: "That code didn’t work… 4 tries left."
+        case homelocked      // the Mac is locked (a Wired row over the cable): "Unlock Mac mini, then tap it again."
+        case homeopenonmac   // the Mac showed no code by itself: "…choose Pair iPhone or iPad… in the Sill menu…"
+        case homerevoked     // the Mac removed this device: its row reads Not paired
+        case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
+        case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
+        case pairingrequired // Require pairing turned on while this device was connected without pairing
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
-    /// viewfinder's stand-in.
+    /// viewfinder's stand-in. The home card unfolds from the client's `homeAsk` (ConnectScreen).
     static func connectScreenOptions(_ c: ConnectCase) -> (adding: Bool, typed: Bool, scanner: CodeScanner.Mode) {
         switch c {
         case .addmac, .pairing: return (true, false, .placeholder)
         case .addcode, .addcodeerror: return (true, true, .placeholder)
         case .camera: return (true, false, .denied)
+        case .homecode, .homecodeerror: return (false, true, .placeholder)
         default: return (false, false, .placeholder)
         }
     }
@@ -331,6 +519,28 @@ enum MockCatalog {
         func remote(_ name: String, _ id: String) -> FoundMac { FoundMac(name: name, endpoint: nil, route: .remote, macID: id) }
         let remoteRows = [mac("Studio", .wifi), mac("Mac mini", .direct),
                           remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21"), remote("Mac mini (2)", "0123456789ABCDEF")]
+        /// A row at home as `recomputeMacs` makes it: its door (`p`), what this device knows of its
+        /// Mac, and the word DiscoveryPolicy.rowWord gives them. `cable`: a Wired row whose interface
+        /// carries only link-local addresses (the USB cable to the Mac); false for a USB Ethernet
+        /// adapter on the LAN.
+        func home(_ name: String, _ method: DiscoveryPolicy.Method?, door: DiscoveryPolicy.HomeDoor = .pairingRequired,
+                  saved: Bool = false, revoked: Bool = false, homeTLS: Bool = false, cable: Bool = false) -> FoundMac {
+            let word = DiscoveryPolicy.rowWord(door: door, saved: saved, revoked: revoked, homeTLS: homeTLS,
+                                               debug: StreamClient.debugBuild, method: method, cable: cable)
+            return FoundMac(name: name, endpoint: .service(name: name, type: "_sill._tcp", domain: "local.", interface: nil),
+                            route: method == .direct ? .direct : .network, macID: saved ? "HOMEPAIRING\(name.count)" : nil,
+                            method: method, door: door, homeWord: word)
+        }
+        /// A tap's ask on `row` (`homeAsk`), waiting for its answer or answered `shown`.
+        func ask(_ row: FoundMac, shown: Bool) -> HomeAsk {
+            var a = HomeAsk(target: HomeDialer.Target(endpoint: row.endpoint!, peerToPeer: row.direct, row: row.id, label: row.name),
+                            name: row.name, cableRow: row.homeWord == .pairsOverCable, savedID: nil, tagNamed: false)
+            if shown { a.phase = .shown }
+            return a
+        }
+        let studio = home("Studio", .wifi, saved: true, homeTLS: true)
+        let device = StreamClient.deviceWord
+        typealias Copy = DiscoveryPolicy.HomeCopy
         switch c {
         case .looking:
             break
@@ -362,7 +572,8 @@ enum MockCatalog {
             let goodbye = c == .update
                 ? Goodbye(reason: Goodbye.update, message: "Update Sill on your \(StreamClient.deviceWord) to keep using Mac mini. It needs version 1.2 or later.",
                           minimumVersion: "1.2", reconnect: false)
-                : Goodbye(reason: "pairingRequired",
+                // A reason this build does not know ("pairingRequired" is pairing at home's own now).
+                : Goodbye(reason: "pairAgain",
                           message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair iPhone or iPad…, then scan its code with this \(StreamClient.deviceWord).",
                           reconnect: false)
             let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
@@ -385,6 +596,46 @@ enum MockCatalog {
             client.status = failureCopy(UserDefaults.standard.string(forKey: "SillRemoteFailure") ?? "timeout")
         case .externalpair:
             client.pendingLink = mockLink
+        case .homerows:
+            // The long names check that "Not paired" and "Update Sill" never truncate or wrap: the
+            // title does.
+            client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true),
+                           home("Studio", .wifi),
+                           home("MacBook Pro", .wired, cable: true),
+                           home("Office iMac", .wired, cable: false),
+                           home("Living Room iMac", .wifi, door: .open),
+                           home("Mac Studio", .wifi, door: .plain, saved: true, homeTLS: true),
+                           home("Noah Saffer’s MacBook Pro in the Studio (2)", .wifi),
+                           home("Noah Saffer’s iMac on the Desk by the Window", .wired, door: .plain, saved: true, homeTLS: true)]
+        case .homeasking:
+            let mini = home("Mac mini", .wifi)
+            client.macs = [mini, studio]
+            client.homeAsk = ask(mini, shown: false)
+            client.status = Copy.pairing(mac: mini.name, cable: false)
+        case .homecard, .homecode, .homecodeerror:
+            let mini = home("Mac mini", .wifi)
+            client.macs = [mini, studio]
+            client.homeAsk = ask(mini, shown: true)
+            client.status = Copy.showing(mac: mini.name, device: device)
+            if c == .homecodeerror { client.pairing = .failed(.wrongCode(triesLeft: 4)) }
+        case .homelocked:
+            client.macs = [home("Mac mini", .wired, cable: true), studio]
+            client.status = Copy.locked(mac: "Mac mini")
+        case .homeopenonmac:
+            client.macs = [home("Mac mini", .wifi), studio]
+            client.status = Copy.openOnMac(mac: "Mac mini")
+        case .homerevoked:
+            client.macs = [home("Mac mini", .wifi, saved: true, revoked: true, homeTLS: true), studio]
+            client.status = Copy.removed(mac: "Mac mini", device: device)
+        case .homecabledone:
+            client.macs = [home("Mac mini", .wired, saved: true, homeTLS: true), studio]
+            client.status = Copy.pairedOverCable(mac: "Mac mini")
+        case .homeolder:
+            client.macs = [home("Mac mini", .wifi, door: .plain, saved: true, homeTLS: true), studio]
+            client.status = DiscoveryPolicy.updateSillStatus(mac: "Mac mini")
+        case .pairingrequired:
+            client.macs = [home("Mac mini", .wifi), studio]
+            client.status = Copy.pairingRequired(mac: "Mac mini", device: device)
         }
         return client
     }

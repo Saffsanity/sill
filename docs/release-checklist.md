@@ -9,15 +9,15 @@ build for App Store Connect (TestFlight, below).
 
 ## Placeholders
 
-The domain and the support address are Noah's (confirmed 2026-09-25); only the App Store address
-still waits, for the App Store Connect record. Each lives in the places listed.
+The domain and the support address are Noah's (confirmed 2026-09-25), and the App Store address
+came with the App Store Connect record (2026-09-26). Each lives in the places listed.
 
 | What | Now | Where |
 |---|---|---|
 | The site's domain | getsill.app (bought at Cloudflare 2026-09-25; live) | `site/CNAME`, the iOS app's links (`iOSClient/SillLinks.swift`), `README.md`, `docs/DEVELOPMENT.md`, `docs/app-store-metadata.md`, `Scripts/release.sh`, this file |
 | The support address | `support@getsill.app` (Cloudflare Email Routing, 2026-09-25) | `site/privacy.html`, `site/support.html`, `README.md`, `docs/app-store-metadata.md`, this file |
-| The current Mac build | none: the page links `releases/latest/download/Sill.zip` and `Sill.zip.sha256`, which `release.sh --publish` uploads under those names beside `Sill.dmg` and `Sill.dmg.sha256`; once a release carries `Sill.dmg`, the page links that instead (part 2, "The download page moves to Sill.dmg") | `site/download.html` (edited once for the disk image, otherwise never per release, part 2) |
-| The App Store address | `APP_STORE_URL_PLACEHOLDER`: until it is replaced, a Mac's update notice on the device shows no "Update Sill in the App Store" link (its words still say what to do), and `release-ios.sh` warns | `iOSClient/SillLinks.swift` (`appStoreText`; TestFlight §2 has the command) |
+| The current Mac build | none in the page: it links `releases/latest/download/Sill.dmg` and `Sill.dmg.sha256` (since Sill for Mac 0.3.1, PR #33), which GitHub redirects to the newest release; `release.sh --publish` uploads them under those names, with `Sill.zip` and `Sill.zip.sha256` beside them for older links | `site/download.html` (never edited per release, part 2) |
+| The App Store address | `https://apps.apple.com/app/id6816359860`, the record's Apple ID (PR #27, 2026-09-26). It answers only once the app is on the App Store; until then a Mac's update notice links a page that isn't there yet | `iOSClient/SillLinks.swift` (`appStoreText`; `release-ios.sh` stops on a line that isn't an App Store address) |
 
 To change one, with the new value in place of `<address>` or `<domain>`: the first command
 changes the support address, the second the domain everywhere, the address's own included.
@@ -80,7 +80,11 @@ shell.
       builds any commit and only warns that HEAD lacks the release's tag (part 2), which a real
       run refuses to build without. `spctl -a -vv -t open --context context:primary-signature
       .build/Sill-<version>.dmg` then says `source=Unnotarized Developer ID`, which a real run's
-      notarization turns into `Notarized Developer ID`.
+      notarization turns into `Notarized Developer ID`. Last rehearsed 2026-09-27 on main at
+      643af6b (PRs #34 to #36 in), in a fresh worktree: exit 0 in 54 s, Sill 0.3.1 (391) for
+      arm64 with the hardened runtime, a timestamp and no entitlements, `Sill-0.3.1.zip` and
+      `Sill-0.3.1.dmg` of 3.0 MB each, the image's window and signature as make-dmg.sh checks
+      them, no keychain prompt, and only the warning that HEAD lacks the tag.
 - [ ] Look at the disk image once, on this Mac (it isn't notarized, so nowhere else): double-click
       `.build/Sill-<version>.dmg`. Its window should show Sill on the left and Applications on the
       right with the arrow between them and "To install Sill, drag it to Applications." under it,
@@ -105,7 +109,10 @@ unchecked items below were done that day or record what was decided):
       below). Apple wants real contact details behind the Support URL (guideline 1.5).
 - [ ] Remote Access: the pages describe it (PR #13, on main since ba91136). For a release without
       it, delete each block from `<!-- Remote Access` to `<!-- /Remote Access -->`. Then this must
-      print nothing: `grep -n -i -E 'remote access|vpn|tailscale|camera|pair' site/*.html`.
+      print nothing: `grep -n -i -E 'remote access|vpn|tailscale|port you forward' site/*.html |
+      grep -v '“Sill Remote Access”'` (that is the keychain item's name, which stays). Pairing and
+      the camera are no longer Remote Access's: every device pairs since pairing at home (PR #37),
+      so the pages describe both outside the blocks.
 - [x] Done 2026-09-26: the repository is public with its LICENSE (Apache-2.0, since PR #15), and
       `index.html` says "Free and open source" with the GitHub link, `support.html` links the
       issues, and the README shows its CI badge. Sill for Mac already says "free and open source"
@@ -118,13 +125,14 @@ Hosting: GitHub Pages. On GitHub Free it serves only public repositories, and fr
 serves the root or `/docs`, never `/site`. So:
 
 - [x] Done 2026-09-25: the public repository Saffsanity/sill-site holds a copy of `site/`, with
-      Pages on (main, / root) and the custom domain set. Republish whenever `site/` changes:
+      Pages on (main, / root) and the custom domain set. Republish when `site/` changes, right
+      after the release whose builds the change describes (part 2, the last item):
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
 ```
 git clone https://github.com/Saffsanity/sill-site.git ../sill-site     # once
-rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # whenever the site changes
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/   # when the site changes
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -133,16 +141,15 @@ Sponsor button); the two excludes keep `--delete` off them.
 
 - [x] Domain, done 2026-09-25: getsill.app at Cloudflare, with A records to GitHub Pages
       (185.199.108.153, .109, .110, .111), the matching AAAA records (2606:50c0:8000::153 to
-      8003::153), and Email Routing forwarding support@ to Noah's mailbox. The records are proxied
-      through Cloudflare, which serves the certificate, so GitHub's "Enforce HTTPS" stays off.
-- [ ] Cloudflare: SSL/TLS mode "Full" and "Always Use HTTPS" on, so the hop to GitHub is encrypted
-      and plain links redirect (.app is HTTPS-only in browsers anyway). Add `www CNAME
-      saffsanity.github.io` if www should work. Optional: verify the domain for the GitHub account
-      (github.com › Settings › Pages › Add a domain, a TXT record) so nobody else can claim it.
-- [ ] Cloudflare rewrites visible email addresses unless they sit inside `<!--email_off-->`
-      comments, which the pages now use; alternatively turn off Scrape Shield › Email Address
-      Obfuscation.
-- [ ] In the repository's Settings › Pages, tick Enforce HTTPS once GitHub has the certificate.
+      8003::153), and Email Routing forwarding support@ to Noah's mailbox. Since 2026-09-27 the
+      records are DNS only (Cloudflare's proxy is off, so the site may serve video, which
+      Cloudflare's free plan forbids), `www` is a CNAME to saffsanity.github.io, and GitHub serves
+      the pages with its own certificate for both names (expiring 2026-12-26; GitHub renews it).
+- [x] Done 2026-09-27: with the proxy off, Cloudflare's SSL/TLS mode, Always Use HTTPS and Email
+      Address Obfuscation no longer touch the site (the pages' `<!--email_off-->` comments stay,
+      inert), and the domain is verified for the Saffsanity GitHub account (the TXT record
+      `_github-pages-challenge-Saffsanity`, which stays).
+- [x] Done 2026-09-27: Enforce HTTPS is on in sill-site's Settings › Pages.
 - [ ] In a private window: https://getsill.app/, `/download`, `/privacy` and `/support` all
       load. GitHub Pages serves `privacy.html` at `/privacy`, the form the app and App Store
       Connect use.
@@ -151,8 +158,9 @@ Sponsor button); the two excludes keep `--delete` off them.
 
 Field by field, with the values and in the order App Store Connect asks: TestFlight §1 below.
 
-- [ ] New App (metadata §1): iOS, name Sill, bundle ID me.saffer.sill, SKU sill-ios. Creating
-      it reserves the name.
+- [x] Done 2026-09-26: New App (metadata §1): iOS, bundle ID me.saffer.sill, SKU sill-ios. "Sill"
+      was taken, so the record was made as "Sill – Window Streaming" and is now "Sill – Mac
+      Streaming" (PR #28), Apple ID 6816359860.
 - [ ] App Information (metadata §2): category, content rights, the age rating (every answer
       none: 4+) and the EU trader status (Business › Agreements › Compliance › Digital Services
       Act).
@@ -166,31 +174,121 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       screenshots.
 - [ ] For a build without Remote Access, paste the local-only keywords, What's New
       and review notes, leave out the description's "Away from home" bullet, and film no shot 11
-      (metadata, the Remote Access switch). Then nothing you paste mentions Remote Access, a VPN,
-      Tailscale, pairing or camera access.
+      (metadata, the Remote Access switch). Then nothing you paste mentions Remote Access, a VPN
+      or Tailscale. Pairing and the camera stay: every device pairs since PR #37.
 - [ ] Export compliance (metadata §6): nothing to answer. The app's Info.plist says NO
       (`ITSAppUsesNonExemptEncryption`), so the uploaded build must not show Missing Compliance.
 - [ ] App Review Information (metadata §7 and §8): contact, notes, the video.
 - [ ] Version Release: Manually release this version, so an approval waits for the Mac download.
-- [ ] Once the record exists, before the first upload: in `iOSClient/SillLinks.swift`, replace
-      `APP_STORE_URL_PLACEHOLDER` with `https://apps.apple.com/app/id<Apple ID>` (App Information
-      shows the Apple ID; TestFlight §2 has the command). A Mac that needs a newer Sill on the
-      device then shows "Update Sill in the App Store" under its notice.
+- [x] Done 2026-09-26 (PR #27): `iOSClient/SillLinks.swift` gives
+      `https://apps.apple.com/app/id6816359860`, so a Mac that needs a newer Sill on the device
+      shows "Update Sill in the App Store" under its notice (TestFlight §2).
+
+### 5. The keychain provisioning profile (for the hardened identity keychain)
+
+Recommended before the first public build (docs/keychain-plan.md): it moves Sill's remote‑access
+identity (the Mac's key, the trust list, Require pairing) from the legacy login keychain to the
+data‑protection keychain, which no other process can pre‑create or read. Without it, a release
+still builds and runs — it keeps the identity in the login keychain, and `make-app.sh --release`
+and `release.sh` say so in the log. Landing it before the first public build means new installs
+write straight to the strong keychain and only your own dev Macs need the reset below.
+
+- [x] **Made 2026-09-27** on developer.apple.com (Certificates, Identifiers & Profiles): the App ID
+      "Sill for Mac", `me.saffer.sill.mac`, and the Developer ID provisioning profile **"Sill
+      Developer ID"**, UUID `18e9509f-5498-4533-ba59-293461a61a0d`, platform macOS, team
+      9B2KKVM937, all Macs, for the Developer ID Application certificate (SHA‑1 `42424F38…71D8D6`).
+      It grants `com.apple.application-identifier` `9B2KKVM937.me.saffer.sill.mac`,
+      `com.apple.developer.team-identifier` 9B2KKVM937 and `keychain-access-groups`
+      `9B2KKVM937.*`, which covers the group `9B2KKVM937.me.saffer.sill.mac`. It expires
+      **2044‑09‑22** (Apple issues them for 18 years).
+- Where it lives: `Packaging/embedded.provisionprofile` (git‑ignored; the copy make-app.sh embeds),
+      backed up as `~/Library/Developer/Xcode/UserData/Provisioning Profiles/18e9509f-5498-4533-ba59-293461a61a0d.provisionprofile`
+      and as the download, `~/Downloads/Sill_Developer_ID.provisionprofile`; all three byte for
+      byte the same (SHA‑256 `4f9f99b0…d996ed65`). It holds no secret (Apple's signature, the
+      public certificate, the entitlements), and the developer site downloads it again at any time.
+      `SILL_PROVISION_PROFILE` points make-app.sh at another copy.
+- Check: `security cms -D -i Packaging/embedded.provisionprofile` prints its plist; a Mac profile
+      names the app `Entitlements › com.apple.application-identifier` (`application-identifier` is
+      the iOS key, and an app signed with it is killed at launch: docs/keychain-plan.md §9b).
+      `make-app.sh --release` prints `identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)`. It refuses, before it writes an app that macOS would kill
+      at launch, a profile that doesn't grant what `Packaging/SillRelease.entitlements` asks for
+      (the application identifier, the team, the keychain group, and any entitlement added to
+      that file later), doesn't list the certificate that signed the build, has expired, or
+      doesn't decode. Proved with this profile on 2026‑09‑27 (docs/keychain-plan.md §9b): the
+      build launches, and only an entitled build reads the group.
+- [ ] **By 2027‑02‑01: the certificate, then the profile.** The profile outlives the certificate it
+      lists: the Developer ID Application certificate ends on 2027‑02‑01, with the Apple CA that
+      issued it ("Developer ID Certification Authority", 2012–2027). Apple says a build signed with a
+      secure timestamp before then keeps launching (not something this Mac can test yet); a build
+      after it needs a new Developer ID certificate (§1) and then the profile with it: on the
+      developer site, edit "Sill Developer ID" to use the new certificate (or make a new Developer ID
+      profile for `me.saffer.sill.mac`), download it, and replace
+      `Packaging/embedded.provisionprofile` and the backups. Until then make-app.sh refuses: "lists
+      the certificates […], not the one that signed this build".
+- To make one again from nothing (another team, a lost account): on developer.apple.com register
+      the explicit App ID `me.saffer.sill.mac`, then a provisioning profile of type Developer ID
+      for macOS with that App ID and the Developer ID Application certificate, and download it. (The
+      plan's other way, `xcodebuild -allowProvisioningUpdates` from a throwaway macOS target with
+      Keychain Sharing, registers the same things from Xcode and may prompt for your Apple Account;
+      a background or CI run must not do either.)
+- One team, two certificates: both identities on this Mac are team **9B2KKVM937** (the
+      Apple Development certificate's name ends in HG877AGTQ7, your own member ID, not a team). The
+      profile lists only the Developer ID certificate, so only the Developer ID build carries the
+      profile and the access group; a development build (make-app.sh's default) must **not** — it
+      keeps `SillDebug.entitlements` and the login keychain. Signed with the Apple Development
+      certificate, the same entitlements and this profile, a build is killed at launch (measured
+      2026‑09‑27).
+- Profile validity: Gatekeeper checks the profile at **every launch**, so an expired one stops the
+      app launching. `make-app.sh` refuses an expired profile and warns within 30 days. A
+      **missing** profile is the safe fallback — the release builds on the login keychain with a log
+      line — but an **expired** one is an error, not a fallback, because it would already be
+      embedded.
+- Releases from GitHub Actions: the runner has no `Packaging/embedded.provisionprofile` (it is
+      git‑ignored), so a release the release workflow makes ships on the login keychain, and its log
+      says so. To harden those too, the workflow needs the profile (a secret written to that path
+      before `release.sh`, or the file committed, which holds no secret): not done yet
+      (docs/keychain-plan.md §10).
+- No auto‑migration (the security review, docs/keychain-plan.md §9a): an entitled build never reads
+      the login keychain, so a dev Mac that used remote access on the legacy store gets a **fresh**
+      key and Mac ID on its first hardened launch (any device paired to it re‑pairs). Remote access
+      is off by default and home pairing has not shipped publicly, so this is near zero. To start
+      clean, delete the legacy items by hand — `for a in recognition-key paired-devices
+      require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a $a; done`, and
+      the "Sill Remote Access" key in Keychain Access — and re‑pair. On a Mac you own, never in CI.
 
 ## Part 2: every release
 
 - [ ] Versions: Sill for Mac's is `CFBundleShortVersionString` in `Packaging/Info.plist`; its
       build number is the commit count, which make-app.sh stamps in. The iOS app's are
       MARKETING_VERSION and CURRENT_PROJECT_VERSION in `iOSClient/Sill.xcodeproj` (target Sill ›
-      General). Commit.
-- [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag v0.4.0` and
-      `git push origin v0.4.0` for 0.4.0. `make-app.sh --release` builds only the commit carrying
-      it, and `release.sh --publish` refuses to start until origin's tag names that commit, then
+      General). Commit. When a device build goes out with the Mac release, put its build number
+      (`CURRENT_PROJECT_VERSION` + 1 in both configurations, or a new `MARKETING_VERSION` with
+      build 1) in the same pull request as the Mac's version, so the tag below names the commit
+      that both come from; `release-ios.sh --upload` then needs no `--bump`.
+- [ ] A Mac release and a device build that need each other (a change to the home door or the wire
+      that older builds on the other side can't follow): the release notes say which versions go
+      together, the device build is uploaded first (App Store Connect takes 5 to 30 minutes to
+      process it, and nobody can install it before), its What to Test goes on as soon as it shows
+      in TestFlight (internal testers with automatic distribution get it the moment it is
+      processed), one device tries it from TestFlight against a Mac that runs a build of the same
+      commit (processed is not tested, and the builds tried before it are usually Debug ones),
+      the Mac release is published once that works, and the site is republished right after (the
+      Download button gives the newest release's Sill.dmg the moment it is published, so the
+      pages' words should follow within minutes). A device with the new build and a Mac without
+      its release is the gentler half of the gap: whichever side can say what to update must be
+      the one that arrives first.
+- [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag -a v0.4.0 -m "Sill
+      for Mac 0.4.0: …"` and `git push origin v0.4.0` for 0.4.0 (v0.3.0 and v0.3.1 are annotated
+      tags on merge commits of main: v0.3.1 on its release pull request's, #32, and v0.3.0 on
+      main's head that day, #20's). `make-app.sh --release` builds only the commit carrying it,
+      and `release.sh --publish` refuses to start until origin's tag names that commit, then
       makes the GitHub Release for it. Every Sill.app's update check reads the releases of
-      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag (not
-      a draft, not a prerelease) with the version it runs: once Saffsanity/sill is public, within a
-      day of a release there, every older Sill.app offers it. While the repository is private,
-      GitHub answers the check with a 404 and no Sill.app offers anything.
+      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
+      (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is public (since
+      2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now
+      in Settings › General asks at once). A private repository's releases answer the check with
+      a 404, and then no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, then puts the stapled app
       in the disk image (`Scripts/make-dmg.sh`, signed with the same identity), has Apple notarize
@@ -199,61 +297,145 @@ Field by field, with the values and in the order App Store Connect asks: TestFli
       copy was checked). It prints both files' paths and SHA-256 and where Apple's two notary logs
       are (`.build/Sill-<version>-notary-log.json`, `…-dmg-notary-log.json`). It warns when a log
       lists issues: read them. Two submissions, so it waits for Apple twice.
-- [ ] Try the disk image as someone new to Sill would: on another Mac or a new macOS user account,
-      download `Sill.dmg` from where it will live (so it gets the quarantine flag), open it, drag
-      Sill to Applications in its window, open it, allow the permissions and stream to a device.
-      While the page still links the zip, try the zip the same way too. For 1.0 this is the
-      reviewer's path: film it for the review video (metadata §8).
+- [ ] Try the disk image as someone new to Sill would, on another Mac or a new macOS user account,
+      with the quarantine flag a download sets: before publishing, the real run's
+      `.build/Sill-<version>.dmg` sent there by AirDrop (which sets it too); once published, the
+      image downloaded from the release (a release published in one `--publish` run is tried
+      then). Open it, drag Sill to Applications in its window, open it, allow the permissions and
+      stream to a device. For 1.0 this is the reviewer's path: film it for the review video
+      (metadata §8).
 - [ ] Publish: `Scripts/release.sh --publish` (with the same two variables), or a pushed tag with
       the release workflow ("Releasing from GitHub Actions" below), creates the GitHub Release
       `v<version>` in Saffsanity/sill with the assets `Sill.dmg`, `Sill.dmg.sha256`, `Sill.zip` and
       `Sill.zip.sha256`; before it builds, `--publish` checks that origin has the tag and that it
       names HEAD (the workflow's checkout is that tag). The site's Download button links
       `releases/latest/download/<name>`, which GitHub redirects to the newest release, so
-      download.html is never edited per release (the one exception: the next item). The
-      repository must be public for anonymous downloads and for the update check. Until it is,
-      `SILL_RELEASE_REPO=Saffsanity/sill-site` publishes there instead (point download.html's three
-      GitHub links there too), and release.sh warns: a release in sill-site can be downloaded, but
-      no Sill.app will offer it, so the download page's "it tells you when a new version is out"
-      does not hold for it. Once sill is public: unset `SILL_RELEASE_REPO` (in `~/.sill-release`
-      and the repository variable of that name too), point the links back at Saffsanity/sill, and
-      publish the newest release there, so that every older Sill.app offers it. One way or the
-      other for a version: pushing the tag, which a local `--publish` needs first, also starts the
-      release workflow. With `SILL_SIGN_IN_CI` set to `true` that run publishes the release, so
-      don't also run `--publish` here (whichever comes second stops at "already exists"); without
-      it the run only verifies (macOS minutes either way).
-- [ ] The download page moves to Sill.dmg, once, in this order: first the release that carries
-      `Sill.dmg` is published (the item above); then, in a private window,
-      https://github.com/Saffsanity/sill/releases/latest/download/Sill.dmg downloads the image
-      (before that release it is a 404, so the page must not move first); then edit
-      `site/download.html` as the comment above its card says (the button, the checksum line, the
-      three Install steps and "Check the download"), delete the comment, and republish the site
-      (the rsync in part 1 §3). Then download it from https://getsill.app/download and compare its
-      `shasum -a 256` with `Sill.dmg.sha256`.
+      download.html is never edited per release (its one exception, the move to Sill.dmg, is done:
+      below). Anonymous downloads and the update check need a public repository, which
+      Saffsanity/sill is since 2026-09-26. While it was private,
+      `SILL_RELEASE_REPO=Saffsanity/sill-site` was the way out (with download.html's three GitHub
+      links pointed there too); release.sh still warns that no Sill.app offers a release published
+      anywhere but Saffsanity/sill, so leave `SILL_RELEASE_REPO` unset (in `~/.sill-release` and as
+      a repository variable). One way or the other for a version: pushing the tag, which a local
+      `--publish` needs first, also starts the release workflow. With `SILL_SIGN_IN_CI` set to
+      `true` that run publishes the release, so don't also run `--publish` here (whichever comes
+      second stops at "already exists"); without it the run only verifies (macOS minutes either
+      way). Neither the variable nor any secret is set on 2026-09-27, so a pushed tag only verifies.
+- [ ] Release notes: `--publish` gives the release a one-line body (the version, the build and
+      both SHA-256). Replace it with the release's notes, keeping that line as their last, with
+      `gh release edit v<version> --repo Saffsanity/sill --notes-file <notes>` (as for v0.3.0 and
+      v0.3.1): what is new, the requirements, which device builds go with it, and how to check the
+      download. The update check opens the release's page, so this is what every Sill.app that
+      offers the update shows first.
+- [ ] Check what was published, signed out: `gh release view v<version> --json assets` lists the
+      four assets; `curl -sSLo` each of Sill.dmg and Sill.zip from
+      `https://github.com/Saffsanity/sill/releases/latest/download/<name>`, `shasum -c` against its
+      `.sha256`, `spctl -a -vv -t open --context context:primary-signature` on the image and
+      `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
+      `CFBundleShortVersionString` and `CFBundleVersion`.
+- [x] Done 2026-09-27 with Sill for Mac 0.3.1 (PR #33; sill-site 39754b9): the download page
+      moved to Sill.dmg, after the release that carries it was published and its
+      `releases/latest/download/Sill.dmg` answered.
 - [ ] Keep `Sill.zip` in every release for now: `release.sh --publish` uploads it beside the disk
       image, so the page's zip links keep working until it moves, and so do links that name
       `Sill.zip` elsewhere (v0.3.0's notes, pages people saved). Every Sill.app's update check
       opens the release's page, which lists both. Dropping the zip later is one line in
       `publish_release` (and its `.sha256`), for a release after the page has moved, never while
       download.html still links it.
-- [ ] The first release only: the published copy of download.html says the build is being prepared;
-      right after Saffsanity/sill goes public, republish `site/` (the rsync below) so the button
-      shows (before that, the button and every GitHub link on the pages answer 404 to visitors).
-      Then, in a private window, download it from https://getsill.app/download and compare its
-      `shasum -a 256` with `Sill.zip.sha256`.
+- [x] Done 2026-09-26 with v0.3.0 (sill-site e4046a1): the first release, and the site
+      republished right after Saffsanity/sill went public, so the button shows.
 - [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without
-      `--bump`, once `MARKETING_VERSION` says it); TestFlight §4 below. Or in Xcode: Any iOS
-      Device, Product › Archive, then the Organizer's Validate App and Distribute App › App Store
-      Connect › Upload. The privacy report: `Scripts/release-ios.sh --privacy-report`, and the
-      Organizer's Generate Privacy Report for the PDF; both should list the privacy manifest's API
-      categories.
+      `--bump`, once `MARKETING_VERSION` says it); TestFlight §4 below. With the build number
+      already committed in the release's pull request (the first item), `Scripts/release-ios.sh
+      --upload` from the tagged commit. Or in Xcode: Any iOS Device, Product › Archive, then the
+      Organizer's Validate App and Distribute App › App Store Connect › Upload. The privacy report:
+      `Scripts/release-ios.sh --privacy-report`, and the Organizer's Generate Privacy Report for
+      the PDF; both should list the privacy manifest's API categories.
 - [ ] TestFlight: internal testers get the build without review. An external group sends the
       first build through Beta App Review with the same notes and video: a cheap rehearsal
-      (TestFlight §5 to §7 below).
+      (TestFlight §5 to §7 below). Every build has its own What to Test (TestFlight › the build ›
+      Test Details): what changed since the build before, from the release notes (metadata §5).
 - [ ] Review notes (metadata §7): describe what is new in this version specifically (guideline
       2.3.1(a)), and What's New (metadata §5).
 - [ ] Submit for review with manual release. Release once the Mac download is live.
-- [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date.
+- [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date, and
+      republish it (part 1 §3) right after the release is published: the pages describe the builds
+      people can download, so words for a newer build wait for it, and words for the old one go
+      with it. On 2026-09-27 the published pages were main's `site/` as PR #33 left it:
+      privacy.html's lines for the tour (PR #35), the Mac's menus (PR #36) and its pointer (PR
+      #31, whose Mac side 0.3.1 already has) wait for the next release, with that page's date.
+
+### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
+
+Pairing at home (PR #37) made the home door TLS 1.3 with pairing, and neither side works at home with
+the other's older release (docs/home-pairing-plan.md §3.4, read again against the code on
+2026-09-27):
+
+- A device from before it (TestFlight's 0.5 (1), from b37f47a, or a build of main before PR #37) at
+  Sill for Mac 0.4.0: it dials plain TCP, and the door fails the handshake (-9836) within
+  milliseconds and closes. The device reads a TLS alert and EOF, shows its stream screen for a
+  moment (build 1 counts a session from TCP's ready), then "‹Mac› disconnected. Sill will reconnect
+  when it can reach it." (for a Mac it never saved, "…It will reconnect when the Mac is back."),
+  and its reconnect dials the listed row again at once, over and over, for as long as both run:
+  nothing spaces the tries while the Mac is listed (its 2 s timer only covers a Mac that is not),
+  so it can flicker several times a second. Nobody has watched it on a device; the plan's "every
+  2 s" was read from that timer. No notice can reach it through a failed handshake. The Mac's menu
+  says "An iPhone or iPad Needs Sill Updated" from a source's third plain try within a minute, for
+  10 minutes; those tries never start the door's backoff, so the updated device gets in at once.
+  Remote Access still serves it (the remote door was TLS already), away from home.
+- 0.5 (2), or any Release build from PR #37 on, at Sill for Mac 0.3.1 or earlier: that Sill
+  advertises no `p` in its TXT record, a plain door, and a Release build never dials one (no
+  downgrade). The row reads "Update Sill", and a tap dials nothing and says "‹Mac› runs an older
+  Sill. Update Sill on the Mac to connect." The Mac sees nothing; its update check offers 0.4.0
+  once it is published. A Debug build dials a plain door until it has seen that Mac speak TLS.
+- Both new: every device pairs once, with the code over Wi-Fi or by itself over the cable, one
+  paired for Remote Access before too. Keychain hardening (PR #42) keeps a release's identity, trust
+  list and Require pairing in the data-protection keychain and never reads 0.3.1's login-keychain
+  items (no migration, docs/keychain-plan.md §9a), so a Mac that ran 0.3.1 with Remote Access
+  starts 0.4.0 with a new key and Mac ID and none of its pairings. A device paired at home learns the Mac's addresses for afar only in a session at home while Remote Access
+  is on (the Mac lists them only then); without them a dial away says only that the Mac didn't
+  answer.
+
+So the device build goes first (it says what to update), then the Mac, in this order, once PRs
+#37, #38, #42 and #43 are on main and Noah has tried main's build, one device of it a Release build as
+TestFlight's is (a Debug build dials a plain door it has not seen speak TLS, and shows the tour only
+when asked):
+
+- [ ] The release's pull request (branch `release-next`): main merged in, the words that waited for
+      the three (the site's pages, the README's How it works, the metadata, this section),
+      `CFBundleShortVersionString` 0.4.0 and `CURRENT_PROJECT_VERSION` 2; CI green; merged.
+- [ ] Tag its merge commit: `git tag -a v0.4.0 -m "Sill for Mac 0.4.0: pairing at home"` and
+      `git push origin v0.4.0` (the release workflow verifies it: neither `SILL_SIGN_IN_CI` nor a
+      secret is set).
+- [ ] From that commit, `Scripts/release-ios.sh --upload`: 0.5 (2) to App Store Connect. As soon as
+      it shows under TestFlight, its What to Test (the build › Test Details): internal testers
+      with automatic distribution get it the moment it is processed (5 to 30 minutes, and an
+      email).
+- [ ] Once it is processed, one device installs it from TestFlight and connects at home to a Mac
+      that runs this release's code (Noah's build of main from his trial will do: the release
+      commit adds only words and the two version numbers): the Release build's first session at
+      the new door. If that fails, stop here, with only an internal TestFlight build out: fix,
+      and the next device build is 3.
+- [ ] Stage the site: the tagged pages rsynced into the sill-site clone (part 1 §3) and committed,
+      not pushed yet.
+- [ ] The keychain profile in place: `Packaging/embedded.provisionprofile` (git-ignored; part 1 §5,
+      "Sill Developer ID"). This release must be built with it: `make-app.sh --release`, which
+      release.sh runs, prints `identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)` and release.sh "Identity keychain: data-protection". Without
+      it the build falls back to the login keychain and says so: stop, since the notes tell users
+      their Mac's keys moved. The rehearsal (`release.sh --dry-run`) shows the same lines first.
+- [ ] Then `Scripts/release.sh --publish` from the same commit (part 1 §2's variables), the notes
+      over its one-line body (`gh release edit v0.4.0 --notes-file …`), the site's commit pushed
+      at once (the Download button gives the new release's Sill.dmg the moment it is published,
+      and the pages should say what it does), and the check of what was published, signed out.
+- [ ] The Beta App Description (TestFlight §6).
+- [ ] Noah's devices: Sill from TestFlight on the iPad and the iPhone, then Sill for Mac from the
+      download on a Mac that runs a release (not the Apple Development build on this Mac, part 1
+      §1). The iPad, paired for Remote Access on 2026-09-25, pairs once more (the Mac's new key,
+      above), and so does the iPhone, with the code or over the cable; each reaches the Mac away
+      from home once it has connected at home with Remote Access on.
+- [ ] Not before 0.4.0 is the download: 0.5 (2) to an external group or App Review, which use the
+      Sill for Mac that getsill.app/download gives.
 
 ## TestFlight
 
@@ -265,7 +447,9 @@ costs money: uploads and TestFlight come with the Apple Developer Program.
 Already done (2026-09-26): the bundle ID is registered (Xcode's automatic signing made it; the
 developer portal calls it "XC me saffer sill"), and the first export, `release-ios.sh`'s rehearsal,
 made a cloud-managed Apple Distribution certificate, whose private key stays with Apple, and the
-App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Nothing was uploaded.
+App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Then the record (§1, "Sill
+– Mac Streaming", Apple ID 6816359860), its address in the app (§2, PR #27), and the first build,
+0.5 (1), uploaded with `release-ios.sh --upload` from b37f47a (§4), for internal testers.
 
 ### 1. The app's record
 
@@ -274,7 +458,7 @@ App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Nothing
 | Field | Value |
 |---|---|
 | Platforms | iOS |
-| Name | `Sill` (if it's taken: `Sill – Window Streaming`, with an en dash; metadata §2) |
+| Name | `Sill – Mac Streaming`, with an en dash (metadata §2): "Sill" was taken, and the record, first "Sill – Window Streaming", has this name since 2026-09-26 (PR #28) |
 | Primary Language | English (U.S.) |
 | Bundle ID | `me.saffer.sill`, listed as "XC me saffer sill - me.saffer.sill" |
 | SKU | `sill-ios` (never shown; can't change) |
@@ -307,7 +491,8 @@ App Store profile "iOS Team Store Provisioning Profile: me.saffer.sill". Nothing
 
 ### 2. The App Store address in the app
 
-- [ ] With the Apple ID from App Information (a number such as 6712345678), before the first upload:
+- [x] Done 2026-09-26 (PR #27, 6816359860). With the Apple ID from App Information (a number such
+      as 6712345678), before the first upload:
 
 ```
 sed -i '' 's#APP_STORE_URL_PLACEHOLDER#https://apps.apple.com/app/id<Apple ID>#' iOSClient/SillLinks.swift
@@ -322,16 +507,17 @@ address (the number left out, say) stops it before it builds.
 ### 3. The site
 
 - [ ] App Store Connect links the privacy policy and the support page, and the App Privacy answers
-      and the policy must agree. On 2026-09-26 Saffsanity/sill-site held main's `site/` file for
-      file (the policy's Update check section and the footer's GitHub links included) but for
-      `download.html`, which says "being prepared" on purpose until the first Mac release (part 2),
-      so TestFlight needs no republish. The pages getsill.app serves lack the `<!--email_off-->`
-      comments only because Cloudflare takes them out. If `site/` changes before that release,
-      republish it without the download page (and, as in part 1 §3, without touching sill-site's
-      own `.nojekyll` and `.github`):
+      and the policy must agree. Since the first Mac release (v0.3.0, 2026-09-26),
+      Saffsanity/sill-site holds all of `site/`, download.html included, and is republished with
+      part 1 §3's rsync (never with `--exclude download.html` any more, which kept that page at
+      "being prepared" until then; still without touching sill-site's own `.nojekyll` and
+      `.github`), right after each release whose builds the pages describe (part 2, the last
+      item). Since 2026-09-27 GitHub serves the pages itself (Cloudflare's proxy is off, part 1
+      §3), so getsill.app's copies are sill-site's byte for byte, `<!--email_off-->` comments
+      included.
 
 ```
-rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll --exclude download.html site/ ../sill-site/
+rsync -a --delete --exclude .git --exclude .github --exclude .nojekyll site/ ../sill-site/
 git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" && git -C ../sill-site push
 ```
 
@@ -342,7 +528,7 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
 
 ```
 Scripts/release-ios.sh                    # archive, export .build/ios/export/Sill.ipa and check it; nothing uploaded
-Scripts/release-ios.sh --upload           # the same, then the upload: 0.5 (1), the first build
+Scripts/release-ios.sh --upload           # the same, then the upload: 0.5 (1), the first build (done 2026-09-26, b37f47a)
 Scripts/release-ios.sh --bump --upload    # every later upload of 0.5: the build number + 1, committed alone
 Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest declares, and its required-reason APIs
 ```
@@ -375,13 +561,17 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
   49 s, Sill.ipa 2.0 MB, signed "Apple Distribution: NOAH WILLIAM SAFFER (9B2KKVM937)" (cloud
   managed), the App Store profile until 2027-09-26, entitlements `application-identifier`
   9B2KKVM937.me.saffer.sill, `beta-reports-active` true, get-task-allow false, no keychain or
-  Apple Account prompt.
+  Apple Account prompt. Again on 2026-09-27 (main at 643af6b, PRs #30 to #36 in): 46 s, Sill.ipa
+  2.5 MB, the same certificate and profile, the required-reason APIs SystemBootTime
+  (`systemUptime`) and UserDefaults, both declared, and only the known `StreamClient` capture
+  warning in the archive's log.
 - The privacy report: xcodebuild has no command for it, so `--privacy-report` prints what the report
   is made of (the manifests, and the required-reason APIs the binary uses). The PDF: `open
   .build/ios/Sill.xcarchive` (Xcode shows it in Window › Organizer › Archives), Control-click it ›
   Generate Privacy Report. Keep it with the App Privacy answers.
 - After an upload, App Store Connect processes the build, usually within half an hour, and emails
-  when it's done; it then shows under TestFlight as 0.5 (1).
+  when it's done; it then shows under TestFlight as 0.5 (1), or whichever build it is. Give it its
+  What to Test there (the build › Test Details): what changed since the build before.
 
 ### 5. Internal testers
 
@@ -398,32 +588,32 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
 
 | Field | Value |
 |---|---|
-| Beta App Description | The block below (548 characters) |
+| Beta App Description | The block below (665 characters) |
 | Feedback Email | `support@getsill.app` |
 | Marketing URL | `https://getsill.app` |
 | Privacy Policy URL | `https://getsill.app/privacy` |
 | Beta App Review Information: First Name, Last Name, Phone Number, Email | Noah, Saffer, a number starting with + and the country code, `support@getsill.app` (or your own; App Review only) |
 | Sign-in required | Unchecked: there is no account |
-| Review Notes | Metadata §7's notes (about 3,550 characters of the 4,000 allowed), Remote Access part included while the build has it |
+| Review Notes | Metadata §7's notes (under the 4,000 bytes allowed; §10 there has the count), Remote Access part included while the build has it |
 | License Agreement | Apple's standard: leave it |
 
 ```text
 Sill puts your Mac on your iPhone and iPad. Pick any window, or the whole desktop, and use it with touch, a trackpad, a keyboard or Apple Pencil.
 
-It needs the free Sill for Mac, from https://getsill.app/download, on a Mac with Apple silicon and macOS 14 or later. Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac.
+It needs the free Sill for Mac 0.4.0 or later, from https://getsill.app/download, on a Mac with Apple silicon and macOS 14 or later. Open Sill for Mac and allow Screen Recording and Accessibility, then open Sill on your iPhone or iPad on the same Wi-Fi and tap your Mac. The first time, pair: scan the code your Mac shows, or type it. Over a USB cable, it pairs by itself.
 
 To send feedback, take a screenshot while you use Sill, or use Send Beta Feedback in TestFlight. Write to support@getsill.app for anything else.
 ```
 
 ### 7. External testers and Beta App Review
 
-- [ ] TestFlight › External Testing › + : a group such as `Beta`. Add Builds › 0.5 (1), and What to
-      Test: metadata §5's What's New. Submit Review.
+- [ ] TestFlight › External Testing › + : a group such as `Beta`. Add Builds › the newest build of
+      0.5, and its What to Test (metadata §5). Submit Review.
 - Beta App Review looks at the first build of a version in full (later builds of the same version
   may not need it), up to six builds a day. It needs what App Review needs: Sill for Mac
-  downloadable at https://getsill.app/download (not yet: no Mac release, and the repository is
-  private; "Why the download link doesn't work yet" below), the notes, and the contact. Test
-  internally first: that needs none of it.
+  downloadable at https://getsill.app/download (it is, since v0.3.0 on 2026-09-26; the build
+  under review must work with the Sill for Mac that page offers), the notes, and the contact.
+  Test internally first: that needs none of it.
 - Once approved: invite testers by email, or turn on a public link (Open to Anyone, with a tester
   limit if you like, up to 10,000).
 
@@ -438,6 +628,9 @@ screens of each set, the capture commands and what may appear in the picture. Th
       Clock, Calculator or TextEdit with sample text), and disconnect every other device.
 - [ ] iPhone 6.9" (the iPhone 18 Pro Max simulator, 1320 × 2868), then iPad 13" (iPad Pro 13-inch
       (M5), 2064 × 2752): five each, the app in use first, JPEG without alpha.
+- [ ] On a fresh install the first-run tour dims the screen about a second after the Mac's
+      picture, unless something is touched: take it once (or click the picture at once) before
+      the first screenshot.
 - [ ] Never `simctl io … recordVideo` while Sill.app streams: the recorder takes the video encoder
       from Sill (screenshots are fine).
 - [ ] Upload them on the version page (iPhone 6.9" Display, iPad 13" Display) with the rest of
@@ -542,13 +735,13 @@ encoder. `.github/workflows/release.yml` runs when a tag `v<version>` is pushed,
 Settings › Secrets and variables › Actions, or `gh` from the repository's folder. Nothing here
 ever goes in the repository, a commit message or a shell profile.
 
-Until the repository is public, sign on this Mac instead (`Scripts/release.sh --publish`, with
-`SILL_SIGN_IN_CI` unset). Repository secrets reach any workflow on any branch or tag pushed here
-(never a fork's pull request), and an environment, which can keep them to release runs alone,
-needs a public repository on GitHub Free. Once it is public, before `SILL_SIGN_IN_CI` goes on: an
-environment `release` that only tags `v*` may deploy to, with Noah as its required reviewer,
-holds the five secrets (`gh secret set NAME --env release`), and release.yml's publish job names
-it (`environment: release`).
+Until the environment below exists, sign on this Mac instead (`Scripts/release.sh --publish`, with
+`SILL_SIGN_IN_CI` unset), as v0.3.0 and v0.3.1 were. Repository secrets reach any workflow on any
+branch or tag pushed here (never a fork's pull request), and an environment, which can keep them to
+release runs alone, needs a public repository on GitHub Free, which Saffsanity/sill is since
+2026-09-26. Before `SILL_SIGN_IN_CI` goes on: an environment `release` that only tags `v*` may
+deploy to, with Noah as its required reviewer, holds the five secrets (`gh secret set NAME --env
+release`), and release.yml's publish job names it (`environment: release`).
 
 | Name | Kind | What it holds |
 |---|---|---|
@@ -602,9 +795,9 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
 [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions),
 [hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)):
 
-- A public repository: nothing. Standard GitHub-hosted runners, `xcode-27` included, are free and
-  unlimited there.
-- A private repository, as Saffsanity/sill is today: each run's minutes count against the
+- A public repository, as Saffsanity/sill is since 2026-09-26: nothing. Standard GitHub-hosted
+  runners, `xcode-27` included, are free and unlimited there.
+- A private repository, as Saffsanity/sill was until then: each run's minutes count against the
   account's included minutes (2,000 a month on GitHub Free, 3,000 on Pro). Count a macOS minute
   as about ten of them: GitHub's billing pages no longer print the multiplier table they used to
   (macOS 10, Linux 1), but they still speak of minute multipliers, and today's prices keep that
@@ -626,8 +819,10 @@ GitHub's prices on 2026-09-25 ([runner pricing](https://docs.github.com/en/billi
   use a week's share; making the repository public ends the question. A verify-only release
   takes about the same (the disk image adds well under a minute). A signed release also waits for
   Apple's notary service twice (the zip, then the disk image), usually 15 to 30 minutes in all.
-  The mutants (CI started by hand with "mutants" ticked) take about two hours of macOS time across
-  their fifteen jobs: some 1,200 included minutes, more than half of Free's month, or about $7.50.
+  The mutants (CI started by hand with "mutants" ticked) run a job for each of the 32 checks with
+  mutants, about four hours of macOS time in all (their scripts took 205 minutes here on
+  2026-09-27, several at once; each job also checks out and selects Xcode, and is rounded up to
+  the minute): some 2,400 included minutes, more than Free's month, or about $15.
 - Storage is small: the build cache stays within the 10 GB each repository gets for caches, and
   the artifacts (a zip and a disk image of about 3 MB each for 14 days, the notary logs for 30, a
   TestFlight .ipa of about 2 MB for 14 days) within the 500 MB of artifact storage on GitHub Free.
