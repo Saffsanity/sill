@@ -91,7 +91,8 @@ connect, unless you turn off Require pairing in Settings › Devices; then any
 device on your network can, still encrypted. Pairing at home came with Sill
 for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and each needs the other:
 the iPhone and iPad app shows an older Sill for Mac as "Update Sill", and an
-older iPhone and iPad app can't connect to Sill for Mac 0.4.0 at home. With
+older iPhone and iPad app can't connect to Sill for Mac 0.4.0 or later at
+home. Since 0.5.1 the two apps share one version number for each release. With
 Sill for Mac 0.3.1 or earlier, connections on your local network, over the
 cable and over Direct Wireless Connection are not encrypted, and any iPhone or
 iPad with Sill on the same network, or nearby while Direct Wireless Connection
