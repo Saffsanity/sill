@@ -605,11 +605,166 @@ for s in gridScreens {
 }
 check(grid >= 400, "the grid covers \(grid) placements")
 
+// MARK: - The iPhone Duo's real sizes, with its fold (iOS 27.1; docs/iphone-duo-plan.md)
+
+// The stream screen's sizes on the iOS 27.1 simulator (the status bar hidden on the inner display held
+// upright, shown sideways: 867 pt, its strip at the side; 951 if it were hidden there too; the cover
+// less its camera's strip), and the fold as the device reports it there.
+let bookSize = CGSize(width: 951, height: 669), uprightSize = CGSize(width: 669, height: 951)
+let bookBand = CGRect(x: 455.5, y: 0, width: 40, height: 669), laptopBand = CGRect(x: 0, y: 455.5, width: 669, height: 40)
+let bookInfo = FoldInfo.known(bookBand), laptopInfo = FoldInfo.known(laptopBand), flatInfo = FoldInfo.known(nil)
+/// The halves split at `picture` and `controls` (DuoPosture.portraitSplit), the inner display's metrics.
+func halvesModel(_ w: CGFloat, _ h: CGFloat, picture: CGFloat, controls: CGFloat) -> Screen {
+    let (padTop, padSide, padBottom, gap, barH, bw, bh, thumbPad, capH): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) =
+        (12, 14, 22, 10, 78, 64, 58, 10, 48)
+    let barY = controls + padTop
+    let settingsX = w - padSide - bw
+    let aaX = settingsX - 2 * (12 + bw)
+    let stripX = padSide + bw + 12
+    let by = barY + (barH - bh) / 2
+    let keysY = barY + barH + gap
+    let padY = keysY + capH + gap
+    let stream = CGRect(x: 8, y: 8, width: w - 16, height: picture - 16)
+    return Screen(size: CGSize(width: w, height: h), layout: P, stream: stream, targets: [
+        .stream: stream,
+        .strip: CGRect(x: stripX, y: barY + thumbPad - 5, width: aaX - 12 - stripX, height: barH - (thumbPad - 5) - (thumbPad - 6)),
+        .textSize: CGRect(x: aaX, y: by, width: bw, height: bh),
+        .settings: CGRect(x: settingsX, y: by, width: bw, height: bh),
+        .keys: CGRect(x: padSide, y: keysY, width: w - 2 * padSide, height: capH),
+        .trackpad: CGRect(x: padSide, y: padY, width: w - 2 * padSide, height: h - padBottom - padY)])
+}
+/// The landscape bar at 951 pt, and in the book pose its strip ending 12 pt short of the fold
+/// (DuoPosture.bookBar: 343.5 pt; the right group keeps its size, 55.5 pt past the fold).
+let flatLandscape = model(951, 669)
+let bookScreen: Screen = {
+    var targets = flatLandscape.targets
+    targets[.strip] = CGRect(x: 100, y: 5, width: 343.5, height: 77)
+    return Screen(size: bookSize, layout: L, stream: flatLandscape.stream, targets: targets)
+}()
+/// The book pose as this build draws it, the status bar's strip shown at the side (867 pt): the bar
+/// at DuoPosture.bookBar's compact width and 7 pt gaps (Menus at 497, Aa 568, Keyboard 639, Settings
+/// 781), the strip ending 7 pt short of the fold (93 to 448.5); open flat sideways the bar as before.
+let book867Size = CGSize(width: 867, height: 669)
+let flatLandscape867 = model(867, 669)
+let book867: Screen = {
+    var targets = flatLandscape867.targets
+    targets[.strip] = CGRect(x: 93, y: 5, width: 355.5, height: 77)
+    targets[.textSize] = CGRect(x: 568, y: 10, width: 64, height: 66)
+    targets[.keyboard] = CGRect(x: 639, y: 10, width: 64, height: 66)
+    targets[.settings] = CGRect(x: 781, y: 10, width: 64, height: 66)
+    return Screen(size: book867Size, layout: L, stream: flatLandscape867.stream, targets: targets)
+}()
+let laptop = halvesModel(669, 951, picture: 455, controls: 496), flatUpright = halvesModel(669, 951, picture: 424, controls: 424)
+let duoCover = phoneModel(382, 678), duoCoverSide = model(594, 466)
+check(flatLandscape.stream == CGRect(x: 8, y: 94, width: 935, height: 567) && flatLandscape.targets[.textSize]!.minX == 629
+      && flatLandscape.targets[.settings]!.minX == 863, "951×669 as the stream screen lays it out")
+check(laptop.stream == CGRect(x: 8, y: 8, width: 653, height: 439) && laptop.targets[.keys]!.minY == 596 && laptop.targets[.trackpad]!.maxY == 929,
+      "669×951 half-folded: the picture above the fold, the controls from 496")
+func placeDuo(_ s: Screen, _ topic: TourTopic, height h: CGFloat, fold: FoldInfo, ax: Bool = false, inset: CGFloat = 0) -> TourPlacement {
+    let w = TourPolicy.width(screen: s.size, layout: s.layout, accessibilityText: ax, fold: fold, targets: s.union(topic))
+    return TourPolicy.place(card: CGSize(width: w, height: h), targets: s.union(topic), isStream: topic == .touch, screen: s.size,
+                            layout: s.layout, stream: s.stream, bottomInset: inset, fold: fold)
+}
+func duoPinned(_ s: Screen, _ topic: TourTopic, _ h: CGFloat, _ fold: FoldInfo, _ expected: CGRect, tail: TourTail?, line: Int = #line) {
+    let p = placeDuo(s, topic, height: h, fold: fold)
+    check(p == TourPlacement(card: expected, tail: tail), "\(s.size) \(topic) h \(h): \(p.card) tail \(String(describing: p.tail)), expected \(expected) \(String(describing: tail))", line: line)
+}
+// The crease: the fold's real top upright, half-folded; none open flat; as before when unknown.
+check(TourPolicy.crease(uprightSize) == 476, "669×951 inferred, as before: the middle, rounded")
+check(TourPolicy.crease(uprightSize, laptopInfo) == 455.5, "the laptop pose: the fold's top")
+check(TourPolicy.crease(uprightSize, flatInfo) == nil && TourPolicy.crease(bookSize, bookInfo) == nil && TourPolicy.crease(bookSize, flatInfo) == nil,
+      "open flat, and the book pose: no crease across")
+check(TourPolicy.crease(CGSize(width: 669, height: 869), .known(CGRect(x: 0, y: 373.5, width: 669, height: 40))) == 373.5, "the status bar shown")
+// The width: a page holds it in the book pose.
+check(TourPolicy.width(screen: bookSize, layout: L, accessibilityText: false, fold: bookInfo) == 360, "the book pose: 360")
+check(TourPolicy.width(screen: bookSize, layout: L, accessibilityText: true, fold: bookInfo) == 439.5, "the book pose at accessibility sizes: a page's 439.5")
+check(TourPolicy.width(screen: bookSize, layout: L, accessibilityText: true, fold: flatInfo) == 560
+      && TourPolicy.width(screen: uprightSize, layout: P, accessibilityText: true, fold: laptopInfo) == 560, "open flat and upright: 560")
+check(TourPolicy.width(screen: CGSize(width: 594, height: 466), layout: L, accessibilityText: false, fold: flatInfo) == 480, "the cover on its side: 480")
+// With the status bar's strip (867 pt) the trailing page is 355.5: a card about Settings is that wide,
+// beside it; one about the strip or the picture keeps the leading page's 360 (439.5 at accessibility
+// sizes).
+check(TourPolicy.width(screen: book867Size, layout: L, accessibilityText: false, fold: bookInfo, targets: book867.union(.settings)) == 355.5,
+      "867, Settings: the trailing page's 355.5")
+check(TourPolicy.width(screen: book867Size, layout: L, accessibilityText: true, fold: bookInfo, targets: book867.union(.settings)) == 355.5,
+      "867, Settings, accessibility sizes: 355.5")
+check(TourPolicy.width(screen: book867Size, layout: L, accessibilityText: false, fold: bookInfo, targets: book867.union(.bar)) == 360
+      && TourPolicy.width(screen: book867Size, layout: L, accessibilityText: true, fold: bookInfo, targets: book867.union(.touch)) == 439.5,
+      "867, the bar and the picture: the leading page")
+check(TourPolicy.width(screen: book867Size, layout: L, accessibilityText: false, fold: bookInfo) == 360, "867, no targets yet: the wider page")
+// The book pose: the picture's card on the leading page, against the fold; a bar card that would
+// cross it goes onto the page its middle is on; one clear of it stays centred on its targets.
+duoPinned(bookScreen, .touch, 262, bookInfo, CGRect(x: 95.5, y: 246.5, width: 360, height: 262), tail: nil)
+duoPinned(bookScreen, .bar, 230, bookInfo, CGRect(x: 95.5, y: 94, width: 360, height: 230), tail: TourTail(edge: .up, x: 427.5))
+duoPinned(bookScreen, .settings, 200, bookInfo, CGRect(x: 575, y: 88, width: 360, height: 200), tail: TourTail(edge: .up, x: 896))
+// The book pose as drawn, 867 pt: the picture's card and the bar's on the leading page against the
+// fold; Settings' on the trailing page, beside the button, with its tail at it (the review: at 360 pt
+// it went to the far page, its tail clamped at the card's edge).
+check(book867.targets[.strip]!.maxX == 448.5 && book867.targets[.settings]!.maxX == 845 && book867.stream == CGRect(x: 8, y: 94, width: 851, height: 567),
+      "867×669 as the stream screen lays it out")
+duoPinned(book867, .touch, 262, bookInfo, CGRect(x: 95.5, y: 246.5, width: 360, height: 262), tail: nil)
+duoPinned(book867, .bar, 230, bookInfo, CGRect(x: 95.5, y: 94, width: 360, height: 230), tail: TourTail(edge: .up, x: 398))
+duoPinned(book867, .settings, 200, bookInfo, CGRect(x: 495.5, y: 88, width: 355.5, height: 200), tail: TourTail(edge: .up, x: 813))
+duoPinned(flatLandscape867, .settings, 200, flatInfo, CGRect(x: 491, y: 88, width: 360, height: 200), tail: TourTail(edge: .up, x: 812))
+// Open flat sideways: as before, across the middle.
+duoPinned(flatLandscape, .touch, 262, flatInfo, CGRect(x: 295.5, y: 246.5, width: 360, height: 262), tail: nil)
+check(placeDuo(flatLandscape, .bar, height: 230, fold: flatInfo) == placeDuo(flatLandscape, .bar, height: 230, fold: .inferred), "open flat: the fold changes nothing")
+// The laptop pose: in the picture above the fold, never across it, no tail across it.
+duoPinned(laptop, .touch, 262, laptopInfo, CGRect(x: 154.5, y: 96.5, width: 360, height: 262), tail: nil)
+duoPinned(laptop, .laptop, 330, laptopInfo, CGRect(x: 154.5, y: 105, width: 360, height: 330), tail: nil)
+duoPinned(laptop, .settings, 200, laptopInfo, CGRect(x: 293, y: 235, width: 360, height: 200), tail: nil)
+duoPinned(laptop, .laptop, 600, laptopInfo, CGRect(x: 154.5, y: 16, width: 360, height: 419), tail: nil)   // never past the fold: scrolls
+// Open flat upright: no crease, the pane at the picture's shape (16:10 here, 424 pt).
+duoPinned(flatUpright, .laptop, 330, flatInfo, CGRect(x: 154.5, y: 74, width: 360, height: 330), tail: nil)
+duoPinned(flatUpright, .touch, 600, flatInfo, CGRect(x: 154.5, y: 16, width: 360, height: 600), tail: nil)   // grows past the picture: no fold
+duoPinned(flatUpright, .settings, 200, flatInfo, CGRect(x: 293, y: 204, width: 360, height: 200), tail: TourTail(edge: .down, x: 623))
+// The cover: no fold; the phone's and the compact sideways placements, as before.
+for topic in TourPolicy.steps(F, voiceOver: false) {
+    check(placeDuo(duoCover, topic, height: 230, fold: flatInfo) == placeDuo(duoCover, topic, height: 230, fold: .inferred), "the cover upright, \(topic)")
+}
+for topic in TourPolicy.steps(L, voiceOver: false) {
+    check(placeDuo(duoCoverSide, topic, height: 230, fold: flatInfo) == placeDuo(duoCoverSide, topic, height: 230, fold: .inferred), "the cover on its side, \(topic)")
+}
+// Every card at every height and text size: the book pose's on one page, the laptop pose's above
+// the fold; within the margins; a tail only on the card's straight edge.
+var duoGrid = 0
+for (s, fold) in [(bookScreen, bookInfo), (book867, bookInfo), (laptop, laptopInfo), (flatLandscape, flatInfo), (flatLandscape867, flatInfo),
+                  (flatUpright, flatInfo), (duoCover, flatInfo), (duoCoverSide, flatInfo)] {
+    for ax in [false, true] {
+        for topic in TourPolicy.steps(s.layout, voiceOver: false) {
+            for h in stride(from: CGFloat(80), through: 1000, by: 40) {
+                for inset: CGFloat in [0, 34] {
+                    duoGrid += 1
+                    let p = placeDuo(s, topic, height: h, fold: fold, ax: ax, inset: inset)
+                    let c = p.card
+                    let label = "\(s.size) \(fold) \(topic) ax \(ax) h \(h) inset \(inset)"
+                    check(c.minX >= 16 - 0.001 && c.maxX <= s.size.width - 16 + 0.001 && c.minY >= 16 - 0.001
+                          && c.maxY <= s.size.height - 16 - inset + 0.001, "\(label): within the margins, \(c)")
+                    if let band = fold.verticalBand {
+                        check(c.maxX <= band.minX + 0.001 || c.minX >= band.maxX - 0.001, "\(label): on one page, \(c)")
+                        // On the page its targets are on (the picture's: the leading one).
+                        if let t = s.union(topic), topic != .touch {
+                            check(t.midX <= band.midX ? c.maxX <= band.minX + 0.001 : c.minX >= band.maxX - 0.001, "\(label): beside its targets, \(c)")
+                        }
+                    }
+                    if let band = fold.horizontalBand, !p.coversTargets {
+                        check(c.maxY <= band.minY - 16 + 0.001, "\(label): above the fold, \(c)")
+                        if let tail = p.tail { check(tail.edge != .down || c.maxY + 7 <= band.minY, "\(label): a tail across the fold") }
+                    }
+                    if let tail = p.tail { check(tail.x >= c.minX + 28 - 0.001 && tail.x <= c.maxX - 28 + 0.001, "\(label): the tip on the straight edge") }
+                    check(placeDuo(s, topic, height: c.height, fold: fold, ax: ax, inset: inset) == p, "\(label): placed again where it is")
+                }
+            }
+        }
+    }
+}
+check(duoGrid == 2592, "the Duo's grid: \(duoGrid) placements")
+
 // MARK: - The words
 
 func words(_ t: TourTopic, _ layout: TourLayout, mac: String = "Mac mini", device: String = "iPad", voiceOver: Bool = false,
-           first: Bool = false) -> TourCopy {
-    TourPolicy.copy(t, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: first)
+           first: Bool = false, onItsSide: Bool = false) -> TourCopy {
+    TourPolicy.copy(t, layout, mac: mac, device: device, voiceOver: voiceOver, firstOfRun: first, keysOnItsSide: onItsSide)
 }
 func texts(_ c: TourCopy) -> [String] { c.rows.map(\.text) }
 let touchPad = words(.touch, L, first: true)
@@ -642,6 +797,18 @@ check(texts(words(.settings, P)) == Array(texts(settingsL).prefix(2)), "no uprig
 let laptopFirst = words(.laptop, P, first: true)
 check(laptopFirst.title == "Keys and Trackpad" && laptopFirst.subtitle == "Upright, Sill adds keys and a trackpad.", "laptop as a run's first card")
 check(words(.laptop, P, first: false).subtitle == nil, "laptop's subtitle only as a run's first")
+// The iPhone Duo open: its keys and trackpad come with the device on its side (the laptop pose, open
+// flat upright), so the words say so where an iPhone's and the Duo's cover's say upright.
+let duoSettings = words(.settings, L, device: "iPhone", onItsSide: true)
+check(texts(duoSettings).last == "Turn your iPhone on its side for a trackpad and keys." && duoSettings.rows.last?.symbol == "iphone"
+      && duoSettings.rows.last?.spans.first == TourSpan(text: "Turn your iPhone on its side", strong: true), "the Duo's inner display sideways")
+check(texts(duoSettings).prefix(2) == texts(words(.settings, L, device: "iPhone")).prefix(2), "the Duo: the other rows as before")
+check(words(.laptop, P, device: "iPhone", first: true, onItsSide: true).subtitle == "On its side, Sill adds keys and a trackpad.", "the Duo's laptop card")
+check(words(.laptop, P, device: "iPhone", first: false, onItsSide: true).subtitle == nil, "…only as a run's first")
+check(texts(words(.laptop, P, device: "iPhone", onItsSide: true)) == texts(words(.laptop, P, device: "iPhone")), "the Duo's laptop rows as before")
+for t in [TourTopic.touch, .bar] {
+    for layout in [L, P] { check(words(t, layout, onItsSide: true) == words(t, layout), "\(t) \(layout): the same words on the Duo") }
+}
 check(texts(laptopFirst) == ["cmd, opt, ctrl and shift stay on for the next key or trackpad click: tap cmd, then C, to copy.",
                              "The keyboard key types on Mac mini, on screen or with a hardware keyboard.",
                              "Tap with two fingers on the trackpad to right-click.",

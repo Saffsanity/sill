@@ -58,8 +58,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # A build for App Store Connect is made with Xcode 27 or not at all (release-ios.sh refuses
-      # any other too).
+      # A build for App Store Connect is made with the newest Xcode 27 that is not a beta or not at
+      # all, and release-ios.sh refuses one before 27.1 (the iOS 27.1 SDK the iPhone Duo's layouts
+      # need): until the image has a 27.1 release, this job stops there.
       - name: Select Xcode 27
         uses: ./.github/actions/select-xcode
         with:

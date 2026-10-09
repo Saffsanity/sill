@@ -49,6 +49,8 @@
 		A1000001000000000000A044 /* MacMenuButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F044 /* MacMenuButton.swift */; };
 		A1000001000000000000A401 /* TourPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F401 /* TourPolicy.swift */; };
 		A1000001000000000000A402 /* TourOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F402 /* TourOverlay.swift */; };
+		A1000001000000000000AB01 /* DuoPosture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB01 /* DuoPosture.swift */; };
+		A1000001000000000000AB02 /* DuoPostureReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FB02 /* DuoPostureReader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -96,6 +98,8 @@
 		A1000001000000000000F044 /* MacMenuButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenuButton.swift; sourceTree = "<group>"; };
 		A1000001000000000000F401 /* TourPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F402 /* TourOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TourOverlay.swift; sourceTree = "<group>"; };
+		A1000001000000000000FB01 /* DuoPosture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPosture.swift; sourceTree = "<group>"; };
+		A1000001000000000000FB02 /* DuoPostureReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoPostureReader.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,6 +129,8 @@
 				A1000001000000000000F013 /* HostSettingsPanel.swift */,
 				A1000001000000000000F402 /* TourOverlay.swift */,
 				A1000001000000000000F401 /* TourPolicy.swift */,
+				A1000001000000000000FB01 /* DuoPosture.swift */,
+				A1000001000000000000FB02 /* DuoPostureReader.swift */,
 				A1000001000000000000F003 /* StreamClient.swift */,
 				A1000001000000000000F012 /* HostSettingsLedger.swift */,
 				A1000001000000000000F014 /* DiscoveryPolicy.swift */,
@@ -264,6 +270,8 @@
 				A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */,
 				A1000001000000000000A402 /* TourOverlay.swift in Sources */,
 				A1000001000000000000A401 /* TourPolicy.swift in Sources */,
+				A1000001000000000000AB01 /* DuoPosture.swift in Sources */,
+				A1000001000000000000AB02 /* DuoPostureReader.swift in Sources */,
 				A1000001000000000000A003 /* StreamClient.swift in Sources */,
 				A1000001000000000000A012 /* HostSettingsLedger.swift in Sources */,
 				A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */,

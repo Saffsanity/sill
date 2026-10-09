@@ -8,6 +8,71 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The iPhone Duo with the iOS 27.1 SDK (2026-10-08, branch `duo-layout` from main at e6b3265,
+main at 05f2bb8 (PR #39) merged in at 7bd7c41, not rebased; docs/iphone-duo-plan.md has the probe's
+facts, the decisions, the review, the results and what Noah tests).** Noah: research the iOS 27.1
+SDK for iPhone Duo, then "adapt the app to use this SDK, then use the simulator with iPhone Duo, make
+sure it works properly, then take screenshots of all poses", with PR #39's merge kept cheap.
+Approved from mockups: (a) the book pose, one stream across the fold and nothing you touch on it;
+(b1) the laptop pose split at the fold's real frame; (b2) open flat upright, the picture at the
+window's own shape and the trackpad the rest; (c1) the cover upright, the phone's arrangement beside
+the camera's strip; (c2) on its side, the compact landscape bar. Device only, no wire change (a TEST
+ONLY host picture aside).
+- `DuoPosture` (pure) and `DuoPostureReader`: `onHingeChange` at the app's root (SillApp) into the
+  environment; the fold's `.division` region (`.includeInactive`) from each screen's own
+  GeometryReader, in its space, and before the hinge's first report the region alone (active: partly
+  open; inactive: flat); nothing before iOS 27.1, and a device without a hinge or fold reads
+  `unknown`, so every layout there is what it was (the inferred crease included). The fold is in the
+  way while the hinge is partly open.
+- Decisions (the plan's "The build: decisions", revised after the review; the status bar Noah's
+  pick of 2026-10-09, option 1 of the three the mock canvas drew): the stream screen hides the
+  status bar on the inner display in every pose (upright the picture keeps the 82 pt above the
+  fold; sideways Sill has all 951 pt), and every other screen keeps it in every pose, the cover its
+  strip; at 951 pt the book pose's bar keeps its regular size, its group beginning at 551, past the
+  fold's 455.5–495.5, the strip ending 12 pt short of it (at 867 pt, the status bar shown, it would
+  take the approved step to the compact width, Menus at 497); the laptop pose splits at 455 and
+  496; open flat the pane takes the picture's
+  own shape, 16:10 while the Mac fits a window to it (Aa, the virtual display); in the book pose the
+  connect column, the pairing overlay, the window lights and PR #39's link line keep to a page, and
+  a tour card to its targets' page (355.5 pt beside Settings); upright the connect column scrolls
+  in the room above the fold, Add a Mac side by side there; the tour on the inner display says
+  "Turn your iPhone on its side" for the keys and trackpad. The cover needed nothing.
+- Hooks, a few lines each: StreamScreen (also `duoStatusBar` and LinkLineView), PortraitStreamScreen,
+  AddMacCard (`ConnectLayout`), ContentView (the connect screen's room; the harness), PairingOverlay,
+  TourPolicy and TourOverlay, SillApp; pbxproj AB01/FB01, AB02/FB02. The harness: `-SillLayout
+  951x669`, `669x951`, `466x678`, `678x466` with the displays' safe areas as this build has them,
+  `-SillHinge closed|half|flat`. CI: the Mac side on Xcode 27 (not a beta), the iOS app alone on
+  27.1 (select-xcode's `allow-beta`: the image has only `Xcode_27.1_beta.app`, 27A9269); release-ios.sh
+  refuses an Xcode before 27.1 and an app not built with the iOS 27.1 SDK, so TestFlight from
+  GitHub Actions waits for a 27.1 release there. `SILL_TEST_PATTERN=picture:<path>` (TEST ONLY): a
+  synthetic host's Desktop a still picture.
+- The review (2026-10-08, two lenses): eleven findings, two of them the same (the status bar).
+  Eight fixed, one commit per theme (5c2188a the status bar and the fold before the report, 7db22a3
+  the connect column, 8906024 the tour, 9e4f36c CI; the checklist and README with the docs), and
+  the plan's own leftover too (e75ea48 #39's link line); one tested here and given to Noah (the 27.1
+  SDK off the Duo: P9; folds while away: P10, fine on the simulator); one older than the branch and
+  left (an unlabeled VoiceOver element on the phone row's Menus button). c70a04c is the test picture.
+- Checks: `duo` 252,557 and 67 of 67 mutants; `tour` 51,840 and 72 of 72; `run-all.sh`, all 40;
+  each fix commit builds and passes both. Builds: iOS Debug for the Duo simulator, Release for the
+  simulator, Debug for a device, `swift build -c release`, only the known warnings.
+- Verified on a private simulator ("Sill duo", iOS 27.1, deleted after) folded by Tests/duorig
+  against `SillHost --synthetic` on loopback (software encoder, a Weather picture as the Desktop):
+  the stream, connect and Settings screens in all six poses, the tour's cards, folds and turns
+  while Sill was in the background (six, each layout right on return, one connection) and slow
+  folds mid-stream (180→90→180→120→0→90); the harness's mock in every pose with the drawer, lights,
+  pairing, Add a Mac, eight Macs, the link line and the Menus pull-down. Photos at App Store
+  Connect's Duo sizes in `~/Downloads/sill-handoff/duo/final/` (INDEX.md; `live/` private: this
+  Mac's windows and name). The harness at 46 earlier cases against main's build (05f2bb8): 39
+  identical, 7 differing only as main's build differs from itself. The branch contains main: the
+  pull request merges without a conflict. CI run by hand on the branch (37835771799): green, the
+  Mac side on Xcode 27.0, the iOS app on `Xcode_27.1_beta.app` (27A9269).
+- **Untested, for Noah (on an iPhone Duo from Oct 23, a build from Xcode 27.1; TestFlight 0.5 (3),
+  from Xcode 27.0, runs there in an 871×669 compatibility window, sideways only):** the plan's
+  P1–P13: every pose, folding mid-stream by hand, the keyboard on the cover, 120 Hz on each display,
+  Split View if iOS offers it, VoiceOver in the book pose, the iPad mini and iPhone 15 Pro on a 27.1
+  build (P9), folds while away (P10), and the status bar decision. Left: (d) TestFlight 0.5.1 waits
+  for the Duo's release.
+
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
 c564142, PR #39, stacked on PR #34, which merged during its review; main at
 e6b3265 merged in on 2026-10-08, one merge commit, not rebased, so the pull
@@ -4348,7 +4413,8 @@ good.
   `WindowCatalog` (polls windows and thumbnails only while a client is
   connected; icons; installed apps in the background),
   `WindowCapture` (ScreenCaptureKit), `SyntheticCapture` (test pattern for
-  `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise), `HEVCEncoder` (VideoToolbox with one frame inside, a
+  `--synthetic`; SILL_TEST_PATTERN=noise adds a square of noise,
+  SILL_TEST_PATTERN=picture:<path> shows a still picture instead), `HEVCEncoder` (VideoToolbox with one frame inside, a
   one-slot mailbox behind it and a hang watchdog; hardware or software; says
   whether a stalled frame came back; gives a stream whose session settled in
   the slow state a new one), `EncoderSlowState` (when that is, and whether the
@@ -4499,7 +4565,9 @@ good.
   the Local Network, Bonjour and camera entries, the privacy manifest, an
   Apple Distribution signature, an App Store profile, no get-task-allow, the
   required-reason APIs against the manifest), `--bump`, `--api-key`,
-  `--print-version` and `--privacy-report`; it refuses any Xcode but 27,
+  `--print-version` and `--privacy-report`; it refuses any Xcode before 27.1
+  or after 27 (the iOS 27.1 SDK the iPhone Duo's layouts need; the app it
+  checks must say DTPlatformVersion 27.1 or later),
   with `--bump` or `--upload` a working tree with changes (new files in
   iOSClient and Sources/StreamProtocol count), and an App Store address in
   `SillLinks.swift` that isn't one, and sourced it only defines its
@@ -4683,7 +4751,20 @@ good.
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across
   row 1, and the dim, and the Menus button ending the strip's row (`menus`,
-  `stripBesideMenus`); pure, `Tests/checks/phone-portrait`),
+  `stripBesideMenus`); pure, `Tests/checks/phone-portrait`), `DuoPosture`
+  (the iPhone Duo's posture and the rules that follow from it, docs/iphone-duo-plan.md:
+  `FoldInfo`, inferred before iOS 27.1 or the fold's band; the laptop pose's
+  split at the real fold and open flat's at the picture's shape, the book
+  pose's bar, one page for a card (on its targets' page), the connect column
+  and the room above the laptop pose's fold, the pairing overlay and the
+  window lights; the stream screen's status bar (hidden on the inner display
+  in every pose); the hinge from the fold before its first report; the
+  harness's stand-in and the displays' safe areas; pure, `Tests/checks/duo`;
+  pbxproj AB01/FB01), `DuoPostureReader` (iOS 27.1: `onHingeChange` at the
+  app's root into `\.duoEnvironment`, `DuoPosture.read`, the `.division`
+  region as a screen's own GeometryReader sees it; StreamScreen hands it to
+  its layouts as `\.duoFold` and hides the status bar with `duoStatusBar`;
+  AB02/FB02),
   `InputOverlay` (direct touch, Pencil, keyboard, scroll momentum; each input
   says what drew this device's pointer; hardware keys through `ForwardedKeys`,
   let go when the overlay stops taking keys), `KeyChords` (`KeyModifiers`; a
@@ -4801,7 +4882,8 @@ good.
   pull requests and pushes to main that touch more than documents or the site
   (`design/` counts: `dmg-layout` reads its SVG), and by hand; `swift build -c release`,
   `Tests/checks/run-all.sh`, the iOS app for the generic simulator (Debug,
-  arm64, `CODE_SIGNING_ALLOWED=NO`), and the CLI's paths that exit before the
+  arm64, `CODE_SIGNING_ALLOWED=NO`; with Xcode 27.1, its beta while the image
+  has no 27.1 release), and the CLI's paths that exit before the
   host starts (`--internet` alone, exit 2; `--print-reachability`); by hand
   with "mutants", each check's mutants in a job of its own. `release.yml`: a
   pushed tag `v*`, or by hand with one; verify only (the tag, the checks,
@@ -4821,10 +4903,12 @@ good.
   profile stored), and `--upload` too when the variable `SILL_TESTFLIGHT_IN_CI`
   is `true`; the .ipa is the artifact for 14 days (docs/release-checklist.md,
   "TestFlight from GitHub Actions"). `.github/actions/select-xcode` —
-  selects the newest Xcode of the `version` asked for (27) whose folder is
-  not a beta and prints `xcodebuild -version`; without one, CI warns and
-  takes the newest Xcode there and a release (`fallback: false`) fails (CI
-  only: it runs `sudo xcode-select`). The runner's `bash` is 3.2: try `run:`
+  selects the newest Xcode of the `version` asked for (27; CI's build 27.1)
+  whose folder is not a beta and prints `xcodebuild -version`; with
+  `allow-beta: 'true'` (CI's build alone, never a build for App Store
+  Connect), a version with no release yet takes its newest release candidate
+  or beta; without one, CI warns and takes the newest Xcode there and a
+  release (`fallback: false`) fails (CI only: it runs `sudo xcode-select`). The runner's `bash` is 3.2: try `run:`
   steps with `/bin/bash`. Actions are pinned by commit hash.
 - `Tests/checks/` — the pure checks, a folder each: `main.swift`, `run.sh`
   (compiles the app's files it names with swiftc into `.build/checks/<name>/`
@@ -4835,7 +4919,8 @@ good.
   `addresses`, `ask-limits`, `cable-link`, `clientlink`, `compatibility`,
   `device-gate`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
-  arguments and the SVG's size and edge), `door-policy`, `encoder-mailbox`,
+  arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
+  `tour` and `phone-portrait` take the Duo's real sizes too), `encoder-mailbox`,
   `encoder-slowstate`, `fence`, `gesture-chords`, `gestures`, `goodbye`,
   `home-device`, `home-model`, `home-records`, `home-txt`, `key-strokes` (the
   host's KeyStrokes and the device's KeyChords, against a model of the Mac's
@@ -4859,6 +4944,14 @@ good.
   (`SILL_TOUCHRIG_SIM`), `compare.py` judges a run against the surfaces
   before, and a stroke made right after a gesture against the same stroke
   made fresh.
+- `Tests/duorig/` — TEST ONLY, private interfaces, simulator only: folds and
+  turns the iPhone Duo simulator with Device Hub's own events (usage page
+  0xFF61, usage 0x5B, an IOCFSerialize dictionary from
+  `com.apple.Virtualization.VirtualMachines`), posted from a virtual HID
+  service inside the simulator (`xcrun simctl spawn`); `run.sh build`, `run.sh
+  UDID pose <closed-upright|closed-side|flat-portrait|flat-landscape|laptop|book>`,
+  `run.sh UDID shot <pose> FILE.png`, `hinge`, `orient`, `watch`; only a
+  booted iPhone Duo simulator, by UDID (its README).
 
 ## Build and run
 
@@ -4899,6 +4992,7 @@ Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's 
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
+Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```
@@ -4966,8 +5060,10 @@ printed), `SILL_TEST_PAIRING_TTL=<s>`, `SILL_TEST_BACKOFF_SECONDS=<s>`,
 one loopback host serves a device away and one at home: away from home's
 H8 and S4) and `SILL_TEST_NO_ROUTER=1` (never ask the router; set it on every
 headless host). Away from home and the link, headless (docs/remote-bundle-
-plan.md, PR B): `SILL_TEST_PATTERN=noise` gives a synthetic host a square of
-noise, so its stream follows the quality (on the software encoder about 14
+plan.md, PR B): `SILL_TEST_PATTERN=picture:<path>` gives a synthetic host a
+still picture for its Desktop (any image ImageIO reads, filling the frame:
+photographs of a device, docs/iphone-duo-plan.md); `SILL_TEST_PATTERN=noise`
+gives it a square of noise, so its stream follows the quality (on the software encoder about 14
 frames a second, 3.6 Mbit/s at Low and 10.6 at Balanced), for a test of the
 link through `sillrelay.py --rate-mbps 5`; `sillclient.py` prints `away=` and
 `link=` on each kind 16, and `--expect` knows `awayBitrate`,
@@ -5058,9 +5154,16 @@ by a host that does not advertise, makes both doors of a test host listen on
 clients reach it by 127.0.0.1. Reset the app's remote settings with
 `for k in remoteAccess remotePort internetAccess remoteAddressName
 remoteDevicesSeen; do defaults delete me.saffer.sill.mac $k; done`.
-Debug harness (simulator, no Duo simulator exists yet): launch arguments
-`-SillLayout 1000x710` (inner landscape) / `710x1000` / `500x710` / `710x500`
-(outer), `-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
+Debug harness (simulator; the iPhone Duo's from the iOS 27.1 runtime, folded
+by Tests/duorig): launch arguments `-SillLayout 951x669` (inner landscape) /
+`669x951` / `466x678` / `678x466` (the cover), each with the safe area its
+display gives Sill, the status bar's strip included but on the stream screen
+upright with `-SillHinge half` or `flat` (`-SillSafeArea T,L,B,R` sets
+another; the first guesses, `1000x710` / `710x1000` / `500x710` / `710x500`,
+have none), `-SillHinge
+closed|half|flat` (the hinge and a 40 pt fold across the middle of the longer
+side; without it the harness knows no hinge, even on the Duo's simulator),
+`-SillLive 1` (real client inside the frame), `-SillDrawer 1`,
 `-SillActive none|desktop|<windowID>` (mock), `-SillHUD 1` (diagnostics overlay),
 `-SillSettings 1` (the Settings panel open), `-SillMacMenu
 code|blender|long|stale|noaccess|none|slow|timeout|refuse` (the mock Mac's

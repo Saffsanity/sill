@@ -48,8 +48,8 @@ jobs:
   build:
     name: Build and check
     # The newest macOS image GitHub offers, and the only one with Xcode 27, which Sill is built
-    # with: macOS 27 with Xcode 27.0, 27.1 and a 27.2 beta, a public preview in September 2026.
-    # macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
+    # with: macOS 27 with Xcode 27.0, Xcode_27.1_beta.app and a 27.2 beta, a public preview, in
+    # October 2026. macos-latest (macOS 26) has Xcode 26.6 at most. See docs/release-checklist.md.
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -58,7 +58,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # The newest Xcode 27 that is not a beta; without one, a warning and the newest Xcode there.
+      # The Mac side (SwiftPM, the pure checks, the CLI) on the newest Xcode 27 that is not a beta, as
+      # Sill for Mac's releases are built; without one, a warning and the newest Xcode there. The iOS
+      # app picks its own below.
       - name: Select Xcode 27
         id: xcode
         uses: ./.github/actions/select-xcode
@@ -86,6 +88,17 @@ jobs:
 
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
+
+      # The iOS app needs the iOS 27.1 SDK (the iPhone Duo's hinge and fold, docs/iphone-duo-plan.md):
+      # the newest Xcode 27.1 that is not a beta, else its newest beta (the image had only
+      # Xcode_27.1_beta.app, 27A9269, in October 2026); without either, a warning and the newest Xcode
+      # there, whose iOS build then fails if it is older. Selected only here, after the Mac side, so
+      # nothing of Sill for Mac is ever built with a beta.
+      - name: Select Xcode 27.1 for the iOS app
+        uses: ./.github/actions/select-xcode
+        with:
+          version: '27.1'
+          allow-beta: 'true'
 
       # Not -quiet: with it, Xcode 27 heads each compile that only warned with "error: the following
       # command failed with exit code 0", which reads like a failure. ARCHS=arm64: the generic
@@ -120,7 +133,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [addresses, ask-limits, away-copy, away-quality, away-wire, cable-link, clientlink, compatibility, device-gate, dmg-layout, door-policy, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, home-device, home-model, home-records, home-txt, key-strokes, keychain, link-judge, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
+        check: [addresses, ask-limits, away-copy, away-quality, away-wire, cable-link, clientlink, compatibility, device-gate, dmg-layout, door-policy, duo, encoder-mailbox, encoder-slowstate, fence, gesture-chords, gestures, goodbye, home-device, home-model, home-records, home-txt, key-strokes, keychain, link-judge, menu-state, menus, message-reader, origin, pairing-address, phone-portrait, pointer-control, pointer-presence, pointer-watch, policy, protocol, remote-rules, tour, update-policy]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

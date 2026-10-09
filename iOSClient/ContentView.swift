@@ -75,12 +75,24 @@ struct ContentView: View {
 // MARK: - Layout harness (DEBUG only)
 
 /// Renders `StreamScreen` at an exact point size so an iPad simulator can stand in for the iPhone
-/// Duo's screens — 1000×710 for the unfolded inner display, 710×1000 for portrait and the folded
-/// laptop posture, 500×710 and 710×500 for the outer display.
+/// Duo's screens — 951×669 for the inner display sideways (open flat, or the book pose), 669×951
+/// upright (open flat, or the laptop pose), 466×678 and 678×466 for the cover (the first guesses,
+/// 1000×710, 710×1000, 500×710 and 710×500, still work as before).
 ///
 /// Only a launch argument turns it on. The whole contract:
 ///
-/// * `-SillLayout 1000x710` — required; the fake screen's size in points.
+/// * `-SillLayout 1000x710` — required; the fake screen's size in points. At the Duo's four sizes
+///   (951x669, 669x951, 466x678, 678x466) the fake screen has the safe area that display gives Sill
+///   (DuoPosture.displayInsets: the home indicator's 34 at the bottom; on the inner display the
+///   status bar's strip, 84 pt at the right sideways and 82 at the top upright, but on the stream
+///   screen upright with `-SillHinge half` or `flat`, which hides it; on the cover the camera's
+///   84 pt strip, at the right upright and the left on its side); every other size has none, as
+///   before. `-SillSafeArea T,L,B,R` sets it (`none` for none).
+/// * `-SillHinge closed|half|flat` — stands in for the Duo's hinge (iOS 27.1's `onHingeChange`) and
+///   its fold (the `.division` reserved region): `half` the fold in the way, 40 pt across the middle
+///   of the fake screen's longer side (the book pose sideways, the laptop pose upright); `flat` the
+///   same fold, open flat; `closed` none, as on the cover. Without it the harness knows no hinge,
+///   on the Duo's simulator too, and every layout is what the size alone gives, as before.
 /// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
 ///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
 ///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
@@ -323,7 +335,8 @@ struct ContentView: View {
 ///   presses its Take the Tour a second later; `-SillTourVoiceOver 1` gives the run and its words
 ///   as under VoiceOver. The console says what happened ("tour: …").
 /// * `-SillOrientation landscape|portrait` — the normal app only: asks the window scene for that
-///   orientation at launch (a phone simulator sideways, with its real safe areas).
+///   orientation at launch (a phone simulator sideways, with its real safe areas). The Duo's inner
+///   display refuses it (UISceneErrorDomain 101): fold and turn its simulator with Tests/duorig.
 ///
 /// A fake screen too wide for the simulator but fitting on its side (1133×744 on an iPad Pro 13"
 /// held upright) is drawn a quarter turn clockwise: rotate the screenshot back
@@ -370,6 +383,17 @@ struct LayoutHarness: View {
         /// when `live`.
         let pointer: String?
         let pencilPointer: Bool
+        /// The Duo's hinge stand-in (`-SillHinge`), nil for none; the fake screen's safe area.
+        let hinge: DuoPosture.Hinge?
+        let insets: EdgeInsets?
+
+        /// What the screens read of the hinge here: the stand-in, or nothing (never the device's:
+        /// without `-SillHinge`, a stand-in of no hinge and no fold, so that the Duo simulator's own
+        /// fold, which DuoPosture.read goes by before a hinge is reported, never reaches the screen).
+        var duoEnvironment: DuoEnvironment {
+            guard let hinge else { return DuoEnvironment(hinge: .unknown, source: .standIn(nil)) }
+            return DuoEnvironment(hinge: hinge, source: .standIn(hinge == .closed ? nil : DuoPosture.standInFold(size)))
+        }
 
         static var fromLaunchArguments: Spec? {
             let defaults = UserDefaults.standard
@@ -391,7 +415,26 @@ struct LayoutHarness: View {
                         scanOverlay: defaults.bool(forKey: "SillScanOverlay"),
                         macMenu: MockCatalog.MenuCase(rawValue: defaults.string(forKey: "SillMacMenu") ?? "") ?? .code,
                         pointer: defaults.string(forKey: "SillPointer"),
-                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"))
+                        pencilPointer: defaults.bool(forKey: "SillPencilPointer"),
+                        hinge: DuoPosture.hinge(argument: defaults.string(forKey: "SillHinge")),
+                        insets: insets(defaults.string(forKey: "SillSafeArea"), size: CGSize(width: width, height: height),
+                                       streamScreen: defaults.bool(forKey: "SillLive")
+                                           || MockCatalog.ConnectCase(rawValue: defaults.string(forKey: "SillConnectCase") ?? "") == nil,
+                                       hinge: DuoPosture.hinge(argument: defaults.string(forKey: "SillHinge"))))
+        }
+
+        /// `-SillSafeArea T,L,B,R` (or `none`), else the Duo's display's own at its four sizes, with
+        /// the status bar as this build shows it there: hidden on the stream screen with a hinge
+        /// open, every pose (DuoPosture.hidesStatusBar), shown on every other screen and the cover.
+        private static func insets(_ raw: String?, size: CGSize, streamScreen: Bool, hinge: DuoPosture.Hinge?) -> EdgeInsets? {
+            if let raw {
+                let n = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                guard n.count == 4 else { return nil }
+                return EdgeInsets(top: n[0], leading: n[1], bottom: n[2], trailing: n[3])
+            }
+            let hidden = streamScreen && DuoPosture.hidesStatusBar(DuoPosture(hinge: hinge ?? .unknown).pose(size))
+            return DuoPosture.displayInsets(size, statusBarHidden: hidden)
+                .map { EdgeInsets(top: $0.top, leading: $0.leading, bottom: $0.bottom, trailing: $0.trailing) }
         }
 
         private static func mockActive(_ raw: String?) -> StreamSource {
@@ -423,8 +466,10 @@ struct LayoutHarness: View {
             let fit = Fit(screen: spec.size, room: geo.size)
             ZStack {
                 Color.black
-                screen
+                insetScreen
+                    .environment(\.duoEnvironment, spec.duoEnvironment)
                     .frame(width: spec.size.width, height: spec.size.height)
+                    .coordinateSpace(.named(DuoPosture.displaySpace))
                     .clipped()
                     .padding(1)
                     .background(Color(hex: 0x333333))
@@ -473,6 +518,23 @@ struct LayoutHarness: View {
                 turned = onItsSide > upright
                 scale = max(0.01, max(upright, onItsSide))
             }
+        }
+    }
+
+    /// The fake screen with the safe area it stands for: what the simulator's own already gives it
+    /// where they overlap (the Duo's simulator at the display's size), and the rest added.
+    @ViewBuilder private var insetScreen: some View {
+        if let want = spec.insets {
+            GeometryReader { g in
+                let have = g.safeAreaInsets
+                screen.safeAreaPadding(EdgeInsets(top: max(0, want.top - have.top), leading: max(0, want.leading - have.leading),
+                                                  bottom: max(0, want.bottom - have.bottom),
+                                                  trailing: max(0, want.trailing - have.trailing)))
+                    // Black under the insets too, as the app's own root is (ContentView's `app`).
+                    .background(Color.black)
+            }
+        } else {
+            screen
         }
     }
 
@@ -744,6 +806,8 @@ struct ConnectScreen: View {
     let scannerOverride: CodeScanner.Mode?
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The Duo's hinge (iOS 27.1): with the fold, where the column goes (ConnectLayout).
+    @Environment(\.duoEnvironment) private var duoEnvironment
 
     init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
@@ -778,7 +842,8 @@ struct ConnectScreen: View {
 
     var body: some View {
         GeometryReader { geo in
-            let layout = ConnectLayout(size: geo.size)
+            let posture = DuoPosture.read(geo, duoEnvironment)
+            let layout = ConnectLayout(size: geo.size, fold: posture.info(in: geo.size))
             // A field has the keyboard: the column goes to the top (the half-folded Duo's is already
             // in the top half), so Pair stays above the keyboard. The screen ignores the keyboard's
             // safe area below, so nothing else moves (the footer stays under the keyboard).
@@ -793,12 +858,15 @@ struct ConnectScreen: View {
             VStack(spacing: 0) {
                 ScrollView(.vertical) {
                     ColumnOverFooter(
-                        // The Duo half-folded: centred in the top half, at most 500 pt tall, so nothing
-                        // crosses the crease and the keyboard has the lower half (the footer stays along
-                        // the bottom, under the keyboard while it is up). Elsewhere centred in the whole
+                        // The Duo half-folded: centred above the fold, at most 500 pt tall, so nothing
+                        // crosses it and the keyboard has the lower half (the footer stays along the
+                        // bottom, under the keyboard while it is up); where the device reports the
+                        // fold (iOS 27.1) the room above it is the scroll view's, so a long list
+                        // scrolls there rather than run onto it. Elsewhere centred in the whole
                         // height, as before.
-                        centreHeight: layout.topHalf ? min(geo.size.height / 2, 500) : geo.size.height,
-                        visibleHeight: geo.size.height, gap: Self.footerGap, atTop: toTop) {
+                        centreHeight: layout.topRoom.map { min($0, 500) } ?? geo.size.height,
+                        visibleHeight: geo.size.height, scrollHeight: layout.roomAboveFold,
+                        gap: Self.footerGap, atTop: toTop) {
                         column(layout)
                             .frame(width: carded && layout.short && !typed ? layout.sideBySideWidth : layout.columnWidth,
                                    alignment: .leading)
@@ -826,8 +894,12 @@ struct ConnectScreen: View {
                         Color.clear.frame(height: Self.footerGap / 2)
                     }
                 }
+                // The laptop pose: the room above the fold, and nothing between it and the footer.
+                .frame(height: layout.roomAboveFold)
+                if layout.roomAboveFold != nil { Spacer(minLength: 0) }
                 footer(layout)
             }
+            .duoLog(posture, size: geo.size, screen: "connect screen")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .onChange(of: client.pairing) { old, new in
@@ -1133,12 +1205,16 @@ struct ConnectScreen: View {
 /// jumps: it rises until it is 16 pt from the top, and from there it scrolls.
 ///
 /// The second subview is the footer again, hidden, which only gives the footer's height: the scroll
-/// view is `visibleHeight` less that, and its content never learns its container's height.
+/// view is `visibleHeight` less that, and its content never learns its container's height. In the
+/// Duo's laptop pose the scroll view is the room above the fold instead (`scrollHeight`).
 private struct ColumnOverFooter: Layout {
     /// The height the column is centred in, from the top.
     let centreHeight: CGFloat
     /// The scroll view and the footer together: the screen's height.
     let visibleHeight: CGFloat
+    /// The scroll view's own height when it is not the screen less the footer: the laptop pose's
+    /// room above the fold.
+    var scrollHeight: CGFloat? = nil
     let gap: CGFloat
     /// A field has the keyboard: the column at the top.
     let atTop: Bool
@@ -1148,7 +1224,7 @@ private struct ColumnOverFooter: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let (column, footer) = sizes(width: proposal.width, subviews) else { return .zero }
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? max(column.width, footer.width)
-        let room = visibleHeight - footer.height
+        let room = scrollHeight ?? (visibleHeight - footer.height)
         // A point short of the scroll view while it fits, so no rounding ever lets it scroll.
         return CGSize(width: width, height: fits(column: column.height, room: room) ? max(0, room - 1)
                                                                                    : topRoom + column.height + gap)
@@ -1156,7 +1232,7 @@ private struct ColumnOverFooter: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let (column, footer) = sizes(width: bounds.width, subviews) else { return }
-        let room = visibleHeight - footer.height
+        let room = scrollHeight ?? (visibleHeight - footer.height)
         let y: CGFloat
         if !fits(column: column.height, room: room) || atTop {
             y = topRoom
