@@ -422,7 +422,7 @@ still picture, for the photos below (the approved mockups' Weather window).
 
 Verified 2026-10-08 (14:30–16:10) on this Mac, Xcode 27.1 RC (27A9275), "Sill duo":
 
-- **Checks**: `duo` 252,557 checks and 67 of 67 mutants (the pose rule for the status bar, the
+- **Checks**: `duo` 252,557 checks and 67 of 67 mutants, 68 of 68 since Noah's status-bar pick (the pose rule for the status bar, the
   fold before the hinge's report, the page per target, the room above the fold, the insets);
   `tour` 51,840 checks and 72 of 72 mutants (the 867 pt book pose and flat landscape, every card
   on its targets' page over the grid, the Duo's words); `Tests/checks/run-all.sh`, all 40 pass
