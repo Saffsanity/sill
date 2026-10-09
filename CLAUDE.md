@@ -24,13 +24,14 @@ ONLY host picture aside).
   open; inactive: flat); nothing before iOS 27.1, and a device without a hinge or fold reads
   `unknown`, so every layout there is what it was (the inferred crease included). The fold is in the
   way while the hinge is partly open.
-- Decisions (the plan's "The build: decisions", revised after the review): the stream screen hides
-  the status bar on the inner display held upright (laptop, flat upright: as the approved boards,
-  the picture keeps the 82 pt above the fold), keeps it sideways (its 84 pt strip, as the book
-  board drew it: Sill has 867 pt) and every other screen keeps it in every pose (**Noah's call**:
-  the plan's decision 1 has the one-line alternatives); the book pose's bar takes the approved step
-  to the compact width with 7 pt gaps (Menus at 497, past the fold's 455.5–495.5), the strip ending
-  7 pt short of it; the laptop pose splits at 455 and 496; open flat the pane takes the picture's
+- Decisions (the plan's "The build: decisions", revised after the review; the status bar Noah's
+  pick of 2026-10-09, option 1 of the three the mock canvas drew): the stream screen hides the
+  status bar on the inner display in every pose (upright the picture keeps the 82 pt above the
+  fold; sideways Sill has all 951 pt), and every other screen keeps it in every pose, the cover its
+  strip; at 951 pt the book pose's bar keeps its regular size, its group beginning at 551, past the
+  fold's 455.5–495.5, the strip ending 12 pt short of it (at 867 pt, the status bar shown, it would
+  take the approved step to the compact width, Menus at 497); the laptop pose splits at 455 and
+  496; open flat the pane takes the picture's
   own shape, 16:10 while the Mac fits a window to it (Aa, the virtual display); in the book pose the
   connect column, the pairing overlay, the window lights and PR #39's link line keep to a page, and
   a tour card to its targets' page (355.5 pt beside Settings); upright the connect column scrolls
@@ -4757,7 +4758,7 @@ good.
   pose's bar, one page for a card (on its targets' page), the connect column
   and the room above the laptop pose's fold, the pairing overlay and the
   window lights; the stream screen's status bar (hidden on the inner display
-  held upright); the hinge from the fold before its first report; the
+  in every pose); the hinge from the fold before its first report; the
   harness's stand-in and the displays' safe areas; pure, `Tests/checks/duo`;
   pbxproj AB01/FB01), `DuoPostureReader` (iOS 27.1: `onHingeChange` at the
   app's root into `\.duoEnvironment`, `DuoPosture.read`, the `.division`

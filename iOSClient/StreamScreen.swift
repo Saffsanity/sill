@@ -246,7 +246,7 @@ struct StreamScreen: View {
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
             .background(TouchWatcher(watch: touches))
             // The layouts and the overlays share this screen's space, and so its fold; the inner
-            // display held upright gives the picture the status bar's strip.
+            // display gives the picture the status bar's strip in every pose.
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
         }

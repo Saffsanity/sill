@@ -424,8 +424,8 @@ struct LayoutHarness: View {
         }
 
         /// `-SillSafeArea T,L,B,R` (or `none`), else the Duo's display's own at its four sizes, with
-        /// the status bar as this build shows it there: hidden on the stream screen upright with a
-        /// hinge open (DuoPosture.hidesStatusBar), shown on every other screen and pose.
+        /// the status bar as this build shows it there: hidden on the stream screen with a hinge
+        /// open, every pose (DuoPosture.hidesStatusBar), shown on every other screen and the cover.
         private static func insets(_ raw: String?, size: CGSize, streamScreen: Bool, hinge: DuoPosture.Hinge?) -> EdgeInsets? {
             if let raw {
                 let n = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }

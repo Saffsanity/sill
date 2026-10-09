@@ -105,15 +105,17 @@ struct DuoPosture: Equatable {
         return regionActive ? .partiallyOpen : .fullyOpen
     }
 
-    /// Whether the stream screen hides the status bar: on the inner display held upright (the
-    /// laptop pose, and open flat upright), where it would take 82 pt at the top out of the picture
-    /// above the fold, and the approved boards for those poses drew none. Sideways (the book pose,
-    /// open flat sideways) it stays, its 84 pt strip at the side kept clear as the approved boards
-    /// drew it; so it does on the cover, as on an iPhone, and on every other screen in every pose
-    /// (the connect screen keeps the clock and the Wi-Fi it asks about). To hide it sideways too:
-    /// `pose == .book || pose == .flatLandscape` here.
+    /// Whether the stream screen hides the status bar: on the inner display in every pose (Noah,
+    /// 2026-10-09: option 1 of the three the mock canvas drew side by side). Upright (the laptop
+    /// pose, open flat upright) it would take 82 pt at the top out of the picture above the fold;
+    /// sideways (the book pose, open flat sideways) an 84 pt strip at the side out of the picture's
+    /// width, so Sill has all 951 pt and the book pose's bar keeps its regular size (`bookBar`). It
+    /// stays on the cover, as on an iPhone, and on every other screen in every pose (the connect
+    /// screen keeps the clock and the Wi-Fi it asks about). The alternatives: `pose == .laptop ||
+    /// pose == .flatPortrait` here keeps it sideways; dropping StreamScreen's `.duoStatusBar` line
+    /// keeps it everywhere.
     static func hidesStatusBar(_ pose: Pose) -> Bool {
-        pose == .laptop || pose == .flatPortrait
+        pose == .laptop || pose == .flatPortrait || pose == .book || pose == .flatLandscape
     }
 
     /// "book, the fold x 455.5–495.5 in the way, 951×669", for the DEBUG console.
@@ -340,7 +342,7 @@ extension DuoPosture {
     /// The safe area (top, leading, bottom, trailing) each of the Duo's displays gives Sill, as the
     /// probe measured it on the iOS 27.1 simulator: the inner display with its status bar, a strip
     /// of 84 pt at the side sideways and 82 at the top upright, and the home indicator's 34; with the
-    /// status bar hidden (the stream screen upright, `hidesStatusBar`), the 34 alone; the cover its
+    /// status bar hidden (the stream screen on the inner display, `hidesStatusBar`), the 34 alone; the cover its
     /// camera's 84 pt strip at the right upright and at the left on its side (the duorig pose
     /// closed-side), and the 34, either way. Nil for any other size.
     static func displayInsets(_ size: CGSize, statusBarHidden: Bool = false) -> (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat)? {

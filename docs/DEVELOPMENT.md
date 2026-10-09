@@ -200,14 +200,13 @@ and last Take the Tour.
 
 On the iPhone Duo (docs/iphone-duo-plan.md) the layout follows the hinge,
 which iOS 27.1 reports with the fold's place. Open, Sill is on the inner
-display (951×669 sideways, 669×951 upright); while streaming upright the
-status bar hides, so the picture has the top, and sideways it stays in its
-84 pt strip at the side, as on every other screen. Half folded sideways, the
+display (951×669 sideways, 669×951 upright); while streaming the status bar
+hides in every pose, so the picture has the top upright and the full width
+sideways; every other screen keeps it. Half folded sideways, the
 book pose, the picture runs across the fold, but nothing you touch sits on
-it: the thumbnails end short of it, the bar's buttons go to their compact
-width to begin past it, and the Settings panel, the tour's cards, the window
-lights, the link's line and the connect screen stay on one side. Half folded
-upright, the laptop pose, the picture is above the fold and the bar, the keys
+it: the thumbnails end short of it, the bar's buttons begin past it, and
+the Settings panel, the tour's cards, the window lights, the link's line and
+the connect screen stay on one side. Half folded upright, the laptop pose, the picture is above the fold and the bar, the keys
 and the trackpad below it, and the connect screen's list scrolls above the
 fold; open flat upright, the picture takes its own shape across the width and
 the trackpad the rest. Closed, the cover is a phone (below) beside its

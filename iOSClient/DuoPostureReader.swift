@@ -12,7 +12,7 @@ import SwiftUI
 //   reader's own space. The stream screen hands it to its layouts and overlays as `\.duoFold`.
 //   Before the hinge's first report the fold alone says which display this is and whether it is
 //   folded (DuoPosture.hinge(reported:regionActive:)), so the first layout is already the pose's.
-// - The stream screen hides the status bar on the inner display held upright
+// - The stream screen hides the status bar on the inner display in every pose
 //   (DuoPosture.hidesStatusBar, `duoStatusBar`); every other screen keeps it.
 //
 // DEBUG: the harness's `-SillHinge closed|half|flat` stands in for all of it (ContentView's
@@ -58,10 +58,10 @@ extension View {
     /// The app's root: the Duo's hinge into the environment. Nothing at all before iOS 27.1.
     func readsDuoPosture() -> some View { modifier(DuoPostureReader()) }
 
-    /// The stream screen's status bar (DuoPosture.hidesStatusBar): hidden on the inner display held
-    /// upright, as the approved boards drew those poses, so the picture keeps the 82 pt above the
-    /// fold; shown everywhere else, as before. In a background, so that hiding and showing it never
-    /// rebuilds the screen's views; off the Duo it adds nothing.
+    /// The stream screen's status bar (DuoPosture.hidesStatusBar): hidden on the inner display in
+    /// every pose, so the picture keeps the 82 pt above the fold upright and the 84 pt strip's
+    /// width sideways; shown everywhere else, as before. In a background, so that hiding and
+    /// showing it never rebuilds the screen's views; off the Duo it adds nothing.
     func duoStatusBar(_ posture: DuoPosture, size: CGSize) -> some View {
         background {
             if DuoPosture.hidesStatusBar(posture.pose(size)) {

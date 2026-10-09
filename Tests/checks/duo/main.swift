@@ -57,15 +57,15 @@ check(FoldInfo.known(bookFold).verticalBand == bookFold && FoldInfo.known(bookFo
 check(FoldInfo.known(laptopFold).horizontalBand == laptopFold && FoldInfo.known(laptopFold).verticalBand == nil, "the laptop pose's is horizontal")
 check(FoldInfo.inferred.band == nil && FoldInfo.known(nil).band == nil && FoldInfo.known(bookFold).band == bookFold, "band")
 check(FoldInfo.known(rect(0, 0, 40, 40)).horizontalBand != nil && FoldInfo.known(rect(0, 0, 40, 40)).verticalBand == nil, "a square counts as across")
-// The stream screen hides the status bar on the inner display held upright (the laptop pose and
-// open flat upright), as the approved boards drew those poses; it stays sideways (the book pose and
-// open flat sideways: its strip kept clear, as drawn), on the cover and off the Duo.
+// The stream screen hides the status bar on the inner display in every pose (Noah's pick,
+// 2026-10-09: option 1 of three): upright it would take 82 pt off the picture above the fold,
+// sideways an 84 pt strip off the picture's width. It stays on the cover and off the Duo.
 check(DuoPosture.hidesStatusBar(.laptop) && DuoPosture.hidesStatusBar(.flatPortrait), "hidden upright on the inner display")
-check(!DuoPosture.hidesStatusBar(.book) && !DuoPosture.hidesStatusBar(.flatLandscape), "shown sideways")
+check(DuoPosture.hidesStatusBar(.book) && DuoPosture.hidesStatusBar(.flatLandscape), "hidden sideways too")
 check(!DuoPosture.hidesStatusBar(.closedUpright) && !DuoPosture.hidesStatusBar(.closedSide) && !DuoPosture.hidesStatusBar(.unknown),
       "shown on the cover and off the Duo")
 // Whichever way it goes, the pose stays: shown upright the stream screen is 669×869, hidden 669×951;
-// sideways 867×669 shown. So hiding it never turns the screen and loops.
+// sideways 867×669 shown, 951×669 hidden. So hiding it never turns the screen and loops.
 for (hinge, shown, hidden) in [(DuoPosture.Hinge.partiallyOpen, size(669, 869), upright), (.fullyOpen, size(669, 869), upright),
                                (.partiallyOpen, size(867, 669), book), (.fullyOpen, size(867, 669), book)] {
     let p = DuoPosture(hinge: hinge)
