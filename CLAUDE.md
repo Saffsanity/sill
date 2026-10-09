@@ -9,7 +9,7 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Release 0.5.1, prepared, not shipped (2026-10-09, branch `release-0.5.1` from main at 05f2bb8,
-PR #N, a draft).** Noah: "I want the release in the GitHub to line up with the app version, I want
+PR #48, a draft).** Noah: "I want the release in the GitHub to line up with the app version, I want
 all versions to be 0.5.1." One release, and one version for both apps from now on: Sill for Mac
 0.5.1 (after 0.4.0; there is no 0.4.1; the tag will be v0.5.1) with Sill for iPhone and iPad 0.5.1
 (4) (`MARKETING_VERSION` 0.5.1 and `CURRENT_PROJECT_VERSION` 4 in both configurations: the build
@@ -37,13 +37,14 @@ item) and the release's order ("The away release").
   notarized ("Unnotarized Developer ID"); `release-ios.sh` without `--upload`: 0.5.1 (4), Sill.ipa
   2.8 MB, Apple Distribution, the App Store profile, `ITSAppUsesNonExemptEncryption` NO, both
   required-reason APIs declared. Nothing uploaded, tagged or published; only the branch pushed.
-- **Left for Noah:** PR #47 (iPhone Duo) merges first, then this branch merges main again; his
-  device test of away from home (P4–P13 below) before the tag, any claim it disproves cut from the
-  words; TestFlight's 0.5.1 waits for the iPhone Duo in the wild (October 23 or later, his call of
-  2026-10-08); then the pull request's steps: merge, tag v0.5.1 on the merge commit,
-  `release-ios.sh --upload` and What to Test, `release.sh --publish` from the tag, the notes
-  (`fill-notes.sh`, `gh release edit`), the site republished, the check signed out; on the App
-  Store, 0.5.1 once 0.5 is Ready for Distribution.
+- **Left for Noah:** PR #47 (iPhone Duo) merges first, then this branch merges main again (a trial
+  merge of duo-layout at 9d244cb conflicts only here, both adding an entry at the top of Current
+  step: keep both, the release's first); his device test of away from home (P4–P13 below) before the
+  tag, any claim it disproves cut from the words; TestFlight's 0.5.1 waits for the iPhone Duo in the
+  wild (October 23 or later, his call of 2026-10-08); then the pull request's steps: merge, tag
+  v0.5.1 on the merge commit, `release-ios.sh --upload` and What to Test, `release.sh --publish`
+  from the tag, the notes (`fill-notes.sh`, `gh release edit`), the site republished, the check
+  signed out; on the App Store, 0.5.1 once 0.5 is Ready for Distribution.
 
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
 c564142, PR #39, stacked on PR #34, which merged during its review; main at
