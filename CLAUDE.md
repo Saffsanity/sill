@@ -8,15 +8,18 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
-**Release 0.5.1, prepared, not shipped (2026-10-09, branch `release-0.5.1` from main at 05f2bb8,
-PR #48, a draft).** Noah: "I want the release in the GitHub to line up with the app version, I want
+**Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
+at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
+once that is merged do #48. Then run the release procedure").** Noah: "I want the release in the GitHub to line up with the app version, I want
 all versions to be 0.5.1." One release, and one version for both apps from now on: Sill for Mac
 0.5.1 (after 0.4.0; there is no 0.4.1; the tag will be v0.5.1) with Sill for iPhone and iPad 0.5.1
 (4) (`MARKETING_VERSION` 0.5.1 and `CURRENT_PROJECT_VERSION` 4 in both configurations: the build
 numbers keep counting across versions). docs/release-checklist.md has the rule (part 2's first
 item) and the release's order ("The away release").
-- In it since v0.4.0: PR #39, away from home (the entry below), and PR #46, a Mac set up again (its
-  old saved record retires itself); PRs #44 and #45 went to TestFlight as 0.5 (3). Neither half
+- In it since v0.4.0: PR #39, away from home (the entry below), PR #46, a Mac set up again (its
+  old saved record retires itself), and PR #47, the iPhone Duo with the iOS 27.1 SDK (the entry
+  below; the status bar hidden on the stream screen in every pose of the inner display, Noah's
+  pick of 2026-10-09); PRs #44 and #45 went to TestFlight as 0.5 (3). Neither half
   strands the other (read from the code): Sill for Mac 0.5.1 serves 0.5 (2) and (3), and 0.5.1 (4)
   works with Sill for Mac 0.4.0, without the away quality and the link's notice, which are the Mac's.
 - The words: support.html's and index.html's away sentences (inside the Remote Access markers) and
@@ -37,14 +40,16 @@ item) and the release's order ("The away release").
   notarized ("Unnotarized Developer ID"); `release-ios.sh` without `--upload`: 0.5.1 (4), Sill.ipa
   2.8 MB, Apple Distribution, the App Store profile, `ITSAppUsesNonExemptEncryption` NO, both
   required-reason APIs declared. Nothing uploaded, tagged or published; only the branch pushed.
-- **Left for Noah:** PR #47 (iPhone Duo) merges first, then this branch merges main again (a trial
-  merge of duo-layout at 9d244cb conflicts only here, both adding an entry at the top of Current
-  step: keep both, the release's first); his device test of away from home (P4–P13 below) before the
-  tag, any claim it disproves cut from the words; TestFlight's 0.5.1 waits for the iPhone Duo in the
-  wild (October 23 or later, his call of 2026-10-08); then the pull request's steps: merge, tag
-  v0.5.1 on the merge commit, `release-ios.sh --upload` and What to Test, `release.sh --publish`
-  from the tag, the notes (`fill-notes.sh`, `gh release edit`), the site republished, the check
-  signed out; on the App Store, 0.5.1 once 0.5 is Ready for Distribution.
+- Shipping (Noah's go of 2026-10-09 lifted the TestFlight hold of 2026-10-08): PR #47 merged
+  (e3ce043), main merged into this branch (CLAUDE.md alone conflicted, both adding an entry at the
+  top of Current step: both kept, this one first), the Duo in the words (a bullet of the notes, What
+  to Test, the description and What's New, README's How it works, index.html), then the pull
+  request's steps: merge, tag v0.5.1 on the merge commit, `release-ios.sh --upload` and What to
+  Test, `release.sh --publish` from the tag, the notes (`fill-notes.sh`, `gh release edit`), the
+  site republished, the check signed out; the results in sill-handoff's `release-051/STATUS.md`.
+  Still open, and shipped without them on Noah's call: his device tests of away from home (P4–P13
+  below) and of the iPhone Duo (the Duo entry's P1–P13, on a Duo from October 23); on the App
+  Store, 0.5.1 once 0.5 is Ready for Distribution, with the Duo screenshots.
 
 **The iPhone Duo with the iOS 27.1 SDK (2026-10-08, branch `duo-layout` from main at e6b3265,
 main at 05f2bb8 (PR #39) merged in at 7bd7c41, not rebased; docs/iphone-duo-plan.md has the probe's

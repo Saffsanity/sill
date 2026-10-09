@@ -451,8 +451,9 @@ when asked):
 The first release with one version for both apps (the first item of part 2). It brings away from
 home (PR #39: a session through a VPN starts at Low · Standard, the Mac says when the link can't
 keep up, a session away moves home by itself) and, on the device, the old record of a Mac set up
-again retiring itself (PR #46). PRs #44 and #45, merged after the tag v0.4.0, went to TestFlight
-as 0.5 (3) and are in it too.
+again retiring itself (PR #46), and the iPhone Duo (PR #47, the iOS 27.1 SDK: the layouts follow
+the hinge, so the device build needs Xcode 27.1 or later). PRs #44 and #45, merged after the tag
+v0.4.0, went to TestFlight as 0.5 (3) and are in it too.
 
 Unlike the pairing release, neither half strands the other (docs/remote-bundle-plan.md, P13; read
 from the code, not tried on a device): Sill for Mac 0.5.1 serves 0.5 (2) and (3), which get the

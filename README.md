@@ -54,6 +54,10 @@ the App Store yet; until it is, you can build it from source (below).
   needs Accessibility. Three fingers swipe and pinch as on a Mac's trackpad:
   Mission Control, App Exposé, the Spaces, Apps and Show Desktop, through the
   keyboard shortcuts your Mac has for them.
+- **On iPhone Duo**, Sill follows the hinge: open it flat and your Mac fills
+  the inner display; half open, the picture is above the fold with a trackpad
+  and keys below; closed, Sill runs on the cover display. Nothing you touch
+  sits on the fold.
 - **The menus** of the app you use reach your device too: in the iPad's own
   menu bar on iPadOS 26 or later, and behind the Menus button in Sill's bar.
   Sill for Mac reads each menu from the app as you open it and chooses the
