@@ -107,8 +107,9 @@ free.
 
 ## Building from source
 
-You need a Mac with Xcode (Sill is built with Xcode 27), selected as the
-active developer directory, with its license accepted.
+You need a Mac with Xcode (Sill is built with Xcode 27; the iPhone and iPad
+app needs Xcode 27.1 or later, for the iPhone Duo's hinge and fold), selected
+as the active developer directory, with its license accepted.
 
 Sill for Mac, from the repository's folder:
 

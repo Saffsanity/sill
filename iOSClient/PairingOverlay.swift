@@ -20,6 +20,8 @@ struct PairingOverlay: View {
     @FocusState private var codeFocused: Bool
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The Duo's fold across the stream screen (StreamScreen, iOS 27.1): the overlay keeps off it.
+    @Environment(\.duoFold) private var duoFold
 
     init(client: StreamClient, scannerMode: CodeScanner.Mode, typed: Bool = false, close: @escaping () -> Void) {
         self.client = client
@@ -33,8 +35,8 @@ struct PairingOverlay: View {
 
     var body: some View {
         GeometryReader { geo in
-            let layout = ConnectLayout(size: geo.size)
-            let width = min(layout.short ? 640 : 420, geo.size.width - 32)
+            let layout = ConnectLayout(size: geo.size, fold: duoFold)
+            let width = min(layout.short ? 640 : 420, (layout.leadingPage ?? geo.size.width) - 32)
             // The code field has the keyboard: the content goes to the top, so Pair stays above it
             // (the stream screen ignores the keyboard's safe area, so nothing moves by itself), as
             // on the connect screen. The half-folded Duo's is in the top half already.
@@ -60,10 +62,11 @@ struct PairingOverlay: View {
                 }
                 .frame(width: width, alignment: .leading)
                 .padding(.vertical, 16)
-                // The Duo half-folded: the top half only (the crease is at the middle); elsewhere
-                // centred, or at the top while the code is typed.
-                .frame(maxWidth: .infinity, maxHeight: layout.topHalf ? geo.size.height / 2 : geo.size.height,
+                // The Duo half-folded: above the fold only, or, in the book pose, on the leading
+                // page; elsewhere centred, or at the top while the code is typed.
+                .frame(maxWidth: layout.leadingPage ?? .infinity, maxHeight: layout.topRoom ?? geo.size.height,
                        alignment: toTop ? .top : .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .transition(.opacity)

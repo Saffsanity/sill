@@ -328,19 +328,24 @@ enum TourPolicy {
 
     /// The card's width: 360 pt; 480 on a screen held sideways that is under 520 pt tall (a phone,
     /// the Duo's outer display), where height is what runs out; 560 at accessibility text sizes;
-    /// never more than the screen less its margins.
-    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool) -> CGFloat {
+    /// never more than the screen less its margins, nor, across the book pose's fold, than the page
+    /// its `targets` are on (DuoPosture.pageWidth), so the card stays beside them.
+    static func width(screen: CGSize, layout: TourLayout, accessibilityText: Bool, fold: FoldInfo = .inferred,
+                      targets: CGRect? = nil) -> CGFloat {
         let short = layout == .landscape && screen.height < 520
         let preferred: CGFloat = accessibilityText ? 560 : (short ? 480 : 360)
-        return max(0, min(preferred, screen.width - 2 * margin))
+        let page = DuoPosture.pageWidth(screenWidth: screen.width, margin: margin, fold: fold, for: targets) ?? .infinity
+        return max(0, min(preferred, page, screen.width - 2 * margin))
     }
 
-    /// The crease of the Duo half-folded, or in its laptop posture: `ConnectLayout.topHalf`'s rule
-    /// (taller than wide, 600 to 740 pt wide, under 1100 pt tall), where it is the portrait
-    /// layout's own split. Nothing of the tour crosses it.
-    static func crease(_ screen: CGSize) -> CGFloat? {
-        guard screen.height > screen.width, screen.width >= 600, screen.width < 740, screen.height < 1100 else { return nil }
-        return (screen.height / 2).rounded()
+    /// The crease of the Duo half-folded upright, its laptop pose: on iOS 27.1 the top of the fold's
+    /// real band; before it `ConnectLayout.topHalf`'s rule (taller than wide, 600 to 740 pt wide,
+    /// under 1100 pt tall), where it is the portrait layout's own split (DuoPosture.crease). Nothing
+    /// of the tour crosses it.
+    static func crease(_ screen: CGSize, _ fold: FoldInfo = .inferred) -> CGFloat? {
+        guard let band = DuoPosture.crease(screen, fold) else { return nil }
+        if case .inferred = fold { return band.top.rounded() }
+        return band.top
     }
 
     /// The lit part: the step's targets as one rectangle, `cutoutOutset` larger all round and
@@ -383,17 +388,22 @@ enum TourPolicy {
     ///   the top sideways, toward the bottom margin upright), with no tail, `coversTargets`.
     /// - Past the whole screen less its margins (with a crease, the upper half), a card is as tall
     ///   as the room, and its words scroll.
+    /// - The book pose (the Duo half-folded sideways, `info` its fold): a card that would cross the
+    ///   fold goes onto the page its middle is on, or the other when only that one holds it.
     static func place(card: CGSize, targets: CGRect?, isStream: Bool, screen: CGSize, layout: TourLayout,
-                      stream: CGRect, bottomInset: CGFloat) -> TourPlacement {
+                      stream: CGRect, bottomInset: CGFloat, fold info: FoldInfo = .inferred) -> TourPlacement {
         let w = card.width
         let h = max(0, card.height)
         let top = margin
         let bottom = max(top, screen.height - margin - max(0, bottomInset))
-        let fold = crease(screen)
+        let fold = crease(screen, info)
         // Upright, how low a card goes while it stays in the picture's half.
         let pictureBottom = min(bottom, max(top, min(stream.maxY - gap, fold.map { $0 - margin } ?? .infinity)))
 
         func x(centredOn mid: CGFloat) -> CGFloat {
+            DuoPosture.offTheFold(x: clamped(mid), width: w, screenWidth: screen.width, margin: margin, fold: info)
+        }
+        func clamped(_ mid: CGFloat) -> CGFloat {
             let lo = margin, hi = screen.width - margin - w
             return hi < lo ? (screen.width - w) / 2 : min(max(mid - w / 2, lo), hi)
         }
@@ -483,9 +493,11 @@ enum TourPolicy {
 
     /// A step's card. ‹Mac› is the Mac's name ("your Mac" when there is none yet); ‹device› is
     /// "iPad" or "iPhone". Under VoiceOver the rows that name a gesture say VoiceOver's way instead,
-    /// and the trackpad's rows go (the trackpad is no accessibility element).
+    /// and the trackpad's rows go (the trackpad is no accessibility element). `keysOnItsSide`: the
+    /// iPhone Duo open (its inner display), which shows the keys and the trackpad with the device
+    /// turned on its side, so its words say so where an iPhone's say upright.
     static func copy(_ t: TourTopic, _ layout: TourLayout, mac: String, device: String,
-                     voiceOver: Bool, firstOfRun: Bool) -> TourCopy {
+                     voiceOver: Bool, firstOfRun: Bool, keysOnItsSide: Bool = false) -> TourCopy {
         let mac = mac.isEmpty ? "your Mac" : mac
         let iPad = device == "iPad"
         let keyboardRow = row("keyboard", [strong("Keyboard"), plain(" types on \(mac), on screen or with a hardware keyboard.")])
@@ -527,7 +539,8 @@ enum TourPolicy {
             var rows = [row("xmark.circle", [strong("Disconnect"), plain(" is at the bottom of Settings.")]),
                         row("questionmark.circle", [strong("Take the Tour"), plain(" is there too, to see this again.")])]
             if layout == .landscape {
-                rows.append(row(iPad ? "ipad" : "iphone", [strong("Hold your \(device) upright"), plain(" for a trackpad and keys.")]))
+                let turn = keysOnItsSide ? "Turn your \(device) on its side" : "Hold your \(device) upright"
+                rows.append(row(iPad ? "ipad" : "iphone", [strong(turn), plain(" for a trackpad and keys.")]))
             }
             return TourCopy(title: "Settings", subtitle: nil, rows: rows,
                             hint: layout == .phone ? "The last button in the row under the picture." : "The last button in the bar.")
@@ -548,7 +561,8 @@ enum TourPolicy {
                 rows.append(row("cursorarrow.click.2", [strong("Tap with two fingers"), plain(" on the trackpad to right-click.")]))
                 rows.append(row("hand.draw", [strong("Touch and hold"), plain(" the trackpad, "), strong("then drag"), plain(", to move a window or select text.")]))
             }
-            return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? "Upright, Sill adds keys and a trackpad." : nil,
+            let subtitle = keysOnItsSide ? "On its side, Sill adds keys and a trackpad." : "Upright, Sill adds keys and a trackpad."
+            return TourCopy(title: "Keys and Trackpad", subtitle: firstOfRun ? subtitle : nil,
                             rows: rows, hint: layout == .phone ? "Under the windows: the row of keys, then the trackpad."
                                                                : "Below the bar: the row of keys, then the trackpad.")
         }

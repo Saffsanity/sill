@@ -31,7 +31,17 @@ MUTANTS = [
     ("carry goes to the first step, not the next one owed", "guard let next = list.first(where: { $0 > run.at && !run.passed.contains($0) }) else { return nil }", "guard let next = list.first(where: { !run.passed.contains($0) }) else { return nil }"),
     ("carry keeps a step the new layout lacks", "if list.contains(run.at) { return carried }", "if true { return carried }"),
     # Where the card goes.
-    ("the crease ignored", "return (screen.height / 2).rounded()", "return nil"),
+    ("the crease ignored", "guard let band = DuoPosture.crease(screen, fold) else { return nil }", "guard let band = DuoPosture.crease(screen, fold), false else { return nil }"),
+    ("the inferred crease unrounded", "if case .inferred = fold { return band.top.rounded() }", "if case .inferred = fold { return band.top }"),
+    ("the fold's crease rounded", "return band.top.rounded() }\n        return band.top\n", "return band.top.rounded() }\n        return band.top.rounded()\n"),
+    ("a card placed without the fold", "let fold = crease(screen, info)", "let fold = crease(screen)"),
+    ("the book pose's card across the fold", "DuoPosture.offTheFold(x: clamped(mid), width: w, screenWidth: screen.width, margin: margin, fold: info)", "clamped(mid)"),
+    ("a card wider than the book pose's page", "let page = DuoPosture.pageWidth(screenWidth: screen.width, margin: margin, fold: fold, for: targets) ?? .infinity", "let page = CGFloat.infinity"),
+    ("a card as wide as the wider page whatever its targets", "fold: fold, for: targets) ?? .infinity", "fold: fold, for: nil) ?? .infinity"),
+    ("the Duo told to hold it upright", 'let turn = keysOnItsSide ? "Turn your \\(device) on its side" : "Hold your \\(device) upright"', 'let turn = "Hold your \\(device) upright"'),
+    ("the Duo's laptop card says upright", 'let subtitle = keysOnItsSide ? "On its side, Sill adds keys and a trackpad." : "Upright, Sill adds keys and a trackpad."',
+     'let subtitle = "Upright, Sill adds keys and a trackpad."'),
+    ("an iPhone told to turn it on its side", 'let turn = keysOnItsSide ? "Turn your \\(device) on its side" : "Hold your \\(device) upright"', 'let turn = "Turn your \\(device) on its side"'),
     ("a tail across the crease", "let noFold = fold.map { !(rect.maxY <= $0 && $0 <= t.minY) } ?? true", "let noFold = true"),
     ("a portrait tail at any distance", "let reaches = t.minY >= rect.maxY && t.minY - rect.maxY <= tailReach", "let reaches = t.minY >= rect.maxY"),
     ("a tail on a card over its targets", "let rect = CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y))\n            return TourPlacement(card: rect, tail: nil,", "let rect = CGRect(x: cardX, y: y, width: w, height: min(h, bottom - y))\n            return TourPlacement(card: rect, tail: TourTail(edge: .up, x: t.midX),"),
@@ -46,7 +56,7 @@ MUTANTS = [
     ("a card over its targets that says it is not (upright)", "let rect = CGRect(x: cardX, y: top, width: w, height: min(h, bottom - top))\n        return TourPlacement(card: rect, tail: nil, coversTargets: rect.intersects(lit))", "let rect = CGRect(x: cardX, y: top, width: w, height: min(h, bottom - top))\n        return TourPlacement(card: rect, tail: nil, coversTargets: false)"),
     ("the card not clamped", "return hi < lo ? (screen.width - w) / 2 : min(max(mid - w / 2, lo), hi)", "return mid - w / 2"),
     ("the card 360 pt wide on a short screen held sideways", "let preferred: CGFloat = accessibilityText ? 560 : (short ? 480 : 360)", "let preferred: CGFloat = accessibilityText ? 560 : (short ? 360 : 360)"),
-    ("the width not capped by the screen", "return max(0, min(preferred, screen.width - 2 * margin))", "return preferred"),
+    ("the width not capped by the screen", "return max(0, min(preferred, page, screen.width - 2 * margin))", "return max(0, min(preferred, page))"),
     ("a landscape card above its targets while it fits below", "let below = t.maxY + gap", "let below = t.minY - gap - h"),
     ("the home indicator ignored", "let bottom = max(top, screen.height - margin - max(0, bottomInset))", "let bottom = max(top, screen.height - margin)"),
     ("an upright card past the crease when it grows", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : pictureBottom", "let above = fold == nil ? min(bottom, max(top, t.minY - gap)) : bottom"),
@@ -63,10 +73,10 @@ MUTANTS = [
     ("a phone's card under a smaller room", "if h <= room || (room > above - top && room >= minimumRoom) {", "if h <= room || room >= minimumRoom {"),
     # The words.
     ("the Pencil row on iPhone", "if iPad { rows.append(row(\"applepencil\"", "if true { rows.append(row(\"applepencil\""),
-    ("the upright row in portrait", "if layout == .landscape {\n                rows.append(row(iPad ? \"ipad\" : \"iphone\"", "if true {\n                rows.append(row(iPad ? \"ipad\" : \"iphone\""),
+    ("the upright row in portrait", "if layout == .landscape {\n                let turn = keysOnItsSide", "if true {\n                let turn = keysOnItsSide"),
     ("a gesture word in a VoiceOver row", "if voiceOver {\n                rows = [row(\"hand.point.up.left\"", "if false {\n                rows = [row(\"hand.point.up.left\""),
     ("the trackpad's rows under VoiceOver", "if !voiceOver {\n                rows.append(row(\"cursorarrow.click.2\"", "if true {\n                rows.append(row(\"cursorarrow.click.2\""),
-    ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? \"Upright, Sill adds keys and a trackpad.\" : nil", "subtitle: \"Upright, Sill adds keys and a trackpad.\""),
+    ("laptop's subtitle on a card that is not the run's first", "subtitle: firstOfRun ? subtitle : nil", "subtitle: subtitle"),
     ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
     ("no Keyboard row on a phone's bar card", "if layout != .portrait { rows.append(keyboardRow) }", "if layout == .landscape { rows.append(keyboardRow) }"),
     ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
@@ -82,8 +92,8 @@ for name, old, new in MUTANTS:
     with tempfile.TemporaryDirectory() as t:
         mf = os.path.join(t, "TourPolicy.swift"); open(mf, "w").write(src.replace(old, new, 1))
         exe = os.path.join(t, "c")
-        r = subprocess.run(["swiftc", "-O", mf, os.path.join(WT, "iOSClient/PhonePortraitLayout.swift"), os.path.join(HERE, "main.swift"),
-                            "-o", exe], capture_output=True, text=True)
+        r = subprocess.run(["swiftc", "-O", mf, os.path.join(WT, "iOSClient/PhonePortraitLayout.swift"), os.path.join(WT, "iOSClient/DuoPosture.swift"),
+                            os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
         if not os.path.exists(exe): print(f"{name}: did not compile ({r.stderr.strip().splitlines()[:1]})"); continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)
         failed = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
