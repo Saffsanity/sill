@@ -8,6 +8,43 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Release 0.5.1, prepared, not shipped (2026-10-09, branch `release-0.5.1` from main at 05f2bb8,
+PR #N, a draft).** Noah: "I want the release in the GitHub to line up with the app version, I want
+all versions to be 0.5.1." One release, and one version for both apps from now on: Sill for Mac
+0.5.1 (after 0.4.0; there is no 0.4.1; the tag will be v0.5.1) with Sill for iPhone and iPad 0.5.1
+(4) (`MARKETING_VERSION` 0.5.1 and `CURRENT_PROJECT_VERSION` 4 in both configurations: the build
+numbers keep counting across versions). docs/release-checklist.md has the rule (part 2's first
+item) and the release's order ("The away release").
+- In it since v0.4.0: PR #39, away from home (the entry below), and PR #46, a Mac set up again (its
+  old saved record retires itself); PRs #44 and #45 went to TestFlight as 0.5 (3). Neither half
+  strands the other (read from the code): Sill for Mac 0.5.1 serves 0.5 (2) and (3), and 0.5.1 (4)
+  works with Sill for Mac 0.4.0, without the away quality and the link's notice, which are the Mac's.
+- The words: support.html's and index.html's away sentences (inside the Remote Access markers) and
+  privacy.html's date (October 9, 2026: the day the site goes out, if later); README's Good to know
+  (0.4.0 or later; one version number); the metadata (the description's Away bullet, 2,603
+  characters; the review notes' REMOTE ACCESS sentence, 3,995 bytes of 4,000, and the same sentence
+  for App Store Connect's own notes; the version 0.5.1 (4) and its What's New; App Store Connect
+  adds a version only once the current one is Ready for Distribution). README's How it works and
+  privacy.html's link-report line came with #39. In sill-handoff's `release-051/`: the release
+  notes (`notes-0.5.1.md`: a WAITS FOR comment to settle, then `fill-notes.sh` after `--publish`),
+  What to Test for 0.5.1 (4) (`testflight-0.5.1-4.md`, 1,462 characters), and STATUS.md with every
+  command's result.
+- Verified on 336adc0 (STATUS.md): `swift build -c release`, only the CaptureProbe warning;
+  `Tests/checks/run-all.sh`, all 39 (`policy` 392); the iOS app for the generic simulator as CI
+  builds it, only the StreamClient capture warning; `release.sh --dry-run`: "Built .build/Sill.app,
+  version 0.5.1 (535)", "identity keychain: data-protection keychain (access group
+  9B2KKVM937.me.saffer.sill.mac)", Sill-0.5.1.zip 3.2 MB and Sill-0.5.1.dmg 3.3 MB, signed, not
+  notarized ("Unnotarized Developer ID"); `release-ios.sh` without `--upload`: 0.5.1 (4), Sill.ipa
+  2.8 MB, Apple Distribution, the App Store profile, `ITSAppUsesNonExemptEncryption` NO, both
+  required-reason APIs declared. Nothing uploaded, tagged or published; only the branch pushed.
+- **Left for Noah:** PR #47 (iPhone Duo) merges first, then this branch merges main again; his
+  device test of away from home (P4–P13 below) before the tag, any claim it disproves cut from the
+  words; TestFlight's 0.5.1 waits for the iPhone Duo in the wild (October 23 or later, his call of
+  2026-10-08); then the pull request's steps: merge, tag v0.5.1 on the merge commit,
+  `release-ios.sh --upload` and What to Test, `release.sh --publish` from the tag, the notes
+  (`fill-notes.sh`, `gh release edit`), the site republished, the check signed out; on the App
+  Store, 0.5.1 once 0.5 is Ready for Distribution.
+
 **Away from home (2026-09-27, branch `remote-away` from `remote-pacing` at
 c564142, PR #39, stacked on PR #34, which merged during its review; main at
 e6b3265 merged in on 2026-10-08, one merge commit, not rebased, so the pull
@@ -215,11 +252,12 @@ sessions are as they were (H2: the CLI's output and kind 16 unchanged).
     0.4.0 (main's: a TLS home door, no away quality): no header line, no
     callout, and the move home works, pinned; against 0.3.1 (a plain home
     door) the session stays remote.
-  Then it merges and ships as Sill for Mac 0.4.1 with the iOS app's build 4;
-  the release drafts' lines held back for it (the notes, What to Test, the
-  site's support and index lines, the privacy page's date, the metadata) are
-  in sill-handoff's `release-next/drafts/for-0.4.1.md` (its privacy line is in
-  since the merge's review).
+  It merged (05f2bb8, 2026-10-08) and ships as Sill for Mac 0.5.1 with Sill for
+  iPhone and iPad 0.5.1 (4), one version for both (the entry above; there is no
+  Sill for Mac 0.4.1): the release drafts' lines held back for it (sill-handoff's
+  `release-next/drafts/for-0.4.1.md`: the notes, What to Test, the site's support
+  and index lines, the privacy page's date, the metadata) are on the release's
+  branch, `release-0.5.1` (its privacy line was in since the merge's review).
 
 **A Mac set up again: the old saved record retires itself (2026-09-28, branch `stale-duplicate-fix`
 from main at 72d8d1d).** Noah: "When using Tailscale, it shows Noah's MacBook Pro and Noah's MacBook
@@ -5230,7 +5268,7 @@ device keeps working with Macs from the first public build on, or each says why
   header; kinds 0–28 and their payloads (HEVC with ParameterSets; the JSON of Switcher, Input,
   Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu and Gesture), inside `sill/1` at
   both doors (19 and 20 on their own `sill-pair/1` connection, the next bullet); the ping echo; a
-  kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.4.1 (away
+  kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.5.1 (away
   from home, docs/remote-bundle-plan.md §4): its `settings` the pair that connection's controls
   set (the away quality for a device away), and its optional `away` (AwayQuality, from a host with
   an identity: Sill.app, SillHost --remote or --pairing) and `link` (LinkReport, only while a link
