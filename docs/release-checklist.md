@@ -259,13 +259,22 @@ write straight to the strong keychain and only your own dev Macs need the reset 
 
 ## Part 2: every release
 
-- [ ] Versions: Sill for Mac's is `CFBundleShortVersionString` in `Packaging/Info.plist`; its
-      build number is the commit count, which make-app.sh stamps in. The iOS app's are
-      MARKETING_VERSION and CURRENT_PROJECT_VERSION in `iOSClient/Sill.xcodeproj` (target Sill ›
-      General). Commit. When a device build goes out with the Mac release, put its build number
-      (`CURRENT_PROJECT_VERSION` + 1 in both configurations, or a new `MARKETING_VERSION` with
-      build 1) in the same pull request as the Mac's version, so the tag below names the commit
-      that both come from; `release-ios.sh --upload` then needs no `--bump`.
+- [ ] Versions: one number for both apps. From 0.5.1 on, a release's Sill for Mac and Sill for
+      iPhone and iPad carry the same version (Noah, 2026-10-09: "I want the release in the
+      GitHub to line up with the app version, I want all versions to be 0.5.1"), set together
+      in the release's pull request: Sill for Mac's `CFBundleShortVersionString` in
+      `Packaging/Info.plist`, and the iOS app's MARKETING_VERSION in both configurations of
+      `iOSClient/Sill.xcodeproj` (target Sill › General). The tag is `v` + that number, and the
+      GitHub Release, its assets (`.build/Sill-<version>.dmg`), TestFlight's version and the App
+      Store's all say it. The build numbers stay each app's own: Sill for Mac's is the commit
+      count, which make-app.sh stamps in; the iOS app's, CURRENT_PROJECT_VERSION in both
+      configurations, keeps counting across versions (0.5 had builds 1 to 3, 0.5.1 starts at
+      4), so a build number names one upload whatever its version. Put the device build's number
+      in the same pull request as the version, so the tag below names the commit that both come
+      from; `release-ios.sh --upload` then needs no `--bump`. Before 0.5.1 the two counted
+      apart (Sill for Mac 0.3.0, 0.3.1 and 0.4.0 beside Sill for iPhone and iPad 0.5; there was
+      never a Sill for Mac 0.4.1). A release that changes only one app is Noah's call: both at
+      the new number, or the other left at its last (nothing in the code compares the two).
 - [ ] A Mac release and a device build that need each other (a change to the home door or the wire
       that older builds on the other side can't follow): the release notes say which versions go
       together, the device build is uploaded first (App Store Connect takes 5 to 30 minutes to
@@ -278,17 +287,17 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       pages' words should follow within minutes). A device with the new build and a Mac without
       its release is the gentler half of the gap: whichever side can say what to update must be
       the one that arrives first.
-- [ ] Tag that commit `v` + Sill for Mac's version and push the tag: `git tag -a v0.4.0 -m "Sill
-      for Mac 0.4.0: …"` and `git push origin v0.4.0` for 0.4.0 (v0.3.0 and v0.3.1 are annotated
-      tags on merge commits of main: v0.3.1 on its release pull request's, #32, and v0.3.0 on
-      main's head that day, #20's). `make-app.sh --release` builds only the commit carrying it,
-      and `release.sh --publish` refuses to start until origin's tag names that commit, then
-      makes the GitHub Release for it. Every Sill.app's update check reads the releases of
-      Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
+- [ ] Tag that commit `v` + the release's version, both apps', and push the tag: `git tag -a v0.5.1
+      -m "Sill 0.5.1: …"` and `git push origin v0.5.1` for 0.5.1 (v0.3.0, v0.3.1 and v0.4.0 are
+      annotated tags on merge commits of main: v0.4.0 on its release pull request's, #41, v0.3.1 on
+      #32's, and v0.3.0 on main's head that day, #20's). `make-app.sh --release` builds only the
+      commit carrying it, and `release.sh --publish` refuses to start until origin's tag names that
+      commit, then makes the GitHub Release for it. Every Sill.app's update check reads the releases
+      of Saffsanity/sill alone (`UpdatePolicy.feed`) and compares the newest published one's tag
       (not a draft, not a prerelease) with the version it runs: Saffsanity/sill is public (since
-      2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now
-      in Settings › General asks at once). A private repository's releases answer the check with
-      a 404, and then no Sill.app offers anything.
+      2026-09-26), so within a day of a release there every older Sill.app offers it (Check Now in
+      Settings › General asks at once). A private repository's releases answer the check with a 404,
+      and then no Sill.app offers anything.
 - [ ] The release command from part 1 §2, without `--dry-run`. It builds, notarizes, staples and
       zips, checks a copy unpacked from the zip the way Gatekeeper will, then puts the stapled app
       in the disk image (`Scripts/make-dmg.sh`, signed with the same identity), has Apple notarize
@@ -344,13 +353,13 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       download.html still links it.
 - [x] Done 2026-09-26 with v0.3.0 (sill-site e4046a1): the first release, and the site
       republished right after Saffsanity/sill went public, so the button shows.
-- [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without
-      `--bump`, once `MARKETING_VERSION` says it); TestFlight §4 below. With the build number
-      already committed in the release's pull request (the first item), `Scripts/release-ios.sh
-      --upload` from the tagged commit. Or in Xcode: Any iOS Device, Product › Archive, then the
-      Organizer's Validate App and Distribute App › App Store Connect › Upload. The privacy report:
-      `Scripts/release-ios.sh --privacy-report`, and the Organizer's Generate Privacy Report for
-      the PDF; both should list the privacy manifest's API categories.
+- [ ] iOS: `Scripts/release-ios.sh --bump --upload` (a new version's first upload without `--bump`:
+      the release's pull request sets its version and build number); TestFlight §4 below. With the
+      build number already committed in the release's pull request (the first item),
+      `Scripts/release-ios.sh --upload` from the tagged commit. Or in Xcode: Any iOS Device, Product
+      › Archive, then the Organizer's Validate App and Distribute App › App Store Connect › Upload.
+      The privacy report: `Scripts/release-ios.sh --privacy-report`, and the Organizer's Generate
+      Privacy Report for the PDF; both should list the privacy manifest's API categories.
 - [ ] TestFlight: internal testers get the build without review. An external group sends the
       first build through Beta App Review with the same notes and video: a cheap rehearsal
       (TestFlight §5 to §7 below). Every build has its own What to Test (TestFlight › the build ›
@@ -361,9 +370,9 @@ write straight to the strong keychain and only your own dev Macs need the reset 
 - [ ] If what Sill does or keeps changed, update `site/` too, with the privacy policy's date, and
       republish it (part 1 §3) right after the release is published: the pages describe the builds
       people can download, so words for a newer build wait for it, and words for the old one go
-      with it. On 2026-09-27 the published pages were main's `site/` as PR #33 left it:
-      privacy.html's lines for the tour (PR #35), the Mac's menus (PR #36) and its pointer (PR
-      #31, whose Mac side 0.3.1 already has) wait for the next release, with that page's date.
+      with it. Since 2026-09-27 the published pages are v0.4.0's `site/`: privacy.html's line
+      for the link report (PR #39, on main since 2026-10-08) and the away sentences of
+      support.html and index.html go out with 0.5.1, with the privacy page's date.
 
 ### The pairing release: Sill for Mac 0.4.0 with Sill for iPhone and iPad 0.5 (2)
 
@@ -436,6 +445,50 @@ when asked):
       from home once it has connected at home with Remote Access on.
 - [ ] Not before 0.4.0 is the download: 0.5 (2) to an external group or App Review, which use the
       Sill for Mac that getsill.app/download gives.
+
+### The away release: Sill for Mac and Sill for iPhone and iPad 0.5.1 (4)
+
+The first release with one version for both apps (the first item of part 2). It brings away from
+home (PR #39: a session through a VPN starts at Low · Standard, the Mac says when the link can't
+keep up, a session away moves home by itself) and, on the device, the old record of a Mac set up
+again retiring itself (PR #46), and the iPhone Duo (PR #47, the iOS 27.1 SDK: the layouts follow
+the hinge, so the device build needs Xcode 27.1 or later). PRs #44 and #45, merged after the tag
+v0.4.0, went to TestFlight as 0.5 (3) and are in it too.
+
+Unlike the pairing release, neither half strands the other (docs/remote-bundle-plan.md, P13; read
+from the code, not tried on a device): Sill for Mac 0.5.1 serves 0.5 (2) and (3), which get the
+away quality when away but no header line or link notice (kind 16's `away` and `link` are
+optional), and 0.5.1 (4) works with Sill for Mac 0.4.0, without the away quality or the notice
+(the move home goes to 0.4.0's TLS home door, pinned). So the order matters less: the device build
+first still gives App Store Connect its processing time while the Mac is notarized, and the notes,
+What to Test and What's New say which part needs which (the away quality and the link's notice
+come from the Mac).
+
+- [ ] The release's pull request (branch `release-0.5.1`, a draft until the go): the versions
+      (0.5.1, build 4), the site's lines (support's and index's away sentences, the privacy
+      policy's date), the README's Good to know, the metadata (the description's Away bullet,
+      the review notes' sentence, the version 0.5.1 (4) and its What's New), this section. Main
+      merged in again first if another pull request landed meanwhile (PR #47, iPhone Duo, is
+      expected to). CI green; merged.
+- [ ] Before the tag: Noah's device test of away from home (CLAUDE.md, PR #39's P4 to P13). A
+      claim it disproves comes out of the notes, What to Test, the site, the README and the
+      metadata first. The privacy policy's "Last updated" is the day the site goes out.
+- [ ] Tag the merge commit: `git tag -a v0.5.1 -m "Sill 0.5.1: away from home"` and `git push
+      origin v0.5.1` (the release workflow verifies it).
+- [ ] From the tag, `Scripts/release-ios.sh --upload`: 0.5.1 (4), the first build of the version
+      0.5.1 (TestFlight opens the version by itself; App Store Connect's record needs nothing for
+      that). Its What to Test as soon as it shows.
+- [ ] The keychain profile in place and the rehearsal, as for the pairing release
+      (`release.sh --dry-run` says "identity keychain: data-protection keychain (access group
+      9B2KKVM937.me.saffer.sill.mac)" and Sill 0.5.1), then `Scripts/release.sh --publish` from
+      the tag, the notes over its one-line body (`gh release edit v0.5.1 --notes-file …`), the
+      site republished at once, and the check of what was published, signed out.
+- [ ] The App Store, once 0.5 is Ready for Distribution (App Store Connect adds a version only
+      then): the version 0.5.1 on the record (the + beside iOS App; 0.5's metadata is copied into
+      it), its What's New (metadata §5), the description's Away bullet, the review notes'
+      sentence (metadata §7), build 0.5.1 (4), and Submit for Review with manual release. Not
+      before Sill for Mac 0.5.1 is the download: App Review uses the Mac that
+      getsill.app/download gives, and the description's away claims are the Mac's.
 
 ## TestFlight
 
@@ -529,7 +582,7 @@ git -C ../sill-site add -A && git -C ../sill-site commit -m "Update the site" &&
 ```
 Scripts/release-ios.sh                    # archive, export .build/ios/export/Sill.ipa and check it; nothing uploaded
 Scripts/release-ios.sh --upload           # the same, then the upload: 0.5 (1), the first build (done 2026-09-26, b37f47a)
-Scripts/release-ios.sh --bump --upload    # every later upload of 0.5: the build number + 1, committed alone
+Scripts/release-ios.sh --bump --upload    # every later upload of a version: the build number + 1, committed alone
 Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest declares, and its required-reason APIs
 ```
 
@@ -558,7 +611,9 @@ Scripts/release-ios.sh --privacy-report   # what the archive's privacy manifest 
   build that stays here only warns). `--bump` adds 1 to `CURRENT_PROJECT_VERSION` in both
   configurations and commits that alone; push it with the rest.
   A new version: `MARKETING_VERSION` in both configurations (Xcode › target Sill › General ›
-  Version), committed; its builds may start again at 1.
+  Version), the same number as Sill for Mac's (part 2's first item), committed in the release's
+  pull request with the next build number: the numbers keep counting across versions (0.5.1's
+  first build is 4, after 0.5's 1 to 3) rather than starting again at 1.
 - The rehearsal on 2026-09-26 (main at 6f2a934, whose iOS app is 150f781's): archive and export in
   49 s, Sill.ipa 2.0 MB, signed "Apple Distribution: NOAH WILLIAM SAFFER (9B2KKVM937)" (cloud
   managed), the App Store profile until 2027-09-26, entitlements `application-identifier`
@@ -610,7 +665,7 @@ To send feedback, take a screenshot while you use Sill, or use Send Beta Feedbac
 ### 7. External testers and Beta App Review
 
 - [ ] TestFlight › External Testing › + : a group such as `Beta`. Add Builds › the newest build of
-      0.5, and its What to Test (metadata §5). Submit Review.
+      the version, and its What to Test (metadata §5). Submit Review.
 - Beta App Review looks at the first build of a version in full (later builds of the same version
   may not need it), up to six builds a day. It needs what App Review needs: Sill for Mac
   downloadable at https://getsill.app/download (it is, since v0.3.0 on 2026-09-26; the build

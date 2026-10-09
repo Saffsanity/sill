@@ -22,7 +22,7 @@ the command under the table changes every copy in this file.
 | Mac download | `https://getsill.app/download` | `site/download.html`; the same link as `SillLinks.download` in the app. |
 | Contact address | `support@getsill.app` | Noah's: Cloudflare Email Routing forwards it to his mailbox (2026-09-25). |
 | Mac requirement | Apple silicon, macOS 14 or later | Today's Sill.app is arm64 only; `LSMinimumSystemVersion` is 14.0. If the release build becomes universal, take "with Apple silicon" out of the description and the review notes. |
-| App Store Connect record | "Sill – Mac Streaming", Apple ID 6816359860, SKU `sill-ios` | Created 2026-09-26 (section 1). Build 0.5 (1), from b37f47a, is on TestFlight for internal testers. |
+| App Store Connect record | "Sill – Mac Streaming", Apple ID 6816359860, SKU `sill-ios` | Created 2026-09-26 (section 1). Builds 0.5 (1) to (3) went to TestFlight, and 0.5 (3) to App Review as the first version. The next is 0.5.1 (4), the version both apps share from Sill for Mac 0.5.1 on (section 5). |
 | Remote Access in 1.0 | Undecided: main has it since ba91136 (PR #13) | Noah decides, before anything is pasted, whether 1.0 keeps it or ships without it (the audit's advice, given before it merged). |
 
 To change the domain or the contact address in this file, with both values
@@ -71,26 +71,33 @@ These texts are only true once these are:
   other way would question Remote Access and the Mac's menus shown in the
   device's own menus (PR #36): the review notes say plainly that the device
   shows the Mac app's menus and that the Mac runs them.
-- Sill for Mac at the download URL has pairing at home (PR #37; 0.3.1, the
-  download on 2026-09-27, does not). A Release build of the iOS app never
-  connects to an older Sill for Mac: its row reads "Update Sill", and App
-  Review could not connect at all.
+- Sill for Mac at the download URL has pairing at home (PR #37: 0.4.0 and
+  later; 0.3.1, the download until 2026-09-27, does not). A Release build of
+  the iOS app never connects to an older Sill for Mac: its row reads "Update
+  Sill", and App Review could not connect at all. For 0.5.1, Sill for Mac
+  0.5.1 is the download first: the away quality and the notice when the link
+  can't keep up, which the description and the review notes name, come from
+  the Mac.
 - The build carries `PrivacyInfo.xcprivacy` and the export compliance key
   (section 6).
 - The version record's Version is the build's: the first App Store version
   is 0.5 (Noah, 2026-09-26; `MARKETING_VERSION` in both configurations of
   the Sill target since PR #19). App Store Connect names a new app's first
   version 1.0, and only a build whose version matches can be added to it, so
-  set the record's Version to 0.5 (section 5).
+  set the record's Version to 0.5 (section 5). The second version is 0.5.1,
+  the number both apps share from this release on (Noah, 2026-10-09): App
+  Store Connect adds a version only once the current one is Ready for
+  Distribution (the + beside iOS App), and copies its metadata into it.
 - Every claim in the description has been seen working on a device. Still
   open: pairing at home (PR #37's P1 to P16: the code over Wi-Fi, the cable
   pairing by itself, Remove), three-finger gestures (PR #38's P1 to P13), the
   menus (PR #36's P1 to P13: the Menus button, the iPad's menu bar
   on iPadOS 26), the Mac's pointer on the device (PR #31's P1 to P12), the
-  first-run tour (PR #35's P1 to P16), the USB cable on an iPhone (verified
-  on the iPad mini only; if it fails, write "a USB cable (iPad)"), Apple
-  Pencil hover, and 120 frames per second, which no device has shown yet (the
-  iPad mini is 60 Hz). For that one, stream a moving window, then the whole
+  first-run tour (PR #35's P1 to P16), away from home (PR #39's P4 to P13:
+  Low · Standard, the link's callout, the move home), the USB cable on an
+  iPhone (verified on the iPad mini only; if it fails, write "a USB cable
+  (iPad)"), Apple Pencil hover, and 120 frames per second, which no device
+  has shown yet (the iPad mini is 60 Hz). For that one, stream a moving window, then the whole
   desktop, to a ProMotion iPhone or iPad. Sill.app's log should say
   "Streaming … 120 fps", and its `client …` lines for the device, or the
   device's row in the Sill menu, should stay near 120 fps. If they don't,
@@ -256,7 +263,7 @@ Keep three things saying the same: this label, `PrivacyInfo.xcprivacy`
 again before adding crash reporting, analytics, a server of any kind, or
 anything that sends data somewhere other than the user's Mac.
 
-## 5. The first version (0.5)
+## 5. The version page (0.5, then 0.5.1)
 
 ### Promotional text (170 characters at most; editable any time without review)
 
@@ -281,6 +288,7 @@ Made for touch
 • Tap to click. Touch and hold to right-click. Drag to scroll.
 • Apple Pencil works as a mouse, with hover on iPad models that support it.
 • Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below.
+• On iPhone Duo, open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display.
 • Type with the on-screen keyboard or a hardware keyboard. Shortcuts work too.
 • Swipe and pinch with three fingers for Mission Control, App Exposé, Spaces, Apps and Show Desktop.
 • Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26 or later, use the menu bar at the top of the screen.
@@ -296,7 +304,7 @@ Your Mac, your network
 • Connect over Wi-Fi, or over a USB cable.
 • Mac nearby but on another network? Turn on Direct Wireless Connection on the Mac and connect straight to it.
 • Pair each device with your Mac once by scanning a code. Over a USB cable it pairs by itself. By default your Mac lets in only the devices you paired, and every connection is encrypted.
-• Away from home, reach your Mac through your own VPN.
+• Away from home, reach your Mac through your own VPN. Sill starts at a quality a slower connection can carry, tells you when the connection can’t keep up, and moves back to your home network by itself when you get home.
 
 Private
 • No account, no ads, no tracking.
@@ -348,29 +356,33 @@ company's name.
 |---|---|
 | Support URL | `https://getsill.app/support` |
 | Marketing URL (optional) | `https://getsill.app` |
-| Version | 0.5 (App Store Connect proposes 1.0 for a new app; the build says 0.5) |
+| Version | 0.5.1 for the second version, the same number as Sill for Mac 0.5.1. The first was 0.5 (App Store Connect proposed 1.0 for a new app; the build said 0.5) |
 | Copyright | `2026 Noah Saffer` (App Store Connect adds the ©) |
 | App Previews | None for the first version. They are optional, and the sizzle reel can't be one: 2.3.4 allows only captures of the app itself, and previews run 15 to 30 seconds. |
 | Screenshots | Section 9 |
 | Version Release | Manually release this version, so an approval can't go live before the Mac download and the site are up |
-| Build | The Release archive with the privacy manifest and the export compliance key |
+| Build | 0.5.1 (4) for 0.5.1 (0.5 had 0.5 (3)): the Release archive with the privacy manifest and the export compliance key |
 
 ### What's New
 
 App Store Connect doesn't show this field for an app's first version; it is
-required from the second on. Use it as the pattern for a TestFlight build's
-"What to Test", the site and 1.1. TestFlight asks for What to Test for every
-build (the build › Test Details): for a later build, say what changed since
-the build before, as the release notes do.
+required from the second on, so 0.5.1 (4) is the first to have it: what
+changed since 0.5, as the release notes say it. TestFlight asks for What to
+Test for every build (the build › Test Details): for a later build, say what
+changed since the build before.
 
 ```text
-The first version of Sill. Use any window on your Mac, or the whole desktop, on your iPhone or iPad, with touch, a trackpad, a keyboard or Apple Pencil. Connect over Wi-Fi or a USB cable, directly when you share no network, or through your own VPN once paired.
+Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display. Nothing you touch sits on the fold.
+
+Away from home, Sill now starts at a quality a slower connection can carry, tells you when the connection can’t keep up and offers a quality it can, and moves your session back to your home network by itself when you get home. Also fixed: if your Mac showed twice away from home after Sill for Mac 0.4.0 gave it a new key, the row that didn’t work now connects, and the other goes. For the away quality and the notice, update Sill for Mac to 0.5.1 from getsill.app: from this release on, both apps share one version number.
 ```
 
-Local-only build:
+Local-only build (0.5.1's other changes are all away from home's):
 
 ```text
-The first version of Sill. Use any window on your Mac, or the whole desktop, on your iPhone or iPad, with touch, a trackpad, a keyboard or Apple Pencil. Connect over Wi-Fi or a USB cable, or directly when you share no network.
+Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display. Nothing you touch sits on the fold.
+
+Sill for iPhone and iPad and Sill for Mac now share one version number: this is 0.5.1, with Sill for Mac 0.5.1 from getsill.app.
 ```
 
 ## 6. Export compliance (encryption)
@@ -467,10 +479,17 @@ VIDEO
 The attached video, filmed with a camera, shows a Mac and an iPad together: setup, pairing, streaming, touch and keyboard input, and the Settings panel.
 
 REMOTE ACCESS
-On the Mac, choose Remote Access... in the Sill menu and turn it on while the paired device is connected: the device then learns how to reach it from another network through the user's own VPN (such as Tailscale on both). To try it, move the device to cellular or a hotspot with the VPN on and tap the Mac. The attached video shows this too.
+On the Mac, choose Remote Access... in the Sill menu and turn it on while the paired device is connected: the device then learns how to reach it from another network through the user's own VPN (such as Tailscale on both). To try it, move the device to cellular or a hotspot with the VPN on and tap the Mac. It starts at a lower quality for slower links. The attached video shows this too.
 ```
 
 Local-only build: delete from `REMOTE ACCESS` to the end.
+
+The notes in App Store Connect grew answers to App Review's questions about
+0.5 (purpose and audience, accounts, external services, regions, no VPN
+functionality) and say the rest more briefly; a new version starts with
+them. For 0.5.1, add the same sentence, "It starts at a lower quality for
+slower links.", to the end of their REMOTE ACCESS paragraph (47 bytes; they
+stay under 4,000).
 
 ## 8. Demo video
 
@@ -663,6 +682,10 @@ Safe:
   rule that Remote Access is turned on while the paired device is connected
   (a device learns the Mac's addresses only from a session with Remote Access
   on); the rest unchanged.
+- For 0.5.1 (4) with Sill for Mac 0.5.1, PR #39's away from home and PR #46,
+  the same script: description 2,603 (local-only 2,382) of 4,000 characters;
+  review notes 3,995 bytes (local-only 3,592) of 4,000, all ASCII; What's
+  New 523 and 128 characters; the rest unchanged.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's
