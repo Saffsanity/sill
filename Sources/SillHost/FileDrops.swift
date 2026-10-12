@@ -56,7 +56,11 @@ final class FileDrops: NSObject {
 
     /// The files of `drop`, all here, dropped at `point` (global, top-left origin).
     func drop(_ drop: FileDrop, at point: CGPoint, device: String) {
-        let urls = drop.files.compactMap { done.removeValue(forKey: $0) }
+        let folders = Set(drop.folders ?? [])
+        let urls = drop.files.compactMap { id -> URL? in
+            guard let url = done.removeValue(forKey: id) else { return nil }
+            return folders.contains(id) ? Self.unpack(url) : url
+        }
         guard !urls.isEmpty else { print("File drop from \(device): no file arrived whole; nothing dropped"); return }
         self.drop(urls, at: point, device: device)
     }
@@ -103,6 +107,21 @@ final class FileDrops: NSObject {
         }
         guard !items.isEmpty else { return }
         view.beginDraggingSession(with: items, event: event, source: self)
+    }
+
+    /// A folder that came zipped: unpacked beside the zip under a name not taken, the zip removed.
+    private static func unpack(_ zip: URL) -> URL? {
+        let name = zip.deletingPathExtension().lastPathComponent
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("sill-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch); try? FileManager.default.removeItem(at: zip) }
+        guard (try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)) != nil,
+              let folder = FolderZip.unzip(zip, into: scratch, name: name) else {
+            print("File drop: could not unpack \(zip.lastPathComponent)")
+            return nil
+        }
+        let home = unique(zip.deletingLastPathComponent().appendingPathComponent(name))
+        guard (try? FileManager.default.moveItem(at: folder, to: home)) != nil else { return nil }
+        return home
     }
 
     static func safe(_ name: String) -> String {
@@ -176,7 +195,10 @@ final class DragOut {
         let board = NSPasteboard(name: .drag)
         guard board.changeCount != w.baseline else { return }
         let urls = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? [])
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+            .filter { url in
+                let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+                return v?.isRegularFile == true || v?.isDirectory == true
+            }
         w.baseline = board.changeCount
         guard !urls.isEmpty else { watching = w; return }
         let id = UInt32.random(in: 1...UInt32.max)
@@ -185,8 +207,11 @@ final class DragOut {
         if order.count > 8 { offers[order.removeFirst()] = nil }
         w.offered = true
         watching = w
-        let files = urls.map { DragOffer.File(name: $0.lastPathComponent,
-                                             size: UInt64((try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)) }
+        let files = urls.map { url -> DragOffer.File in
+            let folder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            return DragOffer.File(name: url.lastPathComponent, size: UInt64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
+                                  folder: folder ? true : nil)
+        }
         print("Drag out: offering \(files.map(\.name).joined(separator: ", ")) to the device dragging")
         offer(DragOffer(id: id, files: files), to: w.connection)
     }
@@ -216,8 +241,12 @@ final class DragOut {
         }
         print("Drag out: sending \(url.lastPathComponent)")
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let handle = try? FileHandle(forReadingFrom: url) else { return }
-            let size = UInt64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            // A folder goes zipped (FolderZip), the zip removed once sent.
+            let folder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            let source = folder ? FolderZip.zip(url) : url
+            defer { if folder, let source { try? FileManager.default.removeItem(at: source) } }
+            guard let source, let handle = try? FileHandle(forReadingFrom: source) else { return }
+            let size = UInt64((try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
             var offset: UInt64 = 0
             repeat {
                 let bytes = (try? handle.read(upToCount: FileChunk.maxBytes)) ?? Data()

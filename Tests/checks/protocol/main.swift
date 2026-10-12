@@ -500,6 +500,27 @@ do {
     let fr = FileRequest(offer: 9, index: 0, transfer: 3, trash: true)
     check("file request: JSON round-trip with trash", Wire.decode(FileRequest.self, from: Wire.encode(fr)).map { $0 == fr && $0.trash == true } == true)
     check("file request: without trash it is a fetch", Wire.decode(FileRequest.self, from: Data(#"{"offer":1,"index":0,"transfer":2}"#.utf8))?.trash == nil)
+    // A folder as one file: zipped and unpacked whole (a nested file, a symbolic link, the top folder's name).
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory.appendingPathComponent("sill-check-\(UUID().uuidString)")
+    let src = base.appendingPathComponent("My Folder ✓")
+    try? fm.createDirectory(at: src.appendingPathComponent("inner"), withIntermediateDirectories: true)
+    try? Data("hello".utf8).write(to: src.appendingPathComponent("inner/a.txt"))
+    try? fm.createSymbolicLink(atPath: src.appendingPathComponent("link").path, withDestinationPath: "inner/a.txt")
+    let zipped = FolderZip.zip(src)
+    let out = base.appendingPathComponent("out")
+    try? fm.createDirectory(at: out, withIntermediateDirectories: true)
+    let back = zipped.flatMap { FolderZip.unzip($0, into: out, name: "My Folder ✓") }
+    check("folder zip: unpacked under its own name", back?.lastPathComponent == "My Folder ✓")
+    check("folder zip: a nested file whole", back.flatMap { try? Data(contentsOf: $0.appendingPathComponent("inner/a.txt")) } == Data("hello".utf8))
+    check("folder zip: a symbolic link kept as a link",
+          back.flatMap { try? fm.destinationOfSymbolicLink(atPath: $0.appendingPathComponent("link").path) } == "inner/a.txt")
+    check("folder zip: a missing folder gives nothing", FolderZip.zip(base.appendingPathComponent("nope")) == nil)
+    try? fm.removeItem(at: base); if let zipped { try? fm.removeItem(at: zipped) }
+    let fd = FileDrop(files: [1, 2], x: 0, y: 0, folders: [2])
+    check("file drop: folders round-trip", Wire.decode(FileDrop.self, from: Wire.encode(fd))?.folders == [2])
+    check("drag offer: a folder says so", Wire.decode(DragOffer.self, from: Wire.encode(DragOffer(id: 1, files: [.init(name: "d", size: 0, folder: true)])))?.files.first?.folder == true)
+
     let clip = Clipboard(text: "hi", image: nil)
     check("clipboard: JSON round-trip", Wire.decode(Clipboard.self, from: Wire.encode(clip)) == clip)
 }

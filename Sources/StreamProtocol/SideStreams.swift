@@ -110,8 +110,10 @@ public struct FileDrop: Codable, Hashable, Sendable {
     public var y: Double
     public var offer: UInt32?
     public var window: UInt32?
-    public init(files: [UInt32], x: Double, y: Double, offer: UInt32? = nil, window: UInt32? = nil) {
-        self.files = files; self.x = x; self.y = y; self.offer = offer; self.window = window
+    /// The files (of `files`) that are folders sent zipped (`FolderZip`): unpacked before the drop.
+    public var folders: [UInt32]?
+    public init(files: [UInt32], x: Double, y: Double, offer: UInt32? = nil, window: UInt32? = nil, folders: [UInt32]? = nil) {
+        self.files = files; self.x = x; self.y = y; self.offer = offer; self.window = window; self.folders = folders
     }
 }
 
@@ -121,7 +123,9 @@ public struct DragOffer: Codable, Hashable, Sendable {
     public struct File: Codable, Hashable, Sendable {
         public var name: String
         public var size: UInt64
-        public init(name: String, size: UInt64) { self.name = name; self.size = size }
+        /// A folder: sent zipped (`FolderZip`) when asked for, its size then the zip's.
+        public var folder: Bool?
+        public init(name: String, size: UInt64, folder: Bool? = nil) { self.name = name; self.size = size; self.folder = folder }
     }
     public var id: UInt32
     public var files: [File]
@@ -139,6 +143,34 @@ public struct FileRequest: Codable, Hashable, Sendable {
         self.offer = offer; self.index = index; self.transfer = transfer; self.trash = trash
     }
 }
+
+#if os(macOS)
+/// A folder as one file for kinds 34–37: zipped with `ditto` (Finder's own archive: resource forks,
+/// extended attributes, symbolic links kept), unpacked where it lands.
+public enum FolderZip {
+    /// `folder` zipped into a new temporary file, its top folder kept; nil when ditto fails.
+    public static func zip(_ folder: URL) -> URL? {
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("sill-\(UUID().uuidString).zip")
+        return run(["-c", "-k", "--sequesterRsrc", "--keepParent", folder.path, out.path]) ? out : nil
+    }
+
+    /// `zip` unpacked into `directory`; the folder it held (named `name`), or nil.
+    public static func unzip(_ zip: URL, into directory: URL, name: String) -> URL? {
+        guard run(["-x", "-k", zip.path, directory.path]) else { return nil }
+        let folder = directory.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: folder.path) ? folder : nil
+    }
+
+    private static func run(_ args: [String]) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        p.arguments = args
+        guard (try? p.run()) != nil else { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+}
+#endif
 
 /// A clipboard's text and image, either way (kind 32). From a device, neither asks the host to send
 /// its clipboard from now on, which it then does whenever it changes; a host never sends one

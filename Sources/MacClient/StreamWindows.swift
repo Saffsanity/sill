@@ -221,7 +221,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
     private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+        return urls.filter { url in   // files and folders (a folder goes zipped)
+            let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+            return v?.isRegularFile == true || v?.isDirectory == true
+        }
     }
 
     /// Files from this Mac go across and are dropped there; the other Mac's own files, dragged out of

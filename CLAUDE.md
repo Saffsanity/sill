@@ -37,7 +37,7 @@ after a restart and new windows of open apps opened by themselves.
 - Verified between this Mac and a MacBook Pro on the same network, and an iPhone 16 Pro Max against a
   test host: the plan's "Verified". **Open:** the plan's "Open" (full screen after the last fixes, a
   drag between Sill windows, the lost right-button up, Tailscale with Remote Access, uncompressed
-  sound, folders).
+  sound, folders both ways by hand).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then

@@ -470,7 +470,10 @@ extension StreamInputView {
 
     private func files(_ sender: NSDraggingInfo) -> [URL] {
         let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+        return urls.filter { url in   // files and folders (a folder goes zipped)
+            let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+            return v?.isRegularFile == true || v?.isDirectory == true
+        }
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -484,17 +487,24 @@ extension StreamInputView {
     static func send(_ urls: [URL], at: CGPoint, client: StreamClient, window: UInt32? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
             var ids: [UInt32] = []
+            var folders: [UInt32] = []
             var total: UInt64 = 0
-            for url in urls {
+            for original in urls {
+                // A folder goes as one zip (FolderZip), unpacked on the other Mac; the zip removed after.
+                let isFolder = (try? original.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                guard let url = isFolder ? FolderZip.zip(original) : original else { continue }
+                defer { if isFolder { try? FileManager.default.removeItem(at: url) } }
                 guard let handle = try? FileHandle(forReadingFrom: url),
                       let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(UInt64.init),
                       total + size <= FileChunk.maxTotal else { continue }
                 total += size
                 let id = UInt32.random(in: 1...UInt32.max)
+                if isFolder { folders.append(id) }
+                let name = isFolder ? original.lastPathComponent + ".zip" : url.lastPathComponent
                 var offset: UInt64 = 0
                 repeat {
                     let bytes = (try? handle.read(upToCount: FileChunk.maxBytes)) ?? Data()
-                    client.send(.fileChunk, payload: FileChunk.pack(id: id, name: url.lastPathComponent, total: size, offset: offset, bytes: bytes))
+                    client.send(.fileChunk, payload: FileChunk.pack(id: id, name: name, total: size, offset: offset, bytes: bytes))
                     offset += UInt64(bytes.count)
                     if bytes.isEmpty { break }
                 } while offset < size
@@ -502,7 +512,8 @@ extension StreamInputView {
                 ids.append(id)
             }
             guard !ids.isEmpty else { return }
-            client.send(.fileDrop, payload: Wire.encode(FileDrop(files: ids, x: Double(at.x), y: Double(at.y), window: window)))
+            client.send(.fileDrop, payload: Wire.encode(FileDrop(files: ids, x: Double(at.x), y: Double(at.y), window: window,
+                                                                  folders: folders.isEmpty ? nil : folders)))
             print("files: dropped \(ids.count) at \(at), \(total) bytes")
         }
     }
@@ -530,13 +541,14 @@ extension StreamInputView: NSDraggingSource {
         send(.leftUp, last)
         let promises = FilePromises.shared
         let items = offer.files.enumerated().map { index, file -> NSDraggingItem in
-            let provider = NSFilePromiseProvider(fileType: UTType(filenameExtension: (file.name as NSString).pathExtension)?.identifier ?? UTType.data.identifier,
-                                                 delegate: promises)
-            provider.userInfo = FilePromises.Promise(client: client, offer: offer.id, index: index, name: file.name, size: file.size)
+            let type = file.folder == true ? UTType.folder : (UTType(filenameExtension: (file.name as NSString).pathExtension) ?? .data)
+            let provider = NSFilePromiseProvider(fileType: type.identifier, delegate: promises)
+            provider.userInfo = FilePromises.Promise(client: client, offer: offer.id, index: index, name: file.name, size: file.size,
+                                                     folder: file.folder == true)
             let item = NSDraggingItem(pasteboardWriter: provider)
             let at = convert(event.locationInWindow, from: nil)
             item.setDraggingFrame(NSRect(x: at.x - 24, y: at.y - 24, width: 48, height: 48),
-                                  contents: NSWorkspace.shared.icon(for: UTType(filenameExtension: (file.name as NSString).pathExtension) ?? .data))
+                                  contents: NSWorkspace.shared.icon(for: file.folder == true ? .folder : (UTType(filenameExtension: (file.name as NSString).pathExtension) ?? .data)))
             return item
         }
         outgoing = items.compactMap { ($0.item as? NSFilePromiseProvider)?.userInfo as? FilePromises.Promise }
@@ -563,8 +575,9 @@ extension StreamInputView: NSDraggingSource {
 /// (kind 37) and written from its parts (kind 34) where the drop wants it.
 final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Sendable {
     static let shared = FilePromises()
-    struct Promise { let client: StreamClient; let offer: UInt32; let index: Int; let name: String; let size: UInt64 }
-    private struct Writing { let handle: FileHandle; let total: UInt64; var written: UInt64; let done: (Error?) -> Void }
+    struct Promise { let client: StreamClient; let offer: UInt32; let index: Int; let name: String; let size: UInt64; let folder: Bool }
+    /// A file being written from its parts; a folder's zip goes to `zip` and is unpacked at `url`.
+    private struct Writing { let handle: FileHandle; var total: UInt64; var written: UInt64; let done: (Error?) -> Void; let url: URL; let zip: URL? }
     private let lock = NSLock()
     private var writing: [UInt32: Writing] = [:]
     private let queue: OperationQueue = { let q = OperationQueue(); q.qualityOfService = .userInitiated; return q }()
@@ -577,15 +590,17 @@ final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Se
     func operationQueue(for filePromiseProvider: NSFilePromiseProvider) -> OperationQueue { queue }
 
     func filePromiseProvider(_ provider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping (Error?) -> Void) {
-        guard let p = provider.userInfo as? Promise,
-              FileManager.default.createFile(atPath: url.path, contents: nil),
-              let handle = try? FileHandle(forWritingTo: url) else { completionHandler(CocoaError(.fileWriteUnknown)); return }
+        guard let p = provider.userInfo as? Promise else { completionHandler(CocoaError(.fileWriteUnknown)); return }
+        let zip = p.folder ? FileManager.default.temporaryDirectory.appendingPathComponent("sill-\(UUID().uuidString).zip") : nil
+        let target = zip ?? url
+        guard FileManager.default.createFile(atPath: target.path, contents: nil),
+              let handle = try? FileHandle(forWritingTo: target) else { completionHandler(CocoaError(.fileWriteUnknown)); return }
         hook(p.client)
         let transfer = UInt32.random(in: 1...UInt32.max)
         lock.lock()
-        writing[transfer] = Writing(handle: handle, total: p.size, written: 0, done: completionHandler)
+        writing[transfer] = Writing(handle: handle, total: p.size, written: 0, done: completionHandler, url: url, zip: zip)
         lock.unlock()
-        if p.size == 0 { finish(transfer, nil) }
+        if p.size == 0, !p.folder { finish(transfer, nil) }
         p.client.send(.fileRequest, payload: Wire.encode(FileRequest(offer: p.offer, index: p.index, transfer: transfer)))
         // The other Mac gone or never answering: the drop fails rather than leaving a file half made.
         DispatchQueue.global().asyncAfter(deadline: .now() + 60 + Double(p.size) / 2_000_000) { [weak self] in
@@ -603,6 +618,7 @@ final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Se
         guard let c = FileChunk.unpack(data) else { return }
         lock.lock()
         guard var w = writing[c.id], c.offset == w.written else { lock.unlock(); return }
+        if c.offset == 0 { w.total = c.total }   // the size as sent: a folder's zip is only known then
         w.handle.write(c.bytes)
         w.written += UInt64(c.bytes.count)
         writing[c.id] = w
@@ -617,6 +633,17 @@ final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Se
         lock.unlock()
         guard let w else { return }
         try? w.handle.close()
-        w.done(error)
+        guard let zip = w.zip else { w.done(error); return }
+        // A folder: its zip unpacked where the drop asked for it.
+        defer { try? FileManager.default.removeItem(at: zip) }
+        guard error == nil else { w.done(error); return }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("sill-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        guard (try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)) != nil,
+              let folder = FolderZip.unzip(zip, into: scratch, name: w.url.lastPathComponent),
+              (try? FileManager.default.moveItem(at: folder, to: w.url)) != nil else {
+            w.done(CocoaError(.fileWriteUnknown)); return
+        }
+        w.done(nil)
     }
 }

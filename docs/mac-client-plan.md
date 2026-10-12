@@ -97,6 +97,8 @@ while a tapped app makes sound.
   each file (kind 37). Dropped on this Mac's Trash, the files go to the host's Trash instead.
   Dropped on another Sill window, the host drops its own files there from where they are, nothing
   copied.
+- Folders go as one zip (`FolderZip`: Finder's own `ditto` archive, resource forks, attributes and
+  links kept) and are unpacked where they land, a drop on the Trash included.
 - Offers are scoped to the device they were made to; parts are taken only from the device that
   started the file; both are forgotten when that device leaves.
 
@@ -161,5 +163,6 @@ the 27.1-only DuoPostureReader.
   still held at a new press and logs it; the lost up's path is not found yet.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
-- Sound is uncompressed (fine at home, heavy away); folders are not sent; a drag out starts only
-  from the focused window; 16 desk windows at most; Spaces gestures were not re-run.
+- Folders both ways, by hand (the zip round trip is checked: `protocol`).
+- Sound is uncompressed (fine at home, heavy away); a drag out starts only from the focused window;
+  16 desk windows at most; Spaces gestures were not re-run.
