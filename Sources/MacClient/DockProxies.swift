@@ -160,12 +160,20 @@ final class DockProxies {
         work.async { [weak self] in
             try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
             try? png.write(to: url)
-            Self.installIcon(png, in: Self.folder.appendingPathComponent("\(Self.slug(app)).app", isDirectory: true))
+            if let name = self?.last[app]?.name ?? nil { Self.installIcon(png, in: Self.appURL(app, name: name)) }
             DispatchQueue.main.async { self?.post(app) }
         }
     }
 
     private static func iconURL(_ app: String) -> URL { folder.appendingPathComponent("\(slug(app)).png") }
+
+    /// The copy for `app`: in a folder of its own (the bundle ID), named after the app, which is the
+    /// name the Dock shows.
+    private static func appURL(_ app: String, name: String) -> URL {
+        let file = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        return folder.appendingPathComponent(slug(app), isDirectory: true)
+            .appendingPathComponent("\(file.isEmpty ? slug(app) : file).app", isDirectory: true)
+    }
 
     /// The badged icon as the copy's own (AppIcon.icns), so a Dock icon kept in the Dock shows it while
     /// its app is not running; the copy signed again. Only when the icon changed. Off the main thread.
@@ -224,15 +232,21 @@ final class DockProxies {
     /// The copy for `app`, made (or made again) when the helper or the name changed. Off the main thread.
     private static func make(app: String, name: String, template: URL) -> URL? {
         let fm = FileManager.default
-        let dest = folder.appendingPathComponent("\(slug(app)).app", isDirectory: true)
+        let dest = appURL(app, name: name)
+        // The Dock names an app after its file: one from before, named after the bundle ID, goes.
+        try? fm.removeItem(at: folder.appendingPathComponent("\(slug(app)).app", isDirectory: true))
         let stampURL = dest.appendingPathComponent("Contents/Resources/stamp")
         let templateStamp = (try? fm.attributesOfItem(atPath: template.appendingPathComponent("Contents/MacOS/SillDockProxy").path)[.modificationDate] as? Date)
             .map { "\($0.timeIntervalSince1970)" } ?? "?"
         let stamp = "\(templateStamp)|\(name)"
         if (try? String(contentsOf: stampURL, encoding: .utf8)) == stamp { return dest }
         do {
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            let home = dest.deletingLastPathComponent()
+            try fm.createDirectory(at: home, withIntermediateDirectories: true)
+            // A copy under another name (the app's name changed, or was not known yet) goes too.
+            for old in (try? fm.contentsOfDirectory(at: home, includingPropertiesForKeys: nil)) ?? [] where old.pathExtension == "app" {
+                try? fm.removeItem(at: old)
+            }
             try fm.copyItem(at: template, to: dest)
             let plistURL = dest.appendingPathComponent("Contents/Info.plist")
             guard var plist = NSDictionary(contentsOf: plistURL) as? [String: Any] else { return nil }
