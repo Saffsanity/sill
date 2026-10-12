@@ -722,14 +722,16 @@ final class VirtualStage {
         // across an ultrawide, whose 1× pixels are its points anyway).
         let room = deskRoom ?? .zero, window = deskWindow ?? .zero, largest = DeskStages.largest
         let needs1x = window.width > largest.width || window.height > largest.height
-        let scale = needs1x ? 1 : 2
-        let size = needs1x
-            ? CGSize(width: max(room.width, window.width), height: max(room.height, window.height))
-            : CGSize(width: min(max(room.width, window.width), largest.width), height: min(max(room.height, window.height), largest.height))
+        // Back to 2× once the window is clearly within it again (5 % under, so a window resized
+        // about the line does not flap between the two).
+        let fits2x = window.width <= largest.width * 0.95 && window.height <= largest.height * 0.95
+        let scale = needs1x ? 1 : (displayScale == 1 && display?.isAlive == true && !fits2x ? 1 : 2)
+        // The envelope the placement asks for too (`DeskStages.envelope`: room for the menu bar), so
+        // the placement never finds the display too small and makes it again.
+        let roomy = CGSize(width: max(room.width, window.width), height: max(room.height, window.height))
+        let size = scale == 1 ? CGSize(width: roomy.width + 16, height: roomy.height + 48) : DeskStages.envelope(for: roomy)
         if let d = display, d.isAlive, displayScale != scale {
-            // Only up to 1× while the window is there (it outgrew 2×); a window that fits again keeps
-            // its 1× display until the next one is made, rather than moving home and back twice.
-            guard needs1x else { try await ensureDisplay(atLeast: size); return }
+            // Another scale: the window home, a display of that scale, and back (VirtualStage.prepare).
             if placement != nil { releaseWindow() }
             destroyDisplay()
         }

@@ -48,6 +48,11 @@ final class FileDrops: NSObject {
     func drop(_ drop: FileDrop, at point: CGPoint, device: String) {
         let urls = drop.files.compactMap { done.removeValue(forKey: $0) }
         guard !urls.isEmpty else { print("File drop from \(device): no file arrived whole; nothing dropped"); return }
+        self.drop(urls, at: point, device: device)
+    }
+
+    /// `urls` dragged from `point` and let go there: the app under it takes them as a drop.
+    func drop(_ urls: [URL], at point: CGPoint, device: String) {
         print("File drop from \(device): \(urls.map(\.lastPathComponent).joined(separator: ", ")) at \(Int(point.x)),\(Int(point.y))")
         pending = urls
         // A panel of Sill's under the drop point takes the press that starts the drag.
@@ -169,6 +174,12 @@ final class DragOut {
 
     private func offer(_ o: DragOffer, to connection: NWConnection) {
         send?(StreamMessage(kind: .dragOffer, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: Wire.encode(o)), connection)
+    }
+
+    /// The files of an offer, by index (a drop of them on another of this Mac's windows).
+    func urls(offer: UInt32, indices: [UInt32]) -> [URL] {
+        guard let urls = offers[offer] else { return [] }
+        return indices.compactMap { urls.indices.contains(Int($0)) ? urls[Int($0)] : nil }
     }
 
     /// One offered file to the device, in parts (kind 34), off the main actor.

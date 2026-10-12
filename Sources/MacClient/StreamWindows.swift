@@ -185,6 +185,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         let window = StreamWindow(source: source, size: initialSize(source))
         window.delegate = self
+        if case .window(let id) = source {
+            window.container.accepts = { [weak self] info in self?.acceptsDrop(info) ?? false }
+            window.container.onDrop = { [weak self] info, at in self?.dropped(info, at: at, window: id) ?? false }
+        }
         window.title = title(source)
         window.placeholder.image = thumbnail(source)
         if case .window(let id) = source {
@@ -204,6 +208,37 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             window.orderFront(nil)
             requestSideStreams()
         }
+    }
+
+    // MARK: Drops on a window shown beside the streamed one
+
+    private func acceptsDrop(_ info: NSDraggingInfo) -> Bool {
+        guard client.hostFileDrop, client.connected else { return false }
+        return info.draggingSource is StreamInputView ? !input.outgoing.isEmpty : !droppedFiles(info).isEmpty
+    }
+
+    private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+    }
+
+    /// Files from this Mac go across and are dropped there; the other Mac's own files, dragged out of
+    /// one of its windows, are dropped from where they are, nothing copied either way.
+    private func dropped(_ info: NSDraggingInfo, at: CGPoint, window: UInt32) -> Bool {
+        guard client.hostFileDrop else { return false }
+        if info.draggingSource is StreamInputView {
+            let own = input.outgoing
+            guard let offer = own.first?.offer else { return false }
+            input.outgoing = []
+            client.send(.fileDrop, payload: Wire.encode(FileDrop(files: own.map { UInt32($0.index) }, x: Double(at.x), y: Double(at.y),
+                                                                  offer: offer, window: window)))
+            windowLog("drop: \(own.count) of the other Mac's own files moved onto window \(window), nothing copied")
+            return true
+        }
+        let urls = droppedFiles(info)
+        guard !urls.isEmpty else { return false }
+        StreamInputView.send(urls, at: at, client: client, window: window)
+        return true
     }
 
     /// The Dock icons follow the windows open here, by app.
@@ -512,10 +547,31 @@ final class SideView: NSView {
     }
 }
 
+/// A stream window's content: takes files dropped on the picture (the focused window's own view
+/// takes them first), as the point they were let go at, a fraction of the picture from its top left.
+final class DropContainer: NSView {
+    var onDrop: ((NSDraggingInfo, CGPoint) -> Bool)?
+    var accepts: ((NSDraggingInfo) -> Bool)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { accepts?(sender) == true ? .copy : [] }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { accepts?(sender) == true ? .copy : [] }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let p = convert(sender.draggingLocation, from: nil)
+        guard bounds.width > 0, bounds.height > 0 else { return false }
+        return onDrop?(sender, CGPoint(x: p.x / bounds.width, y: 1 - p.y / bounds.height)) ?? false
+    }
+}
+
 /// One of the other Mac's windows: its picture at 1:1, filling a window with no frame of its own.
 final class StreamWindow: NSWindow {
     let source: StreamSource
-    let container = NSView()
+    let container = DropContainer()
     let placeholder = NSImageView()
     let side = SideView()
 

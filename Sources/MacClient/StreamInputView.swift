@@ -481,7 +481,7 @@ extension StreamInputView {
     }
 
     /// The files' parts, then the drop at `at` (a fraction of the picture). Off the main thread.
-    static func send(_ urls: [URL], at: CGPoint, client: StreamClient) {
+    static func send(_ urls: [URL], at: CGPoint, client: StreamClient, window: UInt32? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
             var ids: [UInt32] = []
             var total: UInt64 = 0
@@ -502,7 +502,7 @@ extension StreamInputView {
                 ids.append(id)
             }
             guard !ids.isEmpty else { return }
-            client.send(.fileDrop, payload: Wire.encode(FileDrop(files: ids, x: Double(at.x), y: Double(at.y))))
+            client.send(.fileDrop, payload: Wire.encode(FileDrop(files: ids, x: Double(at.x), y: Double(at.y), window: window)))
             print("files: dropped \(ids.count) at \(at), \(total) bytes")
         }
     }

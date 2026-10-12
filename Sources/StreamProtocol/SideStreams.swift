@@ -101,11 +101,18 @@ public enum FileChunk {
 
 /// Files the device sent (kind 34, by ID) dropped on the picture at (x, y), fractions of the
 /// streamed frame as a pointer's are: the host's app under that point gets them as a drop.
+/// With `offer`, `files` are indices into that drag offer (kind 36): the host's own files, dragged
+/// out of one of its windows and dropped on another, dropped from where they are with nothing copied.
+/// With `window`, (x, y) are in that window's picture, not the streamed one's (a window shown beside it).
 public struct FileDrop: Codable, Hashable, Sendable {
     public var files: [UInt32]
     public var x: Double
     public var y: Double
-    public init(files: [UInt32], x: Double, y: Double) { self.files = files; self.x = x; self.y = y }
+    public var offer: UInt32?
+    public var window: UInt32?
+    public init(files: [UInt32], x: Double, y: Double, offer: UInt32? = nil, window: UInt32? = nil) {
+        self.files = files; self.x = x; self.y = y; self.offer = offer; self.window = window
+    }
 }
 
 /// What an app on the host is dragging under a device's held button (kind 36): files, by name and

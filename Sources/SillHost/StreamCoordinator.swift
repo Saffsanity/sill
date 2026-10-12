@@ -1101,9 +1101,20 @@ package final class StreamCoordinator {
             guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
             dragOut.request(r, from: connection)
         case .fileDrop:
-            guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload), let rect = currentSourceRect() else { return }
+            guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
+            // In the window it names (one shown beside the streamed one), else the streamed one.
+            let target: CGRect? = d.window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
+            guard let rect = target else { return }
             let x = min(max(d.x, 0), 1), y = min(max(d.y, 0), 1)
-            fileDrops.drop(d, at: CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height), device: deviceName(connection))
+            let point = CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+            if let offer = d.offer {
+                // This Mac's own files, dragged out of one of its windows onto another: dropped from where they are.
+                let urls = dragOut.urls(offer: offer, indices: d.files)
+                guard !urls.isEmpty else { return }
+                fileDrops.drop(urls, at: point, device: deviceName(connection))
+            } else {
+                fileDrops.drop(d, at: point, device: deviceName(connection))
+            }
         case .clipboard:
             guard let clip = Wire.decode(Clipboard.self, from: message.payload) else { return }
             if clipboard == nil { clipboard = HostClipboard(server: server, dryRun: synthetic) }
