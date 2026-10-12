@@ -49,6 +49,7 @@ final class StreamInputView: NSView {
     private var scrolling = false
     private var coasting = false
     private var keyMonitor: Any?
+    private var buttonMonitor: Any?
     private var tracking: NSTrackingArea?
     private var viewportWork: DispatchWorkItem?
     /// The Aa scale for the Mac window (Viewport.scale): nil leaves the Mac window's size alone. Set
@@ -83,8 +84,57 @@ final class StreamInputView: NSView {
             #endif
         }
         client.renderPointer()
+        // A button let go where this view never hears of it: the view moved to another window while
+        // the button was held (the host switched streams under a press), so AppKit sent the up to
+        // nowhere, and the other Mac kept the button down, every later click read as that button's
+        // until it was pressed again (a left click acting as a right click). Every up in this app is
+        // looked at first, and one the view would miss goes to the other Mac from here.
+        buttonMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]) { [weak self] event in
+            self?.upSeen(event)
+            return event
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// A press made on this window while it was in the background, still held, now that the other Mac
+    /// streams it: down there, at the point it was made (in window coordinates), and the drag goes on.
+    func beginHeldPress(at locationInWindow: NSPoint) {
+        guard !leftDown, let p = display.fraction(of: convert(locationInWindow, from: nil)) else { return }
+        leftDown = true
+        send(.move, p)
+        send(.leftDown, p)
+    }
+
+    /// An up this view will not get (another window's, or none now that it moved): sent from here.
+    private func upSeen(_ event: NSEvent) {
+        guard event.window == nil || event.window !== window else { return }   // its own: its handler sends it
+        let p = fraction(event, clamped: true) ?? .zero
+        switch event.type {
+        case .leftMouseUp where leftDown:
+            leftDown = false; dragOffer = nil
+            windowLog("buttons: the left button came up in another window; sent")
+            send(.leftUp, p)
+        case .rightMouseUp where rightDown:
+            rightDown = false
+            windowLog("buttons: the right button came up in another window; sent")
+            send(.rightUp, p)
+        case .otherMouseUp where middleDown && event.buttonNumber == 2:
+            middleDown = false
+            windowLog("buttons: the middle button came up in another window; sent")
+            send(.middleUp, p)
+        default:
+            break
+        }
+    }
+
+    /// Buttons this view thinks are down that this Mac has let go of (their up went to no app at all,
+    /// as when the app was switched away from mid-press): let go of on the other Mac too.
+    private func reconcileButtons() {
+        let pressed = NSEvent.pressedMouseButtons
+        if leftDown, pressed & 1 == 0 { leftDown = false; windowLog("buttons: left up never came; sent"); send(.leftUp, .zero) }
+        if rightDown, pressed & 2 == 0 { rightDown = false; windowLog("buttons: right up never came; sent"); send(.rightUp, .zero) }
+        if middleDown, pressed & 4 == 0 { middleDown = false; windowLog("buttons: middle up never came; sent"); send(.middleUp, .zero) }
+    }
 
     override var acceptsFirstResponder: Bool { true }
     /// Clicks go to the other Mac; the window moves by its pill (WindowPill) or a drag in the picture's title strip.
@@ -205,6 +255,7 @@ final class StreamInputView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        reconcileButtons()   // a move with no button held: none can be down
         let p = fraction(event, clamped: false)
         setCursor(over: p != nil)
         guard let p else { return }
@@ -449,6 +500,7 @@ final class StreamInputView: NSView {
 
     deinit {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let buttonMonitor { NSEvent.removeMonitor(buttonMonitor) }
         NotificationCenter.default.removeObserver(self)
     }
 }

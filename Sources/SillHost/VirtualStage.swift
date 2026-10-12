@@ -364,6 +364,8 @@ final class VirtualStage {
             p = current                                       // same window: keep its original frame
         } else if let fresh = sizer.placement(for: window) {
             p = fresh
+        } else if let found = await fromOtherSpace(window) {
+            p = found
         } else {
             throw Failure.axWindowNotFound
         }
@@ -864,11 +866,42 @@ final class VirtualStage {
     func leaveFullScreenNow() {
         guard let p = placement, WindowSizer.isFullScreen(p.element) else { return }
         _ = WindowSizer.perform(.fullScreen, element: p.element)
-        let deadline = Date().addingTimeInterval(1.5)
-        while Date() < deadline, WindowSizer.isFullScreen(p.element) {
+        // An app can say it left as its exit starts: the window has left its Space only once the window
+        // server has it at another size than the display's (destroyed before that, the Space outlived
+        // the display on the Mac's own, out of reach: black and deaf after a restart, 2026-10-12).
+        let screen = display.map { CGDisplayBounds($0.displayID).size }
+        let deadline = Date().addingTimeInterval(2.5)
+        while Date() < deadline {
+            let live = WindowSizer.liveBounds(of: p.windowID)?.size
+            if !WindowSizer.isFullScreen(p.element), let live, let screen,
+               abs(live.width - screen.width) > 2 || abs(live.height - screen.height) > 2 { break }
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))   // its exit animation, so the move home lands
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))   // the rest of its animation, so the move home lands
+    }
+
+    /// A window Accessibility does not list (it lists only the windows of the Space shown): a window
+    /// left full screen in a Space of its own on another display (a host quit before it left). Its
+    /// app is brought forward, which shows that Space, the window found again, and taken out of full
+    /// screen so it can come to the desk. Nil when it still cannot be found.
+    private func fromOtherSpace(_ window: SCWindow) async -> WindowSizer.Placement? {
+        guard !window.isOnScreen, let pid = window.owningApplication?.processID else { return nil }
+        print("\(window.owningApplication?.applicationName ?? "?") — \(window.title ?? ""): not in the Space shown; bringing its app forward to reach it")
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        var found: WindowSizer.Placement?
+        for _ in 0..<15 {
+            try? await Task.sleep(for: .milliseconds(100))
+            if let p = sizer.placement(for: window) { found = p; break }
+        }
+        guard let p = found else { return nil }
+        if WindowSizer.isFullScreen(p.element) {
+            _ = WindowSizer.perform(.fullScreen, element: p.element)
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline, WindowSizer.isFullScreen(p.element) { try? await Task.sleep(for: .milliseconds(100)) }
+            try? await Task.sleep(for: .milliseconds(800))   // out of its Space, back on the desktop
+        }
+        return sizer.placement(for: window) ?? p
     }
 
     /// The window server tore the display down (sleep, another display arriving). The object is

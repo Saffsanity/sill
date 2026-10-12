@@ -219,6 +219,12 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             window.container.over = { [weak self] info, at in self?.dragOver(info, at: at, window: id) ?? [] }
             window.container.exited = { [weak self] info in self?.live.exited(info) }
             window.container.onDrop = { [weak self] info, at in self?.dropped(info, at: at, window: id) ?? false }
+            window.container.onBackgroundPress = { [weak self, weak window] event in
+                guard let self, let window else { return }
+                self.heldPress = (window.source, event.locationInWindow, Date())
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate()
+            }
         }
         window.title = title(source)
         window.placeholder.image = thumbnail(source)
@@ -424,8 +430,22 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
     /// The stream view goes into `source`'s window, with the window's own viewport: a window
     /// streams 1:1 (the Mac window is sized to this one), the Desktop as it is.
+    /// A press on a window in the background, waiting for the other Mac to stream it.
+    private var heldPress: (source: StreamSource, at: NSPoint, when: Date)?
+
     private func attach(to source: StreamSource) {
         guard let window = open[source] else { return }
+        defer {
+            // The press that brought it forward, still held: it goes on there now (a drag out of a
+            // window in the background starts with one press).
+            if let held = heldPress, held.source == source {
+                heldPress = nil
+                if Date().timeIntervalSince(held.when) < 2, NSEvent.pressedMouseButtons & 1 != 0 {
+                    windowLog("buttons: the press on \(source) in the background goes on there")
+                    input.beginHeldPress(at: held.at)
+                }
+            }
+        }
         // The host streams this window now: if no focus here asked for it (the host picked it, or the
         // window opened for an app opened from the status item), its stream is followed into it.
         if !router.draws(into: window.side.feed) { router.follow(window.side.feed) }
@@ -625,6 +645,24 @@ final class DropContainer: NSView {
     /// What a drop would do at that point (a fraction of the picture from its top left).
     var over: ((NSDraggingInfo, CGPoint) -> NSDragOperation)?
     var exited: ((NSDraggingInfo) -> Void)?
+    /// A press on the picture of a window in the background (the stream view is elsewhere): the
+    /// window comes forward, and the press goes on once the other Mac streams it.
+    var onBackgroundPress: ((NSEvent) -> Void)?
+    /// The stream view, while it is in this window (`StreamInputView`).
+    private var input: StreamInputView? { subviews.lazy.compactMap { $0 as? StreamInputView }.first }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if input != nil { return super.hitTest(point) }
+        return frame.contains(point) ? self : nil   // the picture and placeholder take no presses of their own
+    }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        if let input { input.mouseDown(with: event) } else { onBackgroundPress?(event) }
+    }
+    // The press began here: its drag and its up go to the stream view once it has come (it ignores
+    // them until the held press is begun, `beginHeldPress`).
+    override func mouseDragged(with event: NSEvent) { input?.mouseDragged(with: event) }
+    override func mouseUp(with event: NSEvent) { input?.mouseUp(with: event) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
