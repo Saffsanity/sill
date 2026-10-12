@@ -204,5 +204,18 @@ do {
     check(!b.log.contains("d:bs1"), "B draws no side frame on the main stream's sets: \(b.log)")
 }
 
+// A closed window's claim goes with it: a new window whose feed takes the same address (the same
+// object here) draws no side frame before its own sets.
+do {
+    let r = MainRouter(), a = Sink("A"), m = Sink("M")
+    r.register(w2, m); r.register(w1, a); r.listed(active: w2)
+    r.parameterSets(ps("M")); r.frame(f("m1"), isKeyframe: true)
+    r.sideParameterSets(ps("A-side"), into: a); r.sideFrame(f("as1"), isKeyframe: true, into: a)
+    r.register(w1, nil)
+    r.register(w3, a)
+    r.sideFrame(f("cs1"), isKeyframe: false, into: a)
+    check(!a.log.contains("d:cs1"), "a reused feed draws no side frame before its own sets: \(a.log)")
+}
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

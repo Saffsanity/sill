@@ -946,9 +946,11 @@ package final class StreamCoordinator {
     // MARK: Client messages
 
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
-        // A device acting (not its pings, stats or clipboard): an app it brings forward is not the
-        // person at this Mac taking it back (`appActivatedHere`).
-        if ![.ping, .clientStats, .clipboard, .hello].contains(message.kind) {
+        // A device acting, in a way that can bring an app forward on this Mac: an app that comes
+        // forward then is the device's doing, not the person at this Mac taking it back
+        // (`appActivatedHere`). A move, a scroll or a hover never counts: they come all the time, a
+        // Mac client's hover over a window in the background included.
+        if Self.actsOnApps(message) {
             lastDeviceAction = CFAbsoluteTimeGetCurrent()
             lastDeviceKind = message.kind
         }
@@ -1010,7 +1012,9 @@ package final class StreamCoordinator {
             let device = ObjectIdentifier(connection)
             // A scroll or a hover over a window shown beside the streamed one: there, raising nothing.
             if let window = input.window, window != streamedWindowID {
-                guard WindowInput.allowed(event), DesktopWindow.display(of: window) != nil || catalog.window(id: window) != nil,
+                // Only a window this host streams beside the main one (a side stream: on the desk, or a
+                // Desktop), never one elsewhere on the Mac's screens, under whatever covers it.
+                guard WindowInput.allowed(event), sideStreams?.streaming.contains(window) == true,
                       let rect = dropRect(window) else { return }
                 deliver(event, in: rect, from: device)
                 return
@@ -1232,6 +1236,13 @@ package final class StreamCoordinator {
     }
 
     func sharingStopped() async {
+        // With an iPhone or iPad connected nothing counts as shared (`sharedWindows`), but the capture
+        // is gone all the same: the stream stops, as it did before Mac viewers, and devices stay.
+        guard !sharedWindows.isEmpty else {
+            print("Sharing stopped on this Mac: the stream stops; devices stay connected and may pick again")
+            await select(.none)
+            return
+        }
         print("Sharing stopped on this Mac: every window taken back; devices stay connected and may open them again")
         await takeBack(nil)
     }
@@ -1782,6 +1793,11 @@ package final class StreamCoordinator {
             }
             server.broadcast(StreamMessage(kind: .frame, timestamp: now, isKeyframe: isKey, payload: data))
         }
+        // The devices hear which source this is before its first frame (both go out on the server's
+        // queue, in order): a Mac client routes the stream by that word (its MainRouter), and the list
+        // sent once `active` is set came after the first sets and keyframe. A start that fails sends
+        // another list (nothing streams) from `select`.
+        server.broadcast(listMessage(naming: source))
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
@@ -2108,6 +2124,25 @@ package final class StreamCoordinator {
         }
     }
 
+    /// Whether `message` can bring an app forward: a click, a key or text (not into a window in the
+    /// background), a pick, a launch, a window's button, a menu or Dock menu item, a gesture, a drop.
+    private static func actsOnApps(_ message: StreamMessage) -> Bool {
+        switch message.kind {
+        case .selectSource, .launchApp, .windowCommand, .pressMenuItem, .dockMenu, .gesture, .fileDrop, .liveDrag, .pickDisplay:
+            return true
+        case .input:
+            guard let input = WindowInput.decode(message.payload), input.window == nil else { return false }
+            switch input.event {
+            case .pointer(let action, _, _): return action.isButtonDown
+            case .key(_, let down, _): return down
+            case .text: return true
+            case .scroll, .scrollGesture: return false
+            }
+        default:
+            return false
+        }
+    }
+
     private var lastDeviceAction: CFAbsoluteTime = 0
     private var lastDeviceKind: StreamMessageKind?
     private var reclaimObserver: NSObjectProtocol?
@@ -2115,7 +2150,7 @@ package final class StreamCoordinator {
     /// The Dock badges of the apps a Mac client shows (`WindowList.badges`), read every 2 s while one
     /// is connected, and sent with the window list when they change.
     private func watchBadges() {
-        guard badgeTimer == nil, !synthetic else { return }
+        guard badgeTimer == nil, !synthetic, sideStreams?.wholeApp == true else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.5, repeating: 2)
         timer.setEventHandler { [weak self] in Task { @MainActor in self?.readBadges() } }
@@ -2126,7 +2161,8 @@ package final class StreamCoordinator {
     private var dockBadges: [String: String] = [:]
 
     private func readBadges() {
-        guard sideStreams?.wholeApp == true else {
+        guard sideStreams?.wholeApp == true else {   // the last Mac client left: stop until another comes
+            badgeTimer?.cancel(); badgeTimer = nil
             if !dockBadges.isEmpty { dockBadges = [:]; broadcastList() }
             return
         }
@@ -2181,8 +2217,9 @@ package final class StreamCoordinator {
     /// the streamed window's own app, and only while every device is a Mac client, which shows each
     /// window apart (an iPhone or iPad keeps its stream).
     private func followIfOpenedByDevice(_ pid: pid_t) {
+        // Not from the Desktop: a click there brings the clicked app forward, which the Desktop shows.
         guard let side = sideStreams, !connections.isEmpty, side.wholeAppConnections.count == connections.count,
-              pid != ProcessInfo.processInfo.processIdentifier,
+              active != .desktop, pid != ProcessInfo.processInfo.processIdentifier,
               streamedWindowID.flatMap({ catalog.window(id: $0)?.owningApplication?.processID }) != pid else { return }
         followApp = (pid, CFAbsoluteTimeGetCurrent() + Self.followSpan)
         Task { await self.followOpenedApp() }
@@ -2693,9 +2730,9 @@ package final class StreamCoordinator {
 
     // MARK: Catalog to clients
 
-    private func listMessage() -> StreamMessage {
+    private func listMessage(naming source: StreamSource? = nil) -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: source ?? active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
                                                       gestures: TrackpadGesture.generation, middleButton: true,
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,

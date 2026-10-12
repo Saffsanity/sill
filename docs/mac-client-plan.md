@@ -136,10 +136,11 @@ Everything is inside the paired, TLS session; nothing new listens. A device can 
 control the host; what is new is that it can write files into `~/Downloads/From <device>/` (names
 cleaned of `/` and `:`, 512 MB a drop), read files an app on the host is dragging under its own
 pointer, and hear the apps it shows. `SillDockProxy` talks to the viewer over distributed
-notifications, which any local process can post and read, so none carries anything: what an icon
-shows is in a file only this user can read, and a request carries a token Sill Viewer writes there
-(0600) at each launch; one without it is ignored, and a launch is taken only for an app with a Dock
-copy.
+notifications, which any local process can post and read. What an icon shows (window titles, the
+Dock menu) is never in one: it is in a file only this user can read. A request (focus, a window, a
+Dock menu item, launch, close) is signed with an HMAC under a key Sill Viewer writes there (0600) at
+each launch, with a counter that must rise: a watcher sees what was asked but can neither forge nor
+replay a request. A launch is taken only for an app with a Dock copy.
 
 ## Build and run
 
@@ -192,14 +193,16 @@ the new kinds is sent by it, and a host sends it none.
 - Stop Sharing from the host's menu, and an app brought forward on the host, each taking its windows
   back, the viewer closing them and opening them again on request.
 - Sound over AAC-ELD, by hand ("audio streaming is working").
-- The main stream into the right window: focusing between three windows of two apps and opening a
-  new one, screenshots of each window after 1, 3 and 6 s, every picture its own window's.
+- The main stream into the right window, with the router before it was rewritten to follow the
+  host's word: focusing between three windows of two apps and opening a new one, screenshots of each
+  window after 1, 3 and 6 s, every picture its own window's.
 - A scroll over a window in the background reaching its app with the focused window unchanged (the
   host's input counters, and by hand); a Dock badge on the other Mac reaching the viewer within the
   2 s read, and its change.
-- Dock icons: a request without Sill Viewer's token, or with a wrong one, ignored; with it, acted on;
+- Dock icons: a request unsigned, signed with a wrong key, or replayed, ignored; signed, acted on;
   an icon clicked bringing its app's windows forward.
-- Both apps notarized ("Notarized Developer ID"). `Tests/checks/run-all.sh`, all passing.
+- Both apps notarized ("Notarized Developer ID") during development, before the last commits.
+  `Tests/checks/run-all.sh`, all passing at the branch's head; the iOS app built for a device there.
 
 ## Open (by hand, or not done)
 
@@ -215,8 +218,10 @@ the new kinds is sent by it, and a host sends it none.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
 - Spaces gestures were not re-run.
-- Not yet confirmed by hand: a window left by the main stream drawing its side stream at full size
-  (the quarter-size picture's fix), and a closed window's last frame never reaching the next one (the
-  retired pipeline's frames stopped); a real app's badge drawn on its Dock icon here.
+- Not yet confirmed by hand: the rewritten router (the main stream by the host's word, the list now
+  sent before a stream's first frame) with its two fixes, a window left by the main stream drawing its
+  side stream at full size and a closed window's last frame never reaching the next one; a real app's
+  badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad connected
+  (the stream stops, as on main).
 - Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
   separate spike).

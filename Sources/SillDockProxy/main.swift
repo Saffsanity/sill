@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 
 // A Dock icon for one of the other Mac's apps (Sill Viewer's DockProxies): Sill Viewer makes a copy of
 // this app per remote app, named after it, and launches it while that app has a window open there.
@@ -6,7 +7,8 @@ import AppKit
 // app's windows forward in Sill Viewer, and its Dock menu lists them. It talks to Sill Viewer by
 // distributed notifications and quits when told to, or when Sill Viewer goes. A notification carries
 // nothing anyone else could read: Sill Viewer's state for this app is in a file only this user reads
-// (`<slug>.state` beside the copies), and a request carries Sill Viewer's token from there (`token`).
+// (`<slug>.state` beside the copies), and a request is signed with Sill Viewer's key from there
+// (`token`) and carries a counter that must rise, so a watcher can neither forge nor replay one.
 //   SillDockProxy --app <bundle ID> --viewer <pid> [--icon <png>]
 // Kept in the Dock and clicked while Sill Viewer has none of its app's windows, it starts with no
 // arguments: its app is in its Info.plist (SillRemoteApp), it opens Sill Viewer if it is not running
@@ -166,9 +168,22 @@ final class Proxy: NSObject, NSApplicationDelegate {
         // Read each time: Sill Viewer writes a new one at each launch.
         guard let token = try? String(contentsOf: folder.appendingPathComponent("token"), encoding: .utf8) else { return }
         var info = info
-        info["token"] = token
+        // Microseconds since 1970: rises across this icon's launches as well as within one.
+        counter = max(counter + 1, Int64(Date().timeIntervalSince1970 * 1_000_000))
+        info["n"] = String(counter)
+        info["mac"] = Self.mac(app: app, info, key: token)
         DistributedNotificationCenter.default().postNotificationName(Self.actionName, object: app, userInfo: info,
                                                                      deliverImmediately: true)
+    }
+
+    private var counter: Int64 = 0
+
+    /// HMAC-SHA256 of the app and every field but the MAC itself (Sill Viewer's DockRequest.mac).
+    static func mac(app: String, _ info: [String: String], key: String) -> String {
+        let text = ([app] + info.filter { $0.key != "mac" }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
+            .joined(separator: "\n")
+        let code = HMAC<SHA256>.authenticationCode(for: Data(text.utf8), using: SymmetricKey(data: Data(key.utf8)))
+        return code.map { String(format: "%02x", $0) }.joined()
     }
 
     /// Sill Viewer's folder of copies (each in a folder of its own), where the token and the state are.

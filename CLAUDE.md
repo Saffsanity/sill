@@ -34,14 +34,15 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
   on macOS 27.0.1); a full-screen window's display resized live to the viewer window
   (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
-  the shown apps and their helpers, muted on the host, 10 ms PCM, off the main actor), `FileDrops`
+  the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
   goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows always
   go to the desk, never the iPad's Virtual Display staging. Take-back (the menu's Shared Windows,
   Stop Sharing; an app brought forward on the host) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
-  (`OutputSwitch`). Dock icons' requests carry a token Sill Viewer writes at launch (0600).
+  (`OutputSwitch`); the window list naming a new source goes out before its first frame. Dock icons'
+  requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
 - Checks: `mac-keys` (695, 7 mutants), `main-router` (31, 14 mutants), `protocol` 239 with 32
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes

@@ -141,9 +141,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         let router = self.router
         // The Desktop as the window of the display it shows (Self.local), so two displays are two streams.
-        client.onWindowListActive = { [weak client] active, display in
-            let hasDisplays = client.map { !$0.hostDisplays.isEmpty } ?? false
-            router.listed(active: active == .desktop && hasDisplays && display != nil ? .window(DesktopWindow.id(display: display!)) : active)
+        client.onWindowListActive = { active, display in
+            router.listed(active: active == .desktop && display != nil ? .window(DesktopWindow.id(display: display!)) : active)
         }
         let shownPS = client.onParameterSets
         client.onParameterSets = { ps in shownPS?(ps); router.parameterSets(ps) }
@@ -733,7 +732,12 @@ final class DropContainer: NSView {
     override func mouseUp(with event: NSEvent) { input?.mouseUp(with: event) }
 
     override func scrollWheel(with event: NSEvent) {
-        if let input { input.scrollWheel(with: event); return }
+        if let input {
+            // A scroll begun while this window was in the background ends there first.
+            for e in scrollState.finish() { onBackgroundInput?(e) }
+            input.scrollWheel(with: event)
+            return
+        }
         guard let p = pictureFraction(event) else { return }
         for e in scrollState.events(for: event, at: p, picture: bounds.size) { onBackgroundInput?(e) }
     }

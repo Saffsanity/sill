@@ -49,7 +49,10 @@ final class MainRouter: @unchecked Sendable {
     /// `feed` draws `source` (nil: the window closed). Main thread.
     func register(_ source: StreamSource, _ feed: FrameSink?) {
         lock.lock(); defer { lock.unlock() }
-        if let old = feeds[source], old === target { target = nil }
+        if let old = feeds[source] {
+            if old === target { target = nil }
+            sideOwned.remove(ObjectIdentifier(old))   // a new window's feed can take the closed one's address
+        }
         feeds[source] = feed
         // The stream already running for this source: the new window takes it now.
         guard let feed, source == listedSource, begun, target == nil, let ps = lastPS, let frames = gop else { return }
@@ -74,7 +77,7 @@ final class MainRouter: @unchecked Sendable {
         begun = false
     }
 
-    /// Whether the main stream draws into `feed` now.
+    /// Whether the main stream draws into `feed` now (the check's view of the routing).
     func draws(into feed: FrameSink) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return feed === target

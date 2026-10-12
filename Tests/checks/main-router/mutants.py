@@ -4,6 +4,7 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "Sources/MacClient/MainRouter.swift")
 MUTANTS = [
+    ("a closed window keeps its side claim", "            sideOwned.remove(ObjectIdentifier(old))   // a new window's feed can take the closed one's address\n", ""),
     ("side frames on any sets", "let mine = feed !== target && sideOwned.contains(ObjectIdentifier(feed))", "let mine = feed !== target"),
     ("side sets into the main stream's window", "        let mine = feed !== target\n        if mine { sideOwned", "        let mine = true\n        if mine { sideOwned"),
     ("the main stream's sets leave the side's claim", "        if let t = target { sideOwned.remove(ObjectIdentifier(t)) }\n", ""),
@@ -13,7 +14,7 @@ MUTANTS = [
     ("no replay into a window opened late", "        for (data, key) in frames { feed.enqueue(data, isKeyframe: key) }\n", ""),
     ("an old stream replayed into a new window", "guard let feed, source == listedSource, begun, target == nil", "guard let feed, source == listedSource, target == nil"),
     ("a window for another source takes the stream", "guard let feed, source == listedSource, begun, target == nil", "guard let feed, begun, target == nil"),
-    ("a closed window keeps drawing", "        if let old = feeds[source], old === target { target = nil }\n", ""),
+    ("a closed window keeps drawing", "            if old === target { target = nil }\n", ""),
     ("the group kept across keyframes", "        if isKeyframe { gop = []; gopBytes = 0 }\n", ""),
     ("no limit to the group", "if gopBytes > Self.gopLimit {", "if false {"),
     ("reset keeps the windows", "        feeds = [:]; sideOwned", "        sideOwned"),

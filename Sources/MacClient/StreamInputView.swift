@@ -705,10 +705,20 @@ final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Se
 struct ScrollState {
     private var scrolling = false
     private var coasting = false
+    private var last = CGPoint(x: 0.5, y: 0.5)
+
+    /// The end of a gesture or a coast still under way (where it last was), and nothing after.
+    mutating func finish() -> [InputEvent] {
+        var out: [InputEvent] = []
+        if scrolling { out.append(.scrollGesture(.ended, x: Double(last.x), y: Double(last.y))); scrolling = false }
+        if coasting { out.append(.scrollGesture(.momentumEnded, x: Double(last.x), y: Double(last.y))); coasting = false }
+        return out
+    }
 
     /// The events for `event` at `p` (a fraction of a picture of `picture`'s size).
     mutating func events(for event: NSEvent, at p: CGPoint, picture: CGSize) -> [InputEvent] {
         guard picture.width > 0, picture.height > 0 else { return [] }
+        last = p
         let x = Double(p.x), y = Double(p.y)
         var out: [InputEvent] = []
         // A mouse wheel's lines: about what a line scrolls on the Mac.

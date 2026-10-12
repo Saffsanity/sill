@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import ImageIO
 import StreamProtocol
 
@@ -14,8 +15,10 @@ import StreamProtocol
 ///
 /// The two talk by distributed notifications, which any process here can post and read, so none
 /// carries anything: what a Dock icon shows (the window titles, the menu) is in a file only this user
-/// can read (`<slug>.state`), and the notification only says it changed; a Dock icon's request carries
-/// the token Sill Viewer writes there at launch (`token`, 0600), and one without it is ignored.
+/// can read (`<slug>.state`), and the notification only says it changed. A Dock icon's request is
+/// signed: an HMAC of its contents under the key Sill Viewer writes there at each launch (`token`,
+/// 0600), with a counter that must rise, so a process that watches the notifications learns what was
+/// asked (a window's ID, a menu item's title) but can neither forge a request nor replay one.
 final class DockProxies {
     /// An app's windows open here, and its Dock badge on the other Mac.
     struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window]; var badge: String? = nil }
@@ -54,11 +57,16 @@ final class DockProxies {
 
     /// This launch's secret, which a Dock icon's request must carry.
     private let token = UUID().uuidString
+    /// Each app's last request counter, which the next must exceed.
+    private var lastCounter: [String: Int64] = [:]
 
     init() {
         Self.writePrivate(Data(token.utf8), to: Self.folder.appendingPathComponent("token"))
         DistributedNotificationCenter.default().addObserver(forName: Self.actionName, object: nil, queue: .main) { [weak self] note in
-            guard let self, let app = note.object as? String, note.userInfo?["token"] as? String == self.token else { return }
+            guard let self, let app = note.object as? String, let info = note.userInfo as? [String: String],
+                  let n = info["n"].flatMap(Int64.init), n > self.lastCounter[app, default: 0],
+                  let mac = info["mac"], mac == DockRequest.mac(app: app, info, key: self.token) else { return }
+            self.lastCounter[app] = n
             if note.userInfo?["ask"] as? String == "launch" {
                 // Only for an app that has a Dock icon here (one kept in the Dock and clicked).
                 if FileManager.default.fileExists(atPath: Self.folder.appendingPathComponent(Self.slug(app)).path) { self.onLaunch?(app) }
@@ -327,5 +335,16 @@ final class DockProxies {
     private static func png(_ image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
+    }
+}
+
+/// A Dock icon's request, signed (DockProxies): the same code is in SillDockProxy.
+enum DockRequest {
+    /// HMAC-SHA256 of the app and every field but the MAC itself, in a fixed order, as hex.
+    static func mac(app: String, _ info: [String: String], key: String) -> String {
+        let text = ([app] + info.filter { $0.key != "mac" }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
+            .joined(separator: "\n")
+        let code = HMAC<SHA256>.authenticationCode(for: Data(text.utf8), using: SymmetricKey(data: Data(key.utf8)))
+        return code.map { String(format: "%02x", $0) }.joined()
     }
 }

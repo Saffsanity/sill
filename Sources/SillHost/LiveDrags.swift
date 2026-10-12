@@ -168,9 +168,13 @@ final class LiveDrags {
         drag.watchdog?.cancel()
         pendingModifiers[device] = nil
         let rect = rect?(drag.window) ?? .null
-        if !dropped && (drag.began || drag.pressed) {   // the button down: Esc, then up
-            deliver?(.key(hidUsage: 0x29, down: true, modifiers: drag.modifiers), rect, device)
-            deliver?(.key(hidUsage: 0x29, down: false, modifiers: drag.modifiers), rect, device)
+        if !dropped && (drag.began || drag.pressed) {
+            // A drag under way is cancelled (Esc) before the button lets go; a press that never became
+            // one only lets go, with no Esc for whatever app is under it.
+            if drag.began {
+                deliver?(.key(hidUsage: 0x29, down: true, modifiers: drag.modifiers), rect, device)
+                deliver?(.key(hidUsage: 0x29, down: false, modifiers: drag.modifiers), rect, device)
+            }
             deliver?(.pointer(.leftUp, x: min(max(drag.x, 0), 1), y: min(max(drag.y, 0), 1)), rect, device)
         }
         for (bit, usage) in Self.modifierKeys where drag.modifiers & bit != 0 {

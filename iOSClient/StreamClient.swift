@@ -3444,7 +3444,9 @@ final class StreamClient: ObservableObject {
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
-            onWindowListActive?(list.active, list.desktopDisplay)   // in the stream's own order (the Mac client's router)
+            // In the stream's own order (the Mac client's router); the Desktop's display only from a host
+            // that lists its displays, read from this list (hostDisplays is set later, on main).
+            onWindowListActive?(list.active, list.displays?.isEmpty == false ? list.desktopDisplay : nil)
             let from = connection
             DispatchQueue.main.async {
                 // Only from the current connection: a list queued by a replaced one must not
