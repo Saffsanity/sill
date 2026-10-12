@@ -246,8 +246,12 @@ final class WindowCatalog {
             // windows of regular apps only: apps keep many untitled windows they never show.
             let regular = Set(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map(\.processIdentifier))
             let shown = Set(content.windows.map(\.windowID))
+            // Not a window kept above every display, where no one could see it (a chat app's hidden
+            // "Microsoft a chat app" helper at y -360, 2026-10-12): an app's own off-screen trick, not a window.
+            let top = content.displays.map { CGDisplayBounds($0.displayID).minY }.min() ?? 0
             elsewhere = all.windows.filter { w in
-                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, let app = w.owningApplication else { return false }
+                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, let app = w.owningApplication,
+                      w.frame.minY >= top else { return false }
                 return regular.contains(app.processID)
             }
         }

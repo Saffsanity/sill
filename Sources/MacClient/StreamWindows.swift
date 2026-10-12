@@ -306,7 +306,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
                                                               state: state))
         }
         for (app, windows) in byApp {
-            let name = client.windows.first { $0.bundleID == app }?.appName ?? app
+            // The window's app name, else the installed app's (a window of another Space can come
+            // with none), never the bundle ID if either is known.
+            let name = [client.windows.first { $0.bundleID == app && !$0.appName.isEmpty }?.appName,
+                        client.apps.first { $0.bundleID == app }?.name].compactMap { $0 }.first ?? app
             apps[app] = DockProxies.AppWindows(name: name, icon: client.icons[app], windows: windows.sorted { $0.title < $1.title })
         }
         dock.sync(apps)

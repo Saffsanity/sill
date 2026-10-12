@@ -1571,7 +1571,7 @@ package final class StreamCoordinator {
                     let pill = SharePill()
                     await pill.start(w)
                     mainPill = pill
-                } else if sideStreams?.wholeApp == true, let crop = await AppCrop.crop(for: w, frame: place) {
+                } else if sideStreams?.wholeApp == true, w.isOnScreen, let crop = await AppCrop.crop(for: w, frame: place) {
                     filter = crop.filter
                     cropRect = crop.sourceRect
                     mainCropFrame = crop.frame

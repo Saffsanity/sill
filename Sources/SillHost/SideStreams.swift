@@ -201,7 +201,9 @@ final class SideStreams {
                     try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
                                                    fps: fps, showsCursor: false)
                 }
-            } else if wholeApp, let crop = await AppCrop.crop(for: w) {
+            } else if wholeApp, w.isOnScreen, let crop = await AppCrop.crop(for: w) {
+                // On screen only: cropped from its display, a window in another Space showed what
+                // lay there instead (other apps' windows), not itself.
                 stream.cropFrame = crop.frame
                 let pill = SharePill()
                 await pill.start(w)

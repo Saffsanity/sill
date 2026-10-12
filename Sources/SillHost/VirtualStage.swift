@@ -359,6 +359,12 @@ final class VirtualStage {
         // unauthorized process once a virtual display exists, so never create one without it.
         guard AXIsProcessTrusted() else { throw Failure.accessibilityOff }
         guard CGPreflightScreenCaptureAccess() else { throw Failure.screenRecordingOff }
+        // A picked window in another Space (another desktop): its app is brought forward, which shows
+        // that Space, so the window can be moved from it (a move across Spaces does nothing).
+        if mayReachOtherSpace, !window.isOnScreen, placement?.windowID != window.windowID,
+           !(sizer.placement(for: window).map { Self.isMinimized($0.element) } ?? false) {   // minimized: the Dock, not a Space
+            await bringIntoView(window)
+        }
         var p: WindowSizer.Placement
         if let current = placement, current.windowID == window.windowID {
             p = current                                       // same window: keep its original frame
@@ -368,6 +374,18 @@ final class VirtualStage {
             p = found
         } else {
             throw Failure.axWindowNotFound
+        }
+
+        // Minimized: out of the Dock first, or it never shows on the display (a move does nothing
+        // to it, and the window list does not list it: "the window vanished", 2026-10-12).
+        // It goes back to the Dock when it goes home.
+        if p.windowID != stagedID, Self.isMinimized(p.element) {
+            AXUIElementSetAttributeValue(p.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            for _ in 0..<15 where Self.isMinimized(p.element) || WindowSizer.liveBounds(of: p.windowID) == nil {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .milliseconds(300))   // the genie's way out
+            minimizedAtHome.insert(p.windowID)
         }
 
         // (3) A→B: A goes home first; the display stays for B.
@@ -816,6 +834,9 @@ final class VirtualStage {
         let placedID = stagedID   // `placement` is cleared below
         if let p = placement {
             let ok = sizer.restore(p)
+            if minimizedAtHome.remove(p.windowID) != nil {
+                AXUIElementSetAttributeValue(p.element, kAXMinimizedAttribute as CFString, kCFBooleanTrue)   // back in the Dock
+            }
             print(ok ? "Restored \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame))"
                      : "Could not restore \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame)); it is on a real display but not where it was")
             Stats.shared.bump("vd.restored")
@@ -883,7 +904,40 @@ final class VirtualStage {
     /// Only for the window a device picked (the main stream), never a side stream's: bringing an app
     /// forward changes what the person at this Mac sees (DeskStages sets it per prepare).
     var mayReachOtherSpace = false
+    /// Windows that were minimized before they came to the display: minimized again going home.
+    private var minimizedAtHome: Set<CGWindowID> = []
+    private static func isMinimized(_ e: AXUIElement) -> Bool {
+        var v: CFTypeRef?
+        return AXUIElementCopyAttributeValue(e, kAXMinimizedAttribute as CFString, &v) == .success && (v as? Bool) == true
+    }
     private static var reachedFor: [CGWindowID: Date] = [:]
+
+    /// The window's app forward, waiting (1.5 s at most) for the window to be on screen.
+    private func bringIntoView(_ window: SCWindow) async {
+        guard let pid = window.owningApplication?.processID else { return }
+        if let last = Self.reachedFor[window.windowID], Date().timeIntervalSince(last) < 60 { return }
+        Self.reachedFor[window.windowID] = Date()
+        print("\(window.owningApplication?.applicationName ?? "?") — \(window.title ?? ""): in another Space; bringing its app forward to reach it")
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        for _ in 0..<15 {
+            try? await Task.sleep(for: .milliseconds(100))
+            let onScreen = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
+                .contains { ($0[kCGWindowNumber as String] as? CGWindowID) == window.windowID }
+            if onScreen {
+                try? await Task.sleep(for: .milliseconds(300))   // the Space's slide done
+                // Full screen there (a Space of its own, left behind by a quit): out of it first,
+                // or it cannot be moved.
+                if let p = sizer.placement(for: window), WindowSizer.isFullScreen(p.element) {
+                    _ = WindowSizer.perform(.fullScreen, element: p.element)
+                    let deadline = Date().addingTimeInterval(3)
+                    while Date() < deadline, WindowSizer.isFullScreen(p.element) { try? await Task.sleep(for: .milliseconds(100)) }
+                    try? await Task.sleep(for: .milliseconds(800))
+                }
+                return
+            }
+        }
+    }
 
     /// A window Accessibility does not list (it lists only the windows of the Space shown): a window
     /// left full screen in a Space of its own on another display (a host quit before it left). Its
