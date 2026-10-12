@@ -41,10 +41,13 @@ menu item.
   to its window), each as a borderless window with the WindowPill handle, the status item, the remote
   app's menus in the menu bar, a Dock icon per remote app (SillDockProxy copies), clipboard text and
   images both ways (kind 32), and windows restored after a restart. Sill's desk (`DeskStages`): the
-  windows the viewer shows live on ONE hidden virtual display that all share (this Mac keeps one virtual
-  display online at a time: a second took the first offline, measured with a probe), made once per
-  launch at 120 Hz, 3792×2160 pt at 2× or, for a viewer screen wider than that, at 1× up to 7616 px
-  (7680 has no mode at either scale on macOS 27.0.1); background windows captured alone, the focused
+  windows the viewer shows each live on a hidden virtual display of their own, made at 120 Hz at the
+  viewer's largest screen (3792×2160 pt at 2×, or at 1× up to 7616 px for a wider one: 7680 has no mode
+  at either scale on macOS 27.0.1), each with its own identity from a pool (product 0x100 + slot, a
+  serial kept per slot in the defaults): two displays with one vendor and product are one monitor to
+  macOS, which took the older offline (what first looked like a one-display limit). A full-screen
+  window's display takes the viewer window's size live (`VirtualDisplay.resize`, the same display),
+  so its Space fills that window and covers no other; background windows captured alone, the focused
   one cropped from the display with its app (AppCrop) and its share pill (SharePill). Sound (kind 33,
   `AppAudio`): a CoreAudio process tap of the shown apps and their helpers, muted on the host
   (`mutedWhenTapped`), 10 ms 16-bit PCM packets, played by the viewer's `AudioPlayer` (Play Sound in the
@@ -57,8 +60,8 @@ menu item.
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK` (DuoPostureReader's 27.1 hinge API left out). Verified: the
   two-Mac flip test (`-SillFlipTest`), the resize test (`-SillResizeTest`), a drop (`-SillDropTest`),
   audio packets and the host's mute in coreaudiod's log, an iPhone 16 Pro Max session against a test
-  host, all checks. **Untested:** drags out to the laptop's Finder and Trash by hand, full screen in a
-  streamed window (it takes over the shared display: the next step).
+  host, all checks; by hand: a drag out onto the laptop's Trash (the host's file went to its Trash), the
+  iPhone paired. **Untested:** full screen fitted to the viewer window (by hand: YouTube in a browser).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then

@@ -147,11 +147,6 @@ final class VirtualStage {
     private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
-    /// Sill's desk: the stage that owns the one display every desk window shares (DeskStages). This
-    /// Mac keeps one virtual display online at a time: a second one made took the first offline
-    /// and its window went home (measured 2026-10-12, macOS 27.0.1), so the desk's windows share
-    /// one. A stage with a host borrows its display and never makes or destroys one.
-    weak var host: VirtualStage?
     /// The display's scale: 2 (Retina) unless the desk's room is wider or taller than a 2× display
     /// can be on this Mac, then 1 (an ultrawide at 1×, 5120 points, would need 10,240 pixels at 2×;
     /// macOS made no mode for 7,680 or more). A 1× desk renders what a 1× screen shows anyway.
@@ -190,6 +185,11 @@ final class VirtualStage {
     /// vendor, product and serial, and on macOS 27.0.1 (26A434) has been seen refusing one whose
     /// earlier display was not torn down.
     var serial: UInt32 = VirtualStage.serialNum
+    /// The display's product ID. Every display Sill keeps at once needs its own identity: two with
+    /// the same vendor and product were one monitor to macOS, which took the older offline when the
+    /// newer came (a probe of 2026-10-12; with distinct IDs three stayed online together). Sill's
+    /// desk gives each window's display one from a pool (DeskStages).
+    var productID: UInt32 = VirtualStage.productID
     /// Every serial a display of this run has had: macOS refuses one again once its display is gone.
     static var usedSerials: Set<UInt32> = []
     /// A serial no display of this run has had.
@@ -205,6 +205,21 @@ final class VirtualStage {
     }
 
     var isStaged: Bool { display != nil && placement != nil }
+
+    /// Full screen on its own display (Sill's desk): the display takes `fit`, the size of the
+    /// device's window, so the full-screen Space fills that window and no more; back to the size it
+    /// was made at once the window leaves full screen. True when the display changed size.
+    func fitFullScreen(to fit: CGSize?) -> Bool {
+        guard let d = display, d.isAlive, let p = placement else { return false }
+        let full = WindowSizer.isFullScreen(p.element)
+        let w = full ? Int((fit?.width ?? CGFloat(d.madeWidthPt)).rounded()) : d.madeWidthPt
+        let h = full ? Int((fit?.height ?? CGFloat(d.madeHeightPt)).rounded()) : d.madeHeightPt
+        let w2 = min(max(w, 320), d.madeWidthPt), h2 = min(max(h, 240), d.madeHeightPt)
+        guard w2 != d.widthPt || h2 != d.heightPt, d.resize(widthPt: w2, heightPt: h2) else { return false }
+        print(full ? "\(p.appName) — \(p.title) is full screen: its display now \(w2)×\(h2) pt, the device's window"
+                   : "\(p.appName) — \(p.title) left full screen: its display back to \(w2)×\(h2) pt")
+        return true
+    }
 
     /// True when `windowID` is the staged window and `size` is what was last asked for it (±2 pt),
     /// so a repeated viewport needs no restart. Compared against the asked size, not the size the
@@ -561,14 +576,6 @@ final class VirtualStage {
     /// so one grown to an app's minimum is not grown a second time after a rate change. Throws
     /// with the display destroyed if it never came up or SCK never saw it.
     private func ensureDisplay(atLeast env: CGSize) async throws {
-        if let host {
-            try await host.ensureShared()
-            display = host.display
-            scDisplay = host.scDisplay
-            menuInset = host.menuInset
-            insetMeasured = true
-            return
-        }
         var env = displayScale == 1 ? env : Self.clamp(env)
         if displayScale == 1 {   // 1× (Sill's desk on an ultrawide): up to 7680 points a side
             env = CGSize(width: min(max(env.width, Self.minSide), Self.maxSide1x),
@@ -596,7 +603,7 @@ final class VirtualStage {
         do {
             func make(_ serial: UInt32) throws -> VirtualDisplay {
                 try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: displayScale,
-                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: serial)
+                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: productID, serialNum: serial)
             }
             do {
                 d = try make(serial)
@@ -684,11 +691,11 @@ final class VirtualStage {
         print("Virtual display \(id) was mirrored; made a screen of its own (\(err == .success ? "done" : "error \(err.rawValue)")).")
     }
 
-    /// The desk's shared display, made once at its largest and at 120 Hz, so no window's size or
-    /// rate ever makes it again (each new display moves every window on it home and back).
+    /// A desk window's display (DeskStages), made once at the room's size and at 120 Hz, so no
+    /// resize or rate change makes it again (each new display moves the window home and back).
     func ensureShared() async throws {
-        // One at a time: the picked window and a side stream ask together, and two creations at
-        // once each made a display, the second destroying the first under its window.
+        // One at a time: the picked window and its side stream can ask together, and two creations
+        // at once each made a display, the second destroying the first under its window.
         if let running = sharedMaking {
             try? await running.value
             if display?.isAlive == true, scDisplay != nil { return }   // made by the other caller
@@ -804,7 +811,6 @@ final class VirtualStage {
     /// Removes the display. Call `releaseWindow()` first while both displays exist, so the window
     /// goes exactly where it was instead of wherever the window server dumps it.
     func destroyDisplay() {
-        if host != nil { display = nil; scDisplay = nil; return }   // the desk's display is its host's
         if let d = display {
             let id = d.displayID
             display = nil

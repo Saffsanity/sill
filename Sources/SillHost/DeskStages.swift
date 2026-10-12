@@ -28,22 +28,25 @@ final class DeskStages {
     }
 
     var staged: Set<UInt32> { Set(stages.keys) }
-    /// The desk display's scale: what a desk window's capture is at most (a 1× desk on an ultrawide).
-    var scale: CGFloat { CGFloat(shared.displayScale) }
-    /// The one display every desk window shares (VirtualStage.host): this Mac keeps one virtual
-    /// display online at a time, so a display per window took the last one offline and sent its
-    /// window home. Made with the first window, gone with the last.
-    private lazy var shared: VirtualStage = {
-        let s = VirtualStage(sizer: sizer, catalog: catalog)
-        s.serial = VirtualStage.freshSerial()
-        // The window server took it away (sleep): every window on it is on some real display now.
-        s.onLost = { [weak self] in
-            guard let self else { return }
-            for (_, stage) in self.stages { stage.releaseWindow() }
-            self.stages.removeAll()
-        }
-        return s
-    }()
+
+    /// What a window's capture is at most: its display's scale (1× for a room wider than a 2×
+    /// display can be: an ultrawide's).
+    func scale(for id: UInt32) -> CGFloat { CGFloat(stages[id]?.displayScale ?? 2) }
+
+    /// The display identities in use, by window: product IDs 0x100… with a serial kept for each, so
+    /// a slot is the same monitor to macOS every time (it remembers "Extended" for it).
+    private var slots: [UInt32: Int] = [:]
+    nonisolated static let maxWindows = 16
+
+    private func freeSlot() -> Int? { (0..<Self.maxWindows).first { s in !slots.values.contains(s) } }
+
+    private static func serial(forSlot slot: Int) -> UInt32 {
+        let key = "SillDeskSerial\(slot)"
+        if let kept = UserDefaults.standard.object(forKey: key) as? Int, kept > 0 { return UInt32(kept) }
+        let made = UInt32.random(in: 100_000...9_999_999)
+        UserDefaults.standard.set(Int(made), forKey: key)
+        return made
+    }
 
     /// Puts `window` on its desk display at `size` (points), or keeps it there, and returns what to
     /// capture: the filter, the crop in the display's points, and the output size in points. `fps`
@@ -56,22 +59,28 @@ final class DeskStages {
         // A window closing or minimizing can report a size of nothing: never a display for it.
         guard size.width >= 32, size.height >= 32 else { throw TooSmall(size: size) }
         let id = window.windowID
-        let existing = stages[id]
-        let stage = existing ?? VirtualStage(sizer: sizer, catalog: catalog)
-        stage.host = shared
-        if let room { shared.deskRoom = CGSize(width: max(room.width, shared.deskRoom?.width ?? 0), height: max(room.height, shared.deskRoom?.height ?? 0)) }
-        stages[id] = stage
-        let rate = fps ?? 60   // the shared display's own rate is 120 whatever this is
-        try await shared.ensureShared()   // first: its scale caps the capture's
-        let captureScale = min(captureScale, scale)
-        stage.onLost = { [weak self] in self?.stages[id] = nil }   // the window is home already
+        let stage: VirtualStage
+        if let existing = stages[id] { stage = existing } else {
+            guard let slot = freeSlot() else { throw TooMany() }
+            stage = VirtualStage(sizer: sizer, catalog: catalog)
+            stage.productID = 0x100 + UInt32(slot)
+            stage.serial = Self.serial(forSlot: slot)
+            slots[id] = slot
+            stages[id] = stage
+        }
+        if let room { stage.deskRoom = CGSize(width: max(room.width, stage.deskRoom?.width ?? 0), height: max(room.height, stage.deskRoom?.height ?? 0)) }
+        // Its own display, made once at the room's size and 120 Hz, so neither a resize nor a rate
+        // change makes it again, and a full-screen Space there covers this window's display alone.
+        do { try await stage.ensureShared() } catch { stage.release(); forget(id); throw error }
+        let captureScale = min(captureScale, CGFloat(stage.displayScale))
+        stage.onLost = { [weak self] in self?.forget(id) }   // the window is home already
         let envelope = Self.envelope(for: CGSize(width: max(size.width, room?.width ?? 0), height: max(size.height, room?.height ?? 0)))
         let prepared: VirtualStage.Prepared
         do {
-            prepared = try await stage.prepare(window: window, wanted: size, envelope: envelope, captureScale: captureScale, refreshHz: rate)
+            prepared = try await stage.prepare(window: window, wanted: size, envelope: envelope, captureScale: captureScale, refreshHz: 120)
         } catch {
             stage.release()
-            stages[id] = nil
+            forget(id)
             throw error
         }
         var filter = prepared.filter
@@ -80,6 +89,14 @@ final class DeskStages {
             filter = AppCrop.filter(display: display, owner: owner.processID, applications: content.applications)
         }
         return (filter, prepared.sourceRect, prepared.outputSize ?? prepared.sourceRect.size)
+    }
+
+    /// A full-screen window's display fitted to the device's window (`VirtualStage.fitFullScreen`);
+    /// true when it changed, after a moment for the app to lay its full screen out again.
+    func fitFullScreen(_ id: UInt32, to fit: CGSize?) async -> Bool {
+        guard let stage = stages[id], stage.fitFullScreen(to: fit) else { return false }
+        try? await Task.sleep(for: .milliseconds(400))
+        return true
     }
 
     /// Where the window's picture is on screen, for input (nil when it is not on the desk).
@@ -94,9 +111,17 @@ final class DeskStages {
     }
 
     func release(_ id: UInt32) {
-        stages.removeValue(forKey: id)?.release()
-        // The display stays until Sill quits: each new one is a new screen to macOS, which asks what
-        // to show on it ("What do you want to show on Sill?") and may mirror the main screen there.
+        stages[id]?.release()   // the window home, its display gone (its identity kept for the next)
+        forget(id)
+    }
+
+    private func forget(_ id: UInt32) {
+        stages[id] = nil
+        slots[id] = nil
+    }
+
+    struct TooMany: Error, CustomStringConvertible {
+        var description: String { "Sill's desk holds \(DeskStages.maxWindows) windows at most" }
     }
 
     func releaseAll() {

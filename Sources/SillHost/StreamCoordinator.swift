@@ -1472,6 +1472,8 @@ package final class StreamCoordinator {
                 let place = Self.liveBounds(of: id).map { CGRect(origin: $0.origin, size: resized ?? $0.size) }
                 var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
                 if toDesk {
+                    // Full screen on its own display: that display at the device's window's size.
+                    _ = await desk.fitFullScreen(id, to: viewport.map { CGSize(width: $0.width, height: $0.height) })
                     do {
                         let own = Self.liveBounds(of: id)?.size ?? w.frame.size
                         staged = try await desk.prepare(w, size: viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own),
@@ -1502,7 +1504,7 @@ package final class StreamCoordinator {
                 }
             }
             // Sill's desk at 1× (an ultrawide's room) is captured at 1×: its pixels are its points.
-            let windowScale = desk.captureRect(for: id) != nil ? min(captureScale, desk.scale) : captureScale
+            let windowScale = desk.captureRect(for: id) != nil ? min(captureScale, desk.scale(for: id)) : captureScale
             width = evenPixels(size.width * windowScale); height = evenPixels(size.height * windowScale)
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.

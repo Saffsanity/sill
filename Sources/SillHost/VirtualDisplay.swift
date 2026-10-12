@@ -76,8 +76,11 @@ final class VirtualDisplay {
     }
 
     let name: String
-    let widthPt: Int
-    let heightPt: Int
+    private(set) var widthPt: Int
+    private(set) var heightPt: Int
+    /// The size the display was made at: its ceiling (its maxPixels), which `resize` never passes.
+    let madeWidthPt: Int
+    let madeHeightPt: Int
     let scale: Int
     let refreshHz: Double
     let vendorID: UInt32
@@ -126,6 +129,7 @@ final class VirtualDisplay {
         self.name = name
         self.widthPt = widthPt
         self.heightPt = heightPt
+        self.madeWidthPt = widthPt; self.madeHeightPt = heightPt
         self.scale = scale
         self.refreshHz = refreshHz
         self.vendorID = vendorID
@@ -210,6 +214,22 @@ final class VirtualDisplay {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return hasRequestedMode
+    }
+
+    /// Gives the display one mode of `widthPt`×`heightPt` points, live: the display and its ID stay,
+    /// and what is on it is laid out again, as when a person picks another resolution. At most the
+    /// size it was made at. False when macOS refuses it (the size it had stays).
+    @discardableResult
+    func resize(widthPt w: Int, heightPt h: Int) -> Bool {
+        guard let object, w >= 320, h >= 240, w <= madeWidthPt, h <= madeHeightPt else { return false }
+        guard let mode = try? Runtime.newMode(width: UInt32(w), height: UInt32(h), refreshRate: refreshHz),
+              let settings = try? Runtime.newObject("CGVirtualDisplaySettings") else { return false }
+        try? Runtime.setUInt32(settings, "setHiDPI:", scale == 2 ? 1 : 0)
+        try? Runtime.setObject(settings, "setModes:", [mode] as NSArray)
+        guard (try? Runtime.applySettings(object, settings)) == true else { return false }
+        widthPt = w; heightPt = h
+        selectRequestedMode()
+        return true
     }
 
     /// Picks the mode whose point size and pixel size match the request. Public API.

@@ -192,8 +192,8 @@ final class SideStreams {
                 // so another window of its app on top never shows in it. Window capture shows the
                 // system's share pill by itself.
                 try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
-                                               width: evenPixels(staged.size.width * min(s.scale, desk()?.scale ?? s.scale)),
-                                               height: evenPixels(staged.size.height * min(s.scale, desk()?.scale ?? s.scale)), fps: fps, showsCursor: false)
+                                               width: evenPixels(staged.size.width * min(s.scale, desk()?.scale(for: id) ?? s.scale)),
+                                               height: evenPixels(staged.size.height * min(s.scale, desk()?.scale(for: id) ?? s.scale)), fps: fps, showsCursor: false)
             } else if wholeApp, let crop = await AppCrop.crop(for: w) {
                 stream.cropFrame = crop.frame
                 let pill = SharePill()
