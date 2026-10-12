@@ -22,14 +22,22 @@ viewer window, and the host's windows kept on hidden displays while they are sho
   app's menus (read when they open, chosen on the host). A Dock icon per remote app
   (`SillDockProxy`, an ad hoc signed copy per app, talking over distributed notifications) groups
   its windows: its icon is the remote app's with Sill Viewer's in the corner, its Dock menu lists
-  the windows open here (✓ the front one), and kept in the Dock it opens that
-  app's windows from the other Mac again when clicked (Sill Viewer opened if need be, the app
-  launched there when it has none).
+  the windows open here (✓ the front one) and the app's own Dock menu items from the other Mac
+  (Finder's New Finder Window, a mail app's New Message), its badge is the app's badge there, and
+  kept in the Dock it opens that app's windows from the other Mac again when clicked (Sill Viewer
+  opened if need be, the app launched there when it has none). Quitting it closes those windows here.
+- A window in the background here takes a scroll and a hover without coming forward, as on a Mac; a
+  click brings it forward. An app the viewer's own action opens on the other Mac (a document from a
+  mail, a link) opens here by itself. Each of the other Mac's displays can be shown as a Desktop
+  window of its own, and Finder is listed among the apps.
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›
   Devices). While a viewer shows a window, that window lives on a hidden virtual display of its own
   ("Sill's desk"), so it is never covered, never limited by the host's own screens, and the person
   at the host keeps their desk. Windows go back where they were when the viewer closes them,
-  disconnects or quits, and when Sill quits.
+  disconnects or quits, and when Sill quits. The host's menu lists the windows a Mac viewer shows
+  (Shared Windows), each with Stop Sharing; and bringing a shared app forward on the host (its Dock
+  icon, ⌘Tab) takes its windows back, home and in front, while the viewer may open them again. Both
+  only while every connected device is a Mac viewer: an iPhone or iPad keeps its stream.
 
 ## The wire (all additive; StreamMessage.swift, SideStreams.swift)
 
@@ -39,17 +47,26 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 | 29 `sideStreams` | device → host | `SideStreamRequest`: the other windows shown, `wholeApp`, the device's largest screen, `audio` | the list says `sideStreams` |
 | 30, 31 | host → device | a side window's parameter sets and frames, prefixed by its window ID | asked by 29 |
 | 32 `clipboard` | both | `Clipboard`: text and image (PNG or JPEG) | the list says `clipboard`; the host sends only to a device that asked |
-| 33 `audio` | host → device | `AudioPacket`: ~10 ms of 16-bit PCM | `audio: true` in 29 and the list says `audio` |
+| 8, with `window` | device → host | `WindowInput`: a scroll or a hover over a window shown beside the streamed one, which stays in the background | the list says `windowInput` |
+| 33 `audio` | host → device | `AudioPacket`: ~10 ms of 16-bit PCM, or an AAC-ELD packet (`audioCodec` "aac-eld" in 29) | `audio: true` in 29 and the list says `audio` |
 | 34 `fileChunk` | both | `FileChunk`: a part of a file (≤ 512 KB) | the list says `fileDrop` |
 | 35 `fileDrop` | device → host | `FileDrop`: drop those files at a point; or, with `offer`, the host's own files from a drag offer; `window` names the target | the list says `fileDrop` |
 | 36 `dragOffer` | host → device | `DragOffer`: files an app is dragging under that device's held button | the device holds the button over the stream |
 | 37 `fileRequest` | device → host | `FileRequest`: one offered file, back as kind 34; `trash` moves it to the host's Trash instead | the offer was made to that device |
 | 38 `liveDrag` | device → host | `LiveDrag`: a drag of files over the host's windows, followed as it goes (`start`, `files`, `move`, `drop`, `cancel`; the window, the point, the modifier keys) | the list says `liveDrag` |
+| 39 `dockMenu` | both | `DockMenu`: an app's own Dock menu on the host, asked for and one item pressed | the list says `dockMenu` |
+| 40 `pickDisplay` | device → host | `PickDisplay`: which of the host's displays the Desktop is | the list names its `displays` |
+| 41 `takenBack` | host → device | `TakenBack`: windows the person at the host took back; the device closes its windows of them | only to a Mac viewer |
+| 2 (`WindowList.badges`) | host → device | each listed app's Dock badge, by bundle ID | while a Mac viewer is connected |
+
+A window ID can name one of the host's displays (`DesktopWindow`: the display ID with the top bit
+set), so a Desktop window has its side stream, drops and take-back like any other.
 
 Every field added to an existing payload is optional, and a host or device from before skips the
 new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
-`protocol` (round-trips and refusals of every new payload, 221 checks, 28 mutants), `compatibility`,
-`menus` and `pointer-control` know kinds 29–38.
+`protocol` (round-trips and refusals of every new payload, 239 checks, 32 mutants), `compatibility`,
+`menus` and `pointer-control` know kinds 29–41 (42 unknown); `main-router` (31 checks, 14 mutants)
+holds the viewer's routing of the main and side streams.
 
 ## Sill's desk (DeskStages, VirtualStage)
 
@@ -119,8 +136,10 @@ Everything is inside the paired, TLS session; nothing new listens. A device can 
 control the host; what is new is that it can write files into `~/Downloads/From <device>/` (names
 cleaned of `/` and `:`, 512 MB a drop), read files an app on the host is dragging under its own
 pointer, and hear the apps it shows. `SillDockProxy` talks to the viewer over distributed
-notifications, which any local process as the same user can post: at worst it focuses or closes a
-proxy icon.
+notifications, which any local process can post and read, so none carries anything: what an icon
+shows is in a file only this user can read, and a request carries a token Sill Viewer writes there
+(0600) at each launch; one without it is ignored, and a launch is taken only for an app with a Dock
+copy.
 
 ## Build and run
 
@@ -146,11 +165,11 @@ TrackpadGestures, TourPolicy, PhonePortraitLayout, DuoPosture, AwayCopy, SillLin
 one source of truth, compiled by SwiftPM for macOS and by Xcode for iOS, the pure checks' paths
 unchanged. Two files are new and shared by both apps: `ClientPlatform.swift` (the few platform calls
 the session makes) and `HEVCSampleFeed.swift` (the decoding half of the old HEVCDisplayView). The
-iOS-only DEBUG hooks are behind `#if canImport(UIKit)`. Verified: an iPhone 16 Pro Max session (53–57
-fps, rtt 7–8 ms) with the shared code; the iOS app's only build errors on Xcode 27.0 are main's, in
-the 27.1-only DuoPostureReader.
+iOS-only DEBUG hooks are behind `#if canImport(UIKit)`. The iOS app builds for a device from the
+branch's head (Xcode 27.0, `-D SILL_NO_DUO_SDK`, only the old StreamClient capture warning); none of
+the new kinds is sent by it, and a host sends it none.
 
-## Verified (2026-10-12; host this Mac, viewer a MacBook Pro over the LAN)
+## Verified (2026-10-12; two Macs on one LAN, each a host and a viewer of the other)
 
 - Pairing, a pinned reconnect, every input kind as the right host event (`-SillInputTest`, the
   host's input log), real hands: clicks, right and middle clicks, drags, hover, scrolling, typing,
@@ -166,6 +185,20 @@ the 27.1-only DuoPostureReader.
   highlighting as for a drag on the host, the file referenced at its own path; one carried out to the
   laptop was given up on the host and sent across; two of the laptop's files dropped on the remote
   chat app's window arrived and were taken. Two Finder windows of one size keep their own pictures.
+- Both directions at once, with no input loop and no endless mirror (a viewer's own windows are
+  never offered, and input its own host posted is never sent back).
+- Each display as a Desktop window of its own; Finder listed and opened; an app's own Dock menu item
+  pressed on the other Mac; Dock icons named after their apps, with the app's icon badged.
+- Stop Sharing from the host's menu, and an app brought forward on the host, each taking its windows
+  back, the viewer closing them and opening them again on request.
+- Sound over AAC-ELD, by hand ("audio streaming is working").
+- The main stream into the right window: focusing between three windows of two apps and opening a
+  new one, screenshots of each window after 1, 3 and 6 s, every picture its own window's.
+- A scroll over a window in the background reaching its app with the focused window unchanged (the
+  host's input counters, and by hand); a Dock badge on the other Mac reaching the viewer within the
+  2 s read, and its change.
+- Dock icons: a request without Sill Viewer's token, or with a wrong one, ignored; with it, acted on;
+  an icon clicked bringing its app's windows forward.
 - Both apps notarized ("Notarized Developer ID"). `Tests/checks/run-all.sh`, all passing.
 
 ## Open (by hand, or not done)
@@ -182,3 +215,8 @@ the 27.1-only DuoPostureReader.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
 - Spaces gestures were not re-run.
+- Not yet confirmed by hand: a window left by the main stream drawing its side stream at full size
+  (the quarter-size picture's fix), and a closed window's last frame never reaching the next one (the
+  retired pipeline's frames stopped); a real app's badge drawn on its Dock icon here.
+- Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
+  separate spike).

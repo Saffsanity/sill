@@ -15,11 +15,19 @@ open).** A macOS client (`Sources/MacClient`, product `SillClient`, `Scripts/mak
 (`Sources/MacClient/Shared/` symlinks; `iOSClient/ClientPlatform.swift` and `HEVCSampleFeed.swift`
 new and shared). Each host window a borderless window here at 1:1 with a pill for this Mac's
 controls; the others live at 15 fps (side streams); the remote app's menus in the menu bar; Sill's
-controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`); windows restored
-after a restart and new windows of open apps opened by themselves.
+controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`: its windows, the
+app's own Dock menu items and its badge from the other Mac); windows restored after a restart and
+new windows of open apps opened by themselves, as is an app the viewer's own action opens there; a
+scroll or hover reaches a window in the background without bringing it forward; each display a
+Desktop window. The main stream goes to the window of the source the host last listed, decided in
+stream order (`MainRouter`), and a side stream only after its own parameter sets.
 - Wire, additive and gated by window-list flags: the middle button (kind 8, `middleButton`), side
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
-  `fileDrop`), a drag followed live (38, `liveDrag`). The iOS app sends none of them.
+  `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
+  Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), input to a
+  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), AAC-ELD
+  sound (kind 33, `audioCodec`). A window ID with the top bit set is a display (`DesktopWindow`).
+  The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
   of its own with its own identity taken as needed while they fit in a quarter of its memory (two displays with one vendor and product ID
   are one monitor to macOS, which took the older offline: not a one-display limit), made once at
@@ -30,14 +38,18 @@ after a restart and new windows of open apps opened by themselves.
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
   goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows always
-  go to the desk, never the iPad's Virtual Display staging.
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (21, 12 mutants), `protocol` 221 with 28
+  go to the desk, never the iPad's Virtual Display staging. Take-back (the menu's Shared Windows,
+  Stop Sharing; an app brought forward on the host) and following an app a device opened run only
+  while every device is a Mac viewer. A retired pipeline's frames stop at the switch
+  (`OutputSwitch`). Dock icons' requests carry a token Sill Viewer writes at launch (0600).
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (31, 14 mutants), `protocol` 239 with 32
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
-- Verified between this Mac and a MacBook Pro on the same network, and an iPhone 16 Pro Max against a
-  test host: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
-  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host).
+- Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
+  built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
+  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the side stream and
+  retired-pipeline fixes and a real badge by hand; notifications and Dock bounces a separate spike).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
