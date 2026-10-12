@@ -170,6 +170,17 @@ final class InputInjector {
     // MARK: Pointer
 
     private func pointer(_ action: PointerAction, at location: CGPoint) {
+        // A press while another button is still down here: that button's up never came (lost on the
+        // way, or let go of in a menu this Mac drew), and every move since was its drag, every click
+        // after it read as that button's (2026-10-12: left clicks acting as right clicks until
+        // the next right click). A mouse has let go of it by now: so does this Mac, first.
+        if action.isButtonDown {
+            for (stale, held) in [(PointerAction.leftUp, left.isDown), (.rightUp, right.isDown), (.middleUp, middle.isDown)]
+            where held && stale != Self.up(of: action) {
+                print("Input: \(stale.rawValue.replacingOccurrences(of: "Up", with: "")) button was still down at a \(action.rawValue); let go of it first")
+                pointer(stale, at: lastPointerLocation)
+            }
+        }
         let type: CGEventType
         let button: CGMouseButton
         var clicks: Int64 = 1
@@ -210,6 +221,15 @@ final class InputInjector {
         watch?.sillMoved(to: location)   // before the post (see `watch`); a dry run moves the scripted pointer
         lastPointerLocation = location
         if post(event) { Stats.shared.bump("in.pointer") }
+    }
+
+    private static func up(of down: PointerAction) -> PointerAction {
+        switch down {
+        case .leftDown: return .leftUp
+        case .rightDown: return .rightUp
+        case .middleDown: return .middleUp
+        default: return down
+        }
     }
 
     /// Whether this input is the up of a key or a button the Mac has down, which still goes when the
