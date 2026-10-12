@@ -121,6 +121,8 @@ final class WindowCatalog {
     /// server drops them onto a real display when a virtual display goes away.
     static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
         (w.title ?? "").lowercased().contains("layerprobe")
+            // Sill Viewer's windows (and its Dock icons') show other Macs: never offered to a device.
+            || (w.owningApplication?.bundleIdentifier ?? "").hasPrefix("me.saffer.sill.client")
     }
 
     /// Window list and thumbnails, while a client is connected.
