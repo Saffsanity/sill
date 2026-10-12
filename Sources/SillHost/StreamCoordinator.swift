@@ -163,6 +163,15 @@ package final class StreamCoordinator {
     private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32])] = [:]
     private var appAudio: AnyObject?
     private lazy var fileDrops = FileDrops()
+    private lazy var liveDrags: LiveDrags = {
+        let l = LiveDrags(fileDrops: fileDrops)
+        l.deliver = { [unowned self] event, rect, device in self.deliver(event, in: rect, from: device) }
+        l.rect = { [unowned self] window in self.dropRect(window) }
+        l.ownDragEnded = { [unowned self] device in
+            if let connection = self.connections[device] { self.dragOut.buttonUp(connection) }
+        }
+        return l
+    }()
     /// The streamed desk window going into or out of full screen, seen within a quarter second (the
     /// catalog's poll is 2 s): it is placed again at once, its display fitted to the device's window.
     private var fullScreenWatch: Timer?
@@ -452,6 +461,7 @@ package final class StreamCoordinator {
                 self.sideStreams?.clientLeft(connection)
                 if self.audioWanted.removeValue(forKey: id) != nil { self.updateAudio() }
                 self.fileDrops.clientLeft(connection)
+                self.liveDrags.clientLeft(id)
                 self.dragOut.clientLeft(connection)
                 self.clipboard?.clientLeft(connection)
                 self.releaseKeys(of: id)
@@ -1123,8 +1133,7 @@ package final class StreamCoordinator {
         case .fileDrop:
             guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload) else { return }
             // In the window it names (one shown beside the streamed one), else the streamed one.
-            let target: CGRect? = d.window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
-            guard let rect = target else { return }
+            guard let rect = dropRect(d.window) else { return }
             let x = min(max(d.x, 0), 1), y = min(max(d.y, 0), 1)
             let point = CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
             if let offer = d.offer {
@@ -1135,6 +1144,9 @@ package final class StreamCoordinator {
             } else {
                 fileDrops.drop(d, at: point, device: deviceName(connection))
             }
+        case .liveDrag:
+            guard !synthetic, let d = Wire.decode(LiveDrag.self, from: message.payload) else { return }
+            liveDrags.handle(d, from: ObjectIdentifier(connection), name: deviceName(connection))
         case .clipboard:
             guard let clip = Wire.decode(Clipboard.self, from: message.payload) else { return }
             if clipboard == nil { clipboard = HostClipboard(server: server, dryRun: synthetic) }
@@ -1145,6 +1157,12 @@ package final class StreamCoordinator {
     }
 
     // MARK: Where input lands
+
+    /// A window's rectangle for a drop or a drag over it: one shown beside the streamed one (on its
+    /// desk display, else where it is), else (nil) the streamed one.
+    private func dropRect(_ window: UInt32?) -> CGRect? {
+        window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
+    }
 
     /// The active source's rectangle on screen, in CG global points (top-left origin), which is
     /// what the injector maps the client's fractions onto. Nil when nothing is streaming, so
@@ -2441,7 +2459,8 @@ package final class StreamCoordinator {
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
                                                       gestures: TrackpadGesture.generation, middleButton: true,
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,
-                                                      audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true)))
+                                                      audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
+                                                      liveDrag: synthetic ? nil : true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

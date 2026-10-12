@@ -163,7 +163,7 @@ check(!json(list).contains("gestures"), "a list without them leaves the key out:
 check(decodedOld != nil && decodedOld?.gestures == nil, "an older host's list decodes, gestures nil")
 check(Wire.decode(WindowList.self, from: Wire.encode(takes))?.gestures == 1, "gestures round-trips")
 check(StreamMessageKind.gesture.rawValue == 28 && StreamMessageKind(rawValue: 28) == .gesture, "kind 28 is gesture")
-check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 38) == nil, "27 is the menus' fetch, 38 not this build's")
+check(StreamMessageKind(rawValue: 27) == .fetchMenu && StreamMessageKind(rawValue: 39) == nil, "27 is the menus' fetch, 39 not this build's")
 // The Mac client's side streams and clipboard (2026-10-12), after the gesture's 28.
 check(StreamMessageKind(rawValue: 29) == .sideStreams && StreamMessageKind(rawValue: 30) == .sideParameterSets
       && StreamMessageKind(rawValue: 31) == .sideFrame && StreamMessageKind(rawValue: 32) == .clipboard, "29–32: side streams and the clipboard")

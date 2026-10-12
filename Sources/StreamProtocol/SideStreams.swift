@@ -117,6 +117,37 @@ public struct FileDrop: Codable, Hashable, Sendable {
     }
 }
 
+/// A drag of files over the host's windows, followed as it goes (kind 38), so the app under the pointer
+/// takes it as a drag of its own: it shows where the files would land, and the modifier keys choose
+/// what a drop does (Finder: move, ⌥ copy, ⌥⌘ alias). One drag is one `id`, in phases:
+/// - `start`: the drag came over a window of the host. With `offer`, the files are the host's own (a
+///   drag out of one of its windows, whose button the host still holds); without, the device's own,
+///   sent as kind 34 parts.
+/// - `files`: those parts have all been sent (`files`, `folders` as kind 35's): the host starts its
+///   drag of them under the pointer.
+/// - `move`: the pointer over a window (`window`, or the streamed one), `modifiers` as InputEvent's.
+/// - `drop`: let go there. `cancel`: the drag ended elsewhere, or was given up (the host lets go of its
+///   own with Esc, and removes the copies it received).
+/// Phases a host does not know are ignored; the device keeps sending moves only while the drag is over
+/// one of the host's windows.
+public struct LiveDrag: Codable, Hashable, Sendable {
+    public var id: UInt32
+    public var phase: String
+    public var window: UInt32?
+    public var x: Double
+    public var y: Double
+    public var modifiers: UInt64?
+    public var offer: UInt32?
+    public var files: [UInt32]?
+    public var folders: [UInt32]?
+    public init(id: UInt32, phase: String, window: UInt32? = nil, x: Double = 0, y: Double = 0, modifiers: UInt64? = nil,
+                offer: UInt32? = nil, files: [UInt32]? = nil, folders: [UInt32]? = nil) {
+        self.id = id; self.phase = phase; self.window = window; self.x = x; self.y = y; self.modifiers = modifiers
+        self.offer = offer; self.files = files; self.folders = folders
+    }
+    public static let start = "start", filesSent = "files", move = "move", drop = "drop", cancel = "cancel"
+}
+
 /// What an app on the host is dragging under a device's held button (kind 36): files, by name and
 /// size, the device may carry on dragging on its own Mac and ask for when they are dropped there.
 public struct DragOffer: Codable, Hashable, Sendable {

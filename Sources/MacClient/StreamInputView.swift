@@ -36,6 +36,13 @@ final class StreamInputView: NSView {
     var dragOffer: DragOffer?
     /// The files of the drag out under way (for a drop on the Trash).
     var outgoing: [FilePromises.Promise] = []
+    /// The drag followed live on the other Mac (kind 38), when it takes that (StreamWindows sets it).
+    var live: LiveDrop?
+    /// The other Mac's window this view shows: nil for the Desktop (the streamed source).
+    var sourceWindowID: UInt32? {
+        if let w = window as? StreamWindow, case .window(let id) = w.source { return id }
+        return nil
+    }
     private var rightDown = false
     private var middleDown = false
     /// A scroll gesture under way (began sent, ended not), and its momentum.
@@ -460,24 +467,29 @@ struct StreamViewRepresentable: NSViewRepresentable {
 /// dropped where they were let go (kind 35), and the app there takes them as a drop. Folders are
 /// left out. Only to a Mac that takes them (`hostFileDrop`).
 extension StreamInputView {
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { acceptsDrop(sender) ? .copy : [] }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { acceptsDrop(sender) ? .copy : [] }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragOver(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragOver(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { if let sender { live?.exited(sender) } }
+
+    /// Followed live where the other Mac takes that (LiveDrop): this Mac's files, or its own carried
+    /// back over its window; else only this Mac's files, dropped where they are let go.
+    private func dragOver(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let live, live.enabled {
+            return live.over(sender, window: sourceWindowID, at: display.fraction(of: convert(sender.draggingLocation, from: nil), clamped: true) ?? .zero)
+        }
+        return acceptsDrop(sender) ? .copy : []
+    }
 
     private func acceptsDrop(_ sender: NSDraggingInfo) -> Bool {
-        client.hostFileDrop && client.connected && !files(sender).isEmpty
+        client.hostFileDrop && client.connected && !LiveDrop.files(sender).isEmpty
             && display.fraction(of: convert(sender.draggingLocation, from: nil)) != nil
     }
 
-    private func files(_ sender: NSDraggingInfo) -> [URL] {
-        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { url in   // files and folders (a folder goes zipped)
-            let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-            return v?.isRegularFile == true || v?.isDirectory == true
-        }
-    }
-
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = files(sender)
+        if let live, live.enabled {
+            return live.drop(sender, window: sourceWindowID, at: display.fraction(of: convert(sender.draggingLocation, from: nil), clamped: true) ?? .zero)
+        }
+        let urls = LiveDrop.files(sender)
         guard client.hostFileDrop, !urls.isEmpty, let at = display.fraction(of: convert(sender.draggingLocation, from: nil)) else { return false }
         Self.send(urls, at: at, client: client)
         return true
@@ -486,36 +498,43 @@ extension StreamInputView {
     /// The files' parts, then the drop at `at` (a fraction of the picture). Off the main thread.
     static func send(_ urls: [URL], at: CGPoint, client: StreamClient, window: UInt32? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
-            var ids: [UInt32] = []
-            var folders: [UInt32] = []
-            var total: UInt64 = 0
-            for original in urls {
-                // A folder goes as one zip (FolderZip), unpacked on the other Mac; the zip removed after.
-                let isFolder = (try? original.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                guard let url = isFolder ? FolderZip.zip(original) : original else { continue }
-                defer { if isFolder { try? FileManager.default.removeItem(at: url) } }
-                guard let handle = try? FileHandle(forReadingFrom: url),
-                      let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(UInt64.init),
-                      total + size <= FileChunk.maxTotal else { continue }
-                total += size
-                let id = UInt32.random(in: 1...UInt32.max)
-                if isFolder { folders.append(id) }
-                let name = isFolder ? original.lastPathComponent + ".zip" : url.lastPathComponent
-                var offset: UInt64 = 0
-                repeat {
-                    let bytes = (try? handle.read(upToCount: FileChunk.maxBytes)) ?? Data()
-                    client.send(.fileChunk, payload: FileChunk.pack(id: id, name: name, total: size, offset: offset, bytes: bytes))
-                    offset += UInt64(bytes.count)
-                    if bytes.isEmpty { break }
-                } while offset < size
-                try? handle.close()
-                ids.append(id)
-            }
+            let (ids, folders, total) = upload(urls, client: client)
             guard !ids.isEmpty else { return }
             client.send(.fileDrop, payload: Wire.encode(FileDrop(files: ids, x: Double(at.x), y: Double(at.y), window: window,
                                                                   folders: folders.isEmpty ? nil : folders)))
             print("files: dropped \(ids.count) at \(at), \(total) bytes")
         }
+    }
+
+    /// Each file in parts (kind 34), a folder as one zip (FolderZip, unpacked on the other Mac, the
+    /// zip removed here after): their IDs, those of the folders, and the bytes sent. Blocks: call it
+    /// off the main thread.
+    static func upload(_ urls: [URL], client: StreamClient) -> (ids: [UInt32], folders: [UInt32], total: UInt64) {
+        var ids: [UInt32] = []
+        var folders: [UInt32] = []
+        var total: UInt64 = 0
+        for original in urls {
+            let isFolder = (try? original.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            guard let url = isFolder ? FolderZip.zip(original) : original else { continue }
+            defer { if isFolder { try? FileManager.default.removeItem(at: url) } }
+            guard let handle = try? FileHandle(forReadingFrom: url),
+                  let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(UInt64.init),
+                  total + size <= FileChunk.maxTotal else { continue }
+            total += size
+            let id = UInt32.random(in: 1...UInt32.max)
+            if isFolder { folders.append(id) }
+            let name = isFolder ? original.lastPathComponent + ".zip" : url.lastPathComponent
+            var offset: UInt64 = 0
+            repeat {
+                let bytes = (try? handle.read(upToCount: FileChunk.maxBytes)) ?? Data()
+                client.send(.fileChunk, payload: FileChunk.pack(id: id, name: name, total: size, offset: offset, bytes: bytes))
+                offset += UInt64(bytes.count)
+                if bytes.isEmpty { break }
+            } while offset < size
+            try? handle.close()
+            ids.append(id)
+        }
+        return (ids, folders, total)
     }
 }
 
@@ -536,9 +555,15 @@ extension StreamInputView: NSDraggingSource {
     func dragOut(_ offer: DragOffer, event: NSEvent, last: CGPoint) {
         dragOffer = nil
         leftDown = false
-        forward(.keyDown, keyCode: 53, flags: [], isRepeat: false, via: "drag out")
-        forward(.keyUp, keyCode: 53, flags: [], isRepeat: false, via: "drag out")
-        send(.leftUp, last)
+        if let live, live.enabled {
+            // The other Mac's drag goes on, its button held: over a Sill window the pointer there follows
+            // (LiveDrop), and only a drag that ends elsewhere gives it up there.
+            live.startOwn(offer: offer.id, window: sourceWindowID, at: last)
+        } else {
+            forward(.keyDown, keyCode: 53, flags: [], isRepeat: false, via: "drag out")
+            forward(.keyUp, keyCode: 53, flags: [], isRepeat: false, via: "drag out")
+            send(.leftUp, last)
+        }
         let promises = FilePromises.shared
         let items = offer.files.enumerated().map { index, file -> NSDraggingItem in
             let type = file.folder == true ? UTType.folder : (UTType(filenameExtension: (file.name as NSString).pathExtension) ?? .data)
@@ -558,12 +583,13 @@ extension StreamInputView: NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         // Outside: Finder copies, the Dock's Trash deletes. Inside: another Sill window, where the
-        // other Mac drops its own files (StreamWindows.dropped); none here kept them from it.
+        // other Mac drops its own files (LiveDrop, or StreamWindows.dropped); none here kept them from it.
         context == .outsideApplication ? [.copy, .delete] : [.copy, .move, .generic]
     }
 
     /// Dropped on the Trash: the files go to the other Mac's Trash, as dragging them to its own would.
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        live?.ownEnded()   // not let go on a Sill window: the other Mac gives its own drag up
         guard operation == .delete else { return }
         for promise in outgoing {
             promise.client.send(.fileRequest, payload: Wire.encode(FileRequest(offer: promise.offer, index: promise.index, transfer: 0, trash: true)))

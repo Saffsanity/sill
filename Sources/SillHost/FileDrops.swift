@@ -56,32 +56,24 @@ final class FileDrops: NSObject {
 
     /// The files of `drop`, all here, dropped at `point` (global, top-left origin).
     func drop(_ drop: FileDrop, at point: CGPoint, device: String) {
-        let folders = Set(drop.folders ?? [])
-        let urls = drop.files.compactMap { id -> URL? in
+        let urls = received(drop.files, folders: drop.folders ?? [])
+        guard !urls.isEmpty else { print("File drop from \(device): no file arrived whole; nothing dropped"); return }
+        self.drop(urls, at: point, device: device)
+    }
+
+    /// The files `ids` that have arrived whole, taken (each once); those of `folders` unpacked.
+    func received(_ ids: [UInt32], folders: [UInt32]) -> [URL] {
+        let folders = Set(folders)
+        return ids.compactMap { id -> URL? in
             guard let url = done.removeValue(forKey: id) else { return nil }
             return folders.contains(id) ? Self.unpack(url) : url
         }
-        guard !urls.isEmpty else { print("File drop from \(device): no file arrived whole; nothing dropped"); return }
-        self.drop(urls, at: point, device: device)
     }
 
     /// `urls` dragged from `point` and let go there: the app under it takes them as a drop.
     func drop(_ urls: [URL], at point: CGPoint, device: String) {
         print("File drop from \(device): \(urls.map(\.lastPathComponent).joined(separator: ", ")) at \(Int(point.x)),\(Int(point.y))")
-        pending = urls
-        // A panel of Sill's under the drop point takes the press that starts the drag.
-        let screenH = NSScreen.screens.first?.frame.height ?? 0
-        let p = NSPanel(contentRect: NSRect(x: point.x - 4, y: screenH - point.y - 4, width: 8, height: 8),
-                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.level = .screenSaver
-        p.isOpaque = false
-        p.backgroundColor = NSColor.black.withAlphaComponent(0.01)
-        p.hidesOnDeactivate = false
-        let view = DragStart(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
-        view.onPress = { [weak self] event in self?.begin(from: view, event: event) }
-        p.contentView = view
-        p.orderFrontRegardless()
-        panel = p
+        showPanel(for: urls, at: point)
         // Press, move a little (the drag starts), back onto the point, let go: the app there takes the drop.
         let source = CGEventSource(stateID: .hidSystemState)
         func post(_ type: CGEventType, _ at: CGPoint, after: Double) {
@@ -96,7 +88,32 @@ final class FileDrops: NSObject {
         post(.leftMouseDragged, CGPoint(x: point.x + 2, y: point.y + 2), after: 0.4)
         post(.leftMouseDragged, point, after: 0.55)
         post(.leftMouseUp, point, after: 0.75)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.panel?.close(); self?.panel = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.hidePanel() }
+    }
+
+    /// A panel of Sill's under `point` that starts a drag of `urls` at the press posted there (LiveDrags
+    /// and `drop` post it). It never activates Sill.
+    func showPanel(for urls: [URL], at point: CGPoint) {
+        hidePanel()
+        pending = urls
+        let screenH = NSScreen.screens.first?.frame.height ?? 0
+        let p = NSPanel(contentRect: NSRect(x: point.x - 4, y: screenH - point.y - 4, width: 8, height: 8),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.level = .screenSaver
+        p.isOpaque = false
+        p.backgroundColor = NSColor.black.withAlphaComponent(0.01)
+        p.hidesOnDeactivate = false
+        let view = DragStart(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        view.onPress = { [weak self] event in self?.begin(from: view, event: event) }
+        p.contentView = view
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    /// The panel out of the way: once the drag is under way, the app under it is the drag's target.
+    func hidePanel() {
+        panel?.close()
+        panel = nil
     }
 
     private func begin(from view: NSView, event: NSEvent) {

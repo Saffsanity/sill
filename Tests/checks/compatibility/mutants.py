@@ -26,9 +26,9 @@ MUTANTS = [
     ("fingers 3 by default", "Gesture.swift", "public init(gesture: String, fingers: Int? = nil) {", "public init(gesture: String, fingers: Int? = 3) {"),
     ("a name misspelt", "Gesture.swift", 'public static let swipeLeft = "swipeLeft"', 'public static let swipeLeft = "swipeleft"'),
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
-    ("kind 28 as 38", "StreamMessage.swift", "case gesture = 28", "case gesture = 38"),
+    ("kind 28 as 39", "StreamMessage.swift", "case gesture = 28", "case gesture = 39"),
     ("side streams' window ID little-endian", "SideStreams.swift", "d.appendBigEndian(window)", "d.appendBigEndian(window.byteSwapped)"),
-    ("the clipboard at 38", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 38"),
+    ("the clipboard at 39", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 39"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
 ]
 caught = 0

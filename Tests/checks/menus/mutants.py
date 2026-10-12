@@ -11,7 +11,7 @@ PATHS = {
 }
 MUTANTS = [
     # The wire (MacMenu.swift, StreamMessage.swift)
-    ("the fetch at 38", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 38"),
+    ("the fetch at 39", "StreamMessage.swift", "case fetchMenu = 27", "case fetchMenu = 39"),
     ("stale set from pressed", "MacMenu.swift", "self.pressed = pressed; self.stale = stale", "self.pressed = pressed; self.stale = pressed"),
     ("a press's token dropped", "MacMenu.swift", "own titles.\n    public var title: String?\n    public var token: Int?\n\n    public init(version: Int? = nil, id: String? = nil, title: String? = nil, token: Int? = nil) {\n        self.version = version; self.id = id; self.title = title; self.token = token",
      "own titles.\n    public var title: String?\n    public var token: Int?\n\n    public init(version: Int? = nil, id: String? = nil, title: String? = nil, token: Int? = nil) {\n        self.version = version; self.id = id; self.title = title; self.token = nil"),

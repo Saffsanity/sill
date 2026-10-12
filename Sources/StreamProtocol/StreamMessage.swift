@@ -84,6 +84,9 @@ public enum StreamMessageKind: UInt8 {
     case dragOffer = 36      // host → device: JSON DragOffer — the files an app here is dragging under this device's
                              // held button (empty: the drag ended), so a drag out of the window can carry them
     case fileRequest = 37    // device → host: JSON FileRequest — one file of an offer, sent back as kind 34
+    case liveDrag = 38       // device → host: JSON LiveDrag — a drag of files over the host's windows, followed live
+                             // (the host's own drag held, or one it starts with files sent); only to a host whose
+                             // list says `liveDrag`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

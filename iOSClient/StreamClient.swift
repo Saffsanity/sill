@@ -746,6 +746,8 @@ final class StreamClient: ObservableObject {
     @Published var hostAudio = false
     /// Whether this session's Mac takes files dropped on its windows (kinds 34, 35); false before 2026-10-12.
     @Published var hostFileDrop = false
+    /// Whether the Mac follows a drag of files over its windows as it goes (`WindowList.liveDrag`, kind 38).
+    @Published var hostLiveDrag = false
     /// The side streams this device shows (kind 29), sent again on each new connection. Main thread.
     private(set) var sideRequest: SideStreamRequest?
     /// The session moved to a new connection (a better path, or home): what the Mac keeps per
@@ -2909,6 +2911,7 @@ final class StreamClient: ObservableObject {
         hostClipboard = false
         hostAudio = false
         hostFileDrop = false
+        hostLiveDrag = false
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3419,6 +3422,7 @@ final class StreamClient: ObservableObject {
                 if self.hostClipboard != (list.clipboard == true) { self.hostClipboard = list.clipboard == true }
                 if self.hostAudio != (list.audio == true) { self.hostAudio = list.audio == true }
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
+                if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG

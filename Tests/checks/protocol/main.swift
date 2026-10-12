@@ -366,8 +366,8 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 unknown (skipped)",
-      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .unknown)
+check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 unknown (skipped)",
+      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -500,6 +500,17 @@ do {
     let fr = FileRequest(offer: 9, index: 0, transfer: 3, trash: true)
     check("file request: JSON round-trip with trash", Wire.decode(FileRequest.self, from: Wire.encode(fr)).map { $0 == fr && $0.trash == true } == true)
     check("file request: without trash it is a fetch", Wire.decode(FileRequest.self, from: Data(#"{"offer":1,"index":0,"transfer":2}"#.utf8))?.trash == nil)
+    let live = LiveDrag(id: 4, phase: LiveDrag.move, window: 77, x: 0.25, y: 0.5, modifiers: 1 << 19)
+    check("live drag: JSON round-trip of a move", Wire.decode(LiveDrag.self, from: Wire.encode(live)) == live)
+    let started = LiveDrag(id: 5, phase: LiveDrag.start, offer: 9)
+    check("live drag: a start of the host's own files carries the offer", Wire.decode(LiveDrag.self, from: Wire.encode(started))?.offer == 9)
+    let sent = LiveDrag(id: 6, phase: LiveDrag.filesSent, files: [1, 2], folders: [2])
+    check("live drag: the files sent, folders among them", Wire.decode(LiveDrag.self, from: Wire.encode(sent)).map { $0.files == [1, 2] && $0.folders == [2] } == true)
+    check("live drag: a cancel needs only its id and phase", Wire.decode(LiveDrag.self, from: Data(#"{"id":7,"phase":"cancel","x":0,"y":0}"#.utf8)).map { $0.phase == LiveDrag.cancel && $0.window == nil && $0.offer == nil } == true)
+    check("live drag: an unknown phase still decodes (the host ignores it)", Wire.decode(LiveDrag.self, from: Data(#"{"id":8,"phase":"later","x":0,"y":0}"#.utf8))?.phase == "later")
+    let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)
+    check("live drag: the list's flag round-trips; absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(liveList))?.liveDrag == true
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.liveDrag == nil)
     // A folder as one file: zipped and unpacked whole (a nested file, a symbolic link, the top folder's name).
     let fm = FileManager.default
     let base = fm.temporaryDirectory.appendingPathComponent("sill-check-\(UUID().uuidString)")

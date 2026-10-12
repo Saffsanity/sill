@@ -23,7 +23,13 @@ func windowLog(_ line: @autoclosure () -> String) {
 
 final class StreamWindows: NSObject, NSWindowDelegate {
     private let client: StreamClient
-    private(set) lazy var input = StreamInputView(client: client)
+    private(set) lazy var input: StreamInputView = {
+        let view = StreamInputView(client: client)
+        view.live = live
+        return view
+    }()
+    /// A drag of files followed live on the other Mac (kind 38).
+    private lazy var live = LiveDrop(client: client)
     private var open: [StreamSource: StreamWindow] = [:]
     /// The window whose stream the picture shows, once the host has switched to it.
     private var showing: StreamSource?
@@ -187,7 +193,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         let window = StreamWindow(source: source, size: initialSize(source))
         window.delegate = self
         if case .window(let id) = source {
-            window.container.accepts = { [weak self] info in self?.acceptsDrop(info) ?? false }
+            window.container.over = { [weak self] info, at in self?.dragOver(info, at: at, window: id) ?? [] }
+            window.container.exited = { [weak self] info in self?.live.exited(info) }
             window.container.onDrop = { [weak self] info, at in self?.dropped(info, at: at, window: id) ?? false }
         }
         window.title = title(source)
@@ -213,6 +220,12 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
     // MARK: Drops on a window shown beside the streamed one
 
+    /// Followed live on a Mac that takes that (LiveDrop), else only accepted for a drop where let go.
+    private func dragOver(_ info: NSDraggingInfo, at: CGPoint, window: UInt32) -> NSDragOperation {
+        if live.enabled { return live.over(info, window: window, at: at) }
+        return acceptsDrop(info) ? .copy : []
+    }
+
     private func acceptsDrop(_ info: NSDraggingInfo) -> Bool {
         guard client.hostFileDrop, client.connected else { return false }
         let ok = info.draggingSource is StreamInputView ? !input.outgoing.isEmpty : !droppedFiles(info).isEmpty
@@ -221,17 +234,14 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     }
 
     private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
-        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { url in   // files and folders (a folder goes zipped)
-            let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-            return v?.isRegularFile == true || v?.isDirectory == true
-        }
+        LiveDrop.files(info)
     }
 
     /// Files from this Mac go across and are dropped there; the other Mac's own files, dragged out of
     /// one of its windows, are dropped from where they are, nothing copied either way.
     private func dropped(_ info: NSDraggingInfo, at: CGPoint, window: UInt32) -> Bool {
         windowLog("drop: let go on window \(window) at \(at)")
+        if live.enabled { return live.drop(info, window: window, at: at) }
         guard client.hostFileDrop else { return false }
         if info.draggingSource is StreamInputView {
             let own = input.outgoing
@@ -560,7 +570,9 @@ final class SideView: NSView {
 /// takes them first), as the point they were let go at, a fraction of the picture from its top left.
 final class DropContainer: NSView {
     var onDrop: ((NSDraggingInfo, CGPoint) -> Bool)?
-    var accepts: ((NSDraggingInfo) -> Bool)?
+    /// What a drop would do at that point (a fraction of the picture from its top left).
+    var over: ((NSDraggingInfo, CGPoint) -> NSDragOperation)?
+    var exited: ((NSDraggingInfo) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -568,12 +580,17 @@ final class DropContainer: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { accepts?(sender) == true ? .copy : [] }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { accepts?(sender) == true ? .copy : [] }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { at(sender).flatMap { over?(sender, $0) } ?? [] }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { at(sender).flatMap { over?(sender, $0) } ?? [] }
+    override func draggingExited(_ sender: NSDraggingInfo?) { if let sender { exited?(sender) } }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let p = at(sender) else { return false }
+        return onDrop?(sender, p) ?? false
+    }
+    private func at(_ sender: NSDraggingInfo) -> CGPoint? {
         let p = convert(sender.draggingLocation, from: nil)
-        guard bounds.width > 0, bounds.height > 0 else { return false }
-        return onDrop?(sender, CGPoint(x: p.x / bounds.width, y: 1 - p.y / bounds.height)) ?? false
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        return CGPoint(x: min(max(p.x / bounds.width, 0), 1), y: min(max(1 - p.y / bounds.height, 0), 1))
     }
 }
 

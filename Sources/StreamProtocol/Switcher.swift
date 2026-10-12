@@ -65,14 +65,19 @@ public struct WindowList: Codable {
     public var audio: Bool?
     /// True: this host takes files dropped on its windows (kinds 34 and 35). Nil before 2026-10-12.
     public var fileDrop: Bool?
+    /// True: this host follows a drag of files over its windows as it goes (kind 38, LiveDrag), so the app
+    /// under the pointer shows where they would land and the modifier keys choose move, copy or alias.
+    /// Nil before 2026-10-12, to which a device sends no kind 38 and drops only where it lets go (kind 35).
+    public var liveDrag: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
-                sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil) {
+                sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
+                liveDrag: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
-        self.audio = audio; self.fileDrop = fileDrop
+        self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
     }
 }
 
