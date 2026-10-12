@@ -462,5 +462,47 @@ check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs)
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
+// The Mac client's payloads (2026-10-12; SideStreams.swift): kinds 29–37, each round-trips and
+// rejects what it should.
+do {
+    let packed = SideStreamRequest.pack(window: 0xDEAD_BEEF, Data([1, 2, 3]))
+    let un = SideStreamRequest.unpack(packed)
+    check("side stream: the window ID and the rest round-trip", un?.window == 0xDEAD_BEEF && un?.payload == Data([1, 2, 3]))
+    check("side stream: under 4 bytes is nothing", SideStreamRequest.unpack(Data([1, 2])) == nil)
+    let req = SideStreamRequest(windows: [7, 9], fps: 15, wholeApp: true, screen: [5120, 1440], audio: true)
+    check("side stream request: JSON round-trip with audio", Wire.decode(SideStreamRequest.self, from: Wire.encode(req)) == req)
+    check("side stream request: an older device's JSON (no audio) decodes",
+          Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1]}"#.utf8))?.audio == nil)
+
+    let samples: [Int16] = [0, 1, -1, 32767, -32768, 1234]
+    let audio = samples.withUnsafeBufferPointer { AudioPacket.pack(sampleRate: 48_000, channels: 2, samples: $0) }
+    let a = AudioPacket.unpack(audio)
+    check("audio: rate, channels and samples round-trip", a?.sampleRate == 48_000 && a?.channels == 2 && a?.samples == samples)
+    check("audio: an odd sample count for stereo is refused", AudioPacket.unpack(audio.dropLast(2)) == nil)
+    var badRate = audio; badRate[0] = 0xFF
+    check("audio: a sample rate out of range is refused", AudioPacket.unpack(badRate) == nil)
+    check("audio: a header alone is a packet of no samples", AudioPacket.unpack(audio.prefix(5))?.samples.isEmpty == true)
+
+    let chunk = FileChunk.pack(id: 42, name: "Résumé ✓.pdf", total: 1_000_000, offset: 524_288, bytes: Data([9, 8, 7]))
+    let c = FileChunk.unpack(chunk)
+    check("file chunk: id, name, total, offset and bytes round-trip",
+          c?.id == 42 && c?.name == "Résumé ✓.pdf" && c?.total == 1_000_000 && c?.offset == 524_288 && c?.bytes == Data([9, 8, 7]))
+    check("file chunk: cut inside the name is refused", FileChunk.unpack(chunk.prefix(10)) == nil)
+    check("file chunk: a part is under the host's 1 MB limit for a device's message", FileChunk.maxBytes + 2_048 < 1_000_000)
+    let long = FileChunk.unpack(FileChunk.pack(id: 1, name: String(repeating: "a", count: 5_000), total: 0, offset: 0, bytes: Data()))
+    check("file chunk: a name is cut at 1,024 bytes", long?.name.utf8.count == 1_024)
+
+    let drop = FileDrop(files: [1, 2], x: 0.25, y: 0.75, offer: 5, window: 77)
+    check("file drop: JSON round-trip with an offer and a window", Wire.decode(FileDrop.self, from: Wire.encode(drop)) == drop)
+    check("file drop: a drop of this Mac's files has neither", Wire.decode(FileDrop.self, from: Data(#"{"files":[3],"x":0.5,"y":0.5}"#.utf8)).map { $0.offer == nil && $0.window == nil } == true)
+    let offer = DragOffer(id: 9, files: [.init(name: "a.txt", size: 12)])
+    check("drag offer: JSON round-trip", Wire.decode(DragOffer.self, from: Wire.encode(offer)) == offer)
+    let fr = FileRequest(offer: 9, index: 0, transfer: 3, trash: true)
+    check("file request: JSON round-trip with trash", Wire.decode(FileRequest.self, from: Wire.encode(fr)).map { $0 == fr && $0.trash == true } == true)
+    check("file request: without trash it is a fetch", Wire.decode(FileRequest.self, from: Data(#"{"offer":1,"index":0,"transfer":2}"#.utf8))?.trash == nil)
+    let clip = Clipboard(text: "hi", image: nil)
+    check("clipboard: JSON round-trip", Wire.decode(Clipboard.self, from: Wire.encode(clip)) == clip)
+}
+
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

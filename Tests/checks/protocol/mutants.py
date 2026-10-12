@@ -4,6 +4,11 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("audio packet without the channel byte", "SideStreams.swift", "        d.append(channels)\n", ""),
+    ("audio packet takes a stereo half sample", "SideStreams.swift", "body.count % (2 * channels) == 0", "body.count % 2 == 0"),
+    ("file chunk offset read from the total", "SideStreams.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),
+    ("file chunk name uncapped", "SideStreams.swift", "name.utf8.prefix(1024)", "name.utf8.prefix(100_000)"),
+    ("file request drops trash", "SideStreams.swift", "self.transfer = transfer; self.trash = trash", "self.transfer = transfer; self.trash = nil"),
     ("Damm table entry swapped", "Pairing.swift", "[7, 0, 9, 2, 1, 5, 4, 8, 6, 3]", "[7, 0, 9, 2, 1, 5, 4, 8, 3, 6]"),
     ("typed-code check digit ignored", "Pairing.swift", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) == 0", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) >= 0"),
     ("proof_D label changed", "Pairing.swift", 'Data("\\(label) device".utf8)', 'Data("\\(label) devices".utf8)'),

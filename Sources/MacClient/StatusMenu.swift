@@ -149,11 +149,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(toggle("Prioritize Encoding Speed", s.prioritizeSpeed) { [weak self] in
             self?.client.changeSettings(HostSettingsChange(prioritizeSpeed: !s.prioritizeSpeed))
         })
-        if client.settings.host?.virtualDisplayAvailable == true || s.virtualDisplay {
-            menu.addItem(toggle("Virtual Display", s.virtualDisplay) { [weak self] in
-                self?.client.changeSettings(HostSettingsChange(virtualDisplay: !s.virtualDisplay))
-            })
-        }
+        // No Virtual Display item: the iPad's staging of the one streamed window. This viewer's windows
+        // always live on Sill's desk, a display of their own each, whatever that setting says.
         if let direct = s.directWireless {
             menu.addItem(toggle("Direct Wireless Connection", direct) { [weak self] in
                 self?.client.changeSettings(HostSettingsChange(directWireless: !direct))

@@ -708,21 +708,21 @@ final class VirtualStage {
 
     /// A desk window's display (DeskStages), made once at the room's size and at 120 Hz, so no
     /// resize or rate change makes it again (each new display moves the window home and back).
-    func ensureShared() async throws {
+    func ensureDeskDisplay() async throws {
         // One at a time: the picked window and its side stream can ask together, and two creations
         // at once each made a display, the second destroying the first under its window.
-        if let running = sharedMaking {
+        if let running = makingDeskDisplay {
             try? await running.value
             if display?.isAlive == true, scDisplay != nil { return }   // made by the other caller
         }
-        let task = Task { @MainActor in try await self.makeShared() }
-        sharedMaking = task
-        defer { if sharedMaking == task { sharedMaking = nil } }
+        let task = Task { @MainActor in try await self.makeDeskDisplay() }
+        makingDeskDisplay = task
+        defer { if makingDeskDisplay == task { makingDeskDisplay = nil } }
         try await task.value
     }
-    private var sharedMaking: Task<Void, Error>?
+    private var makingDeskDisplay: Task<Void, Error>?
 
-    private func makeShared() async throws {
+    private func makeDeskDisplay() async throws {
         refreshHz = 120
         // Retina (2×) for every window a 2× display can hold, room to grow to the device's largest
         // screen as far as that goes; 1× only for a window wider or taller than that (one stretched

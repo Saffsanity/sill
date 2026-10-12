@@ -10,14 +10,14 @@ import StreamProtocol
 /// Main actor.
 @MainActor
 final class FileDrops: NSObject {
-    private struct Incoming { let url: URL; let handle: FileHandle; let total: UInt64; var written: UInt64 }
+    private struct Incoming { let url: URL; let handle: FileHandle; let total: UInt64; var written: UInt64; let from: ObjectIdentifier }
     private var incoming: [UInt32: Incoming] = [:]
     private var done: [UInt32: URL] = [:]
     private var panel: NSPanel?
     private var pending: [URL] = []
 
     /// One part of a file from `device`.
-    func chunk(_ payload: Data, device: String) {
+    func chunk(_ payload: Data, device: String, from connection: NWConnection) {
         guard let c = FileChunk.unpack(payload), c.total <= FileChunk.maxTotal else { return }
         if c.offset == 0 {
             incoming[c.id].map { try? $0.handle.close() }
@@ -30,9 +30,9 @@ final class FileDrops: NSObject {
                 print("File drop: could not write \(url.path)")
                 return
             }
-            incoming[c.id] = Incoming(url: url, handle: handle, total: c.total, written: 0)
+            incoming[c.id] = Incoming(url: url, handle: handle, total: c.total, written: 0, from: ObjectIdentifier(connection))
         }
-        guard var file = incoming[c.id], c.offset == file.written else { return }
+        guard var file = incoming[c.id], file.from == ObjectIdentifier(connection), c.offset == file.written else { return }
         file.handle.write(c.bytes)
         file.written += UInt64(c.bytes.count)
         if file.written >= file.total {
@@ -41,6 +41,16 @@ final class FileDrops: NSObject {
             done[c.id] = file.url
         } else {
             incoming[c.id] = file
+        }
+    }
+
+    /// A device gone mid-file: what it was sending is closed and left as it is (part of a file, in
+    /// its folder), never written to again.
+    func clientLeft(_ connection: NWConnection) {
+        let gone = ObjectIdentifier(connection)
+        for (id, file) in incoming where file.from == gone {
+            try? file.handle.close()
+            incoming[id] = nil
         }
     }
 
@@ -134,7 +144,8 @@ final class DragOut {
     var send: ((StreamMessage, NWConnection) -> Void)?
     private var watching: (connection: NWConnection, baseline: Int, offered: Bool)?
     private var timer: Timer?
-    private var offers: [UInt32: [URL]] = [:]
+    /// Each offer's files and the device it was made to: only that device may fetch or trash them.
+    private var offers: [UInt32: (urls: [URL], owner: ObjectIdentifier)] = [:]
     private var order: [UInt32] = []
 
     func buttonDown(_ connection: NWConnection) {
@@ -143,6 +154,14 @@ final class DragOut {
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in Task { @MainActor in self?.look() } }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    /// A device gone: its watch stops and its offers are forgotten.
+    func clientLeft(_ connection: NWConnection) {
+        if watching?.connection === connection { timer?.invalidate(); timer = nil; watching = nil }
+        let gone = ObjectIdentifier(connection)
+        for (id, o) in offers where o.owner == gone { offers[id] = nil }
+        order.removeAll { offers[$0] == nil }
     }
 
     func buttonUp(_ connection: NWConnection) {
@@ -161,7 +180,7 @@ final class DragOut {
         w.baseline = board.changeCount
         guard !urls.isEmpty else { watching = w; return }
         let id = UInt32.random(in: 1...UInt32.max)
-        offers[id] = urls
+        offers[id] = (urls, ObjectIdentifier(w.connection))
         order.append(id)
         if order.count > 8 { offers[order.removeFirst()] = nil }
         w.offered = true
@@ -177,15 +196,16 @@ final class DragOut {
     }
 
     /// The files of an offer, by index (a drop of them on another of this Mac's windows).
-    func urls(offer: UInt32, indices: [UInt32]) -> [URL] {
-        guard let urls = offers[offer] else { return [] }
+    func urls(offer: UInt32, indices: [UInt32], from connection: NWConnection) -> [URL] {
+        guard let o = offers[offer], o.owner == ObjectIdentifier(connection) else { return [] }
+        let urls = o.urls
         return indices.compactMap { urls.indices.contains(Int($0)) ? urls[Int($0)] : nil }
     }
 
     /// One offered file to the device, in parts (kind 34), off the main actor.
     func request(_ r: FileRequest, from connection: NWConnection) {
-        guard let urls = offers[r.offer], urls.indices.contains(r.index), let send else { return }
-        let url = urls[r.index]
+        guard let o = offers[r.offer], o.owner == ObjectIdentifier(connection), o.urls.indices.contains(r.index), let send else { return }
+        let url = o.urls[r.index]
         if r.trash == true {
             // Dragged to the device's Trash, as onto this Mac's: it goes to this Mac's Trash, from which it can be put back.
             NSWorkspace.shared.recycle([url]) { _, error in

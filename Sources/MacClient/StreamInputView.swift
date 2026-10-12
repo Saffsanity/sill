@@ -551,7 +551,7 @@ extension StreamInputView: NSDraggingSource {
     /// Dropped on the Trash: the files go to the other Mac's Trash, as dragging them to its own would.
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         guard operation == .delete else { return }
-        for case let promise as FilePromises.Promise in outgoing {
+        for promise in outgoing {
             promise.client.send(.fileRequest, payload: Wire.encode(FileRequest(offer: promise.offer, index: promise.index, transfer: 0, trash: true)))
         }
         print("files: \(outgoing.count) dragged to the Trash: moved to the other Mac's")

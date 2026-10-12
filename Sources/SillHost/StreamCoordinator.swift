@@ -451,6 +451,8 @@ package final class StreamCoordinator {
                 self.menus.clientLeft(connection)
                 self.sideStreams?.clientLeft(connection)
                 if self.audioWanted.removeValue(forKey: id) != nil { self.updateAudio() }
+                self.fileDrops.clientLeft(connection)
+                self.dragOut.clientLeft(connection)
                 self.clipboard?.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
@@ -1114,7 +1116,7 @@ package final class StreamCoordinator {
             updateAudio()
         case .fileChunk:
             guard !synthetic else { return }   // a test host writes and drops nothing
-            fileDrops.chunk(message.payload, device: deviceName(connection))
+            fileDrops.chunk(message.payload, device: deviceName(connection), from: connection)
         case .fileRequest:
             guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
             dragOut.request(r, from: connection)
@@ -1127,7 +1129,7 @@ package final class StreamCoordinator {
             let point = CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
             if let offer = d.offer {
                 // This Mac's own files, dragged out of one of its windows onto another: dropped from where they are.
-                let urls = dragOut.urls(offer: offer, indices: d.files)
+                let urls = dragOut.urls(offer: offer, indices: d.files, from: connection)
                 guard !urls.isEmpty else { return }
                 fileDrops.drop(urls, at: point, device: deviceName(connection))
             } else {
@@ -1456,7 +1458,10 @@ package final class StreamCoordinator {
             picked = w
             title = Self.menuTitle(for: w)
             var size = w.frame.size
-            if virtualDisplay, stage.disabledReason == nil {
+            // A Mac viewer's windows live on Sill's desk (below): the iPad's Virtual Display staging
+            // is for a device that shows one window, and would take the window from the desk.
+            let deskWanted = sideStreams?.wholeApp == true && (!synthetic || VirtualStage.testDesk)
+            if virtualDisplay, stage.disabledReason == nil, !deskWanted {
                 let want = wantedStage(for: w)
                 do {
                     let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale, refreshHz: fps)
@@ -1487,7 +1492,7 @@ package final class StreamCoordinator {
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
                 // Sill's desk takes the window off this Mac's displays: nothing there to raise or fit.
-                let toDesk = sideStreams?.wholeApp == true && (!synthetic || VirtualStage.testDesk)
+                let toDesk = deskWanted
                 if comeForward, !shuttingDown, !toDesk { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot

@@ -81,7 +81,7 @@ final class DeskStages {
         stage.deskWindow = size
         // Its own display, made once at the room's size and 120 Hz, so neither a resize nor a rate
         // change makes it again, and a full-screen Space there covers this window's display alone.
-        do { try await stage.ensureShared() } catch { stage.release(); forget(id); throw error }
+        do { try await stage.ensureDeskDisplay() } catch { stage.release(); forget(id); throw error }
         // Full screen (or just out of it): the display fitted to the window's own size on the device
         // first, whether it streams as the main window or beside it.
         // The main window's `size` is the device's window (a side stream's is the window's own, which

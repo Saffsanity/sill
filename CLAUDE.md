@@ -9,59 +9,35 @@ Formerly winstream; the folder still carries the old name.
 ## Current step
 
 **Sill Viewer, a Mac controlling another Mac (2026-10-11/12, branch `mac-client` from main at
-985a733; docs/mac-client-plan.md has the design, the input table, what was verified and what was
-not).** Goal: a macOS client for the Sill host, Apple frameworks only, no servers, the iOS session
-code reused. The one wire change, asked for on 2026-10-12: the middle button
-(`PointerAction.middleDown/Up`, `WindowList.middleButton`, sent only to a host that says it). `Sources/MacClient` (target `MacClient`, product
-`SillClient`, `Scripts/make-client-app.sh` → `.build/Sill Viewer.app`, `me.saffer.sill.client`):
-its `Shared/` folder symlinks iOSClient's StreamClient and its policies, compiled unchanged but for
-two new shared files (`ClientPlatform.swift`, `HEVCSampleFeed.swift`, pbxproj AC01/FC01 and
-AC02/FC02: the iOS display view now wraps the feed) and `#if canImport(UIKit)` around the iOS
-harness hooks. The Mac's own: the connect window, the session toolbar (windows and apps, Desktop,
-Menus, Text Size, the host's settings, Disconnect), NSEvent input (pointer, buttons, trackpad phases
-and momentum, keys by a local monitor, Capture System Shortcuts by an event tap, gestures from the
-Control menu), the other Mac's cursor shape as this Mac's cursor. `Tests/checks/mac-keys` (695, 7
-mutants) holds its keycode table to the host's. Verified on loopback synthetic hosts: the plain
-door, TLS home pairing and a pinned reconnect, the remote door's link pairing and redial, every
-input kind in the host's input log, the menus against menufixture; all 41 checks; the release build;
-iOS on Xcode 27.0 fails only on the 27.1 Duo APIs, as main does (CI's 27.1 is the real check).
-Two Macs (2026-10-12): the client on a MacBook Pro on the same network against a synthetic
-`--pairing` host here, first through an SSH tunnel, then directly over the LAN once the laptop's
-Local Network prompt was allowed: paired with the code, 3024×1898 at 70–120 fps, rtt 5–6 ms, a
-pinned reconnect, and real hands on the laptop (clicks, right and middle clicks and drags, hover,
-scrolling, typing, ⌘W to the host); hover needed the tracking area made as the view joins its
-window. Later rounds: the toolbar (windows, Desktop, Settings, Menus, gestures), ⌘W to the host,
-⌃⌥⌘⎋, and ⌘Tab through Capture System Shortcuts (fixed: the tap now installs once Accessibility
-is granted). A synthetic host's window picks are real: they resized windows on this Mac. The new
-client against main's host sends no middle button. **Untested:** the Bonjour row on one subnet,
-Direct Wireless over AWDL, Tailscale, the cable, the cursor's shape (needs a real host), choosing a
-menu item.
-- Since (2026-10-12, tests between the two Macs; docs/mac-client-plan.md is older than these): every
-  window open in the viewer lives at once (kinds 29–31 side streams, `MainRouter` routing the main stream
-  to its window), each as a borderless window with the WindowPill handle, the status item, the remote
-  app's menus in the menu bar, a Dock icon per remote app (SillDockProxy copies), clipboard text and
-  images both ways (kind 32), and windows restored after a restart. Sill's desk (`DeskStages`): the
-  windows the viewer shows each live on a hidden virtual display of their own, made at 120 Hz at the
-  viewer's largest screen (3792×2160 pt at 2×, or at 1× up to 7616 px for a wider one: 7680 has no mode
-  at either scale on macOS 27.0.1), each with its own identity from a pool (product 0x100 + slot, a
-  serial kept per slot in the defaults): two displays with one vendor and product are one monitor to
-  macOS, which took the older offline (what first looked like a one-display limit). A full-screen
-  window's display takes the viewer window's size live (`VirtualDisplay.resize`, the same display),
-  so its Space fills that window and covers no other; background windows captured alone, the focused
-  one cropped from the display with its app (AppCrop) and its share pill (SharePill). Sound (kind 33,
-  `AppAudio`): a CoreAudio process tap of the shown apps and their helpers, muted on the host
-  (`mutedWhenTapped`), 10 ms 16-bit PCM packets, played by the viewer's `AudioPlayer` (Play Sound in the
-  status item); NSAudioCaptureUsageDescription, and all CoreAudio work off the main actor (it waits on
-  the permission prompt). Files: dropped on a remote window (kinds 34, 35, `FileDrops`: saved in
-  ~/Downloads/From ‹device›, then a real drag posted on the host) and dragged out of one (kinds 36, 37,
-  `DragOut` and the viewer's NSFilePromiseProvider; onto the laptop's Trash moves the host's file to its
-  Trash). Kinds 33–37 go only to a host whose window list says `audio`/`fileDrop`. Both apps notarized
-  (profile `sill-notary`). The iPhone build from Xcode 27.0 takes
-  `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK` (DuoPostureReader's 27.1 hinge API left out). Verified: the
-  two-Mac flip test (`-SillFlipTest`), the resize test (`-SillResizeTest`), a drop (`-SillDropTest`),
-  audio packets and the host's mute in coreaudiod's log, an iPhone 16 Pro Max session against a test
-  host, all checks; by hand: a drag out onto the laptop's Trash (the host's file went to its Trash), the
-  iPhone paired. **Untested:** full screen fitted to the viewer window (by hand: YouTube in a browser).
+985a733; docs/mac-client-plan.md has the design, the wire, what was verified and what is
+open).** A macOS client (`Sources/MacClient`, product `SillClient`, `Scripts/make-client-app.sh` →
+`.build/Sill Viewer.app`, `me.saffer.sill.client`) whose session code is the iOS app's own
+(`Sources/MacClient/Shared/` symlinks; `iOSClient/ClientPlatform.swift` and `HEVCSampleFeed.swift`
+new and shared). Each host window a borderless window here at 1:1 with a pill for this Mac's
+controls; the others live at 15 fps (side streams); the remote app's menus in the menu bar; Sill's
+controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`); windows restored
+after a restart and new windows of open apps opened by themselves.
+- Wire, additive and gated by window-list flags: the middle button (kind 8, `middleButton`), side
+  streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
+  `fileDrop`). The iOS app sends none of them.
+- Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
+  of its own with its own identity from a pool of 16 (two displays with one vendor and product ID
+  are one monitor to macOS, which took the older offline: not a one-display limit), made once at
+  120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
+  on macOS 27.0.1); a full-screen window's display resized live to the viewer window
+  (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
+  the shown apps and their helpers, muted on the host, 10 ms PCM, off the main actor), `FileDrops`
+  and `DragOut` (offers scoped to their device), `HostClipboard`, `AppCrop` and `SharePill`, windows
+  in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows always
+  go to the desk, never the iPad's Virtual Display staging.
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (18, 10 mutants), `protocol` 209 with 28
+  mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
+  Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes
+  `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
+- Verified between this Mac and a MacBook Pro on the same network, and an iPhone 16 Pro Max against a
+  test host: the plan's "Verified". **Open:** the plan's "Open" (full screen after the last fixes, a
+  drag between Sill windows, the lost right-button up, Tailscale with Remote Access, uncompressed
+  sound, folders).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
@@ -4815,11 +4791,17 @@ good.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
 - `Sources/MacClient/` — Sill Viewer, the Mac client (docs/mac-client-plan.md): `Shared/` symlinks
-  to iOSClient's session files; `SillClientApp`, `ConnectView`, `SessionView`, `StreamInputView`,
-  `HEVCDisplayView` (an NSView over `HEVCSampleFeed`), `MacMenus`, `MacMenuHub` (no-op),
-  `SystemKeyTap`, `MacKeyMap`, DEBUG `MacInputTest`. `Packaging/Client-Info.plist`,
-  `Scripts/make-client-app.sh`. iOSClient's `ClientPlatform.swift` and `HEVCSampleFeed.swift` are
-  shared by both clients.
+  to iOSClient's session files; `main` and `AppDelegate` (AppKit), `StatusMenu` (the menu bar
+  icon), `MainMenu` and `MacMenus` (the remote app's menus in the menu bar), `StreamWindows` (a
+  window per host window, the side streams' feeds, restore, the Dock, drops; `StreamWindow`,
+  `DropContainer`, `SideView`), `MainRouter` (the main stream into the right window),
+  `StreamInputView` (input, drags out, `FilePromises`), `WindowPill`, `ConnectView`,
+  `HEVCDisplayView`, `ClipboardSync`, `AudioPlayer`, `DockProxies`, `SystemKeyTap`, `MacKeyMap`,
+  DEBUG `MacInputTest` (and `MacResizeTest`). `Sources/SillDockProxy/` is the Dock icon helper.
+  `Packaging/Client-Info.plist`, `Scripts/make-client-app.sh`. iOSClient's `ClientPlatform.swift` and
+  `HEVCSampleFeed.swift` are shared by both clients. Host side: `SideStreams`, `DeskStages`,
+  `AppCrop` (+ `SharePill`), `HostClipboard`, `AppAudio`, `FileDrops` (+ `DragOut`) in
+  `Sources/SillHost`; `Sources/StreamProtocol/SideStreams.swift` their payloads.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
   `FoundMac` rows; connection, parsing, reconnect, the move of a session over
