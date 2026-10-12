@@ -335,7 +335,13 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     private func updatePill() {
         guard NSApp.isActive, let key = NSApp.keyWindow as? StreamWindow else { pill.show(over: nil, title: "", image: nil); return }
         var image: NSImage?
-        if case .window(let id) = key.source, let app = appOf[id] { image = client.icons[app] }
+        // The app's icon with Sill Viewer's in its corner, as its Dock icon has it: the other Mac's
+        // window, not this Mac's; a Desktop window has Sill Viewer's own.
+        if case .window(let id) = key.source, let app = appOf[id], let icon = client.icons[app] {
+            image = badgedIcons[app] ?? { let b = DockProxies.badged(icon); badgedIcons[app] = b; return b }()
+        } else if display(of: key.source) != nil || key.source == .desktop {
+            image = NSApp.applicationIconImage
+        }
         pill.show(over: key, title: title(key.source), image: image)
     }
 
@@ -354,6 +360,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
     /// Apps whose Dock icon, kept in the Dock, was clicked before the other Mac was connected.
     private var dockLaunches: Set<String> = []
+    /// Each app's icon badged as the other Mac's, for the pill.
+    private var badgedIcons: [String: NSImage] = [:]
     private var lastDockLaunch: [String: Date] = [:]
 
     /// A kept Dock icon clicked with none of its app's windows open here: its windows on the other
