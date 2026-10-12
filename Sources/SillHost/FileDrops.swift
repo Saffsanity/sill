@@ -143,7 +143,9 @@ final class FileDrops: NSObject {
 
 extension FileDrops: NSDraggingSource {
     nonisolated func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        [.copy, .generic, .link]
+        // As a Finder drag offers: the target picks (Finder moves on one volume, copies across, and
+        // takes ⌥ for a copy). Without .move Finder fell back to .link and made an alias.
+        [.copy, .move, .generic, .link]
     }
 }
 
