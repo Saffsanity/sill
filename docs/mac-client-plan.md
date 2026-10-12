@@ -65,7 +65,7 @@ set), so a Desktop window has its side stream, drops and take-back like any othe
 Every field added to an existing payload is optional, and a host or device from before skips the
 new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
 `protocol` (round-trips and refusals of every new payload, 239 checks, 32 mutants), `compatibility`,
-`menus` and `pointer-control` know kinds 29–41 (42 unknown); `main-router` (31 checks, 14 mutants)
+`menus` and `pointer-control` know kinds 29–41 (42 unknown); `main-router` (32 checks, 15 mutants)
 holds the viewer's routing of the main and side streams.
 
 ## Sill's desk (DeskStages, VirtualStage)
@@ -222,6 +222,8 @@ the new kinds is sent by it, and a host sends it none.
   sent before a stream's first frame) with its two fixes, a window left by the main stream drawing its
   side stream at full size and a closed window's last frame never reaching the next one; a real app's
   badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad connected
-  (the stream stops, as on main).
+  (the stream stops, as on main); a window placed while Sill's hidden displays rearrange (after
+  one is removed), a new window Accessibility does not know yet, and a window that moved while its
+  app's crop streams, each captured where it is.
 - Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
   separate spike).

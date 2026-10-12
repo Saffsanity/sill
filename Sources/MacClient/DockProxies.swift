@@ -340,10 +340,12 @@ final class DockProxies {
 
 /// A Dock icon's request, signed (DockProxies): the same code is in SillDockProxy.
 enum DockRequest {
-    /// HMAC-SHA256 of the app and every field but the MAC itself, in a fixed order, as hex.
+    /// HMAC-SHA256 of the app and every field but the MAC itself, in a fixed order, each part framed
+    /// by its length, as hex.
     static func mac(app: String, _ info: [String: String], key: String) -> String {
-        let text = ([app] + info.filter { $0.key != "mac" }.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
-            .joined(separator: "\n")
+        // Each part with its length first, so no value can be read as another field.
+        let parts = [app] + info.filter { $0.key != "mac" }.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] }
+        let text = parts.map { "\($0.utf8.count):\($0)" }.joined()
         let code = HMAC<SHA256>.authenticationCode(for: Data(text.utf8), using: SymmetricKey(data: Data(key.utf8)))
         return code.map { String(format: "%02x", $0) }.joined()
     }

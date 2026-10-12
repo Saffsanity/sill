@@ -43,9 +43,9 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
   (`OutputSwitch`); the window list naming a new source goes out before its first frame. Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (31, 14 mutants), `protocol` 239 with 32
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 239 with 32
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
-  Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes
+  Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
   built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced

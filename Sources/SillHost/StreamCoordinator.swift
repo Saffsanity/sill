@@ -417,7 +417,10 @@ package final class StreamCoordinator {
         menus.prepare = { [weak self] in await self?.focusForMenus() ?? true }
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
-        catalog.onPolled = { [weak self] in self?.menusPolled() }
+        catalog.onPolled = { [weak self] in
+            self?.menusPolled()
+            Task { @MainActor in await self?.recropIfMoved() }   // a window moves without the list changing
+        }
 
         server.onClientConnected = { [weak self] connection, route, link in
             Task { @MainActor in
@@ -1669,15 +1672,33 @@ package final class StreamCoordinator {
                 // A device asked for windows with what belongs to them (their menus, popovers, the
                 // system's panels): the display, cropped to the window, without the other apps.
                 // The size just set (the window server may still list the old one), at the window's place.
-                let place = Self.liveBounds(of: id).map { CGRect(origin: $0.origin, size: resized ?? $0.size) }
+                var place = Self.liveBounds(of: id).map { CGRect(origin: $0.origin, size: resized ?? $0.size) }
                 var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
                 if toDesk {
                     do {
                         let own = Self.liveBounds(of: id)?.size ?? w.frame.size
-                        staged = try await desk.prepare(w, size: viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own),
-                                                        captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                        let size = viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own)
+                        do {
+                            staged = try await desk.prepare(w, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                        } catch VirtualStage.Failure.axWindowNotFound {
+                            // A window just opened (a new tab's window) is listed before Accessibility
+                            // has it, and its title can still be changing: once more, a moment later.
+                            try? await Task.sleep(for: .milliseconds(400))
+                            staged = try await desk.prepare(w, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                        }
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
+                        // It was put back where it was: read where that is once the window server
+                        // shows it (a move is listed only once the app commits it), not where it was
+                        // read before the move (2026-10-12: a window captured a screen away from itself).
+                        var last = Self.liveBounds(of: id)
+                        for _ in 0..<10 {
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                            let now = Self.liveBounds(of: id)
+                            if now == last { break }
+                            last = now
+                        }
+                        if let last { place = CGRect(origin: last.origin, size: resized ?? last.size) }
                     }
                 }
                 if let staged {
@@ -1797,7 +1818,9 @@ package final class StreamCoordinator {
         // queue, in order): a Mac client routes the stream by that word (its MainRouter), and the list
         // sent once `active` is set came after the first sets and keyframe. A start that fails sends
         // another list (nothing streams) from `select`.
-        server.broadcast(listMessage(naming: source))
+        announced = source
+        defer { announced = nil }   // `active` is set below; a failed start sends `.none` from `select`
+        server.broadcast(listMessage())
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
@@ -2125,10 +2148,11 @@ package final class StreamCoordinator {
     }
 
     /// Whether `message` can bring an app forward: a click, a key or text (not into a window in the
-    /// background), a pick, a launch, a window's button, a menu or Dock menu item, a gesture, a drop.
+    /// background), a pick, a launch, a window's button, a menu opened (its app is made active first)
+    /// or an item chosen, a Dock menu item, a gesture, a drop.
     private static func actsOnApps(_ message: StreamMessage) -> Bool {
         switch message.kind {
-        case .selectSource, .launchApp, .windowCommand, .pressMenuItem, .dockMenu, .gesture, .fileDrop, .liveDrag, .pickDisplay:
+        case .selectSource, .launchApp, .windowCommand, .fetchMenu, .pressMenuItem, .dockMenu, .gesture, .fileDrop, .liveDrag, .pickDisplay:
             return true
         case .input:
             guard let input = WindowInput.decode(message.payload), input.window == nil else { return false }
@@ -2583,6 +2607,15 @@ package final class StreamCoordinator {
         recheckTask?.cancel()   // ends the held-back loop's sleep; its tail starts a new loop while a device is connected
     }
 
+    /// The main stream cropped from its display (a window with its app): a window that moved there,
+    /// which the catalog's list does not show (it lists sizes), is captured again where it is now.
+    private func recropIfMoved() async {
+        if let crop = mainCropFrame, case .window(let id) = active, !switching,
+           let live = Self.liveBounds(of: id), live.origin != crop.origin || live.size != crop.size {
+            await select(active)
+        }
+    }
+
     private func windowsChanged(_ infos: [WindowInfo]) async {
         sideStreams?.changed()   // a side stream's window resized or gone
         // The main stream cropped from its display: a window that moved there is captured again.
@@ -2730,9 +2763,14 @@ package final class StreamCoordinator {
 
     // MARK: Catalog to clients
 
-    private func listMessage(naming source: StreamSource? = nil) -> StreamMessage {
+    /// The source a starting pipeline has announced, until `active` names it: every list sent meanwhile
+    /// (a catalog poll's, a badge change's, a new device's) names it too, never the old one, which would
+    /// send its stream to the old window on a Mac client.
+    private var announced: StreamSource?
+
+    private func listMessage() -> StreamMessage {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: source ?? active, launchID: launchID,
+                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: announced ?? active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
                                                       gestures: TrackpadGesture.generation, middleButton: true,
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,

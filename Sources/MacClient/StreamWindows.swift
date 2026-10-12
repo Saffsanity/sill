@@ -533,6 +533,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     #endif
 
     private func focused(_ window: StreamWindow) {
+        window.container.endBackgroundScroll()
         if local(client.active) != window.source {
             window.placeholder.image = thumbnail(window.source) ?? window.placeholder.image
             pick(window.source)
@@ -731,10 +732,14 @@ final class DropContainer: NSView {
     override func mouseDragged(with event: NSEvent) { input?.mouseDragged(with: event) }
     override func mouseUp(with event: NSEvent) { input?.mouseUp(with: event) }
 
+    /// A scroll begun while this window was in the background ends there (the window came forward).
+    func endBackgroundScroll() {
+        for e in scrollState.finish() { onBackgroundInput?(e) }
+    }
+
     override func scrollWheel(with event: NSEvent) {
         if let input {
-            // A scroll begun while this window was in the background ends there first.
-            for e in scrollState.finish() { onBackgroundInput?(e) }
+            endBackgroundScroll()
             input.scrollWheel(with: event)
             return
         }

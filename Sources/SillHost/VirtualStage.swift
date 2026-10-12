@@ -475,6 +475,17 @@ final class VirtualStage {
                     || Self.usableArea(of: d.displayID).map({ $0.width < 32 || $0.height < 32 }) ?? true {
                 try? await Task.sleep(for: .milliseconds(25))
             }
+            // Another of Sill's displays came or went just now: wait until this one's bounds hold
+            // still (three reads 50 ms apart), at most until a second after that change.
+            let arranged = Self.arrangementChangedAt.addingTimeInterval(Self.arrangementSettle)
+            var steady = 0
+            var seen = CGDisplayBounds(d.displayID)
+            while Date() < arranged, steady < 3 {
+                try? await Task.sleep(for: .milliseconds(50))
+                let now = CGDisplayBounds(d.displayID)
+                steady = now == seen ? steady + 1 : 0
+                seen = now
+            }
             displayBounds = CGDisplayBounds(d.displayID)
             var usable = Self.usableArea(of: d.displayID) ?? displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
             if usable.width < 32 || usable.height < 32 {
@@ -714,6 +725,7 @@ final class VirtualStage {
         scDisplay = listed
         Self.unmirror(d.displayID)
         Stats.shared.bump("vd.created")
+        Self.arrangementChangedAt = Date()
         print("Virtual display \(d.widthPt)×\(d.heightPt) pt @\(displayScale)× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
               + "listed by ScreenCaptureKit after \(Self.ms(since: t1)) ms, menu bar \(Int(menuInset)) pt\(insetMeasured ? "" : " (assumed)")")
     }
@@ -860,6 +872,14 @@ final class VirtualStage {
         EmergencySnapshot.set(snapshotKey, nil)
     }
 
+    /// When one of Sill's displays last came or went. macOS then rearranges the others, and for a
+    /// moment reports a display's bounds where it was: a window placed by them went where no display
+    /// is, was clamped onto the Mac's own screen and sent home (2026-10-12, 180 ms after another
+    /// display was removed). Main actor.
+    static var arrangementChangedAt = Date.distantPast
+    /// How long the arrangement is waited out, at most.
+    static let arrangementSettle: TimeInterval = 1
+
     /// Removes the display. Call `releaseWindow()` first while both displays exist, so the window
     /// goes exactly where it was instead of wherever the window server dumps it.
     func destroyDisplay() {
@@ -868,6 +888,7 @@ final class VirtualStage {
             display = nil
             scDisplay = nil
             d.destroy()
+            Self.arrangementChangedAt = Date()
             print("Removed virtual display \(id)")
         }
         display = nil
