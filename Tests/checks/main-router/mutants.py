@@ -4,8 +4,10 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "Sources/MacClient/MainRouter.swift")
 MUTANTS = [
-    ("switch on any sets", "if let n = next, encoded != lastSets || switched {", "if let n = next {"),
-    ("never switch on the host's word", "if let n = next, encoded != lastSets || switched {", "if let n = next, encoded != lastSets {"),
+    ("switch on any sets", "if let n = next, switched || target == nil {", "if let n = next {"),
+    ("switch on new sets alone, the old rule", "if let n = next, switched || target == nil {", "if let n = next, switched || target == nil || encoded != lastSets {"),
+    ("the first window waits for a word", "if let n = next, switched || target == nil {", "if let n = next, switched {"),
+    ("never switch on the host's word", "if let n = next, switched || target == nil {", "if let n = next, target == nil {"),
     ("an old host word counts", "        next = feed\n        switched = false", "        next = feed"),
     ("follow never at once", "if let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {", "if false, let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {"),
     ("follow at once whatever the age", "if let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {", "if let began = newStreamAt, now() - began < 1e9, let ps = lastPS, let frames = gop {"),

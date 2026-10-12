@@ -26,17 +26,32 @@ do {
     check(a.log == ["ps:A", "K:a1", "d:a2"], "the first window gets its stream: \(a.log)")
 }
 
-// Focus A → B with different parameter sets: old frames stay on A, B starts at its own keyframe.
+// Focus A → B: old frames stay on A, B starts at its own keyframe once the host has switched.
 do {
     let r = MainRouter(), a = Sink("A"), b = Sink("B")
     r.expect(a); r.parameterSets(ps("A")); r.frame(f("a1"), isKeyframe: true)
     r.expect(b)
     r.frame(f("a2"), isKeyframe: false)                  // the old stream, still coming
     check(r.draws(into: a) && r.draws(into: b), "both drawn into during the switch")
+    r.hostSwitched()
     r.parameterSets(ps("B")); r.frame(f("b1"), isKeyframe: true); r.frame(f("b2"), isKeyframe: false)
     check(a.log == ["ps:A", "K:a1", "d:a2"], "A keeps only its own frames: \(a.log)")
     check(b.log == ["ps:B", "K:b1", "d:b2"], "B's first picture is its own keyframe: \(b.log)")
     check(!r.draws(into: a) && r.draws(into: b), "after the switch only B is drawn into")
+}
+
+// The old stream restarted at another size during the switch (the viewport sent with the focus
+// resized it), before the host's word: its new sets stay on A (2026-10-12: one window's picture shown in another).
+do {
+    let r = MainRouter(), a = Sink("A"), b = Sink("B")
+    r.expect(a); r.parameterSets(ps("A")); r.frame(f("a1"), isKeyframe: true)
+    r.expect(b)
+    r.parameterSets(ps("A-resized")); r.frame(f("a2"), isKeyframe: true)
+    check(b.log.isEmpty, "B never shows A's restarted stream: \(b.log)")
+    check(a.log.suffix(2) == ["ps:A-resized", "K:a2"], "A keeps its own restart: \(a.log)")
+    r.listed(active: .window(1)); r.listed(active: .window(2))
+    r.parameterSets(ps("B")); r.frame(f("b1"), isKeyframe: true)
+    check(b.log == ["ps:B", "K:b1"], "then B's own stream goes to B: \(b.log)")
 }
 
 // The old stream's repeated parameter sets (a periodic keyframe) during the switch: they stay on A.
@@ -130,11 +145,40 @@ do {
     check(b.log == ["ps:A", "K:b1"], "B takes the next sets, even identical ones: \(b.log)")
 }
 
+// The old stream's periodic keyframe (the same sets again) is no new stream: a window the host
+// switched to just after waits for its own sets rather than taking the old picture.
+do {
+    var clock = 100.0
+    let r = MainRouter(), a = Sink("A"), b = Sink("B")
+    r.now = { clock }
+    r.expect(a); r.parameterSets(ps("A")); r.frame(f("a1"), isKeyframe: true)
+    clock += 5
+    r.parameterSets(ps("A")); r.frame(f("a2"), isKeyframe: true)
+    clock += 0.5
+    r.follow(b)
+    check(b.log.isEmpty, "B does not take A's periodic keyframe: \(b.log)")
+}
+// After a session ended, its first stream is new even with the old session's sets: a window the
+// host switched to takes it at once.
+do {
+    var clock = 100.0
+    let r = MainRouter(), a = Sink("A"), d = Sink("D")
+    r.now = { clock }
+    r.expect(a); r.parameterSets(ps("S")); r.frame(f("a1"), isKeyframe: true)
+    r.reset()
+    clock += 5
+    r.parameterSets(ps("S")); r.frame(f("d1"), isKeyframe: true)
+    clock += 0.5
+    r.follow(d)
+    check(d.log == ["ps:S", "K:d1"], "D takes the new session's stream at once: \(d.log)")
+}
+
 // A → B → C quickly: only the last expected window takes the new stream; B gets nothing.
 do {
     let r = MainRouter(), a = Sink("A"), b = Sink("B"), c = Sink("C")
     r.expect(a); r.parameterSets(ps("A"))
     r.expect(b); r.expect(c)
+    r.hostSwitched()
     r.parameterSets(ps("C")); r.frame(f("c1"), isKeyframe: true)
     check(b.log.isEmpty && c.log == ["ps:C", "K:c1"], "the last focus wins: B \(b.log), C \(c.log)")
 }

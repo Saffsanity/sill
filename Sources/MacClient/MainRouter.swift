@@ -9,8 +9,8 @@ protocol FrameSink: AnyObject {
 
 /// The main stream's frames (kinds 0, 1) to the window they belong to. Focusing a window expects its
 /// stream: the old stream's frames keep going to the old window until the new one's parameter sets
-/// come, told apart by differing from the old stream's or, for a window of the same size (whose
-/// sets can be identical), by coming after the host has said it switched (its window list). A
+/// come, told apart by coming after the host has said it switched (its window list): new sets alone
+/// can be the old stream's own restart. A
 /// stream's parameter sets precede each of its keyframes, so the new window's first picture is its
 /// own keyframe and the old window keeps its last frame of its own.
 ///
@@ -89,7 +89,11 @@ final class MainRouter: @unchecked Sendable {
         let encoded = ps.encoded()
         lock.lock()
         if encoded != lastSets { newStreamAt = now() }
-        if let n = next, encoded != lastSets || switched {
+        // The expected window takes the stream once the host has said it switched (its window list,
+        // which comes ahead of the new stream's first sets), never on new sets alone: the old stream
+        // restarts too (the viewport sent with a focus resized it), and its new sets went into the
+        // new window, which showed the old one's picture (one app's window inside another's, 2026-10-12).
+        if let n = next, switched || target == nil {   // nothing drawn yet: the first window takes the first sets
             target = n
             next = nil
         }
