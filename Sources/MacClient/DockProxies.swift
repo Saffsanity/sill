@@ -10,13 +10,25 @@ import AppKit
 /// ~/Library/Application Support/Sill Viewer/Dock and are made again only when the helper or the
 /// name changes. Main thread.
 final class DockProxies {
-    struct AppWindows { let name: String; let icon: NSImage?; let windows: [(id: UInt32, title: String)] }
+    struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window] }
+    /// A window in the Dock menu: the app's front one gets a ✓, a minimized one a ◆, as macOS marks its own.
+    struct Window {
+        enum State: String { case front, minimized, other }
+        let id: UInt32
+        let title: String
+        let state: State
+    }
 
     /// Bring an app's windows forward (nil window), or one window.
     var onFocus: ((_ app: String, _ window: UInt32?) -> Void)?
+    /// A Dock icon kept in the Dock was clicked while its app had no window open here.
+    var onLaunch: ((_ app: String) -> Void)?
     private var running: [String: NSRunningApplication] = [:]
     private var making: Set<String> = []
     private var last: [String: AppWindows] = [:]
+    /// The apps whose badged icon is written: an icon can arrive from the other Mac after its Dock
+    /// icon started, and is then written and shown.
+    private var iconWritten: Set<String> = []
     private let work = DispatchQueue(label: "sill.dock", qos: .utility)
 
     static var enabled: Bool {
@@ -26,7 +38,9 @@ final class DockProxies {
 
     init() {
         DistributedNotificationCenter.default().addObserver(forName: Self.actionName, object: nil, queue: .main) { [weak self] note in
-            guard let self, let app = note.object as? String, self.last[app] != nil else { return }
+            guard let self, let app = note.object as? String else { return }
+            if note.userInfo?["ask"] as? String == "launch" { self.onLaunch?(app); return }
+            guard self.last[app] != nil else { return }
             switch note.userInfo?["ask"] as? String {
             case "focus": self.onFocus?(app, nil)
             case "window": self.onFocus?(app, (note.userInfo?["window"] as? String).flatMap { UInt32($0) })
@@ -45,7 +59,10 @@ final class DockProxies {
         for app in Set(last.keys).subtracting(wanted.keys) { quit(app) }
         last = wanted
         for (app, info) in wanted {
-            if let r = running[app], !r.isTerminated { post(app); continue }
+            if let r = running[app], !r.isTerminated {
+                if !iconWritten.contains(app), let icon = info.icon { writeIcon(app, icon) } else { post(app) }
+                continue
+            }
             launch(app, info)
         }
     }
@@ -56,6 +73,7 @@ final class DockProxies {
     }
 
     private func quit(_ app: String) {
+        iconWritten.remove(app)
         DistributedNotificationCenter.default().postNotificationName(Self.stateName, object: app, userInfo: ["quit": true],
                                                                      deliverImmediately: true)
         running[app] = nil
@@ -65,16 +83,18 @@ final class DockProxies {
         guard let info = last[app] else { return }
         DistributedNotificationCenter.default().postNotificationName(
             Self.stateName, object: app,
-            userInfo: ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title)],
+            userInfo: ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
+                       "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path],
             deliverImmediately: true)
     }
 
     private func launch(_ app: String, _ info: AppWindows) {
         guard !making.contains(app), let template = Self.template else { return }
         making.insert(app)
-        let png = info.icon.flatMap(Self.png)
+        let png = info.icon.map(Self.badged).flatMap(Self.png)
+        if png != nil { iconWritten.insert(app) } else { iconWritten.remove(app) }
         let name = info.name
-        let iconURL = Self.folder.appendingPathComponent("\(Self.slug(app)).png")
+        let iconURL = Self.iconURL(app)
         work.async { [weak self] in
             if let png { try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true); try? png.write(to: iconURL) }
             let url = Self.make(app: app, name: name, template: template)
@@ -96,6 +116,20 @@ final class DockProxies {
             }
         }
     }
+
+    /// The app's badged icon written, then its Dock icon told to show it.
+    private func writeIcon(_ app: String, _ icon: NSImage) {
+        guard let png = Self.png(Self.badged(icon)) else { return }
+        iconWritten.insert(app)
+        let url = Self.iconURL(app)
+        work.async { [weak self] in
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+            try? png.write(to: url)
+            DispatchQueue.main.async { self?.post(app) }
+        }
+    }
+
+    private static func iconURL(_ app: String) -> URL { folder.appendingPathComponent("\(slug(app)).png") }
 
     // MARK: The copies
 
@@ -134,6 +168,7 @@ final class DockProxies {
             plist["CFBundleName"] = name
             plist["CFBundleDisplayName"] = name
             plist["CFBundleIdentifier"] = "me.saffer.sill.client.dock.\(slug(app))"
+            plist["SillRemoteApp"] = app   // a copy kept in the Dock and clicked starts with no arguments
             (plist as NSDictionary).write(to: plistURL, atomically: true)
             try fm.createDirectory(at: dest.appendingPathComponent("Contents/Resources"), withIntermediateDirectories: true)
             try stamp.write(to: stampURL, atomically: true, encoding: .utf8)
@@ -150,6 +185,32 @@ final class DockProxies {
             print("dock: \(name)'s icon could not be made: \(error)")
             return nil
         }
+    }
+
+    /// The remote app's icon with Sill Viewer's own in its lower right corner, so its Dock icon reads
+    /// as the other Mac's app, not this Mac's.
+    static func badged(_ icon: NSImage) -> NSImage {
+        let side = 512
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { return icon }
+        let full = NSRect(x: 0, y: 0, width: side, height: side)
+        let b = CGFloat(side) * 0.42
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        icon.draw(in: full)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = CGFloat(side) * 0.02
+        shadow.shadowOffset = NSSize(width: 0, height: -CGFloat(side) * 0.008)
+        shadow.set()
+        NSApp.applicationIconImage?.draw(in: NSRect(x: CGFloat(side) - b, y: 0, width: b, height: b))
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.addRepresentation(rep)
+        return image
     }
 
     private static func png(_ image: NSImage) -> Data? {

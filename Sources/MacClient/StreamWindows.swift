@@ -59,6 +59,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         client.$windows.sink { [weak self] list in
             DispatchQueue.main.async { self?.windowsChanged(list) }
         }.store(in: &subscriptions)
+        // An app's icon can come after its Dock icon started: it is badged and shown then.
+        client.$icons.sink { [weak self] _ in DispatchQueue.main.async { self?.syncDock() } }.store(in: &subscriptions)
         client.$thumbnails.sink { [weak self] thumbs in
             DispatchQueue.main.async { self?.thumbnailsChanged(thumbs) }
         }.store(in: &subscriptions)
@@ -79,6 +81,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             feed.enqueue(data, isKeyframe: isKey)
         }
         dock.onFocus = { [weak self] app, window in self?.focus(app: app, window: window) }
+        dock.onLaunch = { [weak self] app in self?.launchFromDock(app) }
         client.onDragOffer = { [weak self] offer in self?.input.dragOffer = offer.files.isEmpty ? nil : offer }
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -261,11 +264,18 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// The Dock icons follow the windows open here, by app.
     private func syncDock() {
         var apps: [String: DockProxies.AppWindows] = [:]
-        var byApp: [String: [(id: UInt32, title: String)]] = [:]
-        for source in open.keys {
+        var byApp: [String: [DockProxies.Window]] = [:]
+        // Each app's front window (the Dock's ✓): the first of its windows here in this Mac's order.
+        var front: [String: UInt32] = [:]
+        for case let window as StreamWindow in NSApp.orderedWindows where !window.isMiniaturized && window.isVisible {
+            if case .window(let id) = window.source, let app = appOf[id], front[app] == nil { front[app] = id }
+        }
+        for (source, window) in open {
             guard case .window(let id) = source, let app = appOf[id] else { continue }
             let w = client.windows.first { $0.id == id }
-            byApp[app, default: []].append((id, w.map { $0.title.isEmpty ? $0.appName : $0.title } ?? title(source)))
+            let state: DockProxies.Window.State = window.isMiniaturized ? .minimized : (front[app] == id ? .front : .other)
+            byApp[app, default: []].append(DockProxies.Window(id: id, title: w.map { $0.title.isEmpty ? $0.appName : $0.title } ?? title(source),
+                                                              state: state))
         }
         for (app, windows) in byApp {
             let name = client.windows.first { $0.bundleID == app }?.appName ?? app
@@ -293,6 +303,26 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         NSApp.activate()
     }
 
+
+    /// Apps whose Dock icon, kept in the Dock, was clicked before the other Mac was connected.
+    private var dockLaunches: Set<String> = []
+    private var lastDockLaunch: [String: Date] = [:]
+
+    /// A kept Dock icon clicked with none of its app's windows open here: its windows on the other
+    /// Mac open here, or, with none there, the app is launched there (its first window then streams
+    /// here, as an app opened from the status item does).
+    private func launchFromDock(_ app: String) {
+        guard client.connected, known != nil else { dockLaunches.insert(app); return }
+        dockLaunches.remove(app)
+        // The Dock icon asks as it starts and as it becomes active: one answer.
+        if let last = lastDockLaunch[app], Date().timeIntervalSince(last) < 3 { return }
+        lastDockLaunch[app] = Date()
+        let theirs = client.windows.filter { $0.bundleID == app && !$0.title.isEmpty && $0.width >= 80 && $0.height >= 150 }
+        windowLog("dock: \(app) asked for from the Dock: \(theirs.isEmpty ? "launching it" : "\(theirs.count) window(s)")")
+        if theirs.isEmpty { client.launch(bundleID: app); return }
+        for w in theirs.dropFirst().reversed() { open(.window(w.id), focus: false) }
+        open(.window(theirs[0].id), focus: true)
+    }
 
     func closeAll() {
         pill.show(over: nil, title: "", image: nil)
@@ -353,6 +383,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         known = (known ?? []).union(ids)
         restore()
+        for app in dockLaunches { launchFromDock(app) }
         for w in list { appOf[w.id] = w.bundleID }
         defer { syncDock() }
         for (source, window) in open {
@@ -397,6 +428,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         guard let window = notification.object as? StreamWindow else { return }
         windowLog("key: \(window.source)")
         updatePill()
+        syncDock()   // the Dock menu's ✓ follows the front window
         focused(window)
     }
 
@@ -462,8 +494,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
 
     func windowDidResignKey(_ notification: Notification) { updatePill() }
-    func windowDidMiniaturize(_ notification: Notification) { updatePill() }
-    func windowDidDeminiaturize(_ notification: Notification) { updatePill() }
+    func windowDidMiniaturize(_ notification: Notification) { updatePill(); syncDock() }
+    func windowDidDeminiaturize(_ notification: Notification) { updatePill(); syncDock() }
     func windowDidEnterFullScreen(_ notification: Notification) { updatePill() }
     func windowDidExitFullScreen(_ notification: Notification) { updatePill() }
 

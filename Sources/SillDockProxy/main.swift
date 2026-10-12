@@ -6,46 +6,95 @@ import AppKit
 // app's windows forward in Sill Viewer, and its Dock menu lists them. It talks to Sill Viewer by
 // distributed notifications and quits when told to, or when Sill Viewer goes.
 //   SillDockProxy --app <bundle ID> --viewer <pid> [--icon <png>]
+// Kept in the Dock and clicked while Sill Viewer has none of its app's windows, it starts with no
+// arguments: its app is in its Info.plist (SillRemoteApp), it opens Sill Viewer if it is not running
+// and asks it for that app, whose windows on the other Mac then open there (or the app is launched
+// there); it quits if nothing comes of it within two minutes.
 
 final class Proxy: NSObject, NSApplicationDelegate {
     static let stateName = Notification.Name("me.saffer.sill.client.dock.state")
     static let actionName = Notification.Name("me.saffer.sill.client.dock.action")
 
     let app: String
-    let viewer: pid_t
+    var viewer: pid_t?
     let icon: String?
-    private var windows: [(id: String, title: String)] = []
+    private var heard = false
+    private var windows: [(id: String, title: String, state: String)] = []
     private var exitWatch: DispatchSourceProcess?
+    private var iconDate: Date?
 
-    init(app: String, viewer: pid_t, icon: String?) {
+    init(app: String, viewer: pid_t?, icon: String?) {
         self.app = app
         self.viewer = viewer
         self.icon = icon
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let icon, let image = NSImage(contentsOfFile: icon) { NSApp.applicationIconImage = image }
+        if let icon { showIcon(icon) }
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: Self.stateName, object: app, queue: .main) { [weak self] note in
             guard let self else { return }
             if note.userInfo?["quit"] as? Bool == true { NSApp.terminate(nil); return }
+            self.heard = true
+            if let path = note.userInfo?["icon"] as? String { self.showIcon(path) }
             let ids = note.userInfo?["ids"] as? [String] ?? []
             let titles = note.userInfo?["titles"] as? [String] ?? []
-            self.windows = zip(ids, titles).map { ($0, $1) }
+            let states = note.userInfo?["states"] as? [String] ?? []
+            self.windows = ids.indices.compactMap { i in
+                i < titles.count ? (ids[i], titles[i], i < states.count ? states[i] : "") : nil
+            }
         }
-        // Sill Viewer gone: so is this.
-        let watch = DispatchSource.makeProcessSource(identifier: viewer, eventMask: .exit, queue: .main)
-        watch.setEventHandler { NSApp.terminate(nil) }
-        watch.resume()
-        exitWatch = watch
-        if kill(viewer, 0) != 0 { NSApp.terminate(nil) }
-        post(["ask": "state"])
+        if let viewer {
+            watch(viewer)
+            post(["ask": "state"])
+            return
+        }
+        // Started from the Dock: Sill Viewer, opened if need be, is asked for this app.
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: Self.viewerID).first {
+            watch(running.processIdentifier)
+            post(["ask": "launch"])
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.viewerID) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { [weak self] running, _ in
+                DispatchQueue.main.async {
+                    guard let self, let running else { NSApp.terminate(nil); return }
+                    self.watch(running.processIdentifier)
+                    // Its observer is up a moment after it launches: asked again until it answers.
+                    for delay in [1.0, 3.0, 6.0, 10.0] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if !self.heard { self.post(["ask": "launch"]) } }
+                    }
+                }
+            }
+        } else {
+            NSApp.terminate(nil)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in if self?.heard == false { NSApp.terminate(nil) } }
+    }
+
+    static let viewerID = "me.saffer.sill.client"
+
+    /// Sill Viewer gone: so is this.
+    private func watch(_ pid: pid_t) {
+        viewer = pid
+        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        exitWatch = source
+        if kill(pid, 0) != 0 { NSApp.terminate(nil) }
+    }
+
+    /// The icon at `path` (the remote app's, badged as the other Mac's), shown again when it changed.
+    private func showIcon(_ path: String) {
+        let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        guard date != iconDate, let image = NSImage(contentsOfFile: path) else { return }
+        iconDate = date
+        NSApp.applicationIconImage = image
     }
 
     /// Clicked in the Dock, or switched to: Sill Viewer brings this app's windows forward.
     func applicationDidBecomeActive(_ notification: Notification) {
-        post(["ask": "focus"])
-        NSRunningApplication(processIdentifier: viewer)?.activate()
+        post(["ask": heard ? "focus" : "launch"])
+        if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -59,15 +108,28 @@ final class Proxy: NSObject, NSApplicationDelegate {
             let item = NSMenuItem(title: w.title, action: #selector(pick(_:)), keyEquivalent: "")
             item.representedObject = w.id
             item.target = self
+            // As macOS marks an app's own windows here: ✓ the front one, ◆ one in the Dock.
+            if w.state == "front" { item.state = .on }
+            if w.state == "minimized" {
+                item.state = .mixed
+                item.mixedStateImage = Self.diamond
+            }
             menu.addItem(item)
         }
         return menu
     }
 
+    private static let diamond: NSImage? = {
+        let image = NSImage(systemSymbolName: "diamond.fill", accessibilityDescription: "Minimized")?
+            .withSymbolConfiguration(.init(pointSize: 7, weight: .regular))
+        image?.isTemplate = true
+        return image
+    }()
+
     @objc private func pick(_ item: NSMenuItem) {
         guard let id = item.representedObject as? String else { return }
         post(["ask": "window", "window": id])
-        NSRunningApplication(processIdentifier: viewer)?.activate()
+        if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
     }
 
     private func post(_ info: [String: String]) {
@@ -88,7 +150,13 @@ while let a = args.next() {
     default: break
     }
 }
-guard let app, let viewer else { exit(2) }
+// Kept in the Dock and clicked: no arguments, the app from the Info.plist, the icon beside the copy.
+if app == nil, let remote = Bundle.main.object(forInfoDictionaryKey: "SillRemoteApp") as? String {
+    app = remote
+    let png = Bundle.main.bundleURL.deletingPathExtension().appendingPathExtension("png").path
+    if icon == nil, FileManager.default.fileExists(atPath: png) { icon = png }
+}
+guard let app else { exit(2) }
 let delegate = Proxy(app: app, viewer: viewer, icon: icon)
 NSApplication.shared.delegate = delegate
 NSApplication.shared.setActivationPolicy(.regular)

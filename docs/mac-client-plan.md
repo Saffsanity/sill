@@ -21,7 +21,10 @@ viewer window, and the host's windows kept on hidden displays while they are sho
   themselves; the windows open last time come back after a restart. The menu bar shows the remote
   app's menus (read when they open, chosen on the host). A Dock icon per remote app
   (`SillDockProxy`, an ad hoc signed copy per app, talking over distributed notifications) groups
-  its windows.
+  its windows: its icon is the remote app's with Sill Viewer's in the corner, its Dock menu lists
+  the windows open here (✓ the front one, ◆ a minimized one), and kept in the Dock it opens that
+  app's windows from the other Mac again when clicked (Sill Viewer opened if need be, the app
+  launched there when it has none).
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›
   Devices). While a viewer shows a window, that window lives on a hidden virtual display of its own
   ("Sill's desk"), so it is never covered, never limited by the host's own screens, and the person
@@ -41,11 +44,12 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 | 35 `fileDrop` | device → host | `FileDrop`: drop those files at a point; or, with `offer`, the host's own files from a drag offer; `window` names the target | the list says `fileDrop` |
 | 36 `dragOffer` | host → device | `DragOffer`: files an app is dragging under that device's held button | the device holds the button over the stream |
 | 37 `fileRequest` | device → host | `FileRequest`: one offered file, back as kind 34; `trash` moves it to the host's Trash instead | the offer was made to that device |
+| 38 `liveDrag` | device → host | `LiveDrag`: a drag of files over the host's windows, followed as it goes (`start`, `files`, `move`, `drop`, `cancel`; the window, the point, the modifier keys) | the list says `liveDrag` |
 
 Every field added to an existing payload is optional, and a host or device from before skips the
 new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
-`protocol` (round-trips and refusals of every new payload, 209 checks, 28 mutants), `compatibility`,
-`menus` and `pointer-control` know kinds 29–37.
+`protocol` (round-trips and refusals of every new payload, 221 checks, 28 mutants), `compatibility`,
+`menus` and `pointer-control` know kinds 29–38.
 
 ## Sill's desk (DeskStages, VirtualStage)
 
@@ -86,17 +90,24 @@ while a tapped app makes sound.
 
 ## Files (FileDrops, DragOut; the viewer's StreamInputView, StreamWindows, FilePromises)
 
-- **In**: files dropped from this Mac on any Sill window are sent in parts, saved on the host in
-  `~/Downloads/From <device>/`, and dragged there for real: a panel of Sill's own under the drop
-  point takes a posted press, a drag session starts from it with the files, and posted moves and a
-  release let go over the app, which takes a real drop.
+- **Followed live** (kind 38, `LiveDrags` and `LiveDrop`): a drag over any Sill window is a real
+  drag on the host as it goes, so the app under the pointer highlights where it would land (a
+  folder, a page's drop zone, the address bar) and this Mac's ⌘ ⌥ ⇧ ⌃ are pressed there as held
+  (Finder moves, ⌥ copies, ⌥⌘ makes an alias). Older hosts get kind 35 at the drop instead.
+- **In**: files dragged from this Mac over a Sill window are sent at once, saved on the host in
+  `~/Downloads/From <device>/`, and the host starts its own drag of them under the pointer: a panel
+  of Sill's own takes a posted press, a drag session starts from it with the files, and the device's
+  moves follow it until it is let go. Dragged away (0.35 s over no Sill window), the drag is given up
+  and the copies removed. An app that only refers to a file (a chat attachment) keeps the copy's path.
 - **Out**: while a device holds the button over the stream, the host watches its drag pasteboard;
   an app dragging files (Finder, a mail app) makes an offer (kind 36) to that device. When the drag
   leaves the window (the window under the pointer is another), the viewer presses Esc on the host
   (cancelling its drag), lets the button up, and drags `NSFilePromiseProvider`s here; a drop fetches
   each file (kind 37). Dropped on this Mac's Trash, the files go to the host's Trash instead.
-  Dropped on another Sill window, the host drops its own files there from where they are, nothing
-  copied.
+  With the live drag, the host's own drag is never cancelled while the drag is over a Sill window:
+  its button stays held and its pointer follows onto whichever window the drag is over (each on its
+  own display), so a drop there is the host's own, nothing copied; only a drag that ends elsewhere
+  gives it up.
 - Folders go as one zip (`FolderZip`: Finder's own `ditto` archive, resource forks, attributes and
   links kept) and are unpacked where they land, a drop on the Trash included.
 - Offers are scoped to the device they were made to; parts are taken only from the device that
@@ -150,19 +161,22 @@ the 27.1-only DuoPostureReader.
 - Sound: coreaudiod's log "muted by Sill … for all devices" for a browser, a chat app and its helper;
   ~100 packets a second, none dropped; played on the laptop ("sounds great").
 - Files: a drop from the laptop arrived whole and was dropped into the app under it; a drag out to
-  the laptop's Trash moved the host's file to its Trash, by hand.
+  the laptop's Trash moved the host's file to its Trash, by hand. The live drag (16:50–16:51): five
+  drags of the host's own files between Sill windows each landed where let go, the target
+  highlighting as for a drag on the host, the file referenced at its own path; one carried out to the
+  laptop was given up on the host and sent across; two of the laptop's files dropped on the remote
+  chat app's window arrived and were taken. Two Finder windows of one size keep their own pictures.
 - Both apps notarized ("Notarized Developer ID"). `Tests/checks/run-all.sh`, all passing.
 
 ## Open (by hand, or not done)
 
 - Full screen fitted to the viewer window after the last fixes (the background fit, the 0.25 s
   watch).
-- A file dragged from one Sill window onto another (the last fix decides "left the window" by the
-  window under the pointer; the viewer logs each step).
+- The live drag's ⌥ (a copy) and ⌥⌘ (an alias) between two Finder windows, and a browser's address bar
+  against a page's drop zone, by hand.
 - A left click read as a right click until the next right click: the host now lets go of a button
   still held at a new press and logs it; the lost up's path is not found yet.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
-- Folders both ways, by hand (the zip round trip is checked: `protocol`).
 - Sound is uncompressed (fine at home, heavy away); a drag out starts only from the focused window;
   16 desk windows at most; Spaces gestures were not re-run.

@@ -19,7 +19,7 @@ controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`
 after a restart and new windows of open apps opened by themselves.
 - Wire, additive and gated by window-list flags: the middle button (kind 8, `middleButton`), side
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
-  `fileDrop`). The iOS app sends none of them.
+  `fileDrop`), a drag followed live (38, `liveDrag`). The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
   of its own with its own identity from a pool of 16 (two displays with one vendor and product ID
   are one monitor to macOS, which took the older offline: not a one-display limit), made once at
@@ -27,17 +27,18 @@ after a restart and new windows of open apps opened by themselves.
   on macOS 27.0.1); a full-screen window's display resized live to the viewer window
   (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
   the shown apps and their helpers, muted on the host, 10 ms PCM, off the main actor), `FileDrops`
-  and `DragOut` (offers scoped to their device), `HostClipboard`, `AppCrop` and `SharePill`, windows
+  and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
+  goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows always
   go to the desk, never the iPad's Virtual Display staging.
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (18, 10 mutants), `protocol` 209 with 28
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (21, 12 mutants), `protocol` 221 with 28
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between this Mac and a MacBook Pro on the same network, and an iPhone 16 Pro Max against a
-  test host: the plan's "Verified". **Open:** the plan's "Open" (full screen after the last fixes, a
-  drag between Sill windows, the lost right-button up, Tailscale with Remote Access, uncompressed
-  sound, folders both ways by hand).
+  test host: the plan's "Verified". **Open:** the plan's "Open" (full screen after the last fixes, the
+  lost right-button up, Tailscale with Remote Access, uncompressed
+  sound, the live drag's ⌥ and ⌥⌘ by hand).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
@@ -4795,12 +4796,12 @@ good.
   icon), `MainMenu` and `MacMenus` (the remote app's menus in the menu bar), `StreamWindows` (a
   window per host window, the side streams' feeds, restore, the Dock, drops; `StreamWindow`,
   `DropContainer`, `SideView`), `MainRouter` (the main stream into the right window),
-  `StreamInputView` (input, drags out, `FilePromises`), `WindowPill`, `ConnectView`,
+  `StreamInputView` (input, drags out, `FilePromises`), `LiveDrop` (a drag followed live on the host), `WindowPill`, `ConnectView`,
   `HEVCDisplayView`, `ClipboardSync`, `AudioPlayer`, `DockProxies`, `SystemKeyTap`, `MacKeyMap`,
   DEBUG `MacInputTest` (and `MacResizeTest`). `Sources/SillDockProxy/` is the Dock icon helper.
   `Packaging/Client-Info.plist`, `Scripts/make-client-app.sh`. iOSClient's `ClientPlatform.swift` and
   `HEVCSampleFeed.swift` are shared by both clients. Host side: `SideStreams`, `DeskStages`,
-  `AppCrop` (+ `SharePill`), `HostClipboard`, `AppAudio`, `FileDrops` (+ `DragOut`) in
+  `AppCrop` (+ `SharePill`), `HostClipboard`, `AppAudio`, `FileDrops` (+ `DragOut`), `LiveDrags` in
   `Sources/SillHost`; `Sources/StreamProtocol/SideStreams.swift` their payloads.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
