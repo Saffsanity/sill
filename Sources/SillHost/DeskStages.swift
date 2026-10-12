@@ -69,9 +69,15 @@ final class DeskStages {
             stages[id] = stage
         }
         if let room { stage.deskRoom = CGSize(width: max(room.width, stage.deskRoom?.width ?? 0), height: max(room.height, stage.deskRoom?.height ?? 0)) }
+        stage.deskWindow = size
         // Its own display, made once at the room's size and 120 Hz, so neither a resize nor a rate
         // change makes it again, and a full-screen Space there covers this window's display alone.
         do { try await stage.ensureShared() } catch { stage.release(); forget(id); throw error }
+        // Full screen (or just out of it): the display fitted to the window's own size on the device
+        // first, whether it streams as the main window or beside it.
+        // The main window's `size` is the device's window (a side stream's is the window's own, which
+        // in full screen is the whole display: those keep the size they had before it).
+        if stage.isStaged, stage.fitFullScreen(to: fps == nil ? nil : size) { try? await Task.sleep(for: .milliseconds(400)) }
         let captureScale = min(captureScale, CGFloat(stage.displayScale))
         stage.onLost = { [weak self] in self?.forget(id) }   // the window is home already
         let envelope = Self.envelope(for: CGSize(width: max(size.width, room?.width ?? 0), height: max(size.height, room?.height ?? 0)))
@@ -89,14 +95,6 @@ final class DeskStages {
             filter = AppCrop.filter(display: display, owner: owner.processID, applications: content.applications)
         }
         return (filter, prepared.sourceRect, prepared.outputSize ?? prepared.sourceRect.size)
-    }
-
-    /// A full-screen window's display fitted to the device's window (`VirtualStage.fitFullScreen`);
-    /// true when it changed, after a moment for the app to lay its full screen out again.
-    func fitFullScreen(_ id: UInt32, to fit: CGSize?) async -> Bool {
-        guard let stage = stages[id], stage.fitFullScreen(to: fit) else { return false }
-        try? await Task.sleep(for: .milliseconds(400))
-        return true
     }
 
     /// Where the window's picture is on screen, for input (nil when it is not on the desk).

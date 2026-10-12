@@ -91,6 +91,9 @@ final class VirtualStage {
     private(set) var placement: WindowSizer.Placement?
     /// The size the window actually took on the display, and the size that was asked for.
     private(set) var placedSize: CGSize?
+    /// The size the window last had on the display out of full screen: the device's window, which a
+    /// full-screen Space is fitted to (`fitFullScreen`).
+    private(set) var normalSize: CGSize?
     private var askedSize: CGSize?
     /// The rectangle that size was asked as (global points): fitted into the display's usable
     /// area, which the Dock changes while the request stays the same. See `prepare` step (6).
@@ -151,8 +154,9 @@ final class VirtualStage {
     /// can be on this Mac, then 1 (an ultrawide at 1×, 5120 points, would need 10,240 pixels at 2×;
     /// macOS made no mode for 7,680 or more). A 1× desk renders what a 1× screen shows anyway.
     private(set) var displayScale = 2
-    /// The room the desk's devices asked for (their largest screen), for the shared display.
+    /// The room the desk's devices asked for (their largest screen), and the window's own size.
     var deskRoom: CGSize?
+    var deskWindow: CGSize?
     /// Called just before the stage warps the cursor home (`releaseWindow`): that motion is Sill's,
     /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
     /// after, for the reason InputInjector's `watch` gives. Main actor.
@@ -209,7 +213,8 @@ final class VirtualStage {
     /// Full screen on its own display (Sill's desk): the display takes `fit`, the size of the
     /// device's window, so the full-screen Space fills that window and no more; back to the size it
     /// was made at once the window leaves full screen. True when the display changed size.
-    func fitFullScreen(to fit: CGSize?) -> Bool {
+    func fitFullScreen(to fit: CGSize? = nil) -> Bool {
+        let fit = fit ?? normalSize
         guard let d = display, d.isAlive, let p = placement else { return false }
         let full = WindowSizer.isFullScreen(p.element)
         let w = full ? Int((fit?.width ?? CGFloat(d.madeWidthPt)).rounded()) : d.madeWidthPt
@@ -540,6 +545,7 @@ final class VirtualStage {
 
         // (7) Record the sizes and the rectangle asked, and hand over.
         placedSize = live.size
+        normalSize = live.size
         askedSize = wanted
         askedDest = dest
         var crop = live.intersection(displayBounds).offsetBy(dx: -displayBounds.minX, dy: -displayBounds.minY)
@@ -584,7 +590,9 @@ final class VirtualStage {
             env.height = min(env.height, Self.maxSide - menuInset)   // the menu bar counts toward the 8192 px ceiling
         }
         if let d = display, d.isAlive, scDisplay != nil, Int(d.refreshHz) == refreshHz,
-           CGFloat(d.widthPt) >= env.width, CGFloat(d.heightPt) - menuInset >= env.height {
+           CGFloat(d.madeWidthPt) >= env.width, CGFloat(d.madeHeightPt) - menuInset >= env.height {
+            // The size it was made at: a display fitted to a full-screen window is smaller for now,
+            // and making it again would throw that window out of full screen.
             Stats.shared.bump("vd.reused")
             return
         }
@@ -709,13 +717,22 @@ final class VirtualStage {
 
     private func makeShared() async throws {
         refreshHz = 120
-        let room = deskRoom ?? .zero
-        let fits2x = room.width <= DeskStages.largest.width && room.height <= DeskStages.largest.height
-        let scale = fits2x ? 2 : 1
-        let size = fits2x ? DeskStages.largest
-            : CGSize(width: max(room.width, DeskStages.largest.width), height: max(room.height, DeskStages.largest.height))
-        // The scale is chosen when the display is made: a different one later waits until no window
-        // is on it (DeskStages makes it with the first window and removes it with the last).
+        // Retina (2×) for every window a 2× display can hold, room to grow to the device's largest
+        // screen as far as that goes; 1× only for a window wider or taller than that (one stretched
+        // across an ultrawide, whose 1× pixels are its points anyway).
+        let room = deskRoom ?? .zero, window = deskWindow ?? .zero, largest = DeskStages.largest
+        let needs1x = window.width > largest.width || window.height > largest.height
+        let scale = needs1x ? 1 : 2
+        let size = needs1x
+            ? CGSize(width: max(room.width, window.width), height: max(room.height, window.height))
+            : CGSize(width: min(max(room.width, window.width), largest.width), height: min(max(room.height, window.height), largest.height))
+        if let d = display, d.isAlive, displayScale != scale {
+            // Only up to 1× while the window is there (it outgrew 2×); a window that fits again keeps
+            // its 1× display until the next one is made, rather than moving home and back twice.
+            guard needs1x else { try await ensureDisplay(atLeast: size); return }
+            if placement != nil { releaseWindow() }
+            destroyDisplay()
+        }
         if display == nil || !(display?.isAlive ?? false) { displayScale = scale }
         try await ensureDisplay(atLeast: size)
     }

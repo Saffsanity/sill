@@ -1472,8 +1472,6 @@ package final class StreamCoordinator {
                 let place = Self.liveBounds(of: id).map { CGRect(origin: $0.origin, size: resized ?? $0.size) }
                 var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
                 if toDesk {
-                    // Full screen on its own display: that display at the device's window's size.
-                    _ = await desk.fitFullScreen(id, to: viewport.map { CGSize(width: $0.width, height: $0.height) })
                     do {
                         let own = Self.liveBounds(of: id)?.size ?? w.frame.size
                         staged = try await desk.prepare(w, size: viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own),
