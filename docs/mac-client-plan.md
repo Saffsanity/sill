@@ -22,7 +22,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
   app's menus (read when they open, chosen on the host). A Dock icon per remote app
   (`SillDockProxy`, an ad hoc signed copy per app, talking over distributed notifications) groups
   its windows: its icon is the remote app's with Sill Viewer's in the corner, its Dock menu lists
-  the windows open here (✓ the front one, ◆ a minimized one), and kept in the Dock it opens that
+  the windows open here (✓ the front one), and kept in the Dock it opens that
   app's windows from the other Mac again when clicked (Sill Viewer opened if need be, the app
   launched there when it has none).
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›

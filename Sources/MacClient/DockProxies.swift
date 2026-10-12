@@ -13,7 +13,7 @@ import StreamProtocol
 /// name changes. Main thread.
 final class DockProxies {
     struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window] }
-    /// A window in the Dock menu: the app's front one gets a ✓, a minimized one a ◆, as macOS marks its own.
+    /// A window in the Dock menu: the app's front one gets a ✓, as macOS marks its own.
     struct Window {
         enum State: String { case front, minimized, other }
         let id: UInt32

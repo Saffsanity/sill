@@ -125,12 +125,9 @@ final class Proxy: NSObject, NSApplicationDelegate {
             let item = NSMenuItem(title: w.title, action: #selector(pick(_:)), keyEquivalent: "")
             item.representedObject = w.id
             item.target = self
-            // As macOS marks an app's own windows here: ✓ the front one, ◆ one in the Dock.
+            // ✓ the app's front window, as macOS marks it (the Dock draws no other mark in an app's
+            // menu: a minimized window's ◆ is its own).
             if w.state == "front" { item.state = .on }
-            if w.state == "minimized" {
-                item.state = .mixed
-                item.mixedStateImage = Self.diamond
-            }
             menu.addItem(item)
         }
         if !remote.isEmpty {
@@ -152,13 +149,6 @@ final class Proxy: NSObject, NSApplicationDelegate {
         guard let id = item.representedObject as? String else { return }
         post(["ask": "dockItem", "item": id, "title": item.title])
     }
-
-    private static let diamond: NSImage? = {
-        let image = NSImage(systemSymbolName: "diamond.fill", accessibilityDescription: "Minimized")?
-            .withSymbolConfiguration(.init(pointSize: 7, weight: .regular))
-        image?.isTemplate = true
-        return image
-    }()
 
     @objc private func pick(_ item: NSMenuItem) {
         guard let id = item.representedObject as? String else { return }
