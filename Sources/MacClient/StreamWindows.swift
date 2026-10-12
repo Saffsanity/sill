@@ -149,7 +149,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SillResizeTest") { return }   // never the real session's list
         #endif
-        let ordered = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.map(\.source).reversed()
+        let ordered = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.map(\.source).filter { open[$0] != nil }.reversed()
         let kept = ordered.compactMap { source -> Kept? in
             guard case .window(let id) = source, let w = client.windows.first(where: { $0.id == id }) else { return nil }
             return Kept(id: id, app: w.bundleID, title: w.title)
@@ -188,7 +188,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         guard client.connected else { return }
         // Every window open here, the focused one too: the host streams it as the main stream, not
         // as a side one, and keeps them all on Sill's desk, also between two picks.
-        let ordered = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.map(\.source)
+        // Only windows still open: a closing one is still among AppKit's while it closes, and asked
+        // for then, the host kept it on its desk, captured, the sharing indicator on (2026-10-12).
+        let ordered = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.map(\.source).filter { open[$0] != nil }
         let ids = ordered.compactMap { source -> UInt32? in
             guard case .window(let id) = source else { return nil }
             return id

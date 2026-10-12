@@ -113,6 +113,7 @@ final class DeskStages {
         let envelope = Self.envelope(for: CGSize(width: max(size.width, room?.width ?? 0), height: max(size.height, room?.height ?? 0)))
         let prepared: VirtualStage.Prepared
         do {
+            stage.mayReachOtherSpace = fps != nil
             prepared = try await stage.prepare(window: window, wanted: size, envelope: envelope, captureScale: captureScale, refreshHz: 120)
         } catch {
             stage.release()

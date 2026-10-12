@@ -364,7 +364,7 @@ final class VirtualStage {
             p = current                                       // same window: keep its original frame
         } else if let fresh = sizer.placement(for: window) {
             p = fresh
-        } else if let found = await fromOtherSpace(window) {
+        } else if mayReachOtherSpace, let found = await fromOtherSpace(window) {
             p = found
         } else {
             throw Failure.axWindowNotFound
@@ -880,12 +880,20 @@ final class VirtualStage {
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))   // the rest of its animation, so the move home lands
     }
 
+    /// Only for the window a device picked (the main stream), never a side stream's: bringing an app
+    /// forward changes what the person at this Mac sees (DeskStages sets it per prepare).
+    var mayReachOtherSpace = false
+    private static var reachedFor: [CGWindowID: Date] = [:]
+
     /// A window Accessibility does not list (it lists only the windows of the Space shown): a window
     /// left full screen in a Space of its own on another display (a host quit before it left). Its
     /// app is brought forward, which shows that Space, the window found again, and taken out of full
     /// screen so it can come to the desk. Nil when it still cannot be found.
     private func fromOtherSpace(_ window: SCWindow) async -> WindowSizer.Placement? {
         guard !window.isOnScreen, let pid = window.owningApplication?.processID else { return nil }
+        // It changes what the Mac shows: once a minute a window at most.
+        if let last = Self.reachedFor[window.windowID], Date().timeIntervalSince(last) < 60 { return nil }
+        Self.reachedFor[window.windowID] = Date()
         print("\(window.owningApplication?.applicationName ?? "?") — \(window.title ?? ""): not in the Space shown; bringing its app forward to reach it")
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)

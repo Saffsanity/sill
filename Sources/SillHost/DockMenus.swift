@@ -67,7 +67,8 @@ final class DockMenus: @unchecked Sendable {
         let bundle = running.bundleURL?.standardizedFileURL.path
         var byName: AXUIElement?
         for list in children(root) {
-            for item in children(list) {
+            // An app's own item only: a folder or stack of the same name has a menu of the Dock's.
+            for item in children(list) where attribute(item, kAXSubroleAttribute) as? String == "AXApplicationDockItem" {
                 if let url = attribute(item, kAXURLAttribute) as? URL, url.standardizedFileURL.path == bundle { return item }
                 if byName == nil, title(item) == running.localizedName { byName = item }
             }
