@@ -604,6 +604,9 @@ final class StreamWindow: NSWindow {
         placeholder.imageScaling = .scaleProportionallyUpOrDown
         placeholder.frame = container.bounds
         placeholder.autoresizingMask = [.width, .height]
+        // An NSImageView registers for file and image drags itself and, not editable, refuses them;
+        // as the deepest view under the pointer it took every drop meant for the container.
+        placeholder.unregisterDraggedTypes()
         container.addSubview(placeholder)
         side.frame = container.bounds
         side.autoresizingMask = [.width, .height]
