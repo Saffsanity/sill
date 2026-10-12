@@ -328,7 +328,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
                 guard case .window(let id)? = (NSApp.keyWindow as? StreamWindow)?.source else { return nil }
                 return appOf[id]
             }()
-            for w in list where !seen.contains(w.id) && openApps.contains(w.bundleID) && w.width >= 80 && w.height >= 60 {
+            // Not an app's untitled strips (a browser's full-screen bar, 115 points tall across the display).
+            for w in list where !seen.contains(w.id) && openApps.contains(w.bundleID) && w.width >= 80 && w.height >= 150
+                                && !w.title.isEmpty {
                 open(.window(w.id), focus: w.bundleID == focusedApp)
             }
         }

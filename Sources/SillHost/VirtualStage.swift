@@ -209,12 +209,16 @@ final class VirtualStage {
     }
 
     var isStaged: Bool { display != nil && placement != nil }
+    /// The staged window is full screen now, by AppKit's word (Accessibility), whatever the last placement saw.
+    var isFullScreenNow: Bool { placement.map { WindowSizer.isFullScreen($0.element) } ?? false }
 
     /// Full screen on its own display (Sill's desk): the display takes `fit`, the size of the
     /// device's window, so the full-screen Space fills that window and no more; back to the size it
     /// was made at once the window leaves full screen. True when the display changed size.
     func fitFullScreen(to fit: CGSize? = nil) -> Bool {
-        let fit = fit ?? normalSize
+        // A fit the display cannot take (the window's own full-screen size, from a viewport that
+        // resizes nothing) stands down for the size it had before full screen.
+        let fit = fit.flatMap { f in display.map { CGFloat($0.madeWidthPt) >= f.width && CGFloat($0.madeHeightPt) - menuInset > f.height } == true ? f : nil } ?? normalSize
         guard let d = display, d.isAlive, let p = placement else { return false }
         let full = WindowSizer.isFullScreen(p.element)
         let w = full ? Int((fit?.width ?? CGFloat(d.madeWidthPt)).rounded()) : d.madeWidthPt

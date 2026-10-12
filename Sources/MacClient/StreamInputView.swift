@@ -217,7 +217,7 @@ final class StreamInputView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard leftDown, let p = fraction(event, clamped: true) else { return }
         // Files an app on the other Mac is dragging, carried out of this window: the drag goes on here.
-        if let offer = dragOffer, !offer.files.isEmpty, !bounds.contains(convert(event.locationInWindow, from: nil)) {
+        if let offer = dragOffer, !offer.files.isEmpty, !overOwnWindow() {
             dragOut(offer, event: event, last: p)
             return
         }
@@ -511,6 +511,15 @@ extension StreamInputView {
 // MARK: Files dragged out of the other Mac's window
 
 extension StreamInputView: NSDraggingSource {
+    /// Whether the pointer is over this view's window as it shows, not just within its rectangle:
+    /// another window over it (another Sill window, say) counts as leaving it.
+    func overOwnWindow() -> Bool {
+        guard let window else { return false }
+        let at = NSEvent.mouseLocation
+        return NSWindow.windowNumber(at: at, belowWindowWithWindowNumber: 0) == window.windowNumber
+            && bounds.contains(convert(window.convertPoint(fromScreen: at), from: nil))
+    }
+
     /// The other Mac's drag is let go of there (Esc cancels it, then the button comes up), and the
     /// same files go on being dragged here as promises, fetched from the other Mac when dropped.
     func dragOut(_ offer: DragOffer, event: NSEvent, last: CGPoint) {

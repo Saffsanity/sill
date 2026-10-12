@@ -69,6 +69,12 @@ final class DeskStages {
             stages[id] = stage
         }
         if let room { stage.deskRoom = CGSize(width: max(room.width, stage.deskRoom?.width ?? 0), height: max(room.height, stage.deskRoom?.height ?? 0)) }
+        // A full-screen window is its display's size: never the size to make the display for (it grew
+        // the display, which threw the window out of full screen and grew again); the size it had
+        // before full screen stands in.
+        let fullScreen = stage.isStaged && stage.isFullScreenNow
+        let asked = size
+        let size = fullScreen ? (stage.normalSize ?? size) : size
         stage.deskWindow = size
         // Its own display, made once at the room's size and 120 Hz, so neither a resize nor a rate
         // change makes it again, and a full-screen Space there covers this window's display alone.
@@ -77,7 +83,7 @@ final class DeskStages {
         // first, whether it streams as the main window or beside it.
         // The main window's `size` is the device's window (a side stream's is the window's own, which
         // in full screen is the whole display: those keep the size they had before it).
-        if stage.isStaged, stage.fitFullScreen(to: fps == nil ? nil : size) { try? await Task.sleep(for: .milliseconds(400)) }
+        if stage.isStaged, stage.fitFullScreen(to: fps == nil ? nil : asked) { try? await Task.sleep(for: .milliseconds(400)) }
         let captureScale = min(captureScale, CGFloat(stage.displayScale))
         stage.onLost = { [weak self] in self?.forget(id) }   // the window is home already
         let envelope = Self.envelope(for: CGSize(width: max(size.width, room?.width ?? 0), height: max(size.height, room?.height ?? 0)))
