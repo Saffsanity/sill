@@ -4,20 +4,20 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "Sources/MacClient/MainRouter.swift")
 MUTANTS = [
-    ("switch on any sets", "if let n = next, switched || target == nil {", "if let n = next {"),
-    ("switch on new sets alone, the old rule", "if let n = next, switched || target == nil {", "if let n = next, switched || target == nil || encoded != lastSets {"),
-    ("the first window waits for a word", "if let n = next, switched || target == nil {", "if let n = next, switched {"),
-    ("never switch on the host's word", "if let n = next, switched || target == nil {", "if let n = next, target == nil {"),
-    ("an old host word counts", "        next = feed\n        switched = false", "        next = feed"),
-    ("follow never at once", "if let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {", "if false, let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {"),
-    ("follow at once whatever the age", "if let began = newStreamAt, now() - began < Self.followWindow, let ps = lastPS, let frames = gop {", "if let began = newStreamAt, now() - began < 1e9, let ps = lastPS, let frames = gop {"),
-    ("follow waits without the host's word", "            next = feed\n            switched = true\n", "            next = feed\n"),
+    ("side frames on any sets", "let mine = feed !== target && sideOwned.contains(ObjectIdentifier(feed))", "let mine = feed !== target"),
+    ("side sets into the main stream's window", "        let mine = feed !== target\n        if mine { sideOwned", "        let mine = true\n        if mine { sideOwned"),
+    ("the main stream's sets leave the side's claim", "        if let t = target { sideOwned.remove(ObjectIdentifier(t)) }\n", ""),
+    ("the stream never follows the list", "        target = listedSource.flatMap { feeds[$0] }\n", ""),
+    ("a late window never takes the stream", "        target = listedSource.flatMap { feeds[$0] }\n", "        if target == nil && !begun { target = listedSource.flatMap { feeds[$0] } }\n"),
+    ("a list never marks the switch", "        listedSource = active\n        begun = false", "        listedSource = active"),
+    ("no replay into a window opened late", "        for (data, key) in frames { feed.enqueue(data, isKeyframe: key) }\n", ""),
+    ("an old stream replayed into a new window", "guard let feed, source == listedSource, begun, target == nil", "guard let feed, source == listedSource, target == nil"),
+    ("a window for another source takes the stream", "guard let feed, source == listedSource, begun, target == nil", "guard let feed, begun, target == nil"),
+    ("a closed window keeps drawing", "        if let old = feeds[source], old === target { target = nil }\n", ""),
     ("the group kept across keyframes", "        if isKeyframe { gop = []; gopBytes = 0 }\n", ""),
-    ("reset keeps the old sets", "target = nil; next = nil; switched = false; lastSets = nil", "target = nil; next = nil; switched = false"),
-    ("the expected window is not drawn into", "return feed === target || feed === next", "return feed === target"),
-    ("the sets not remembered", "        lastSets = encoded\n", ""),
-    ("a list never marks the switch", "if let last = lastListed, last != active { switched = true }", ""),
-    ("any list marks the switch", "if let last = lastListed, last != active { switched = true }", "switched = true"),
+    ("no limit to the group", "if gopBytes > Self.gopLimit {", "if false {"),
+    ("reset keeps the windows", "        feeds = [:]; sideOwned", "        sideOwned"),
+    ("reset keeps the target", "sideOwned = []; target = nil;", "sideOwned = [];"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

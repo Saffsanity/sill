@@ -11,6 +11,11 @@ import StreamProtocol
 /// once that app has no window open here, or when Sill Viewer goes. Copies live in
 /// ~/Library/Application Support/Sill Viewer/Dock and are made again only when the helper or the
 /// name changes. Main thread.
+///
+/// The two talk by distributed notifications, which any process here can post and read, so none
+/// carries anything: what a Dock icon shows (the window titles, the menu) is in a file only this user
+/// can read (`<slug>.state`), and the notification only says it changed; a Dock icon's request carries
+/// the token Sill Viewer writes there at launch (`token`, 0600), and one without it is ignored.
 final class DockProxies {
     struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window] }
     /// A window in the Dock menu: the app's front one gets a ✓, as macOS marks its own.
@@ -46,10 +51,18 @@ final class DockProxies {
         set { UserDefaults.standard.set(newValue, forKey: "SillClient.dockIcons") }
     }
 
+    /// This launch's secret, which a Dock icon's request must carry.
+    private let token = UUID().uuidString
+
     init() {
+        Self.writePrivate(Data(token.utf8), to: Self.folder.appendingPathComponent("token"))
         DistributedNotificationCenter.default().addObserver(forName: Self.actionName, object: nil, queue: .main) { [weak self] note in
-            guard let self, let app = note.object as? String else { return }
-            if note.userInfo?["ask"] as? String == "launch" { self.onLaunch?(app); return }
+            guard let self, let app = note.object as? String, note.userInfo?["token"] as? String == self.token else { return }
+            if note.userInfo?["ask"] as? String == "launch" {
+                // Only for an app that has a Dock icon here (one kept in the Dock and clicked).
+                if FileManager.default.fileExists(atPath: Self.folder.appendingPathComponent(Self.slug(app)).path) { self.onLaunch?(app) }
+                return
+            }
             guard self.last[app] != nil else { return }
             switch note.userInfo?["ask"] as? String {
             case "focus": self.onFocus?(app, nil)
@@ -90,9 +103,24 @@ final class DockProxies {
 
     private func quit(_ app: String) {
         iconWritten.remove(app)
-        DistributedNotificationCenter.default().postNotificationName(Self.stateName, object: app, userInfo: ["quit": true],
-                                                                     deliverImmediately: true)
+        tell(app, ["quit": true])
         running[app] = nil
+    }
+
+    /// `state` written where only this user reads it, and the app's Dock icon told it changed.
+    private func tell(_ app: String, _ state: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: state) else { return }
+        Self.writePrivate(data, to: Self.folder.appendingPathComponent("\(Self.slug(app)).state"))
+        DistributedNotificationCenter.default().postNotificationName(Self.stateName, object: app, userInfo: nil, deliverImmediately: true)
+    }
+
+    /// `data` at `url`, readable and writable by this user alone.
+    private static func writePrivate(_ data: Data, to url: URL) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let temp = url.appendingPathExtension("tmp")
+        guard fm.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { return }
+        _ = try? fm.replaceItemAt(url, withItemAt: temp)
     }
 
     /// The app's Dock menu as the other Mac read it: shown in its Dock icon's menu from the next opening.
@@ -112,13 +140,10 @@ final class DockProxies {
     private func post(_ app: String) {
         guard let info = last[app] else { return }
         let menu = menus[app] ?? []
-        DistributedNotificationCenter.default().postNotificationName(
-            Self.stateName, object: app,
-            userInfo: ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
-                       "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
-                       "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
-                       "menuEnabled": menu.map { $0.enabled ? "1" : "0" }],
-            deliverImmediately: true)
+        tell(app, ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
+                   "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
+                   "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
+                   "menuEnabled": menu.map { $0.enabled ? "1" : "0" }])
     }
 
     private func launch(_ app: String, _ info: AppWindows) {

@@ -49,6 +49,8 @@ final class SideStreams {
     /// Some device asks for windows captured with what belongs to them (StreamCoordinator's main
     /// stream follows it too).
     var wholeApp: Bool { wanted.values.contains { $0.wholeApp } }
+    /// The devices that asked for whole-app capture: the Mac clients.
+    var wholeAppConnections: [NWConnection] { wanted.values.filter(\.wholeApp).map(\.connection) }
     /// The devices' wish for whole-app capture changed: the main stream starts again with it.
     var onWholeAppChanged: (() -> Void)?
     /// The person at this Mac stopped the sharing (StreamCoordinator.sharingStopped).

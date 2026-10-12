@@ -11,7 +11,8 @@ import StreamProtocol
 final class DockMenus: @unchecked Sendable {
     private let queue = DispatchQueue(label: "sill.dockmenu", qos: .userInitiated)
 
-    /// The Dock's own items, left out (and never pressed from a device).
+    /// The Dock's own items, left out (and never pressed from a device). By their English titles: on a
+    /// Mac in another language they are read and offered like the app's.
     private static let docksOwn: Set<String> = ["Options", "Show All Windows", "Hide", "Hide Others", "Show", "Quit",
                                                 "Force Quit", "Show Recents", "Keep in Dock", "Remove from Dock",
                                                 "Open at Login", "Show in Finder", "Assign To"]
@@ -24,13 +25,15 @@ final class DockMenus: @unchecked Sendable {
         }
     }
 
-    /// The item at `id` pressed, if its title is still `title` and it is not the Dock's own.
-    func press(_ app: String, id: Int, title: String, done: @escaping (Bool) -> Void) {
+    /// The item at `id` pressed, if it is one `read` offers (the app's, not a window or the Dock's own)
+    /// and its title is still `title`.
+    func press(_ app: String, id: Int, title: String, windowTitles: Set<String> = [], done: @escaping (Bool) -> Void) {
         queue.async {
             let pressed = Self.withMenu(app, keepOpen: true) { menu -> Bool in
                 let children = Self.children(menu)
-                guard children.indices.contains(id), Self.title(children[id]) == title, !Self.docksOwn.contains(title),
-                      Self.enabled(children[id]) else { return false }
+                let offered = Self.items(of: menu, windowTitles: windowTitles)
+                guard children.indices.contains(id), offered.contains(where: { $0.id == id && $0.title == title && $0.separator != true }),
+                      Self.title(children[id]) == title, Self.enabled(children[id]) else { return false }
                 return AXUIElementPerformAction(children[id], kAXPressAction as CFString) == .success
             } ?? false
             DispatchQueue.main.async { done(pressed) }
@@ -52,7 +55,7 @@ final class DockMenus: @unchecked Sendable {
         guard AXUIElementPerformAction(item, "AXShowMenu" as CFString) == .success else { return nil }
         var menu: AXUIElement?
         for _ in 0..<30 {   // shown within a few hundred ms
-            if let m = attribute(item, "AXShownMenuUIElement").map({ $0 as! AXUIElement }), !children(m).isEmpty { menu = m; break }
+            if let m = element(attribute(item, "AXShownMenuUIElement")), !children(m).isEmpty { menu = m; break }
             usleep(30_000)
         }
         guard let menu else { close(item); return nil }
@@ -62,7 +65,7 @@ final class DockMenus: @unchecked Sendable {
     }
 
     private static func close(_ item: AXUIElement) {
-        if let shown = attribute(item, "AXShownMenuUIElement") { AXUIElementPerformAction(shown as! AXUIElement, kAXCancelAction as CFString) }
+        if let shown = element(attribute(item, "AXShownMenuUIElement")) { AXUIElementPerformAction(shown, kAXCancelAction as CFString) }
     }
 
     /// The Dock's item for the running app `app` (by its bundle's URL, else its name).
@@ -98,6 +101,11 @@ final class DockMenus: @unchecked Sendable {
     private static func attribute(_ e: AXUIElement, _ name: String) -> AnyObject? {
         var v: AnyObject?
         return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+    }
+    /// `value` if it is an Accessibility element.
+    private static func element(_ value: AnyObject?) -> AXUIElement? {
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
     }
     private static func children(_ e: AXUIElement) -> [AXUIElement] { (attribute(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
     private static func title(_ e: AXUIElement) -> String { attribute(e, kAXTitleAttribute) as? String ?? "" }

@@ -750,6 +750,10 @@ final class StreamClient: ObservableObject {
     @Published var hostLiveDrag = false
     /// Whether the Mac reads its apps' Dock menus for this device (`WindowList.dockMenu`, kind 39).
     @Published var hostDockMenu = false
+    /// Whether the Mac takes a scroll or a hover over a window shown beside the streamed one
+    /// (`WindowList.windowInput`; kind 8 with a window).
+    var hostWindowInput = false
+    private var lastWindowMoveAt: CFTimeInterval = 0
     /// The Mac's own displays, to pick which the Desktop is (`WindowList.displays`, kind 40), and that one.
     @Published var hostDisplays: [DisplayInfo] = []
     @Published var desktopDisplay: UInt32?
@@ -2922,6 +2926,7 @@ final class StreamClient: ObservableObject {
         hostFileDrop = false
         hostLiveDrag = false
         hostDockMenu = false
+        hostWindowInput = false
         hostDisplays = []
         desktopDisplay = nil
         remoteRoute = nil
@@ -3063,6 +3068,23 @@ final class StreamClient: ObservableObject {
     func send(_ kind: StreamMessageKind, payload: Data) {
         let message = StreamMessage(kind: kind, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
         link.send(message.serialized())
+    }
+
+    /// A scroll or a hover over `window`, shown here but not the streamed one (a Mac client): only to a
+    /// Mac that takes it. Moves at most 60 a second. Main thread.
+    func sendWindowInput(_ window: UInt32, _ event: InputEvent) {
+        guard connected, hostWindowInput, WindowInput.allowed(event) else { return }
+        if case .pointer(.move, _, _) = event {
+            let now = CACurrentMediaTime()
+            guard now - lastWindowMoveAt >= 1.0 / 60 else { return }
+            lastWindowMoveAt = now
+        }
+        lastInputAt = ProcessInfo.processInfo.systemUptime
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.flushPendingMove()
+            self.send(.input, WindowInput(window: window, event: event).encoded())
+        }
     }
 
     func sendInput(_ event: InputEvent) {
@@ -3442,6 +3464,7 @@ final class StreamClient: ObservableObject {
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
                 if self.hostDockMenu != (list.dockMenu == true) { self.hostDockMenu = list.dockMenu == true }
+                self.hostWindowInput = list.windowInput == true
                 if self.hostDisplays != (list.displays ?? []) { self.hostDisplays = list.displays ?? [] }
                 if self.desktopDisplay != list.desktopDisplay { self.desktopDisplay = list.desktopDisplay }
                 if !self.sessionListed {

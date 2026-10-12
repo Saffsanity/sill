@@ -78,14 +78,13 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             DispatchQueue.main.async { self?.requestSideStreams() }
         }.store(in: &subscriptions)
         let feeds = sideFeeds, route = router
-        // A window the main stream draws into takes no side frames: its side stream is on its way out.
+        // Side streams through the router: never into the window the main stream draws, and a side
+        // frame only after its own parameter sets (MainRouter).
         client.onSideParameterSets = { id, ps in
-            guard let feed = feeds.get(id), !route.draws(into: feed) else { return }
-            feed.apply(ps)
+            if let feed = feeds.get(id) { route.sideParameterSets(ps, into: feed) }
         }
         client.onSideFrame = { id, data, isKey in
-            guard let feed = feeds.get(id), !route.draws(into: feed) else { return }
-            feed.enqueue(data, isKeyframe: isKey)
+            if let feed = feeds.get(id) { route.sideFrame(data, isKeyframe: isKey, into: feed) }
         }
         dock.onFocus = { [weak self] app, window in self?.focus(app: app, window: window) }
         dock.onLaunch = { [weak self] app in self?.launchFromDock(app) }
@@ -238,6 +237,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             window.container.over = { [weak self] info, at in self?.dragOver(info, at: at, window: id) ?? [] }
             window.container.exited = { [weak self] info in self?.live.exited(info) }
             window.container.onDrop = { [weak self] info, at in self?.dropped(info, at: at, window: id) ?? false }
+            window.container.onBackgroundInput = { [weak self] event in self?.client.sendWindowInput(id, event) }
             window.container.onBackgroundPress = { [weak self, weak window] event in
                 guard let self, let window else { return }
                 self.heldPress = (window.source, event.locationInWindow, Date())
@@ -252,6 +252,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             appOf[id] = client.windows.first { $0.id == id }?.bundleID ?? appOf[id]
         }
         open[source] = window
+        router.register(source, window.side.feed)   // the main stream goes here whenever the host streams this
         defer { syncDock(); keep() }
         window.center()
         if let key = NSApp.keyWindow as? StreamWindow, key !== window {
@@ -425,7 +426,6 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         requested = nil
         input.flushHeld()
         if open[active] == nil { open(active) }
-        router.hostSwitched()
         attach(to: active)
         requestSideStreams()
     }
@@ -494,9 +494,6 @@ final class StreamWindows: NSObject, NSWindowDelegate {
                 }
             }
         }
-        // The host streams this window now: if no focus here asked for it (the host picked it, or the
-        // window opened for an app opened from the status item), its stream is followed into it.
-        if !router.draws(into: window.side.feed) { router.follow(window.side.feed) }
         showing = source
         if case .window = source, display(of: source) == nil { input.textScale = 1 } else { input.textScale = nil }
         if input.superview !== window.container {
@@ -534,7 +531,6 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     private func focused(_ window: StreamWindow) {
         if local(client.active) != window.source {
             window.placeholder.image = thumbnail(window.source) ?? window.placeholder.image
-            router.expect(window.side.feed)   // the new stream's picture goes here once it comes
             pick(window.source)
         } else {
             attach(to: window.source)
@@ -600,6 +596,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? StreamWindow else { return }
         open[window.source] = nil
+        router.register(window.source, nil)
         if case .window(let id) = window.source { sideFeeds.set(id, nil) }
         defer { requestSideStreams(); syncDock(); keep() }
         guard showing == window.source else { return }
@@ -710,6 +707,10 @@ final class DropContainer: NSView {
     /// A press on the picture of a window in the background (the stream view is elsewhere): the
     /// window comes forward, and the press goes on once the other Mac streams it.
     var onBackgroundPress: ((NSEvent) -> Void)?
+    /// Input over the picture of a window in the background that does not bring it forward, as on a
+    /// Mac: a scroll, and the pointer moving over it (a fraction of the picture from its top left).
+    var onBackgroundInput: ((InputEvent) -> Void)?
+    private var scrollState = ScrollState()
     /// The stream view, while it is in this window (`StreamInputView`).
     private var input: StreamInputView? { subviews.lazy.compactMap { $0 as? StreamInputView }.first }
 
@@ -725,6 +726,28 @@ final class DropContainer: NSView {
     // them until the held press is begun, `beginHeldPress`).
     override func mouseDragged(with event: NSEvent) { input?.mouseDragged(with: event) }
     override func mouseUp(with event: NSEvent) { input?.mouseUp(with: event) }
+
+    override func scrollWheel(with event: NSEvent) {
+        if let input { input.scrollWheel(with: event); return }
+        guard let p = pictureFraction(event) else { return }
+        for e in scrollState.events(for: event, at: p, picture: bounds.size) { onBackgroundInput?(e) }
+    }
+    override func mouseMoved(with event: NSEvent) {
+        guard input == nil, let p = pictureFraction(event) else { return }   // the stream view tracks its own
+        onBackgroundInput?(.pointer(.move, x: Double(p.x), y: Double(p.y)))
+    }
+    /// The picture fills the window, the other Mac's window at 1:1.
+    private func pictureFraction(_ event: NSEvent) -> CGPoint? {
+        let at = convert(event.locationInWindow, from: nil)
+        guard bounds.width > 0, bounds.height > 0, bounds.contains(at) else { return nil }
+        return CGPoint(x: at.x / bounds.width, y: isFlipped ? at.y / bounds.height : 1 - at.y / bounds.height)
+    }
+    // Moves while the window is in the background too.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)

@@ -80,6 +80,11 @@ package final class StreamCoordinator {
     /// Why that check failed, if it did: the virtual display then stays off for the whole run.
     private var apiProblem: String?
     private var encoder: HEVCEncoder? { didSet { encoderBox.current = encoder } }
+    /// Whether the running pipeline's frames still go out: off before its encoder is let go. The old
+    /// encoder is drained off the main actor (`HEVCEncoder.deinit`), and the frame still inside it came
+    /// out after the next stream had begun: a keyframe of the closed window, with its sets, drawn in
+    /// the window a device had just focused (2026-10-12).
+    private var encoderLive: OutputSwitch?
     /// Hardware HEVC normally. When a hardware session stops returning frames, or the launch probe
     /// gets no answer, the stream runs on the software encoder at half the capture scale and up to
     /// 60 fps, slow but alive (`enterSoftwareFallback`), until a re-check finds the hardware keeping
@@ -999,8 +1004,16 @@ package final class StreamCoordinator {
                 if let error { print("Launch failed: \(error.localizedDescription)") }
             }
         case .input:
-            guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            guard let input = WindowInput.decode(message.payload) else { return }
+            let event = input.event
             let device = ObjectIdentifier(connection)
+            // A scroll or a hover over a window shown beside the streamed one: there, raising nothing.
+            if let window = input.window, window != streamedWindowID {
+                guard WindowInput.allowed(event), DesktopWindow.display(of: window) != nil || catalog.window(id: window) != nil,
+                      let rect = dropRect(window) else { return }
+                deliver(event, in: rect, from: device)
+                return
+            }
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
                 // drag): input has nowhere to land. The up of a key or a button the Mac has down still
@@ -1157,6 +1170,7 @@ package final class StreamCoordinator {
         case .fileChunk:
             guard !synthetic else { return }   // a test host writes and drops nothing
             fileDrops.chunk(message.payload, device: deviceName(connection), from: connection)
+            liveDrags.heard(ObjectIdentifier(connection))   // a large file takes longer than a drag's silence
         case .fileRequest:
             guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
             dragOut.request(r, from: connection)
@@ -1185,14 +1199,14 @@ package final class StreamCoordinator {
                 server.send(StreamMessage(kind: .dockMenu, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                           payload: Wire.encode(m)), to: connection)
             }
+            let titles = Set(catalog.windows.filter { $0.owningApplication?.bundleIdentifier == d.app }.compactMap(\.title))
             if let press = d.press {
                 let who = deviceName(connection)
-                dockMenus.press(d.app, id: press, title: d.title ?? "") { pressed in
+                dockMenus.press(d.app, id: press, title: d.title ?? "", windowTitles: titles) { pressed in
                     print("Dock menu from \(who): \(d.app) › \(d.title ?? "?")\(pressed ? "" : " (not pressed: the menu changed)")")
                     answer(DockMenu(app: d.app, token: d.token, pressed: pressed))
                 }
             } else {
-                let titles = Set(catalog.windows.filter { $0.owningApplication?.bundleIdentifier == d.app }.compactMap(\.title))
                 dockMenus.read(d.app, windowTitles: titles) { items in answer(DockMenu(app: d.app, token: d.token, items: items)) }
             }
         case .liveDrag:
@@ -1209,9 +1223,8 @@ package final class StreamCoordinator {
 
     // MARK: Sharing stopped on this Mac
 
-    /// The person at this Mac stopped the sharing (the menu bar's screen-sharing item, Stop Sharing):
-    /// every device is told and let go, and nothing is captured until one connects again. The devices
-    /// do not reconnect by themselves.
+    /// Whether a capture ended because the person at this Mac stopped the sharing (the menu bar's
+    /// screen-sharing item, Stop Sharing): `sharingStopped` then takes every window back.
     static func stoppedByPerson(_ error: Error) -> Bool {
         let e = error as NSError
         return e.domain == SCStreamErrorDomain && e.code == SCStreamError.Code.userStopped.rawValue
@@ -1224,7 +1237,10 @@ package final class StreamCoordinator {
 
     /// The windows shared now (the main stream's and those beside it), for the person at this Mac to
     /// take back one at a time: their IDs (a Desktop's display tagged, DesktopWindow) and names.
+    /// Only while every connected device is a Mac client (it asked for its windows whole, and it reads
+    /// kind 41): an iPhone or iPad keeps its stream as it always did, whatever is done at this Mac.
     package var sharedWindows: [(id: UInt32, title: String)] {
+        guard let side = sideStreams, !connections.isEmpty, side.wholeAppConnections.count == connections.count else { return [] }
         var ids: [UInt32] = []
         if case .window(let id) = active { ids.append(id) }
         if active == .desktop, let d = catalog.display { ids.append(DesktopWindow.id(display: d.displayID)) }
@@ -1245,11 +1261,13 @@ package final class StreamCoordinator {
     /// streaming, and the devices are told (kind 41) and close their windows of it; they may open it
     /// again. The devices stay connected.
     package func takeBack(_ id: UInt32?) async {
-        let ids = Set(id.map { [$0] } ?? sharedWindows.map(\.id))
+        let shared = Set(sharedWindows.map(\.id))
+        let ids = id.map { shared.contains($0) ? [$0] : [] }.map(Set.init) ?? shared
         guard !ids.isEmpty else { return }
         print("Stopped sharing on this Mac: \(id == nil ? "every window" : sharedWindows.first { $0.id == id }?.title ?? "window \(id!)")")
-        server.broadcast(StreamMessage(kind: .takenBack, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                                       payload: Wire.encode(TakenBack(windows: Array(ids)))))
+        let message = StreamMessage(kind: .takenBack, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                    payload: Wire.encode(TakenBack(windows: Array(ids))))
+        for c in sideStreams?.wholeAppConnections ?? [] { server.send(message, to: c) }
         sideStreams?.forget(ids)
         let mainShared: Bool = {
             if case .window(let w) = active { return ids.contains(w) }
@@ -1264,6 +1282,15 @@ package final class StreamCoordinator {
 
     /// A window's rectangle for a drop or a drag over it: one shown beside the streamed one (on its
     /// desk display, else where it is), else (nil) the streamed one.
+    /// The streamed source as side streams name a window (a Desktop by its display, tagged).
+    private var streamedWindowID: UInt32? {
+        switch active {
+        case .window(let id): return id
+        case .desktop: return catalog.display.map { DesktopWindow.id(display: $0.displayID) }
+        case .none: return nil
+        }
+    }
+
     private func dropRect(_ window: UInt32?) -> CGRect? {
         if let d = window.flatMap(DesktopWindow.display(of:)) { return CGDisplayBounds(d) }   // a Desktop window's display
         return window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
@@ -1448,6 +1475,9 @@ package final class StreamCoordinator {
         selecting = source
         restartOf = (source == active && source != .none) ? source : nil
         defer {
+            // A pick brings its app forward, maybe seconds after the device asked (an app that took
+            // its time to launch): the device's own doing, never the person here taking it back.
+            if bringForward { lastDeviceAction = CFAbsoluteTimeGetCurrent() }
             switching = false
             selecting = nil
             restartOf = nil
@@ -1505,6 +1535,7 @@ package final class StreamCoordinator {
             }
         }
         releaseKeysOfDevicesThatLeft()
+        encoderLive?.off(); encoderLive = nil
         encoder = nil                  // deinit invalidates the VT session
         server.resetForNewStream()          // every client waits for the next parameter sets + keyframe
         // New settings take effect here, between pipelines, before the rate, the scale and the
@@ -1740,7 +1771,10 @@ package final class StreamCoordinator {
             }
         }
         let server = self.server
+        let live = OutputSwitch()
+        encoderLive = live
         enc.onEncoded = { data, isKey, parameterSets in
+            guard live.on else { return }   // a retired pipeline's last frame, drained after the switch
             let now = Date().timeIntervalSince1970
             if let ps = parameterSets {
                 server.broadcast(StreamMessage(kind: .parameterSets, timestamp: now, isKeyframe: true, payload: ps.encoded()))
@@ -2097,6 +2131,8 @@ package final class StreamCoordinator {
         guard since > 2 else {
             if sharedWindows.contains(where: { catalog.window(id: $0.id)?.owningApplication?.processID == pid }) {
                 print("An app with shared windows came forward \(String(format: "%.1f", since)) s after a device acted (\(lastDeviceKind.map { "\($0)" } ?? "?")); left shared")
+            } else {
+                followIfOpenedByDevice(pid)
             }
             return
         }
@@ -2106,6 +2142,37 @@ package final class StreamCoordinator {
         guard !ids.isEmpty else { return }
         print("An app was brought forward on this Mac: taking back its \(ids.count) shared window\(ids.count == 1 ? "" : "s")")
         Task { for id in ids { await self.takeBack(id) } }
+    }
+
+    /// An app a Mac client's action brought forward that it does not show (a document opened from a
+    /// mail, a link opened from a chat): its front window is streamed, as an app opened from the device
+    /// is, once it has one (a slow launch within `followSpan`); the client opens a window for it. Not
+    /// the streamed window's own app, and only while every device is a Mac client, which shows each
+    /// window apart (an iPhone or iPad keeps its stream).
+    private func followIfOpenedByDevice(_ pid: pid_t) {
+        guard let side = sideStreams, !connections.isEmpty, side.wholeAppConnections.count == connections.count,
+              pid != ProcessInfo.processInfo.processIdentifier,
+              streamedWindowID.flatMap({ catalog.window(id: $0)?.owningApplication?.processID }) != pid else { return }
+        followApp = (pid, CFAbsoluteTimeGetCurrent() + Self.followSpan)
+        Task { await self.followOpenedApp() }
+    }
+    private var followApp: (pid: pid_t, until: CFAbsoluteTime)?
+    private static let followSpan: CFAbsoluteTime = 10
+
+    /// The app `followApp` names, streamed once it has a window (`windowsChanged` asks again).
+    private func followOpenedApp() async {
+        guard let follow = followApp, !switching else { return }
+        guard CFAbsoluteTimeGetCurrent() < follow.until else { followApp = nil; return }
+        let listed = Set(catalog.infos.map(\.id))
+        // Its front window: the window server's list is front to back.
+        let onScreen = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        guard let front = onScreen.first(where: {
+            ($0[kCGWindowOwnerPID as String] as? pid_t) == follow.pid && ($0[kCGWindowLayer as String] as? Int) == 0
+                && listed.contains(($0[kCGWindowNumber as String] as? UInt32) ?? 0)
+        }), let id = front[kCGWindowNumber as String] as? UInt32 else { return }
+        followApp = nil
+        print("An app a device's action opened came forward: streaming its window \(id)")
+        await select(.window(id), bringForward: true)
     }
 
     /// Under the AppKit loop (Sill.app, the CLI's --virtual-display), while a device subscribes:
@@ -2458,6 +2525,7 @@ package final class StreamCoordinator {
         }
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
+        if followApp != nil { await followOpenedApp() }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
             pendingLaunch = nil
             await select(.window(w.id), bringForward: true)   // launched from the device to use it: a pick
@@ -2602,7 +2670,8 @@ package final class StreamCoordinator {
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
                                                       liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
-                                                      displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID)))
+                                                      displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID,
+                                                      windowInput: true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
@@ -2714,4 +2783,13 @@ extension ClientRoute {
     /// not beside ClientRoute in StreamServer.swift, which the pacing harness compiles without the
     /// coordinator's files.
     var isAway: Bool { AwayPolicy.isAway(remoteDoor: isRemote, origin: origin) }
+}
+
+/// One pipeline's frames going out or not (`encoderLive`). Thread-safe: read on the encoder's callback
+/// thread, turned off on the main actor.
+final class OutputSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOn = true
+    var on: Bool { lock.lock(); defer { lock.unlock() }; return isOn }
+    func off() { lock.lock(); isOn = false; lock.unlock() }
 }

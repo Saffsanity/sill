@@ -46,8 +46,7 @@ final class StreamInputView: NSView {
     private var rightDown = false
     private var middleDown = false
     /// A scroll gesture under way (began sent, ended not), and its momentum.
-    private var scrolling = false
-    private var coasting = false
+    private var scrollState = ScrollState()
     private var keyMonitor: Any?
     private var buttonMonitor: Any?
     private var tracking: NSTrackingArea?
@@ -364,36 +363,7 @@ final class StreamInputView: NSView {
     override func scrollWheel(with event: NSEvent) {
         let rect = display.videoRect
         guard rect.width > 0, let p = fraction(event, clamped: true) else { return }
-        let x = Double(p.x), y = Double(p.y)
-        // A mouse wheel's lines: about what a line scrolls on the Mac.
-        let unit: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 12
-        let dx = Double(event.scrollingDeltaX * unit / rect.width)
-        let dy = Double(event.scrollingDeltaY * unit / rect.height)
-
-        if event.phase.contains(.began) {
-            endScroll(x: x, y: y)
-            emit(.scrollGesture(.began, x: x, y: y))
-            scrolling = true
-        }
-        if event.momentumPhase.contains(.began) {
-            if scrolling { emit(.scrollGesture(.ended, x: x, y: y)); scrolling = false }
-            emit(.scrollGesture(.momentumBegan, x: x, y: y))
-            coasting = true
-        }
-        if dx != 0 || dy != 0 { emit(.scroll(x: x, y: y, dx: dx, dy: dy)) }
-        if event.phase.contains(.ended) || event.phase.contains(.cancelled), scrolling {
-            emit(.scrollGesture(.ended, x: x, y: y))
-            scrolling = false
-        }
-        if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled), coasting {
-            emit(.scrollGesture(.momentumEnded, x: x, y: y))
-            coasting = false
-        }
-    }
-
-    private func endScroll(x: Double, y: Double) {
-        if scrolling { emit(.scrollGesture(.ended, x: x, y: y)); scrolling = false }
-        if coasting { emit(.scrollGesture(.momentumEnded, x: x, y: y)); coasting = false }
+        for e in scrollState.events(for: event, at: p, picture: rect.size) { emit(e) }
     }
 
     // MARK: Gestures
@@ -518,8 +488,8 @@ struct StreamViewRepresentable: NSViewRepresentable {
 // MARK: Files dropped from this Mac
 
 /// Files dragged from Finder (or any app) onto the other Mac's window: sent in parts (kind 34), then
-/// dropped where they were let go (kind 35), and the app there takes them as a drop. Folders are
-/// left out. Only to a Mac that takes them (`hostFileDrop`).
+/// dropped where they were let go (kind 35), and the app there takes them as a drop; a folder goes
+/// as one zip, unpacked there. Only to a Mac that takes them (`hostFileDrop`).
 extension StreamInputView {
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragOver(sender) }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragOver(sender) }
@@ -727,5 +697,44 @@ final class FilePromises: NSObject, NSFilePromiseProviderDelegate, @unchecked Se
             w.done(CocoaError(.fileWriteUnknown)); return
         }
         w.done(nil)
+    }
+}
+
+/// A Mac's scroll events as the host takes them: a trackpad's gesture (its phases, then the deltas as
+/// fractions of the picture) or a wheel's lines. One per view that scrolls.
+struct ScrollState {
+    private var scrolling = false
+    private var coasting = false
+
+    /// The events for `event` at `p` (a fraction of a picture of `picture`'s size).
+    mutating func events(for event: NSEvent, at p: CGPoint, picture: CGSize) -> [InputEvent] {
+        guard picture.width > 0, picture.height > 0 else { return [] }
+        let x = Double(p.x), y = Double(p.y)
+        var out: [InputEvent] = []
+        // A mouse wheel's lines: about what a line scrolls on the Mac.
+        let unit: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 12
+        let dx = Double(event.scrollingDeltaX * unit / picture.width)
+        let dy = Double(event.scrollingDeltaY * unit / picture.height)
+        if event.phase.contains(.began) {
+            if scrolling { out.append(.scrollGesture(.ended, x: x, y: y)); scrolling = false }
+            if coasting { out.append(.scrollGesture(.momentumEnded, x: x, y: y)); coasting = false }
+            out.append(.scrollGesture(.began, x: x, y: y))
+            scrolling = true
+        }
+        if event.momentumPhase.contains(.began) {
+            if scrolling { out.append(.scrollGesture(.ended, x: x, y: y)); scrolling = false }
+            out.append(.scrollGesture(.momentumBegan, x: x, y: y))
+            coasting = true
+        }
+        if dx != 0 || dy != 0 { out.append(.scroll(x: x, y: y, dx: dx, dy: dy)) }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled), scrolling {
+            out.append(.scrollGesture(.ended, x: x, y: y))
+            scrolling = false
+        }
+        if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled), coasting {
+            out.append(.scrollGesture(.momentumEnded, x: x, y: y))
+            coasting = false
+        }
+        return out
     }
 }

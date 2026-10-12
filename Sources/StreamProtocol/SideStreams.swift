@@ -365,6 +365,47 @@ public enum ClipboardPasteboard {
 }
 #endif
 
+/// Input over a window shown beside the streamed one: what a Mac lets a person do to a window that is
+/// visible but not in front, without bringing it forward: scroll it, and hover over it. Kind 8, its
+/// InputEvent with a `window` key beside the event's own (a fraction of that window's picture, as
+/// kind 8's is of the streamed one; window IDs as side streams name them), sent only to a host whose
+/// list says `windowInput`: a host from before ignores the key, and would take the input as the
+/// streamed window's. The host takes only
+/// a pointer move, a scroll and a scroll's phases this way (a click focuses the window, which makes it
+/// the streamed one).
+public struct WindowInput: Hashable {
+    public var window: UInt32?
+    public var event: InputEvent
+    public init(window: UInt32?, event: InputEvent) { self.window = window; self.event = event }
+
+    /// Whether the host takes `event` for a window not in front.
+    public static func allowed(_ event: InputEvent) -> Bool {
+        switch event {
+        case .pointer(.move, _, _), .scroll, .scrollGesture: return true
+        default: return false
+        }
+    }
+
+    /// Kind 8's payload: the event alone without a window, as every device has sent it.
+    public func encoded() -> Data {
+        let plain = Wire.encode(event)
+        guard let window, var object = (try? JSONSerialization.jsonObject(with: plain)) as? [String: Any] else { return plain }
+        object["window"] = window
+        return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? plain
+    }
+
+    /// A kind 8 payload, with or without a window.
+    public static func decode(_ data: Data) -> WindowInput? {
+        guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        guard object["window"] != nil else { return Wire.decode(InputEvent.self, from: data).map { WindowInput(window: nil, event: $0) } }
+        guard object.count == 2,
+              let window = (object.removeValue(forKey: "window") as? NSNumber)?.uint32Value,
+              let rest = try? JSONSerialization.data(withJSONObject: object),
+              let event = Wire.decode(InputEvent.self, from: rest) else { return nil }
+        return WindowInput(window: window, event: event)
+    }
+}
+
 /// Windows the person at the host stopped sharing (kind 41): each went back to where it was on the
 /// Mac and stopped streaming; a device closes its windows of them and may open them again. Window IDs
 /// as side streams name them (a Desktop window's display tagged, DesktopWindow).

@@ -522,6 +522,26 @@ do {
     let shown = WindowList(macName: "M", windows: [], active: .desktop, displays: [DisplayInfo(id: 1, name: "Built-in", width: 1728, height: 1117, main: true), DisplayInfo(id: 5, name: "LG", width: 2560, height: 1440)], desktopDisplay: 5)
     check("displays: the host's displays and the Desktop's round-trip", Wire.decode(WindowList.self, from: Wire.encode(shown)).map { $0.displays?.count == 2 && $0.desktopDisplay == 5 && $0.displays?[0].main == true } == true)
     check("displays: absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.displays == nil)
+    do {   // input over a window beside the streamed one: kind 8 with a window key
+        let scroll = InputEvent.scroll(x: 0.25, y: 0.5, dx: 0, dy: 0.1)
+        let windowed = WindowInput(window: DesktopWindow.id(display: 3), event: scroll).encoded()
+        check("window input: round-trip", WindowInput.decode(windowed) == WindowInput(window: 0x8000_0003, event: scroll))
+        check("window input: a host from before would take it as the streamed window's (hence the list's flag)",
+              Wire.decode(InputEvent.self, from: windowed) == scroll)
+        check("window input: without a window, the plain kind 8 every device sends",
+              WindowInput(window: nil, event: scroll).encoded() == Wire.encode(scroll)
+              && WindowInput.decode(Wire.encode(scroll)) == WindowInput(window: nil, event: scroll))
+        check("window input: a third key, or a window that is no number, is refused",
+              WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":5,"extra":1}"#.utf8)) == nil
+              && WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":"5"}"#.utf8)) == nil)
+        check("window input: only a move, a scroll and its phases",
+              WindowInput.allowed(scroll) && WindowInput.allowed(.pointer(.move, x: 0, y: 0))
+              && WindowInput.allowed(.scrollGesture(.began, x: 0, y: 0)) && !WindowInput.allowed(.pointer(.leftDown, x: 0, y: 0))
+              && !WindowInput.allowed(.key(hidUsage: 4, down: true, modifiers: 0)) && !WindowInput.allowed(.text("a")))
+        check("window input: the list's flag round-trips, nil from a host before",
+              Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, windowInput: true)))?.windowInput == true
+              && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.windowInput == nil)
+    }
     check("taken back: round-trip", Wire.decode(TakenBack.self, from: Wire.encode(TakenBack(windows: [7, DesktopWindow.id(display: 2)])))?.windows == [7, 0x8000_0002])
     check("pick display: round-trip", Wire.decode(PickDisplay.self, from: Wire.encode(PickDisplay(display: 5)))?.display == 5)
     let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)

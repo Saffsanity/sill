@@ -72,6 +72,9 @@ public struct WindowList: Codable {
     /// True: this host reads and presses its apps' own Dock menus for a device (kind 39, DockMenu). Nil
     /// before 2026-10-12, to which a device sends no kind 39.
     public var dockMenu: Bool?
+    /// True: this host takes a scroll or a hover over a window shown beside the streamed one (kind 8
+    /// with a `window`, WindowInput). Nil before 2026-10-12, to which a device sends none.
+    public var windowInput: Bool?
     /// The host's own displays (never Sill's hidden ones), for a device that picks which the Desktop
     /// is (kind 40); nil from a host before 2026-10-12, whose Desktop is its main display.
     public var displays: [DisplayInfo]?
@@ -81,12 +84,13 @@ public struct WindowList: Codable {
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
                 sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
-                liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil) {
+                liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil,
+                windowInput: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
         self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
-        self.dockMenu = dockMenu
+        self.dockMenu = dockMenu; self.windowInput = windowInput
         self.displays = displays; self.desktopDisplay = desktopDisplay
     }
 }

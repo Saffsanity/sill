@@ -4,7 +4,9 @@ import AppKit
 // this app per remote app, named after it, and launches it while that app has a window open there.
 // It has no window and no menus of its own: its icon is the remote app's, clicking it brings that
 // app's windows forward in Sill Viewer, and its Dock menu lists them. It talks to Sill Viewer by
-// distributed notifications and quits when told to, or when Sill Viewer goes.
+// distributed notifications and quits when told to, or when Sill Viewer goes. A notification carries
+// nothing anyone else could read: Sill Viewer's state for this app is in a file only this user reads
+// (`<slug>.state` beside the copies), and a request carries Sill Viewer's token from there (`token`).
 //   SillDockProxy --app <bundle ID> --viewer <pid> [--icon <png>]
 // Kept in the Dock and clicked while Sill Viewer has none of its app's windows, it starts with no
 // arguments: its app is in its Info.plist (SillRemoteApp), it opens Sill Viewer if it is not running
@@ -36,17 +38,18 @@ final class Proxy: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let icon { showIcon(icon) }
         let center = DistributedNotificationCenter.default()
-        center.addObserver(forName: Self.stateName, object: app, queue: .main) { [weak self] note in
-            guard let self else { return }
-            if note.userInfo?["quit"] as? Bool == true { self.told = true; NSApp.terminate(nil); return }
+        center.addObserver(forName: Self.stateName, object: app, queue: .main) { [weak self] _ in
+            guard let self, let data = try? Data(contentsOf: self.folder.appendingPathComponent("\(self.slug).state")),
+                  let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+            if state["quit"] as? Bool == true { self.told = true; NSApp.terminate(nil); return }
             self.heard = true
-            if let path = note.userInfo?["icon"] as? String { self.showIcon(path) }
-            let ids = note.userInfo?["ids"] as? [String] ?? []
-            let titles = note.userInfo?["titles"] as? [String] ?? []
-            let states = note.userInfo?["states"] as? [String] ?? []
-            let menuIDs = note.userInfo?["menuIDs"] as? [String] ?? []
-            let menuTitles = note.userInfo?["menuTitles"] as? [String] ?? []
-            let menuEnabled = note.userInfo?["menuEnabled"] as? [String] ?? []
+            if let path = state["icon"] as? String { self.showIcon(path) }
+            let ids = state["ids"] as? [String] ?? []
+            let titles = state["titles"] as? [String] ?? []
+            let states = state["states"] as? [String] ?? []
+            let menuIDs = state["menuIDs"] as? [String] ?? []
+            let menuTitles = state["menuTitles"] as? [String] ?? []
+            let menuEnabled = state["menuEnabled"] as? [String] ?? []
             self.remote = menuIDs.indices.compactMap { i in
                 i < menuTitles.count ? (menuIDs[i], menuTitles[i], i < menuEnabled.count ? menuEnabled[i] == "1" : true) : nil
             }
@@ -157,8 +160,23 @@ final class Proxy: NSObject, NSApplicationDelegate {
     }
 
     private func post(_ info: [String: String]) {
+        // Read each time: Sill Viewer writes a new one at each launch.
+        guard let token = try? String(contentsOf: folder.appendingPathComponent("token"), encoding: .utf8) else { return }
+        var info = info
+        info["token"] = token
         DistributedNotificationCenter.default().postNotificationName(Self.actionName, object: app, userInfo: info,
                                                                      deliverImmediately: true)
+    }
+
+    /// Sill Viewer's folder of copies (each in a folder of its own), where the token and the state are.
+    private var folder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Sill Viewer/Dock", isDirectory: true)
+    }
+    /// DockProxies.slug: this app's state file's name.
+    private var slug: String {
+        let s = app.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-" ? Character($0) : "-" }
+        return String(String(s).prefix(100))
     }
 }
 

@@ -37,6 +37,8 @@ final class LiveDrags {
         var y: Double
         var modifiers: UInt64 = 0
         var began = false
+        /// The button went down for this Mac's drag of the device's files (before `began`).
+        var pressed = false
         var dropWanted = false
         var received: [URL] = []
         var watchdog: DispatchWorkItem?
@@ -122,6 +124,7 @@ final class LiveDrags {
         for (after, event) in steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
                 guard let self, self.drags[device]?.id == drag.id else { return }
+                if case .pointer(.leftDown, _, _) = event { self.drags[device]?.pressed = true }
                 if let event { self.deliver?(event, rect, device) } else { self.fileDrops.hidePanel() }
             }
         }
@@ -165,7 +168,7 @@ final class LiveDrags {
         drag.watchdog?.cancel()
         pendingModifiers[device] = nil
         let rect = rect?(drag.window) ?? .null
-        if !dropped && drag.began {
+        if !dropped && (drag.began || drag.pressed) {   // the button down: Esc, then up
             deliver?(.key(hidUsage: 0x29, down: true, modifiers: drag.modifiers), rect, device)
             deliver?(.key(hidUsage: 0x29, down: false, modifiers: drag.modifiers), rect, device)
             deliver?(.pointer(.leftUp, x: min(max(drag.x, 0), 1), y: min(max(drag.y, 0), 1)), rect, device)
@@ -179,6 +182,11 @@ final class LiveDrags {
             print("Live drag: given up")
             if !drag.own { discard(drag.received) }
         }
+    }
+
+    /// A part of the device's files arrived (kind 34): its drag is alive, however long they take.
+    func heard(_ device: KeyStrokes.Device) {
+        if drags[device] != nil { arm(device) }
     }
 
     private func arm(_ device: KeyStrokes.Device) {

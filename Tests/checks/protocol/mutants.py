@@ -4,6 +4,9 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("window input: the window dropped", "SideStreams.swift", '        object["window"] = window\n', ""),
+    ("window input: any key count", "SideStreams.swift", "guard object.count == 2,", "guard object.count >= 2,"),
+    ("window input: a click allowed", "SideStreams.swift", "case .pointer(.move, _, _), .scroll, .scrollGesture: return true", "case .pointer, .scroll, .scrollGesture: return true"),
     ("audio packet without the channel byte", "SideStreams.swift", "        d.append(channels)\n", ""),
     ("audio packet takes a stereo half sample", "SideStreams.swift", "body.count % (2 * channels) == 0", "body.count % 2 == 0"),
     ("file chunk offset read from the total", "SideStreams.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),

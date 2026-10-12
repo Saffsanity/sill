@@ -24,9 +24,9 @@ final class AudioPlayer: @unchecked Sendable {
     private var buffer: [Float] = []       // interleaved
     private var readIndex = 0
     private var playing = false
-    private var rate: Double = 0
+    private var rate: Double = 0           // the playing format: under the lock
     private var channels = 0
-    private var engine: AVAudioEngine?
+    private var engine: AVAudioEngine?     // main thread
 
     private var buffered: Int { buffer.count - readIndex }   // samples; under the lock
 
@@ -46,9 +46,13 @@ final class AudioPlayer: @unchecked Sendable {
 
     /// Interleaved samples into the buffer the engine plays from. Network queue.
     private func append(_ samples: [Float], rate packetRate: Double, channels packetChannels: Int) {
-        if packetRate != rate || packetChannels != channels {
+        let changed = lock.withLock { () -> Bool in
+            guard packetRate != rate || packetChannels != channels else { return false }
+            rate = packetRate; channels = packetChannels
+            return true
+        }
+        if changed {
             let r = packetRate, c = packetChannels
-            rate = r; channels = c
             DispatchQueue.main.async { [weak self] in self?.restart(rate: r, channels: c) }
         }
         let c = packetChannels, perMs = Int(packetRate / 1000) * c
@@ -60,12 +64,11 @@ final class AudioPlayer: @unchecked Sendable {
         }
     }
 
-    /// Stops playing and forgets what waited (a disconnect, Play Sound off).
+    /// Stops playing and forgets what waited (a disconnect, Play Sound off). Main thread.
     func stop() {
         engine?.stop()
         engine = nil
-        lock.withLock { buffer.removeAll(); readIndex = 0; playing = false }
-        rate = 0; channels = 0
+        lock.withLock { buffer.removeAll(); readIndex = 0; playing = false; rate = 0; channels = 0 }
     }
 
     private func restart(rate: Double, channels: Int) {

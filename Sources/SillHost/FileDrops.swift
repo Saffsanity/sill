@@ -12,7 +12,7 @@ import StreamProtocol
 final class FileDrops: NSObject {
     private struct Incoming { let url: URL; let handle: FileHandle; let total: UInt64; var written: UInt64; let from: ObjectIdentifier }
     private var incoming: [UInt32: Incoming] = [:]
-    private var done: [UInt32: URL] = [:]
+    private var done: [UInt32: (url: URL, from: ObjectIdentifier)] = [:]
     private var panel: NSPanel?
     private var pending: [URL] = []
 
@@ -20,7 +20,11 @@ final class FileDrops: NSObject {
     func chunk(_ payload: Data, device: String, from connection: NWConnection) {
         guard let c = FileChunk.unpack(payload), c.total <= FileChunk.maxTotal else { return }
         if c.offset == 0 {
-            incoming[c.id].map { try? $0.handle.close() }
+            // Another device's file of the same ID is left alone; this device's own begun again is closed.
+            if let old = incoming[c.id] {
+                guard old.from == ObjectIdentifier(connection) else { return }
+                try? old.handle.close()
+            }
             let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("From \(Self.safe(device))", isDirectory: true)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -38,19 +42,23 @@ final class FileDrops: NSObject {
         if file.written >= file.total {
             try? file.handle.close()
             incoming[c.id] = nil
-            done[c.id] = file.url
+            done[c.id] = (file.url, file.from)
         } else {
             incoming[c.id] = file
         }
     }
 
-    /// A device gone mid-file: what it was sending is closed and left as it is (part of a file, in
-    /// its folder), never written to again.
+    /// A device gone: what it was sending is closed and left as it is (part of a file, in its folder),
+    /// never written to again; files it sent whole but never dropped are removed.
     func clientLeft(_ connection: NWConnection) {
         let gone = ObjectIdentifier(connection)
         for (id, file) in incoming where file.from == gone {
             try? file.handle.close()
             incoming[id] = nil
+        }
+        for (id, file) in done where file.from == gone {
+            done[id] = nil
+            try? FileManager.default.removeItem(at: file.url)
         }
     }
 
@@ -65,7 +73,7 @@ final class FileDrops: NSObject {
     func received(_ ids: [UInt32], folders: [UInt32]) -> [URL] {
         let folders = Set(folders)
         return ids.compactMap { id -> URL? in
-            guard let url = done.removeValue(forKey: id) else { return nil }
+            guard let url = done.removeValue(forKey: id)?.url else { return nil }
             return folders.contains(id) ? Self.unpack(url) : url
         }
     }
