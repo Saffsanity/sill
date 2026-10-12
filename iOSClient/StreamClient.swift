@@ -753,6 +753,8 @@ final class StreamClient: ObservableObject {
     /// Whether the Mac takes a scroll or a hover over a window shown beside the streamed one
     /// (`WindowList.windowInput`; kind 8 with a window).
     var hostWindowInput = false
+    /// The Mac's Dock badges of the apps it lists (`WindowList.badges`), by bundle ID.
+    @Published var hostBadges: [String: String] = [:]
     private var lastWindowMoveAt: CFTimeInterval = 0
     /// The Mac's own displays, to pick which the Desktop is (`WindowList.displays`, kind 40), and that one.
     @Published var hostDisplays: [DisplayInfo] = []
@@ -2927,6 +2929,7 @@ final class StreamClient: ObservableObject {
         hostLiveDrag = false
         hostDockMenu = false
         hostWindowInput = false
+        hostBadges = [:]
         hostDisplays = []
         desktopDisplay = nil
         remoteRoute = nil
@@ -3465,6 +3468,7 @@ final class StreamClient: ObservableObject {
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
                 if self.hostDockMenu != (list.dockMenu == true) { self.hostDockMenu = list.dockMenu == true }
                 self.hostWindowInput = list.windowInput == true
+                if self.hostBadges != (list.badges ?? [:]) { self.hostBadges = list.badges ?? [:] }
                 if self.hostDisplays != (list.displays ?? []) { self.hostDisplays = list.displays ?? [] }
                 if self.desktopDisplay != list.desktopDisplay { self.desktopDisplay = list.desktopDisplay }
                 if !self.sessionListed {

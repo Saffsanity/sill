@@ -44,6 +44,9 @@ final class Proxy: NSObject, NSApplicationDelegate {
             if state["quit"] as? Bool == true { self.told = true; NSApp.terminate(nil); return }
             self.heard = true
             if let path = state["icon"] as? String { self.showIcon(path) }
+            // The app's badge on the other Mac ("3"), as its own Dock icon shows it there.
+            let badge = state["badge"] as? String ?? ""
+            if NSApp.dockTile.badgeLabel != (badge.isEmpty ? nil : badge) { NSApp.dockTile.badgeLabel = badge.isEmpty ? nil : badge }
             let ids = state["ids"] as? [String] ?? []
             let titles = state["titles"] as? [String] ?? []
             let states = state["states"] as? [String] ?? []

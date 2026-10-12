@@ -17,7 +17,8 @@ import StreamProtocol
 /// can read (`<slug>.state`), and the notification only says it changed; a Dock icon's request carries
 /// the token Sill Viewer writes there at launch (`token`, 0600), and one without it is ignored.
 final class DockProxies {
-    struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window] }
+    /// An app's windows open here, and its Dock badge on the other Mac.
+    struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window]; var badge: String? = nil }
     /// A window in the Dock menu: the app's front one gets a ✓, as macOS marks its own.
     struct Window {
         enum State: String { case front, minimized, other }
@@ -140,7 +141,7 @@ final class DockProxies {
     private func post(_ app: String) {
         guard let info = last[app] else { return }
         let menu = menus[app] ?? []
-        tell(app, ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
+        tell(app, ["badge": info.badge ?? "", "ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
                    "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
                    "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
                    "menuEnabled": menu.map { $0.enabled ? "1" : "0" }])

@@ -74,6 +74,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         client.$hostSideStreams.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.requestSideStreams() }
         }.store(in: &subscriptions)
+        // The other Mac's Dock badges on this Mac's Dock icons of its apps.
+        client.$hostBadges.removeDuplicates().sink { [weak self] badges in
+            DispatchQueue.main.async { windowLog("dock: badges on the other Mac: \(badges)"); self?.syncDock() }
+        }.store(in: &subscriptions)
         client.$hostAudio.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.requestSideStreams() }
         }.store(in: &subscriptions)
@@ -328,7 +332,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             // with none), never the bundle ID if either is known.
             let name = [client.windows.first { $0.bundleID == app && !$0.appName.isEmpty }?.appName,
                         client.apps.first { $0.bundleID == app }?.name].compactMap { $0 }.first ?? app
-            apps[app] = DockProxies.AppWindows(name: name, icon: client.icons[app], windows: windows.sorted { $0.title < $1.title })
+            apps[app] = DockProxies.AppWindows(name: name, icon: client.icons[app], windows: windows.sorted { $0.title < $1.title },
+                                               badge: client.hostBadges[app])
         }
         dock.sync(apps)
     }

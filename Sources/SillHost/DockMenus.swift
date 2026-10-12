@@ -40,6 +40,27 @@ final class DockMenus: @unchecked Sendable {
         }
     }
 
+    /// Every app's Dock badge (Accessibility's AXStatusLabel on its Dock item), by bundle ID, read on
+    /// this queue without showing anything; `done` on the main queue.
+    func badges(done: @escaping ([String: String]) -> Void) {
+        queue.async {
+            var found: [String: String] = [:]
+            if let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first {
+                let root = AXUIElementCreateApplication(dock.processIdentifier)
+                AXUIElementSetMessagingTimeout(root, 1)
+                for list in Self.children(root) {
+                    for item in Self.children(list) where Self.attribute(item, kAXSubroleAttribute) as? String == "AXApplicationDockItem" {
+                        guard let label = Self.attribute(item, "AXStatusLabel") as? String, !label.isEmpty,
+                              let url = Self.attribute(item, kAXURLAttribute) as? URL,
+                              let id = Bundle(url: url)?.bundleIdentifier else { continue }
+                        found[id] = String(label.prefix(8))
+                    }
+                }
+            }
+            DispatchQueue.main.async { done(found) }
+        }
+    }
+
     /// The app's Dock icon clicked: a running app with no window opens one (the Dock's reopen).
     func reopen(_ app: String) {
         queue.async {

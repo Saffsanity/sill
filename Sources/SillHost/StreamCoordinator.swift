@@ -953,6 +953,7 @@ package final class StreamCoordinator {
             lastDeviceKind = message.kind
         }
         watchReclaims()
+        watchBadges()
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -2111,6 +2112,36 @@ package final class StreamCoordinator {
     private var lastDeviceKind: StreamMessageKind?
     private var reclaimObserver: NSObjectProtocol?
 
+    /// The Dock badges of the apps a Mac client shows (`WindowList.badges`), read every 2 s while one
+    /// is connected, and sent with the window list when they change.
+    private func watchBadges() {
+        guard badgeTimer == nil, !synthetic else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.5, repeating: 2)
+        timer.setEventHandler { [weak self] in Task { @MainActor in self?.readBadges() } }
+        timer.resume()
+        badgeTimer = timer
+    }
+    private var badgeTimer: DispatchSourceTimer?
+    private var dockBadges: [String: String] = [:]
+
+    private func readBadges() {
+        guard sideStreams?.wholeApp == true else {
+            if !dockBadges.isEmpty { dockBadges = [:]; broadcastList() }
+            return
+        }
+        dockMenus.badges { [weak self] all in
+            Task { @MainActor in
+                guard let self else { return }
+                let shown = Set(self.catalog.infos.map(\.bundleID))
+                let badges = all.filter { shown.contains($0.key) }
+                guard badges != self.dockBadges else { return }
+                self.dockBadges = badges
+                self.broadcastList()
+            }
+        }
+    }
+
     /// Under the AppKit loop (Sill.app): an app brought forward on this Mac whose windows a device shows.
     private func watchReclaims() {
         guard appKitLoop, reclaimObserver == nil else { return }
@@ -2671,7 +2702,7 @@ package final class StreamCoordinator {
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
                                                       liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
                                                       displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID,
-                                                      windowInput: true)))
+                                                      windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

@@ -542,6 +542,9 @@ do {
               Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, windowInput: true)))?.windowInput == true
               && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.windowInput == nil)
     }
+    check("badges: round-trip, nil from a host before",
+          Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, badges: ["a.b": "3"])))?.badges == ["a.b": "3"]
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.badges == nil)
     check("taken back: round-trip", Wire.decode(TakenBack.self, from: Wire.encode(TakenBack(windows: [7, DesktopWindow.id(display: 2)])))?.windows == [7, 0x8000_0002])
     check("pick display: round-trip", Wire.decode(PickDisplay.self, from: Wire.encode(PickDisplay(display: 5)))?.display == 5)
     let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)
