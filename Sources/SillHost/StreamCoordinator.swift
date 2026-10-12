@@ -149,6 +149,8 @@ package final class StreamCoordinator {
             if active == .none { status.update { $0.stream = nil } }
             server.setStreaming(active != .none)   // link keepalive ticks while a source is live
             cursorShapes.running = active != .none
+            sideStreams?.changed()   // the picked window is never also a side stream
+            if !audioWanted.isEmpty { updateAudio() }   // the picked window's app is heard too
             pointer.setGeometry(pointerGeometry(), fps: fps)   // also on a restart of the same source
             menuTargetChanged()                     // the menus' app follows the source (only for devices that asked)
         }
@@ -156,6 +158,39 @@ package final class StreamCoordinator {
     private var rectCache: (id: CGWindowID, rect: CGRect, at: CFAbsoluteTime)?
     private var pendingLaunch: String?
     private var switching = false
+    /// The devices that asked for the sound of the windows they show (kind 29's `audio`), with those
+    /// windows; the picked one counts too. AppAudio taps their apps.
+    private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32])] = [:]
+    private var appAudio: AnyObject?
+    private lazy var fileDrops = FileDrops()
+    private lazy var dragOut: DragOut = {
+        let d = DragOut()
+        let server = self.server
+        d.send = { message, connection in server.send(message, to: connection) }
+        return d
+    }()
+
+    /// The tap follows the apps of every window a listening device shows. Never on a test host: its
+    /// tap would silence this Mac's own apps.
+    private func updateAudio() {
+        guard #available(macOS 14.2, *), !synthetic else { return }
+        var ids = Set(audioWanted.values.flatMap(\.windows))
+        if !audioWanted.isEmpty, case .window(let main) = active { ids.insert(main) }
+        let apps = Set(ids.compactMap { catalog.window(id: $0)?.owningApplication?.bundleIdentifier })
+        let audio: AppAudio
+        if let made = appAudio as? AppAudio { audio = made } else {
+            guard !apps.isEmpty else { return }
+            audio = AppAudio()
+            let server = self.server
+            audio.onPacket = { server.sendAudio($0) }
+            appAudio = audio
+        }
+        server.setAudioListeners(audioWanted.values.map(\.connection))
+        audio.set(apps: apps)
+    }
+    /// The source a select in flight goes to: the main stream's window from its start, so the side
+    /// streams never stage it beside it (two stages of one window: one fails and sends it home).
+    private var selecting: StreamSource?
     /// A restart of the active source is in flight (a settings change, a resize, a rate change,
     /// the encoder fallback, a lost display): the source being restarted. Nil during a switch to
     /// another source.
@@ -247,6 +282,18 @@ package final class StreamCoordinator {
     /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
     /// MenuMirror). Reads and presses nothing for a device that never asked.
     let menus: MenuMirror
+    /// The windows streamed besides the one picked, made at a device's first request (kind 29).
+    private var sideStreams: SideStreams?
+    /// The clipboard shared with devices that ask (kind 32), made at the first one.
+    private var clipboard: HostClipboard?
+    /// The main stream's window, cropped from its display with what belongs to it (AppCrop, a device
+    /// asked: SideStreamRequest.wholeApp): its frame then, so a move starts it again.
+    private var mainCropFrame: CGRect?
+    /// The cropped main window's share pill (SharePill), while it streams.
+    private var mainPill: SharePill?
+    /// Sill's desk: the windows a device shows as its own, each on a virtual display of its own
+    /// (DeskStages), while a device asks for whole-app capture.
+    private(set) lazy var desk = DeskStages(sizer: sizer, catalog: catalog)
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -384,6 +431,9 @@ package final class StreamCoordinator {
                 self.linkReports[id] = nil
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
+                self.sideStreams?.clientLeft(connection)
+                if self.audioWanted.removeValue(forKey: id) != nil { self.updateAudio() }
+                self.clipboard?.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -908,6 +958,9 @@ package final class StreamCoordinator {
             // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
             // activates and raises nothing either.
             if !synthetic { raiseIfInteracting(event) }
+            if !synthetic, case .pointer(let action, _, _) = event {
+                if action == .leftDown { dragOut.buttonDown(connection) } else if action == .leftUp { dragOut.buttonUp(connection) }
+            }
             deliver(event, in: rect, from: device)
             desktopInputMayActivate(event)
         case .gesture:
@@ -1010,6 +1063,51 @@ package final class StreamCoordinator {
             // bring a window forward: a view a gesture opened is left behind, as after a click.
             gestureChords.forget()
             menus.press(r, from: connection, who: deviceName(connection))
+        case .sideStreams:
+            // More windows live at once (SideStreams), for a device that shows them as its own windows.
+            guard let r = Wire.decode(SideStreamRequest.self, from: message.payload) else { return }
+            if sideStreams == nil {
+                let made = SideStreams(server: server, catalog: catalog)
+                made.settings = { [unowned self] in (self.captureScale, self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
+                made.mainWindow = { [unowned self] in
+                    if case .window(let id)? = self.selecting { return id }
+                    if case .window(let id) = self.active { return id }
+                    return nil
+                }
+                made.desk = { [unowned self] in
+                    guard !self.synthetic || VirtualStage.testDesk else { return nil }
+                    return self.desk
+                }
+                // Whole-app capture asked for or no longer: the picked window is captured again with it.
+                made.onWholeAppChanged = { [unowned self] in
+                    Task { @MainActor in
+                        guard case .window = self.active, !self.switching else { return }
+                        await self.select(self.active)
+                    }
+                }
+                sideStreams = made
+            }
+            sideStreams?.request(r, from: connection)
+            let hears = r.audio == true && !synthetic
+            if hears != (audioWanted[ObjectIdentifier(connection)] != nil) {
+                print("Audio: \(deviceName(connection)) \(hears ? "asks for" : "no longer asks for") the sound of the windows it shows")
+            }
+            audioWanted[ObjectIdentifier(connection)] = hears ? (connection, r.windows) : nil
+            updateAudio()
+        case .fileChunk:
+            guard !synthetic else { return }   // a test host writes and drops nothing
+            fileDrops.chunk(message.payload, device: deviceName(connection))
+        case .fileRequest:
+            guard !synthetic, let r = Wire.decode(FileRequest.self, from: message.payload) else { return }
+            dragOut.request(r, from: connection)
+        case .fileDrop:
+            guard !synthetic, let d = Wire.decode(FileDrop.self, from: message.payload), let rect = currentSourceRect() else { return }
+            let x = min(max(d.x, 0), 1), y = min(max(d.y, 0), 1)
+            fileDrops.drop(d, at: CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height), device: deviceName(connection))
+        case .clipboard:
+            guard let clip = Wire.decode(Clipboard.self, from: message.payload) else { return }
+            if clipboard == nil { clipboard = HostClipboard(server: server, dryRun: synthetic) }
+            clipboard?.received(clip, from: connection, device: deviceName(connection))
         default:
             break
         }
@@ -1033,6 +1131,7 @@ package final class StreamCoordinator {
             // On the virtual display the video is the captured crop, not the whole window: an app
             // that took a larger size than asked overhangs the display and the overhang is not shown.
             if virtualDisplay, stage.isStaged, let onScreen = stage.captureRectOnScreen { return onScreen }
+            if let onDesk = desk.captureRect(for: id) { return onDesk }
             // The catalog only refreshes every 2 s, so ask the window server for live bounds —
             // but cache them briefly, or a 120 Hz Pencil drag hits it on every single event.
             let now = CFAbsoluteTimeGetCurrent()
@@ -1123,6 +1222,22 @@ package final class StreamCoordinator {
             return
         }
         guard case .window(let id) = active, let w = catalog.window(id: id) else { return }
+        // On Sill's desk: the window's display and size follow the device's window.
+        if desk.staged.contains(id) {
+            // A viewport with no scale resizes nothing (a device sends one just before a pick, with
+            // the size of the window it picks, not of the one streaming now).
+            guard viewport?.scale != nil else { return }
+            let want = VirtualStage.windowSize(for: viewport, own: w.frame.size)
+            if let live = Self.liveBounds(of: id)?.size, abs(live.width - want.width) < 2, abs(live.height - want.height) < 2 { return }
+            await select(active)
+            return
+        }
+        // Cropped from its display (AppCrop): a window the viewport resized is captured again at once,
+        // at the size just set, instead of keeping the old crop until the catalog's next look.
+        if mainCropFrame != nil {
+            if fitToViewport(w) != nil { await select(active) }
+            return
+        }
         if fitToViewport(w) != nil { await catalog.refreshWindows() }
     }
 
@@ -1176,9 +1291,11 @@ package final class StreamCoordinator {
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
+        selecting = source
         restartOf = (source == active && source != .none) ? source : nil
         defer {
             switching = false
+            selecting = nil
             restartOf = nil
             var pick = pickArrivedWhileSwitching
             pickArrivedWhileSwitching = nil
@@ -1215,6 +1332,7 @@ package final class StreamCoordinator {
 
         await capture.stop()
         await syntheticCapture.stop()
+        await mainPill?.stop(); mainPill = nil
         capture.onFrame = nil; syntheticCapture.onFrame = nil   // both queues drained: let the old encoder go
         rectCache = nil
         // Input held for the old source must not replay into the new one, but what acts on the whole
@@ -1285,6 +1403,8 @@ package final class StreamCoordinator {
 
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
+        var cropRect: CGRect? = nil      // a window cropped from its display with its app (AppCrop)
+        mainCropFrame = nil
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
         let width: Int, height: Int
         var describe = ""
@@ -1337,14 +1457,53 @@ package final class StreamCoordinator {
                 // picked window). A covered window stops repainting, so it would stream frozen, and
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
-                if comeForward, !shuttingDown { activateAndRaise(window: w) }
+                // Sill's desk takes the window off this Mac's displays: nothing there to raise or fit.
+                let toDesk = sideStreams?.wholeApp == true && (!synthetic || VirtualStage.testDesk)
+                if comeForward, !shuttingDown, !toDesk { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
-                if let resized = fitToViewport(w) { size = Self.liveBounds(of: id)?.size ?? resized }
+                let resized = toDesk ? nil : fitToViewport(w)
+                if let resized { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
+                // A device asked for windows with what belongs to them (their menus, popovers, the
+                // system's panels): the display, cropped to the window, without the other apps.
+                // The size just set (the window server may still list the old one), at the window's place.
+                let place = Self.liveBounds(of: id).map { CGRect(origin: $0.origin, size: resized ?? $0.size) }
+                var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
+                if toDesk {
+                    do {
+                        let own = Self.liveBounds(of: id)?.size ?? w.frame.size
+                        staged = try await desk.prepare(w, size: viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own),
+                                                        captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                    } catch {
+                        print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
+                    }
+                }
+                if let staged {
+                    // Sill's desk: the window on a display of its own, sized to the device's window.
+                    filter = staged.filter
+                    cropRect = staged.sourceRect
+                    mainCropFrame = nil
+                    size = staged.size
+                    describe += ", on Sill's desk"
+                    let pill = SharePill()
+                    await pill.start(w)
+                    mainPill = pill
+                } else if sideStreams?.wholeApp == true, let crop = await AppCrop.crop(for: w, frame: place) {
+                    filter = crop.filter
+                    cropRect = crop.sourceRect
+                    mainCropFrame = crop.frame
+                    size = crop.frame.size
+                    describe += ", with its app"
+                    let pill = SharePill()
+                    await pill.start(w)
+                    mainPill = pill
+                }
             }
-            width = evenPixels(size.width * captureScale); height = evenPixels(size.height * captureScale)
+            // Sill's desk at 1× (an ultrawide's room) is captured at 1×: its pixels are its points.
+            let windowScale = desk.captureRect(for: id) != nil ? min(captureScale, desk.scale) : captureScale
+            width = evenPixels(size.width * windowScale); height = evenPixels(size.height * windowScale)
             // Staged on the virtual display, nothing is activated or raised on select: the window
             // cannot be covered there, and the AX moves that put it there touch no focus.
         case .desktop:
@@ -1379,7 +1538,7 @@ package final class StreamCoordinator {
         }
 
         do {
-            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect, width: width, height: height, describe: describe,
+            try await startPipeline(source: source, filter: filter, sourceRect: sourceRect ?? cropRect, width: width, height: height, describe: describe,
                                     title: title, kind: kind)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
@@ -1441,7 +1600,7 @@ package final class StreamCoordinator {
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
-                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
+                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil && mainCropFrame == nil,
                                                   softwareEncoder: useSoftwareEncoder)
         }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
@@ -1527,7 +1686,7 @@ package final class StreamCoordinator {
         // uncovering (regular path). Clicks, keys and text need the app active and the window key.
         let needsFocus: Bool
         switch event {
-        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }; needsFocus = true
+        case .pointer(let action, _, _): guard action.isButtonDown else { return }; needsFocus = true
         case .scroll: needsFocus = false
         case .scrollGesture(let phase, _, _): guard phase == .began else { return }; needsFocus = false
         case .key(_, let down, _): guard down else { return }; needsFocus = true
@@ -1628,7 +1787,7 @@ package final class StreamCoordinator {
     /// against the one being streamed. The quickest way to see a mapping or ordering problem.
     private var lastClickLog: CFAbsoluteTime = 0
     private func logClick(_ event: InputEvent, in rect: CGRect) {
-        guard case .pointer(let action, let x, let y) = event, action == .leftDown || action == .rightDown,
+        guard case .pointer(let action, let x, let y) = event, action.isButtonDown,
               case .window(let id) = active else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
@@ -1741,7 +1900,7 @@ package final class StreamCoordinator {
     private func desktopInputMayActivate(_ event: InputEvent) {
         guard active == .desktop, menus.hasSubscribers, !menuFrontCheckPending else { return }
         switch event {
-        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }
+        case .pointer(let action, _, _): guard action.isButtonDown else { return }
         case .key(_, let down, _): guard down else { return }
         default: return
         }
@@ -1847,9 +2006,11 @@ package final class StreamCoordinator {
     /// liveness.
     package func shutdownForExit() {
         injector.releaseAll()
+        if #available(macOS 14.2, *) { (appAudio as? AppAudio)?.stop() }   // the apps' sound back on this Mac
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
         stage.release()
+        desk.releaseAll()
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
@@ -2094,6 +2255,13 @@ package final class StreamCoordinator {
     }
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
+        sideStreams?.changed()   // a side stream's window resized or gone
+        // The main stream cropped from its display: a window that moved there is captured again.
+        if let crop = mainCropFrame, case .window(let id) = active, !switching,
+           let live = Self.liveBounds(of: id), live.origin != crop.origin || live.size != crop.size {
+            await select(active)
+            return
+        }
         // The pointer's rectangle follows the catalog: the Desktop's display, a window's bounds.
         defer { pointer.setGeometry(pointerGeometry(), fps: fps) }
         if let pending = pendingLaunch, let w = infos.first(where: { $0.bundleID == pending }) {
@@ -2196,8 +2364,8 @@ package final class StreamCoordinator {
         case .pointer(let action, _, _):
             switch action {
             case .move: return .pointerMove
-            case .leftDown, .rightDown: return .buttonDown
-            case .leftUp, .rightUp: return .buttonUp
+            case .leftDown, .rightDown, .middleDown: return .buttonDown
+            case .leftUp, .rightUp, .middleUp: return .buttonUp
             }
         case .scroll, .scrollGesture: return .scroll
         case .key(_, let down, _): return down ? .keyDown : .keyUp
@@ -2236,7 +2404,9 @@ package final class StreamCoordinator {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation)))
+                                                      gestures: TrackpadGesture.generation, middleButton: true,
+                                                      sideStreams: SideStreams.maxWindows, clipboard: true,
+                                                      audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

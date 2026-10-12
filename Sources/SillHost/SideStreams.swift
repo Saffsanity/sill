@@ -1,0 +1,232 @@
+import CoreMedia
+import Foundation
+import Network
+import ScreenCaptureKit
+import StreamProtocol
+
+/// The windows streamed besides the one picked (kinds 29–31; the Mac client shows each of the host's
+/// windows as a window of its own, all of them live). Each is captured and encoded on its own at a
+/// lower rate (SideStreamRequest: 15 fps unless asked otherwise, 30 at most), at the stream's
+/// capture scale, sharing the Mac's encoder engine with the main stream; the main stream never
+/// waits for them, because the server drops a side frame rather than queue it behind anything
+/// (StreamServer.sendSide). A window the main stream shows is never also a side stream, a window
+/// that changes size is started again at its new size, and one whose capture or encoder fails is
+/// left alone for 10 s. At most `maxWindows` at once, the first asked first. Nothing is captured
+/// for a device that asks for none. Main actor.
+@MainActor
+final class SideStreams {
+    static let maxWindows = 6
+
+    private final class Stream {
+        let id: UInt32
+        let size: CGSize
+        let fps: Int
+        /// The window's frame when it was cropped from its display (wholeApp), to tell when it moved.
+        var cropFrame: CGRect?
+        /// The share pill macOS draws while the window itself is captured (SharePill).
+        var pill: SharePill?
+        /// On Sill's desk (DeskStages).
+        var onDesk = false
+        let capture = WindowCapture()
+        var encoder: HEVCEncoder?
+        init(id: UInt32, size: CGSize, fps: Int) { self.id = id; self.size = size; self.fps = fps }
+    }
+
+    private let server: StreamServer
+    private let catalog: WindowCatalog
+    /// The stream's capture scale, the encoder to use and the bitrate per 60 fps, read at each start.
+    var settings: () -> (scale: CGFloat, software: Bool, bitratePer60: Int, prioritizeSpeed: Bool) = { (2, false, 15_000_000, false) }
+    /// The window the main stream shows, if it is one.
+    var mainWindow: () -> UInt32? = { nil }
+    /// Sill's desk, where a whole-app device's windows live (nil: none, a test host).
+    var desk: () -> DeskStages? = { nil }
+
+    private var wanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], fps: Int, wholeApp: Bool, screen: CGSize?)] = [:]
+    /// The largest screen of the devices that asked (Sill's desk makes each window's room that big).
+    var largestScreen: CGSize? {
+        wanted.values.compactMap(\.screen).max { $0.width * $0.height < $1.width * $1.height }
+    }
+    /// Some device asks for windows captured with what belongs to them (StreamCoordinator's main
+    /// stream follows it too).
+    var wholeApp: Bool { wanted.values.contains { $0.wholeApp } }
+    /// The devices' wish for whole-app capture changed: the main stream starts again with it.
+    var onWholeAppChanged: (() -> Void)?
+    private var streams: [UInt32: Stream] = [:]
+    private var failedAt: [UInt32: Date] = [:]
+    private var reconciling = false
+    private var again = false
+    /// The encoders by window, for the server's keyframe requests on its network queue.
+    private let encoders = EncoderBox()
+
+    init(server: StreamServer, catalog: WindowCatalog) {
+        self.server = server
+        self.catalog = catalog
+        let box = encoders
+        server.onSideKeyframeNeeded = { id in box.get(id)?.requestKeyframe() }
+    }
+
+    func request(_ r: SideStreamRequest, from c: NWConnection) {
+        let fps = min(max(r.fps ?? SideStreamRequest.defaultFPS, 1), SideStreamRequest.maxFPS)
+        var seen = Set<UInt32>()
+        let windows = r.windows.filter { seen.insert($0).inserted }
+        let before = wholeApp
+        // Kept with no windows when it asks for whole-app capture: the main stream follows that.
+        if windows.isEmpty && r.wholeApp != true { wanted[ObjectIdentifier(c)] = nil }
+        else {
+            let screen = r.screen.flatMap { $0.count == 2 && $0[0] > 0 && $0[1] > 0 ? CGSize(width: $0[0], height: $0[1]) : nil }
+            wanted[ObjectIdentifier(c)] = (c, windows, fps, r.wholeApp == true, screen)
+        }
+        if wholeApp != before { onWholeAppChanged?() }
+        Task { await reconcile() }
+    }
+
+    func clientLeft(_ c: NWConnection) {
+        let before = wholeApp
+        guard wanted.removeValue(forKey: ObjectIdentifier(c)) != nil else { return }
+        if wholeApp != before { onWholeAppChanged?() }
+        Task { await reconcile() }
+    }
+
+    /// The catalog changed (sizes, windows gone) or the main stream did.
+    func changed() { Task { await reconcile() } }
+
+    func stopAll() async {
+        wanted.removeAll()
+        await reconcile()
+    }
+
+    /// Brings the running streams to what is asked: one at a time, a request made meanwhile runs after.
+    func reconcile() async {
+        if reconciling { again = true; return }
+        reconciling = true
+        defer { reconciling = false }
+        repeat {
+            again = false
+            await reconcileOnce()
+        } while again
+    }
+
+    private func reconcileOnce() async {
+        let main = mainWindow()
+        let now = Date()
+        // The first asked first, over every device; the main stream's window never.
+        var order: [UInt32] = []
+        var fps: [UInt32: Int] = [:]
+        var subscribers: [UInt32: [NWConnection]] = [:]
+        for entry in wanted.values {
+            for id in entry.windows where id != main {
+                if fps[id] == nil { order.append(id) }
+                fps[id] = max(fps[id] ?? 0, entry.fps)
+                subscribers[id, default: []].append(entry.connection)
+            }
+        }
+        var target: [UInt32: SCWindow] = [:]
+        for id in order where target.count < Self.maxWindows {
+            guard let w = catalog.window(id: id), w.frame.width >= 32, w.frame.height >= 32 else { continue }
+            if let failed = failedAt[id], now.timeIntervalSince(failed) < 10 { continue }
+            target[id] = w
+        }
+        server.setSideSubscribers(subscribers.filter { target[$0.key] != nil })
+        // The desk keeps what a device shows (side streams and the main window) and sends the rest home.
+        if let desk = desk() {
+            // Every window a device has open stays there, streaming or not: one whose side stream
+            // failed to start, is over the limit, or is briefly off the window list while it moves
+            // is still shown on the device, and sending it home would move it under the person at
+            // this Mac and make its display again when it streams.
+            var keep = Set(wanted.values.flatMap(\.windows))
+            if let main { keep.insert(main) }
+            desk.keep(wholeApp ? keep : [])   // no device asks for it any more: every window goes home
+        }
+        for (id, stream) in streams {
+            let w = target[id]
+            let moved = stream.cropFrame.map { $0.origin != w?.frame.origin } ?? false
+            if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved
+                || (stream.cropFrame != nil || stream.onDesk) != wholeApp { await stop(id) }
+        }
+        for (id, w) in target where streams[id] == nil {
+            await start(w, fps: fps[id] ?? SideStreamRequest.defaultFPS)
+        }
+    }
+
+    private func start(_ w: SCWindow, fps: Int) async {
+        let id = w.windowID
+        let s = settings()
+        let width = evenPixels(w.frame.width * s.scale), height = evenPixels(w.frame.height * s.scale)
+        let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
+        let stream = Stream(id: id, size: w.frame.size, fps: fps)
+        do {
+            let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
+                                      software: s.software, quiet: true)
+            let server = self.server
+            enc.onEncoded = { data, isKey, ps in server.sendSide(window: id, parameterSets: ps?.encoded(), frame: data, isKeyframe: isKey) }
+            enc.onHung = { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.streams[id] != nil else { return }
+                    print("Side stream of window \(id): the encoder stopped answering; leaving it for 10 s.")
+                    self.failedAt[id] = Date()
+                    await self.stop(id)
+                }
+            }
+            stream.capture.statsPrefix = "side.cap"
+            stream.capture.onFrame = { pb, pts in enc.encode(pb, pts: pts) }
+            stream.capture.onStopped = { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.streams[id] === stream else { return }
+                    self.failedAt[id] = Date()
+                    await self.stop(id)
+                }
+            }
+            stream.encoder = enc
+            streams[id] = stream
+            encoders.set(id, enc)
+            var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
+            if wholeApp, let desk = desk() {
+                do { staged = try await desk.prepare(w, size: w.frame.size, captureScale: s.scale, fps: nil, room: largestScreen) }
+                catch { print("Sill's desk: window \(id) could not move there (\(error)); capturing it where it is.") }
+            }
+            if let staged {
+                stream.cropFrame = nil
+                stream.onDesk = true
+                // The desk's windows share one display and lie over each other there: a window in the
+                // background is captured on its own (its menus are for when it is the main stream),
+                // so another window of its app on top never shows in it. Window capture shows the
+                // system's share pill by itself.
+                try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
+                                               width: evenPixels(staged.size.width * min(s.scale, desk()?.scale ?? s.scale)),
+                                               height: evenPixels(staged.size.height * min(s.scale, desk()?.scale ?? s.scale)), fps: fps, showsCursor: false)
+            } else if wholeApp, let crop = await AppCrop.crop(for: w) {
+                stream.cropFrame = crop.frame
+                let pill = SharePill()
+                await pill.start(w)
+                stream.pill = pill
+                try await stream.capture.start(filter: crop.filter, width: width, height: height, fps: fps, showsCursor: false,
+                                               sourceRect: crop.sourceRect)
+            } else {
+                try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
+                                               fps: fps, showsCursor: false)
+            }
+            print("Side stream: \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") (window \(id)) at \(width)×\(height), \(fps) fps, \(bitrate / 1_000_000) Mbps\(stream.cropFrame != nil ? ", with its app" : "")")
+        } catch {
+            print("Side stream of window \(id) did not start: \(error)")
+            failedAt[id] = Date()
+            if streams[id] === stream { streams[id] = nil; encoders.set(id, nil) }
+        }
+    }
+
+    private func stop(_ id: UInt32) async {
+        guard let stream = streams.removeValue(forKey: id) else { return }
+        encoders.set(id, nil)
+        await stream.capture.stop()
+        await stream.pill?.stop()
+        stream.capture.onFrame = nil
+        stream.encoder = nil   // its deinit drains and invalidates the session
+    }
+
+    /// Lock-protected, for the network queue.
+    private final class EncoderBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var map: [UInt32: HEVCEncoder] = [:]
+        func get(_ id: UInt32) -> HEVCEncoder? { lock.lock(); defer { lock.unlock() }; return map[id] }
+        func set(_ id: UInt32, _ e: HEVCEncoder?) { lock.lock(); map[id] = e; lock.unlock() }
+    }
+}

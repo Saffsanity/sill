@@ -1,7 +1,9 @@
 import Foundation
 import Network
 import CryptoKit
+#if canImport(UIKit)
 import UIKit
+#endif
 import StreamProtocol
 
 // Remote access on the device (docs/remote-access-plan.md §7): pairing, saved Macs, remote dials,
@@ -143,7 +145,7 @@ enum RemoteCopy {
 
 extension StreamClient {
     /// "iPhone" or "iPad", for copy about this device.
-    static var deviceWord: String { UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad" }
+    static var deviceWord: String { ClientPlatform.deviceWord }
 
     /// DEBUG builds keep 127.0.0.1 for the simulator's tests against a host on this Mac.
     static var keepsLoopback: Bool {
@@ -928,8 +930,8 @@ extension StreamClient {
             queue.async {
                 guard !finished else { return }
                 let proof = PairingProof.deviceProof(key: key, deviceFingerprint: fpDevice, macFingerprint: fpMac)
-                let request = PairRequest(method: method, proof: Base64URL.encode(proof), name: UIDevice.current.name,
-                                          model: ClientStatsReporter.hardwareIdentifier)
+                let request = PairRequest(method: method, proof: Base64URL.encode(proof), name: ClientPlatform.deviceName,
+                                          model: ClientPlatform.hardwareIdentifier)
                 let message = StreamMessage(kind: .pairRequest, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                             payload: Wire.encode(request))
                 c.send(content: message.serialized(), completion: .contentProcessed { _ in })

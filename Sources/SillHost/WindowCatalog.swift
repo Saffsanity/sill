@@ -87,7 +87,7 @@ final class WindowCatalog {
     /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
     /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
     /// the client's bar and the coordinator can still find it.
-    var stagedWindowID: CGWindowID?
+    var stagedWindowIDs: Set<CGWindowID> = []
 
     /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
     /// an off-screen window that probes layer backing on the new screen). They carry the app's
@@ -233,11 +233,14 @@ final class WindowCatalog {
         // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
         // poll, and only then. Fetched before the sequence check so its await cannot let an older
         // refresh overwrite a newer one.
-        var pinned: SCWindow? = nil
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
-           let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
-            pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
-            if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
+        var pinnedAll: [SCWindow] = []
+        let missing = stagedWindowIDs.filter { id in !content.windows.contains(where: { $0.windowID == id }) }
+        if !missing.isEmpty, let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+            for id in missing {
+                guard let w = all.windows.first(where: { $0.windowID == id && !Self.isOwn($0) }) else { continue }
+                pinnedAll.append(w)
+                print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.")
+            }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
@@ -252,7 +255,7 @@ final class WindowCatalog {
                 && app.processID != Self.ownPID
                 && !Self.isSystemHelperWindow(w)
         }
-        if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        for pinned in pinnedAll where !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })

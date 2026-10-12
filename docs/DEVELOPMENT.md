@@ -259,6 +259,30 @@ with the test service type), the privacy manifest `PrivacyInfo.xcprivacy`, and
 the package reference. Nothing else. A new source file needs its four
 `project.pbxproj` entries added by hand.
 
+## Sill Viewer: controlling one Mac from another
+
+`Sources/MacClient` is a Mac client for the same host: the other Mac runs Sill.app (or `SillHost`)
+as it always does, and this Mac shows its windows or Desktop and controls them. The session code is
+the iPhone and iPad app's own (`Sources/MacClient/Shared` links to it). docs/mac-client-plan.md has
+the design and what has been tested.
+
+```
+Scripts/make-client-app.sh --open          # .build/Sill Viewer.app (release; --debug for the test arguments)
+```
+
+- **Connect** as from an iPad: a Mac on the same network is listed, and a tap asks to pair (type the
+  code the other Mac shows). Away from home use Add a Mac with the address and code from that Mac's
+  Pair iPhone or iPad… window, or paste its `sill://pair` link.
+- **Keys** go to the other Mac while the picture has the keyboard, ⌘W and ⌘Q included; ⌃⌥⌘⎋ gives
+  the keyboard back to this Mac. ⌘Tab, ⌘Space and the other shortcuts macOS keeps for itself go
+  across only with Control › Capture System Shortcuts, which needs Sill Viewer allowed in Privacy &
+  Security › Accessibility.
+- **Gestures**: macOS keeps three-finger swipes, so the Control menu sends Mission Control, App
+  Exposé, the Spaces, Show Desktop and Show Apps. The middle button goes to a Mac whose Sill takes
+  it (from 2026-10-12); an older one gets none.
+- The device key is in the login keychain (`me.saffer.sill.device-key`); saved Macs are in
+  `defaults read me.saffer.sill.client`. On the other Mac this Mac is a device in Settings › Devices.
+
 ## Permissions
 
 - The first launch opens Settings on Permissions. Screen Recording and

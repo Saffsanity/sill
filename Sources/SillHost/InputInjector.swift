@@ -37,6 +37,7 @@ final class InputInjector {
     private var lastMoveArrival: CFTimeInterval = 0   // jitter probe, see apply()
     private var left = ButtonState()
     private var right = ButtonState()
+    private var middle = ButtonState()
 
     /// The Mac's pointer (docs/pointer-visibility-plan.md §4.5): told just before each post of a
     /// pointer or scroll event, never after. The network queue reads the pointer while this posts,
@@ -144,6 +145,9 @@ final class InputInjector {
         case .rightMouseDown: what = "right mouse down"
         case .rightMouseUp: what = "right mouse up"
         case .rightMouseDragged: what = "right mouse drag"
+        case .otherMouseDown: what = "middle mouse down"
+        case .otherMouseUp: what = "middle mouse up"
+        case .otherMouseDragged: what = "middle mouse drag"
         case .scrollWheel: what = "scroll"
         default: what = "event \(event.type.rawValue)"
         }
@@ -176,6 +180,7 @@ final class InputInjector {
             // text selection and window dragging.
             if left.isDown { type = .leftMouseDragged; button = .left; clicks = left.clicks }
             else if right.isDown { type = .rightMouseDragged; button = .right; clicks = right.clicks }
+            else if middle.isDown { type = .otherMouseDragged; button = .center; clicks = middle.clicks }
             else { type = .mouseMoved; button = .left }
         case .leftDown:
             beginClick(&left, at: location)
@@ -189,6 +194,12 @@ final class InputInjector {
         case .rightUp:
             right.isDown = false
             type = .rightMouseUp; button = .right; clicks = right.clicks
+        case .middleDown:
+            beginClick(&middle, at: location)
+            type = .otherMouseDown; button = .center; clicks = middle.clicks
+        case .middleUp:
+            middle.isDown = false
+            type = .otherMouseUp; button = .center; clicks = middle.clicks
         }
 
         guard let event = CGEvent(mouseEventSource: source, mouseType: type,
@@ -205,7 +216,8 @@ final class InputInjector {
     /// input has nowhere to land (DroppedInput, StreamCoordinator): its down was posted, its up has
     /// not been.
     func isUpOfSomethingDown(_ event: InputEvent) -> Bool {
-        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown)
+        DroppedInput.stillGoes(event, keyDown: keys.isDown, leftDown: left.isDown, rightDown: right.isDown,
+                               middleDown: middle.isDown)
     }
 
     private func beginClick(_ state: inout ButtonState, at location: CGPoint) {
@@ -493,6 +505,7 @@ final class InputInjector {
         post(keys.releaseAll(), letGo: true)
         if left.isDown { pointer(.leftUp, at: pointerNow()) }
         if right.isDown { pointer(.rightUp, at: pointerNow()) }
+        if middle.isDown { pointer(.middleUp, at: pointerNow()) }
     }
 
     /// Shift, control, option and command: the modifiers that change a click or a scroll.

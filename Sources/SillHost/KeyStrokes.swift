@@ -299,14 +299,16 @@ package struct KeyUpCheck: Sendable {
 /// later click a ⌘-click, and a button left down every later move a drag.
 package enum DroppedInput {
     /// Whether `event` still goes: a key's up when `keyDown` says that key is down on the Mac, a
-    /// button's up when that button is (`leftDown`, `rightDown`). Downs, moves, scrolls, text and a
+    /// button's up when that button is (`leftDown`, `rightDown`, `middleDown`). Downs, moves, scrolls, text and a
     /// scroll gesture's boundaries never do (InputInjector's scroll watchdog closes a gesture left
     /// open).
-    package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool) -> Bool {
+    package static func stillGoes(_ event: InputEvent, keyDown: (UInt16) -> Bool, leftDown: Bool, rightDown: Bool,
+                                  middleDown: Bool = false) -> Bool {
         switch event {
         case .key(let usage, false, _): return keyDown(usage)
         case .pointer(.leftUp, _, _): return leftDown
         case .pointer(.rightUp, _, _): return rightDown
+        case .pointer(.middleUp, _, _): return middleDown
         default: return false
         }
     }

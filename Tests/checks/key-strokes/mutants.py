@@ -100,6 +100,7 @@ MUTANTS = [
     # Input with nowhere to land (DroppedInput)
     ("a button's up with nowhere to land is dropped (before the review)", STROKES,
      "        case .pointer(.leftUp, _, _): return leftDown\n        case .pointer(.rightUp, _, _): return rightDown\n", ""),
+    ("the middle button's up never goes", STROKES, "        case .pointer(.middleUp, _, _): return middleDown\n", ""),
     ("the right button's up judged by the left", STROKES, "case .pointer(.rightUp, _, _): return rightDown", "case .pointer(.rightUp, _, _): return leftDown"),
     ("a button's up goes whether or not it is down", STROKES, "case .pointer(.leftUp, _, _): return leftDown", "case .pointer(.leftUp, _, _): return true"),
     ("a key's up goes whether or not its key is down", STROKES, "case .key(let usage, false, _): return keyDown(usage)", "case .key(_, false, _): return true"),

@@ -53,11 +53,26 @@ public struct WindowList: Codable {
     /// 2026-09-27, to which a device sends no kind 28. A later generation of gestures says 2 and
     /// goes only to a host that says so.
     public var gestures: Int?
+    /// True: this host takes the middle button (PointerAction.middleDown and .middleUp). Nil from every
+    /// host before 2026-10-12, to which a device sends neither: its kind 8 would not decode there.
+    public var middleButton: Bool?
+    /// How many windows this host streams besides the one picked (kinds 29–31, SideStreams.swift); nil
+    /// from every host before 2026-10-12, to which a device sends no kind 29.
+    public var sideStreams: Int?
+    /// True: this host shares its clipboard's text (kind 32) with a device that asks. Nil before 2026-10-12.
+    public var clipboard: Bool?
+    /// True: this host sends the sound of the apps a device shows (kind 33) when it asks. Nil before 2026-10-12.
+    public var audio: Bool?
+    /// True: this host takes files dropped on its windows (kinds 34 and 35). Nil before 2026-10-12.
+    public var fileDrop: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
-                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil) {
+                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
+                sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
+        self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
+        self.audio = audio; self.fileDrop = fileDrop
     }
 }
 

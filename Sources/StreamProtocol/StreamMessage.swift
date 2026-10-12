@@ -67,6 +67,23 @@ public enum StreamMessageKind: UInt8 {
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
+    // More windows live at once, and the clipboard (2026-10-12, the Mac client; SideStreams.swift). Only to and
+    // from a host whose window list says `sideStreams` (29–31) or `clipboard` (32); older peers skip them.
+    case sideStreams = 29    // device → host: JSON SideStreamRequest — the windows this device shows besides the one
+                             // it streams (kind 6), each to be streamed too at a lower rate; an empty list stops them
+    case sideParameterSets = 30 // host → device: window ID (UInt32 BE) + ParameterSets.encoded(), as kind 0 for that window
+    case sideFrame = 31      // host → device: window ID (UInt32 BE) + one HEVC access unit, as kind 1 for that window
+    case clipboard = 32      // either way: JSON Clipboard — the sender's clipboard changed (or, from a device with no
+                             // text, a request to be sent the host's from now on)
+    case audio = 33          // host → device: AudioPacket — about 10 ms of the sound of the apps whose windows the
+                             // device shows (it asked: SideStreamRequest.audio), only from a host whose list says `audio`
+    case fileChunk = 34      // either way: FileChunk — part of a file dropped on one of the host's windows here, or
+                             // (host → device) of a file the device asked for (kind 37)
+    case fileDrop = 35       // device → host: JSON FileDrop — those files, all sent, dropped at a point of the picture;
+                             // both only to a host whose list says `fileDrop`
+    case dragOffer = 36      // host → device: JSON DragOffer — the files an app here is dragging under this device's
+                             // held button (empty: the drag ended), so a drag out of the window can carry them
+    case fileRequest = 37    // device → host: JSON FileRequest — one file of an offer, sent back as kind 34
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

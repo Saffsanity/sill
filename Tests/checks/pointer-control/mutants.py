@@ -55,8 +55,8 @@ MUTANTS = [
     ("a non-finite position", POINTER, "guard inside == true, let x, let y, x.isFinite, y.isFinite", "guard inside == true, let x, let y"),
     ("inside left out of the JSON when false", POINTER, "self.x = x; self.y = y; self.inside = inside; self.seen = seen",
      "self.x = x; self.y = y; self.inside = inside == false ? nil : inside; self.seen = seen"),
-    ("kind 26 numbered 29", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 29 "),
-    ("kind 26 numbered 30", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 30 "),
+    ("kind 26 numbered 33", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 33 "),
+    ("kind 26 numbered 34", MESSAGE, "    case macPointer = 26 ", "    case macPointer = 34 "),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:

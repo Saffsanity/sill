@@ -10,6 +10,8 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
     /// The stream ended on its own (window closed, permission revoked). Called on an SCK thread.
     var onStopped: ((Error) -> Void)?
+    /// The stats line's keys: "cap" for the stream, "side.cap" for a side stream (SideStreams).
+    var statsPrefix = "cap"
 
     /// `showsCursor`: draw the Mac cursor into the frames. The host passes false: the client draws
     /// the pointer itself (with the Mac's current shape, sent separately), so the video never
@@ -49,7 +51,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             throw error
         }
         let crop = sourceRect.map { String(format: " sourceRect (%.0f,%.0f,%.0f,%.0f)", $0.minX, $0.minY, $0.width, $0.height) } ?? ""
-        print("Capture started: \(width)×\(height) @\(fps) fps, cursor \(showsCursor ? "in" : "out"), filter \(filter.contentRect.size) scale \(filter.pointPixelScale)" + crop)
+        if statsPrefix == "cap" { print("Capture started: \(width)×\(height) @\(fps) fps, cursor \(showsCursor ? "in" : "out"), filter \(filter.contentRect.size) scale \(filter.pointPixelScale)" + crop) }
     }
 
     private var framesSeen = 0
@@ -71,13 +73,13 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let statusRaw = attachments.first?[.status] as? Int,
               let status = SCFrameStatus(rawValue: statusRaw)
-        else { Stats.shared.bump("cap.noStatus"); return }
+        else { Stats.shared.bump("\(statsPrefix).noStatus"); return }
         // .idle frames (nothing changed) are skipped, which is what we want.
-        guard status == .complete else { Stats.shared.bump(status == .idle ? "cap.idle" : "cap.status\(statusRaw)"); return }
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { Stats.shared.bump("cap.noPixels"); return }
-        Stats.shared.bump("cap.complete")
+        guard status == .complete else { Stats.shared.bump(status == .idle ? "\(statsPrefix).idle" : "\(statsPrefix).status\(statusRaw)"); return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { Stats.shared.bump("\(statsPrefix).noPixels"); return }
+        Stats.shared.bump("\(statsPrefix).complete")
         framesSeen += 1
-        if framesSeen == 1 { print("Capture: first frame \(CVPixelBufferGetWidth(pixelBuffer))×\(CVPixelBufferGetHeight(pixelBuffer))") }
+        if framesSeen == 1, statsPrefix == "cap" { print("Capture: first frame \(CVPixelBufferGetWidth(pixelBuffer))×\(CVPixelBufferGetHeight(pixelBuffer))") }
         onFrame?(pixelBuffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 

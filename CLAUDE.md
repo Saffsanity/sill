@@ -8,6 +8,58 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Sill Viewer, a Mac controlling another Mac (2026-10-11/12, branch `mac-client` from main at
+985a733; docs/mac-client-plan.md has the design, the input table, what was verified and what was
+not).** Goal: a macOS client for the Sill host, Apple frameworks only, no servers, the iOS session
+code reused. The one wire change, asked for on 2026-10-12: the middle button
+(`PointerAction.middleDown/Up`, `WindowList.middleButton`, sent only to a host that says it). `Sources/MacClient` (target `MacClient`, product
+`SillClient`, `Scripts/make-client-app.sh` → `.build/Sill Viewer.app`, `me.saffer.sill.client`):
+its `Shared/` folder symlinks iOSClient's StreamClient and its policies, compiled unchanged but for
+two new shared files (`ClientPlatform.swift`, `HEVCSampleFeed.swift`, pbxproj AC01/FC01 and
+AC02/FC02: the iOS display view now wraps the feed) and `#if canImport(UIKit)` around the iOS
+harness hooks. The Mac's own: the connect window, the session toolbar (windows and apps, Desktop,
+Menus, Text Size, the host's settings, Disconnect), NSEvent input (pointer, buttons, trackpad phases
+and momentum, keys by a local monitor, Capture System Shortcuts by an event tap, gestures from the
+Control menu), the other Mac's cursor shape as this Mac's cursor. `Tests/checks/mac-keys` (695, 7
+mutants) holds its keycode table to the host's. Verified on loopback synthetic hosts: the plain
+door, TLS home pairing and a pinned reconnect, the remote door's link pairing and redial, every
+input kind in the host's input log, the menus against menufixture; all 41 checks; the release build;
+iOS on Xcode 27.0 fails only on the 27.1 Duo APIs, as main does (CI's 27.1 is the real check).
+Two Macs (2026-10-12): the client on a MacBook Pro on the same network against a synthetic
+`--pairing` host here, first through an SSH tunnel, then directly over the LAN once the laptop's
+Local Network prompt was allowed: paired with the code, 3024×1898 at 70–120 fps, rtt 5–6 ms, a
+pinned reconnect, and real hands on the laptop (clicks, right and middle clicks and drags, hover,
+scrolling, typing, ⌘W to the host); hover needed the tracking area made as the view joins its
+window. Later rounds: the toolbar (windows, Desktop, Settings, Menus, gestures), ⌘W to the host,
+⌃⌥⌘⎋, and ⌘Tab through Capture System Shortcuts (fixed: the tap now installs once Accessibility
+is granted). A synthetic host's window picks are real: they resized windows on this Mac. The new
+client against main's host sends no middle button. **Untested:** the Bonjour row on one subnet,
+Direct Wireless over AWDL, Tailscale, the cable, the cursor's shape (needs a real host), choosing a
+menu item.
+- Since (2026-10-12, tests between the two Macs; docs/mac-client-plan.md is older than these): every
+  window open in the viewer lives at once (kinds 29–31 side streams, `MainRouter` routing the main stream
+  to its window), each as a borderless window with the WindowPill handle, the status item, the remote
+  app's menus in the menu bar, a Dock icon per remote app (SillDockProxy copies), clipboard text and
+  images both ways (kind 32), and windows restored after a restart. Sill's desk (`DeskStages`): the
+  windows the viewer shows live on ONE hidden virtual display that all share (this Mac keeps one virtual
+  display online at a time: a second took the first offline, measured with a probe), made once per
+  launch at 120 Hz, 3792×2160 pt at 2× or, for a viewer screen wider than that, at 1× up to 7616 px
+  (7680 has no mode at either scale on macOS 27.0.1); background windows captured alone, the focused
+  one cropped from the display with its app (AppCrop) and its share pill (SharePill). Sound (kind 33,
+  `AppAudio`): a CoreAudio process tap of the shown apps and their helpers, muted on the host
+  (`mutedWhenTapped`), 10 ms 16-bit PCM packets, played by the viewer's `AudioPlayer` (Play Sound in the
+  status item); NSAudioCaptureUsageDescription, and all CoreAudio work off the main actor (it waits on
+  the permission prompt). Files: dropped on a remote window (kinds 34, 35, `FileDrops`: saved in
+  ~/Downloads/From ‹device›, then a real drag posted on the host) and dragged out of one (kinds 36, 37,
+  `DragOut` and the viewer's NSFilePromiseProvider; onto the laptop's Trash moves the host's file to its
+  Trash). Kinds 33–37 go only to a host whose window list says `audio`/`fileDrop`. Both apps notarized
+  (profile `sill-notary`). The iPhone build from Xcode 27.0 takes
+  `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK` (DuoPostureReader's 27.1 hinge API left out). Verified: the
+  two-Mac flip test (`-SillFlipTest`), the resize test (`-SillResizeTest`), a drop (`-SillDropTest`),
+  audio packets and the host's mute in coreaudiod's log, an iPhone 16 Pro Max session against a test
+  host, all checks. **Untested:** drags out to the laptop's Finder and Trash by hand, full screen in a
+  streamed window (it takes over the shared display: the next step).
+
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
 once that is merged do #48. Then run the release procedure").** Noah: "I want the release in the GitHub to line up with the app version, I want
@@ -4759,6 +4811,12 @@ good.
   Connect record) and every release's steps.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
+- `Sources/MacClient/` — Sill Viewer, the Mac client (docs/mac-client-plan.md): `Shared/` symlinks
+  to iOSClient's session files; `SillClientApp`, `ConnectView`, `SessionView`, `StreamInputView`,
+  `HEVCDisplayView` (an NSView over `HEVCSampleFeed`), `MacMenus`, `MacMenuHub` (no-op),
+  `SystemKeyTap`, `MacKeyMap`, DEBUG `MacInputTest`. `Packaging/Client-Info.plist`,
+  `Scripts/make-client-app.sh`. iOSClient's `ClientPlatform.swift` and `HEVCSampleFeed.swift` are
+  shared by both clients.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one;
   `FoundMac` rows; connection, parsing, reconnect, the move of a session over
@@ -5035,6 +5093,7 @@ SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/ru
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
+Scripts/make-client-app.sh --debug --open   # .build/Sill Viewer.app, the Mac client (-SillConnect, -SillInputTest 1, -SillMenuTest press)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
@@ -5421,7 +5480,8 @@ device keeps working with Macs from the first public build on, or each says why
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
   `InputEvent` case, scroll phase or window command goes only to a host that said it takes it (a
   kind or a field only newer hosts send), and a gesture ends with a scroll phase the first build
-  knows.
+  knows. The middle button is such a case: `PointerAction.middleDown/Up` only to a
+  host whose window list says `middleButton` true.
 - A device is refused, never served wrong. A host that can no longer serve older devices raises
   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
   before anything else. A device from 2026-09-25 on that receives it shows the host's message word

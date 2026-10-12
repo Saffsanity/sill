@@ -119,8 +119,19 @@ final class VirtualStage {
     private(set) var captureRect: CGRect = .zero
     /// Height of the menu bar macOS draws on the virtual display. A guess until measured from
     /// NSScreen after the first display comes up, then cached for the process.
-    private var menuInset: CGFloat = 24
-    private var insetMeasured = false
+    /// The virtual display's menu bar height, measured once per run and kept for every stage after
+    /// (Sill's desk makes many: each guessing anew made every display twice, and macOS refuses a
+    /// serial whose display was just torn down).
+    /// The virtual display's menu bar as last measured, kept across launches (30 pt on macOS 27), so
+    /// a launch's first display is not made twice.
+    private static var measuredInset: CGFloat? = {
+        let v = UserDefaults.standard.double(forKey: "SillVirtualMenuBar")
+        return v > 0 ? CGFloat(v) : nil
+    }() {
+        didSet { if let v = measuredInset { UserDefaults.standard.set(Double(v), forKey: "SillVirtualMenuBar") } }
+    }
+    private var menuInset: CGFloat = VirtualStage.measuredInset ?? 24
+    private var insetMeasured = VirtualStage.measuredInset != nil
     /// Set when staging must not be attempted again this run (API missing, repeated failures).
     var disabledReason: String?
     private var creationFailures = 0
@@ -136,6 +147,17 @@ final class VirtualStage {
     private var lastReleased: (windowID: CGWindowID, element: AXUIElement)?
     /// The window server tore the display down on its own (sleep, display arbitration). Main actor.
     var onLost: (() -> Void)?
+    /// Sill's desk: the stage that owns the one display every desk window shares (DeskStages). This
+    /// Mac keeps one virtual display online at a time: a second one made took the first offline
+    /// and its window went home (measured 2026-10-12, macOS 27.0.1), so the desk's windows share
+    /// one. A stage with a host borrows its display and never makes or destroys one.
+    weak var host: VirtualStage?
+    /// The display's scale: 2 (Retina) unless the desk's room is wider or taller than a 2× display
+    /// can be on this Mac, then 1 (an ultrawide at 1×, 5120 points, would need 10,240 pixels at 2×;
+    /// macOS made no mode for 7,680 or more). A 1× desk renders what a 1× screen shows anyway.
+    private(set) var displayScale = 2
+    /// The room the desk's devices asked for (their largest screen), for the shared display.
+    var deskRoom: CGSize?
     /// Called just before the stage warps the cursor home (`releaseWindow`): that motion is Sill's,
     /// not the Mac's user taking over the pointer (PointerWatch.sillMoved). Before the warp, never
     /// after, for the reason InputInjector's `watch` gives. Main actor.
@@ -148,9 +170,34 @@ final class VirtualStage {
     /// 8192 px, its ceiling.
     static let minSide: CGFloat = 320
     static let maxSide: CGFloat = 4096
+    /// A 1× display's ceiling (the same 7,680 pixels a 2× one stops short of).
+    static let maxSide1x: CGFloat = 7616   // 7680 came up with no mode at 1× too (macOS 27.0.1)
     /// Fixed identity, so System Settings › Displays keeps one remembered "Sill" entry across runs
     /// (the probe used serial 0xF00D and does not collide).
     static let vendorID: UInt32 = 0x5111, productID: UInt32 = 0x0001, serialNum: UInt32 = 1
+
+    /// TEST ONLY `SILL_TEST_DESK=1`: a synthetic host stages windows on Sill's desk too (it moves real
+    /// windows: a run with it needs the AppKit loop, `--virtual-display`).
+    nonisolated static let testDesk = ProcessInfo.processInfo.environment["SILL_TEST_DESK"] == "1"
+
+    /// This stage's entry in the snapshots `emergencyRestore` reads at exit.
+    private let snapshotKey = UUID()
+    /// The window this stage placed, as the catalog pins it.
+    private var stagedID: CGWindowID? { placement?.windowID }
+
+    /// The display's serial number: the coordinator's stage has `serialNum`; each of Sill's desk
+    /// stages one of its own (DeskStages), since macOS refuses a second display with the same
+    /// vendor, product and serial, and on macOS 27.0.1 (26A434) has been seen refusing one whose
+    /// earlier display was not torn down.
+    var serial: UInt32 = VirtualStage.serialNum
+    /// Every serial a display of this run has had: macOS refuses one again once its display is gone.
+    static var usedSerials: Set<UInt32> = []
+    /// A serial no display of this run has had.
+    static func freshSerial() -> UInt32 {
+        var s: UInt32
+        repeat { s = UInt32.random(in: 10_000...9_999_999) } while usedSerials.contains(s)
+        return s
+    }
 
     init(sizer: WindowSizer, catalog: WindowCatalog) {
         self.sizer = sizer
@@ -316,8 +363,8 @@ final class VirtualStage {
         // there — Ctrl-C's `shutdownForExit`, the display-lost callback, the coordinator's catch —
         // only restores what `placement` names. The sizes are recorded once the move has settled.
         placement = p
-        EmergencySnapshot.set((p.element, p.originalFrame))
-        catalog.stagedWindowID = p.windowID
+        EmergencySnapshot.set(snapshotKey, (p.element, p.originalFrame))
+        catalog.stagedWindowIDs.insert(p.windowID)
 
         // (5b) Full screen. A window the user put in a full-screen Space (a video made full screen,
         // 2026-09-23) fills the display and refuses moves and sizes; treating that as a misplaced
@@ -370,8 +417,19 @@ final class VirtualStage {
         var dest = CGRect.zero
         for attempt in 0..<2 {
             guard let d = display else { releaseWindow(); throw Failure.neverOnline }
+            // While another display comes or goes (each window on Sill's desk has its own), macOS
+            // reports this one's bounds as a point or two, and AppKit may not list it, for a moment:
+            // placed then, the window went to a 1×0 rectangle and home. Wait it out (1 s at most).
+            let settled = Date().addingTimeInterval(1)
+            while Date() < settled, CGDisplayBounds(d.displayID).width < CGFloat(d.widthPt) - 1
+                    || Self.usableArea(of: d.displayID).map({ $0.width < 32 || $0.height < 32 }) ?? true {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
             displayBounds = CGDisplayBounds(d.displayID)
-            let usable = Self.usableArea(of: d.displayID) ?? displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
+            var usable = Self.usableArea(of: d.displayID) ?? displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
+            if usable.width < 32 || usable.height < 32 {
+                usable = displayBounds.divided(atDistance: menuInset, from: .minYEdge).remainder
+            }
             dest = CGRect(origin: usable.origin,
                           size: CGSize(width: min(wanted.width, usable.width), height: min(wanted.height, usable.height)))
             let before = WindowSizer.liveBounds(of: p.windowID)
@@ -453,8 +511,8 @@ final class VirtualStage {
                 // Record it again before the second placement, or the next switch would leave it
                 // on the virtual display and a later select would take that spot for its home.
                 placement = p
-                EmergencySnapshot.set((p.element, p.originalFrame))
-                catalog.stagedWindowID = p.windowID
+                EmergencySnapshot.set(snapshotKey, (p.element, p.originalFrame))
+                catalog.stagedWindowIDs.insert(p.windowID)
                 continue
             }
             let inside = Self.fraction(of: live, inside: displayBounds)
@@ -495,7 +553,7 @@ final class VirtualStage {
     }
 
     /// The refresh rate the next display is made at; see `prepare`.
-    private var refreshHz = 60
+    private(set) var refreshHz = 60
 
     /// Reuses the current display if `env` fits below its menu bar and its refresh rate matches,
     /// else (re)creates it, waits for it to come online at 2×, measures the menu bar once, and
@@ -503,15 +561,29 @@ final class VirtualStage {
     /// so one grown to an app's minimum is not grown a second time after a rate change. Throws
     /// with the display destroyed if it never came up or SCK never saw it.
     private func ensureDisplay(atLeast env: CGSize) async throws {
-        var env = Self.clamp(env)
-        env.height = min(env.height, Self.maxSide - menuInset)   // the menu bar counts toward the 8192 px ceiling
+        if let host {
+            try await host.ensureShared()
+            display = host.display
+            scDisplay = host.scDisplay
+            menuInset = host.menuInset
+            insetMeasured = true
+            return
+        }
+        var env = displayScale == 1 ? env : Self.clamp(env)
+        if displayScale == 1 {   // 1× (Sill's desk on an ultrawide): up to 7680 points a side
+            env = CGSize(width: min(max(env.width, Self.minSide), Self.maxSide1x),
+                         height: min(max(env.height, Self.minSide), Self.maxSide1x - menuInset))
+        } else {
+            env.height = min(env.height, Self.maxSide - menuInset)   // the menu bar counts toward the 8192 px ceiling
+        }
         if let d = display, d.isAlive, scDisplay != nil, Int(d.refreshHz) == refreshHz,
            CGFloat(d.widthPt) >= env.width, CGFloat(d.heightPt) - menuInset >= env.height {
             Stats.shared.bump("vd.reused")
             return
         }
         if let d = display {
-            env = Self.clamp(CGSize(width: max(env.width, CGFloat(d.widthPt)), height: max(env.height, CGFloat(d.heightPt) - menuInset)))
+            let grown = CGSize(width: max(env.width, CGFloat(d.widthPt)), height: max(env.height, CGFloat(d.heightPt) - menuInset))
+            env = displayScale == 1 ? grown : Self.clamp(grown)
         }
         // Recreating under a staged window (rate change, envelope grew) would let the window server
         // dump it anywhere on a real display until the new one is up: send it home first. prepare
@@ -522,8 +594,21 @@ final class VirtualStage {
         let t0 = Date()
         let d: VirtualDisplay
         do {
-            d = try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: 2,
-                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: Self.serialNum)
+            func make(_ serial: UInt32) throws -> VirtualDisplay {
+                try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: displayScale,
+                                   refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: Self.productID, serialNum: serial)
+            }
+            do {
+                d = try make(serial)
+            } catch {
+                // macOS refuses a serial whose display was torn down earlier in its session (seen on
+                // 27.0.1): a serial this run has not used, kept for this stage's later displays.
+                let fresh = Self.freshSerial()
+                print("Virtual display serial \(serial) refused (\(error)); using \(fresh).")
+                d = try make(fresh)
+                serial = fresh
+            }
+            Self.usedSerials.insert(serial)
         } catch {
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }
@@ -546,7 +631,7 @@ final class VirtualStage {
             }
             // Up, but not at the requested mode: occlusion-free beats crisp. "Capture started …
             // scale 1.0" in the log gives it away.
-            print("Virtual display is online but not at \(d.widthPt)×\(d.heightPt) @2×: backing \(d.pixelSize.width)×\(d.pixelSize.height) px. Modes: \(d.availableModes().joined(separator: "; "))")
+            print("Virtual display is online but not at \(d.widthPt)×\(d.heightPt) @\(displayScale)×: backing \(d.pixelSize.width)×\(d.pixelSize.height) px. Modes: \(d.availableModes().joined(separator: "; "))")
         }
 
         // The menu bar: AppKit learns the new screen through the run loop, usually within a frame.
@@ -558,6 +643,7 @@ final class VirtualStage {
                 let guessed = menuInset
                 insetMeasured = true
                 menuInset = measured
+                Self.measuredInset = measured
                 if CGFloat(d.heightPt) - measured < env.height {
                     // Guessed too small: once more with the measured bar, so the window fits.
                     print("Virtual display menu bar is \(Int(measured)) pt, not \(Int(guessed)); recreating the display to fit.")
@@ -581,9 +667,50 @@ final class VirtualStage {
             throw Failure.notListedBySCK
         }
         scDisplay = listed
+        Self.unmirror(d.displayID)
         Stats.shared.bump("vd.created")
-        print("Virtual display \(d.widthPt)×\(d.heightPt) pt @2× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
+        print("Virtual display \(d.widthPt)×\(d.heightPt) pt @\(displayScale)× id \(d.displayID): created \(created) ms, online \(onlineMs) ms, "
               + "listed by ScreenCaptureKit after \(Self.ms(since: t1)) ms, menu bar \(Int(menuInset)) pt\(insetMeasured ? "" : " (assumed)")")
+    }
+
+    /// Takes a new display out of any mirror set, so it is a screen of its own (macOS asks what to
+    /// show on a new display, and "Entire Screen" mirrors the main one onto it).
+    static func unmirror(_ id: CGDirectDisplayID) {
+        guard CGDisplayIsInMirrorSet(id) != 0 else { return }
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success, let config else { return }
+        CGConfigureDisplayMirrorOfDisplay(config, id, kCGNullDirectDisplay)
+        let err = CGCompleteDisplayConfiguration(config, .forSession)
+        print("Virtual display \(id) was mirrored; made a screen of its own (\(err == .success ? "done" : "error \(err.rawValue)")).")
+    }
+
+    /// The desk's shared display, made once at its largest and at 120 Hz, so no window's size or
+    /// rate ever makes it again (each new display moves every window on it home and back).
+    func ensureShared() async throws {
+        // One at a time: the picked window and a side stream ask together, and two creations at
+        // once each made a display, the second destroying the first under its window.
+        if let running = sharedMaking {
+            try? await running.value
+            if display?.isAlive == true, scDisplay != nil { return }   // made by the other caller
+        }
+        let task = Task { @MainActor in try await self.makeShared() }
+        sharedMaking = task
+        defer { if sharedMaking == task { sharedMaking = nil } }
+        try await task.value
+    }
+    private var sharedMaking: Task<Void, Error>?
+
+    private func makeShared() async throws {
+        refreshHz = 120
+        let room = deskRoom ?? .zero
+        let fits2x = room.width <= DeskStages.largest.width && room.height <= DeskStages.largest.height
+        let scale = fits2x ? 2 : 1
+        let size = fits2x ? DeskStages.largest
+            : CGSize(width: max(room.width, DeskStages.largest.width), height: max(room.height, DeskStages.largest.height))
+        // The scale is chosen when the display is made: a different one later waits until no window
+        // is on it (DeskStages makes it with the first window and removes it with the last).
+        if display == nil || !(display?.isAlive ?? false) { displayScale = scale }
+        try await ensureDisplay(atLeast: size)
     }
 
     /// Sends every window that is not `keeping` off the virtual display to the main display.
@@ -598,6 +725,7 @@ final class VirtualStage {
             guard (info[kCGWindowLayer as String] as? Int) == 0,
                   (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let id = info[kCGWindowNumber as String] as? CGWindowID, id != keep,
+                  !catalog.stagedWindowIDs.contains(id),   // another of Sill's desk windows: it lives there too
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
                   let b = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b as CFDictionary),
@@ -647,6 +775,7 @@ final class VirtualStage {
 
     /// Puts the staged window back where it was and forgets it. The display stays.
     func releaseWindow() {
+        let placedID = stagedID   // `placement` is cleared below
         if let p = placement {
             let ok = sizer.restore(p)
             print(ok ? "Restored \(p.appName) — \(p.title) to \(Self.fmt(p.originalFrame))"
@@ -668,13 +797,14 @@ final class VirtualStage {
         askedSize = nil
         askedDest = nil
         captureRect = .zero
-        catalog.stagedWindowID = nil
-        EmergencySnapshot.set(nil)
+        if let id = placedID { catalog.stagedWindowIDs.remove(id) }
+        EmergencySnapshot.set(snapshotKey, nil)
     }
 
     /// Removes the display. Call `releaseWindow()` first while both displays exist, so the window
     /// goes exactly where it was instead of wherever the window server dumps it.
     func destroyDisplay() {
+        if host != nil { display = nil; scDisplay = nil; return }   // the desk's display is its host's
         if let d = display {
             let id = d.displayID
             display = nil
@@ -703,16 +833,17 @@ final class VirtualStage {
         onLost?()
     }
 
-    /// Last resort from `atexit`, on any thread, with no main-actor state: the window's element and
-    /// original frame were snapshotted when it was placed. The display dies with the process.
+    /// Last resort from `atexit`, on any thread, with no main-actor state: each staged window's
+    /// element and original frame were snapshotted when it was placed (several stages: Sill's desk,
+    /// DeskStages). The displays die with the process.
     nonisolated static func emergencyRestore() {
-        guard let snapshot = EmergencySnapshot.take() else { return }
-        let (element, frame) = snapshot
-        var origin = frame.origin, size = frame.size
-        guard let pos = AXValueCreate(.cgPoint, &origin), let sz = AXValueCreate(.cgSize, &size) else { return }
-        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
-        AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sz)
-        AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+        for (element, frame) in EmergencySnapshot.takeAll() {
+            var origin = frame.origin, size = frame.size
+            guard let pos = AXValueCreate(.cgPoint, &origin), let sz = AXValueCreate(.cgSize, &size) else { continue }
+            AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+            AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sz)
+            AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, pos)
+        }
     }
 }
 
@@ -720,8 +851,11 @@ final class VirtualStage {
 /// purpose: `atexit` handlers run wherever `exit` was called.
 private enum EmergencySnapshot {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var value: (AXUIElement, CGRect)?
+    nonisolated(unsafe) private static var values: [UUID: (AXUIElement, CGRect)] = [:]
 
-    static func set(_ v: (AXUIElement, CGRect)?) { lock.lock(); value = v; lock.unlock() }
-    static func take() -> (AXUIElement, CGRect)? { lock.lock(); defer { value = nil; lock.unlock() }; return value }
+    static func set(_ key: UUID, _ v: (AXUIElement, CGRect)?) { lock.lock(); values[key] = v; lock.unlock() }
+    static func takeAll() -> [(AXUIElement, CGRect)] {
+        lock.lock(); defer { values.removeAll(); lock.unlock() }
+        return Array(values.values)
+    }
 }

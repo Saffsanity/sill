@@ -1,7 +1,9 @@
 import Foundation
 import Network
 import QuartzCore
+#if canImport(UIKit)
 import UIKit
+#endif
 import StreamProtocol
 
 /// A Mac on the connect screen: one the network browser lists, one seen only over peer-to-peer
@@ -233,6 +235,9 @@ final class StreamClient: ObservableObject {
     #else
     private static let noAutoDesktop = false
     #endif
+    /// Whether this device picks the Desktop by itself when nothing streams (below): the iPhone and
+    /// iPad always do; the Mac client, whose windows are the user's to open and close, never does.
+    var picksDesktopItself = true
     /// Picks and launches sent from this device (main thread). The automatic Desktop request that
     /// waits out a closed window stands down if this moved meanwhile: the user chose something,
     /// and the host cannot tell that request from a Desktop tap, so it could replace the choice.
@@ -247,8 +252,8 @@ final class StreamClient: ObservableObject {
             }
         }
     }
-    @Published var thumbnails: [UInt32: UIImage] = [:] // by window ID
-    @Published var icons: [String: UIImage] = [:]      // by bundle ID
+    @Published var thumbnails: [UInt32: PlatformImage] = [:] // by window ID
+    @Published var icons: [String: PlatformImage] = [:]      // by bundle ID
     @Published var apps: [AppInfo] = []                // installed apps, for "All apps"
 
     // The Mac's streaming settings (kinds 16 and 17; see the Host settings section below and
@@ -301,8 +306,10 @@ final class StreamClient: ObservableObject {
     #if DEBUG
     /// What each waiting completion opened, for the console ("menus: File (2) in 41 ms, 24 items").
     private var menuAsked: [Int: (title: String, id: String, at: Double)] = [:]
+    #if canImport(UIKit)
     /// The harness's Mac menus (`-SillMacMenu`): what the mock Mac answers its fetches and choices with.
     var mockMenus: MockCatalog.MacMenus?
+    #endif
     /// `-SillMenuPress` has run on this client.
     private var menuPressArgumentDone = false
     #endif
@@ -387,7 +394,7 @@ final class StreamClient: ObservableObject {
 
     /// The Mac's current cursor image (hotspot and size in points), for the pointer sprite, whichever
     /// pointer it shows. Not @Published for the same reason as `presence`. Main thread.
-    struct CursorShape { let image: UIImage; let hotspot: CGPoint; let size: CGSize }
+    struct CursorShape { let image: PlatformImage; let hotspot: CGPoint; let size: CGSize }
     var cursorShape: CursorShape? { didSet { onCursorShapeChange?(cursorShape) } }
     var onCursorShapeChange: ((CursorShape?) -> Void)?
 
@@ -728,6 +735,33 @@ final class StreamClient: ObservableObject {
     /// with the session.
     @Published var hostVersion: String?
     @Published var hostProtocol: Int?
+    /// This session's Mac takes the middle button (`WindowList.middleButton`); false for a Mac before
+    /// 2026-10-12, which is sent none (the Mac client's middle clicks). Cleared with the session.
+    var hostMiddleButton = false
+    /// How many windows this session's Mac streams besides the picked one (`WindowList.sideStreams`),
+    /// and whether it shares its clipboard (`clipboard`); 0 and false for a Mac before 2026-10-12.
+    @Published var hostSideStreams = 0
+    @Published var hostClipboard = false
+    /// Whether this session's Mac sends the sound of the apps shown (kind 33); false before 2026-10-12.
+    @Published var hostAudio = false
+    /// Whether this session's Mac takes files dropped on its windows (kinds 34, 35); false before 2026-10-12.
+    @Published var hostFileDrop = false
+    /// The side streams this device shows (kind 29), sent again on each new connection. Main thread.
+    private(set) var sideRequest: SideStreamRequest?
+    /// The session moved to a new connection (a better path, or home): what the Mac keeps per
+    /// connection is asked for again there (ClipboardSync). Main thread.
+    var onMoved: (() -> Void)?
+    /// A side stream's parameter sets and frames (kinds 30, 31), on the network queue.
+    var onSideParameterSets: ((UInt32, ParameterSets) -> Void)?
+    var onSideFrame: ((UInt32, Data, Bool) -> Void)?
+    /// The Mac's clipboard, on the main thread (kind 32, once this device has asked).
+    var onClipboard: ((Clipboard) -> Void)?
+    /// About 10 ms of the shown apps' sound (kind 33), on the network queue.
+    var onAudio: ((Data) -> Void)?
+    /// The files an app on the Mac is dragging under this device's held button (kind 36), on the main thread.
+    var onDragOffer: ((DragOffer) -> Void)?
+    /// A part of a file this device asked for (kind 34 from the Mac), on the network queue.
+    var onFileChunk: ((Data) -> Void)?
     /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
@@ -827,7 +861,7 @@ final class StreamClient: ObservableObject {
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
         // Back from the background: the pings stopped while the app was suspended, which is no loss.
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: ClientPlatform.willEnterForeground, object: nil, queue: .main) { [weak self] _ in
             self?.resetLiveness()
         }
     }
@@ -2129,6 +2163,10 @@ final class StreamClient: ObservableObject {
         // connection it came on, which the session no longer reads: the menus waiting settle, and
         // the new connection asks for the top level (the same Mac: its menus stay meanwhile).
         menusMoved()
+        // The Mac keeps the windows shown besides the picked one and the clipboard's subscription per
+        // connection too, and forgets them when the old one goes: both again on the new one.
+        if let side = sideRequest, hostSideStreams > 0 { send(.sideStreams, payload: Wire.encode(side)) }
+        onMoved?()
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
@@ -2863,6 +2901,11 @@ final class StreamClient: ObservableObject {
         hostVersion = nil
         hostProtocol = nil
         hostGestures = nil
+        hostMiddleButton = false
+        hostSideStreams = 0
+        hostClipboard = false
+        hostAudio = false
+        hostFileDrop = false
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3367,6 +3410,11 @@ final class StreamClient: ObservableObject {
                 if self.hostVersion != list.hostVersion { self.hostVersion = list.hostVersion }
                 if self.hostProtocol != list.protocol { self.hostProtocol = list.protocol }
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
+                self.hostMiddleButton = list.middleButton == true
+                if self.hostSideStreams != (list.sideStreams ?? 0) { self.hostSideStreams = list.sideStreams ?? 0 }
+                if self.hostClipboard != (list.clipboard == true) { self.hostClipboard = list.clipboard == true }
+                if self.hostAudio != (list.audio == true) { self.hostAudio = list.audio == true }
+                if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -3382,9 +3430,13 @@ final class StreamClient: ObservableObject {
                     // Once per connection, now that the Mac has let this device in: the Mac's menus,
                     // their top level now and again whenever it changes (a Mac from before them skips it).
                     self.subscribeToMenus()
+                    // The windows shown besides the picked one, on this new connection too.
+                    if let side = self.sideRequest, (list.sideStreams ?? 0) > 0 { self.send(.sideStreams, payload: Wire.encode(side)) }
                     #if DEBUG
+                    #if canImport(UIKit)   // the iOS app's harness (ContentView)
                     InputScript.sessionListed(self)   // -SillInputScript: its clock starts here
                     SettingsScript.sessionListed(self)   // -SillSettingsScript: and this one's
+                    #endif
                     if let test = UserDefaults.standard.string(forKey: "SillMoveHomeTest") { self.beginMoveHomeTest(test) }
                     #endif
                 }
@@ -3413,7 +3465,8 @@ final class StreamClient: ObservableObject {
                 // connection, and again when the window being watched has closed. Not when a pick
                 // failed (the host still lists the window): that is the user's to retry. At most
                 // once every 10 s, so a host that cannot start the Desktop does not loop.
-                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10, !Self.noAutoDesktop {
+                if list.active == .none, Date().timeIntervalSince(self.lastAutoDesktop) > 10, !Self.noAutoDesktop,
+                   self.picksDesktopItself {
                     switch previous {
                     case .none:
                         self.lastAutoDesktop = Date()
@@ -3440,20 +3493,37 @@ final class StreamClient: ObservableObject {
             }
         case .thumbnail:
             guard let (windowID, jpeg) = ImageBlob.decodeThumbnail(data),
-                  let image = UIImage(data: jpeg) else { return }
+                  let image = PlatformImage(data: jpeg) else { return }
             DispatchQueue.main.async { self.thumbnails[windowID] = image }
         case .appIcon:
             guard let (bundleID, png) = ImageBlob.decodeIcon(data),
-                  let image = UIImage(data: png) else { return }
+                  let image = PlatformImage(data: png) else { return }
             DispatchQueue.main.async { self.icons[bundleID] = image }
         case .appList:
             guard let apps = Wire.decode([AppInfo].self, from: data) else { return }
             DispatchQueue.main.async { self.apps = apps }
         case .cursorShape:
-            guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = UIImage(data: png) else { return }
+            guard let (hotspot, size, png) = CursorShapeBlob.decode(data), let image = PlatformImage(data: png) else { return }
             DispatchQueue.main.async { self.cursorShape = CursorShape(image: image, hotspot: hotspot, size: size) }
         case .macPointer:
             receivePointer(data)
+        case .sideParameterSets:
+            // More windows live at once (kinds 29–31, the Mac client): each window's own stream.
+            guard let (window, payload) = SideStreamRequest.unpack(data), let ps = ParameterSets(encoded: payload) else { return }
+            onSideParameterSets?(window, ps)
+        case .sideFrame:
+            guard let (window, payload) = SideStreamRequest.unpack(data) else { return }
+            onSideFrame?(window, payload, header.isKeyframe)
+        case .clipboard:
+            guard let clip = Wire.decode(Clipboard.self, from: data), clip.text != nil || clip.image != nil else { return }
+            DispatchQueue.main.async { self.onClipboard?(clip) }
+        case .audio:
+            onAudio?(data)
+        case .dragOffer:
+            guard let offer = Wire.decode(DragOffer.self, from: data) else { return }
+            DispatchQueue.main.async { self.onDragOffer?(offer) }
+        case .fileChunk:
+            onFileChunk?(data)
         case .hostSettings:
             guard let state = Wire.decode(HostSettingsState.self, from: data) else { return }
             let from = connection
@@ -3840,6 +3910,24 @@ extension StreamClient {
     /// The subscription: a kind 27 without an id, once per connection at its first window list (and
     /// on a move's new connection). The Mac then sends its top level and every later one; a Mac from
     /// before the menus skips it and sends nothing, so no Menus button shows. Main thread.
+    /// The windows this device shows besides the one it streams (kind 29), to a Mac that streams
+    /// them: an empty list stops them. Kept and sent again on each new connection. Main thread.
+    func requestSideStreams(_ windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: CGSize? = nil, audio: Bool? = nil) {
+        let request = SideStreamRequest(windows: windows, fps: fps, wholeApp: wholeApp,
+                                        screen: screen.map { [Double($0.width), Double($0.height)] }, audio: audio)
+        guard request != sideRequest else { return }
+        sideRequest = request
+        guard hostSideStreams > 0 else { return }
+        send(.sideStreams, payload: Wire.encode(request))
+    }
+
+    /// This device's clipboard to the Mac (kind 32); an empty one asks for the Mac's from now on.
+    /// Only to a Mac that shares it. Main thread.
+    func sendClipboard(_ clip: Clipboard) {
+        guard hostClipboard, let payload = clip.payload(within: Clipboard.messageFromDevice) else { return }
+        send(.clipboard, payload: payload)
+    }
+
     func subscribeToMenus() {
         send(.fetchMenu, payload: Wire.encode(FetchMenu(token: nextMenuToken())))
     }
@@ -3886,7 +3974,9 @@ extension StreamClient {
             send(.fetchMenu, payload: Wire.encode(request))
             scheduleMenusExpiry()
             #if DEBUG
+            #if canImport(UIKit)
             if connection == nil { mockAnswer(request) }
+            #endif
             #endif
         case .joined:
             menuCompletions[key] = completion
@@ -3907,7 +3997,9 @@ extension StreamClient {
             send(.pressMenuItem, payload: Wire.encode(request))
             #if DEBUG
             print("menus: chose \(row.title) (\(request.id ?? ""))")
+            #if canImport(UIKit)
             if connection == nil { mockAnswer(request) }
+            #endif
             #endif
         case .refused(let refusal)?:
             menuRefused(refusal)
@@ -3926,7 +4018,9 @@ extension StreamClient {
             let what = count == 0 && menus.app == nil ? "none" : "\(menus.app ?? "?"), \(count) menu\(count == 1 ? "" : "s")"
             print("menus: \(what) (version \(menus.version.map(String.init) ?? "?"))"
                   + (menus.stale ? ", stale" : "") + (menus.note.map { ": \($0)" } ?? ""))
+            #if canImport(UIKit)
             pressFromLaunchArgument()
+            #endif
             #endif
             MacMenuHub.shared.menusChanged(self)
         }
@@ -3937,8 +4031,7 @@ extension StreamClient {
     /// A choice not made: the warning haptic (iPhones; an iPad has no Taptic Engine) and VoiceOver's
     /// announcement. Nothing on screen: the Mac's picture says what happened (plan's Q9).
     private func menuRefused(_ refusal: MacMenuState.Refusal) {
-        UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        UIAccessibility.post(notification: .announcement, argument: refusal.announcement)
+        ClientPlatform.warn(announcing: refusal.announcement)
         #if DEBUG
         print(refusal.byMac ? "menus: the Mac refused \(refusal.title) (\(refusal.id)): \(refusal.note)"
                             : "menus: not sent: \(refusal.title) (\(refusal.id)): \(refusal.note)")
@@ -4014,7 +4107,7 @@ extension StreamClient {
         return menuToken
     }
 
-    #if DEBUG
+    #if DEBUG && canImport(UIKit)
     /// The harness's menus: the mock Mac's top level, as if the Mac had sent it on this connection.
     func showMockMenus(_ mock: MockCatalog.MacMenus) {
         mockMenus = mock
