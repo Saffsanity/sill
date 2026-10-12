@@ -366,8 +366,8 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 the Dock menu, 40 unknown (skipped)",
-      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .dockMenu && header(40)?.kind == .unknown)
+check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 the Dock menu, 40 the Desktop's display, 41 unknown (skipped)",
+      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .dockMenu && header(40)?.kind == .pickDisplay && header(41)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -519,6 +519,10 @@ do {
     check("dock menu: JSON round-trip of an answer", Wire.decode(DockMenu.self, from: Wire.encode(dm)) == dm)
     check("dock menu: a press names the item and its title", Wire.decode(DockMenu.self, from: Wire.encode(DockMenu(app: "a", token: 4, press: 3, title: "New Finder Window"))).map { $0.press == 3 && $0.title == "New Finder Window" && $0.items == nil } == true)
     check("dock menu: an ask is the app and a token", Wire.decode(DockMenu.self, from: Data(#"{"app":"a","token":1}"#.utf8)).map { $0.press == nil && $0.items == nil } == true)
+    let shown = WindowList(macName: "M", windows: [], active: .desktop, displays: [DisplayInfo(id: 1, name: "Built-in", width: 1728, height: 1117, main: true), DisplayInfo(id: 5, name: "LG", width: 2560, height: 1440)], desktopDisplay: 5)
+    check("displays: the host's displays and the Desktop's round-trip", Wire.decode(WindowList.self, from: Wire.encode(shown)).map { $0.displays?.count == 2 && $0.desktopDisplay == 5 && $0.displays?[0].main == true } == true)
+    check("displays: absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.displays == nil)
+    check("pick display: round-trip", Wire.decode(PickDisplay.self, from: Wire.encode(PickDisplay(display: 5)))?.display == 5)
     let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)
     check("live drag: the list's flag round-trips; absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(liveList))?.liveDrag == true
           && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.liveDrag == nil)

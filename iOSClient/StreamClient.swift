@@ -750,6 +750,9 @@ final class StreamClient: ObservableObject {
     @Published var hostLiveDrag = false
     /// Whether the Mac reads its apps' Dock menus for this device (`WindowList.dockMenu`, kind 39).
     @Published var hostDockMenu = false
+    /// The Mac's own displays, to pick which the Desktop is (`WindowList.displays`, kind 40), and that one.
+    @Published var hostDisplays: [DisplayInfo] = []
+    @Published var desktopDisplay: UInt32?
     /// The side streams this device shows (kind 29), sent again on each new connection. Main thread.
     private(set) var sideRequest: SideStreamRequest?
     /// The session moved to a new connection (a better path, or home): what the Mac keeps per
@@ -2917,6 +2920,8 @@ final class StreamClient: ObservableObject {
         hostFileDrop = false
         hostLiveDrag = false
         hostDockMenu = false
+        hostDisplays = []
+        desktopDisplay = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3029,6 +3034,12 @@ final class StreamClient: ObservableObject {
     }
 
     private static func orderKey(for mac: String) -> String { "Sill.windowOrder." + mac }
+
+    /// Which of the Mac's displays the Desktop is (kind 40); only to a Mac that lists them.
+    func pickDisplay(_ id: UInt32) {
+        guard hostDisplays.contains(where: { $0.id == id }) else { return }
+        send(.pickDisplay, Wire.encode(PickDisplay(display: id)))
+    }
 
     /// Ask the host to launch an installed app; the host selects its first window itself.
     func launch(bundleID: String) {
@@ -3429,6 +3440,8 @@ final class StreamClient: ObservableObject {
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
                 if self.hostDockMenu != (list.dockMenu == true) { self.hostDockMenu = list.dockMenu == true }
+                if self.hostDisplays != (list.displays ?? []) { self.hostDisplays = list.displays ?? [] }
+                if self.desktopDisplay != list.desktopDisplay { self.desktopDisplay = list.desktopDisplay }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG

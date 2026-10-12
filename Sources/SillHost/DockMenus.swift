@@ -37,6 +37,13 @@ final class DockMenus: @unchecked Sendable {
         }
     }
 
+    /// The app's Dock icon clicked: a running app with no window opens one (the Dock's reopen).
+    func reopen(_ app: String) {
+        queue.async {
+            if let item = Self.dockItem(for: app) { AXUIElementPerformAction(item, kAXPressAction as CFString) }
+        }
+    }
+
     // MARK: Accessibility
 
     /// The app's Dock menu shown, `body` run on it, then closed (unless an item was pressed: that closes it).

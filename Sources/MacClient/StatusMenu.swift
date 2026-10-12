@@ -68,6 +68,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         desktop.image = NSImage(systemSymbolName: "menubar.dock.rectangle", accessibilityDescription: nil)
         mark(desktop, source: .desktop, open: open)
         menu.addItem(desktop)
+        // The other Mac's displays, when it has more than one: the Desktop shows the one picked.
+        if client.hostDisplays.count > 1 {
+            for d in client.hostDisplays {
+                let item = action("\(d.name) (\(Int(d.width))×\(Int(d.height)))") { [weak self] in
+                    guard let self else { return }
+                    self.client.pickDisplay(d.id)
+                    self.app.windows.open(.desktop)
+                }
+                item.indentationLevel = 1
+                item.state = d.id == client.desktopDisplay ? .on : .off
+                menu.addItem(item)
+            }
+        }
         // By app, as the Dock groups them: the app opens all its windows; each window opens alone.
         var appOrder: [String] = []
         var byApp: [String: [WindowInfo]] = [:]

@@ -403,7 +403,6 @@ package final class StreamCoordinator {
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
         // registration: set before `server.start()`.
         remote?.attach(server: server, status: status, macName: macName, requirePairing: config.requirePairing)
-        catalog.preferMainDisplay = virtualDisplay   // the Desktop source must never capture the virtual display
         stage.onLost = { [weak self] in Task { @MainActor in await self?.stageLost() } }
         status.update { $0.synthetic = synthetic; $0.virtualDisplayOn = config.virtualDisplay }
         // Every change of the snapshot re-publishes the devices' settings state (deduplicated, so
@@ -827,7 +826,6 @@ package final class StreamCoordinator {
             || old.requirePairing != next.requirePairing {
             remote?.apply(next)
         }
-        catalog.preferMainDisplay = next.virtualDisplay   // the Desktop source must never capture the virtual display
         if old.virtualDisplay && !next.virtualDisplay {
             stage.release()        // idempotent: select has already sent a staged window home
             status.update { $0.lastStageFailure = nil }
@@ -966,11 +964,24 @@ package final class StreamCoordinator {
             print("Window \(cmd.id) \(cmd.action.rawValue): \(done ? "done" : "refused")")
             Stats.shared.bump("win.\(cmd.action.rawValue)")
             await catalog.refreshWindows()      // show the result now, not at the next poll
+        case .pickDisplay:
+            guard let pick = Wire.decode(PickDisplay.self, from: message.payload), catalog.pickDesktop(pick.display) else { return }
+            print("Desktop: \(deviceName(connection)) picked display \(pick.display)")
+            broadcastList()
+            if active == .desktop, !switching { await select(.desktop) }
         case .launchApp:
             guard let req = Wire.decode(LaunchApp.self, from: message.payload),
                   let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: req.bundleID) else { return }
             gestureChords.forget()              // the app comes forward, which closes a view a gesture opened
             pendingLaunch = req.bundleID
+            // Running already with no window to show (Finder with none open): its Dock icon is clicked,
+            // as a person would, which asks it for a window (a launch of a running app does nothing).
+            if !synthetic, NSRunningApplication.runningApplications(withBundleIdentifier: req.bundleID).isEmpty == false,
+               !catalog.infos.contains(where: { $0.bundleID == req.bundleID }) {
+                print("Launch: \(req.bundleID) is running with no window; clicking its Dock icon for one")
+                dockMenus.reopen(req.bundleID)
+                return
+            }
             let config = NSWorkspace.OpenConfiguration()
             // The launch itself takes no focus on the Mac. Its first window is then picked for the
             // device (`windowsChanged`), which in regular mode brings it forward like any pick.
@@ -2488,7 +2499,8 @@ package final class StreamCoordinator {
                                                       gestures: TrackpadGesture.generation, middleButton: true,
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
-                                                      liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true)))
+                                                      liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
+                                                      displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

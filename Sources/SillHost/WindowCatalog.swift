@@ -81,7 +81,30 @@ final class WindowCatalog {
     /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
     /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
     /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
-    var preferMainDisplay = false
+    /// The display a device picked for the Desktop (kind 40); nil, or gone, the main display.
+    var desktopDisplayID: CGDirectDisplayID?
+    /// This Mac's own displays, never Sill's hidden ones (VirtualDisplay's vendor), for a device to pick.
+    private(set) var realDisplays: [SCDisplay] = []
+    static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == 0x5111 }
+
+    /// The Desktop is `id` from now on, at once (the next refresh keeps it). False when it is not one
+    /// of this Mac's own displays.
+    func pickDesktop(_ id: CGDirectDisplayID) -> Bool {
+        guard let d = realDisplays.first(where: { $0.displayID == id }) else { return false }
+        desktopDisplayID = id
+        display = d
+        return true
+    }
+
+    /// The displays as a device lists them: their names (NSScreen's), sizes in points, the main one.
+    var displayInfos: [DisplayInfo] {
+        realDisplays.map { d in
+            let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == d.displayID }
+            let b = CGDisplayBounds(d.displayID)
+            return DisplayInfo(id: d.displayID, name: screen?.localizedName ?? "Display \(d.displayID)", width: b.width, height: b.height,
+                               main: d.displayID == CGMainDisplayID() ? true : nil)
+        }
+    }
 
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
     /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
@@ -258,9 +281,12 @@ final class WindowCatalog {
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        // The Desktop is one of this Mac's own displays, never Sill's hidden ones (the first listed
+        // could be one: the Desktop showed a window staged there, not the Mac's screen).
+        realDisplays = content.displays.filter { !Self.isSills($0.displayID) }
+        display = realDisplays.first { $0.displayID == desktopDisplayID }
+            ?? realDisplays.first { $0.displayID == CGMainDisplayID() } ?? realDisplays.first ?? content.displays.first
+
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
