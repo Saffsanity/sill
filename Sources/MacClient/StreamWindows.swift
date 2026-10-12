@@ -82,6 +82,26 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         dock.onFocus = { [weak self] app, window in self?.focus(app: app, window: window) }
         dock.onLaunch = { [weak self] app in self?.launchFromDock(app) }
+        dock.askMenu = { [weak self] app in
+            guard let self, self.client.hostDockMenu, self.client.connected else { return }
+            self.client.send(.dockMenu, payload: Wire.encode(DockMenu(app: app, token: UInt32.random(in: 1...UInt32.max))))
+        }
+        dock.pressMenu = { [weak self] app, id, title in
+            guard let self, self.client.hostDockMenu, self.client.connected else { return }
+            windowLog("dock: \(app) › \(title) pressed on the other Mac")
+            self.client.send(.dockMenu, payload: Wire.encode(DockMenu(app: app, token: UInt32.random(in: 1...UInt32.max), press: id, title: title)))
+        }
+        client.onDockMenu = { [weak self] menu in
+            guard let items = menu.items else { return }
+            windowLog("dock: \(menu.app)'s menu on the other Mac: \(items.filter { $0.separator != true }.map(\.title))")
+            self?.dock.setMenu(menu.app, items)
+        }
+        dock.onClose = { [weak self] app in
+            guard let self else { return }
+            for (source, window) in self.open {
+                if case .window(let id) = source, self.appOf[id] == app { window.close() }
+            }
+        }
         client.onDragOffer = { [weak self] offer in self?.input.dragOffer = offer.files.isEmpty ? nil : offer }
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in

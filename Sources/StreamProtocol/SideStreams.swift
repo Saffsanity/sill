@@ -148,6 +148,36 @@ public struct LiveDrag: Codable, Hashable, Sendable {
     public static let start = "start", filesSent = "files", move = "move", drop = "drop", cancel = "cancel"
 }
 
+/// An app's own Dock menu on the host (kind 39), for the Dock icon a Mac client shows for it: the
+/// items the app adds (Finder's New Finder Window…, a browser's profiles), without the app's windows
+/// (the client lists its own) or the Dock's own items (Options, Show All Windows, Hide, Quit, which
+/// the client's Dock adds itself). The host reads it by showing the app's menu in its Dock for a
+/// moment (Accessibility has it only while shown).
+/// - Device → host: `app` and `token`; with `press`, that item (an `Item.id`, its `title` as shown).
+/// - Host → device: `app`, the `token` answered, and `items` (empty: none, or the app is not running
+///   there), or `pressed`.
+public struct DockMenu: Codable, Hashable, Sendable {
+    public struct Item: Codable, Hashable, Sendable {
+        /// Its place in the Dock's menu as read, which a press names.
+        public var id: Int
+        public var title: String
+        public var enabled: Bool
+        public var separator: Bool?
+        public init(id: Int, title: String, enabled: Bool, separator: Bool? = nil) {
+            self.id = id; self.title = title; self.enabled = enabled; self.separator = separator
+        }
+    }
+    public var app: String
+    public var token: UInt32
+    public var press: Int?
+    public var title: String?
+    public var items: [Item]?
+    public var pressed: Bool?
+    public init(app: String, token: UInt32, press: Int? = nil, title: String? = nil, items: [Item]? = nil, pressed: Bool? = nil) {
+        self.app = app; self.token = token; self.press = press; self.title = title; self.items = items; self.pressed = pressed
+    }
+}
+
 /// What an app on the host is dragging under a device's held button (kind 36): files, by name and
 /// size, the device may carry on dragging on its own Mac and ask for when they are dropped there.
 public struct DragOffer: Codable, Hashable, Sendable {

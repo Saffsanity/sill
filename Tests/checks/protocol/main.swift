@@ -366,8 +366,8 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 unknown (skipped)",
-      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .unknown)
+check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 the Dock menu, 40 unknown (skipped)",
+      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .dockMenu && header(40)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -508,6 +508,10 @@ do {
     check("live drag: the files sent, folders among them", Wire.decode(LiveDrag.self, from: Wire.encode(sent)).map { $0.files == [1, 2] && $0.folders == [2] } == true)
     check("live drag: a cancel needs only its id and phase", Wire.decode(LiveDrag.self, from: Data(#"{"id":7,"phase":"cancel","x":0,"y":0}"#.utf8)).map { $0.phase == LiveDrag.cancel && $0.window == nil && $0.offer == nil } == true)
     check("live drag: an unknown phase still decodes (the host ignores it)", Wire.decode(LiveDrag.self, from: Data(#"{"id":8,"phase":"later","x":0,"y":0}"#.utf8))?.phase == "later")
+    let dm = DockMenu(app: "com.apple.finder", token: 3, items: [.init(id: 3, title: "New Finder Window", enabled: true), .init(id: 4, title: "", enabled: false, separator: true)])
+    check("dock menu: JSON round-trip of an answer", Wire.decode(DockMenu.self, from: Wire.encode(dm)) == dm)
+    check("dock menu: a press names the item and its title", Wire.decode(DockMenu.self, from: Wire.encode(DockMenu(app: "a", token: 4, press: 3, title: "New Finder Window"))).map { $0.press == 3 && $0.title == "New Finder Window" && $0.items == nil } == true)
+    check("dock menu: an ask is the app and a token", Wire.decode(DockMenu.self, from: Data(#"{"app":"a","token":1}"#.utf8)).map { $0.press == nil && $0.items == nil } == true)
     let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)
     check("live drag: the list's flag round-trips; absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(liveList))?.liveDrag == true
           && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.liveDrag == nil)

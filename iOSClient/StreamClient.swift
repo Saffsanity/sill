@@ -748,6 +748,8 @@ final class StreamClient: ObservableObject {
     @Published var hostFileDrop = false
     /// Whether the Mac follows a drag of files over its windows as it goes (`WindowList.liveDrag`, kind 38).
     @Published var hostLiveDrag = false
+    /// Whether the Mac reads its apps' Dock menus for this device (`WindowList.dockMenu`, kind 39).
+    @Published var hostDockMenu = false
     /// The side streams this device shows (kind 29), sent again on each new connection. Main thread.
     private(set) var sideRequest: SideStreamRequest?
     /// The session moved to a new connection (a better path, or home): what the Mac keeps per
@@ -765,6 +767,8 @@ final class StreamClient: ObservableObject {
     var onWindowListActive: ((StreamSource) -> Void)?
     /// The files an app on the Mac is dragging under this device's held button (kind 36), on the main thread.
     var onDragOffer: ((DragOffer) -> Void)?
+    /// An app's Dock menu on the Mac, or the answer to a press (kind 39), on main.
+    var onDockMenu: ((DockMenu) -> Void)?
     /// A part of a file this device asked for (kind 34 from the Mac), on the network queue.
     var onFileChunk: ((Data) -> Void)?
     /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
@@ -2912,6 +2916,7 @@ final class StreamClient: ObservableObject {
         hostAudio = false
         hostFileDrop = false
         hostLiveDrag = false
+        hostDockMenu = false
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3423,6 +3428,7 @@ final class StreamClient: ObservableObject {
                 if self.hostAudio != (list.audio == true) { self.hostAudio = list.audio == true }
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
+                if self.hostDockMenu != (list.dockMenu == true) { self.hostDockMenu = list.dockMenu == true }
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -3530,6 +3536,9 @@ final class StreamClient: ObservableObject {
         case .dragOffer:
             guard let offer = Wire.decode(DragOffer.self, from: data) else { return }
             DispatchQueue.main.async { self.onDragOffer?(offer) }
+        case .dockMenu:
+            guard let menu = Wire.decode(DockMenu.self, from: data) else { return }
+            DispatchQueue.main.async { self.onDockMenu?(menu) }
         case .fileChunk:
             onFileChunk?(data)
         case .hostSettings:

@@ -87,6 +87,8 @@ public enum StreamMessageKind: UInt8 {
     case liveDrag = 38       // device → host: JSON LiveDrag — a drag of files over the host's windows, followed live
                              // (the host's own drag held, or one it starts with files sent); only to a host whose
                              // list says `liveDrag`
+    case dockMenu = 39       // both ways: JSON DockMenu — an app's own Dock menu on the host (Finder's New Finder
+                             // Window…), asked for and pressed by a device; only to a host whose list says `dockMenu`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

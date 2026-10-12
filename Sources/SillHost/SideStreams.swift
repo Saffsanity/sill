@@ -187,13 +187,20 @@ final class SideStreams {
             if let staged {
                 stream.cropFrame = nil
                 stream.onDesk = true
-                // The desk's windows share one display and lie over each other there: a window in the
-                // background is captured on its own (its menus are for when it is the main stream),
-                // so another window of its app on top never shows in it. Window capture shows the
-                // system's share pill by itself.
-                try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w),
-                                               width: evenPixels(staged.size.width * min(s.scale, desk()?.scale(for: id) ?? s.scale)),
-                                               height: evenPixels(staged.size.height * min(s.scale, desk()?.scale(for: id) ?? s.scale)), fps: fps, showsCursor: false)
+                // A window in the background is captured on its own (its menus are for when it is the
+                // main stream); window capture shows the system's share pill by itself. Full screen,
+                // its display is captured instead: the window an app reports then can be far wider
+                // than its Space (a browser's: 3768 pt on a 1712 pt display), and fitted into the frame
+                // the video was a quarter of it, in a corner (2026-10-12).
+                let scale = min(s.scale, desk()?.scale(for: id) ?? s.scale)
+                let width = evenPixels(staged.size.width * scale), height = evenPixels(staged.size.height * scale)
+                if desk()?.isFullScreen(id) == true {
+                    try await stream.capture.start(filter: staged.filter, width: width, height: height, fps: fps, showsCursor: false,
+                                                   sourceRect: staged.sourceRect)
+                } else {
+                    try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
+                                                   fps: fps, showsCursor: false)
+                }
             } else if wholeApp, let crop = await AppCrop.crop(for: w) {
                 stream.cropFrame = crop.frame
                 let pill = SharePill()

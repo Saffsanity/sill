@@ -19,7 +19,11 @@ final class Proxy: NSObject, NSApplicationDelegate {
     var viewer: pid_t?
     let icon: String?
     private var heard = false
+    /// Sill Viewer told this to quit (its app has no window open there): nothing to ask on the way out.
+    private var told = false
     private var windows: [(id: String, title: String, state: String)] = []
+    /// The app's own Dock menu on the other Mac (New Finder Window…): pressed there.
+    private var remote: [(id: String, title: String, enabled: Bool)] = []
     private var exitWatch: DispatchSourceProcess?
     private var iconDate: Date?
 
@@ -34,12 +38,18 @@ final class Proxy: NSObject, NSApplicationDelegate {
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: Self.stateName, object: app, queue: .main) { [weak self] note in
             guard let self else { return }
-            if note.userInfo?["quit"] as? Bool == true { NSApp.terminate(nil); return }
+            if note.userInfo?["quit"] as? Bool == true { self.told = true; NSApp.terminate(nil); return }
             self.heard = true
             if let path = note.userInfo?["icon"] as? String { self.showIcon(path) }
             let ids = note.userInfo?["ids"] as? [String] ?? []
             let titles = note.userInfo?["titles"] as? [String] ?? []
             let states = note.userInfo?["states"] as? [String] ?? []
+            let menuIDs = note.userInfo?["menuIDs"] as? [String] ?? []
+            let menuTitles = note.userInfo?["menuTitles"] as? [String] ?? []
+            let menuEnabled = note.userInfo?["menuEnabled"] as? [String] ?? []
+            self.remote = menuIDs.indices.compactMap { i in
+                i < menuTitles.count ? (menuIDs[i], menuTitles[i], i < menuEnabled.count ? menuEnabled[i] == "1" : true) : nil
+            }
             self.windows = ids.indices.compactMap { i in
                 i < titles.count ? (ids[i], titles[i], i < states.count ? states[i] : "") : nil
             }
@@ -91,6 +101,13 @@ final class Proxy: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = image
     }
 
+    /// Quit from its Dock menu (or ⌘Q while it is in front): the app's windows close in Sill Viewer,
+    /// as quitting an app closes its windows. The app on the other Mac goes on running.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !told, viewer != nil { post(["ask": "close"]) }
+        return .terminateNow
+    }
+
     /// Clicked in the Dock, or switched to: Sill Viewer brings this app's windows forward.
     func applicationDidBecomeActive(_ notification: Notification) {
         post(["ask": heard ? "focus" : "launch"])
@@ -116,7 +133,24 @@ final class Proxy: NSObject, NSApplicationDelegate {
             }
             menu.addItem(item)
         }
+        if !remote.isEmpty {
+            if !windows.isEmpty { menu.addItem(.separator()) }
+            for r in remote {
+                if r.title.isEmpty { menu.addItem(.separator()); continue }
+                let item = NSMenuItem(title: r.title, action: r.enabled ? #selector(pickRemote(_:)) : nil, keyEquivalent: "")
+                item.representedObject = r.id
+                item.target = self
+                item.isEnabled = r.enabled
+                menu.addItem(item)
+            }
+        }
+        post(["ask": "menu"])   // read again on the other Mac for the next opening (Sill Viewer paces it)
         return menu
+    }
+
+    @objc private func pickRemote(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String else { return }
+        post(["ask": "dockItem", "item": id, "title": item.title])
     }
 
     private static let diamond: NSImage? = {

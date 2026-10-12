@@ -163,6 +163,9 @@ package final class StreamCoordinator {
     private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32])] = [:]
     private var appAudio: AnyObject?
     private lazy var fileDrops = FileDrops()
+    private let dockMenus = DockMenus()
+    /// When each device last asked for a Dock menu: each ask shows it in this Mac's Dock for a moment.
+    private var lastDockMenuAsk: [ObjectIdentifier: CFAbsoluteTime] = [:]
     private lazy var liveDrags: LiveDrags = {
         let l = LiveDrags(fileDrops: fileDrops)
         l.deliver = { [unowned self] event, rect, device in self.deliver(event, in: rect, from: device) }
@@ -1143,6 +1146,27 @@ package final class StreamCoordinator {
                 fileDrops.drop(urls, at: point, device: deviceName(connection))
             } else {
                 fileDrops.drop(d, at: point, device: deviceName(connection))
+            }
+        case .dockMenu:
+            guard !synthetic, let d = Wire.decode(DockMenu.self, from: message.payload) else { return }
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - (lastDockMenuAsk[id] ?? 0) >= 0.5 else { return }   // two a second at most
+            lastDockMenuAsk[id] = now
+            let server = self.server
+            func answer(_ m: DockMenu) {
+                server.send(StreamMessage(kind: .dockMenu, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                          payload: Wire.encode(m)), to: connection)
+            }
+            if let press = d.press {
+                let who = deviceName(connection)
+                dockMenus.press(d.app, id: press, title: d.title ?? "") { pressed in
+                    print("Dock menu from \(who): \(d.app) › \(d.title ?? "?")\(pressed ? "" : " (not pressed: the menu changed)")")
+                    answer(DockMenu(app: d.app, token: d.token, pressed: pressed))
+                }
+            } else {
+                let titles = Set(catalog.windows.filter { $0.owningApplication?.bundleIdentifier == d.app }.compactMap(\.title))
+                dockMenus.read(d.app, windowTitles: titles) { items in answer(DockMenu(app: d.app, token: d.token, items: items)) }
             }
         case .liveDrag:
             guard !synthetic, let d = Wire.decode(LiveDrag.self, from: message.payload) else { return }
@@ -2460,7 +2484,7 @@ package final class StreamCoordinator {
                                                       gestures: TrackpadGesture.generation, middleButton: true,
                                                       sideStreams: SideStreams.maxWindows, clipboard: true,
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
-                                                      liveDrag: synthetic ? nil : true)))
+                                                      liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

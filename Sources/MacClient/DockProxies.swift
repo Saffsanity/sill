@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import StreamProtocol
 
 /// A Dock icon per remote app with a window open here, grouped as macOS groups an app's windows
 /// (Sources/SillDockProxy): Sill Viewer carries one helper app; for each remote app it makes a copy,
@@ -23,6 +25,14 @@ final class DockProxies {
     var onFocus: ((_ app: String, _ window: UInt32?) -> Void)?
     /// A Dock icon kept in the Dock was clicked while its app had no window open here.
     var onLaunch: ((_ app: String) -> Void)?
+    /// A Dock icon quit from the Dock: its app's windows close here.
+    var onClose: ((_ app: String) -> Void)?
+    /// Ask the other Mac for an app's own Dock menu (kind 39), and press one of its items there.
+    var askMenu: ((_ app: String) -> Void)?
+    var pressMenu: ((_ app: String, _ id: Int, _ title: String) -> Void)?
+    /// Each app's own Dock menu on the other Mac, as last read, and when it was asked for.
+    private var menus: [String: [DockMenu.Item]] = [:]
+    private var menuAsked: [String: Date] = [:]
     private var running: [String: NSRunningApplication] = [:]
     private var making: Set<String> = []
     private var last: [String: AppWindows] = [:]
@@ -45,6 +55,12 @@ final class DockProxies {
             case "focus": self.onFocus?(app, nil)
             case "window": self.onFocus?(app, (note.userInfo?["window"] as? String).flatMap { UInt32($0) })
             case "state": self.post(app)
+            case "close": self.running[app] = nil; self.onClose?(app)
+            case "menu": self.refreshMenu(app)
+            case "dockItem":
+                if let id = (note.userInfo?["item"] as? String).flatMap({ Int($0) }), let title = note.userInfo?["title"] as? String {
+                    self.pressMenu?(app, id, title)
+                }
             default: break
             }
         }
@@ -79,12 +95,29 @@ final class DockProxies {
         running[app] = nil
     }
 
+    /// The app's Dock menu as the other Mac read it: shown in its Dock icon's menu from the next opening.
+    func setMenu(_ app: String, _ items: [DockMenu.Item]) {
+        menus[app] = items
+        post(app)
+    }
+
+    /// Asked for again when the Dock icon's menu opens, at most every 20 s: each read shows the menu in
+    /// the other Mac's Dock for a moment.
+    private func refreshMenu(_ app: String) {
+        if let at = menuAsked[app], Date().timeIntervalSince(at) < 20 { return }
+        menuAsked[app] = Date()
+        askMenu?(app)
+    }
+
     private func post(_ app: String) {
         guard let info = last[app] else { return }
+        let menu = menus[app] ?? []
         DistributedNotificationCenter.default().postNotificationName(
             Self.stateName, object: app,
             userInfo: ["ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
-                       "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path],
+                       "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
+                       "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
+                       "menuEnabled": menu.map { $0.enabled ? "1" : "0" }],
             deliverImmediately: true)
     }
 
@@ -98,6 +131,7 @@ final class DockProxies {
         work.async { [weak self] in
             if let png { try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true); try? png.write(to: iconURL) }
             let url = Self.make(app: app, name: name, template: template)
+            if let url, let png { Self.installIcon(png, in: url) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.making.remove(app)
@@ -111,6 +145,7 @@ final class DockProxies {
                         if let error { print("dock: \(name)'s icon did not start: \(error.localizedDescription)"); return }
                         self.running[app] = running
                         self.post(app)
+                        self.refreshMenu(app)
                     }
                 }
             }
@@ -125,11 +160,47 @@ final class DockProxies {
         work.async { [weak self] in
             try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
             try? png.write(to: url)
+            Self.installIcon(png, in: Self.folder.appendingPathComponent("\(Self.slug(app)).app", isDirectory: true))
             DispatchQueue.main.async { self?.post(app) }
         }
     }
 
     private static func iconURL(_ app: String) -> URL { folder.appendingPathComponent("\(slug(app)).png") }
+
+    /// The badged icon as the copy's own (AppIcon.icns), so a Dock icon kept in the Dock shows it while
+    /// its app is not running; the copy signed again. Only when the icon changed. Off the main thread.
+    private static func installIcon(_ png: Data, in app: URL) {
+        let resources = app.appendingPathComponent("Contents/Resources", isDirectory: true)
+        let kept = resources.appendingPathComponent("icon.png")
+        guard FileManager.default.fileExists(atPath: app.path), (try? Data(contentsOf: kept)) != png,
+              let source = CGImageSourceCreateWithData(png as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
+        let icns = resources.appendingPathComponent("AppIcon.icns")
+        guard let dest = CGImageDestinationCreateWithURL(icns as CFURL, "com.apple.icns" as CFString, 5, nil) else { return }
+        for side in [16, 32, 128, 256, 512] {
+            guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+            ctx.interpolationQuality = .high
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            if let scaled = ctx.makeImage() { CGImageDestinationAddImage(dest, scaled, nil) }
+        }
+        guard CGImageDestinationFinalize(dest) else { return }
+        try? png.write(to: kept)
+        let plistURL = app.appendingPathComponent("Contents/Info.plist")
+        if var plist = NSDictionary(contentsOf: plistURL) as? [String: Any], plist["CFBundleIconFile"] as? String != "AppIcon" {
+            plist["CFBundleIconFile"] = "AppIcon"
+            (plist as NSDictionary).write(to: plistURL, atomically: true)
+        }
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", app.path]
+        sign.standardOutput = FileHandle.nullDevice
+        sign.standardError = FileHandle.nullDevice
+        try? sign.run()
+        sign.waitUntilExit()
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: app.path)
+        NSWorkspace.shared.noteFileSystemChanged(app.path)
+    }
 
     // MARK: The copies
 
