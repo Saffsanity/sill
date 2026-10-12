@@ -847,8 +847,22 @@ final class VirtualStage {
 
     /// Window home, then display gone.
     func release() {
+        leaveFullScreenNow()
         releaseWindow()
         destroyDisplay()
+    }
+
+    /// A full-screen window cannot be moved home: its Space would outlive the display on another one,
+    /// out of sight (a browser's, 2026-10-12, after a quit). Out of full screen first, waiting for it
+    /// (1.5 s at most). Synchronous, for the teardowns that cannot wait in a Task (Quit, `keep`).
+    func leaveFullScreenNow() {
+        guard let p = placement, WindowSizer.isFullScreen(p.element) else { return }
+        _ = WindowSizer.perform(.fullScreen, element: p.element)
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline, WindowSizer.isFullScreen(p.element) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))   // its exit animation, so the move home lands
     }
 
     /// The window server tore the display down (sleep, another display arriving). The object is
