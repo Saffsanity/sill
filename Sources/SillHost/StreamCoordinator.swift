@@ -160,7 +160,7 @@ package final class StreamCoordinator {
     private var switching = false
     /// The devices that asked for the sound of the windows they show (kind 29's `audio`), with those
     /// windows; the picked one counts too. AppAudio taps their apps.
-    private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32])] = [:]
+    private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], encoded: Bool)] = [:]
     private var appAudio: AnyObject?
     private lazy var fileDrops = FileDrops()
     private let dockMenus = DockMenus()
@@ -213,9 +213,13 @@ package final class StreamCoordinator {
             audio = AppAudio()
             let server = self.server
             audio.onPacket = { server.sendAudio($0) }
+            audio.onEncoded = { server.sendAudio($0, encoded: true) }
             appAudio = audio
         }
-        server.setAudioListeners(audioWanted.values.map(\.connection))
+        let plain = audioWanted.values.filter { !$0.encoded }.map(\.connection)
+        let encoded = audioWanted.values.filter(\.encoded).map(\.connection)
+        server.setAudioListeners(plain: plain, encoded: encoded)
+        audio.set(plain: !plain.isEmpty, encoded: !encoded.isEmpty)
         audio.set(apps: apps)
     }
     /// The source a select in flight goes to: the main stream's window from its start, so the side
@@ -1125,7 +1129,7 @@ package final class StreamCoordinator {
             if hears != (audioWanted[ObjectIdentifier(connection)] != nil) {
                 print("Audio: \(deviceName(connection)) \(hears ? "asks for" : "no longer asks for") the sound of the windows it shows")
             }
-            audioWanted[ObjectIdentifier(connection)] = hears ? (connection, r.windows) : nil
+            audioWanted[ObjectIdentifier(connection)] = hears ? (connection, r.windows, r.audioCodec == AudioPacket.aacELD) : nil
             updateAudio()
         case .fileChunk:
             guard !synthetic else { return }   // a test host writes and drops nothing

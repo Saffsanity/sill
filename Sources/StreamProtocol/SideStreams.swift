@@ -20,9 +20,14 @@ public struct SideStreamRequest: Codable, Hashable, Sendable {
     /// True: send the sound of the apps these windows belong to (and the picked one's), kind 33, and
     /// silence them on the host while it does. A host whose list does not say `audio` ignores it.
     public var audio: Bool?
+    /// The sound compressed (`AudioPacket.aacELD`, about 96 kbit/s instead of 1.5 Mbit/s); nil, plain
+    /// PCM. A host that cannot encode sends PCM.
+    public var audioCodec: String?
 
-    public init(windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: [Double]? = nil, audio: Bool? = nil) {
+    public init(windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: [Double]? = nil, audio: Bool? = nil,
+                audioCodec: String? = nil) {
         self.windows = windows; self.fps = fps; self.wholeApp = wholeApp; self.screen = screen; self.audio = audio
+        self.audioCodec = audioCodec
     }
 
     public static let defaultFPS = 15
@@ -44,8 +49,8 @@ public struct SideStreamRequest: Codable, Hashable, Sendable {
 }
 
 /// About 10 ms of sound (kind 33): the sample rate (UInt32 BE), the channel count (UInt8), then
-/// interleaved signed 16-bit little-endian samples. Plain PCM: on a home network its 1.5 Mbit/s at
-/// 48 kHz stereo costs less than an encoder's delay.
+/// interleaved signed 16-bit little-endian samples. Plain PCM, 1.5 Mbit/s at 48 kHz stereo, for a
+/// device that asks for no codec; compressed (`packEncoded`) for one that does.
 public enum AudioPacket {
     public static func pack(sampleRate: UInt32, channels: UInt8, samples: UnsafeBufferPointer<Int16>) -> Data {
         var d = Data(capacity: 5 + samples.count * 2)
@@ -53,6 +58,35 @@ public enum AudioPacket {
         d.append(channels)
         samples.withMemoryRebound(to: UInt8.self) { d.append(contentsOf: $0) }   // Apple silicon is little-endian
         return d
+    }
+
+    /// A compressed packet (one AAC-ELD packet, about 10 ms), for a device that asked for it
+    /// (`SideStreamRequest.audioCodec`): the rate, the channels with the high bit set (which a reader of
+    /// plain packets refuses: more than 8 channels), the decoder's magic cookie (UInt8 length, then
+    /// the bytes) and the packet.
+    public static let aacELD = "aac-eld"
+    public static func packEncoded(sampleRate: UInt32, channels: UInt8, cookie: Data, packet: Data) -> Data {
+        var d = Data(capacity: 6 + cookie.count + packet.count)
+        d.appendBigEndian(sampleRate)
+        d.append(channels | 0x80)
+        d.append(UInt8(min(cookie.count, 255)))
+        d.append(cookie.prefix(255))
+        d.append(packet)
+        return d
+    }
+
+    /// The rate, channels, cookie and packet of a compressed kind 33; nil when it is plain or malformed.
+    public static func unpackEncoded(_ d: Data) -> (sampleRate: Double, channels: Int, cookie: Data, packet: Data)? {
+        guard d.count >= 6 else { return nil }
+        let rate = d.readBigEndian(UInt32.self, at: 0)
+        let flagged = d[d.startIndex + 4]
+        guard flagged & 0x80 != 0 else { return nil }
+        let channels = Int(flagged & 0x7F)
+        let cookieLength = Int(d[d.startIndex + 5])
+        guard rate >= 8_000, rate <= 192_000, (1...8).contains(channels), d.count > 6 + cookieLength else { return nil }
+        let cookie = d.subdata(in: (d.startIndex + 6)..<(d.startIndex + 6 + cookieLength))
+        let packet = d.subdata(in: (d.startIndex + 6 + cookieLength)..<d.endIndex)
+        return (Double(rate), channels, cookie, packet)
     }
 
     /// The rate, channels and samples of a kind 33; nil when malformed.

@@ -1470,19 +1470,21 @@ final class StreamServer {
     /// The side streams and who watches each. A client new to one waits for its next keyframe, which
     /// is asked for. Thread-safe.
     /// The devices that hear the tapped apps' sound (kind 33, AppAudio). Main actor.
-    func setAudioListeners(_ connections: [NWConnection]) {
-        let ids = Set(connections.map(ObjectIdentifier.init))
-        queue.async { [self] in audioListeners = ids }
+    func setAudioListeners(plain: [NWConnection], encoded: [NWConnection]) {
+        let p = Set(plain.map(ObjectIdentifier.init)), e = Set(encoded.map(ObjectIdentifier.init))
+        queue.async { [self] in audioListeners = p; encodedAudioListeners = e }
     }
     private var audioListeners: Set<ObjectIdentifier> = []
+    /// Those that asked for it compressed (SideStreamRequest.audioCodec).
+    private var encodedAudioListeners: Set<ObjectIdentifier> = []
 
     /// About 10 ms of sound to every listener whose connection has taken what it was sent: a packet
     /// that would wait behind a frame is dropped (a gap of 10 ms beats sound that lags the picture).
     /// Any queue.
-    func sendAudio(_ packet: Data) {
+    func sendAudio(_ packet: Data, encoded: Bool = false) {
         let message = StreamMessage(kind: .audio, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: packet).serialized()
         queue.async { [self] in
-            for id in audioListeners {
+            for id in encoded ? encodedAudioListeners : audioListeners {
                 guard let client = clients[id], client.connection.state == .ready else { continue }
                 if client.pendingBytes > Self.audioBudget { Stats.shared.bump("audio.dropped"); continue }
                 send(message, to: client)

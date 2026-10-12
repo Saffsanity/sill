@@ -3929,9 +3929,11 @@ extension StreamClient {
     /// before the menus skips it and sends nothing, so no Menus button shows. Main thread.
     /// The windows this device shows besides the one it streams (kind 29), to a Mac that streams
     /// them: an empty list stops them. Kept and sent again on each new connection. Main thread.
-    func requestSideStreams(_ windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: CGSize? = nil, audio: Bool? = nil) {
+    func requestSideStreams(_ windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: CGSize? = nil, audio: Bool? = nil,
+                            audioCodec: String? = nil) {
         let request = SideStreamRequest(windows: windows, fps: fps, wholeApp: wholeApp,
-                                        screen: screen.map { [Double($0.width), Double($0.height)] }, audio: audio)
+                                        screen: screen.map { [Double($0.width), Double($0.height)] }, audio: audio,
+                                        audioCodec: audio == true ? audioCodec : nil)
         guard request != sideRequest else { return }
         sideRequest = request
         guard hostSideStreams > 0 else { return }

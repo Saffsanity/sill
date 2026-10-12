@@ -1,3 +1,5 @@
+import AVFoundation
+import os
 import AudioToolbox
 import CoreAudio
 import Foundation
@@ -13,8 +15,13 @@ import StreamProtocol
 /// up (on the main actor that froze the host, 2026-10-12). `set` and `stop` return at once.
 @available(macOS 14.2, *)
 final class AppAudio: @unchecked Sendable {
-    /// About 10 ms of sound, packed (AudioPacket), on the IO queue.
+    /// About 10 ms of sound, packed (AudioPacket), on the IO queue: plain while `plain` (a device asked
+    /// for PCM), and compressed (AAC-ELD, `packEncoded`) while `encoded` (a device asked for that).
     var onPacket: ((Data) -> Void)?
+    var onEncoded: ((Data) -> Void)?
+    private let wants = OSAllocatedUnfairLock(initialState: (plain: true, encoded: false))
+    /// Which forms the listening devices asked for. Any thread.
+    func set(plain: Bool, encoded: Bool) { wants.withLock { $0 = (plain, encoded) } }
 
     private var apps: Set<String> = []
     private var tapped: [AudioObjectID] = []
@@ -117,7 +124,15 @@ final class AppAudio: @unchecked Sendable {
         else { throw Failure(step: "the tap's format is not 32-bit float", status: -1) }
 
         let packer = Packer(sampleRate: format.mSampleRate, channels: Int(max(1, min(format.mChannelsPerFrame, 8))))
-        let send = onPacket
+        let plain = onPacket, encodedOut = onEncoded, wants = self.wants
+        var encoder: AACEncoder?
+        let send: (Data) -> Void = { pcm in
+            let want = wants.withLock { $0 }
+            if want.plain { plain?(pcm) }
+            guard want.encoded, let encodedOut else { return }
+            if encoder == nil { encoder = AACEncoder(sampleRate: packer.sampleRate, channels: packer.channels) }
+            encoder?.encode(pcm, out: encodedOut)
+        }
         var proc: AudioDeviceIOProcID?
         err = AudioDeviceCreateIOProcIDWithBlock(&proc, agg, ioQueue) { _, input, _, _, _ in
             Stats.shared.bump("audio.io")
@@ -234,4 +249,59 @@ private final class Packer: @unchecked Sendable {
     }
 
     private static func int16(_ v: Float) -> Int16 { Int16(max(-1, min(1, v)) * 32767) }
+}
+
+/// AAC-ELD (low delay) of the tapped sound, for a device that asked for it: about 96 kbit/s at 48 kHz
+/// stereo instead of plain PCM's 1.5 Mbit/s, for about 15 ms more delay. Fed the plain packets'
+/// samples; each AAC packet (512 frames) goes out with the decoder's magic cookie. On the IO queue.
+private final class AACEncoder {
+    private let converter: AVAudioConverter
+    private let input: AVAudioFormat
+    private let output: AVAudioFormat
+    private let cookie: Data
+    private let sampleRate: UInt32
+    private let channels: UInt8
+    private var pending: AVAudioPCMBuffer?
+
+    init?(sampleRate: Double, channels: Int) {
+        guard let input = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: AVAudioChannelCount(channels),
+                                        interleaved: true) else { return nil }
+        var desc = AudioStreamBasicDescription(mSampleRate: sampleRate, mFormatID: kAudioFormatMPEG4AAC_ELD, mFormatFlags: 0,
+                                               mBytesPerPacket: 0, mFramesPerPacket: 0, mBytesPerFrame: 0,
+                                               mChannelsPerFrame: UInt32(channels), mBitsPerChannel: 0, mReserved: 0)
+        guard let output = AVAudioFormat(streamDescription: &desc), let converter = AVAudioConverter(from: input, to: output) else {
+            print("Audio: no AAC-ELD encoder; plain PCM only")
+            return nil
+        }
+        converter.bitRate = channels > 1 ? 96_000 : 64_000
+        self.input = input; self.output = output; self.converter = converter
+        self.cookie = converter.magicCookie ?? Data()
+        self.sampleRate = UInt32(sampleRate); self.channels = UInt8(channels)
+    }
+
+    /// One plain packet (AudioPacket) in; any AAC packets it completes out.
+    func encode(_ pcm: Data, out: (Data) -> Void) {
+        guard let (_, _, samples) = AudioPacket.unpack(pcm), !samples.isEmpty else { return }
+        let frames = AVAudioFrameCount(samples.count / Int(channels))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: input, frameCapacity: frames) else { return }
+        buffer.frameLength = frames
+        samples.withUnsafeBufferPointer { src in
+            buffer.int16ChannelData![0].update(from: src.baseAddress!, count: samples.count)
+        }
+        pending = buffer
+        let compressed = AVAudioCompressedBuffer(format: output, packetCapacity: 4, maximumPacketSize: max(converter.maximumOutputPacketSize, 1536))
+        var error: NSError?
+        let status = converter.convert(to: compressed, error: &error) { [weak self] _, outStatus in
+            guard let self, let given = self.pending else { outStatus.pointee = .noDataNow; return nil }
+            self.pending = nil
+            outStatus.pointee = .haveData
+            return given
+        }
+        guard status != .error, let descriptions = compressed.packetDescriptions else { return }
+        for i in 0..<Int(compressed.packetCount) {
+            let d = descriptions[i]
+            let packet = Data(bytes: compressed.data.advanced(by: Int(d.mStartOffset)), count: Int(d.mDataByteSize))
+            out(AudioPacket.packEncoded(sampleRate: sampleRate, channels: channels, cookie: cookie, packet: packet))
+        }
+    }
 }

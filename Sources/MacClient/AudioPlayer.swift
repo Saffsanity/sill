@@ -6,7 +6,9 @@ import StreamProtocol
 /// output. Packets of about 10 ms go into a short buffer that the engine pulls from: playback starts
 /// once 40 ms are in and the buffer is cut back to 60 ms whenever it passes 150 ms, so the sound
 /// never drifts behind the picture; an empty buffer plays silence. Play Sound in the status item
-/// turns it off (the host then keeps the apps' sound). Packets arrive on the network queue.
+/// turns it off (the host then keeps the apps' sound). The sound comes compressed (AAC-ELD, about 96
+/// kbit/s) unless `SillClient.plainAudio` is set; a host that cannot encode sends PCM, played as it
+/// comes. Packets arrive on the network queue.
 final class AudioPlayer: @unchecked Sendable {
     static let defaultsKey = "SillClient.playSound"
     static var enabled: Bool {
@@ -14,7 +16,11 @@ final class AudioPlayer: @unchecked Sendable {
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
+    /// The codec asked for: AAC-ELD unless the default `SillClient.plainAudio` says plain PCM.
+    static var codec: String? { UserDefaults.standard.bool(forKey: "SillClient.plainAudio") ? nil : AudioPacket.aacELD }
+
     private let lock = OSAllocatedUnfairLock()
+    private var decoder: AACDecoder?
     private var buffer: [Float] = []       // interleaved
     private var readIndex = 0
     private var playing = false
@@ -26,16 +32,29 @@ final class AudioPlayer: @unchecked Sendable {
 
     /// One kind 33 payload. Network queue.
     func receive(_ payload: Data) {
+        if let e = AudioPacket.unpackEncoded(payload) {
+            if decoder?.matches(rate: e.sampleRate, channels: e.channels, cookie: e.cookie) != true {
+                decoder = AACDecoder(rate: e.sampleRate, channels: e.channels, cookie: e.cookie)
+            }
+            guard let samples = decoder?.decode(e.packet) else { return }
+            append(samples, rate: e.sampleRate, channels: e.channels)
+            return
+        }
         guard let packet = AudioPacket.unpack(payload) else { return }
-        if packet.sampleRate != rate || packet.channels != channels {
-            let r = packet.sampleRate, c = packet.channels
+        append(packet.samples.map { Float($0) / 32767 }, rate: packet.sampleRate, channels: packet.channels)
+    }
+
+    /// Interleaved samples into the buffer the engine plays from. Network queue.
+    private func append(_ samples: [Float], rate packetRate: Double, channels packetChannels: Int) {
+        if packetRate != rate || packetChannels != channels {
+            let r = packetRate, c = packetChannels
             rate = r; channels = c
             DispatchQueue.main.async { [weak self] in self?.restart(rate: r, channels: c) }
         }
-        let c = packet.channels, perMs = Int(packet.sampleRate / 1000) * c
+        let c = packetChannels, perMs = Int(packetRate / 1000) * c
         lock.withLock {
             if readIndex > 48_000 * 8 { buffer.removeFirst(readIndex); readIndex = 0 }
-            buffer.append(contentsOf: packet.samples.lazy.map { Float($0) / 32767 })
+            buffer.append(contentsOf: samples)
             if !playing, buffered >= 40 * perMs { playing = true }
             if buffered > 150 * perMs { readIndex = buffer.count - 60 * perMs }   // too far behind: catch up
         }
@@ -79,5 +98,47 @@ final class AudioPlayer: @unchecked Sendable {
         } catch {
             print("audio: could not start (\(error))")
         }
+    }
+}
+
+/// AAC-ELD packets back to interleaved float samples. Network queue.
+private final class AACDecoder {
+    private let converter: AVAudioConverter
+    private let input: AVAudioFormat
+    private let output: AVAudioFormat
+    private let rate: Double, channels: Int, cookie: Data
+
+    init?(rate: Double, channels: Int, cookie: Data) {
+        var desc = AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatMPEG4AAC_ELD, mFormatFlags: 0,
+                                               mBytesPerPacket: 0, mFramesPerPacket: 0, mBytesPerFrame: 0,
+                                               mChannelsPerFrame: UInt32(channels), mBitsPerChannel: 0, mReserved: 0)
+        guard let input = AVAudioFormat(streamDescription: &desc),
+              let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: AVAudioChannelCount(channels), interleaved: true),
+              let converter = AVAudioConverter(from: input, to: output) else { return nil }
+        converter.magicCookie = cookie
+        self.input = input; self.output = output; self.converter = converter
+        self.rate = rate; self.channels = channels; self.cookie = cookie
+    }
+
+    func matches(rate: Double, channels: Int, cookie: Data) -> Bool { rate == self.rate && channels == self.channels && cookie == self.cookie }
+
+    func decode(_ packet: Data) -> [Float]? {
+        let compressed = AVAudioCompressedBuffer(format: input, packetCapacity: 1, maximumPacketSize: max(packet.count, 1))
+        packet.withUnsafeBytes { compressed.data.copyMemory(from: $0.baseAddress!, byteCount: packet.count) }
+        compressed.byteLength = UInt32(packet.count)
+        compressed.packetCount = 1
+        compressed.packetDescriptions?.pointee = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 0,
+                                                                              mDataByteSize: UInt32(packet.count))
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: 1024) else { return nil }
+        var given = false
+        var error: NSError?
+        let status = converter.convert(to: pcm, error: &error) { _, outStatus in
+            if given { outStatus.pointee = .noDataNow; return nil }
+            given = true
+            outStatus.pointee = .haveData
+            return compressed
+        }
+        guard status != .error, let data = pcm.floatChannelData else { return nil }
+        return Array(UnsafeBufferPointer(start: data[0], count: Int(pcm.frameLength) * channels))
     }
 }

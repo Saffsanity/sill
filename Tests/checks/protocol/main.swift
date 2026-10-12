@@ -508,6 +508,13 @@ do {
     check("live drag: the files sent, folders among them", Wire.decode(LiveDrag.self, from: Wire.encode(sent)).map { $0.files == [1, 2] && $0.folders == [2] } == true)
     check("live drag: a cancel needs only its id and phase", Wire.decode(LiveDrag.self, from: Data(#"{"id":7,"phase":"cancel","x":0,"y":0}"#.utf8)).map { $0.phase == LiveDrag.cancel && $0.window == nil && $0.offer == nil } == true)
     check("live drag: an unknown phase still decodes (the host ignores it)", Wire.decode(LiveDrag.self, from: Data(#"{"id":8,"phase":"later","x":0,"y":0}"#.utf8))?.phase == "later")
+    let enc = AudioPacket.packEncoded(sampleRate: 48_000, channels: 2, cookie: Data([1, 2, 3]), packet: Data(repeating: 7, count: 100))
+    check("audio: a compressed packet round-trips (rate, channels, cookie, packet)", AudioPacket.unpackEncoded(enc).map { $0.sampleRate == 48_000 && $0.channels == 2 && $0.cookie == Data([1, 2, 3]) && $0.packet.count == 100 } == true)
+    check("audio: a compressed packet is never read as plain samples", AudioPacket.unpack(enc) == nil)
+    let plainAudio = [Int16](repeating: 5, count: 960).withUnsafeBufferPointer { AudioPacket.pack(sampleRate: 48_000, channels: 2, samples: $0) }
+    check("audio: a plain packet is not a compressed one", AudioPacket.unpackEncoded(plainAudio) == nil && AudioPacket.unpack(plainAudio)?.samples.count == 960)
+    check("audio: the codec asked for round-trips; absent from an older device", Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1], audio: true, audioCodec: AudioPacket.aacELD)))?.audioCodec == "aac-eld"
+          && Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1],"audio":true}"#.utf8))?.audioCodec == nil)
     let dm = DockMenu(app: "com.apple.finder", token: 3, items: [.init(id: 3, title: "New Finder Window", enabled: true), .init(id: 4, title: "", enabled: false, separator: true)])
     check("dock menu: JSON round-trip of an answer", Wire.decode(DockMenu.self, from: Wire.encode(dm)) == dm)
     check("dock menu: a press names the item and its title", Wire.decode(DockMenu.self, from: Wire.encode(DockMenu(app: "a", token: 4, press: 3, title: "New Finder Window"))).map { $0.press == 3 && $0.title == "New Finder Window" && $0.items == nil } == true)

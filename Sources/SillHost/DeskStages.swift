@@ -37,11 +37,31 @@ final class DeskStages {
     func scale(for id: UInt32) -> CGFloat { CGFloat(stages[id]?.displayScale ?? 2) }
 
     /// The display identities in use, by window: product IDs 0x100… with a serial kept for each, so
-    /// a slot is the same monitor to macOS every time (it remembers "Extended" for it).
+    /// a slot is the same monitor to macOS every time (it remembers "Extended" for it). Taken as
+    /// needed, the lowest free first; no fixed number of windows.
     private var slots: [UInt32: Int] = [:]
-    nonisolated static let maxWindows = 16
 
-    private func freeSlot() -> Int? { (0..<Self.maxWindows).first { s in !slots.values.contains(s) } }
+    private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) }! }
+
+    /// What the desk's displays may take of this Mac's memory in all: each holds a framebuffer of its
+    /// own (about 130 MB for a Retina display at the largest size), so a new window goes on the desk
+    /// only while the displays already made leave room for one more of the same.
+    nonisolated static let memoryShare = 0.25
+
+    /// The framebuffers the desk's displays hold now, in bytes, and the largest of them.
+    private var framebuffers: (total: Double, largest: Double) {
+        let each = stages.values.compactMap { s -> Double? in
+            guard let d = s.display else { return nil }
+            return Double(d.madeWidthPt * d.scale) * Double(d.madeHeightPt * d.scale) * 4
+        }
+        return (each.reduce(0, +), each.max() ?? 0)
+    }
+
+    private func roomForAnother() -> Bool {
+        let (total, largest) = framebuffers
+        return total + max(largest, Double(Self.largest.width * Self.largest.height) * 4 * 4)
+            <= Double(ProcessInfo.processInfo.physicalMemory) * Self.memoryShare
+    }
 
     private static func serial(forSlot slot: Int) -> UInt32 {
         let key = "SillDeskSerial\(slot)"
@@ -64,7 +84,8 @@ final class DeskStages {
         let id = window.windowID
         let stage: VirtualStage
         if let existing = stages[id] { stage = existing } else {
-            guard let slot = freeSlot() else { throw TooMany() }
+            guard roomForAnother() else { throw TooMany(count: stages.count) }
+            let slot = freeSlot()
             stage = VirtualStage(sizer: sizer, catalog: catalog)
             stage.productID = 0x100 + UInt32(slot)
             stage.serial = Self.serial(forSlot: slot)
@@ -128,7 +149,10 @@ final class DeskStages {
     }
 
     struct TooMany: Error, CustomStringConvertible {
-        var description: String { "Sill's desk holds \(DeskStages.maxWindows) windows at most" }
+        let count: Int
+        var description: String {
+            "Sill's desk has \(count) windows; their displays already take a quarter of this Mac's memory"
+        }
     }
 
     func releaseAll() {

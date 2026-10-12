@@ -195,7 +195,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         // Every window with what belongs to it: its menus, popovers, sheets and the system's panels.
         client.requestSideStreams(ids, wholeApp: true, screen: Self.largestScreen,
-                                  audio: client.hostAudio && AudioPlayer.enabled ? true : nil)
+                                  audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec)
     }
 
     /// This Mac's largest display, in points: the room the host keeps for each window (Sill's desk).
