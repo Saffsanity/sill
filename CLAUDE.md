@@ -37,8 +37,9 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
   goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
-  in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows always
-  go to the desk, never the iPad's Virtual Display staging. Take-back (the menu's Shared Windows,
+  in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows go to
+  the desk, never the iPad's Virtual Display staging; one the desk fails to take is captured where
+  it is, never raised or resized there, and the desk is not tried again for it for 30 s. Take-back (the menu's Shared Windows,
   Stop Sharing; an app brought forward on the host) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
   (`OutputSwitch`); the window list naming a new source goes out before its first frame. Dock icons'
@@ -49,8 +50,8 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
   built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
-  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the side stream and
-  retired-pipeline fixes and a real badge by hand; notifications and Dock bounces a separate spike).
+  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's 30 s backoff and a real
+  badge by hand; notifications and Dock bounces a separate spike, a stacked docs pull request in the fork).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then

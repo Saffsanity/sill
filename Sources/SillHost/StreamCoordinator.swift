@@ -1428,6 +1428,9 @@ package final class StreamCoordinator {
             await select(active)
             return
         }
+        // A Mac viewer's window is never resized on this Mac's own screens (one the desk could not
+        // take is captured where it is, as it is).
+        if sideStreams?.wholeApp == true { return }
         // Cropped from its display (AppCrop): a window the viewport resized is captured again at once,
         // at the size just set, instead of keeping the old crop until the catalog's next look.
         if mainCropFrame != nil {
@@ -1693,21 +1696,22 @@ package final class StreamCoordinator {
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
                         deskFailedAt[id] = CFAbsoluteTimeGetCurrent()
-                        // It was put back where it was: read where that is once the window server
-                        // shows it (a move is listed only once the app commits it: up to about 0.45 s
-                        // for a slow app), not where it was read before (2026-10-12: a window captured
-                        // a screen away from itself). Until it has left that frame, then until it holds
-                        // still for two reads; 0.8 s at most (a window that was home already never moves).
+                        // It was put back where it was before (where `place` read it): read where it
+                        // is once the window server shows that (a move is listed only once the app
+                        // commits it, up to about 0.45 s for a slow app), not a frame from before it
+                        // went home (2026-10-12: a window captured a screen away from itself). Done
+                        // when it is listed back at that place, or held still for two reads once half
+                        // a second has passed (an app that put it elsewhere); 0.8 s at most.
                         let before = place
                         var last = Self.liveBounds(of: id)
-                        var moved = false, still = 0
-                        for _ in 0..<16 {
+                        var still = 0
+                        for step in 1...16 {
                             try? await Task.sleep(nanoseconds: 50_000_000)
                             let now = Self.liveBounds(of: id)
-                            if !moved, let now, let before, now.origin != before.origin { moved = true }
-                            still = (moved && now == last) ? still + 1 : 0
+                            still = now == last ? still + 1 : 0
                             last = now
-                            if still >= 2 { break }
+                            if let now, let before, now.origin == before.origin { break }
+                            if step >= 10, still >= 2 { break }
                         }
                         if let last { place = CGRect(origin: last.origin, size: resized ?? last.size) }
                     }
@@ -2638,9 +2642,10 @@ package final class StreamCoordinator {
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
         sideStreams?.changed()   // a side stream's window resized or gone
-        // The main stream cropped from its display: a window that moved there is captured again.
+        // The main stream cropped from its display: a window resized there is captured again at its
+        // new size (a move alone waits for the window to hold still: `recropIfMoved`).
         if let crop = mainCropFrame, case .window(let id) = active, !switching,
-           let live = Self.liveBounds(of: id), live.origin != crop.origin || live.size != crop.size {
+           let live = Self.liveBounds(of: id), live.size != crop.size {
             await select(active)
             return
         }

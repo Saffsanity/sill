@@ -33,7 +33,8 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›
   Devices). While a viewer shows a window, that window lives on a hidden virtual display of its own
   ("Sill's desk"), so it is never covered, never limited by the host's own screens, and the person
-  at the host keeps their desk. Windows go back where they were when the viewer closes them,
+  at the host keeps their desk. One the desk cannot take is captured where it is, never raised or
+  resized there, and the desk is not tried again for it for 30 s. Windows go back where they were when the viewer closes them,
   disconnects or quits, and when Sill quits. The host's menu lists the windows a Mac viewer shows
   (Shared Windows), each with Stop Sharing; and bringing a shared app forward on the host (its Dock
   icon, ⌘Tab) takes its windows back, home and in front, while the viewer may open them again. Both
