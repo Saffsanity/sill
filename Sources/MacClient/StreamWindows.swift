@@ -53,8 +53,15 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     init(client: StreamClient) {
         self.client = client
         super.init()
-        client.$active.removeDuplicates().sink { [weak self] active in
-            DispatchQueue.main.async { self?.activeChanged(active) }
+        client.$active.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { guard let self else { return }; self.activeChanged(self.local(self.client.active)) }
+        }.store(in: &subscriptions)
+        // Another display picked while the Desktop streams: the stream goes to that display's window.
+        client.$desktopDisplay.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, self.client.active == .desktop else { return }
+                self.activeChanged(self.local(.desktop))
+            }
         }.store(in: &subscriptions)
         client.$windows.sink { [weak self] list in
             DispatchQueue.main.async { self?.windowsChanged(list) }
@@ -117,14 +124,18 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         input.display.isHidden = true
         input.viewportAllowed = { [weak self] in
             guard let self, let window = self.input.window as? StreamWindow else { return false }
-            return window.source == self.client.active && window.source == self.showing
+            return window.source == self.local(self.client.active) && window.source == self.showing
         }
         input.holding = { [weak self] in
             guard let self, let wanted = self.requested else { return false }
-            return self.client.active != wanted
+            return self.local(self.client.active) != wanted
         }
         let router = self.router
-        client.onWindowListActive = { router.listed(active: $0) }
+        // The Desktop as the window of the display it shows (Self.local), so two displays are two streams.
+        client.onWindowListActive = { [weak client] active, display in
+            let hasDisplays = client.map { !$0.hostDisplays.isEmpty } ?? false
+            router.listed(active: active == .desktop && hasDisplays && display != nil ? .window(DesktopWindow.id(display: display!)) : active)
+        }
         let shownPS = client.onParameterSets
         client.onParameterSets = { ps in shownPS?(ps); router.parameterSets(ps) }
         let shownFrame = client.onFrame
@@ -376,6 +387,19 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// The host streams `active`: a source this Mac chose, or one the host picked (an app opened
     /// from the status item streams its new window). The window for it gets the picture, made if
     /// there is none.
+    /// The host's source as this Mac's windows know it: on a host that lists its displays, the Desktop is
+    /// the Desktop window of the display it shows (DesktopWindow), one window per display.
+    func local(_ source: StreamSource) -> StreamSource {
+        guard source == .desktop, !client.hostDisplays.isEmpty, let d = client.desktopDisplay else { return source }
+        return .window(DesktopWindow.id(display: d))
+    }
+
+    /// The display a Desktop window shows; nil for the other Mac's windows.
+    private func display(of source: StreamSource) -> DisplayInfo? {
+        guard case .window(let id) = source, let d = DesktopWindow.display(of: id) else { return nil }
+        return client.hostDisplays.first { $0.id == d }
+    }
+
     private func activeChanged(_ active: StreamSource) {
         windowLog("host streams \(active) (requested \(String(describing: requested)), showing \(String(describing: showing)))")
         guard client.connected, active != .none else { return }
@@ -419,6 +443,11 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         defer { syncDock() }
         for (source, window) in open {
             guard case .window(let id) = source else { continue }
+            if DesktopWindow.display(of: id) != nil {
+                // A Desktop window: closes once its display is gone from the other Mac.
+                if display(of: source) == nil, !client.hostDisplays.isEmpty { window.close() } else { window.title = title(source) }
+                continue
+            }
             if ids.contains(id) {
                 window.title = title(source)
             } else {
@@ -455,7 +484,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         // window opened for an app opened from the status item), its stream is followed into it.
         if !router.draws(into: window.side.feed) { router.follow(window.side.feed) }
         showing = source
-        if case .window = source { input.textScale = 1 } else { input.textScale = nil }
+        if case .window = source, display(of: source) == nil { input.textScale = 1 } else { input.textScale = nil }
         if input.superview !== window.container {
             input.removeFromSuperview()
             input.frame = window.container.bounds
@@ -489,7 +518,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     #endif
 
     private func focused(_ window: StreamWindow) {
-        if client.active != window.source {
+        if local(client.active) != window.source {
             window.placeholder.image = thumbnail(window.source) ?? window.placeholder.image
             router.expect(window.side.feed)   // the new stream's picture goes here once it comes
             pick(window.source)
@@ -515,8 +544,18 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         if window.isKeyWindow { window.makeFirstResponder(input) }
         input.textScale = nil
         input.sendViewportNow()
-        client.select(source)
+        ask(source)
         watchPick(source, tries: 0)
+    }
+
+    /// The host asked for `source`: a Desktop window is the Desktop on its display.
+    private func ask(_ source: StreamSource) {
+        if let d = display(of: source) {
+            if client.desktopDisplay != d.id { client.pickDisplay(d.id) }
+            client.select(.desktop)
+        } else {
+            client.select(source)
+        }
     }
 
     /// A pick the host has not taken (it was switching, or the message went with a connection that
@@ -524,10 +563,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// dropped: asked again after 1.5 s, twice, then input goes to whatever streams.
     private func watchPick(_ source: StreamSource, tries: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, self.requested == source, self.client.active != source, self.client.connected else { return }
+            guard let self, self.requested == source, self.local(self.client.active) != source, self.client.connected else { return }
             if tries < 2, self.open[source] != nil {
                 windowLog("pick \(source) not taken after 1.5 s; asking again")
-                self.client.select(source)
+                self.ask(source)
                 self.watchPick(source, tries: tries + 1)
             } else {
                 windowLog("pick \(source) never taken; input goes on to \(self.client.active)")
@@ -581,6 +620,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         let room = (NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900))
         var size: NSSize
         switch source {
+        case .window(let id) where DesktopWindow.display(of: id) != nil:
+            let d = display(of: source)
+            size = NSSize(width: CGFloat(d?.width ?? 1440), height: CGFloat(d?.height ?? 900))
         case .window(let id):
             let w = client.windows.first { $0.id == id }
             size = NSSize(width: CGFloat(w?.width ?? 1000), height: CGFloat(w?.height ?? 700))
@@ -596,6 +638,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     }
 
     func title(_ source: StreamSource) -> String {
+        if let d = display(of: source) { return "\(client.macName) — \(d.name)" }
         switch source {
         case .window(let id):
             guard let w = client.windows.first(where: { $0.id == id }) else { return client.macName }

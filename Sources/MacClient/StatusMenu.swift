@@ -64,20 +64,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func windowItems(into menu: NSMenu) {
         let open = app.windows.openSources
         menu.addItem(.separator())
-        let desktop = action("Desktop") { [weak self] in self?.app.windows.open(.desktop) }
-        desktop.image = NSImage(systemSymbolName: "menubar.dock.rectangle", accessibilityDescription: nil)
-        mark(desktop, source: .desktop, open: open)
-        menu.addItem(desktop)
-        // The other Mac's displays, when it has more than one: the Desktop shows the one picked.
-        if client.hostDisplays.count > 1 {
+        if client.hostDisplays.isEmpty {
+            let desktop = action("Desktop") { [weak self] in self?.app.windows.open(.desktop) }
+            desktop.image = NSImage(systemSymbolName: "menubar.dock.rectangle", accessibilityDescription: nil)
+            mark(desktop, source: .desktop, open: open)
+            menu.addItem(desktop)
+        } else {
+            // Each of the other Mac's displays, a Desktop window of its own.
             for d in client.hostDisplays {
-                let item = action("\(d.name) (\(Int(d.width))×\(Int(d.height)))") { [weak self] in
-                    guard let self else { return }
-                    self.client.pickDisplay(d.id)
-                    self.app.windows.open(.desktop)
+                let source = StreamSource.window(DesktopWindow.id(display: d.id))
+                let item = action(client.hostDisplays.count > 1 ? "Desktop — \(d.name)" : "Desktop") { [weak self] in
+                    self?.app.windows.open(source)
                 }
-                item.indentationLevel = 1
-                item.state = d.id == client.desktopDisplay ? .on : .off
+                item.image = NSImage(systemSymbolName: "menubar.dock.rectangle", accessibilityDescription: nil)
+                mark(item, source: source, open: open)
                 menu.addItem(item)
             }
         }
@@ -121,7 +121,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// A check on a window open here, and "streaming" after the one the other Mac streams now.
     private func mark(_ item: NSMenuItem, source: StreamSource, open: Set<StreamSource>) {
         item.state = open.contains(source) ? .on : .off
-        guard client.active == source else { return }
+        guard app.windows.local(client.active) == source else { return }
         let text = NSMutableAttributedString(string: item.title + "  ")
         text.append(NSAttributedString(string: "streaming", attributes: [.foregroundColor: NSColor.secondaryLabelColor,
                                                                          .font: NSFont.menuFont(ofSize: 11)]))

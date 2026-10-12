@@ -1120,6 +1120,8 @@ package final class StreamCoordinator {
                 made.mainWindow = { [unowned self] in
                     if case .window(let id)? = self.selecting { return id }
                     if case .window(let id) = self.active { return id }
+                    // The Desktop streams one display as the main stream: not also beside it.
+                    if self.active == .desktop || self.selecting == .desktop, let d = self.catalog.display { return DesktopWindow.id(display: d.displayID) }
                     return nil
                 }
                 made.desk = { [unowned self] in
@@ -1200,7 +1202,8 @@ package final class StreamCoordinator {
     /// A window's rectangle for a drop or a drag over it: one shown beside the streamed one (on its
     /// desk display, else where it is), else (nil) the streamed one.
     private func dropRect(_ window: UInt32?) -> CGRect? {
-        window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
+        if let d = window.flatMap(DesktopWindow.display(of:)) { return CGDisplayBounds(d) }   // a Desktop window's display
+        return window.map { id in desk.captureRect(for: id) ?? catalog.window(id: id)?.frame } ?? currentSourceRect()
     }
 
     /// The active source's rectangle on screen, in CG global points (top-left origin), which is

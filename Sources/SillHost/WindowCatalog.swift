@@ -85,26 +85,6 @@ final class WindowCatalog {
     var desktopDisplayID: CGDirectDisplayID?
     /// This Mac's own displays, never Sill's hidden ones (VirtualDisplay's vendor), for a device to pick.
     private(set) var realDisplays: [SCDisplay] = []
-    /// The titles of `pid`'s minimized windows (Accessibility; a quarter of a second at most).
-    private static func minimizedTitles(of pid: pid_t) -> Set<String> {
-        guard AXIsProcessTrusted() else { return [] }
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.25)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return [] }
-        var titles: Set<String> = []
-        for w in windows {
-            var minimized: CFTypeRef?, title: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minimized) == .success,
-                  (minimized as? Bool) == true,
-                  AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &title) == .success,
-                  let t = title as? String else { continue }
-            titles.insert(t)
-        }
-        return titles
-    }
-
     static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == 0x5111 }
 
     /// The Desktop is `id` from now on, at once (the next refresh keeps it). False when it is not one
@@ -286,25 +266,14 @@ final class WindowCatalog {
             }
             // Windows out of sight, in another Space (a full-screen one, another desktop): listed too,
             // so a device can reach every window an app has, not just those on screen now. Titled
-            // windows of regular apps only: apps keep many untitled windows they never show.
-            let regular = Set(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map(\.processIdentifier))
+            // windows only: apps keep many untitled windows they never show.
             let shown = Set(content.windows.map(\.windowID))
-            // Not a window kept above every display, where no one could see it (a chat app's hidden
-            // "Microsoft a chat app" helper at y -360, 2026-10-12): an app's own off-screen trick, not a window.
-            let top = content.displays.map { CGDisplayBounds($0.displayID).minY }.min() ?? 0
-            let offScreen = all.windows.filter { w in
-                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, w.owningApplication != nil,
-                      w.frame.minY >= top else { return false }
-                return true
-            }
-            // A menu bar app's (no Dock icon) window that is minimized, as its owner left it (a menu bar app's,
-            // 2026-10-12); its other hidden windows are its own business, as an app's are.
-            let others = Set(offScreen.filter { $0.windowLayer == 0 && $0.frame.width > 100 && $0.frame.height > 100 }
-                .compactMap(\.owningApplication?.processID)).subtracting(regular)
-            let minimized = Dictionary(uniqueKeysWithValues: others.map { ($0, Self.minimizedTitles(of: $0)) })
-            elsewhere = offScreen.filter { w in
-                guard let pid = w.owningApplication?.processID else { return false }
-                return regular.contains(pid) || (minimized[pid]?.contains(w.title ?? "") ?? false)
+            // A window in a Space (another desktop, a full-screen Space, or minimized from one), any
+            // app's: an app's own hidden windows (a chat app's hidden helper, ordered out) are in
+            // none, and are not listed (2026-10-12).
+            elsewhere = all.windows.filter { w in
+                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, w.owningApplication != nil else { return false }
+                return WindowSpaces.inSomeSpace(w.windowID)
             }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
@@ -469,5 +438,24 @@ final class WindowCatalog {
         image.draw(in: NSRect(x: 0, y: 0, width: size, height: size), from: .zero, operation: .copy, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
         return rep.representation(using: .png, properties: [:])
+    }
+}
+
+/// Whether a window belongs to a Space (SkyLight's own answer, read-only; the window server's private
+/// interface, looked up at run time like SymbolicHotKeys'). Unknown, every window counts as in one.
+enum WindowSpaces {
+    private typealias MainConnection = @convention(c) () -> Int32
+    private typealias CopySpaces = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+    private static let calls: (MainConnection, CopySpaces)? = {
+        guard let sl = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW),
+              let conn = dlsym(sl, "SLSMainConnectionID") ?? dlsym(sl, "CGSMainConnectionID"),
+              let copy = dlsym(sl, "SLSCopySpacesForWindows") ?? dlsym(sl, "CGSCopySpacesForWindows") else { return nil }
+        return (unsafeBitCast(conn, to: MainConnection.self), unsafeBitCast(copy, to: CopySpaces.self))
+    }()
+
+    static func inSomeSpace(_ id: CGWindowID) -> Bool {
+        guard let (conn, copy) = calls else { return true }
+        let spaces = copy(conn(), 7, [id] as CFArray)?.takeRetainedValue() as? [Any] ?? []
+        return !spaces.isEmpty
     }
 }

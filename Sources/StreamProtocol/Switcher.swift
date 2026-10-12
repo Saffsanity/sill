@@ -164,3 +164,14 @@ public struct PickDisplay: Codable, Hashable, Sendable {
     public var display: UInt32
     public init(display: UInt32) { self.display = display }
 }
+
+/// One of the host's displays where a window ID goes (a side stream, kind 29–31; a drop's `window`):
+/// its display ID with the top bit set, which no window ID has. A Mac client shows each of the host's
+/// displays as a Desktop window of its own, the focused one the Desktop (`PickDisplay`) and the others
+/// side streams; only to a host that lists its `displays`.
+public enum DesktopWindow {
+    public static let bit: UInt32 = 0x8000_0000
+    public static func id(display: UInt32) -> UInt32 { display | bit }
+    /// The display a tagged ID names; nil for a window's.
+    public static func display(of id: UInt32) -> UInt32? { id & bit != 0 ? id & ~bit : nil }
+}

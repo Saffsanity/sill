@@ -767,7 +767,7 @@ final class StreamClient: ObservableObject {
     var onAudio: ((Data) -> Void)?
     /// The source each window list names, on the network queue as it arrives: before the frames that
     /// follow it on the wire, which the main thread's view of `active` can come after.
-    var onWindowListActive: ((StreamSource) -> Void)?
+    var onWindowListActive: ((StreamSource, UInt32?) -> Void)?
     /// The files an app on the Mac is dragging under this device's held button (kind 36), on the main thread.
     var onDragOffer: ((DragOffer) -> Void)?
     /// An app's Dock menu on the Mac, or the answer to a press (kind 39), on main.
@@ -3417,7 +3417,7 @@ final class StreamClient: ObservableObject {
             onFrame?(data, header.isKeyframe)
         case .windowList:
             guard let list = Wire.decode(WindowList.self, from: data) else { return }
-            onWindowListActive?(list.active)   // in the stream's own order (the Mac client's router)
+            onWindowListActive?(list.active, list.desktopDisplay)   // in the stream's own order (the Mac client's router)
             let from = connection
             DispatchQueue.main.async {
                 // Only from the current connection: a list queued by a replaced one must not

@@ -121,12 +121,18 @@ final class SideStreams {
             }
         }
         var target: [UInt32: SCWindow] = [:]
-        for id in order where target.count < Self.maxWindows {
-            guard let w = catalog.window(id: id), w.frame.width >= 32, w.frame.height >= 32 else { continue }
+        // A Desktop window (DesktopWindow): one of this Mac's own displays, whole.
+        var displays: [UInt32: SCDisplay] = [:]
+        for id in order where target.count + displays.count < Self.maxWindows {
             if let failed = failedAt[id], now.timeIntervalSince(failed) < 10 { continue }
+            if let d = DesktopWindow.display(of: id) {
+                if let display = catalog.realDisplays.first(where: { $0.displayID == d }) { displays[id] = display }
+                continue
+            }
+            guard let w = catalog.window(id: id), w.frame.width >= 32, w.frame.height >= 32 else { continue }
             target[id] = w
         }
-        server.setSideSubscribers(subscribers.filter { target[$0.key] != nil })
+        server.setSideSubscribers(subscribers.filter { target[$0.key] != nil || displays[$0.key] != nil })
         // The desk keeps what a device shows (side streams and the main window) and sends the rest home.
         if let desk = desk() {
             // Every window a device has open stays there, streaming or not: one whose side stream
@@ -137,7 +143,14 @@ final class SideStreams {
             if let main { keep.insert(main) }
             desk.keep(wholeApp ? keep : [])   // no device asks for it any more: every window goes home
         }
-        for (id, stream) in streams {
+        for (id, stream) in streams where DesktopWindow.display(of: id) != nil {
+            let size = displays[id].map { CGDisplayBounds($0.displayID).size }
+            if size != stream.size || fps[id] != stream.fps { await stop(id) }
+        }
+        for (id, d) in displays where streams[id] == nil {
+            await start(display: d, id: id, fps: fps[id] ?? SideStreamRequest.defaultFPS)
+        }
+        for (id, stream) in streams where DesktopWindow.display(of: id) == nil {
             let w = target[id]
             let moved = stream.cropFrame.map { $0.origin != w?.frame.origin } ?? false
             if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved
@@ -145,6 +158,47 @@ final class SideStreams {
         }
         for (id, w) in target where streams[id] == nil {
             await start(w, fps: fps[id] ?? SideStreamRequest.defaultFPS)
+        }
+    }
+
+    /// A Desktop window's side stream: the display whole, at the stream's scale.
+    private func start(display d: SCDisplay, id: UInt32, fps: Int) async {
+        let s = settings()
+        let size = CGDisplayBounds(d.displayID).size
+        let width = evenPixels(size.width * s.scale), height = evenPixels(size.height * s.scale)
+        let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
+        let stream = Stream(id: id, size: size, fps: fps)
+        do {
+            let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
+                                      software: s.software, quiet: true)
+            let server = self.server
+            enc.onEncoded = { data, isKey, ps in server.sendSide(window: id, parameterSets: ps?.encoded(), frame: data, isKeyframe: isKey) }
+            enc.onHung = { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.streams[id] != nil else { return }
+                    self.failedAt[id] = Date()
+                    await self.stop(id)
+                }
+            }
+            stream.capture.statsPrefix = "side.cap"
+            stream.capture.onFrame = { pb, pts in enc.encode(pb, pts: pts) }
+            stream.capture.onStopped = { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.streams[id] === stream else { return }
+                    self.failedAt[id] = Date()
+                    await self.stop(id)
+                }
+            }
+            stream.encoder = enc
+            streams[id] = stream
+            encoders.set(id, enc)
+            try await stream.capture.start(filter: SCContentFilter(display: d, excludingWindows: []), width: width, height: height,
+                                           fps: fps, showsCursor: false)
+            print("Side stream: display \(d.displayID) (a Desktop window) at \(width)×\(height), \(fps) fps, \(bitrate / 1_000_000) Mbps")
+        } catch {
+            print("Side stream of display \(d.displayID) did not start: \(error)")
+            failedAt[id] = Date()
+            if streams[id] === stream { streams[id] = nil; encoders.set(id, nil) }
         }
     }
 
