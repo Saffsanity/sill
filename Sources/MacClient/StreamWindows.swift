@@ -214,7 +214,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
     private func acceptsDrop(_ info: NSDraggingInfo) -> Bool {
         guard client.hostFileDrop, client.connected else { return false }
-        return info.draggingSource is StreamInputView ? !input.outgoing.isEmpty : !droppedFiles(info).isEmpty
+        let ok = info.draggingSource is StreamInputView ? !input.outgoing.isEmpty : !droppedFiles(info).isEmpty
+        windowLog("drop: over a window, source \(String(describing: info.draggingSource.map { type(of: $0) })), own files \(input.outgoing.count), types \(info.draggingPasteboard.types?.map(\.rawValue).prefix(4) ?? []) → \(ok)")
+        return ok
     }
 
     private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
@@ -225,6 +227,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// Files from this Mac go across and are dropped there; the other Mac's own files, dragged out of
     /// one of its windows, are dropped from where they are, nothing copied either way.
     private func dropped(_ info: NSDraggingInfo, at: CGPoint, window: UInt32) -> Bool {
+        windowLog("drop: let go on window \(window) at \(at)")
         guard client.hostFileDrop else { return false }
         if info.draggingSource is StreamInputView {
             let own = input.outgoing

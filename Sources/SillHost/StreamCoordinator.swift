@@ -163,6 +163,24 @@ package final class StreamCoordinator {
     private var audioWanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32])] = [:]
     private var appAudio: AnyObject?
     private lazy var fileDrops = FileDrops()
+    /// The streamed desk window going into or out of full screen, seen within a quarter second (the
+    /// catalog's poll is 2 s): it is placed again at once, its display fitted to the device's window.
+    private var fullScreenWatch: Timer?
+    private var fullScreenSeen: (id: UInt32, full: Bool)?
+
+    private func watchFullScreen() {
+        guard fullScreenWatch == nil else { return }
+        let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.switching, case .window(let id) = self.active, let full = self.desk.isFullScreen(id) else { return }
+                defer { self.fullScreenSeen = (id, full) }
+                guard let seen = self.fullScreenSeen, seen.id == id, seen.full != full else { return }
+                await self.select(.window(id))
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        fullScreenWatch = t
+    }
     private lazy var dragOut: DragOut = {
         let d = DragOut()
         let server = self.server
@@ -1492,6 +1510,7 @@ package final class StreamCoordinator {
                     }
                 }
                 if let staged {
+                    watchFullScreen()
                     // Sill's desk: the window on a display of its own, sized to the device's window.
                     filter = staged.filter
                     cropRect = staged.sourceRect

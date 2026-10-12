@@ -540,7 +540,7 @@ extension StreamInputView: NSDraggingSource {
             return item
         }
         outgoing = items.compactMap { ($0.item as? NSFilePromiseProvider)?.userInfo as? FilePromises.Promise }
-        print("files: dragging \(offer.files.map(\.name).joined(separator: ", ")) out of the other Mac")
+        windowLog("files: dragging \(offer.files.map(\.name).joined(separator: ", ")) out of the other Mac")
         beginDraggingSession(with: items, event: event, source: self)
     }
 

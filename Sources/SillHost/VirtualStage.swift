@@ -221,6 +221,9 @@ final class VirtualStage {
         let fit = fit.flatMap { f in display.map { CGFloat($0.madeWidthPt) >= f.width && CGFloat($0.madeHeightPt) - menuInset > f.height } == true ? f : nil } ?? normalSize
         guard let d = display, d.isAlive, let p = placement else { return false }
         let full = WindowSizer.isFullScreen(p.element)
+        // Beside the streamed window (no fit asked): a display already fitted keeps its size, the
+        // device's window as it was when this window was the one it streamed.
+        if fit == nil, full, d.widthPt != d.madeWidthPt || d.heightPt != d.madeHeightPt { return false }
         let w = full ? Int((fit?.width ?? CGFloat(d.madeWidthPt)).rounded()) : d.madeWidthPt
         let h = full ? Int((fit?.height ?? CGFloat(d.madeHeightPt)).rounded()) : d.madeHeightPt
         let w2 = min(max(w, 320), d.madeWidthPt), h2 = min(max(h, 240), d.madeHeightPt)

@@ -29,6 +29,9 @@ final class DeskStages {
 
     var staged: Set<UInt32> { Set(stages.keys) }
 
+    /// Whether `id`'s window is full screen now (Accessibility's word); nil when it is not on the desk.
+    func isFullScreen(_ id: UInt32) -> Bool? { stages[id].flatMap { $0.isStaged ? $0.isFullScreenNow : nil } }
+
     /// What a window's capture is at most: its display's scale (1× for a room wider than a 2×
     /// display can be: an ultrawide's).
     func scale(for id: UInt32) -> CGFloat { CGFloat(stages[id]?.displayScale ?? 2) }
