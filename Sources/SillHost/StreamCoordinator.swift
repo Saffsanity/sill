@@ -941,6 +941,13 @@ package final class StreamCoordinator {
     // MARK: Client messages
 
     private func handle(_ message: StreamMessage, from connection: NWConnection) async {
+        // A device acting (not its pings, stats or clipboard): an app it brings forward is not the
+        // person at this Mac taking it back (`appActivatedHere`).
+        if ![.ping, .clientStats, .clipboard, .hello].contains(message.kind) {
+            lastDeviceAction = CFAbsoluteTimeGetCurrent()
+            lastDeviceKind = message.kind
+        }
+        watchReclaims()
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -1211,15 +1218,47 @@ package final class StreamCoordinator {
     }
 
     func sharingStopped() async {
-        guard !stopping else { return }
-        stopping = true
-        defer { stopping = false }
-        print("Sharing stopped on this Mac: every device is let go")
-        await sideStreams?.stopAll()
-        await select(.none)
-        server.closeAll(Goodbye(reason: "stopped", message: "Sharing was stopped on \(macName).", reconnect: false))
+        print("Sharing stopped on this Mac: every window taken back; devices stay connected and may open them again")
+        await takeBack(nil)
     }
-    private var stopping = false
+
+    /// The windows shared now (the main stream's and those beside it), for the person at this Mac to
+    /// take back one at a time: their IDs (a Desktop's display tagged, DesktopWindow) and names.
+    package var sharedWindows: [(id: UInt32, title: String)] {
+        var ids: [UInt32] = []
+        if case .window(let id) = active { ids.append(id) }
+        if active == .desktop, let d = catalog.display { ids.append(DesktopWindow.id(display: d.displayID)) }
+        for id in sideStreams?.streaming ?? [] where !ids.contains(id) { ids.append(id) }
+        return ids.map { id in
+            if let d = DesktopWindow.display(of: id) {
+                let name = catalog.displayInfos.first { $0.id == d }?.name ?? "Display \(d)"
+                return (id, "Desktop — \(name)")
+            }
+            let w = catalog.window(id: id)
+            let app = w?.owningApplication?.applicationName ?? "Window"
+            let title = w?.title ?? ""
+            return (id, title.isEmpty ? app : "\(app) — \(title)")
+        }
+    }
+
+    /// The person at this Mac stops sharing `id` (nil: every window): it goes back where it was, stops
+    /// streaming, and the devices are told (kind 41) and close their windows of it; they may open it
+    /// again. The devices stay connected.
+    package func takeBack(_ id: UInt32?) async {
+        let ids = Set(id.map { [$0] } ?? sharedWindows.map(\.id))
+        guard !ids.isEmpty else { return }
+        print("Stopped sharing on this Mac: \(id == nil ? "every window" : sharedWindows.first { $0.id == id }?.title ?? "window \(id!)")")
+        server.broadcast(StreamMessage(kind: .takenBack, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                                       payload: Wire.encode(TakenBack(windows: Array(ids)))))
+        sideStreams?.forget(ids)
+        let mainShared: Bool = {
+            if case .window(let w) = active { return ids.contains(w) }
+            if active == .desktop, let d = catalog.display { return ids.contains(DesktopWindow.id(display: d.displayID)) }
+            return false
+        }()
+        if mainShared { await select(.none) }
+        for w in ids where DesktopWindow.display(of: w) == nil { desk.release(w) }
+    }
 
     // MARK: Where input lands
 
@@ -2032,6 +2071,41 @@ package final class StreamCoordinator {
             self.menuFrontCheckAt = CFAbsoluteTimeGetCurrent()
             if self.active == .desktop { self.menuTargetChanged() }
         }
+    }
+
+    private var lastDeviceAction: CFAbsoluteTime = 0
+    private var lastDeviceKind: StreamMessageKind?
+    private var reclaimObserver: NSObjectProtocol?
+
+    /// Under the AppKit loop (Sill.app): an app brought forward on this Mac whose windows a device shows.
+    private func watchReclaims() {
+        guard appKitLoop, reclaimObserver == nil else { return }
+        reclaimObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil) { [weak self] note in
+            let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
+            Task { @MainActor in self?.appActivatedHere(pid) }
+        }
+    }
+
+    /// The person at this Mac brought forward an app whose windows a device shows (its Dock icon,
+    /// ⌘Tab, a click on it): they want it back, so its windows are taken back (`takeBack`), home
+    /// and in front of them; the device may open them again. Not within 2 s of a device's own
+    /// action, which activates apps too (a click, a pick, a menu).
+    private func appActivatedHere(_ pid: pid_t?) {
+        guard let pid else { return }
+        let since = CFAbsoluteTimeGetCurrent() - lastDeviceAction
+        guard since > 2 else {
+            if sharedWindows.contains(where: { catalog.window(id: $0.id)?.owningApplication?.processID == pid }) {
+                print("An app with shared windows came forward \(String(format: "%.1f", since)) s after a device acted (\(lastDeviceKind.map { "\($0)" } ?? "?")); left shared")
+            }
+            return
+        }
+        let ids = sharedWindows.map(\.id).filter { id in
+            DesktopWindow.display(of: id) == nil && catalog.window(id: id)?.owningApplication?.processID == pid
+        }
+        guard !ids.isEmpty else { return }
+        print("An app was brought forward on this Mac: taking back its \(ids.count) shared window\(ids.count == 1 ? "" : "s")")
+        Task { for id in ids { await self.takeBack(id) } }
     }
 
     /// Under the AppKit loop (Sill.app, the CLI's --virtual-display), while a device subscribes:

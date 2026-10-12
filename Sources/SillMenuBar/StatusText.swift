@@ -325,7 +325,7 @@ enum StatusText {
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
         if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }
         if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return "The streamed window is on the virtual display" }
-        return "Picked windows leave this screen while they stream"
+        return "For iPhone and iPad; a Mac viewer always moves windows"
     }
 
     /// "Safari — A very long window title that goes on" → "Safari — A very long…that goes on".

@@ -92,6 +92,15 @@ final class SideStreams {
     /// The catalog changed (sizes, windows gone) or the main stream did.
     func changed() { Task { await reconcile() } }
 
+    /// The windows streaming beside the main one now.
+    var streaming: [UInt32] { Array(streams.keys) }
+
+    /// `ids` no longer asked for by any device until it asks again (the person at the Mac took them back).
+    func forget(_ ids: Set<UInt32>) {
+        for (key, entry) in wanted { wanted[key] = (entry.connection, entry.windows.filter { !ids.contains($0) }, entry.fps, entry.wholeApp, entry.screen) }
+        Task { await reconcile() }
+    }
+
     func stopAll() async {
         wanted.removeAll()
         await reconcile()

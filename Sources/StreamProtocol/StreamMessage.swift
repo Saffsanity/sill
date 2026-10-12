@@ -89,6 +89,8 @@ public enum StreamMessageKind: UInt8 {
                              // list says `liveDrag`
     case pickDisplay = 40    // device → host: JSON PickDisplay — which of the host's own displays the Desktop is;
                              // only to a host whose list names its `displays`
+    case takenBack = 41      // host → device: JSON TakenBack — windows the person at the Mac stopped sharing (gone
+                             // home there); the device closes its windows of them and may open them again
     case dockMenu = 39       // both ways: JSON DockMenu — an app's own Dock menu on the host (Finder's New Finder
                              // Window…), asked for and pressed by a device; only to a host whose list says `dockMenu`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know

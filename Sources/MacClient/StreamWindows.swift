@@ -98,6 +98,12 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             windowLog("dock: \(app) › \(title) pressed on the other Mac")
             self.client.send(.dockMenu, payload: Wire.encode(DockMenu(app: app, token: UInt32.random(in: 1...UInt32.max), press: id, title: title)))
         }
+        // The person at the other Mac took these windows back: they close here (and may be opened again).
+        client.onTakenBack = { [weak self] ids in
+            guard let self else { return }
+            windowLog("taken back by the other Mac: \(ids)")
+            for id in ids { self.open[.window(id)]?.close() }
+        }
         client.onDockMenu = { [weak self] menu in
             guard let items = menu.items else { return }
             windowLog("dock: \(menu.app)'s menu on the other Mac: \(items.filter { $0.separator != true }.map(\.title))")

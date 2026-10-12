@@ -772,6 +772,8 @@ final class StreamClient: ObservableObject {
     var onDragOffer: ((DragOffer) -> Void)?
     /// An app's Dock menu on the Mac, or the answer to a press (kind 39), on main.
     var onDockMenu: ((DockMenu) -> Void)?
+    /// Windows the person at the Mac stopped sharing (kind 41), on main.
+    var onTakenBack: (([UInt32]) -> Void)?
     /// A part of a file this device asked for (kind 34 from the Mac), on the network queue.
     var onFileChunk: ((Data) -> Void)?
     /// Which trackpad gestures this session's Mac takes (`WindowList.gestures`): 1 for kind 28's
@@ -3552,6 +3554,9 @@ final class StreamClient: ObservableObject {
         case .dockMenu:
             guard let menu = Wire.decode(DockMenu.self, from: data) else { return }
             DispatchQueue.main.async { self.onDockMenu?(menu) }
+        case .takenBack:
+            guard let back = Wire.decode(TakenBack.self, from: data) else { return }
+            DispatchQueue.main.async { self.onTakenBack?(back.windows) }
         case .fileChunk:
             onFileChunk?(data)
         case .hostSettings:

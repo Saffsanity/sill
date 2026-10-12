@@ -364,3 +364,11 @@ public enum ClipboardPasteboard {
     }
 }
 #endif
+
+/// Windows the person at the host stopped sharing (kind 41): each went back to where it was on the
+/// Mac and stopped streaming; a device closes its windows of them and may open them again. Window IDs
+/// as side streams name them (a Desktop window's display tagged, DesktopWindow).
+public struct TakenBack: Codable, Hashable, Sendable {
+    public var windows: [UInt32]
+    public init(windows: [UInt32]) { self.windows = windows }
+}
