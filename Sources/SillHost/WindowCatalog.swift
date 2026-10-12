@@ -85,6 +85,26 @@ final class WindowCatalog {
     var desktopDisplayID: CGDirectDisplayID?
     /// This Mac's own displays, never Sill's hidden ones (VirtualDisplay's vendor), for a device to pick.
     private(set) var realDisplays: [SCDisplay] = []
+    /// The titles of `pid`'s minimized windows (Accessibility; a quarter of a second at most).
+    private static func minimizedTitles(of pid: pid_t) -> Set<String> {
+        guard AXIsProcessTrusted() else { return [] }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return [] }
+        var titles: Set<String> = []
+        for w in windows {
+            var minimized: CFTypeRef?, title: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minimized) == .success,
+                  (minimized as? Bool) == true,
+                  AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &title) == .success,
+                  let t = title as? String else { continue }
+            titles.insert(t)
+        }
+        return titles
+    }
+
     static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == 0x5111 }
 
     /// The Desktop is `id` from now on, at once (the next refresh keeps it). False when it is not one
@@ -272,10 +292,19 @@ final class WindowCatalog {
             // Not a window kept above every display, where no one could see it (a chat app's hidden
             // "Microsoft a chat app" helper at y -360, 2026-10-12): an app's own off-screen trick, not a window.
             let top = content.displays.map { CGDisplayBounds($0.displayID).minY }.min() ?? 0
-            elsewhere = all.windows.filter { w in
-                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, let app = w.owningApplication,
+            let offScreen = all.windows.filter { w in
+                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, w.owningApplication != nil,
                       w.frame.minY >= top else { return false }
-                return regular.contains(app.processID)
+                return true
+            }
+            // A menu bar app's (no Dock icon) window that is minimized, as its owner left it (a menu bar app's,
+            // 2026-10-12); its other hidden windows are its own business, as an app's are.
+            let others = Set(offScreen.filter { $0.windowLayer == 0 && $0.frame.width > 100 && $0.frame.height > 100 }
+                .compactMap(\.owningApplication?.processID)).subtracting(regular)
+            let minimized = Dictionary(uniqueKeysWithValues: others.map { ($0, Self.minimizedTitles(of: $0)) })
+            elsewhere = offScreen.filter { w in
+                guard let pid = w.owningApplication?.processID else { return false }
+                return regular.contains(pid) || (minimized[pid]?.contains(w.title ?? "") ?? false)
             }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
@@ -411,6 +440,11 @@ final class WindowCatalog {
                 if display.hasSuffix(".app") { display.removeLast(4) }
                 apps.append((display, id, url.path))
             }
+        }
+        // Finder, which lives in CoreServices, not in an applications folder.
+        let finder = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        if let id = Bundle(url: finder)?.bundleIdentifier, !seen.contains(id) {
+            apps.append((FileManager.default.displayName(atPath: finder.path).replacingOccurrences(of: ".app", with: ""), id, finder.path))
         }
         return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
