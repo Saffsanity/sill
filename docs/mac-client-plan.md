@@ -53,7 +53,7 @@ new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them
 
 ## Sill's desk (DeskStages, VirtualStage)
 
-- **One hidden display per window**, each with its own display identity from a pool of 16 (product
+- **One hidden display per window**, each with its own display identity, taken as needed (product
   0x100 + slot, a serial kept per slot in the defaults, so macOS remembers how to show each:
   "Extended Display"). Two displays with the same vendor and product ID are one monitor to macOS,
   which takes the older offline when the newer comes; that, measured with a probe, is why the first
@@ -82,8 +82,8 @@ new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them
 A CoreAudio process tap (macOS 14.2+) over every process of the apps whose windows the viewer
 shows, their helpers included (browsers and web-based apps play from a helper, matched by bundle ID
 prefix), `mutedWhenTapped`: silent on the host, played here. Read through a private aggregate
-device, sent as 10 ms 16-bit PCM (1.5 Mbit/s at 48 kHz stereo: less delay than an encoder on a home
-network). The viewer buffers 40 ms before it starts and cuts back to 60 ms past 150 ms. All
+device, sent as AAC-ELD (about 96 kbit/s at 48 kHz stereo, some 15 ms more delay than plain PCM's
+1.5 Mbit/s; `SillClient.plainAudio` asks for PCM, and a host that cannot encode sends it). The viewer buffers 40 ms before it starts and cuts back to 60 ms past 150 ms. All
 CoreAudio work runs off the main actor: its calls wait on coreaudiod and on the audio recording
 permission's prompt (`NSAudioCaptureUsageDescription`), which once froze the host. The tap runs only
 while a tapped app makes sound.
@@ -170,13 +170,15 @@ the 27.1-only DuoPostureReader.
 
 ## Open (by hand, or not done)
 
-- Full screen fitted to the viewer window after the last fixes (the background fit, the 0.25 s
-  watch).
-- The live drag's ⌥ (a copy) and ⌥⌘ (an alias) between two Finder windows, and a browser's address bar
-  against a page's drop zone, by hand.
-- A left click read as a right click until the next right click: the host now lets go of a button
-  still held at a new press and logs it; the lost up's path is not found yet.
+- The desk takes windows while their displays fit in a quarter of the host's memory (each display a
+  framebuffer of its own, up to about 130 MB); side streams stay at 6 live windows beside the focused
+  one.
+- The stuck right button: the viewer now sends an up its stream view would miss (the view moved to
+  another window under a held button, the likeliest path) and the host lets go of a button still
+  held at a new press; not seen since, not reproduced on purpose.
+- A full-screen window stranded in a Space of its own after a restart is reached by bringing its app
+  forward: by hand.
+- The remote Dock menu flashes in the host's Dock for about half a second each time it is read.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
-- Sound is uncompressed (fine at home, heavy away); a drag out starts only from the focused window;
-  16 desk windows at most; Spaces gestures were not re-run.
+- Spaces gestures were not re-run.

@@ -21,7 +21,7 @@ after a restart and new windows of open apps opened by themselves.
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
   `fileDrop`), a drag followed live (38, `liveDrag`). The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
-  of its own with its own identity from a pool of 16 (two displays with one vendor and product ID
+  of its own with its own identity taken as needed while they fit in a quarter of its memory (two displays with one vendor and product ID
   are one monitor to macOS, which took the older offline: not a one-display limit), made once at
   120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
   on macOS 27.0.1); a full-screen window's display resized live to the viewer window
@@ -36,9 +36,8 @@ after a restart and new windows of open apps opened by themselves.
   Both apps notarized (`sill-notary`). The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between this Mac and a MacBook Pro on the same network, and an iPhone 16 Pro Max against a
-  test host: the plan's "Verified". **Open:** the plan's "Open" (full screen after the last fixes, the
-  lost right-button up, Tailscale with Remote Access, uncompressed
-  sound, the live drag's ⌥ and ⌥⌘ by hand).
+  test host: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
+  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
