@@ -33,8 +33,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›
   Devices). While a viewer shows a window, that window lives on a hidden virtual display of its own
   ("Sill's desk"), so it is never covered, never limited by the host's own screens, and the person
-  at the host keeps their desk. One the desk cannot take is captured where it is, never raised or
-  resized there, and the desk is not tried again for it for 30 s. Windows go back where they were when the viewer closes them,
+  at the host keeps their desk. One the desk cannot take is captured where it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s. Windows go back where they were when the viewer closes them,
   disconnects or quits, and when Sill quits. The host's menu lists the windows a Mac viewer shows
   (Shared Windows), each with Stop Sharing; and bringing a shared app forward on the host (its Dock
   icon, ⌘Tab) takes its windows back, home and in front, while the viewer may open them again. Both
@@ -222,7 +221,7 @@ the new kinds is sent by it, and a host sends it none.
 - Confirmed by hand on the build before the last fix: opening, closing and switching windows of
   several apps, new windows included, each showing its own picture and none black (the rewritten
   router and the desk's placement fixes). Not yet confirmed by hand: the last fix (a window the desk
-  could not take captured where it is for 30 s, and re-cropped only once it holds still); a real
+  could not take captured where it is for 30 s, and captured again once it holds still after a move, at once after a resize); a real
   app's badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad
   connected (the stream stops, as on main). The Dock icons' signing was tested live before its
   fields were length-framed; since then both sides' signing was compiled and compared.

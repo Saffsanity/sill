@@ -39,7 +39,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows go to
   the desk, never the iPad's Virtual Display staging; one the desk fails to take is captured where
-  it is, never raised or resized there, and the desk is not tried again for it for 30 s. Take-back (the menu's Shared Windows,
+  it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s. Take-back (the menu's Shared Windows,
   Stop Sharing; an app brought forward on the host) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
   (`OutputSwitch`); the window list naming a new source goes out before its first frame. Dock icons'
