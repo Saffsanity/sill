@@ -218,12 +218,15 @@ final class VirtualStage {
     func fitFullScreen(to fit: CGSize? = nil) -> Bool {
         // A fit the display cannot take (the window's own full-screen size, from a viewport that
         // resizes nothing) stands down for the size it had before full screen.
-        let fit = fit.flatMap { f in display.map { CGFloat($0.madeWidthPt) >= f.width && CGFloat($0.madeHeightPt) - menuInset > f.height } == true ? f : nil } ?? normalSize
+        let asked = fit.flatMap { f in display.map { CGFloat($0.madeWidthPt) >= f.width && CGFloat($0.madeHeightPt) - menuInset > f.height } == true ? f : nil }
         guard let d = display, d.isAlive, let p = placement else { return false }
         let full = WindowSizer.isFullScreen(p.element)
         // Beside the streamed window (no fit asked): a display already fitted keeps its size, the
-        // device's window as it was when this window was the one it streamed.
-        if fit == nil, full, d.widthPt != d.madeWidthPt || d.heightPt != d.madeHeightPt { return false }
+        // device's window as it was when this window was the one it streamed. (Checked before the
+        // fallback below: with it, a full-screen window that went to the background had its display
+        // shrunk to its size before full screen, the video a quarter of its window, 2026-10-12.)
+        if asked == nil, full, d.widthPt != d.madeWidthPt || d.heightPt != d.madeHeightPt { return false }
+        let fit = asked ?? normalSize
         let w = full ? Int((fit?.width ?? CGFloat(d.madeWidthPt)).rounded()) : d.madeWidthPt
         let h = full ? Int((fit?.height ?? CGFloat(d.madeHeightPt)).rounded()) : d.madeHeightPt
         let w2 = min(max(w, 320), d.madeWidthPt), h2 = min(max(h, 240), d.madeHeightPt)
