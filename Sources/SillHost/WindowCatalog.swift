@@ -234,12 +234,21 @@ final class WindowCatalog {
         // poll, and only then. Fetched before the sequence check so its await cannot let an older
         // refresh overwrite a newer one.
         var pinnedAll: [SCWindow] = []
+        var elsewhere: [SCWindow] = []
         let missing = stagedWindowIDs.filter { id in !content.windows.contains(where: { $0.windowID == id }) }
-        if !missing.isEmpty, let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+        if let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
             for id in missing {
                 guard let w = all.windows.first(where: { $0.windowID == id && !Self.isOwn($0) }) else { continue }
                 pinnedAll.append(w)
-                print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.")
+            }
+            // Windows out of sight, in another Space (a full-screen one, another desktop): listed too,
+            // so a device can reach every window an app has, not just those on screen now. Titled
+            // windows of regular apps only: apps keep many untitled windows they never show.
+            let regular = Set(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map(\.processIdentifier))
+            let shown = Set(content.windows.map(\.windowID))
+            elsewhere = all.windows.filter { w in
+                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, let app = w.owningApplication else { return false }
+                return regular.contains(app.processID)
             }
         }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
@@ -256,6 +265,10 @@ final class WindowCatalog {
                 && !Self.isSystemHelperWindow(w)
         }
         for pinned in pinnedAll where !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        for w in elsewhere where !visible.contains(where: { $0.windowID == w.windowID }) && w.windowLayer == 0
+            && w.frame.width > 100 && w.frame.height > 100 && w.owningApplication?.processID != Self.ownPID && !Self.isSystemHelperWindow(w) {
+            visible.append(w)
+        }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
