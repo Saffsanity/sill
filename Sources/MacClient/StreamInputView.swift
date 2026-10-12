@@ -557,7 +557,9 @@ extension StreamInputView: NSDraggingSource {
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .outsideApplication ? [.copy, .delete] : []   // .delete: the Dock's Trash takes it
+        // Outside: Finder copies, the Dock's Trash deletes. Inside: another Sill window, where the
+        // other Mac drops its own files (StreamWindows.dropped); none here kept them from it.
+        context == .outsideApplication ? [.copy, .delete] : [.copy, .move, .generic]
     }
 
     /// Dropped on the Trash: the files go to the other Mac's Trash, as dragging them to its own would.

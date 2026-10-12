@@ -14,6 +14,8 @@ MUTANTS = [
     ("reset keeps the old sets", "target = nil; next = nil; switched = false; lastSets = nil", "target = nil; next = nil; switched = false"),
     ("the expected window is not drawn into", "return feed === target || feed === next", "return feed === target"),
     ("the sets not remembered", "        lastSets = encoded\n", ""),
+    ("a list never marks the switch", "if let last = lastListed, last != active { switched = true }", ""),
+    ("any list marks the switch", "if let last = lastListed, last != active { switched = true }", "switched = true"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

@@ -61,6 +61,23 @@ do {
     check(b.log == ["ps:S", "K:b1"], "after the host switched, B takes the next sets: \(b.log)")
 }
 
+// Same-size windows, the host's list read in the stream's order (`listed`): a list naming another
+// source marks the switch before the new sets, however late the main thread hears of it; a list
+// naming the same source again marks nothing.
+do {
+    let r = MainRouter(), a = Sink("A"), b = Sink("B")
+    r.listed(active: .window(1))
+    r.expect(a); r.parameterSets(ps("S")); r.frame(f("a1"), isKeyframe: true)
+    r.expect(b)
+    r.listed(active: .window(1))                                       // the same source again
+    r.parameterSets(ps("S")); r.frame(f("a9"), isKeyframe: true)
+    check(b.log.isEmpty, "a list naming the same source moves nothing: B \(b.log)")
+    r.listed(active: .window(2))                                       // the switch, on the wire before B's sets
+    r.parameterSets(ps("S")); r.frame(f("b1"), isKeyframe: true)
+    check(b.log == ["ps:S", "K:b1"], "B's first sets go to B, not A: \(b.log)")
+    check(!a.log.contains("K:b1"), "A never shows B's picture: \(a.log)")
+}
+
 // Focusing the window already drawn into changes nothing; a later expect starts afresh.
 do {
     let r = MainRouter(), a = Sink("A"), b = Sink("B")

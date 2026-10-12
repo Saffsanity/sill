@@ -95,6 +95,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             return self.client.active != wanted
         }
         let router = self.router
+        client.onWindowListActive = { router.listed(active: $0) }
         let shownPS = client.onParameterSets
         client.onParameterSets = { ps in shownPS?(ps); router.parameterSets(ps) }
         let shownFrame = client.onFrame

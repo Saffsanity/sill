@@ -46,7 +46,7 @@ final class MainRouter: @unchecked Sendable {
     /// The session ended: the next session's first window takes its stream's first sets.
     func reset() {
         lock.lock(); defer { lock.unlock() }
-        target = nil; next = nil; switched = false; lastSets = nil
+        target = nil; next = nil; switched = false; lastSets = nil; lastListed = nil
         lastPS = nil; gop = []; gopBytes = 0; newStreamAt = nil
     }
 
@@ -67,6 +67,17 @@ final class MainRouter: @unchecked Sendable {
     }
 
     func hostSwitched() { lock.lock(); switched = true; lock.unlock() }
+
+    /// A window list naming `active`, on the network queue in the stream's order: a change of source
+    /// marks the switch before the new stream's first sets arrive (marked on the main thread, it
+    /// could come after them, and two windows of one size have the same sets: the new stream's
+    /// picture went into the old window, and stayed there while nothing on it changed).
+    func listed(active: StreamSource) {
+        lock.lock(); defer { lock.unlock() }
+        if let last = lastListed, last != active { switched = true }
+        lastListed = active
+    }
+    private var lastListed: StreamSource?
 
     /// Whether the main stream draws into `feed` now or is about to (expected).
     func draws(into feed: FrameSink) -> Bool {
