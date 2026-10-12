@@ -23,6 +23,9 @@ final class WindowCatalog {
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
+    /// Sill Viewer on this Mac, if it runs: its windows show other Macs, never sent in a Desktop (two
+    /// Macs each showing the other's Desktop would show each other without end).
+    private(set) var viewerApplications: [SCRunningApplication] = []
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -279,6 +282,7 @@ final class WindowCatalog {
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
+        viewerApplications = content.applications.filter { $0.bundleIdentifier == "me.saffer.sill.client" }
         // The Desktop is one of this Mac's own displays, never Sill's hidden ones (the first listed
         // could be one: the Desktop showed a window staged there, not the Mac's screen).
         realDisplays = content.displays.filter { !Self.isSills($0.displayID) }

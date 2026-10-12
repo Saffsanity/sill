@@ -527,7 +527,9 @@ package final class StreamCoordinator {
         }
         capture.onStopped = { [weak self] error in
             print("Capture stopped: \(error.localizedDescription)")
-            Task { @MainActor in await self?.select(.none) }
+            Task { @MainActor in
+                if Self.stoppedByPerson(error) { await self?.sharingStopped() } else { await self?.select(.none) }
+            }
         }
         // Status for the menu bar app. The server's callbacks hop here from its network queue; the
         // stats tick runs on the main queue, which under the CLI's dispatchMain is drained by a
@@ -1135,6 +1137,7 @@ package final class StreamCoordinator {
                         await self.select(self.active)
                     }
                 }
+                made.onStoppedByPerson = { [unowned self] in Task { await self.sharingStopped() } }
                 sideStreams = made
             }
             sideStreams?.request(r, from: connection)
@@ -1196,6 +1199,27 @@ package final class StreamCoordinator {
             break
         }
     }
+
+    // MARK: Sharing stopped on this Mac
+
+    /// The person at this Mac stopped the sharing (the menu bar's screen-sharing item, Stop Sharing):
+    /// every device is told and let go, and nothing is captured until one connects again. The devices
+    /// do not reconnect by themselves.
+    static func stoppedByPerson(_ error: Error) -> Bool {
+        let e = error as NSError
+        return e.domain == SCStreamErrorDomain && e.code == SCStreamError.Code.userStopped.rawValue
+    }
+
+    func sharingStopped() async {
+        guard !stopping else { return }
+        stopping = true
+        defer { stopping = false }
+        print("Sharing stopped on this Mac: every device is let go")
+        await sideStreams?.stopAll()
+        await select(.none)
+        server.closeAll(Goodbye(reason: "stopped", message: "Sharing was stopped on \(macName).", reconnect: false))
+    }
+    private var stopping = false
 
     // MARK: Where input lands
 
@@ -1621,8 +1645,9 @@ package final class StreamCoordinator {
                     own = await catalog.resolveOwnApplication()
                     guard !shuttingDown else { active = .none; broadcastList(); return }
                 }
-                if let own {
-                    filter = SCContentFilter(display: d, excludingApplications: [own], exceptingWindows: [])
+                let left = (own.map { [$0] } ?? []) + catalog.viewerApplications
+                if !left.isEmpty {
+                    filter = SCContentFilter(display: d, excludingApplications: left, exceptingWindows: [])
                 } else {
                     filter = SCContentFilter(display: d, excludingWindows: [])
                 }

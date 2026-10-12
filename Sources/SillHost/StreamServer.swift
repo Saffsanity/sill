@@ -1040,6 +1040,13 @@ final class StreamServer {
         }
     }
 
+    /// Every admitted session gets `goodbye` and is closed. Thread-safe.
+    func closeAll(_ goodbye: Goodbye) {
+        queue.async { [self] in
+            for client in clients.values { self.goodbye(goodbye, to: client.connection) }
+        }
+    }
+
     // MARK: Goodbye (kind 22)
 
     /// Tells one admitted client why it is about to be closed, then closes it once the message is

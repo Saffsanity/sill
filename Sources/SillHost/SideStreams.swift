@@ -51,6 +51,8 @@ final class SideStreams {
     var wholeApp: Bool { wanted.values.contains { $0.wholeApp } }
     /// The devices' wish for whole-app capture changed: the main stream starts again with it.
     var onWholeAppChanged: (() -> Void)?
+    /// The person at this Mac stopped the sharing (StreamCoordinator.sharingStopped).
+    var onStoppedByPerson: (() -> Void)?
     private var streams: [UInt32: Stream] = [:]
     private var failedAt: [UInt32: Date] = [:]
     private var reconciling = false
@@ -182,9 +184,10 @@ final class SideStreams {
             }
             stream.capture.statsPrefix = "side.cap"
             stream.capture.onFrame = { pb, pts in enc.encode(pb, pts: pts) }
-            stream.capture.onStopped = { [weak self] _ in
+            stream.capture.onStopped = { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.streams[id] === stream else { return }
+                    if StreamCoordinator.stoppedByPerson(error) { self.onStoppedByPerson?(); return }
                     self.failedAt[id] = Date()
                     await self.stop(id)
                 }
@@ -223,9 +226,10 @@ final class SideStreams {
             }
             stream.capture.statsPrefix = "side.cap"
             stream.capture.onFrame = { pb, pts in enc.encode(pb, pts: pts) }
-            stream.capture.onStopped = { [weak self] _ in
+            stream.capture.onStopped = { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.streams[id] === stream else { return }
+                    if StreamCoordinator.stoppedByPerson(error) { self.onStoppedByPerson?(); return }
                     self.failedAt[id] = Date()
                     await self.stop(id)
                 }

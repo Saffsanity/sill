@@ -197,6 +197,7 @@ final class StreamInputView: NSView {
     /// Every input this view makes: sent, or held while the host switches (at most 2 s, then dropped
     /// rather than typed into the wrong app). Pointer moves held collapse to the latest.
     private func emit(_ event: InputEvent) {
+        guard !LocalHostInput.current else { return }   // this Mac's own host posted it: never back out
         guard holding() else { client.sendInput(event); return }
         let now = ProcessInfo.processInfo.systemUptime
         if let since = heldSince, now - since > 2 { held.removeAll(); heldSince = nil }
@@ -454,6 +455,7 @@ final class StreamInputView: NSView {
 
     /// A key event, from the monitor or the system tap.
     func forward(_ type: NSEvent.EventType, keyCode: UInt16, flags: NSEvent.ModifierFlags, isRepeat: Bool, via: String = "monitor") {
+        if via == "monitor", LocalHostInput.current { return }
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SillKeyLog") {
             let line = "keys: \(via) \(type == .keyDown ? "down" : type == .keyUp ? "up" : "flags") keycode \(keyCode) flags \(String(flags.rawValue, radix: 16)) → usage \(MacKeyMap.hidUsages[keyCode].map { String($0, radix: 16) } ?? "none")\n"
