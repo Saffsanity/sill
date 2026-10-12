@@ -218,12 +218,12 @@ the new kinds is sent by it, and a host sends it none.
 - Away from home over Tailscale: needs Remote Access on in Sill.app and the device to know the
   Mac's addresses (a session at home with Remote Access on, or Add a Mac with the code).
 - Spaces gestures were not re-run.
-- Not yet confirmed by hand: the rewritten router (the main stream by the host's word, the list now
-  sent before a stream's first frame) with its two fixes, a window left by the main stream drawing its
-  side stream at full size and a closed window's last frame never reaching the next one; a real app's
-  badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad connected
-  (the stream stops, as on main); a window placed while Sill's hidden displays rearrange (after
-  one is removed), a new window Accessibility does not know yet, and a window that moved while its
-  app's crop streams, each captured where it is.
+- Confirmed by hand on the build before the last fix: opening, closing and switching windows of
+  several apps, new windows included, each showing its own picture and none black (the rewritten
+  router and the desk's placement fixes). Not yet confirmed by hand: the last fix (a window the desk
+  could not take captured where it is for 30 s, and re-cropped only once it holds still); a real
+  app's badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad
+  connected (the stream stops, as on main). The Dock icons' signing was tested live before its
+  fields were length-framed; since then both sides' signing was compiled and compared.
 - Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
   separate spike).

@@ -1661,12 +1661,16 @@ package final class StreamCoordinator {
                 // keys go to the active app's key window. Done before capture starts, so the first
                 // frames already show it uncovered. The virtual display's fallback lands here too.
                 // Sill's desk takes the window off this Mac's displays: nothing there to raise or fit.
-                let toDesk = deskWanted
-                if comeForward, !shuttingDown, !toDesk { activateAndRaise(window: w) }
+                // A window the desk just failed to take is captured where it is for a while, not
+                // tried again at every restart (each try makes a display and moves the window).
+                let toDesk = deskWanted && CFAbsoluteTimeGetCurrent() - (deskFailedAt[id] ?? 0) > Self.deskRetryAfter
+                // A Mac viewer's window is never raised or resized on this Mac's own screens, the desk
+                // or not: the person here keeps their desk.
+                if comeForward, !shuttingDown, !deskWanted { activateAndRaise(window: w) }
                 // Fit the window to the client's panel before capture starts, so the stream comes up
                 // at the new size instead of restarting once the catalog notices. `w` is a snapshot
                 // with the old frame; the window server has the new one.
-                let resized = toDesk ? nil : fitToViewport(w)
+                let resized = deskWanted ? nil : fitToViewport(w)
                 if let resized { size = Self.liveBounds(of: id)?.size ?? resized }
                 describe = "\(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "")\(useSoftwareEncoder ? " (software encoder)" : "")"
                 // A device asked for windows with what belongs to them (their menus, popovers, the
@@ -1688,15 +1692,22 @@ package final class StreamCoordinator {
                         }
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
+                        deskFailedAt[id] = CFAbsoluteTimeGetCurrent()
                         // It was put back where it was: read where that is once the window server
-                        // shows it (a move is listed only once the app commits it), not where it was
-                        // read before the move (2026-10-12: a window captured a screen away from itself).
+                        // shows it (a move is listed only once the app commits it: up to about 0.45 s
+                        // for a slow app), not where it was read before (2026-10-12: a window captured
+                        // a screen away from itself). Until it has left that frame, then until it holds
+                        // still for two reads; 0.8 s at most (a window that was home already never moves).
+                        let before = place
                         var last = Self.liveBounds(of: id)
-                        for _ in 0..<10 {
+                        var moved = false, still = 0
+                        for _ in 0..<16 {
                             try? await Task.sleep(nanoseconds: 50_000_000)
                             let now = Self.liveBounds(of: id)
-                            if now == last { break }
+                            if !moved, let now, let before, now.origin != before.origin { moved = true }
+                            still = (moved && now == last) ? still + 1 : 0
                             last = now
+                            if still >= 2 { break }
                         }
                         if let last { place = CGRect(origin: last.origin, size: resized ?? last.size) }
                     }
@@ -2608,13 +2619,22 @@ package final class StreamCoordinator {
     }
 
     /// The main stream cropped from its display (a window with its app): a window that moved there,
-    /// which the catalog's list does not show (it lists sizes), is captured again where it is now.
+    /// which the catalog's list does not show (it lists sizes), is captured again where it is now,
+    /// once it has held still across two polls (not mid-drag, not a window still on its way home).
     private func recropIfMoved() async {
-        if let crop = mainCropFrame, case .window(let id) = active, !switching,
-           let live = Self.liveBounds(of: id), live.origin != crop.origin || live.size != crop.size {
-            await select(active)
+        guard let crop = mainCropFrame, case .window(let id) = active, !switching,
+              let live = Self.liveBounds(of: id), live.origin != crop.origin || live.size != crop.size else {
+            lastMovedFrame = nil
+            return
         }
+        defer { lastMovedFrame = live }
+        guard live == lastMovedFrame else { return }
+        await select(active)
     }
+    private var lastMovedFrame: CGRect?
+    /// When Sill's desk last failed to take each window, and how long it is not tried again.
+    private var deskFailedAt: [UInt32: CFAbsoluteTime] = [:]
+    private static let deskRetryAfter: CFAbsoluteTime = 30
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
         sideStreams?.changed()   // a side stream's window resized or gone
