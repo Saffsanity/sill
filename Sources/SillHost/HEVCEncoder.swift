@@ -482,6 +482,9 @@ final class HEVCEncoder {
         switch event {
         case .replace: makeReplacement()
         case .judged(let report): print(Self.describe(report, session: "hardware HEVC \(width)×\(height)"))
+        case .relapsed(let slow, let count):
+            print("Encoder (hardware HEVC \(width)×\(height)): frames took \(Int((slow.turnaround * 1000).rounded())) ms each again; "
+                  + "the last \(count) new sessions each went slow within \(Int(EncoderSlowState.relapseWithin)) s, so this stream keeps this one and gets no other.")
         }
     }
 
