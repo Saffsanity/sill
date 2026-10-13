@@ -25,6 +25,8 @@ final class Proxy: NSObject, NSApplicationDelegate {
     private var heard = false
     /// A badge was heard already: only a change after it can bounce.
     private var heardBadge = false
+    /// The bounce asked for while the app bounces on the other Mac, to cancel when it stops.
+    private var attentionRequest: Int?
     /// Sill Viewer told this to quit (its app has no window open there): nothing to ask on the way out.
     private var told = false
     private var windows: [(id: String, title: String, state: String)] = []
@@ -59,6 +61,16 @@ final class Proxy: NSObject, NSApplicationDelegate {
                 NSApp.dockTile.badgeLabel = badge.isEmpty ? nil : badge
             }
             self.heardBadge = true
+            // The app bouncing its Dock icon on the other Mac: this one bounces until that stops (a
+            // one-time bounce there arrives as about a second of bouncing here).
+            let attention = state["attention"] as? Bool == true
+            if attention, self.attentionRequest == nil {
+                let id = NSApp.requestUserAttention(.criticalRequest)
+                self.attentionRequest = id >= 0 ? id : nil   // -1: this icon is the active app, nothing to do
+            } else if !attention, let id = self.attentionRequest {
+                NSApp.cancelUserAttentionRequest(id)
+                self.attentionRequest = nil
+            }
             let ids = state["ids"] as? [String] ?? []
             let titles = state["titles"] as? [String] ?? []
             let states = state["states"] as? [String] ?? []

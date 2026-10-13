@@ -959,6 +959,7 @@ package final class StreamCoordinator {
         }
         watchReclaims()
         watchBadges()
+        watchAttention()
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
@@ -2227,6 +2228,36 @@ package final class StreamCoordinator {
         }
     }
 
+    /// The apps a Mac client shows that bounce their Dock icon here (`WindowList.attention`), read every
+    /// 250 ms off the main actor while one is connected (`AttentionWatch`), and sent with the window list
+    /// when the set changes: a one-time bounce lasts about a second, so it is seen.
+    private func watchAttention() {
+        guard attentionTimer == nil, !synthetic, sideStreams?.wholeApp == true else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
+        timer.setEventHandler { [weak self] in
+            let asking = AttentionWatch.bundleIDs()
+            Task { @MainActor in self?.readAttention(asking) }
+        }
+        timer.resume()
+        attentionTimer = timer
+    }
+    private var attentionTimer: DispatchSourceTimer?
+    private var dockAttention: [String] = []
+
+    private func readAttention(_ asking: Set<String>?) {
+        guard sideStreams?.wholeApp == true else {   // the last Mac client left: stop until another comes
+            attentionTimer?.cancel(); attentionTimer = nil
+            if !dockAttention.isEmpty { dockAttention = []; broadcastList() }
+            return
+        }
+        let shown = Set(catalog.infos.map(\.bundleID))
+        let attention = (asking ?? []).filter { shown.contains($0) }.sorted()
+        guard attention != dockAttention else { return }
+        dockAttention = attention
+        broadcastList()
+    }
+
     /// Under the AppKit loop (Sill.app): an app brought forward on this Mac whose windows a device shows.
     private func watchReclaims() {
         guard appKitLoop, reclaimObserver == nil else { return }
@@ -2812,7 +2843,8 @@ package final class StreamCoordinator {
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
                                                       liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
                                                       displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID,
-                                                      windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges)))
+                                                      windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges,
+                                                      attention: dockAttention.isEmpty ? nil : dockAttention)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

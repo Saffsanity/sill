@@ -193,10 +193,7 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
    the first notification, with a clear in-app explanation; for an app with no helper running, have
    Sill Viewer launch it, with a fallback of Sill Viewer posting under its own name. Put the remote
    window or app ID in `userInfo` and bring the app's windows forward on a click.
-3. **Build bounce forwarding** on `LSWantsAttention`: the host polls it (every 250 ms is enough) for the
-   apps whose windows a Mac viewer shows, sends informational or critical (a window-list field, gated
-   like `badges`), and the app's Dock icon here makes the same request and cancels it when the host's
-   flag clears. Until then, a badge that rises bounces the icon once (built, below).
+3. **Bounce forwarding on `LSWantsAttention`:** built (below).
 4. **Still to test before building** (needs the user or a second Mac): alert-style (persistent)
    notifications; a Focus on; the frontmost-app banner I could not see; a real pointer click and a click
    on a helper that has quit; the banner icon; behaviour on macOS 14 to 26; and the cost of the tree read
@@ -207,6 +204,15 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
 - **Badges in Sill Viewer's menu.** Each app in the menu bar icon's menu carries its Dock badge from the
   other Mac (`NSMenuItemBadge`: a count, or the label as it is). Seen live with two real apps' badges
   and a test app counting up every 15 s.
+- **Dock bounces forwarded.** Sill.app reads `LSWantsAttention` every 250 ms off the main actor
+  (`AttentionWatch`) while a Mac viewer is connected and sends the bouncing apps with a window listed
+  as `WindowList.attention` (bundle IDs, sorted; nil from a host before, and when none bounce). The
+  app's Dock icon here makes a critical request while its app is listed and cancels it when it is not,
+  so a one-time bounce there is about a second of bouncing here, and a repeating one lasts as long as
+  there. The host cannot tell the two apart (the key is 1 for both). Seen between two Macs: a test app
+  with a window, on the host and not active, bounced once and then repeatedly for 5 s every 20 s, and
+  its Dock icon on the viewing Mac bounced. An app active on the host bounces nowhere (macOS refuses
+  the request), so a click on its window in the viewer, which activates it there, stops its bounces.
 - **A rising badge bounces the app's Dock icon here once.** `SillDockProxy` makes an informational request
   when a count grows or a badge appears; not for the first state it hears, nor for a badge that falls or
   goes. Seen with the test app: its helper's `LSWantsAttention` went 1, then 0 about 1 s later, at each

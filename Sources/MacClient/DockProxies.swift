@@ -20,8 +20,8 @@ import StreamProtocol
 /// 0600), with a counter that must rise, so a process that watches the notifications learns what was
 /// asked (a window's ID, a menu item's title) but can neither forge a request nor replay one.
 final class DockProxies {
-    /// An app's windows open here, and its Dock badge on the other Mac.
-    struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window]; var badge: String? = nil }
+    /// An app's windows open here, and its Dock badge on the other Mac and whether its icon bounces there.
+    struct AppWindows { let name: String; let icon: NSImage?; let windows: [Window]; var badge: String? = nil; var attention = false }
     /// A window in the Dock menu: the app's front one gets a ✓, as macOS marks its own.
     struct Window {
         enum State: String { case front, minimized, other }
@@ -149,7 +149,7 @@ final class DockProxies {
     private func post(_ app: String) {
         guard let info = last[app] else { return }
         let menu = menus[app] ?? []
-        tell(app, ["badge": info.badge ?? "", "ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
+        tell(app, ["badge": info.badge ?? "", "attention": info.attention, "ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
                    "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
                    "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
                    "menuEnabled": menu.map { $0.enabled ? "1" : "0" }])
