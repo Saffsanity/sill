@@ -335,8 +335,18 @@ public enum ClipboardImage {
 import AppKit
 
 /// This Mac's general pasteboard as a `Clipboard`, for the host (HostClipboard) and the Mac client
-/// (ClipboardSync) alike.
+/// (ClipboardSync) alike. Two Macs that each view the other run both on each Mac, so a copy reaches the
+/// other Mac twice (host to viewer, viewer to host): what came from the other Mac is marked
+/// (`fromOtherMac`) and never sent back, and a copy already there is not written again. Without both,
+/// the copy went back and forth for good, a new clipboard entry each time, and a late one replaced a
+/// newer copy.
 public enum ClipboardPasteboard {
+    /// The private type on a pasteboard item Sill wrote from the other Mac's clipboard.
+    public static let fromOtherMacType = NSPasteboard.PasteboardType("me.saffer.sill.clipboard.from-other-mac")
+
+    /// Whether the pasteboard holds what Sill wrote from the other Mac (not a copy made on this one).
+    public static var fromOtherMac: Bool { NSPasteboard.general.types?.contains(fromOtherMacType) == true }
+
     /// Its text (when not too long) and its image (PNG, TIFF or JPEG, made to fit `imageLimit`).
     public static func read(imageLimit: Int) -> Clipboard {
         let board = NSPasteboard.general
@@ -349,11 +359,14 @@ public enum ClipboardPasteboard {
         return Clipboard(text: text, image: image)
     }
 
-    /// Text and an image (PNG or JPEG, with TIFF beside it for apps that read only that), both if both.
+    /// Text and an image (PNG or JPEG, with TIFF beside it for apps that read only that), both if both,
+    /// marked as the other Mac's; nothing when the pasteboard holds that already.
     public static func write(_ clip: Clipboard) {
         let board = NSPasteboard.general
+        guard !holds(clip) else { return }
         board.clearContents()
         let item = NSPasteboardItem()
+        item.setData(Data(), forType: fromOtherMacType)
         if let text = clip.text { item.setString(text, forType: .string) }
         if let image = clip.image {
             let isPNG = image.starts(with: [0x89, 0x50, 0x4E, 0x47])
@@ -361,6 +374,14 @@ public enum ClipboardPasteboard {
             if let rep = NSBitmapImageRep(data: image), let tiff = rep.tiffRepresentation { item.setData(tiff, forType: .tiff) }
         }
         board.writeObjects([item])
+    }
+
+    /// Whether the pasteboard's text and image are `clip`'s.
+    private static func holds(_ clip: Clipboard) -> Bool {
+        let board = NSPasteboard.general
+        guard board.string(forType: .string) == clip.text else { return false }
+        let image = board.data(forType: .png) ?? board.data(forType: NSPasteboard.PasteboardType("public.jpeg"))
+        return clip.image == nil ? board.data(forType: .tiff) == nil && image == nil : image == clip.image
     }
 }
 #endif

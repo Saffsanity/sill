@@ -48,6 +48,7 @@ final class ClipboardSync {
         let board = NSPasteboard.general
         guard Self.enabled, client.connected, client.hostClipboard, board.changeCount != synced else { return }
         synced = board.changeCount
+        guard !ClipboardPasteboard.fromOtherMac else { return }   // the other Mac's copy, or one Sill here wrote
         let clip = ClipboardPasteboard.read(imageLimit: Clipboard.maxImageFromDevice)
         guard clip.text != nil || clip.image != nil else { return }
         client.sendClipboard(clip)

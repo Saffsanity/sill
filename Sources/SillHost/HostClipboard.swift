@@ -56,6 +56,7 @@ final class HostClipboard {
         let count = NSPasteboard.general.changeCount
         guard count != lastSeen else { return }
         lastSeen = count
+        guard !ClipboardPasteboard.fromOtherMac else { return }   // a device's copy, or one Sill Viewer here wrote
         let clip = ClipboardPasteboard.read(imageLimit: Clipboard.maxImageFromHost)
         guard clip.text != nil || clip.image != nil, let payload = clip.payload(within: Clipboard.messageFromHost) else { return }
         let m = StreamMessage(kind: .clipboard, timestamp: Date().timeIntervalSince1970, isKeyframe: false, payload: payload)
