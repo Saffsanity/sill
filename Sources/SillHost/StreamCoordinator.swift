@@ -1297,9 +1297,15 @@ package final class StreamCoordinator {
 
     /// A window's rectangle for a drop or a drag over it: one shown beside the streamed one (on its
     /// desk display, else where it is), else (nil) the streamed one.
+    /// The source input goes to: the one announced to the devices while it starts (`announced`), else
+    /// the streaming one. A Mac viewer holds the click that picked a window until the window list
+    /// names it, which it does before capture starts: mapped onto the old source's rectangle, that
+    /// click landed on the old window (a full-screen video paused, 2026-10-13).
+    private var inputSource: StreamSource { announced ?? active }
+
     /// The streamed source as side streams name a window (a Desktop by its display, tagged).
     private var streamedWindowID: UInt32? {
-        switch active {
+        switch inputSource {
         case .window(let id): return id
         case .desktop: return catalog.display.map { DesktopWindow.id(display: $0.displayID) }
         case .none: return nil
@@ -1315,7 +1321,7 @@ package final class StreamCoordinator {
     /// what the injector maps the client's fractions onto. Nil when nothing is streaming, so
     /// input that arrives between sources is dropped rather than poked at the wrong window.
     private func currentSourceRect() -> CGRect? {
-        switch active {
+        switch inputSource {
         case .none:
             return nil
         case .desktop:
@@ -1928,8 +1934,9 @@ package final class StreamCoordinator {
         // started, and by then a pick has already raised the new window. Raising or activating
         // the old one here would put it back in front of the pick (a flick's momentum scroll keeps
         // arriving through a tap on the switcher). The event itself is still delivered, so no
-        // key-up or button-up goes missing.
-        guard !switching, case .window(let id) = active else { return }
+        // key-up or button-up goes missing. Once the new source is announced, it is the one: the
+        // devices were told so, and a Mac viewer's click that picked it comes right after.
+        guard case .window(let id) = (announced ?? (switching ? StreamSource.none : active)) else { return }
         // Scroll routes to the window under the cursor whatever the active app is: it only needs
         // uncovering (regular path). Clicks, keys and text need the app active and the window key.
         let needsFocus: Bool
@@ -2036,7 +2043,7 @@ package final class StreamCoordinator {
     private var lastClickLog: CFAbsoluteTime = 0
     private func logClick(_ event: InputEvent, in rect: CGRect) {
         guard case .pointer(let action, let x, let y) = event, action.isButtonDown,
-              case .window(let id) = active else { return }
+              case .window(let id) = inputSource else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastClickLog > 1 else { return }
         lastClickLog = now
