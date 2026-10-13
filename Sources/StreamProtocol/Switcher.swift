@@ -83,6 +83,9 @@ public struct WindowList: Codable {
     /// attention), by bundle ID, sorted: a Mac client bounces its Dock icon of that app until it is left
     /// out again. Nil before 2026-10-13 and from a host that reads none; empty is left out too.
     public var attention: [String]?
+    /// True: this host streams the windows a device names in `SideStreamRequest.fullRate` at the main
+    /// stream's rate. Nil before 2026-10-13, to which a device sends none.
+    public var fullRate: Bool?
     /// The host's own displays (never Sill's hidden ones), for a device that picks which the Desktop
     /// is (kind 40); nil from a host before 2026-10-12, whose Desktop is its main display.
     public var displays: [DisplayInfo]?
@@ -93,13 +96,14 @@ public struct WindowList: Codable {
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
                 sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
                 liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil,
-                windowInput: Bool? = nil, badges: [String: String]? = nil, attention: [String]? = nil) {
+                windowInput: Bool? = nil, badges: [String: String]? = nil, attention: [String]? = nil,
+                fullRate: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
         self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
         self.dockMenu = dockMenu; self.windowInput = windowInput; self.badges = badges
-        self.attention = attention
+        self.attention = attention; self.fullRate = fullRate
         self.displays = displays; self.desktopDisplay = desktopDisplay
     }
 }

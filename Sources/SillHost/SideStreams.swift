@@ -36,12 +36,15 @@ final class SideStreams {
     private let catalog: WindowCatalog
     /// The stream's capture scale, the encoder to use and the bitrate per 60 fps, read at each start.
     var settings: () -> (scale: CGFloat, software: Bool, bitratePer60: Int, prioritizeSpeed: Bool) = { (2, false, 15_000_000, false) }
+    /// The main stream's rate, for a window a device wants at full speed (`SideStreamRequest.fullRate`).
+    var mainFPS: () -> Int = { 60 }
     /// The window the main stream shows, if it is one.
     var mainWindow: () -> UInt32? = { nil }
     /// Sill's desk, where a whole-app device's windows live (nil: none, a test host).
     var desk: () -> DeskStages? = { nil }
 
-    private var wanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], fps: Int, wholeApp: Bool, screen: CGSize?)] = [:]
+    private var wanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], fps: Int, wholeApp: Bool, screen: CGSize?,
+                                               fullRate: Set<UInt32>)] = [:]
     /// The largest screen of the devices that asked (Sill's desk makes each window's room that big).
     var largestScreen: CGSize? {
         wanted.values.compactMap(\.screen).max { $0.width * $0.height < $1.width * $1.height }
@@ -71,6 +74,7 @@ final class SideStreams {
 
     func request(_ r: SideStreamRequest, from c: NWConnection) {
         let fps = min(max(r.fps ?? SideStreamRequest.defaultFPS, 1), SideStreamRequest.maxFPS)
+        let full = Set((r.fullRate ?? []).prefix(SideStreamRequest.maxFullRate))
         var seen = Set<UInt32>()
         let windows = r.windows.filter { seen.insert($0).inserted }
         let before = wholeApp
@@ -78,7 +82,7 @@ final class SideStreams {
         if windows.isEmpty && r.wholeApp != true { wanted[ObjectIdentifier(c)] = nil }
         else {
             let screen = r.screen.flatMap { $0.count == 2 && $0[0] > 0 && $0[1] > 0 ? CGSize(width: $0[0], height: $0[1]) : nil }
-            wanted[ObjectIdentifier(c)] = (c, windows, fps, r.wholeApp == true, screen)
+            wanted[ObjectIdentifier(c)] = (c, windows, fps, r.wholeApp == true, screen, full)
         }
         if wholeApp != before { onWholeAppChanged?() }
         Task { await reconcile() }
@@ -99,7 +103,9 @@ final class SideStreams {
 
     /// `ids` no longer asked for by any device until it asks again (the person at the Mac took them back).
     func forget(_ ids: Set<UInt32>) {
-        for (key, entry) in wanted { wanted[key] = (entry.connection, entry.windows.filter { !ids.contains($0) }, entry.fps, entry.wholeApp, entry.screen) }
+        for (key, entry) in wanted {
+            wanted[key] = (entry.connection, entry.windows.filter { !ids.contains($0) }, entry.fps, entry.wholeApp, entry.screen, entry.fullRate)
+        }
         Task { await reconcile() }
     }
 
@@ -129,7 +135,8 @@ final class SideStreams {
         for entry in wanted.values {
             for id in entry.windows where id != main {
                 if fps[id] == nil { order.append(id) }
-                fps[id] = max(fps[id] ?? 0, entry.fps)
+                // A window wanted at full speed: the main stream's rate (the device's, under this Mac's limit).
+                fps[id] = max(fps[id] ?? 0, entry.fullRate.contains(id) ? max(entry.fps, mainFPS()) : entry.fps)
                 subscribers[id, default: []].append(entry.connection)
             }
         }

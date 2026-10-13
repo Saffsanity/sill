@@ -757,6 +757,9 @@ final class StreamClient: ObservableObject {
     @Published var hostBadges: [String: String] = [:]
     /// The apps whose Dock icon bounces on the Mac now (`WindowList.attention`), by bundle ID.
     @Published var hostAttention: Set<String> = []
+    /// Whether the Mac streams windows a device names at full speed beside the main one
+    /// (`WindowList.fullRate`, `SideStreamRequest.fullRate`).
+    @Published var hostFullRate = false
     private var lastWindowMoveAt: CFTimeInterval = 0
     /// The Mac's own displays, to pick which the Desktop is (`WindowList.displays`, kind 40), and that one.
     @Published var hostDisplays: [DisplayInfo] = []
@@ -2933,6 +2936,7 @@ final class StreamClient: ObservableObject {
         hostWindowInput = false
         hostBadges = [:]
         hostAttention = []
+        hostFullRate = false
         hostDisplays = []
         desktopDisplay = nil
         remoteRoute = nil
@@ -3475,6 +3479,7 @@ final class StreamClient: ObservableObject {
                 self.hostWindowInput = list.windowInput == true
                 if self.hostBadges != (list.badges ?? [:]) { self.hostBadges = list.badges ?? [:] }
                 if self.hostAttention != Set(list.attention ?? []) { self.hostAttention = Set(list.attention ?? []) }
+                if self.hostFullRate != (list.fullRate == true) { self.hostFullRate = list.fullRate == true }
                 if self.hostDisplays != (list.displays ?? []) { self.hostDisplays = list.displays ?? [] }
                 if self.desktopDisplay != list.desktopDisplay { self.desktopDisplay = list.desktopDisplay }
                 if !self.sessionListed {
@@ -3981,10 +3986,11 @@ extension StreamClient {
     /// The windows this device shows besides the one it streams (kind 29), to a Mac that streams
     /// them: an empty list stops them. Kept and sent again on each new connection. Main thread.
     func requestSideStreams(_ windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: CGSize? = nil, audio: Bool? = nil,
-                            audioCodec: String? = nil) {
+                            audioCodec: String? = nil, fullRate: [UInt32]? = nil) {
         let request = SideStreamRequest(windows: windows, fps: fps, wholeApp: wholeApp,
                                         screen: screen.map { [Double($0.width), Double($0.height)] }, audio: audio,
-                                        audioCodec: audio == true ? audioCodec : nil)
+                                        audioCodec: audio == true ? audioCodec : nil,
+                                        fullRate: hostFullRate && fullRate?.isEmpty == false ? fullRate : nil)
         guard request != sideRequest else { return }
         sideRequest = request
         guard hostSideStreams > 0 else { return }

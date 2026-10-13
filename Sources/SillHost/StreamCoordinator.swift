@@ -1148,6 +1148,7 @@ package final class StreamCoordinator {
             if sideStreams == nil {
                 let made = SideStreams(server: server, catalog: catalog)
                 made.settings = { [unowned self] in (self.captureScale, self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
+                made.mainFPS = { [unowned self] in self.effectiveFPS }
                 made.mainWindow = { [unowned self] in
                     if case .window(let id)? = self.selecting { return id }
                     if case .window(let id) = self.active { return id }
@@ -2844,7 +2845,7 @@ package final class StreamCoordinator {
                                                       liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
                                                       displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID,
                                                       windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges,
-                                                      attention: dockAttention.isEmpty ? nil : dockAttention)))
+                                                      attention: dockAttention.isEmpty ? nil : dockAttention, fullRate: true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

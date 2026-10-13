@@ -23,15 +23,21 @@ public struct SideStreamRequest: Codable, Hashable, Sendable {
     /// The sound compressed (`AudioPacket.aacELD`, about 96 kbit/s instead of 1.5 Mbit/s); nil, plain
     /// PCM. A host that cannot encode sends PCM.
     public var audioCodec: String?
+    /// Windows of `windows` wanted at the main stream's rate though not in front (the viewer's "full
+    /// speed"), at most `maxFullRate`, the first ones taken. Sent only to a host whose list says
+    /// `fullRate`; one before it ignores the key and streams them at `fps`.
+    public var fullRate: [UInt32]?
 
     public init(windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: [Double]? = nil, audio: Bool? = nil,
-                audioCodec: String? = nil) {
+                audioCodec: String? = nil, fullRate: [UInt32]? = nil) {
         self.windows = windows; self.fps = fps; self.wholeApp = wholeApp; self.screen = screen; self.audio = audio
-        self.audioCodec = audioCodec
+        self.audioCodec = audioCodec; self.fullRate = fullRate
     }
 
     public static let defaultFPS = 15
     public static let maxFPS = 30
+    /// Each one costs the host's encoder and the link as much as the main stream.
+    public static let maxFullRate = 2
 
     /// A side stream's payload (kinds 30 and 31): the window ID, then the rest.
     public static func pack(window: UInt32, _ payload: Data) -> Data {

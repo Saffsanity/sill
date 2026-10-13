@@ -6,12 +6,21 @@ import AppKit
 /// its strip moves this window too: StreamInputView), and its buttons, with that Mac's own
 /// green-button menu, are that Mac's. A child window of the focused one, so it moves with it; shown
 /// only while that window is key and the app is in front; over the window's top-left corner when
-/// there is no room above it. Main thread.
+/// there is no room above it. After the lights, a bolt, where the other Mac streams windows in the
+/// background at full speed: lit, this window keeps the main stream's rate when another is in front
+/// (StreamWindows.fullSpeed). Main thread.
 final class WindowPill: NSPanel {
     private weak var parentStream: StreamWindow?
     private let label = NSTextField(labelWithString: "")
     private let icon = NSImageView()
+    private let bolt = BoltButton()
     private static let height: CGFloat = 26
+    /// The bolt pressed: full speed on or off for the window under the pill.
+    var onFullSpeed: ((StreamWindow) -> Void)?
+    /// Where the icon starts: after the lights, and after the bolt when it shows.
+    private var lead: CGFloat { bolt.isHidden ? 72 : 92 }
+    private var windowTitle = ""
+    private var noteUntil: Date?
 
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 200, height: Self.height),
@@ -38,6 +47,13 @@ final class WindowPill: NSPanel {
             b.onPress = { [weak self] kind in self?.press(kind) }
             effect.addSubview(b)
         }
+        bolt.frame = NSRect(x: 66, y: (Self.height - 18) / 2, width: 18, height: 18)
+        bolt.onPress = { [weak self] in
+            guard let self, let window = self.parentStream else { return }
+            self.onFullSpeed?(window)
+        }
+        bolt.isHidden = true
+        effect.addSubview(bolt)
         icon.frame = NSRect(x: 72, y: (Self.height - 16) / 2, width: 16, height: 16)
         effect.addSubview(icon)
         label.font = .systemFont(ofSize: 12, weight: .medium)
@@ -50,8 +66,9 @@ final class WindowPill: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// Shows the pill over `window`, or hides it (nil).
-    func show(over window: StreamWindow?, title: String, image: NSImage?) {
+    /// Shows the pill over `window`, or hides it (nil). `fullSpeed`: the bolt, lit or not; nil, none
+    /// (a host that streams every background window at one rate).
+    func show(over window: StreamWindow?, title: String, image: NSImage?, fullSpeed: Bool? = nil) {
         #if DEBUG
         FileHandle.standardError.write(Data("pill: \(window.map { "over \($0.title) \($0.frame)" } ?? "hidden")\n".utf8))
         #endif
@@ -62,8 +79,13 @@ final class WindowPill: NSPanel {
             return
         }
         parentStream = window
-        label.stringValue = title
+        windowTitle = title
+        if noteUntil.map({ $0 < Date() }) ?? true { noteUntil = nil; label.stringValue = title }
         icon.image = image
+        bolt.isHidden = fullSpeed == nil
+        bolt.on = fullSpeed == true
+        icon.frame.origin.x = lead
+        label.frame.origin.x = lead + 22
         place()
         if parent !== window { window.addChildWindow(self, ordered: .above) }
         orderFront(nil)
@@ -73,14 +95,27 @@ final class WindowPill: NSPanel {
     func place() {
         guard let window = parentStream else { return }
         let titleWidth = min(ceil(label.intrinsicContentSize.width), 360)
-        let width = min(94 + titleWidth + 14, max(window.frame.width, 120))
-        label.frame.size.width = width - 94 - 14
+        let width = min(lead + 22 + titleWidth + 14, max(window.frame.width, 120))
+        label.frame.size.width = width - lead - 22 - 14
         let screenTop = (window.screen ?? NSScreen.main)?.visibleFrame.maxY ?? .greatestFiniteMagnitude
         var origin = NSPoint(x: window.frame.minX + 6, y: window.frame.maxY + 4)
         // No room above (full screen, or a window at the top): inside its top-left corner, where the
         // other Mac's traffic lights are, so its green light always takes the window out of full screen.
         if window.styleMask.contains(.fullScreen) || origin.y + Self.height > screenTop { origin.y = window.frame.maxY - Self.height - 4 }
         setFrame(NSRect(origin: origin, size: NSSize(width: width, height: Self.height)), display: true)
+    }
+
+    /// A word in the title's place for a few seconds (a window the bolt's limit sent back to 15 fps).
+    func note(_ text: String) {
+        noteUntil = Date().addingTimeInterval(3)
+        label.stringValue = text
+        place()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.05) { [weak self] in
+            guard let self, let until = self.noteUntil, until <= Date() else { return }
+            self.noteUntil = nil
+            self.label.stringValue = self.windowTitle
+            self.place()
+        }
     }
 
     private func press(_ kind: TrafficLight.Kind) {
@@ -113,6 +148,7 @@ final class TrafficLight: NSView {
     init(kind: Kind) {
         self.kind = kind
         super.init(frame: .zero)
+        setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(kind == .close ? "Close" : kind == .minimize ? "Minimize" : "Full Screen")
     }
@@ -143,6 +179,56 @@ final class TrafficLight: NSView {
         let tinted = NSImage(size: image.size, flipped: false) { rect in
             image.draw(in: rect)
             NSColor.black.withAlphaComponent(0.6).set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        tinted.draw(in: NSRect(x: (bounds.width - image.size.width) / 2, y: (bounds.height - image.size.height) / 2,
+                               width: image.size.width, height: image.size.height))
+    }
+}
+
+/// The pill's bolt: full speed in the background, lit (the accent colour) or not (grey).
+final class BoltButton: NSView {
+    var on = false {
+        didSet {
+            needsDisplay = true
+            setAccessibilityValue(on ? "On" : "Off")
+            toolTip = on ? "Full speed in the background: this window keeps its full frame rate when another is in front. Click to turn off."
+                         : "Full speed in the background: click to keep this window at its full frame rate when another is in front (two at most)."
+        }
+    }
+    var onPress: (() -> Void)?
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        setAccessibilityLabel("Full Speed in the Background")
+        on = false
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress?() }
+    }
+    override func accessibilityPerformPress() -> Bool { onPress?(); return true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        guard let image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return }
+        let color: NSColor = on ? .controlAccentColor : (hovering ? .secondaryLabelColor : .tertiaryLabelColor)
+        let tinted = NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            color.set()
             rect.fill(using: .sourceAtop)
             return true
         }

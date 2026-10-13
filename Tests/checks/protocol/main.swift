@@ -542,6 +542,12 @@ do {
               Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, windowInput: true)))?.windowInput == true
               && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.windowInput == nil)
     }
+    check("full rate: a request's windows at full speed round-trip, nil from a device before",
+          Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1, 2, 3], fullRate: [2, 3])))?.fullRate == [2, 3]
+          && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.fullRate == nil)
+    check("full rate: a host's flag round-trips, nil from a host before",
+          Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, fullRate: true)))?.fullRate == true
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.fullRate == nil)
     check("attention: round-trip, nil from a host before",
           Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, attention: ["a.b", "c.d"])))?.attention == ["a.b", "c.d"]
           && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.attention == nil)

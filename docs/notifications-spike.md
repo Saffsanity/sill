@@ -231,4 +231,14 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
   macOS does it. Seen on one Mac against the other: minimised into a remote app's own icon and back by
   each of the three ways, the stand-in and the picture gone after, and the menu bar showing the
   remote app's menus with no Sill Viewer Dock icon.
+- **Full speed in the background.** A bolt in a window's pill (after the lights; the accent colour lit,
+  grey not) keeps that window at the main stream's rate when another is in front, where the others get
+  15 fps: `SideStreamRequest.fullRate` names it, two at most (each costs the host's one encoder and the
+  link as much as the main stream), and a third mark takes the oldest's, the pill saying which went
+  back to 15 fps. Sent only to a host whose list says `fullRate`; the host streams those windows at
+  its main stream's rate (`SideStreams.mainFPS`, the device's rate under its Frame Rate limit), the
+  bitrate following as for any side stream. For the session: a window's ID lives as long as the
+  window. The pill's lights and bolt are Accessibility elements now (they were not: VoiceOver had none
+  of them). Seen between two Macs: a window marked and then put behind a Desktop window streamed at
+  120 fps and 30 Mbps, at 15 fps and 3 Mbps unmarked. Not tried: a third mark replacing the oldest.
 

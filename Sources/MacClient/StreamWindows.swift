@@ -95,6 +95,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             if let feed = feeds.get(id) { route.sideFrame(data, isKeyframe: isKey, into: feed) }
         }
         dock.onFocus = { [weak self] app, window in self?.focus(app: app, window: window) }
+        pill.onFullSpeed = { [weak self] window in self?.toggleFullSpeed(window) }
         dock.onLaunch = { [weak self] app in self?.launchFromDock(app) }
         dock.askMenu = { [weak self] app in
             guard let self, self.client.hostDockMenu, self.client.connected else { return }
@@ -220,7 +221,38 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         // Every window with what belongs to it: its menus, popovers, sheets and the system's panels.
         client.requestSideStreams(ids, wholeApp: true, screen: Self.largestScreen,
-                                  audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec)
+                                  audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec,
+                                  fullRate: fullSpeed.filter { ids.contains($0) })
+    }
+
+    /// The windows marked full speed in their pill (the bolt), oldest first, at most
+    /// `SideStreamRequest.maxFullRate`: streamed at the main stream's rate when not in front, where the
+    /// others get 15 fps. For this session: a window's ID is the other Mac's, and lives as long as it.
+    private var fullSpeed: [UInt32] = []
+
+    /// The pill's bolt: full speed on or off for the focused window. A mark beyond the limit takes the
+    /// oldest's; the pill says which went back to 15 fps.
+    private func toggleFullSpeed(_ window: StreamWindow) {
+        guard let id = Self.sideID(window.source) else { return }
+        if let i = fullSpeed.firstIndex(of: id) {
+            fullSpeed.remove(at: i)
+        } else {
+            fullSpeed.append(id)
+            if fullSpeed.count > SideStreamRequest.maxFullRate {
+                let dropped = fullSpeed.removeFirst()
+                let name = open[.window(dropped)].map { $0.title } ?? "another window"
+                pill.note("\(name) back to 15 fps in the background")
+            }
+        }
+        windowLog("full speed: \(fullSpeed)")
+        updatePill()
+        requestSideStreams()
+    }
+
+    /// A window's ID as side streams name it (a Desktop window's display tagged, DesktopWindow).
+    private static func sideID(_ source: StreamSource) -> UInt32? {
+        guard case .window(let id) = source else { return nil }
+        return id
     }
 
     /// This Mac's largest display, in points: the room the host keeps for each window (Sill's desk).
@@ -393,7 +425,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         } else if display(of: key.source) != nil || key.source == .desktop {
             image = NSApp.applicationIconImage
         }
-        pill.show(over: key, title: title(key.source), image: image)
+        pill.show(over: key, title: title(key.source), image: image,
+                  fullSpeed: client.hostFullRate ? Self.sideID(key.source).map { fullSpeed.contains($0) } : nil)
     }
 
     /// From a Dock icon: one window, or every window of the app (the most recent one key).
@@ -649,6 +682,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         guard let window = notification.object as? StreamWindow else { return }
         open[window.source] = nil
         window.forgetPicture()
+        if let id = Self.sideID(window.source) { fullSpeed.removeAll { $0 == id } }
         router.register(window.source, nil)
         if case .window(let id) = window.source { sideFeeds.set(id, nil) }
         defer { requestSideStreams(); syncDock(); keep() }
