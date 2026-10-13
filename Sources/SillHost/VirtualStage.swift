@@ -528,9 +528,12 @@ final class VirtualStage {
                 // (a minimum in both dimensions) and stillness counts at once, as before: waiting for
                 // a change that never comes would freeze each such restart for the whole deadline. An
                 // app that applies a size after answering the write (AX lags too) reads as a refusal
-                // and is left to the catalog's next poll, as before.
-                var taken: CGRect?                            // what AX says the app took, if a new size
-                if let before, let f = WindowSizer.frame(of: p.element), !Self.sameSize(f.size, before.size) { taken = f }
+                // and is left to the catalog's next poll, as before. A move with no new size is
+                // judged the same way by its origin: an Electron app took 720 ms to list a move, so
+                // three still reads of its old place called the move refused after 120 ms and it was
+                // captured where it was (2026-10-13), though AX already had it on the display.
+                var taken: CGRect?                            // what AX says the app took, if a new size or place
+                if let before, let f = WindowSizer.frame(of: p.element), !Self.close(f, before) { taken = f }
                 var stillnessCounts = taken == nil
                 var settled = false
                 var same = 0
