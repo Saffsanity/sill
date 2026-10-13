@@ -4,7 +4,8 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
-    ("full rate windows not kept", "SideStreams.swift", "self.audioCodec = audioCodec; self.fullRate = fullRate", "self.audioCodec = audioCodec; self.fullRate = nil"),
+    ("full rate windows not kept", "SideStreams.swift", "self.fullRate = fullRate;", "self.fullRate = nil;"),
+    ("paused windows not kept", "SideStreams.swift", "self.paused = paused", "self.paused = nil"),
     ("host full rate flag not kept", "Switcher.swift", "self.attention = attention; self.fullRate = fullRate", "self.attention = attention; self.fullRate = nil"),
     ("attention not kept", "Switcher.swift", "self.attention = attention;", "self.attention = nil;"),
     ("badges not kept", "Switcher.swift", "self.windowInput = windowInput; self.badges = badges", "self.windowInput = windowInput; self.badges = nil"),

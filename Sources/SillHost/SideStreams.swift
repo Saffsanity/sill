@@ -21,6 +21,8 @@ final class SideStreams {
         let id: UInt32
         let size: CGSize
         let fps: Int
+        /// Its capture and encode scale: the stream's, or 1× in the background (not at full speed).
+        let scale: CGFloat
         /// The window's frame when it was cropped from its display (wholeApp), to tell when it moved.
         var cropFrame: CGRect?
         /// The share pill macOS draws while the window itself is captured (SharePill).
@@ -29,7 +31,7 @@ final class SideStreams {
         var onDesk = false
         let capture = WindowCapture()
         var encoder: HEVCEncoder?
-        init(id: UInt32, size: CGSize, fps: Int) { self.id = id; self.size = size; self.fps = fps }
+        init(id: UInt32, size: CGSize, fps: Int, scale: CGFloat) { self.id = id; self.size = size; self.fps = fps; self.scale = scale }
     }
 
     private let server: StreamServer
@@ -44,7 +46,7 @@ final class SideStreams {
     var desk: () -> DeskStages? = { nil }
 
     private var wanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], fps: Int, wholeApp: Bool, screen: CGSize?,
-                                               fullRate: Set<UInt32>)] = [:]
+                                               fullRate: Set<UInt32>, paused: Set<UInt32>)] = [:]
     /// The largest screen of the devices that asked (Sill's desk makes each window's room that big).
     var largestScreen: CGSize? {
         wanted.values.compactMap(\.screen).max { $0.width * $0.height < $1.width * $1.height }
@@ -75,6 +77,7 @@ final class SideStreams {
     func request(_ r: SideStreamRequest, from c: NWConnection) {
         let fps = min(max(r.fps ?? SideStreamRequest.defaultFPS, 1), SideStreamRequest.maxFPS)
         let full = Set((r.fullRate ?? []).prefix(SideStreamRequest.maxFullRate))
+        let paused = Set(r.paused ?? [])
         var seen = Set<UInt32>()
         let windows = r.windows.filter { seen.insert($0).inserted }
         let before = wholeApp
@@ -82,7 +85,7 @@ final class SideStreams {
         if windows.isEmpty && r.wholeApp != true { wanted[ObjectIdentifier(c)] = nil }
         else {
             let screen = r.screen.flatMap { $0.count == 2 && $0[0] > 0 && $0[1] > 0 ? CGSize(width: $0[0], height: $0[1]) : nil }
-            wanted[ObjectIdentifier(c)] = (c, windows, fps, r.wholeApp == true, screen, full)
+            wanted[ObjectIdentifier(c)] = (c, windows, fps, r.wholeApp == true, screen, full, paused)
         }
         if wholeApp != before { onWholeAppChanged?() }
         Task { await reconcile() }
@@ -104,7 +107,8 @@ final class SideStreams {
     /// `ids` no longer asked for by any device until it asks again (the person at the Mac took them back).
     func forget(_ ids: Set<UInt32>) {
         for (key, entry) in wanted {
-            wanted[key] = (entry.connection, entry.windows.filter { !ids.contains($0) }, entry.fps, entry.wholeApp, entry.screen, entry.fullRate)
+            wanted[key] = (entry.connection, entry.windows.filter { !ids.contains($0) }, entry.fps, entry.wholeApp, entry.screen,
+                           entry.fullRate, entry.paused)
         }
         Task { await reconcile() }
     }
@@ -132,9 +136,14 @@ final class SideStreams {
         var order: [UInt32] = []
         var fps: [UInt32: Int] = [:]
         var subscribers: [UInt32: [NWConnection]] = [:]
+        // Full speed keeps a window at the stream's scale; every other one in the background is
+        // encoded at 1× (a quarter of a Retina window's pixels: the one encoder goes further).
+        var full: Set<UInt32> = []
         for entry in wanted.values {
-            for id in entry.windows where id != main {
+            // A window the device cannot see now (minimised, covered) stays on the desk, unsent.
+            for id in entry.windows where id != main && !entry.paused.contains(id) {
                 if fps[id] == nil { order.append(id) }
+                if entry.fullRate.contains(id) { full.insert(id) }
                 // A window wanted at full speed: the main stream's rate (the device's, under this Mac's limit).
                 fps[id] = max(fps[id] ?? 0, entry.fullRate.contains(id) ? max(entry.fps, mainFPS()) : entry.fps)
                 subscribers[id, default: []].append(entry.connection)
@@ -163,31 +172,32 @@ final class SideStreams {
             if let main { keep.insert(main) }
             desk.keep(wholeApp ? keep : [])   // no device asks for it any more: every window goes home
         }
+        let scaleOf = { (id: UInt32) -> CGFloat in full.contains(id) ? self.settings().scale : min(self.settings().scale, 1) }
         for (id, stream) in streams where DesktopWindow.display(of: id) != nil {
             let size = displays[id].map { CGDisplayBounds($0.displayID).size }
-            if size != stream.size || fps[id] != stream.fps { await stop(id) }
+            if size != stream.size || fps[id] != stream.fps || scaleOf(id) != stream.scale { await stop(id) }
         }
         for (id, d) in displays where streams[id] == nil {
-            await start(display: d, id: id, fps: fps[id] ?? SideStreamRequest.defaultFPS)
+            await start(display: d, id: id, fps: fps[id] ?? SideStreamRequest.defaultFPS, scale: scaleOf(id))
         }
         for (id, stream) in streams where DesktopWindow.display(of: id) == nil {
             let w = target[id]
             let moved = stream.cropFrame.map { $0.origin != w?.frame.origin } ?? false
-            if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved
+            if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved || scaleOf(id) != stream.scale
                 || (stream.cropFrame != nil || stream.onDesk) != wholeApp { await stop(id) }
         }
         for (id, w) in target where streams[id] == nil {
-            await start(w, fps: fps[id] ?? SideStreamRequest.defaultFPS)
+            await start(w, fps: fps[id] ?? SideStreamRequest.defaultFPS, scale: scaleOf(id))
         }
     }
 
     /// A Desktop window's side stream: the display whole, at the stream's scale.
-    private func start(display d: SCDisplay, id: UInt32, fps: Int) async {
+    private func start(display d: SCDisplay, id: UInt32, fps: Int, scale: CGFloat) async {
         let s = settings()
         let size = CGDisplayBounds(d.displayID).size
-        let width = evenPixels(size.width * s.scale), height = evenPixels(size.height * s.scale)
+        let width = evenPixels(size.width * scale), height = evenPixels(size.height * scale)
         let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
-        let stream = Stream(id: id, size: size, fps: fps)
+        let stream = Stream(id: id, size: size, fps: fps, scale: scale)
         do {
             let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
                                       software: s.software, quiet: true)
@@ -223,12 +233,12 @@ final class SideStreams {
         }
     }
 
-    private func start(_ w: SCWindow, fps: Int) async {
+    private func start(_ w: SCWindow, fps: Int, scale streamScale: CGFloat) async {
         let id = w.windowID
         let s = settings()
-        let width = evenPixels(w.frame.width * s.scale), height = evenPixels(w.frame.height * s.scale)
+        let width = evenPixels(w.frame.width * streamScale), height = evenPixels(w.frame.height * streamScale)
         let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
-        let stream = Stream(id: id, size: w.frame.size, fps: fps)
+        let stream = Stream(id: id, size: w.frame.size, fps: fps, scale: streamScale)
         do {
             let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
                                       software: s.software, quiet: true)
@@ -268,7 +278,7 @@ final class SideStreams {
                 // its display is captured instead: the window an app reports then can be far wider
                 // than its Space (a browser's: 3768 pt on a 1712 pt display), and fitted into the frame
                 // the video was a quarter of it, in a corner (2026-10-12).
-                let scale = min(s.scale, desk()?.scale(for: id) ?? s.scale)
+                let scale = min(streamScale, desk()?.scale(for: id) ?? streamScale)
                 let width = evenPixels(staged.size.width * scale), height = evenPixels(staged.size.height * scale)
                 if desk()?.isFullScreen(id) == true {
                     try await stream.capture.start(filter: staged.filter, width: width, height: height, fps: fps, showsCursor: false,

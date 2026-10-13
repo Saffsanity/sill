@@ -25,7 +25,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
   `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
   Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), input to a
-  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices' `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`, `fullRate`), AAC-ELD
+  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices' `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`, `fullRate`), windows no one can see here paused (`SideStreamRequest.paused`: minimised or covered, kept on the desk, not captured or sent; the background ones that stream at 1× unless at full speed), AAC-ELD
   sound (kind 33, `audioCodec`). A window ID with the top bit set is a display (`DesktopWindow`).
   The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
@@ -45,7 +45,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
   (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 242 with 35
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 243 with 36
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.

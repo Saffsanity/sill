@@ -214,15 +214,20 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         // as a side one, and keeps them all on Sill's desk, also between two picks.
         // Only windows still open: a closing one is still among AppKit's while it closes, and asked
         // for then, the host kept it on its desk, captured, the sharing indicator on (2026-10-12).
-        let ordered = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.map(\.source).filter { open[$0] != nil }
-        let ids = ordered.compactMap { source -> UInt32? in
-            guard case .window(let id) = source else { return nil }
-            return id
-        }
+        // A window minimised into its app's Dock icon is put away, so not among AppKit's ordered ones:
+        // still asked for, last, so the host keeps it on its desk.
+        let windows = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.filter { open[$0.source] === $0 }
+            + open.values.filter { $0.parked }
+        let ids = windows.compactMap { Self.sideID($0.source) }
+        // Those no one can see here (minimised, or wholly covered or off screen): kept on the host's
+        // desk, not captured or sent, until they can be seen again. Never the one streaming.
+        let paused = windows.filter { window in
+            window.source != showing && (window.parked || window.isMiniaturized || !window.occlusionState.contains(.visible))
+        }.compactMap { Self.sideID($0.source) }
         // Every window with what belongs to it: its menus, popovers, sheets and the system's panels.
         client.requestSideStreams(ids, wholeApp: true, screen: Self.largestScreen,
                                   audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec,
-                                  fullRate: fullSpeed.filter { ids.contains($0) })
+                                  fullRate: fullSpeed.filter { ids.contains($0) }, paused: paused)
     }
 
     /// The windows marked full speed in their pill (the bolt), oldest first, at most
@@ -673,8 +678,11 @@ final class StreamWindows: NSObject, NSWindowDelegate {
 
 
     func windowDidResignKey(_ notification: Notification) { updatePill() }
-    func windowDidMiniaturize(_ notification: Notification) { updatePill(); syncDock() }
-    func windowDidDeminiaturize(_ notification: Notification) { updatePill(); syncDock() }
+    func windowDidMiniaturize(_ notification: Notification) { updatePill(); syncDock(); requestSideStreams() }
+    func windowDidDeminiaturize(_ notification: Notification) { updatePill(); syncDock(); requestSideStreams() }
+    /// Covered or uncovered, on screen or off (another Space, the display asleep): a window no one
+    /// can see is paused on the host.
+    func windowDidChangeOcclusionState(_ notification: Notification) { requestSideStreams() }
     func windowDidEnterFullScreen(_ notification: Notification) { updatePill() }
     func windowDidExitFullScreen(_ notification: Notification) { updatePill() }
 

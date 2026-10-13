@@ -27,11 +27,15 @@ public struct SideStreamRequest: Codable, Hashable, Sendable {
     /// speed"), at most `maxFullRate`, the first ones taken. Sent only to a host whose list says
     /// `fullRate`; one before it ignores the key and streams them at `fps`.
     public var fullRate: [UInt32]?
+    /// Windows of `windows` no one can see on the device now (minimised, or covered): kept where they
+    /// are on the host (its desk) but not captured or sent until they are left out of this again. A
+    /// host before 2026-10-13 ignores the key and streams them.
+    public var paused: [UInt32]?
 
     public init(windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: [Double]? = nil, audio: Bool? = nil,
-                audioCodec: String? = nil, fullRate: [UInt32]? = nil) {
+                audioCodec: String? = nil, fullRate: [UInt32]? = nil, paused: [UInt32]? = nil) {
         self.windows = windows; self.fps = fps; self.wholeApp = wholeApp; self.screen = screen; self.audio = audio
-        self.audioCodec = audioCodec; self.fullRate = fullRate
+        self.audioCodec = audioCodec; self.fullRate = fullRate; self.paused = paused
     }
 
     public static let defaultFPS = 15
