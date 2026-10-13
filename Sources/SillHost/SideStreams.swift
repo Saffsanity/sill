@@ -236,10 +236,45 @@ final class SideStreams {
     private func start(_ w: SCWindow, fps: Int, scale streamScale: CGFloat) async {
         let id = w.windowID
         let s = settings()
-        let width = evenPixels(w.frame.width * streamScale), height = evenPixels(w.frame.height * streamScale)
         let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
         let stream = Stream(id: id, size: w.frame.size, fps: fps, scale: streamScale)
+        // Registered before anything waits, so a reconcile meanwhile sees it starting.
+        streams[id] = stream
         do {
+            // Where it is captured, and so the picture's size, decided first: the encoder is made at
+            // that size. Made at the window's reported size instead, a full-screen window captured as
+            // its display's band (1920×840 where the window said 1920×1198) was stretched tall on the
+            // device (2026-10-13).
+            var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
+            if wholeApp, let desk = desk() {
+                do { staged = try await desk.prepare(w, size: w.frame.size, captureScale: s.scale, fps: nil, room: largestScreen) }
+                catch { print("Sill's desk: window \(id) could not move there (\(error)); capturing it where it is.") }
+            }
+            guard streams[id] === stream else { return }   // stopped while it was being placed
+            var plan: (filter: SCContentFilter, sourceRect: CGRect?, width: Int, height: Int)
+            var crop: (frame: CGRect, filter: SCContentFilter, sourceRect: CGRect)?
+            if let staged {
+                stream.onDesk = true
+                // A window in the background is captured on its own (its menus are for when it is the
+                // main stream); window capture shows the system's share pill by itself. Full screen,
+                // its display is captured instead: the window an app reports then can be far wider
+                // than its Space (a browser's: 3768 pt on a 1712 pt display), and fitted into the frame
+                // the video was a quarter of it, in a corner (2026-10-12).
+                let scale = min(streamScale, desk()?.scale(for: id) ?? streamScale)
+                let width = evenPixels(staged.size.width * scale), height = evenPixels(staged.size.height * scale)
+                plan = desk()?.isFullScreen(id) == true
+                    ? (staged.filter, staged.sourceRect, width, height)
+                    : (SCContentFilter(desktopIndependentWindow: w), nil, width, height)
+            } else if wholeApp, w.isOnScreen, let found = await AppCrop.crop(for: w) {
+                // On screen only: cropped from its display, a window in another Space showed what
+                // lay there instead (other apps' windows), not itself.
+                crop = (found.frame, found.filter, found.sourceRect)
+                plan = (found.filter, found.sourceRect, evenPixels(w.frame.width * streamScale), evenPixels(w.frame.height * streamScale))
+            } else {
+                plan = (SCContentFilter(desktopIndependentWindow: w), nil,
+                        evenPixels(w.frame.width * streamScale), evenPixels(w.frame.height * streamScale))
+            }
+            let width = plan.width, height = plan.height
             let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
                                       software: s.software, quiet: true)
             let server = self.server
@@ -263,42 +298,17 @@ final class SideStreams {
                 }
             }
             stream.encoder = enc
-            streams[id] = stream
             encoders.set(id, enc)
-            var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?
-            if wholeApp, let desk = desk() {
-                do { staged = try await desk.prepare(w, size: w.frame.size, captureScale: s.scale, fps: nil, room: largestScreen) }
-                catch { print("Sill's desk: window \(id) could not move there (\(error)); capturing it where it is.") }
-            }
-            if let staged {
-                stream.cropFrame = nil
-                stream.onDesk = true
-                // A window in the background is captured on its own (its menus are for when it is the
-                // main stream); window capture shows the system's share pill by itself. Full screen,
-                // its display is captured instead: the window an app reports then can be far wider
-                // than its Space (a browser's: 3768 pt on a 1712 pt display), and fitted into the frame
-                // the video was a quarter of it, in a corner (2026-10-12).
-                let scale = min(streamScale, desk()?.scale(for: id) ?? streamScale)
-                let width = evenPixels(staged.size.width * scale), height = evenPixels(staged.size.height * scale)
-                if desk()?.isFullScreen(id) == true {
-                    try await stream.capture.start(filter: staged.filter, width: width, height: height, fps: fps, showsCursor: false,
-                                                   sourceRect: staged.sourceRect)
-                } else {
-                    try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
-                                                   fps: fps, showsCursor: false)
-                }
-            } else if wholeApp, w.isOnScreen, let crop = await AppCrop.crop(for: w) {
-                // On screen only: cropped from its display, a window in another Space showed what
-                // lay there instead (other apps' windows), not itself.
+            if let crop {
                 stream.cropFrame = crop.frame
                 let pill = SharePill()
                 await pill.start(w)
                 stream.pill = pill
-                try await stream.capture.start(filter: crop.filter, width: width, height: height, fps: fps, showsCursor: false,
-                                               sourceRect: crop.sourceRect)
+            }
+            if let rect = plan.sourceRect {
+                try await stream.capture.start(filter: plan.filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: rect)
             } else {
-                try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
-                                               fps: fps, showsCursor: false)
+                try await stream.capture.start(filter: plan.filter, width: width, height: height, fps: fps, showsCursor: false)
             }
             print("Side stream: \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") (window \(id)) at \(width)×\(height), \(fps) fps, \(bitrate / 1_000_000) Mbps\(stream.cropFrame != nil ? ", with its app" : "")")
         } catch {
