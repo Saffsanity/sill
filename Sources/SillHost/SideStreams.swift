@@ -275,6 +275,9 @@ final class SideStreams {
                         evenPixels(w.frame.width * streamScale), evenPixels(w.frame.height * streamScale))
             }
             let width = plan.width, height = plan.height
+            // A window at full speed runs at the main stream's rate: capped at its size as that is.
+            let fps = StreamRate.capped(fps, pixels: width * height, software: s.software)
+            let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
             let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: bitrate, prioritizeSpeed: s.prioritizeSpeed,
                                       software: s.software, quiet: true)
             let server = self.server

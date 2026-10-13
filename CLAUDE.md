@@ -46,7 +46,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
 - Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 243 with 36
-  mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
+  mutants, `stream-rate` 15 with 7 (a stream's rate capped at its size: 3930×2188 runs at 60 where the device asks 120; StreamRate), the encoder's experiments behind hidden settings (`encoderLowLatency`, `encoderMaxRealTimeFrameRate`, `encoderRealTimeOff`, `encoderExpectedFrameRate`; HEVCEncoder) (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app

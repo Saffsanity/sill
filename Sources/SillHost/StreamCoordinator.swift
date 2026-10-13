@@ -1821,7 +1821,11 @@ package final class StreamCoordinator {
     /// `title` and `kind` describe the stream in the app's menu.
     private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
-        let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
+        // What the encoder can keep up with at this size (StreamRate): `fps` stays the devices' rate,
+        // which every restart rule compares against, and only this pipeline runs slower.
+        let rate = StreamRate.capped(fps, pixels: width * height, software: useSoftwareEncoder)
+        let rateBitrate = bitrate * rate / 60
+        let enc = try HEVCEncoder(width: width, height: height, fps: rate, bitrate: rateBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
         enc.onHung = { [weak self, weak enc] in
             Task { @MainActor in
@@ -1849,17 +1853,17 @@ package final class StreamCoordinator {
         server.broadcast(listMessage())
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
+            try await capture.start(filter: filter, width: width, height: height, fps: rate, showsCursor: false, sourceRect: sourceRect)
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            syntheticCapture.start(width: width, height: height, fps: fps)
+            syntheticCapture.start(width: width, height: height, fps: rate)
         }
         encoder = enc
         active = source
-        print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
+        print("Streaming \(describe) at \(width)×\(height), \(rate) fps\(rate < fps ? " (of \(fps): what the encoder keeps up with at this size)" : ""), \(rateBitrate / 1_000_000) Mbps")
         status.update {
-            $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
-                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil && mainCropFrame == nil,
+            $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: rate,
+                                                  mbps: rateBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil && mainCropFrame == nil,
                                                   softwareEncoder: useSoftwareEncoder)
         }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog

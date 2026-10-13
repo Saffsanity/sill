@@ -130,6 +130,25 @@ final class HEVCEncoder {
     /// (others 0), follows a bitrate change live, and drops frames its own way at low bitrates. On
     /// with `defaults write me.saffer.sill.mac encoderLowLatency -bool YES` (or `-encoderLowLatency 1`
     /// for one run), read once per process and said once.
+    /// EXPERIMENTS, each off unless its key is set (`defaults write me.saffer.sill.mac <key> …`, read
+    /// once per process and said once), against the slow state, from VideoToolbox's documentation and
+    /// what other encoders set (2026-10-13): `encoderMaxRealTimeFrameRate` N sets
+    /// `kVTCompressionPropertyKey_MaximumRealTimeFrameRate` (the peak rate frames may come at, "so it
+    /// can configure itself to ensure this capability"; macOS 15+), `encoderRealTimeOff` leaves
+    /// `RealTime` false (OBS's and FFmpeg's default: the encoder may pace itself to the rate it sees
+    /// when real-time), and `encoderExpectedFrameRate` N declares N as the expected rate instead of the
+    /// stream's. Hardware sessions only.
+    static let experiments: (maxRealTime: Int, realTimeOff: Bool, expected: Int) = {
+        let d = UserDefaults.standard
+        let e = (d.integer(forKey: "encoderMaxRealTimeFrameRate"), d.bool(forKey: "encoderRealTimeOff"), d.integer(forKey: "encoderExpectedFrameRate"))
+        var said: [String] = []
+        if e.0 > 0 { said.append("MaximumRealTimeFrameRate \(e.0)") }
+        if e.1 { said.append("RealTime off") }
+        if e.2 > 0 { said.append("ExpectedFrameRate \(e.2)") }
+        if !said.isEmpty { print("Encoder: experiments on for hardware sessions: \(said.joined(separator: ", "))") }
+        return e
+    }()
+
     private static var lowLatencyRefusalSaid = false
     static let lowLatency: Bool = {
         let on = UserDefaults.standard.bool(forKey: "encoderLowLatency")
@@ -188,14 +207,18 @@ final class HEVCEncoder {
         guard status == noErr, let session = s else { throw EncoderError.create(status) }
 
         func set(_ key: CFString, _ value: CFTypeRef) { VTSessionSetProperty(session, key: key, value: value) }
-        set(kVTCompressionPropertyKey_RealTime, kCFBooleanTrue)
+        let experiments = software ? (maxRealTime: 0, realTimeOff: false, expected: 0) : Self.experiments
+        set(kVTCompressionPropertyKey_RealTime, experiments.realTimeOff ? kCFBooleanFalse : kCFBooleanTrue)
+        if experiments.maxRealTime > 0, #available(macOS 15.0, *) {
+            set(kVTCompressionPropertyKey_MaximumRealTimeFrameRate, experiments.maxRealTime as CFNumber)
+        }
         set(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_HEVC_Main_AutoLevel)
         set(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)      // no B-frames
         // Keyframes are requested on demand (new client, dropped delta, source switch); this is
         // only a safety interval. Longer intervals cut the periodic IDR hitch; 4 s is the value
         // every working stream so far has used.
         set(kVTCompressionPropertyKey_MaxKeyFrameInterval, (fps * 4) as CFNumber)
-        set(kVTCompressionPropertyKey_ExpectedFrameRate, fps as CFNumber)
+        set(kVTCompressionPropertyKey_ExpectedFrameRate, (experiments.expected > 0 ? experiments.expected : fps) as CFNumber)
         set(kVTCompressionPropertyKey_AverageBitRate, bitrate as CFNumber)
         set(kVTCompressionPropertyKey_DataRateLimits, [bitrate / 8, 1] as CFArray)
         if prioritizeSpeed || software, #available(macOS 14.0, *) {
