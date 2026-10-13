@@ -2882,7 +2882,7 @@ whose session has settled in it gets a new session in place, on by default
   every 10–13 s (222 times in a day on a Mac viewer, each a keyframe and a hitch). Two swaps in a row
   slow again within 30 s of taking over (`relapseWithin`, `maxRelapses`) and the stream keeps its
   session, one line: "…the last 2 new sessions each went slow within 30 s, so this stream keeps this
-  one and gets no other." A failed make is no relapse. `encoder-slowstate` 1,213 checks, 33 mutants.
+  one and gets no other." A failed make is no relapse. `encoder-slowstate` 1,211 checks, 33 mutants.
 - `SILL_TEST_ENCODER_RECYCLE=1` or `0` overrides the constant for one process
   (an A/B from one binary; a "TEST:" line says so).
 
