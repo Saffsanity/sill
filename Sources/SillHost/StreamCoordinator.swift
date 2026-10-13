@@ -1519,9 +1519,12 @@ package final class StreamCoordinator {
             }
             if catalog.clientCount == 0 { pick = nil }
             if let pick, pick != active {
-                // The pick's own select fits the latest viewport. Run after it has started, the
-                // viewport tail would resize the old window, which `active` still names mid-switch.
-                viewportArrivedWhileSwitching = false
+                // A viewport that came meanwhile waits for the pick's own select to settle, then fits
+                // the picked window (`viewport` is always the latest, so never an older window's).
+                // Applied now it would resize the old one, which `active` still names mid-switch;
+                // dropped, a Mac viewer's window resized as its pick was asked again (a window moved
+                // to a smaller display as it opened) kept the other Mac's window at its old size
+                // until it was next focused (2026-10-13).
                 // Through the handler's rule again, not straight to `select`: another restart can
                 // start before this Task runs (a viewport's new rate, an encoder hang, a lost
                 // display), and `select` would drop the pick; the rule queues it behind that one.
