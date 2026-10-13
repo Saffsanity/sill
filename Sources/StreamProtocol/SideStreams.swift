@@ -31,11 +31,15 @@ public struct SideStreamRequest: Codable, Hashable, Sendable {
     /// are on the host (its desk) but not captured or sent until they are left out of this again. A
     /// host before 2026-10-13 ignores the key and streams them.
     public var paused: [UInt32]?
+    /// The device's app is not in front (the person works in another app there): its main stream is
+    /// a background window too, at 1× and the side streams' rate, unless it is in `fullRate`. While
+    /// every connected device says so. A host before 2026-10-13 ignores the key.
+    public var background: Bool?
 
     public init(windows: [UInt32], fps: Int? = nil, wholeApp: Bool? = nil, screen: [Double]? = nil, audio: Bool? = nil,
-                audioCodec: String? = nil, fullRate: [UInt32]? = nil, paused: [UInt32]? = nil) {
+                audioCodec: String? = nil, fullRate: [UInt32]? = nil, paused: [UInt32]? = nil, background: Bool? = nil) {
         self.windows = windows; self.fps = fps; self.wholeApp = wholeApp; self.screen = screen; self.audio = audio
-        self.audioCodec = audioCodec; self.fullRate = fullRate; self.paused = paused
+        self.audioCodec = audioCodec; self.fullRate = fullRate; self.paused = paused; self.background = background
     }
 
     public static let defaultFPS = 15

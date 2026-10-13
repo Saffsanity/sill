@@ -127,6 +127,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.updatePill()
+                self?.appActiveChanged()
                 // On activation the key window can come a moment later (a click on a window that was
                 // key while the app was in the background): look again then.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self?.updatePill() }
@@ -227,7 +228,28 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         // Every window with what belongs to it: its menus, popovers, sheets and the system's panels.
         client.requestSideStreams(ids, wholeApp: true, screen: Self.largestScreen,
                                   audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec,
-                                  fullRate: fullSpeed.filter { ids.contains($0) }, paused: paused)
+                                  fullRate: fullSpeed.filter { ids.contains($0) }, paused: paused, background: inBackground)
+    }
+
+    /// Since when this app has been out of front: after `backgroundDelay` the main stream is a
+    /// background window too (`SideStreamRequest.background`), so a glance at another app and back
+    /// costs no restart.
+    private var inactiveSince: Date?
+    private static let backgroundDelay: TimeInterval = 3
+    private var inBackground: Bool { inactiveSince.map { Date().timeIntervalSince($0) >= Self.backgroundDelay - 0.05 } ?? false }
+
+    private func appActiveChanged() {
+        if NSApp.isActive {
+            inactiveSince = nil
+            requestSideStreams()
+        } else if inactiveSince == nil {
+            let since = Date()
+            inactiveSince = since
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.backgroundDelay) { [weak self] in
+                guard let self, self.inactiveSince == since else { return }
+                self.requestSideStreams()
+            }
+        }
     }
 
     /// The windows marked full speed in their pill (the bolt), oldest first, at most

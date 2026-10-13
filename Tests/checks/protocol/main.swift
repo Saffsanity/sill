@@ -548,6 +548,10 @@ do {
     check("paused: a request's unseen windows round-trip, nil from a device before",
           Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1, 2, 3], paused: [3])))?.paused == [3]
           && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.paused == nil)
+    check("background: a request from a viewer out of front round-trips, nil from a device before",
+          Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1], background: true)))?.background == true
+          && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.background == nil
+          && Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1]}"#.utf8))?.background == nil)
     check("full rate: a host's flag round-trips, nil from a host before",
           Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, fullRate: true)))?.fullRate == true
           && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.fullRate == nil)

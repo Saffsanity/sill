@@ -74,6 +74,9 @@ final class SideStreams {
         server.onSideKeyframeNeeded = { id in box.get(id)?.requestKeyframe() }
     }
 
+    /// Whether any device wants `id` at full speed (`SideStreamRequest.fullRate`).
+    func wantsFullRate(_ id: UInt32) -> Bool { wanted.values.contains { $0.fullRate.contains(id) } }
+
     func request(_ r: SideStreamRequest, from c: NWConnection) {
         let fps = min(max(r.fps ?? SideStreamRequest.defaultFPS, 1), SideStreamRequest.maxFPS)
         let full = Set((r.fullRate ?? []).prefix(SideStreamRequest.maxFullRate))

@@ -30,6 +30,17 @@ package final class StreamCoordinator {
     private var wantedFPS: Int { min(maxFPS, max(24, clientFPS.values.max() ?? 60)) }
     /// What the next pipeline will run at: the software encoder is not asked for more than 60.
     private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
+    /// The devices whose app is not in front (`SideStreamRequest.background`).
+    private var backgroundConnections: Set<ObjectIdentifier> = []
+    /// Every connected device's app is in the background and none wants the main window at full
+    /// speed: the main stream is a background window too, at 1× and the side streams' rate.
+    private var mainInBackground: Bool {
+        guard !clientFPS.isEmpty, clientFPS.keys.allSatisfy({ backgroundConnections.contains($0) }) else { return false }
+        if case .window(let id) = active, sideStreams?.wantsFullRate(id) == true { return false }
+        return true
+    }
+    /// The main stream's rate: the devices' (`effectiveFPS`), or the side streams' in the background.
+    private var mainStreamFPS: Int { mainInBackground ? min(effectiveFPS, SideStreamRequest.defaultFPS) : effectiveFPS }
     /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
     /// keeps its share of bits.
     private var streamBitrate: Int { bitrate * fps / 60 }
@@ -461,6 +472,7 @@ package final class StreamCoordinator {
             Task { @MainActor in
                 guard let self else { return }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
+                self.backgroundConnections.remove(ObjectIdentifier(connection))
                 self.settingsArrivals[ObjectIdentifier(connection)] = nil
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 let id = ObjectIdentifier(connection)
@@ -484,7 +496,7 @@ package final class StreamCoordinator {
                 let flipped = self.routesChanged(joined: nil, endpoint: nil)
                 // A 120 Hz device left a 60 Hz one behind: come down to its rate. The restart takes
                 // the flip too (select's commit), so a device that leaves costs one.
-                if self.active != .none, self.catalog.clientCount > 1, self.effectiveFPS != self.fps {
+                if self.active != .none, self.catalog.clientCount > 1, self.mainStreamFPS != self.fps {
                     await self.select(self.active)
                 } else if flipped {
                     await self.applyPending()
@@ -811,9 +823,10 @@ package final class StreamCoordinator {
     private func restartNeeded(for new: HostConfig, away: Bool) -> Bool {
         guard active != .none else { return false }
         let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
-        let newFPS = useSoftwareEncoder ? min(wanted, 60) : wanted
+        let unbackgrounded = useSoftwareEncoder ? min(wanted, 60) : wanted
+        let newFPS = mainInBackground ? min(unbackgrounded, SideStreamRequest.defaultFPS) : unbackgrounded
         let pair = new.effective(away: away)
-        let newScale = useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
+        let newScale = mainInBackground ? 1 : useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
         if newFPS != fps || newScale != captureScale { return true }
         if pair.bitrate != bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
         if new.virtualDisplay != config.virtualDisplay, case .window = active { return true }
@@ -1148,7 +1161,7 @@ package final class StreamCoordinator {
             guard let r = Wire.decode(SideStreamRequest.self, from: message.payload) else { return }
             if sideStreams == nil {
                 let made = SideStreams(server: server, catalog: catalog)
-                made.settings = { [unowned self] in (self.captureScale, self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
+                made.settings = { [unowned self] in (self.sideCaptureScale, self.useSoftwareEncoder, self.bitrate, self.prioritizeSpeed) }
                 made.mainFPS = { [unowned self] in self.effectiveFPS }
                 made.mainWindow = { [unowned self] in
                     if case .window(let id)? = self.selecting { return id }
@@ -1171,7 +1184,15 @@ package final class StreamCoordinator {
                 made.onStoppedByPerson = { [unowned self] in Task { await self.sharingStopped() } }
                 sideStreams = made
             }
+            let wasBackground = mainInBackground
+            if r.background == true { backgroundConnections.insert(ObjectIdentifier(connection)) }
+            else { backgroundConnections.remove(ObjectIdentifier(connection)) }
             sideStreams?.request(r, from: connection)
+            if mainInBackground != wasBackground {
+                print(mainInBackground ? "Every device's viewer is in the background: the main stream at 1× and \(SideStreamRequest.defaultFPS) fps until one comes forward."
+                                       : "A device's viewer came forward: the main stream at its full quality again.")
+                if active != .none, !switching { Task { @MainActor in await self.select(self.active) } }
+            }
             let hears = r.audio == true && !synthetic
             if hears != (audioWanted[ObjectIdentifier(connection)] != nil) {
                 print("Audio: \(deviceName(connection)) \(hears ? "asks for" : "no longer asks for") the sound of the windows it shows")
@@ -1411,7 +1432,7 @@ package final class StreamCoordinator {
     private func applyViewportToActiveWindow() async {
         // A different rate (a ProMotion device joined, Low Power Mode toggled) needs a new capture
         // interval and encoder session: one restart, whatever the source.
-        if active != .none, effectiveFPS != fps { await select(active); return }
+        if active != .none, mainStreamFPS != fps { await select(active); return }
         if virtualDisplay, stage.isStaged, case .window(let id) = active {
             // One restart: prepare re-places the window on the same display (the display is only
             // recreated if the envelope grew). The client's identical re-send after a switch is a
@@ -1595,7 +1616,7 @@ package final class StreamCoordinator {
             // Home or away changed (a device joined or left): the pipeline takes the other pair.
             adopt(config, away: awayWanted)
         }
-        fps = effectiveFPS             // the devices' panel rate (highest), or 60 before any has said
+        fps = mainStreamFPS            // the devices' panel rate (highest), or 60 before any has said
         // The devices' links: judged afresh when the stream comes back at another quality or not at
         // all, kept through a restart that keeps it (a window picked, a rotation, a resize).
         judgeLinks(source == .none ? nil : LinkJudge.Quality(bitrate: bitrate, fps: fps, captureScale: Double(captureScale)))
@@ -2149,7 +2170,10 @@ package final class StreamCoordinator {
     }
 
     /// Retina normally; points when the software encoder is carrying the stream.
-    private var captureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+    private var captureScale: CGFloat { mainInBackground ? 1 : sideCaptureScale }
+    /// The quality's scale (the software encoder's 1×), whatever the devices' apps: a full-speed
+    /// side stream's.
+    private var sideCaptureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
     private static func menuTitle(for w: SCWindow) -> String {

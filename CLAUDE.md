@@ -25,7 +25,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
   `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
   Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), input to a
-  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices' `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`, `fullRate`), windows no one can see here paused (`SideStreamRequest.paused`: minimised or covered, kept on the desk, not captured or sent; the background ones that stream at 1× unless at full speed), AAC-ELD
+  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices' `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`, `fullRate`), windows no one can see here paused (`SideStreamRequest.paused`: minimised or covered, kept on the desk, not captured or sent; the background ones that stream at 1× unless at full speed), the main stream at 1× and 15 fps while every viewer has been out of front for 3 s (`SideStreamRequest.background`; not a window at full speed), AAC-ELD
   sound (kind 33, `audioCodec`). A window ID with the top bit set is a display (`DesktopWindow`).
   The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
