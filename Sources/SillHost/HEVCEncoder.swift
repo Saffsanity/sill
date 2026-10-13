@@ -132,19 +132,18 @@ final class HEVCEncoder {
     /// for one run), read once per process and said once.
     /// EXPERIMENTS, each off unless its key is set (`defaults write me.saffer.sill.mac <key> …`, read
     /// once per process and said once), against the slow state, from VideoToolbox's documentation and
-    /// what other encoders set (2026-10-13): `encoderMaxRealTimeFrameRate` N sets
-    /// `kVTCompressionPropertyKey_MaximumRealTimeFrameRate` (the peak rate frames may come at, "so it
-    /// can configure itself to ensure this capability"; macOS 15+), `encoderRealTimeOff` leaves
+    /// what other encoders set (2026-10-13): `encoderRealTimeOff` leaves
     /// `RealTime` false (OBS's and FFmpeg's default: the encoder may pace itself to the rate it sees
     /// when real-time), and `encoderExpectedFrameRate` N declares N as the expected rate instead of the
-    /// stream's. Hardware sessions only.
-    static let experiments: (maxRealTime: Int, realTimeOff: Bool, expected: Int) = {
+    /// stream's. Hardware sessions only. Neither beat the defaults on a scrolling page (51 and 52 frames
+    /// encoded a second of 51 and 52, against 54 of 54); `MaximumRealTimeFrameRate` 120, also tried,
+    /// halved the rate (26 of 54) and kept the session slow, and was removed.
+    static let experiments: (realTimeOff: Bool, expected: Int) = {
         let d = UserDefaults.standard
-        let e = (d.integer(forKey: "encoderMaxRealTimeFrameRate"), d.bool(forKey: "encoderRealTimeOff"), d.integer(forKey: "encoderExpectedFrameRate"))
+        let e = (d.bool(forKey: "encoderRealTimeOff"), d.integer(forKey: "encoderExpectedFrameRate"))
         var said: [String] = []
-        if e.0 > 0 { said.append("MaximumRealTimeFrameRate \(e.0)") }
-        if e.1 { said.append("RealTime off") }
-        if e.2 > 0 { said.append("ExpectedFrameRate \(e.2)") }
+        if e.0 { said.append("RealTime off") }
+        if e.1 > 0 { said.append("ExpectedFrameRate \(e.1)") }
         if !said.isEmpty { print("Encoder: experiments on for hardware sessions: \(said.joined(separator: ", "))") }
         return e
     }()
@@ -207,11 +206,8 @@ final class HEVCEncoder {
         guard status == noErr, let session = s else { throw EncoderError.create(status) }
 
         func set(_ key: CFString, _ value: CFTypeRef) { VTSessionSetProperty(session, key: key, value: value) }
-        let experiments = software ? (maxRealTime: 0, realTimeOff: false, expected: 0) : Self.experiments
+        let experiments = software ? (realTimeOff: false, expected: 0) : Self.experiments
         set(kVTCompressionPropertyKey_RealTime, experiments.realTimeOff ? kCFBooleanFalse : kCFBooleanTrue)
-        if experiments.maxRealTime > 0, #available(macOS 15.0, *) {
-            set(kVTCompressionPropertyKey_MaximumRealTimeFrameRate, experiments.maxRealTime as CFNumber)
-        }
         set(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_HEVC_Main_AutoLevel)
         set(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)      // no B-frames
         // Keyframes are requested on demand (new client, dropped delta, source switch); this is
