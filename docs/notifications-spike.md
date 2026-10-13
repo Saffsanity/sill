@@ -1,8 +1,9 @@
 # Spike: forwarding the host's notifications and Dock bounces to Sill Viewer
 
-Feasibility only. Nothing here is in Sill; every probe was a throwaway outside the repository and has
-been removed. Measured on macOS 27.0.1 (26A434), one Mac, Accessibility granted to the process that ran
-the probes (Sill.app has the same permission), 2026-10-12.
+Feasibility, and two small pieces built on it (the last section). Every probe was a throwaway outside
+the repository and has been removed. Measured on macOS 27.0.1 (26A434), Accessibility granted to the
+process that ran the probes (Sill.app has the same permission), 2026-10-12; the Dock bounce again on
+2026-10-13, also on a second Mac (macOS 27.0).
 
 The question: can the host (Sill.app) learn when an app shows a notification or bounces its Dock icon,
 so Sill Viewer (and the Dock icon helper it makes per remote app, `SillDockProxy`) can show it on the
@@ -13,7 +14,7 @@ viewing Mac?
 | | Verdict |
 |---|---|
 | Notification banners (app, title, body) | **Works** through Accessibility on `com.apple.notificationcenterui`, about 120 ms after the post, no extra permission beyond the Accessibility the host already has. Only banners that are shown: a passive or Focus-silenced notification is invisible. |
-| Dock bounces | **No signal found.** Nothing public and nothing through Accessibility. |
+| Dock bounces | **Works** through LaunchServices: the bouncing app's information carries `LSWantsAttention` 1 while it asks for attention. Read with two private (exported) LaunchServices calls, no permission at all. Nothing public, nothing through Accessibility. |
 | Showing it on the viewer under the remote app's name and icon | **Works** with an ad hoc signed copy of the helper, one permission prompt per copy (per bundle ID). A click reaches the copy. |
 
 Recommendation at the end.
@@ -80,23 +81,50 @@ AXWindow  Subrole=AXSystemDialog  Title="Notification Center"
 
 ## 2. Dock bounces
 
-- **AX notifications on the Dock process:** of 48 names, `AXObserverAddNotification` accepted only 4:
-  `AXCreated`, `AXUIElementDestroyed`, `AXFocusedUIElementChanged` and `AXSelectedChildrenChanged`
-  (the other 44 returned `kAXErrorNotificationUnsupported`, -25207). While an app launched and quit, the
-  Dock fired `AXCreated` and `AXUIElementDestroyed` for its item and nothing else.
-- **A bounce fired nothing.** I could not get a visible bounce from my own probe: `requestUserAttention`
-  returned request id 0 (the call's "not made" value) for both informational and critical requests,
-  with the app inactive, hidden or launched in the background, so this spike adds no bounce
-  measurement of its own. The known result stands: a Dock item's attributes do not change during a bounce
-  (an earlier throwaway that did bounce showed only `AXParent`'s pointer differing).
-- **Other public signals:** a wildcard (`nil` name) `DistributedNotificationCenter` observer received
-  nothing at all on this macOS, even for a notification I posted myself; a named observer for the same
-  post worked. So there is no sniffing distributed notifications; only known names work, and I know of
-  none for attention requests. The unified log for the Dock, the posting app and WindowServer had no line
-  about a request during the attempts.
-- **Nearest substitutes that exist today:** the Dock badge (`AXStatusLabel`, already forwarded) and
-  banners. Together they cover most of what a bounce means (something new needs attention); the bounce
-  alone for an app that shows neither is not readable.
+Measured again on 2026-10-13 (macOS 27.0.1, and 27.0 on a second Mac), after the first pass (below) found
+nothing.
+
+- **The first pass misread its own probe.** `requestUserAttention` returns a request ID counting from 0,
+  so the 0 it got was the first request, not a refusal; -1 is the refusal, given while the app is the
+  active one (AppKit checks that first and returns). A bundled, signed app launched with `open -g`
+  bounces on its first call; no window and no earlier activation are needed. `.informationalRequest`
+  bounces once (about 1 s), `.criticalRequest` until `cancelUserAttentionRequest` or the app is
+  activated.
+- **What the request is.** Stepped through in the probe's own process with lldb:
+  `-[NSApplication requestUserAttention:]` calls HIServices' `_SetApplicationDesiresAttention` with the
+  kind (100) and the app's LaunchServices ASN, which is one synchronous Mach message to the Dock
+  (`dispatch_mach_send_and_wait_for_reply`). No distributed notification, no XPC, no WindowServer
+  property, no CoreDock call. The Dock keeps the state in the app's LaunchServices information, which
+  is updated by the time the call returns.
+- **The signal: `LSWantsAttention`.** `_LSCopyRunningApplicationArray(-1)` lists the running apps'
+  ASNs and `_LSCopyApplicationInformation(-1, asn, nil)` each one's information dictionary (both
+  exported, found with `dlsym`). The key is absent until an app first asks, 1 while it asks, 0 after.
+  Polled every 50 ms by a plain process with no Accessibility, Screen Recording or any other
+  permission:
+  - a critical request: 1 at once, 0 when cancelled about 3 s later (on the second Mac: 1 at 45.571,
+    0 at 48.713);
+  - an informational one: 1, then 0 about 1 s later (51.856, 52.838), the bounce's own length;
+  - the app activated: 0 within about 65 ms.
+  So a reader tells a one-time bounce from one that repeats until the user looks.
+- **Session.** The calls read the caller's own login session: over ssh they list nothing, and
+  `launchctl asuser` is refused without root. Sill.app runs in the user's session, so it reads what the
+  Dock does.
+- **Cost and fragility.** Polling every app's dictionary costs tens of microseconds a sample; a push
+  exists (`LSApplicationWorkspace addObserver:`, private and undocumented) but was not tried. The two
+  calls and the key are private and undocumented (fine outside the App Store, which Sill.app is), and
+  a rename would fail silently, as banner reading would: a self-test (Sill bounces a helper of its own
+  and expects to read it) covers it the same way.
+- **Not used:** `_GetApplicationDesiresAttention` reads the same state but is not exported. Nothing
+  changes in the Dock's Accessibility tree during a bounce (its geometry included: the bounce is drawn
+  by the render server), and no `NSWorkspace` notification, `NSRunningApplication` property or
+  distributed notification carries it.
+- **Not yet tried with a real app's bounce** on the host (the probes were small AppKit apps); every
+  AppKit app, Electron's `app.dock.bounce` included, goes through the same call.
+
+### The first pass (2026-10-12), for the record
+
+The Dock's Accessibility notifications (only 4 of 48 accepted), a wildcard distributed notification
+observer and the unified log showed nothing, and the probe's request ID 0 was taken for a failure.
 
 ## 3. Viewer side: posting under the remote app's name
 
@@ -165,9 +193,22 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
    the first notification, with a clear in-app explanation; for an app with no helper running, have
    Sill Viewer launch it, with a fallback of Sill Viewer posting under its own name. Put the remote
    window or app ID in `userInfo` and bring the app's windows forward on a click.
-3. **Do not build bounce forwarding.** There is no signal to read. If a stand-in is wanted, forward a
-   Dock badge increase (already read) as a "needs attention" hint on the helper's Dock icon.
+3. **Build bounce forwarding** on `LSWantsAttention`: the host polls it (every 250 ms is enough) for the
+   apps whose windows a Mac viewer shows, sends informational or critical (a window-list field, gated
+   like `badges`), and the app's Dock icon here makes the same request and cancels it when the host's
+   flag clears. Until then, a badge that rises bounces the icon once (built, below).
 4. **Still to test before building** (needs the user or a second Mac): alert-style (persistent)
    notifications; a Focus on; the frontmost-app banner I could not see; a real pointer click and a click
    on a helper that has quit; the banner icon; behaviour on macOS 14 to 26; and the cost of the tree read
    with many windows open.
+
+## Built in this branch
+
+- **Badges in Sill Viewer's menu.** Each app in the menu bar icon's menu carries its Dock badge from the
+  other Mac (`NSMenuItemBadge`: a count, or the label as it is). Seen live with two real apps' badges
+  and a test app counting up every 15 s.
+- **A rising badge bounces the app's Dock icon here once.** `SillDockProxy` makes an informational request
+  when a count grows or a badge appears; not for the first state it hears, nor for a badge that falls or
+  goes. Seen with the test app: its helper's `LSWantsAttention` went 1, then 0 about 1 s later, at each
+  of three rises 14–16 s apart.
+

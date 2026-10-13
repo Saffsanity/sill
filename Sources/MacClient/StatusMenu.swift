@@ -96,6 +96,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 for (i, w) in windows.enumerated() { self.app.windows.open(.window(w.id), focus: i == windows.count - 1) }
             }
             header.image = icon(client.icons[app])
+            // The app's Dock badge on the other Mac ("3"), as its Dock icon here shows it.
+            if let badge = client.hostBadges[app], !badge.isEmpty {
+                header.badge = Int(badge).map { NSMenuItemBadge(count: $0) } ?? NSMenuItemBadge(string: badge)
+            }
             if windows.count == 1 { mark(header, source: .window(windows[0].id), open: open) }
             menu.addItem(header)
             guard windows.count > 1 else { continue }

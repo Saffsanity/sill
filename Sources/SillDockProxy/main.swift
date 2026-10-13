@@ -23,6 +23,8 @@ final class Proxy: NSObject, NSApplicationDelegate {
     var viewer: pid_t?
     let icon: String?
     private var heard = false
+    /// A badge was heard already: only a change after it can bounce.
+    private var heardBadge = false
     /// Sill Viewer told this to quit (its app has no window open there): nothing to ask on the way out.
     private var told = false
     private var windows: [(id: String, title: String, state: String)] = []
@@ -48,7 +50,15 @@ final class Proxy: NSObject, NSApplicationDelegate {
             if let path = state["icon"] as? String { self.showIcon(path) }
             // The app's badge on the other Mac ("3"), as its own Dock icon shows it there.
             let badge = state["badge"] as? String ?? ""
-            if NSApp.dockTile.badgeLabel != (badge.isEmpty ? nil : badge) { NSApp.dockTile.badgeLabel = badge.isEmpty ? nil : badge }
+            if NSApp.dockTile.badgeLabel != (badge.isEmpty ? nil : badge) {
+                // A badge that rose (a new mail, a new message) bounces the icon once, as the app's own
+                // would; the first state, and a badge that falls or goes, do not.
+                if self.heardBadge, Self.rose(from: NSApp.dockTile.badgeLabel ?? "", to: badge) {
+                    NSApp.requestUserAttention(.informationalRequest)
+                }
+                NSApp.dockTile.badgeLabel = badge.isEmpty ? nil : badge
+            }
+            self.heardBadge = true
             let ids = state["ids"] as? [String] ?? []
             let titles = state["titles"] as? [String] ?? []
             let states = state["states"] as? [String] ?? []
@@ -90,6 +100,14 @@ final class Proxy: NSObject, NSApplicationDelegate {
     }
 
     static let viewerID = "me.saffer.sill.client"
+
+    /// Whether a badge rose: a count that grew, or a badge where there was none ("•" counts).
+    static func rose(from old: String, to new: String) -> Bool {
+        guard !new.isEmpty else { return false }
+        guard !old.isEmpty else { return true }
+        if let o = Int(old), let n = Int(new) { return n > o }
+        return false
+    }
 
     /// Sill Viewer gone: so is this.
     private func watch(_ pid: pid_t) {
