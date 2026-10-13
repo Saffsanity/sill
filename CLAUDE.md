@@ -15,7 +15,7 @@ open).** A macOS client (`Sources/MacClient`, product `SillClient`, `Scripts/mak
 (`Sources/MacClient/Shared/` symlinks; `iOSClient/ClientPlatform.swift` and `HEVCSampleFeed.swift`
 new and shared). Each host window a borderless window here at 1:1 with a pill for this Mac's
 controls; the others live at 15 fps (side streams); the remote app's menus in the menu bar; Sill's
-controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`: its windows, the
+controls in a menu bar icon; a Dock icon per remote app and none of its own (`Sources/SillDockProxy`: its windows, its minimised windows (a stand-in), the
 app's own Dock menu items and its badge from the other Mac); windows restored after a restart and
 new windows of open apps opened by themselves, as is an app the viewer's own action opens there; a
 scroll or hover reaches a window in the background without bringing it forward; each display a

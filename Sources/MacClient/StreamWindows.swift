@@ -235,11 +235,13 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         guard source != .none else { return }
         if let window = open[source] {
             if window.isMiniaturized { window.deminiaturize(nil) }
+            unpark(window)
             if focus { window.makeKeyAndOrderFront(nil); NSApp.activate() } else { window.orderFront(nil) }
             return
         }
         let window = StreamWindow(source: source, size: initialSize(source))
         window.delegate = self
+        window.onMinimize = { [weak self] window in self?.park(window) ?? false }
         if case .window(let id) = source {
             window.container.over = { [weak self] info, at in self?.dragOver(info, at: at, window: id) ?? [] }
             window.container.exited = { [weak self] info in self?.live.exited(info) }
@@ -326,9 +328,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         for (source, window) in open {
             guard case .window(let id) = source, let app = appOf[id] else { continue }
             let w = client.windows.first { $0.id == id }
-            let state: DockProxies.Window.State = window.isMiniaturized ? .minimized : (front[app] == id ? .front : .other)
+            let state: DockProxies.Window.State = window.isMiniaturized || window.parked ? .minimized : (front[app] == id ? .front : .other)
             byApp[app, default: []].append(DockProxies.Window(id: id, title: w.map { $0.title.isEmpty ? $0.appName : $0.title } ?? title(source),
-                                                              state: state))
+                                                              state: state, parked: window.parkedPicture.map { (window.frame, $0) }))
         }
         for (app, windows) in byApp {
             // The window's app name, else the installed app's (a window of another Space can come
@@ -339,6 +341,46 @@ final class StreamWindows: NSObject, NSWindowDelegate {
                                                badge: client.hostBadges[app], attention: client.hostAttention.contains(app))
         }
         dock.sync(apps)
+    }
+
+    /// Minimised into its app's Dock icon rather than Sill Viewer's: macOS minimises a window only into
+    /// its own app, and this window is Sill Viewer's, so the app's Dock icon minimises a stand-in with
+    /// the window's last picture (DockProxies, `parked`) while this one is put away; restoring the
+    /// stand-in, or the window picked anywhere here, brings this one back. False (macOS minimises it
+    /// itself) for a Desktop window, or an app with no Dock icon here.
+    private func park(_ window: StreamWindow) -> Bool {
+        guard case .window(let id) = window.source, let app = appOf[id], dock.hasIcon(app) else { return false }
+        guard let image = Self.picture(of: window), let path = DockProxies.writePicture(image, app: app, window: id) else { return false }
+        windowLog("park \(window.source) in \(app)'s Dock icon")
+        window.parkedPicture = path
+        window.orderOut(nil)
+        if let next = NSApp.orderedWindows.compactMap({ $0 as? StreamWindow }).first(where: { $0.isVisible && !$0.isMiniaturized }) {
+            next.makeKeyAndOrderFront(nil)
+        }
+        updatePill()
+        syncDock()
+        requestSideStreams()
+        return true
+    }
+
+    /// Back from its app's Dock icon: shown again (the caller makes it key), and the stand-in goes.
+    private func unpark(_ window: StreamWindow) {
+        guard window.parked else { return }
+        windowLog("unpark \(window.source)")
+        window.forgetPicture()
+        window.orderFront(nil)
+        syncDock()
+        requestSideStreams()
+    }
+
+    /// The window as it is on screen: its own, which needs no Screen Recording permission.
+    /// CGWindowListCreateImage is gone from the SDK's Swift interface but not from macOS; nil if it ever is.
+    private static func picture(of window: NSWindow) -> CGImage? {
+        typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage") else { return nil }
+        let capture = unsafeBitCast(symbol, to: Capture.self)
+        // kCGWindowListOptionIncludingWindow, kCGWindowImageBoundsIgnoreFraming
+        return capture(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0)?.takeRetainedValue()
     }
 
     private func updatePill() {
@@ -357,6 +399,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// From a Dock icon: one window, or every window of the app (the most recent one key).
     private func focus(app: String, window: UInt32?) {
         if let window { open(.window(window)); return }
+        // A window minimised into the app's Dock icon stays there, as on a Mac: the icon restores it.
         let mine = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.filter {
             guard case .window(let id) = $0.source else { return false }
             return appOf[id] == app
@@ -605,6 +648,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? StreamWindow else { return }
         open[window.source] = nil
+        window.forgetPicture()
         router.register(window.source, nil)
         if case .window(let id) = window.source { sideFeeds.set(id, nil) }
         defer { requestSideStreams(); syncDock(); keep() }
@@ -793,6 +837,20 @@ final class StreamWindow: NSWindow {
     let container = DropContainer()
     let placeholder = NSImageView()
     let side = SideView()
+    /// Minimise, handed to its app's Dock icon (StreamWindows.park): true if taken, else macOS minimises it.
+    var onMinimize: ((StreamWindow) -> Bool)?
+    /// Its last picture while it is minimised into its app's Dock icon.
+    var parkedPicture: String?
+    var parked: Bool { parkedPicture != nil }
+
+    override func miniaturize(_ sender: Any?) {
+        if onMinimize?(self) != true { super.miniaturize(sender) }
+    }
+
+    func forgetPicture() {
+        if let path = parkedPicture { try? FileManager.default.removeItem(atPath: path) }
+        parkedPicture = nil
+    }
 
     init(source: StreamSource, size: NSSize) {
         self.source = source

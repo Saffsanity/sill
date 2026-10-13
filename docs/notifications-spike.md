@@ -217,4 +217,18 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
   when a count grows or a badge appears; not for the first state it hears, nor for a badge that falls or
   goes. Seen with the test app: its helper's `LSWantsAttention` went 1, then 0 about 1 s later, at each
   of three rises 14–16 s apart.
+- **Windows minimise into their app's Dock icon, and Sill Viewer has none.** macOS minimises a window
+  only into its own app, and every window here is Sill Viewer's, so with "Minimise windows into
+  application icon" on they all went into Sill Viewer's. Now the pill's minimise hands the window to
+  its app's Dock icon (`StreamWindows.park`): the window's last picture (its own window captured, no
+  permission; a 0600 PNG beside the Dock icons, deleted when it comes back) goes in the state file, the
+  window is put away, and the Dock icon shows a stand-in with that picture where the window was and
+  minimises it. Restoring the stand-in, picking the window in the menu or the Dock icon's menu, or
+  clicking the Dock icon with every window of the app minimised brings the real window back, and the
+  stand-in goes. Focusing the app restores nothing, as on a Mac. With the Dock icons on (the default)
+  Sill Viewer runs as an accessory app: no Dock icon or ⌘Tab entry of its own, its menu bar the remote
+  app's as before, its controls in the menu bar icon. A Desktop window, which has no app, minimises as
+  macOS does it. Seen on one Mac against the other: minimised into a remote app's own icon and back by
+  each of the three ways, the stand-in and the picture gone after, and the menu bar showing the
+  remote app's menus with no Sill Viewer Dock icon.
 

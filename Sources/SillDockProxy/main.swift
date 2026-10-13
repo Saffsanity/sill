@@ -15,7 +15,7 @@ import CryptoKit
 // and asks it for that app, whose windows on the other Mac then open there (or the app is launched
 // there); it quits if nothing comes of it within two minutes.
 
-final class Proxy: NSObject, NSApplicationDelegate {
+final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static let stateName = Notification.Name("me.saffer.sill.client.dock.state")
     static let actionName = Notification.Name("me.saffer.sill.client.dock.action")
 
@@ -27,6 +27,11 @@ final class Proxy: NSObject, NSApplicationDelegate {
     private var heardBadge = false
     /// The bounce asked for while the app bounces on the other Mac, to cancel when it stops.
     private var attentionRequest: Int?
+    /// Stand-ins for the app's windows minimised in Sill Viewer, by window ID: each shows the window's
+    /// last picture where it was and is minimised, so the window goes into this icon (macOS minimises a
+    /// window only into its own app's, and the real one is Sill Viewer's). Restored, it asks Sill
+    /// Viewer for the window, and goes when Sill Viewer no longer lists it as minimised.
+    private var standIns: [String: NSWindow] = [:]
     /// Sill Viewer told this to quit (its app has no window open there): nothing to ask on the way out.
     private var told = false
     private var windows: [(id: String, title: String, state: String)] = []
@@ -71,6 +76,8 @@ final class Proxy: NSObject, NSApplicationDelegate {
                 NSApp.cancelUserAttentionRequest(id)
                 self.attentionRequest = nil
             }
+            self.syncStandIns(ids: state["parkedIDs"] as? [String] ?? [], titles: state["parkedTitles"] as? [String] ?? [],
+                              frames: state["parkedFrames"] as? [String] ?? [], pictures: state["parkedPictures"] as? [String] ?? [])
             let ids = state["ids"] as? [String] ?? []
             let titles = state["titles"] as? [String] ?? []
             let states = state["states"] as? [String] ?? []
@@ -121,6 +128,40 @@ final class Proxy: NSObject, NSApplicationDelegate {
         return false
     }
 
+    private func syncStandIns(ids: [String], titles: [String], frames: [String], pictures: [String]) {
+        for (id, window) in standIns where !ids.contains(id) {
+            window.delegate = nil
+            window.close()
+            standIns[id] = nil
+        }
+        for (i, id) in ids.enumerated() where standIns[id] == nil && i < frames.count && i < pictures.count {
+            guard let image = NSImage(contentsOfFile: pictures[i]) else { continue }
+            let frame = NSRectFromString(frames[i])
+            let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                                  backing: .buffered, defer: false)
+            window.setFrame(frame, display: false)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(kind)?.isHidden = true }
+            window.title = i < titles.count ? titles[i] : ""
+            window.isReleasedWhenClosed = false
+            let view = NSImageView(image: image)
+            view.imageScaling = .scaleAxesIndependently
+            window.contentView = view
+            window.delegate = self
+            standIns[id] = window
+            window.orderFrontRegardless()
+            window.miniaturize(nil)
+        }
+    }
+
+    /// A stand-in restored from the Dock: Sill Viewer shows its window, then lists it no longer minimised.
+    func windowDidDeminiaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, let id = standIns.first(where: { $0.value === window })?.key else { return }
+        post(["ask": "window", "window": id])
+        if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
+    }
+
     /// Sill Viewer gone: so is this.
     private func watch(_ pid: pid_t) {
         viewer = pid
@@ -154,12 +195,17 @@ final class Proxy: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         post(["ask": "focus"])
+        // Every window of the app minimised into this icon: the last one comes back, as a click on an
+        // app's icon does.
+        if !windows.contains(where: { $0.state != "minimized" }), let last = standIns.values.max(by: { $0.windowNumber < $1.windowNumber }) {
+            last.deminiaturize(nil)
+        }
         return false
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
-        for w in windows {
+        for w in windows where standIns[w.id] == nil {   // the Dock lists a stand-in itself, minimised
             let item = NSMenuItem(title: w.title, action: #selector(pick(_:)), keyEquivalent: "")
             item.representedObject = w.id
             item.target = self

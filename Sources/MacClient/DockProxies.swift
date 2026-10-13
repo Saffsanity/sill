@@ -28,6 +28,9 @@ final class DockProxies {
         let id: UInt32
         let title: String
         let state: State
+        /// Minimised into the app's Dock icon (StreamWindows.park): where it was, and its last picture
+        /// (a PNG only this user reads), for the stand-in the Dock icon minimises in its place.
+        var parked: (frame: NSRect, picture: String)? = nil
     }
 
     /// Bring an app's windows forward (nil window), or one window.
@@ -149,10 +152,25 @@ final class DockProxies {
     private func post(_ app: String) {
         guard let info = last[app] else { return }
         let menu = menus[app] ?? []
+        let parked = info.windows.filter { $0.parked != nil }
         tell(app, ["badge": info.badge ?? "", "attention": info.attention, "ids": info.windows.map { String($0.id) }, "titles": info.windows.map(\.title),
                    "states": info.windows.map(\.state.rawValue), "icon": Self.iconURL(app).path,
                    "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
-                   "menuEnabled": menu.map { $0.enabled ? "1" : "0" }])
+                   "menuEnabled": menu.map { $0.enabled ? "1" : "0" },
+                   "parkedIDs": parked.map { String($0.id) }, "parkedTitles": parked.map(\.title),
+                   "parkedFrames": parked.map { NSStringFromRect($0.parked!.frame) }, "parkedPictures": parked.map { $0.parked!.picture }])
+    }
+
+    /// Whether the app's Dock icon is running, so a window can be minimised into it.
+    func hasIcon(_ app: String) -> Bool { Self.enabled && running[app].map { !$0.isTerminated } == true }
+
+    /// A window's last picture, for its stand-in in the app's Dock icon: written where only this user
+    /// reads it; its path, or nil.
+    static func writePicture(_ image: CGImage, app: String, window: UInt32) -> String? {
+        guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return nil }
+        let url = folder.appendingPathComponent("\(slug(app)).\(window).png")
+        writePrivate(png, to: url)
+        return url.path
     }
 
     private func launch(_ app: String, _ info: AppWindows) {
