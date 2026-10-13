@@ -42,7 +42,8 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s. Take-back (the menu's Shared Windows,
   Stop Sharing; an app brought forward on the host) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
-  (`OutputSwitch`); the window list naming a new source goes out before its first frame. Dock icons'
+  (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
+  (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
 - Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 239 with 32
   mutants (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
