@@ -1032,6 +1032,7 @@ package final class StreamCoordinator {
                 if injector.isUpOfSomethingDown(event) { deliver(event, in: .null, from: device) }
                 return
             }
+            if swallowPressOnBackdrop(event, from: device) { return }
             // A click, a key or text may close a view a gesture opened; a move or a scroll does not.
             gestureChords.input(Self.gestureInput(event))
             // A synthetic host acts on nothing: it posts no event (InputInjector.dryRun), so it
@@ -2050,6 +2051,56 @@ package final class StreamCoordinator {
     /// One line per second at most: where a click lands on the Mac and which window is there,
     /// against the one being streamed. The quickest way to see a mapping or ordering problem.
     private var lastClickLog: CFAbsoluteTime = 0
+
+    /// The buttons a device pressed over the Dock, whose ups go
+    /// nowhere either (`swallowPressOnBackdrop`).
+    private var swallowedPresses: Set<String> = []
+
+    /// A press on a streamed window at a point the Dock covers on the Mac: the picture leaves the
+    /// Dock out (AppCrop's backdrop), so the device saw the window there, and the
+    /// click would open whatever Dock icon lies under it (2026-10-13: a window captured where it is,
+    /// its bottom under the Dock, and a click there launched another app). The press and its up are
+    /// dropped. True when the event was dropped.
+    private func swallowPressOnBackdrop(_ event: InputEvent, from device: KeyStrokes.Device) -> Bool {
+        guard case .pointer(let action, _, _) = event, case .window = inputSource else { return false }
+        let button: String
+        switch action {
+        case .leftDown, .leftUp: button = "left"
+        case .rightDown, .rightUp: button = "right"
+        case .middleDown, .middleUp: button = "middle"
+        default: return false
+        }
+        let key = "\(device.hashValue).\(button)"
+        guard action.isButtonDown else { return swallowedPresses.remove(key) != nil }
+        guard let point = injectorProbePoint(event), let owner = Self.backdropCover(at: point) else { return false }
+        swallowedPresses.insert(key)
+        print("Click at (\(Int(point.x)),\(Int(point.y))) dropped: \(owner) covers the streamed window there on this Mac")
+        return true
+    }
+
+    /// "the Dock" when the Dock's tiles are at `point` on this Mac, else nil. The Dock's window
+    /// spans its whole display (transparent but for the tiles), so its strip is read from
+    /// Accessibility: its list of tiles' frame, in the same top-left screen points as the input.
+    private static func backdropCover(at point: CGPoint) -> String? {
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
+        let app = AXUIElementCreateApplication(dock.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var children: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXChildrenAttribute as CFString, &children) == .success,
+              let lists = children as? [AXUIElement] else { return nil }
+        for list in lists {
+            var role: CFTypeRef?, pos: CFTypeRef?, size: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(list, kAXRoleAttribute as CFString, &role) == .success,
+                  role as? String == kAXListRole as String,
+                  AXUIElementCopyAttributeValue(list, kAXPositionAttribute as CFString, &pos) == .success,
+                  AXUIElementCopyAttributeValue(list, kAXSizeAttribute as CFString, &size) == .success else { continue }
+            var origin = CGPoint.zero, extent = CGSize.zero
+            AXValueGetValue(pos as! AXValue, .cgPoint, &origin)
+            AXValueGetValue(size as! AXValue, .cgSize, &extent)
+            if CGRect(origin: origin, size: extent).contains(point) { return "the Dock" }
+        }
+        return nil
+    }
     private func logClick(_ event: InputEvent, in rect: CGRect) {
         guard case .pointer(let action, let x, let y) = event, action.isButtonDown,
               case .window(let id) = inputSource else { return }
