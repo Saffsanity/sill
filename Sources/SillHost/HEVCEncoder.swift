@@ -123,6 +123,20 @@ final class HEVCEncoder {
         return n != 0
     }()
 
+    /// EXPERIMENT, off by default: every hardware session made with VideoToolbox's low-latency rate
+    /// control (`kVTVideoEncoderSpecification_EnableLowLatencyRateControl`), against the slow state
+    /// that sessions settle in after a quiet spell (CLAUDE.md, "The 33 fps plateau": the engine's rate
+    /// control or power state). Measured on 2026-09-25: such a session runs at firmware priority 60
+    /// (others 0), follows a bitrate change live, and drops frames its own way at low bitrates. On
+    /// with `defaults write me.saffer.sill.mac encoderLowLatency -bool YES` (or `-encoderLowLatency 1`
+    /// for one run), read once per process and said once.
+    private static var lowLatencyRefusalSaid = false
+    static let lowLatency: Bool = {
+        let on = UserDefaults.standard.bool(forKey: "encoderLowLatency")
+        if on { print("Encoder: low-latency rate control on for hardware sessions (encoderLowLatency, an experiment)") }
+        return on
+    }()
+
     init(width: Int, height: Int, fps: Int, bitrate: Int, prioritizeSpeed: Bool, software: Bool = false,
          quiet: Bool = false) throws {
         self.width = width
@@ -151,11 +165,26 @@ final class HEVCEncoder {
         var s: VTCompressionSession?
         var spec: [CFString: Any] = [:]
         if software { spec[kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder] = false }
-        let status = VTCompressionSessionCreate(
+        let lowLatency = !software && lowLatency
+        if lowLatency { spec[kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = true }
+        var status = VTCompressionSessionCreate(
             allocator: nil, width: Int32(width), height: Int32(height),
             codecType: kCMVideoCodecType_HEVC, encoderSpecification: spec.isEmpty ? nil : spec as CFDictionary,
             imageBufferAttributes: nil, compressedDataAllocator: nil,
             outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        if lowLatency, status != noErr || s == nil {
+            // Refused at this size or on this Mac: an ordinary session, said once a process.
+            if !lowLatencyRefusalSaid {
+                lowLatencyRefusalSaid = true
+                print("Encoder: low-latency rate control refused (\(status)) at \(width)×\(height); ordinary sessions instead")
+            }
+            spec[kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = nil
+            status = VTCompressionSessionCreate(
+                allocator: nil, width: Int32(width), height: Int32(height),
+                codecType: kCMVideoCodecType_HEVC, encoderSpecification: spec.isEmpty ? nil : spec as CFDictionary,
+                imageBufferAttributes: nil, compressedDataAllocator: nil,
+                outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        }
         guard status == noErr, let session = s else { throw EncoderError.create(status) }
 
         func set(_ key: CFString, _ value: CFTypeRef) { VTSessionSetProperty(session, key: key, value: value) }
