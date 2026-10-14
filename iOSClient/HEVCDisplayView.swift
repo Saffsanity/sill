@@ -13,6 +13,8 @@ final class HEVCDisplayView: UIView {
 
     private var formatDescription: CMVideoFormatDescription?
     private var waitingForKeyframe = true
+    /// Flushed after an interruption, and no keyframe since: the ask is owed until one comes.
+    private var interrupted = false
     private var lastParameterSets: Data?
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
@@ -272,6 +274,7 @@ final class HEVCDisplayView: UIView {
         formatDescription = nil
         lastParameterSets = nil
         waitingForKeyframe = true
+        interrupted = false
         displayLayer.flushAndRemoveImage()
         // The pointer's copy of the size is main-thread state; the client zeroes its own alongside.
         DispatchQueue.main.async { [weak self] in
@@ -285,6 +288,7 @@ final class HEVCDisplayView: UIView {
         if waitingForKeyframe {
             guard isKeyframe else { return }
             waitingForKeyframe = false
+            interrupted = false
         }
 
         let count = data.count
@@ -318,14 +322,19 @@ final class HEVCDisplayView: UIView {
 
     /// The layer failed, or needs a flush before it decodes again (the app was in the background):
     /// flush it, wait for a keyframe and ask for one (`onNeedsKeyframe`), since a still window sends
-    /// none. Also called on the return to the foreground, when no frame may come to notice it. On
-    /// the queue `enqueue` runs on. True when it recovered.
+    /// none. Also called when the app becomes active, when no frame may come to notice it, and then
+    /// asks again for a layer flushed in the background (where the ask is not sent) that has had no
+    /// keyframe since. On the queue `enqueue` runs on. True when it flushed the layer.
     @discardableResult
     func recoverIfInterrupted() -> Bool {
-        guard displayLayer.status == .failed || displayLayer.requiresFlushToResumeDecoding else { return false }
+        guard displayLayer.status == .failed || displayLayer.requiresFlushToResumeDecoding else {
+            if interrupted { onNeedsKeyframe?() }
+            return false
+        }
         print("display layer interrupted (\(displayLayer.status == .failed ? "failed: \(String(describing: displayLayer.error))" : "needs a flush")); asking for a keyframe")
         displayLayer.flush()
         waitingForKeyframe = true
+        interrupted = true
         onNeedsKeyframe?()
         return true
     }
