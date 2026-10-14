@@ -82,6 +82,12 @@ final class DockProxies {
             case "state": self.post(app)
             case "close": self.running[app] = nil; self.onClose?(app)
             case "menu": self.refreshMenu(app)
+            case "menuOpen":
+                if let id = info["menu"], let title = info["title"], let token = info["token"] {
+                    self.onMenuOpen?(app, id, info["top"] == "1", title, token)
+                }
+            case "menuPress":
+                if let id = info["item"], let title = info["title"] { self.onMenuPress?(app, id, title) }
             case "dockItem":
                 if let id = (note.userInfo?["item"] as? String).flatMap({ Int($0) }), let title = note.userInfo?["title"] as? String {
                     self.pressMenu?(app, id, title)
@@ -92,6 +98,50 @@ final class DockProxies {
     }
 
     private static let stateName = Notification.Name("me.saffer.sill.client.dock.state")
+    private static let menuBarName = Notification.Name("me.saffer.sill.client.dock.menubar")
+    private static let menuName = Notification.Name("me.saffer.sill.client.dock.menu")
+
+    // MARK: The other Mac's menus, in the app's Dock icon's menu bar
+
+    /// A menu of the app opened in its Dock icon's menu bar: `id` the other Mac's (a top-level one when
+    /// `top`), answered with `setMenuContent` under `token`.
+    var onMenuOpen: ((_ app: String, _ id: String, _ top: Bool, _ title: String, _ token: String) -> Void)?
+    /// An item chosen there.
+    var onMenuPress: ((_ app: String, _ id: String, _ title: String) -> Void)?
+    /// When each app's Dock icon was last asked to take the menu bar (in its state, so its activation
+    /// then hands the keyboard straight back instead of bringing the app's windows forward).
+    private var menuBarAt: [String: Double] = [:]
+
+    /// The other Mac's top-level menus for `app`, for its Dock icon's menu bar: as it shows them, each
+    /// read when it opens (`onMenuOpen`). Empty with a `note` when there are none to show.
+    func setMenuBar(_ app: String, top: [(id: String, title: String, enabled: Bool)], note: String?) {
+        guard Self.enabled else { return }
+        let state: [String: Any] = ["ids": top.map(\.id), "titles": top.map(\.title), "enabled": top.map { $0.enabled ? "1" : "0" },
+                                    "note": note ?? ""]
+        guard let data = try? JSONSerialization.data(withJSONObject: state) else { return }
+        Self.writePrivate(data, to: Self.folder.appendingPathComponent("\(Self.slug(app)).menubar"))
+        DistributedNotificationCenter.default().postNotificationName(Self.menuBarName, object: app, userInfo: nil, deliverImmediately: true)
+    }
+
+    /// The answer to an `onMenuOpen`: `content` (sections of rows, or a message) for the menu opened under `token`.
+    func setMenuContent(_ app: String, token: String, content: [String: Any]) {
+        var state = content
+        state["token"] = token
+        guard let data = try? JSONSerialization.data(withJSONObject: state) else { return }
+        Self.writePrivate(data, to: Self.folder.appendingPathComponent("\(Self.slug(app)).menu"))
+        DistributedNotificationCenter.default().postNotificationName(Self.menuName, object: app, userInfo: nil, deliverImmediately: true)
+    }
+
+    /// The app's Dock icon takes the menu bar, so its menus (the other Mac's) show there while this app,
+    /// which has none (an accessory app: no Dock icon of its own), keeps the keyboard: the menu bar stays
+    /// with the regular app active last. The icon is activated and hands activation straight back.
+    func takeMenuBar(_ app: String) {
+        guard Self.enabled, let proxy = running[app], !proxy.isTerminated,
+              NSWorkspace.shared.menuBarOwningApplication?.processIdentifier != proxy.processIdentifier else { return }
+        menuBarAt[app] = Date().timeIntervalSince1970
+        post(app)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { proxy.activate() }
+    }
     private static let actionName = Notification.Name("me.saffer.sill.client.dock.action")
 
     /// The remote apps with a window open here now, by bundle ID.
@@ -158,7 +208,8 @@ final class DockProxies {
                    "menuIDs": menu.map { String($0.id) }, "menuTitles": menu.map(\.title),
                    "menuEnabled": menu.map { $0.enabled ? "1" : "0" },
                    "parkedIDs": parked.map { String($0.id) }, "parkedTitles": parked.map(\.title),
-                   "parkedFrames": parked.map { NSStringFromRect($0.parked!.frame) }, "parkedPictures": parked.map { $0.parked!.picture }])
+                   "parkedFrames": parked.map { NSStringFromRect($0.parked!.frame) }, "parkedPictures": parked.map { $0.parked!.picture },
+                   "menuBarAt": menuBarAt[app] ?? 0])
     }
 
     /// Whether the app's Dock icon is running, so a window can be minimised into it.
