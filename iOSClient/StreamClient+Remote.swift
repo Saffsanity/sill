@@ -196,8 +196,10 @@ extension StreamClient {
                 attributes.title = mac.name
                 attributes.contentDescription = "Connect with Sill"
                 attributes.keywords = ["Sill", "Mac", mac.name]
-                return CSSearchableItem(uniqueIdentifier: SpotlightMacs.identifier(mac.macID), domainIdentifier: SpotlightMacs.domain,
-                                        attributeSet: attributes)
+                let item = CSSearchableItem(uniqueIdentifier: SpotlightMacs.identifier(mac.macID), domainIdentifier: SpotlightMacs.domain,
+                                            attributeSet: attributes)
+                item.expirationDate = .distantFuture        // Spotlight's default is a month, and a saved Mac lasts
+                return item
             }
         let done: (Error?) -> Void = { error in
             DispatchQueue.main.async { [weak self] in
