@@ -799,6 +799,8 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// A Spotlight tap's saved Mac, until its row is dialed (`openFromSpotlight`). Main thread.
+    var spotlightPick: String?
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -826,6 +828,7 @@ final class StreamClient: ObservableObject {
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
+        indexSavedMacs()
         // Back from the background: the pings stopped while the app was suspended, which is no loss.
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.resetLiveness()
@@ -1022,6 +1025,7 @@ final class StreamClient: ObservableObject {
         }
         #endif
         macs = next
+        trySpotlightPick()
         #if DEBUG
         if let prefix = pendingTapRow, let mac = macs.first(where: { $0.route != .remote && $0.name.hasPrefix(prefix) }) {
             pendingTapRow = nil

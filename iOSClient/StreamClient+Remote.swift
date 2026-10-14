@@ -1,4 +1,5 @@
 import Foundation
+import CoreSpotlight
 import Network
 import CryptoKit
 import UIKit
@@ -174,6 +175,69 @@ extension StreamClient {
     /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
     func storeSavedMacs() {
         if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        indexSavedMacs()
+    }
+
+    // MARK: Spotlight
+
+    /// The saved Macs as Spotlight items (SpotlightMacs), all of them written again each time the
+    /// list is: a renamed, forgotten or removed Mac is gone from Spotlight with its old self.
+    func indexSavedMacs() {
+        guard !savedMacsSeeded else { return }      // DEBUG's seeded Macs never reach the real Spotlight
+        let items = SpotlightMacs.indexed(savedMacs.map { SpotlightMacs.Mac(macID: $0.macID, name: displayName($0.macID), revoked: $0.revoked == true) })
+            .map { mac -> CSSearchableItem in
+                let attributes = CSSearchableItemAttributeSet(contentType: .content)
+                attributes.title = mac.name
+                attributes.contentDescription = "Connect with Sill"
+                attributes.keywords = ["Sill", "Mac", mac.name]
+                return CSSearchableItem(uniqueIdentifier: SpotlightMacs.identifier(mac.macID), domainIdentifier: SpotlightMacs.domain,
+                                        attributeSet: attributes)
+            }
+        let index = CSSearchableIndex.default()
+        index.deleteSearchableItems(withDomainIdentifiers: [SpotlightMacs.domain]) { _ in
+            guard !items.isEmpty else { return }
+            index.indexSearchableItems(items) { error in
+                if let error { print("spotlight: not indexed: \(error)"); return }
+                #if DEBUG
+                print("spotlight: \(items.count) saved Mac\(items.count == 1 ? "" : "s") indexed")
+                #endif
+            }
+        }
+    }
+
+    /// A tap on a saved Mac in Spotlight: that Mac's row is dialed as a tap on it would be, once it is
+    /// listed (`trySpotlightPick`). Ignored while a session runs, and for an identifier not Sill's.
+    func openFromSpotlight(_ identifier: String) {
+        guard let macID = SpotlightMacs.macID(fromIdentifier: identifier), savedMac(macID) != nil, !connected else {
+            print("spotlight: \(identifier) ignored (\(connected ? "a session runs" : "not a saved Mac"))")
+            return
+        }
+        print("spotlight: \(displayName(macID)) tapped")
+        spotlightPick = macID
+        trySpotlightPick()
+        // The network's time runs out without a change to the rows: look again then.
+        let left = searchingSince + DiscoveryPolicy.networkFirst - ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, left) + 0.1) { [weak self] in self?.trySpotlightPick() }
+    }
+
+    /// Dials the Spotlight tap's Mac when SpotlightMacs says which row; on each change to the rows.
+    func trySpotlightPick() {
+        guard let macID = spotlightPick else { return }
+        // A session that started meanwhile, or the Mac forgotten (or its record cleared) since the tap.
+        guard !connected, savedMac(macID) != nil else { spotlightPick = nil; return }
+        let waited = ProcessInfo.processInfo.systemUptime >= searchingSince + DiscoveryPolicy.networkFirst
+        let rows = macs.map { (route: $0.route == .network ? SpotlightMacs.Route.network : $0.route == .direct ? .direct : .remote, macID: $0.macID) }
+        switch SpotlightMacs.choice(for: macID, rows: rows, waited: waited) {
+        case .wait: return
+        case .row(let i):
+            spotlightPick = nil
+            print("spotlight: dialing \(macs[i].name) (\(macs[i].route.rawValue) row)")
+            connect(to: macs[i])
+        case .dialSaved:
+            spotlightPick = nil
+            print("spotlight: dialing \(displayName(macID)) at its saved addresses")
+            dialSaved(macID, why: .tap)
+        }
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
