@@ -430,7 +430,7 @@ final class VirtualStage {
             Stats.shared.bump("vd.fullScreen")
             let fresh = await catalog.resolveWindow(id: p.windowID) ?? window
             // No releaseWindow here: a full-screen window cannot be put back mid-Space anyway.
-            guard let scDisplay, let alive = display, alive.isAlive else { throw Failure.notListedBySCK }
+            guard let alive = display, alive.isAlive, let scDisplay = await currentSCDisplay() else { throw Failure.notListedBySCK }
             print("\(p.appName) — \(p.title) is full screen on virtual display \(alive.displayID); capturing \(Self.fmt(crop)) of it")
             let filter = fresh.owningApplication.map { SCContentFilter(display: scDisplay, including: [$0], exceptingWindows: []) }
                 ?? SCContentFilter(display: scDisplay, including: [fresh])
@@ -593,7 +593,7 @@ final class VirtualStage {
         let fresh = await catalog.resolveWindow(id: p.windowID) ?? window
         // The grow path may have replaced the display, so read `display` again here rather than
         // the one step (4) produced (that one is destroyed by then).
-        guard let scDisplay, let d = display, d.isAlive else {
+        guard let d = display, d.isAlive, let scDisplay = await currentSCDisplay() else {
             releaseWindow()
             throw Failure.notListedBySCK
         }
@@ -606,6 +606,19 @@ final class VirtualStage {
         let filter = fresh.owningApplication.map { SCContentFilter(display: scDisplay, including: [$0], exceptingWindows: []) }
             ?? SCContentFilter(display: scDisplay, including: [fresh])
         return Prepared(filter: filter, sourceRect: crop, describe: describe)
+    }
+
+    /// This stage's display as ScreenCaptureKit lists it now, for a filter: the one kept from when the
+    /// display was made carries its frame then, and the desk's arrangement moves each time another
+    /// of its displays comes or goes. The kept one when the listing does not answer in time.
+    func currentSCDisplay() async -> SCDisplay? {
+        guard let d = display, d.isAlive else { return nil }
+        if let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 1),
+           let listed = content.displays.first(where: { $0.displayID == d.displayID }) {
+            scDisplay = listed
+            return listed
+        }
+        return scDisplay
     }
 
     /// The refresh rate the next display is made at; see `prepare`.
@@ -647,6 +660,11 @@ final class VirtualStage {
             func make(_ serial: UInt32) throws -> VirtualDisplay {
                 try VirtualDisplay(name: "Sill", widthPt: Int(env.width), heightPt: Int(env.height + menuInset), scale: displayScale,
                                    refreshHz: Double(refreshHz), vendorID: Self.vendorID, productID: productID, serialNum: serial)
+            }
+            // An identity still being taken down (just removed here, or by the last Sill as it quit) is
+            // not made again until it is gone and has rested (VirtualDisplay.identityRest).
+            if !(await VirtualDisplay.waitUntilIdentityFree(vendorID: Self.vendorID, productID: productID, serialNum: serial)) {
+                print("Virtual display identity \(String(productID, radix: 16))/\(serial) is still being taken down; making it anyway.")
             }
             do {
                 d = try make(serial)

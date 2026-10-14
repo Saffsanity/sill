@@ -218,6 +218,16 @@ the new kinds is sent by it, and a host sends it none.
   display identity it has seen (a ColorSync profile, a registry entry, WindowServer's records), and
   ColorSync re-reads that registry on each request. Side streams stay at 6 live windows beside the
   focused one.
+- A display removed while a capture still runs on it, then the same identities made again seconds
+  later (a host quit mid-stream and relaunched, macOS 27.0.1), left WindowServer's display streams
+  delivering nothing at all, for every app (ScreenCaptureKit, CGDisplayStream, macOS Screen Sharing),
+  while screenshots still worked; display sleep, a resolution switch, mirroring, capturing all displays
+  and restarting replayd did not bring them back. So: every capture is stopped, its stop confirmed,
+  before a display goes (the exit path, and side streams before the desk lets their windows go); the
+  exit waits for the displays to leave the display list; an identity is not made again until it is off
+  the list and has rested 3 s since its removal, by any Sill process (VirtualDisplay.identityRest); a
+  capture's display is looked up afresh, not cached; a window found on a Sill display gets the main
+  display as its home; and a display capture that delivers nothing in 3 s streams the window alone.
 - macOS's own bug (FB17797423): after one virtual display is removed while others stay, a stream of a
   display made later can show another display's picture. The desk keeps displays a window leaves and
   removes them only together; the picture check (DeskPicture) catches the rest.

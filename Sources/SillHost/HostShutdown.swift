@@ -44,7 +44,7 @@ package enum HostShutdown {
         guard !began else { return }
         began = true
         print("Shutting down: putting the window back and removing the virtual display.")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
             print("Shutdown timed out; exiting anyway.")
             exit(0)
         }
@@ -57,7 +57,7 @@ package enum HostShutdown {
         print("Shutting down: putting the window back and removing the virtual display.")
         // Off the main queue, so a stuck AX call cannot hold the exit hostage; atexit then
         // restores from the snapshot instead.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
             print("Shutdown timed out; exiting anyway.")
             exit(code)
         }
