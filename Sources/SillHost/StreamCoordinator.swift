@@ -1718,8 +1718,20 @@ package final class StreamCoordinator {
                         } catch VirtualStage.Failure.axWindowNotFound {
                             // A window just opened (a new tab's window) is listed before Accessibility
                             // has it, and its title can still be changing: once more, a moment later.
-                            try? await Task.sleep(for: .milliseconds(400))
-                            staged = try await desk.prepare(w, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                            // One that is not drawn (closed: an app that keeps running with its window
+                            // put away lists it still, and Accessibility has none; 2026-10-14, a chat
+                            // app's window streamed white) is shown first, as a click on its app's Dock
+                            // icon here would, and waited for.
+                            var again = w
+                            if !Self.isOnScreen(id), let app = w.owningApplication?.bundleIdentifier {
+                                print("\(w.owningApplication?.applicationName ?? app)'s picked window is not drawn on this Mac; showing it as its Dock icon would.")
+                                dockMenus.reopen(app)
+                                for _ in 0..<20 where !Self.isOnScreen(id) { try? await Task.sleep(for: .milliseconds(100)) }
+                                again = await catalog.resolveWindow(id: id) ?? w
+                            } else {
+                                try? await Task.sleep(for: .milliseconds(400))
+                            }
+                            staged = try await desk.prepare(again, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
                         }
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
@@ -2223,6 +2235,12 @@ package final class StreamCoordinator {
 
     /// The on-screen layer-0 window under `point` (any point when nil, i.e. the frontmost normal
     /// window on screen) and its owner, or nil when unknown.
+    /// Whether the window server draws the window now (on a display, in the Space shown there).
+    private static func isOnScreen(_ id: CGWindowID) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]]
+        return (list?.first?[kCGWindowIsOnscreen as String] as? Bool) == true
+    }
+
     private static func topmostWindow(at point: CGPoint?) -> (id: CGWindowID, pid: pid_t)? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         for info in list {   // front to back
