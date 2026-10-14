@@ -1,11 +1,13 @@
 import AppKit
+import ServiceManagement
 import StreamProtocol
 
 /// Sill's controls, in the menu bar's status item, so the menu bar itself is the controlled app's:
 /// the connection (Connect…, Disconnect), the other Mac's windows (each opens as a window here, a
 /// check on those open, a dot on the one streaming) with the Desktop and its apps to open, the
 /// other Mac's streaming settings (as its own menu has them, kind 17), the gestures macOS keeps
-/// for itself here, and Capture System Shortcuts. Built afresh each time it opens. Main thread.
+/// for itself here, Capture System Shortcuts and Launch at Login. Built afresh each time it opens.
+/// Main thread.
 final class StatusMenu: NSObject, NSMenuDelegate {
     private unowned let app: AppDelegate
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -56,6 +58,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(captureItem())
         }
         menu.addItem(.separator())
+        menu.addItem(loginItem())
         menu.addItem(action("Quit Sill Viewer") { NSApp.terminate(nil) })
     }
 
@@ -201,6 +204,26 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.toolTip = client.hostAudio ? "The sound of the apps open here plays on this Mac and is silenced on \(client.macName)."
                                         : "\(client.macName)’s Sill does not send sound yet."
         item.isEnabled = client.hostAudio
+        return item
+    }
+
+    /// Launch at login, as Sill.app has it (SMAppService.mainApp): the system's status is the truth, read
+    /// as the menu opens, and the user can switch it off in System Settings › General › Login Items.
+    /// It records this copy's path, so it follows the copy in ~/Applications or /Applications.
+    private func loginItem() -> NSMenuItem {
+        let service = SMAppService.mainApp
+        let on = service.status == .enabled || service.status == .requiresApproval
+        let item = toggle("Launch at Login", on) {
+            do {
+                if on { try service.unregister() } else { try service.register() }
+            } catch {
+                print("Launch at login could not be turned \(on ? "off" : "on"): \(error.localizedDescription)")
+            }
+        }
+        if service.status == .requiresApproval {
+            item.toolTip = "Waiting for your approval in System Settings › General › Login Items."
+        }
+        item.isEnabled = Bundle.main.bundleURL.pathExtension == "app"
         return item
     }
 
