@@ -84,6 +84,27 @@ window.contentView?.addSubview(label)
 window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
 window.orderFrontRegardless()
 
+/// "Slow Close": a titled, closable window as far off screen, for the window command's close (the
+/// close check, Scripts/menu-check): asked to close, it holds its main thread 4 s and stays open, as
+/// an app showing a modal alert from its close does.
+final class SlowClose: NSObject, NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        log("windowShouldClose 'Slow Close' (sleeping 4 s)")
+        Thread.sleep(forTimeInterval: 4)
+        log("windowShouldClose 'Slow Close' done")
+        return false
+    }
+}
+let slowClose = SlowClose()
+let slowWindow = NSWindow(contentRect: NSRect(x: -20000, y: -19800, width: 240, height: 80), styleMask: [.titled, .closable],
+                          backing: .buffered, defer: false)
+slowWindow.title = "Slow Close"
+slowWindow.ignoresMouseEvents = true
+slowWindow.isReleasedWhenClosed = false
+slowWindow.delegate = slowClose
+slowWindow.setFrameOrigin(NSPoint(x: -20000, y: -19800))
+slowWindow.orderFrontRegardless()
+
 var validations: [String: Int] = [:]
 var dynamic = 0
 
