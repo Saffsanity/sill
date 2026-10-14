@@ -19,9 +19,9 @@ all versions to be 0.5.1." One release, and one version for both apps from now o
 (4) (`MARKETING_VERSION` 0.5.1 and `CURRENT_PROJECT_VERSION` 4 in both configurations: the build
 numbers keep counting across versions). docs/release-checklist.md has the rule (part 2's first
 item) and the release's order ("The away release").
-- In it since v0.4.0: PR #39, away from home (the entry below), PR #46, a Mac set up again (its
-  old saved record retires itself), and PR #47, the iPhone Duo with the iOS 27.1 SDK (the entry
-  below; the status bar hidden on the stream screen in every pose of the inner display, Noah's
+- In it since v0.4.0: PR #39, away from home (its entry in docs/history.md), PR #46, a Mac set up again (its
+  old saved record retires itself), and PR #47, the iPhone Duo with the iOS 27.1 SDK (its entry
+  in docs/history.md; the status bar hidden on the stream screen in every pose of the inner display, Noah's
   pick of 2026-10-09); PRs #44 and #45 went to TestFlight as 0.5 (3). Neither half
   strands the other (read from the code): Sill for Mac 0.5.1 serves 0.5 (2) and (3), and 0.5.1 (4)
   works with Sill for Mac 0.4.0, without the away quality and the link's notice, which are the Mac's.
@@ -51,7 +51,7 @@ item) and the release's order ("The away release").
   Test, `release.sh --publish` from the tag, the notes (`fill-notes.sh`, `gh release edit`), the
   site republished, the check signed out; the results in sill-handoff's `release-051/STATUS.md`.
   Still open, and shipped without them on Noah's call: his device tests of away from home (P4–P13
-  below) and of the iPhone Duo (the Duo entry's P1–P13, on a Duo from October 23); on the App
+  in its entry in docs/history.md) and of the iPhone Duo (the Duo entry's P1–P13, on a Duo from October 23); on the App
   Store, 0.5 went live on 2026-10-08 and 0.5.1 (4) on 2026-10-10, approved within hours
   (https://apps.apple.com/app/id6816359860; the large-display iPhone screenshots follow as a
   standalone Asset Library submission). The site and README name the listing since PR #49.
