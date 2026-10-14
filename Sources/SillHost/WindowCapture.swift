@@ -44,6 +44,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         // by the identity check in didStopWithError.
         self.stream = stream
         framesSeen = 0
+        anyBuffer.set(false)
         do {
             try await stream.startCapture()
         } catch {
@@ -55,6 +56,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private var framesSeen = 0
+    /// Whether the stream has delivered anything since it started, a frame or an idle notice: one
+    /// that delivers nothing at all is WindowServer's display streams wedged (StreamCoordinator).
+    private let anyBuffer = LockedFlag()
+    var deliveredAnything: Bool { anyBuffer.get() }
     /// Held by the type: `SCStreamConfiguration.backgroundColor` is unowned(unsafe) and would not keep
     /// a temporary alive.
     private static let black = CGColor(gray: 0, alpha: 1)
@@ -68,8 +73,19 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in queue.async { c.resume() } }
     }
 
+    /// Stops the capture and waits for ScreenCaptureKit to say it has, at most `timeout`: for the exit
+    /// path, which cannot await, and must not remove a display a capture still runs on.
+    func stopNow(timeout: TimeInterval) {
+        guard let stream else { return }
+        self.stream = nil
+        let stopped = DispatchSemaphore(value: 0)
+        stream.stopCapture { _ in stopped.signal() }
+        _ = stopped.wait(timeout: .now() + timeout)
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen else { return }
+        anyBuffer.set(true)
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let statusRaw = attachments.first?[.status] as? Int,
               let status = SCFrameStatus(rawValue: statusRaw)
@@ -94,3 +110,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
 /// HEVC wants even dimensions.
 func evenPixels(_ v: CGFloat) -> Int { Int(v.rounded(.down)) & ~1 }
+
+/// A Bool behind a lock, set on the capture's queue and read on the main actor.
+final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set(_ v: Bool) { lock.lock(); value = v; lock.unlock() }
+    func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+}

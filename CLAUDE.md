@@ -39,7 +39,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   made after another was removed can stream a third's picture), all removed together once the desk
   is empty; the main stream's picture compared with the window alone at start and every 10 s
   (`DeskPicture`), the window captured alone when it is another display's, the viewer's pill
-  refresh (kind 42) making every display again; a full-screen window's display resized live to the
+  refresh (kind 42) making every display again; every capture stopped before its display goes, an identity made again only once it is off the display list and has rested 3 s (a display removed under a running capture, then remade, stopped WindowServer's display streams for every app until it restarted); a full-screen window's display resized live to the
   viewer window (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
   the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it

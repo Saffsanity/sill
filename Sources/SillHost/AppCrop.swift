@@ -70,4 +70,5 @@ final class SharePill {
     }
 
     func stop() async { await capture.stop() }
+    func stopNow(timeout: TimeInterval) { capture.stopNow(timeout: timeout) }
 }
