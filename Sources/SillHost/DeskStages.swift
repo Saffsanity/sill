@@ -41,6 +41,12 @@ final class DeskStages {
     /// needed, the lowest free first; no fixed number of windows.
     private var slots: [UInt32: Int] = [:]
 
+    /// Windows the desk could not take (Accessibility found no window to move, or it refused the
+    /// move), by when: not tried again for `retryAfter`, so no display is made and removed for them
+    /// over and over. Captured where they are meanwhile.
+    private var cannotTake: [UInt32: Date] = [:]
+    static let retryAfter: TimeInterval = 300
+
     private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) }! }
 
     /// What the desk's displays may take of this Mac's memory in all: each holds a framebuffer of its
@@ -84,6 +90,17 @@ final class DeskStages {
         let id = window.windowID
         let stage: VirtualStage
         if let existing = stages[id] { stage = existing } else {
+            // No display for a window that cannot go on one: every display made and removed leaves
+            // macOS's ColorSync service more work for the rest of the login session (2026-10-14: a
+            // window Accessibility could not find was tried every few seconds, a display made and
+            // removed each time, and about 40 in a morning saturated it and hung WindowServer).
+            if let failed = cannotTake[id], Date().timeIntervalSince(failed) < Self.retryAfter {
+                throw VirtualStage.Failure.axWindowNotFound
+            }
+            guard sizer.placement(for: window) != nil else {
+                cannotTake[id] = Date()
+                throw VirtualStage.Failure.axWindowNotFound
+            }
             guard roomForAnother() else { throw TooMany(count: stages.count) }
             let slot = freeSlot()
             stage = VirtualStage(sizer: sizer, catalog: catalog)
@@ -102,7 +119,7 @@ final class DeskStages {
         stage.deskWindow = size
         // Its own display, made once at the room's size and 120 Hz, so neither a resize nor a rate
         // change makes it again, and a full-screen Space there covers this window's display alone.
-        do { try await stage.ensureDeskDisplay() } catch { stage.release(); forget(id); throw error }
+        do { try await stage.ensureDeskDisplay() } catch { stage.release(); forget(id); cannotTake[id] = Date(); throw error }
         // Full screen (or just out of it): the display fitted to the window's own size on the device
         // first, whether it streams as the main window or beside it.
         // The main window's `size` is the device's window (a side stream's is the window's own, which
@@ -118,8 +135,11 @@ final class DeskStages {
         } catch {
             stage.release()
             forget(id)
+            // A window that refused the move, or was not found there, is not tried again for a while.
+            cannotTake[id] = Date()
             throw error
         }
+        cannotTake[id] = nil
         var filter = prepared.filter
         if let display = stage.scDisplay, let owner = window.owningApplication,
            let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 2) {

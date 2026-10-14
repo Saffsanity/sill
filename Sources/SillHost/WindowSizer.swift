@@ -274,17 +274,33 @@ final class WindowSizer {
         // the main thread for the ~1.5 s default per candidate.
         for c in candidates { AXUIElementSetMessagingTimeout(c, 0.5) }
 
-        let title = window.title ?? ""
-        let titled = title.isEmpty ? [] : candidates.filter { string(of: $0, kAXTitleAttribute) == title }
+        // Titles compared without invisible formatting characters: a window list can carry a
+        // left-to-right mark (U+200E) at the start that Accessibility's title has not.
+        let title = Self.plain(window.title ?? "")
+        let titled = title.isEmpty ? [] : candidates.filter { Self.plain(string(of: $0, kAXTitleAttribute) ?? "") == title }
         if titled.count == 1 { return titled[0] }
 
         let bounds = liveBounds(of: window.windowID) ?? window.frame
         let pool = titled.isEmpty ? candidates : titled
-        return pool.first { candidate in
+        if let exact = pool.first(where: { candidate in
             guard let f = frame(of: candidate) else { return false }
             return abs(f.minX - bounds.minX) <= frameTolerance && abs(f.minY - bounds.minY) <= frameTolerance
                 && abs(f.width - bounds.width) <= frameTolerance && abs(f.height - bounds.height) <= frameTolerance
+        }) { return exact }
+        // The window's place can differ where it is not on screen (another Space): the one window of
+        // its size, if only one.
+        let sized = pool.filter { candidate in
+            guard let f = frame(of: candidate) else { return false }
+            return abs(f.width - bounds.width) <= frameTolerance && abs(f.height - bounds.height) <= frameTolerance
         }
+        return sized.count == 1 ? sized[0] : nil
+    }
+
+    /// A title without the invisible formatting characters (marks and isolates of text direction,
+    /// zero-width ones), trimmed.
+    static func plain(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.properties.generalCategory != .format }))
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// The window server's current bounds (CG global, top-left origin — the same space AX uses).
