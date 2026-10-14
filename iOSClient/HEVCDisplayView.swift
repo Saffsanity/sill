@@ -23,6 +23,9 @@ final class HEVCDisplayView: UIView {
     /// (`StreamClient.pointerFrameChanged`). Two hooks instead of a chain, so re-hosting after a
     /// rotation cannot stack closures.
     var onVideoSizeForPointer: ((CGSize) -> Void)?
+    /// The layer was interrupted and waits for a keyframe (`recoverIfInterrupted`). On the queue
+    /// `enqueue` runs on.
+    var onNeedsKeyframe: (() -> Void)?
 
     // MARK: The pointer sprite
     //
@@ -309,13 +312,22 @@ final class HEVCDisplayView: UIView {
             first[kCMSampleAttachmentKey_DisplayImmediately as String] = true
         }
 
-        if displayLayer.status == .failed {
-            print("display layer failed: \(String(describing: displayLayer.error))")
-            displayLayer.flush()
-            waitingForKeyframe = true
-            return
-        }
+        if recoverIfInterrupted() { return }
         displayLayer.enqueue(sample)
+    }
+
+    /// The layer failed, or needs a flush before it decodes again (the app was in the background):
+    /// flush it, wait for a keyframe and ask for one (`onNeedsKeyframe`), since a still window sends
+    /// none. Also called on the return to the foreground, when no frame may come to notice it. On
+    /// the queue `enqueue` runs on. True when it recovered.
+    @discardableResult
+    func recoverIfInterrupted() -> Bool {
+        guard displayLayer.status == .failed || displayLayer.requiresFlushToResumeDecoding else { return false }
+        print("display layer interrupted (\(displayLayer.status == .failed ? "failed: \(String(describing: displayLayer.error))" : "needs a flush")); asking for a keyframe")
+        displayLayer.flush()
+        waitingForKeyframe = true
+        onNeedsKeyframe?()
+        return true
     }
 }
 
