@@ -182,6 +182,7 @@ package final class StreamCoordinator {
     }()
     /// The streamed desk window going into or out of full screen, seen within a quarter second (the
     /// catalog's poll is 2 s): it is placed again at once, its display fitted to the device's window.
+    /// Stops once the desk is empty; the next window put there starts it.
     private var fullScreenWatch: Timer?
     private var fullScreenSeen: (id: UInt32, full: Bool)?
 
@@ -189,7 +190,14 @@ package final class StreamCoordinator {
         guard fullScreenWatch == nil else { return }
         let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.switching, case .window(let id) = self.active, let full = self.desk.isFullScreen(id) else { return }
+                guard let self else { return }
+                if self.desk.staged.isEmpty {
+                    self.fullScreenWatch?.invalidate()
+                    self.fullScreenWatch = nil
+                    self.fullScreenSeen = nil
+                    return
+                }
+                guard !self.switching, case .window(let id) = self.active, let full = self.desk.isFullScreen(id) else { return }
                 defer { self.fullScreenSeen = (id, full) }
                 guard let seen = self.fullScreenSeen, seen.id == id, seen.full != full else { return }
                 await self.select(.window(id))
@@ -335,9 +343,7 @@ package final class StreamCoordinator {
     private(set) lazy var desk = DeskStages(sizer: sizer, catalog: catalog)
     /// Windows whose hidden display gave another display's picture (DeskPicture): their main stream
     /// captures the window alone, without its menus and popovers, until the desk is made again by
-    /// hand (the viewer's refresh). Never made again by itself: every display made and removed leaves
-    /// macOS's ColorSync service more work for the rest of the login session (2026-10-14: about 40 in
-    /// a morning saturated it, and WindowServer, waiting on it, was killed by its watchdog).
+    /// hand (the viewer's refresh). Never made again by itself (see `DeskStages.spares`).
     private var deskWindowAlone: Set<UInt32> = []
     /// The desk being made again (`rebuildDesk`).
     private var rebuildingDesk = false
@@ -474,6 +480,9 @@ package final class StreamCoordinator {
                 self.settingsIgnoredLineAt[ObjectIdentifier(connection)] = nil
                 let id = ObjectIdentifier(connection)
                 self.gestureArrivals[id] = nil
+                self.lastRebuildAsk[id] = nil
+                self.lastDockMenuAsk[id] = nil
+                self.swallowedPresses[id] = nil
                 self.routes[id] = nil
                 self.lastPairingWanted[id] = nil
                 self.connections[id] = nil
@@ -1693,8 +1702,8 @@ package final class StreamCoordinator {
                 // frames already show it uncovered. The virtual display's fallback lands here too.
                 // Sill's desk takes the window off this Mac's displays: nothing there to raise or fit.
                 // A window the desk just failed to take is captured where it is for a while, not
-                // tried again at every restart (each try makes a display and moves the window).
-                let toDesk = deskWanted && CFAbsoluteTimeGetCurrent() - (deskFailedAt[id] ?? 0) > Self.deskRetryAfter
+                // tried again at every restart (DeskStages.mayTry).
+                let toDesk = deskWanted && desk.mayTry(id, picked: true)
                 // A Mac viewer's window is never raised or resized on this Mac's own screens, the desk
                 // or not: the person here keeps their desk.
                 if comeForward, !shuttingDown, !deskWanted { activateAndRaise(window: w) }
@@ -1719,11 +1728,11 @@ package final class StreamCoordinator {
                         // no display is made for nothing. Still not drawn (the app opened a new window
                         // instead, which comes to the device by itself): no display for this one.
                         var picked = w
-                        if !Self.isOnScreen(id), sizer.placement(for: w) == nil, let app = w.owningApplication?.bundleIdentifier {
+                        if !WindowSizer.isOnScreen(id), sizer.placement(for: w) == nil, let app = w.owningApplication?.bundleIdentifier {
                             print("\(w.owningApplication?.applicationName ?? app)'s picked window is not drawn on this Mac; showing it as its Dock icon would.")
                             dockMenus.reopen(app)
-                            for _ in 0..<20 where !Self.isOnScreen(id) { try? await Task.sleep(for: .milliseconds(100)) }
-                            guard Self.isOnScreen(id) else { throw VirtualStage.Failure.windowMissing }
+                            for _ in 0..<20 where !WindowSizer.isOnScreen(id) { try? await Task.sleep(for: .milliseconds(100)) }
+                            guard WindowSizer.isOnScreen(id) else { throw VirtualStage.Failure.windowMissing }
                             picked = await catalog.resolveWindow(id: id) ?? w
                         }
                         do {
@@ -1736,7 +1745,6 @@ package final class StreamCoordinator {
                         }
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
-                        deskFailedAt[id] = CFAbsoluteTimeGetCurrent()
                         // It was put back where it was before (where `place` read it): read where it
                         // is once the window server shows that (a move is listed only once the app
                         // commits it, up to about 0.45 s for a slow app), not a frame from before it
@@ -1897,7 +1905,6 @@ package final class StreamCoordinator {
             } else {
                 capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
             }
-            capture.onFirstFrame = deskCheck == nil ? nil : { pixelBuffer in frameGrid.set(DeskPicture.grid(pixelBuffer)) }
             try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
@@ -1966,8 +1973,8 @@ package final class StreamCoordinator {
     /// Every hidden display of the desk removed together and made again, on a device's word (the
     /// viewer's refresh): the streams stop, the windows go home, and once no hidden display is left
     /// they go back to new ones, the main window first. Displays made with none left stream their own
-    /// pictures (DeskPicture), and windows captured alone go back to theirs. Only by hand: each
-    /// display made costs ColorSync work for the rest of the login session (`deskWindowAlone`).
+    /// pictures (DeskPicture), and windows captured alone go back to theirs. Only by hand, since each
+    /// display made has a lasting cost (see `DeskStages.spares`).
     func rebuildDesk() async {
         guard !rebuildingDesk, !desk.staged.isEmpty else { return }
         rebuildingDesk = true
@@ -2163,15 +2170,12 @@ package final class StreamCoordinator {
     /// against the one being streamed. The quickest way to see a mapping or ordering problem.
     private var lastClickLog: CFAbsoluteTime = 0
 
-    /// The buttons a device pressed over the Dock, whose ups go
-    /// nowhere either (`swallowPressOnBackdrop`).
-    private var swallowedPresses: Set<String> = []
+    /// The buttons each device pressed over the Dock, whose ups go nowhere either (`swallowPressOnBackdrop`).
+    private var swallowedPresses: [KeyStrokes.Device: Set<String>] = [:]
 
-    /// A press on a streamed window at a point the Dock covers on the Mac: the picture leaves the
-    /// Dock out (AppCrop's backdrop), so the device saw the window there, and the
-    /// click would open whatever Dock icon lies under it (2026-10-13: a window captured where it is,
-    /// its bottom under the Dock, and a click there launched another app). The press and its up are
-    /// dropped. True when the event was dropped.
+    /// A press on a streamed window at a point the Dock covers on the Mac: the picture leaves the Dock
+    /// out (AppCrop's backdrop), so the device saw the window there, and the click would open whatever
+    /// Dock icon lies under it. The press and its up are dropped. True when the event was dropped.
     private func swallowPressOnBackdrop(_ event: InputEvent, from device: KeyStrokes.Device) -> Bool {
         guard case .pointer(let action, _, _) = event, case .window = inputSource else { return false }
         let button: String
@@ -2181,24 +2185,23 @@ package final class StreamCoordinator {
         case .middleDown, .middleUp: button = "middle"
         default: return false
         }
-        let key = "\(device.hashValue).\(button)"
-        guard action.isButtonDown else { return swallowedPresses.remove(key) != nil }
-        guard let point = injectorProbePoint(event), let owner = Self.backdropCover(at: point) else { return false }
-        swallowedPresses.insert(key)
-        print("Click at (\(Int(point.x)),\(Int(point.y))) dropped: \(owner) covers the streamed window there on this Mac")
+        guard action.isButtonDown else { return swallowedPresses[device]?.remove(button) != nil }
+        guard let point = injectorProbePoint(event), Self.dockCovers(point) else { return false }
+        swallowedPresses[device, default: []].insert(button)
+        print("Click at (\(Int(point.x)),\(Int(point.y))) dropped: the Dock covers the streamed window there on this Mac")
         return true
     }
 
-    /// "the Dock" when the Dock's tiles are at `point` on this Mac, else nil. The Dock's window
-    /// spans its whole display (transparent but for the tiles), so its strip is read from
-    /// Accessibility: its list of tiles' frame, in the same top-left screen points as the input.
-    private static func backdropCover(at point: CGPoint) -> String? {
-        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
+    /// Whether the Dock's tiles are at `point` on this Mac. The Dock's window spans its whole display
+    /// (transparent but for the tiles), so its strip is read from Accessibility: its list of tiles'
+    /// frame, in the same top-left screen points as the input.
+    private static func dockCovers(_ point: CGPoint) -> Bool {
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return false }
         let app = AXUIElementCreateApplication(dock.processIdentifier)
         AXUIElementSetMessagingTimeout(app, 0.25)
         var children: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXChildrenAttribute as CFString, &children) == .success,
-              let lists = children as? [AXUIElement] else { return nil }
+              let lists = children as? [AXUIElement] else { return false }
         for list in lists {
             var role: CFTypeRef?, pos: CFTypeRef?, size: CFTypeRef?
             guard AXUIElementCopyAttributeValue(list, kAXRoleAttribute as CFString, &role) == .success,
@@ -2208,9 +2211,9 @@ package final class StreamCoordinator {
             var origin = CGPoint.zero, extent = CGSize.zero
             AXValueGetValue(pos as! AXValue, .cgPoint, &origin)
             AXValueGetValue(size as! AXValue, .cgSize, &extent)
-            if CGRect(origin: origin, size: extent).contains(point) { return "the Dock" }
+            if CGRect(origin: origin, size: extent).contains(point) { return true }
         }
-        return nil
+        return false
     }
     private func logClick(_ event: InputEvent, in rect: CGRect) {
         guard case .pointer(let action, let x, let y) = event, action.isButtonDown,
@@ -2236,12 +2239,6 @@ package final class StreamCoordinator {
 
     /// The on-screen layer-0 window under `point` (any point when nil, i.e. the frontmost normal
     /// window on screen) and its owner, or nil when unknown.
-    /// Whether the window server draws the window now (on a display, in the Space shown there).
-    private static func isOnScreen(_ id: CGWindowID) -> Bool {
-        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]]
-        return (list?.first?[kCGWindowIsOnscreen as String] as? Bool) == true
-    }
-
     private static func topmostWindow(at point: CGPoint?) -> (id: CGWindowID, pid: pid_t)? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         for info in list {   // front to back
@@ -2820,9 +2817,6 @@ package final class StreamCoordinator {
         await select(active)
     }
     private var lastMovedFrame: CGRect?
-    /// When Sill's desk last failed to take each window, and how long it is not tried again.
-    private var deskFailedAt: [UInt32: CFAbsoluteTime] = [:]
-    private static let deskRetryAfter: CFAbsoluteTime = 30
 
     private func windowsChanged(_ infos: [WindowInfo]) async {
         sideStreams?.changed()   // a side stream's window resized or gone
@@ -3101,8 +3095,6 @@ extension ClientRoute {
     var isAway: Bool { AwayPolicy.isAway(remoteDoor: isRemote, origin: origin) }
 }
 
-/// One pipeline's frames going out or not (`encoderLive`). Thread-safe: read on the encoder's callback
-/// thread, turned off on the main actor.
 /// The desk picture check's latest frame (DeskPicture.grid), from the capture queue to the main actor.
 final class GridBox: @unchecked Sendable {
     private let lock = NSLock()
@@ -3118,6 +3110,8 @@ final class GridBox: @unchecked Sendable {
     func due() -> Bool { lock.lock(); defer { lock.unlock() }; return asked || CFAbsoluteTimeGetCurrent() - taken >= 1 }
 }
 
+/// One pipeline's frames going out or not (`encoderLive`). Thread-safe: read on the encoder's callback
+/// thread, turned off on the main actor.
 final class OutputSwitch: @unchecked Sendable {
     private let lock = NSLock()
     private var isOn = true

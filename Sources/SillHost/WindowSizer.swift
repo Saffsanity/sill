@@ -310,6 +310,12 @@ final class WindowSizer {
         return CGRect(dictionaryRepresentation: bounds as CFDictionary)
     }
 
+    /// Whether the window server draws the window now (on a display, in the Space shown there).
+    static func isOnScreen(_ id: CGWindowID) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]]
+        return (list?.first?[kCGWindowIsOnscreen as String] as? Bool) == true
+    }
+
     // MARK: Staying on screen
 
     /// The visible frame (menu bar and Dock excluded) of the display holding most of `rect`, in
