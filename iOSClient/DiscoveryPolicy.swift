@@ -10,7 +10,7 @@ import Foundation
 /// on it does, whether a connection runs over the USB cable as this device sees it, the key each
 /// connection of a session at home is pinned to and what its end means, what the Mac's answer to
 /// an ask means, where a pairing link goes, and the words for all of it.
-/// AWDL takes the radio off its Wi-Fi channel (CLAUDE.md, trackpad stutter), so the device asks for
+/// AWDL takes the radio off its Wi-Fi channel (docs/history.md, trackpad stutter), so the device asks for
 /// it only when a Mac it has seen with Direct Wireless Connection on is missing from the network,
 /// or when the user taps Search Nearby, never while connected, and leaves it once the network lists
 /// that Mac again.

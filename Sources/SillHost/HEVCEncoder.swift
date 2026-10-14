@@ -18,7 +18,7 @@ import StreamProtocol
 ///   finds the place taken waits in the mailbox, where a newer one replaces it (`EncoderMailbox`,
 ///   which keeps this bookkeeping and is checked on its own). Latency beats quality: a frame the
 ///   encoder has no room for waits in the mailbox, never inside VT behind another. Two inside at
-///   once was measured against the hardware's slow state and dropped (CLAUDE.md, "The 33 fps
+///   once was measured against the hardware's slow state and dropped (docs/history.md, "The 33 fps
 ///   plateau").
 /// - A watchdog on its own queue declares the session dead when a frame has been inside VT
 ///   `hangAfter` seconds without an output. The owner is told (`onHung`) and starts over on the
@@ -31,10 +31,10 @@ import StreamProtocol
 ///     the encoder firmware's priority 80, a real-time session like this one at 0, and the one
 ///     encoder engine served the recorder while this session's frame waited 1.8 s and 8.6 s. Both
 ///     frames came back, and fresh sessions answered at once. The kernel's AppleAVE2 log showed it
-///     (CLAUDE.md, "Frozen stream").
+///     (docs/history.md, "Frozen stream").
 ///   A session given up on reports on its way out whether its stalled frame ever came back
 ///   (`deinit`): a busy encoder hands it back, a stuck one never does.
-/// - The hardware's slow state (CLAUDE.md, "The 33 fps plateau"): a session fed sparse frames for
+/// - The hardware's slow state (docs/history.md, "The 33 fps plateau"): a session fed sparse frames for
 ///   about a second can settle at ~29 ms a frame instead of 9–16 and stay there through any motion
 ///   that follows (34 fps out of 57 captured at 3024×1964). When a stream's session does
 ///   (`EncoderSlowState`), the stream gets a new one in place (`replacesSlowSessions`): made on a
@@ -109,7 +109,7 @@ final class HEVCEncoder {
     private var watchdog: DispatchSourceTimer?
     static let hangAfter: CFTimeInterval = 1.5
     /// A hardware stream session that settles in the slow state is replaced (`EncoderSlowState`).
-    /// Measured alone on the engine (CLAUDE.md, "The 33 fps plateau"): the resumed motion ran at
+    /// Measured alone on the engine (docs/history.md, "The 33 fps plateau"): the resumed motion ran at
     /// 57 fps against 34 without it. False keeps each session for the stream's life.
     static let replacesSlowSessions = true
     /// `replacesSlowSessions`, unless TEST ONLY `SILL_TEST_ENCODER_RECYCLE=1` or `0` says otherwise for

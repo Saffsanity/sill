@@ -859,7 +859,7 @@ final class StreamClient: ObservableObject {
         startPathMonitor()
         // Network only: includePeerToPeer stays at its default, false. A peer-to-peer browse makes
         // the kernel bring AWDL up, which takes the radio off its Wi-Fi channel up to ~100 ms twice
-        // a second (CLAUDE.md, trackpad stutter), and on a shared network AWDL carries nothing of
+        // a second (docs/history.md, trackpad stutter), and on a shared network AWDL carries nothing of
         // Sill's. Direct Wireless Connection is the Mac's opt-in for that route (the nearby browser).
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: NWParameters())
         browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in

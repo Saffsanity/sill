@@ -1,6 +1,6 @@
 import Foundation
 
-// The Mac's modifier keys after a device's keys (CLAUDE.md, "The stuck command after Spotlight"):
+// The Mac's modifier keys after a device's keys (docs/history.md, "The stuck command after Spotlight"):
 // KeyStrokes (Sources/SillHost), the keyboard events InputInjector posts for a device's keys, put
 // through a model of InputInjector's glue and of the Mac's HID state table.
 //

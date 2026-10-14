@@ -7,7 +7,7 @@ import Foundation
 /// took over; it is checked on its own with swiftc against scripted streams in virtual time
 /// (`Tests/checks/encoder-slowstate`, which CI runs).
 ///
-/// The slow state (CLAUDE.md, "The 33 fps plateau"), measured alone on the engine at 3024×1964:
+/// The slow state (docs/history.md, "The 33 fps plateau"), measured alone on the engine at 3024×1964:
 /// every fresh session started fast (9 ms a frame, then ~16 ms paced to 57 fps); about a second
 /// into a quiet spell an isolated frame took 29 ms, and once motion resumed every frame did for as
 /// long as it lasted (90 s of 90): 34 fps out of 57 captured, one frame inside at a time.

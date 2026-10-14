@@ -7,7 +7,7 @@
 # also says whether another process is encoding (engine-free.sh, the kernel's AppleAVE2 HeartBeat
 # of the last 12 s): a shared engine is a different experiment (the Claude app's iOS Simulator panel
 # encodes its screen at priority 60), and the Retina Desktop's slow state needs the engine to
-# itself (CLAUDE.md, "The 33 fps plateau").
+# itself (docs/history.md, "The 33 fps plateau").
 #
 # usage: Scripts/encoder-check/verify-hardware.sh [parity] [stream] [harness] [probe] [keyframe]   (none: all five)
 #   parity   SillHost --synthetic idle 35 s, base then new: new's stdout masked and sorted must
