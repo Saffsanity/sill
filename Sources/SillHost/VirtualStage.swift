@@ -379,13 +379,16 @@ final class VirtualStage {
         // Minimized: out of the Dock first, or it never shows on the display (a move does nothing
         // to it, and the window list does not list it: "the window vanished", 2026-10-12).
         // It goes back to the Dock when it goes home.
-        if p.windowID != stagedID, Self.isMinimized(p.element) {
+        // One already on the display minimised here (macOS's sharing menu over it has Minimise, which
+        // left the stream a blurred, cached picture of the minimised window: 2026-10-14) comes back too,
+        // and stays on the display: the device minimises its own window.
+        if Self.isMinimized(p.element) {
             AXUIElementSetAttributeValue(p.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
             for _ in 0..<15 where Self.isMinimized(p.element) || WindowSizer.liveBounds(of: p.windowID) == nil {
                 try? await Task.sleep(for: .milliseconds(100))
             }
             try? await Task.sleep(for: .milliseconds(300))   // the genie's way out
-            minimizedAtHome.insert(p.windowID)
+            if p.windowID != stagedID { minimizedAtHome.insert(p.windowID) } else { print("\(p.appName) — \(p.title) was minimised on this Mac; back on its display.") }
         }
 
         // (3) A→B: A goes home first; the display stays for B.
@@ -798,6 +801,10 @@ final class VirtualStage {
                   let id = info[kCGWindowNumber as String] as? CGWindowID, id != keep,
                   !catalog.stagedWindowIDs.contains(id),   // another of Sill's desk windows: it lives there too
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
+                  // The staged window's own app's (an About panel, a sheet, a popover): it belongs to
+                  // this window's picture (2026-10-14: an About panel opened from the menus was moved
+                  // onto this Mac's screen, out of the stream).
+                  pid != placement?.pid,
                   let b = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b as CFDictionary),
                   rect.width >= 100, rect.height >= 100, rect.intersects(bounds) else { continue }
