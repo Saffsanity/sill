@@ -443,6 +443,30 @@ struct StreamScreen: View {
                 scaleOpen = true
             }
         }
+        // `-SillCaptureAt <s>`: Capture Screen's picture at s seconds, written to the app's tmp, with
+        // how much of it is not black (a video layer that snapshots black would read 0 %).
+        let captureAt = defaults.double(forKey: "SillCaptureAt")
+        if captureAt > 0 {
+            after(captureAt) {
+                guard let image = client.displayView.snapshot(), let cg = image.cgImage,
+                      let data = image.pngData() else { print("capture: no picture"); return }
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("capture.png")
+                try? data.write(to: url)
+                print("capture: \(cg.width)×\(cg.height) px, \(Self.notBlackPercent(cg)) % not black, \(url.path)")
+            }
+        }
+    }
+
+    /// The share of a picture's pixels that are not near black, sampled at 64×64.
+    private static func notBlackPercent(_ image: CGImage) -> Int {
+        let side = 64
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let context = CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return -1 }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        let lit = stride(from: 0, to: pixels.count, by: 4).filter { Int(pixels[$0]) + Int(pixels[$0 + 1]) + Int(pixels[$0 + 2]) > 30 }.count
+        return lit * 100 / (side * side)
     }
     private static var launchArgumentsRan = false
     #endif

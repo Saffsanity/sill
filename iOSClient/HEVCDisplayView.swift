@@ -65,6 +65,19 @@ final class HEVCDisplayView: UIView {
                       width: size.width, height: size.height)
     }
 
+    /// The picture as it shows now, cropped to the video (no letterbox), with the pointer sprite if it
+    /// shows: Capture Screen. Nil while no video has arrived. Main thread.
+    func snapshot() -> UIImage? {
+        let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat.preferred()
+        // The device's points at its scale: the Mac's pixels, as near as the panel shows them.
+        format.scale = max(window?.screen.scale ?? 2, pointerVideoSize.width / rect.width)
+        return UIGraphicsImageRenderer(size: rect.size, format: format).image { _ in
+            drawHierarchy(in: CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: bounds.size), afterScreenUpdates: false)
+        }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black

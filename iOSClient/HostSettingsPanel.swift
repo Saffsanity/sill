@@ -312,8 +312,43 @@ struct HostSettingsPanel: View {
             // After everything of the Mac's, whatever state its settings are in: while they load, and
             // for a Mac without them too. Both are this device's own: its gestures, then the tour.
             thisDevice
+            capture
             tour
         }
+    }
+
+    // MARK: Capture Screen
+
+    /// Windows App's Capture Screen: the picture as it shows now, cropped to the video, through the
+    /// share sheet (Save Image, Copy, Messages…). Sends nothing to the Mac.
+    @ViewBuilder private var capture: some View {
+        Rows {
+            Button(action: shareStream) {
+                Text("Capture Screen…")
+                    .foregroundStyle(client.videoSize == .zero ? Palette.muted : Palette.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(client.videoSize == .zero)
+            .accessibilityHint("Shares a picture of what \(mac) is streaming.")
+            .rowFrame()
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func shareStream() {
+        guard let image = client.displayView.snapshot(),
+              let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })?.keyWindow,
+              var top = window.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        // An iPad shows it as a popover, which needs an anchor: the middle of the window, no arrow.
+        sheet.popoverPresentationController?.sourceView = window
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+        sheet.popoverPresentationController?.permittedArrowDirections = []
+        top.present(sheet, animated: true)
     }
 
     /// The last group: this device's, not the Mac's, so after everything about the Mac, and there
