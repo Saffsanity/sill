@@ -71,8 +71,8 @@ final class HEVCDisplayView: UIView {
         let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
         guard rect.width > 0, rect.height > 0 else { return nil }
         let format = UIGraphicsImageRendererFormat.preferred()
-        // The device's points at its scale: the Mac's pixels, as near as the panel shows them.
-        format.scale = max(window?.screen.scale ?? 2, pointerVideoSize.width / rect.width)
+        // The screen's pixels: drawHierarchy draws what the screen shows, so more would only enlarge it.
+        format.scale = window?.screen.scale ?? 2
         return UIGraphicsImageRenderer(size: rect.size, format: format).image { _ in
             drawHierarchy(in: CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: bounds.size), afterScreenUpdates: false)
         }
