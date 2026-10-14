@@ -135,9 +135,10 @@ final class DockProxies {
     /// The app's Dock icon takes the menu bar, so its menus (the other Mac's) show there while this app,
     /// which has none (an accessory app: no Dock icon of its own), keeps the keyboard: the menu bar stays
     /// with the regular app active last. The icon is activated and hands activation straight back.
-    func takeMenuBar(_ app: String) {
+    /// `force`: taken again though the icon holds the bar already (new menus show only once it is active).
+    func takeMenuBar(_ app: String, force: Bool = false) {
         guard Self.enabled, let proxy = running[app], !proxy.isTerminated,
-              NSWorkspace.shared.menuBarOwningApplication?.processIdentifier != proxy.processIdentifier else { return }
+              force || NSWorkspace.shared.menuBarOwningApplication?.processIdentifier != proxy.processIdentifier else { return }
         menuBarAt[app] = Date().timeIntervalSince1970
         post(app)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { proxy.activate() }
