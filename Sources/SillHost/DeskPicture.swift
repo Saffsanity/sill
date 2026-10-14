@@ -15,14 +15,26 @@ enum DeskPicture {
     /// in grey), so a playing video or a caret moves a little.
     static let cellTolerance = 48
 
-    /// The picture is not the window: the middle cell difference is over `cellTolerance`. A sheet, a
-    /// popover or a menu over part of the window (in the crop, not in the window alone) changes some
-    /// cells, never most of them; a picture of something else, or black, changes most.
+    /// A picture whose cells span no more than this is flat (black, one colour).
+    static let flatSpread = 8
+    /// A window whose cells span at least this has something on it (text, edges), dark or not.
+    static let detailSpread = 24
+
+    /// The picture is not the window: the middle cell difference is over `cellTolerance`, or the
+    /// picture is flat while the window alone has detail. A sheet, a popover or a menu over part of
+    /// the window (in the crop, not in the window alone) changes some cells, never most of them; a
+    /// picture of something else, or black, changes most. Black against a dark window (a dark-themed
+    /// app) changes each cell by less than the tolerance, so a flat picture of a window with detail
+    /// counts too (Teams, dark, showed black when focused and was never caught, 2026-10-14).
     static func differs(_ frame: [UInt8], _ window: [UInt8]) -> Bool {
         guard frame.count == window.count, !frame.isEmpty else { return false }
         let diffs = zip(frame, window).map { abs(Int($0) - Int($1)) }.sorted()
-        return diffs[diffs.count / 2] > cellTolerance
+        if diffs[diffs.count / 2] > cellTolerance { return true }
+        return spread(frame) <= flatSpread && spread(window) >= detailSpread
     }
+
+    /// The brightest cell less the darkest.
+    static func spread(_ cells: [UInt8]) -> Int { Int(cells.max() ?? 0) - Int(cells.min() ?? 0) }
 
     /// Each cell's mean luma (0–255) of a 420f frame's Y plane, row by row; nil for another format.
     static func grid(_ px: CVPixelBuffer) -> [UInt8]? {

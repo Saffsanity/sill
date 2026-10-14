@@ -52,7 +52,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
   (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (26, 9
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (37, 15
   mutants), `protocol` (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
