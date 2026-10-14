@@ -137,6 +137,9 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.processIdentifier != getpid() else { return }
             self?.lastOtherFront = app.bundleIdentifier
+            // A Dock icon in front (its menu bar open) is this app in front; another app is not.
+            self?.updatePill()
+            self?.appActiveChanged()
         }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
@@ -270,8 +273,13 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     private static let backgroundDelay: TimeInterval = 3
     private var inBackground: Bool { inactiveSince.map { Date().timeIntervalSince($0) >= Self.backgroundDelay - 0.05 } ?? false }
 
+    /// This app is in front, or one of its Dock icons is (it holds the menu bar, and a menu may be open).
+    private var inFront: Bool {
+        NSApp.isActive || NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.hasPrefix(DockProxies.iconIDPrefix) == true
+    }
+
     private func appActiveChanged() {
-        if NSApp.isActive {
+        if inFront {
             inactiveSince = nil
             requestSideStreams()
         } else if inactiveSince == nil {
@@ -590,7 +598,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     }
 
     private func updatePill() {
-        guard NSApp.isActive, let key = NSApp.keyWindow as? StreamWindow else { pill.show(over: nil, title: "", image: nil); return }
+        guard inFront, let key = NSApp.keyWindow as? StreamWindow else { pill.show(over: nil, title: "", image: nil); return }
         var image: NSImage?
         // The app's icon with Sill Viewer's in its corner, as its Dock icon has it: the other Mac's
         // window, not this Mac's; a Desktop window has Sill Viewer's own.
