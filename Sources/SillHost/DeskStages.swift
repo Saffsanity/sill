@@ -149,9 +149,10 @@ final class DeskStages {
             stage.mayReachOtherSpace = fps != nil
             prepared = try await stage.prepare(window: window, wanted: size, envelope: envelope, captureScale: captureScale, refreshHz: 120)
         } catch {
-            stage.release()
-            forget(id)
-            // A window that refused the move, or was not found there, is not tried again for a while.
+            // The display is sound, the window would not go on it: kept for the next (`spares`), not
+            // removed (a Finder window opened a moment before was not found yet, and its display was
+            // made and removed at once). The window is not tried again for a while.
+            release(id)
             cannotTake[id] = Date()
             throw error
         }
