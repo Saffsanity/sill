@@ -11,11 +11,15 @@ import VideoToolbox
 /// the picture's aspect-fit rectangle, as the system layer's `.resizeAspect`). Nil from `init` when
 /// this device has no Metal or the shader does not build: the system layer draws then, as before.
 ///
-/// Threads: `decode` and `setFormat` on the stream's queue (HEVCDisplayView's enqueue), `layout` and
-/// `setFilter` on main, the drawing on VideoToolbox's output thread (and a redraw on main); what they
-/// share is under `lock`, the drawing itself under `drawing`.
+/// Threads: `decode`, `setFormat` and `clear` run on the stream's serial queue (HEVCDisplayView's
+/// enqueue); `layout` and `setFilter` are called from main and hop to a serial render queue for any
+/// redraw, so `nextDrawable()` never blocks the main thread and every decode + Metal draw runs in
+/// strict frame order with no async reordering.
 final class MetalStreamRenderer {
     let layer = CAMetalLayer()
+    /// Called when an invalidated decoder (after backgrounding) was recreated and needs a keyframe.
+    var onNeedsKeyframe: (() -> Void)?
+
     private let queue: MTLCommandQueue
     private let toIntermediate: MTLRenderPipelineState
     private let toDrawable: MTLRenderPipelineState
@@ -23,8 +27,8 @@ final class MetalStreamRenderer {
     private let device: MTLDevice
 
     private let lock = NSLock()
-    private let drawing = NSLock()
     private var session: VTDecompressionSession?
+    private var format: CMVideoFormatDescription?
     private var filter: PictureSmoothing.Filter
     /// The picture's rectangle in the drawable's pixels, and the drawable's size (`layout`).
     private var target: (rect: CGRect, size: CGSize)?
@@ -32,7 +36,6 @@ final class MetalStreamRenderer {
     private var last: CVPixelBuffer?
     /// A frame of this stream did not decode, and that was said: once a stream, not every frame.
     private var decodeFailureSaid = false
-    // Under `drawing`:
     private var intermediate: MTLTexture?
     private var colorSpaceSet = false
 
@@ -76,13 +79,37 @@ final class MetalStreamRenderer {
         if let session { VTDecompressionSessionInvalidate(session) }
     }
 
-    func setFilter(_ filter: PictureSmoothing.Filter) {
-        lock.lock(); self.filter = filter; let frame = last; lock.unlock()
-        if let frame { draw(frame) }
+    /// On main (or any thread); redraws off the main thread so `nextDrawable()` never stalls UI.
+    func setFilter(_ filter: PictureSmoothing.Filter, on renderQueue: DispatchQueue) {
+        renderQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.filter = filter
+            let frame = self.last
+            self.lock.unlock()
+            if let frame { self.draw(frame) }
+        }
     }
 
-    /// A new stream's format: a decoder for it (the old one goes). On the stream's queue.
+    /// A new stream's format: a decoder for it (the old one goes) and the old picture cleared.
+    /// On the stream's queue.
     func setFormat(_ format: CMVideoFormatDescription) {
+        lock.lock()
+        let old = session
+        session = nil
+        self.format = format
+        decodeFailureSaid = false
+        lock.unlock()
+        if let old { VTDecompressionSessionInvalidate(old) }
+        let made = Self.makeSession(format)
+        lock.lock()
+        session = made
+        last = nil
+        lock.unlock()
+        drawBlack()
+    }
+
+    private static func makeSession(_ format: CMVideoFormatDescription) -> VTDecompressionSession? {
         let attributes: [CFString: Any] = [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
                                             kCVPixelBufferMetalCompatibilityKey: true]
         var made: VTDecompressionSession?
@@ -90,24 +117,43 @@ final class MetalStreamRenderer {
                                                   imageBufferAttributes: attributes as CFDictionary, outputCallback: nil,
                                                   decompressionSessionOut: &made)
         if status != noErr { print("smoothing: no decoder for this stream (\(status))") }
-        lock.lock()
-        let old = session
-        session = made
-        last = nil
-        decodeFailureSaid = false
-        lock.unlock()
-        if let old { VTDecompressionSessionInvalidate(old) }
+        return made
     }
 
-    /// One frame of the stream, drawn once it decodes. On the stream's queue.
+    /// One frame of the stream, decoded synchronously on the stream's queue so frames draw in strict
+    /// arrival order. If iOS invalidated the session in the background, recreates it and asks for a
+    /// keyframe.
     func decode(_ sample: CMSampleBuffer) {
-        lock.lock(); let session = self.session; lock.unlock()
-        guard let session else { return }
-        let status = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample,
-                                                       flags: [._EnableAsynchronousDecompression, ._1xRealTimePlayback],
-                                                       infoFlagsOut: nil) { [weak self] status, _, image, _, _ in
-            guard status == noErr, let image else { return }
-            self?.draw(image)
+        lock.lock()
+        var current = session
+        let fmt = format
+        lock.unlock()
+        if current == nil, let fmt {
+            current = Self.makeSession(fmt)
+            lock.lock(); session = current; lock.unlock()
+        }
+        guard let current else { return }
+        var decoded: CVPixelBuffer?
+        let status = VTDecompressionSessionDecodeFrame(current, sampleBuffer: sample,
+                                                       flags: [._1xRealTimePlayback],
+                                                       infoFlagsOut: nil) { status, _, image, _, _ in
+            if status == noErr { decoded = image }
+        }
+        if let decoded {
+            draw(decoded)
+            return
+        }
+        if PictureSmoothing.sessionBroken(status) {
+            print("smoothing: decoder session invalidated (\(status)); recreating and asking for a keyframe")
+            VTDecompressionSessionInvalidate(current)
+            let rebuilt = fmt.flatMap(Self.makeSession)
+            lock.lock()
+            session = rebuilt
+            last = nil
+            decodeFailureSaid = false
+            lock.unlock()
+            onNeedsKeyframe?()
+            return
         }
         guard status != noErr else { return }
         lock.lock(); let said = decodeFailureSaid; decodeFailureSaid = true; lock.unlock()
@@ -115,46 +161,73 @@ final class MetalStreamRenderer {
     }
 
     /// Where the picture goes: the view's size in points, its scale, and the video's size in pixels.
-    /// On main.
-    func layout(bounds: CGRect, scale: CGFloat, videoSize: CGSize) {
+    /// Called on main; drawable sizing and redraw run on `renderQueue` so they serialize with `decode`.
+    func layout(bounds: CGRect, scale: CGFloat, videoSize: CGSize, on renderQueue: DispatchQueue) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.frame = bounds
         layer.contentsScale = scale
         CATransaction.commit()
         let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
-        guard size.width > 0, size.height > 0 else { return }
-        layer.drawableSize = size
         let fit = HEVCDisplayView.videoRect(in: CGRect(origin: .zero, size: size), videoSize: videoSize).integral
-        lock.lock(); target = fit.width > 0 && fit.height > 0 ? (fit, size) : nil; let frame = last; lock.unlock()
-        if let frame { draw(frame) }
+        renderQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.target = (size.width > 0 && size.height > 0 && fit.width > 0 && fit.height > 0) ? (fit, size) : nil
+            let frame = self.last
+            self.lock.unlock()
+            if let frame { self.draw(frame) }
+        }
     }
 
-    /// The session ended: no decoder, no frame, black.
+    /// The session ended: no decoder, no frame, black. On the stream's queue.
     func clear() {
         lock.lock()
         let old = session
         session = nil
-        last = nil
+        format = nil
+        decodeFailureSaid = false
         lock.unlock()
         if let old { VTDecompressionSessionInvalidate(old) }
+        lock.lock()
+        last = nil
+        intermediate = nil
+        lock.unlock()
+        drawBlack()
     }
 
-    /// Draws one frame. `lock` only for the state it reads, so a wait for a drawable (up to a second
-    /// in the background) never holds up `decode` on the stream's queue; `drawing` keeps two draws
-    /// (a decoded frame, a redraw for a new layout) from sharing the intermediate texture at once.
+    /// Clears the Metal layer to black without resetting `layer.contents` (which breaks CAMetalLayer's
+    /// drawable presentation). On the stream's serial queue.
+    private func drawBlack() {
+        lock.lock(); let target = self.target; lock.unlock()
+        guard let target else { return }
+        if layer.drawableSize != target.size { layer.drawableSize = target.size }
+        guard let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
+        let d = MTLRenderPassDescriptor()
+        d.colorAttachments[0].texture = drawable.texture
+        d.colorAttachments[0].loadAction = .clear
+        d.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        d.colorAttachments[0].storeAction = .store
+        if let encoder = buffer.makeRenderCommandEncoder(descriptor: d) { encoder.endEncoding() }
+        buffer.present(drawable)
+        buffer.commit()
+    }
+
+    /// Draws one frame on the stream's serial queue.
     private func draw(_ image: CVPixelBuffer) {
         lock.lock()
         last = image
         let filter = self.filter, target = self.target
+        let needColorSpace = !colorSpaceSet
         lock.unlock()
         guard let target else { return }
-        drawing.lock()
-        defer { drawing.unlock() }
-        if !colorSpaceSet, let attachments = CVBufferCopyAttachments(image, .shouldPropagate),
+        if needColorSpace, let attachments = CVBufferCopyAttachments(image, .shouldPropagate),
            let space = CVImageBufferCreateColorSpaceFromAttachments(attachments)?.takeRetainedValue() {
-            layer.colorspace = space            // the stream's own colour, as the system layer shows it
-            colorSpaceSet = true
+            lock.lock(); colorSpaceSet = true; lock.unlock()
+            DispatchQueue.main.async { [layer] in layer.colorspace = space }
+        }
+        if layer.drawableSize != target.size {
+            layer.drawableSize = target.size
         }
         let width = CVPixelBufferGetWidth(image), height = CVPixelBufferGetHeight(image)
         var cvTexture: CVMetalTexture?

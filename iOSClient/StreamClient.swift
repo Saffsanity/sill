@@ -433,6 +433,7 @@ final class StreamClient: ObservableObject {
 
     /// Picture Smoothing's renderer while a level other than Automatic is chosen. Main thread.
     private var smoothingRenderer: MetalStreamRenderer?
+    private var smoothingRecovery = PictureSmoothing.DecoderRecovery()
 
     /// Picture Smoothing (PictureSmoothing; This iPad in the Settings panel): Automatic draws with the
     /// system's video layer, every other level with Sill's own renderer and that level's filter. A
@@ -441,9 +442,23 @@ final class StreamClient: ObservableObject {
     func setSmoothing(_ smoothing: PictureSmoothing) {
         var renderer: MetalStreamRenderer?
         if let filter = smoothing.filter {
-            renderer = smoothingRenderer ?? MetalStreamRenderer(filter: filter)
-            renderer?.setFilter(filter)
-            if renderer == nil { print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead") }
+            if let existing = smoothingRenderer {
+                renderer = existing
+                existing.setFilter(filter, on: queue)
+            } else if let made = MetalStreamRenderer(filter: filter) {
+                made.onNeedsKeyframe = { [weak self] in
+                    DispatchQueue.main.async {
+                        guard let self, self.active != .none else { return }
+                        let activeApp = UIApplication.shared.applicationState == .active
+                        if self.smoothingRecovery.shouldAskKeyframe(now: ProcessInfo.processInfo.systemUptime, active: activeApp) {
+                            self.request(self.active)
+                        }
+                    }
+                }
+                renderer = made
+            } else {
+                print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead")
+            }
         }
         let newPath = renderer !== smoothingRenderer
         smoothingRenderer = renderer
@@ -458,6 +473,7 @@ final class StreamClient: ObservableObject {
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
+        view.renderQueue = queue
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }

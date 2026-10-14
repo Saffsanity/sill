@@ -51,6 +51,26 @@ enum PictureSmoothing: String, CaseIterable {
         }
     }
 
+    /// True when VideoToolbox's status says the decompression session itself is gone or broken
+    /// (iOS invalidates a hardware session in the background: kVTInvalidSessionErr = -12903,
+    /// kVTVideoDecoderMalfunctionErr = -12911), so it must be made again from the format description.
+    static func sessionBroken(_ status: Int32) -> Bool {
+        status == -12903 || status == -12911
+    }
+
+    /// When a recreated decoder asks the Mac for a keyframe (a still window sends none): only while
+    /// the app is active, and at most once per 2 s.
+    struct DecoderRecovery: Equatable {
+        static let spacing: TimeInterval = 2
+        private var lastAsked: TimeInterval?
+
+        mutating func shouldAskKeyframe(now: TimeInterval, active: Bool) -> Bool {
+            guard active else { return false }
+            if let last = lastAsked, now >= last, now - last < Self.spacing { return false }
+            lastAsked = now
+            return true
+        }
+    }
 }
 
 extension PictureSmoothing.Filter {

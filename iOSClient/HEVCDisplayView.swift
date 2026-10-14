@@ -19,6 +19,9 @@ final class HEVCDisplayView: UIView {
     private var ownRenderer: MetalStreamRenderer?
     /// The same renderer, whose layer is shown over the system layer's and laid out here. Main thread.
     private var shownRenderer: MetalStreamRenderer?
+    /// The stream's serial queue, so `layoutSubviews` can schedule Metal drawable sizing/redraw in
+    /// order with `decode`.
+    var renderQueue: DispatchQueue?
 
     /// The streamed frame's pixel size, reported on main whenever new parameter sets arrive.
     /// Input needs it: touches are normalized against the video, not against this view.
@@ -80,14 +83,17 @@ final class HEVCDisplayView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        // A standalone layer renders at 1× unless told otherwise; the arrow should be crisp.
+        // A standalone layer renders at 1× unless told otherwise; the arrow and Metal layer should be crisp.
         if let scale = window?.screen.scale { cursorLayer.contentsScale = scale }
+        setNeedsLayout()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         placeCursor()   // rotation and letterbox changes move the video rect under it
-        shownRenderer?.layout(bounds: bounds, scale: window?.screen.scale ?? 2, videoSize: pointerVideoSize)
+        if let shownRenderer, let renderQueue {
+            shownRenderer.layout(bounds: bounds, scale: window?.screen.scale ?? 2, videoSize: pointerVideoSize, on: renderQueue)
+        }
         #if DEBUG
         if let debugFrame {
             CATransaction.begin()
