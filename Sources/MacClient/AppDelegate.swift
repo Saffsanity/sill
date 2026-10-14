@@ -78,8 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let mac = client.session?.macID { UserDefaults.standard.set(mac, forKey: Self.lastMacKey) }
             connectWindow?.orderOut(nil)
             // The session starts empty: the windows open last time with this Mac come back
-            // (StreamWindows), and with none the status item's menu opens so one can be picked.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            // (StreamWindows), and with none the status item's menu opens so one can be picked. From
+            // a run-loop timer, never a main-queue block (the modal-loop rule): the menu's tracking
+            // loop runs inside whatever opened it, and inside a main-queue block it holds the main
+            // queue until the menu closes, so a session that ended meanwhile (the other Mac's Sill
+            // quit) was never ended and never reconnected while the menu stayed open.
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
                 guard let self, self.client.connected, self.windows.openSources.isEmpty else { return }
                 self.status?.open()
             }
