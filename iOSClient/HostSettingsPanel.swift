@@ -338,9 +338,9 @@ struct HostSettingsPanel: View {
     }
 
     private func shareStream() {
-        guard let image = client.displayView.snapshot(),
-              let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive })?.keyWindow,
+        // This session's own window, where its picture is: with two Sill windows on an iPad, both in
+        // front, the share sheet opens over the one that asked.
+        guard let image = client.displayView.snapshot(), let window = client.displayView.window,
               var top = window.rootViewController else { return }
         while let presented = top.presentedViewController { top = presented }
         let sheet = UIActivityViewController(activityItems: [image], applicationActivities: nil)
