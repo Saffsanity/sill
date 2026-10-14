@@ -1713,25 +1713,26 @@ package final class StreamCoordinator {
                     do {
                         let own = Self.liveBounds(of: id)?.size ?? w.frame.size
                         let size = viewport?.scale == nil ? own : VirtualStage.windowSize(for: viewport, own: own)
+                        // A window not drawn, that Accessibility does not find either (an app that keeps
+                        // running with its window put away still lists it; 2026-10-14, a chat app's window
+                        // streamed white) is shown first, as a click on its app's Dock icon here would, so
+                        // no display is made for nothing. Still not drawn (the app opened a new window
+                        // instead, which comes to the device by itself): no display for this one.
+                        var picked = w
+                        if !Self.isOnScreen(id), sizer.placement(for: w) == nil, let app = w.owningApplication?.bundleIdentifier {
+                            print("\(w.owningApplication?.applicationName ?? app)'s picked window is not drawn on this Mac; showing it as its Dock icon would.")
+                            dockMenus.reopen(app)
+                            for _ in 0..<20 where !Self.isOnScreen(id) { try? await Task.sleep(for: .milliseconds(100)) }
+                            guard Self.isOnScreen(id) else { throw VirtualStage.Failure.windowMissing }
+                            picked = await catalog.resolveWindow(id: id) ?? w
+                        }
                         do {
-                            staged = try await desk.prepare(w, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                            staged = try await desk.prepare(picked, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
                         } catch VirtualStage.Failure.axWindowNotFound {
                             // A window just opened (a new tab's window) is listed before Accessibility
                             // has it, and its title can still be changing: once more, a moment later.
-                            // One that is not drawn (closed: an app that keeps running with its window
-                            // put away lists it still, and Accessibility has none; 2026-10-14, a chat
-                            // app's window streamed white) is shown first, as a click on its app's Dock
-                            // icon here would, and waited for.
-                            var again = w
-                            if !Self.isOnScreen(id), let app = w.owningApplication?.bundleIdentifier {
-                                print("\(w.owningApplication?.applicationName ?? app)'s picked window is not drawn on this Mac; showing it as its Dock icon would.")
-                                dockMenus.reopen(app)
-                                for _ in 0..<20 where !Self.isOnScreen(id) { try? await Task.sleep(for: .milliseconds(100)) }
-                                again = await catalog.resolveWindow(id: id) ?? w
-                            } else {
-                                try? await Task.sleep(for: .milliseconds(400))
-                            }
-                            staged = try await desk.prepare(again, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
+                            try? await Task.sleep(for: .milliseconds(400))
+                            staged = try await desk.prepare(picked, size: size, captureScale: captureScale, fps: fps, room: sideStreams?.largestScreen)
                         }
                     } catch {
                         print("Sill's desk: \(w.owningApplication?.applicationName ?? "?") could not move there (\(error)); capturing it where it is.")
