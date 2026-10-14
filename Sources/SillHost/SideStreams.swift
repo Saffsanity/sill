@@ -27,6 +27,10 @@ final class SideStreams {
         var pill: SharePill?
         /// On Sill's desk (DeskStages).
         var onDesk = false
+        /// Whether whole-app capture was asked for when it started (a window neither on the desk nor
+        /// cropped, off screen, is captured alone though it was).
+        var wholeApp = false
+        let startedAt = Date()
         let capture = WindowCapture()
         var encoder: HEVCEncoder?
         init(id: UInt32, size: CGSize, fps: Int) { self.id = id; self.size = size; self.fps = fps }
@@ -172,8 +176,12 @@ final class SideStreams {
         for (id, stream) in streams where DesktopWindow.display(of: id) == nil {
             let w = target[id]
             let moved = stream.cropFrame.map { $0.origin != w?.frame.origin } ?? false
+            // Captured alone though whole-app capture was asked for (off screen when it started): tried
+            // again once the window shows, at most every 30 s.
+            let alone = stream.wholeApp && !stream.onDesk && stream.cropFrame == nil
+            let retry = alone && w?.isOnScreen == true && Date().timeIntervalSince(stream.startedAt) > 30
             if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved
-                || (stream.cropFrame != nil || stream.onDesk) != wholeApp { await stop(id) }
+                || stream.wholeApp != wholeApp || retry { await stop(id) }
         }
         for (id, w) in target where streams[id] == nil {
             await start(w, fps: fps[id] ?? SideStreamRequest.defaultFPS)
@@ -252,6 +260,7 @@ final class SideStreams {
                 }
             }
             stream.encoder = enc
+            stream.wholeApp = wholeApp
             streams[id] = stream
             encoders.set(id, enc)
             var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?

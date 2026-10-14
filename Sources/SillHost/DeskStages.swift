@@ -101,10 +101,12 @@ final class DeskStages {
             // macOS's ColorSync service more work for the rest of the login session (2026-10-14: a
             // window Accessibility could not find was tried every few seconds, a display made and
             // removed each time, and about 40 in a morning saturated it and hung WindowServer).
-            if let failed = cannotTake[id], Date().timeIntervalSince(failed) < Self.retryAfter {
+            // A window picked on the device (`fps`, the main stream) is always tried, and in another
+            // Space Accessibility finds it only once the stage has brought that Space into view.
+            if fps == nil, let failed = cannotTake[id], Date().timeIntervalSince(failed) < Self.retryAfter {
                 throw VirtualStage.Failure.axWindowNotFound
             }
-            guard sizer.placement(for: window) != nil else {
+            if fps == nil || window.isOnScreen, sizer.placement(for: window) == nil {
                 cannotTake[id] = Date()
                 throw VirtualStage.Failure.axWindowNotFound
             }
