@@ -116,8 +116,12 @@ final class WindowSizer {
         case .close:
             var button: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &button) == .success,
-                  let button else { return false }
-            return AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString) == .success
+                  let button, CFGetTypeID(button) == AXUIElementGetTypeID() else { return false }
+            // The button is a new element, on the system's default timeout: an app whose close runs a
+            // modal alert would hold the main actor that long.
+            let press = button as! AXUIElement
+            AXUIElementSetMessagingTimeout(press, 1.0)
+            return AXUIElementPerformAction(press, kAXPressAction as CFString) == .success
         case .minimize:
             return AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
         case .fullScreen:

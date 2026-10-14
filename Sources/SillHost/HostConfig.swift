@@ -27,7 +27,7 @@ package struct HostConfig: Equatable, Sendable {
     /// Direct Wireless Connection: peer-to-peer Wi-Fi (AWDL) on the listener and its Bonjour
     /// registration, so a device with no network in common can find and reach the Mac. Off by
     /// default: while it is on the kernel keeps AWDL up and the Mac's one radio leaves its Wi-Fi
-    /// channel up to ~97 ms every 524 ms (CLAUDE.md, trackpad stutter). The listener's, not the
+    /// channel up to ~97 ms every 524 ms (docs/history.md, trackpad stutter). The listener's, not the
     /// pipeline's: a change replaces the listener (StreamServer.setPeerToPeer) and never restarts
     /// the stream.
     package var directWireless: Bool

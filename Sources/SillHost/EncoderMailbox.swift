@@ -9,7 +9,7 @@ import CoreMedia
 ///
 /// One frame inside at a time, on the hardware and the software encoder alike: the next goes in
 /// when the last came back. Two at once was measured against the hardware's slow state and
-/// dropped (CLAUDE.md, "The 33 fps plateau").
+/// dropped (docs/history.md, "The 33 fps plateau").
 ///
 /// Foundation and CoreMedia only, so it is checked on its own with swiftc against a stand-in for
 /// VideoToolbox that returns frames after programmable delays, in virtual time

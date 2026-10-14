@@ -1,9 +1,10 @@
 #!/bin/bash
-# usage: build.sh reader|mirror OUT [BUDGET]
+# usage: build.sh reader|mirror|close OUT [BUDGET]
 # Compiles Scripts/menu-check/<harness>.swift with Sources/StreamProtocol and the host's menu files
 # as one module (-package-name sill): MenuReader, MenuFormat and MenuPolicy, and for the mirror
 # MenuMirror, each without its `import StreamProtocol` and `import Network` (the mirror's
-# NWConnection is the harness's FakeConnection). BUDGET replaces MenuReader.readBudget.
+# NWConnection is the harness's FakeConnection); for close, WindowSizer alone. BUDGET replaces
+# MenuReader.readBudget.
 set -e
 HARNESS=$1; OUT=$2; BUDGET=${3:-}
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
@@ -12,6 +13,7 @@ trap 'rm -rf "$T"' EXIT
 cp "$ROOT"/Sources/StreamProtocol/*.swift "$T"/
 files=(MenuReader MenuFormat MenuPolicy)
 [ "$HARNESS" = mirror ] && files+=(MenuMirror)
+[ "$HARNESS" = close ] && files=(WindowSizer)
 for f in "${files[@]}"; do
   sed -e '/^import StreamProtocol$/d' -e '/^import Network$/d' -e 's/NWConnection/FakeConnection/g' \
       "$ROOT/Sources/SillHost/$f.swift" > "$T/$f.swift"
