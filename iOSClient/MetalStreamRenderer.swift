@@ -30,6 +30,8 @@ final class MetalStreamRenderer {
     private var target: (rect: CGRect, size: CGSize)?
     /// The last frame decoded, drawn again when the layout or the filter changes.
     private var last: CVPixelBuffer?
+    /// A frame of this stream did not decode, and that was said: once a stream, not every frame.
+    private var decodeFailureSaid = false
     // Under `drawing`:
     private var intermediate: MTLTexture?
     private var colorSpaceSet = false
@@ -92,6 +94,7 @@ final class MetalStreamRenderer {
         let old = session
         session = made
         last = nil
+        decodeFailureSaid = false
         lock.unlock()
         if let old { VTDecompressionSessionInvalidate(old) }
     }
@@ -106,7 +109,9 @@ final class MetalStreamRenderer {
             guard status == noErr, let image else { return }
             self?.draw(image)
         }
-        if status != noErr { print("smoothing: a frame did not decode (\(status))") }
+        guard status != noErr else { return }
+        lock.lock(); let said = decodeFailureSaid; decodeFailureSaid = true; lock.unlock()
+        if !said { print("smoothing: a frame of this stream did not decode (\(status)); said once a stream") }
     }
 
     /// Where the picture goes: the view's size in points, its scale, and the video's size in pixels.
