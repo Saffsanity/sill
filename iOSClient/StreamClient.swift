@@ -801,6 +801,8 @@ final class StreamClient: ObservableObject {
     private(set) var savedMacsSeeded = false
     /// A Spotlight tap's saved Mac, until its row is dialed (`openFromSpotlight`). Main thread.
     var spotlightPick: String?
+    /// One Spotlight write at a time (`indexSavedMacs`). Main thread.
+    var spotlightRun = SpotlightMacs.Run()
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which

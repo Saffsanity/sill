@@ -19,6 +19,29 @@ enum SpotlightMacs {
         case wait
     }
 
+    /// One write of the items at a time. A write is a delete of the domain, then the items once the
+    /// delete is done; two writes close together would interleave (delete, delete, items, items) and
+    /// the older list could land last, as at a launch that indexes the saved Macs and then clears
+    /// them. A write while one runs waits, and those waiting run once after it with the list then.
+    struct Run: Equatable {
+        private var running = false
+        private var again = false
+
+        /// A write is asked for: true when it starts now.
+        mutating func request() -> Bool {
+            if running { again = true; return false }
+            running = true
+            return true
+        }
+
+        /// The running write is done: true when another must run now (a write waited).
+        mutating func finished() -> Bool {
+            guard again else { running = false; return false }
+            again = false
+            return true
+        }
+    }
+
     static func identifier(_ macID: String) -> String { "mac:" + macID }
 
     /// The Mac ID in one of Sill's identifiers; nil for anything else.

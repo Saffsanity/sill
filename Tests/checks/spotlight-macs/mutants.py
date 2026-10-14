@@ -14,6 +14,11 @@ MUTANTS = [
     ("a Remote row at once", "guard waited else { return .wait }", ""),
     ("any Mac's row", "$0.route == route && $0.macID == macID", "$0.route == route"),
     ("never the saved dial", "return .dialSaved\n", "return .wait\n"),
+    ("two writes at once", "if running { again = true; return false }", "if running { again = true }"),
+    ("a waiting write dropped", "if running { again = true; return false }", "if running { return false }"),
+    ("no rerun after a wait", "guard again else { running = false; return false }\n            again = false\n            return true", "running = false; again = false; return false"),
+    ("rerun for ever", "guard again else { running = false; return false }\n            again = false", "guard again else { running = false; return false }"),
+    ("stuck running", "guard again else { running = false; return false }", "guard again else { return false }"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

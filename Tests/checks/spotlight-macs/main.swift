@@ -38,5 +38,15 @@ check(SpotlightMacs.choice(for: "m1", rows: [], waited: true) == .dialSaved, "no
 check(SpotlightMacs.choice(for: "m1", rows: [(R.network, nil), (R.network, "other")], waited: true) == .dialSaved,
       "never another Mac's row, nor an unsaved one")
 
+// One index at a time: a write while one runs waits and runs once after it, with the list as it is
+// then (a launch's index, then the same launch clearing the list, must end with the cleared list).
+var run = SpotlightMacs.Run()
+check(run.request(), "idle: a write starts at once")
+check(!run.request(), "a write while one runs does not start a second")
+check(!run.request(), "nor does a third")
+check(run.finished(), "the run ends: one more, for the writes that waited")
+check(!run.finished(), "that one ends: nothing waited, so idle")
+check(run.request(), "idle again: the next write starts at once")
+check(!run.finished(), "a run with nothing waiting ends idle")
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

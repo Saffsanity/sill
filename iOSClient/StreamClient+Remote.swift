@@ -181,9 +181,15 @@ extension StreamClient {
     // MARK: Spotlight
 
     /// The saved Macs as Spotlight items (SpotlightMacs), all of them written again each time the
-    /// list is: a renamed, forgotten or removed Mac is gone from Spotlight with its old self.
+    /// list is: a renamed, forgotten or removed Mac is gone from Spotlight with its old self. One
+    /// write at a time (SpotlightMacs.Run): a write asked for meanwhile runs after it, with the list
+    /// as it is then, so the last list written is the last one asked for.
     func indexSavedMacs() {
         guard !savedMacsSeeded else { return }      // DEBUG's seeded Macs never reach the real Spotlight
+        if spotlightRun.request() { writeSpotlight() }
+    }
+
+    private func writeSpotlight() {
         let items = SpotlightMacs.indexed(savedMacs.map { SpotlightMacs.Mac(macID: $0.macID, name: displayName($0.macID), revoked: $0.revoked == true) })
             .map { mac -> CSSearchableItem in
                 let attributes = CSSearchableItemAttributeSet(contentType: .content)
@@ -193,15 +199,20 @@ extension StreamClient {
                 return CSSearchableItem(uniqueIdentifier: SpotlightMacs.identifier(mac.macID), domainIdentifier: SpotlightMacs.domain,
                                         attributeSet: attributes)
             }
-        let index = CSSearchableIndex.default()
-        index.deleteSearchableItems(withDomainIdentifiers: [SpotlightMacs.domain]) { _ in
-            guard !items.isEmpty else { return }
-            index.indexSearchableItems(items) { error in
-                if let error { print("spotlight: not indexed: \(error)"); return }
+        let done: (Error?) -> Void = { error in
+            DispatchQueue.main.async { [weak self] in
+                if let error { print("spotlight: not written: \(error)") }
                 #if DEBUG
-                print("spotlight: \(items.count) saved Mac\(items.count == 1 ? "" : "s") indexed")
+                if error == nil { print("spotlight: \(items.count) saved Mac\(items.count == 1 ? "" : "s") indexed") }
                 #endif
+                guard let self else { return }
+                if self.spotlightRun.finished() { self.writeSpotlight() }
             }
+        }
+        let index = CSSearchableIndex.default()
+        index.deleteSearchableItems(withDomainIdentifiers: [SpotlightMacs.domain]) { error in
+            guard error == nil, !items.isEmpty else { done(error); return }
+            index.indexSearchableItems(items, completionHandler: done)
         }
     }
 
