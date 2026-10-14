@@ -211,11 +211,10 @@ while let a = args.next() {
     default: break
     }
 }
-// Kept in the Dock and clicked: no arguments, the app from the Info.plist, the icon beside the copy.
+// Kept in the Dock and clicked: no arguments, the app from the Info.plist, the icon the copy's own
+// (AppIcon.icns, DockProxies.installIcon).
 if app == nil, let remote = Bundle.main.object(forInfoDictionaryKey: "SillRemoteApp") as? String {
     app = remote
-    let png = Bundle.main.bundleURL.deletingPathExtension().appendingPathExtension("png").path
-    if icon == nil, FileManager.default.fileExists(atPath: png) { icon = png }
 }
 guard let app else { exit(2) }
 let delegate = Proxy(app: app, viewer: viewer, icon: icon)
