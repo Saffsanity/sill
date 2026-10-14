@@ -182,22 +182,16 @@ final class VirtualStage {
 
     /// The display's serial number: the coordinator's stage has `serialNum`; each of Sill's desk
     /// stages one of its own (DeskStages), since macOS refuses a second display with the same
-    /// vendor, product and serial, and on macOS 27.0.1 (26A434) has been seen refusing one whose
-    /// earlier display was not torn down.
+    /// vendor, product and serial. Never a new one: macOS keeps every display identity it has seen
+    /// for good (a ColorSync profile in /Library/ColorSync/Profiles/Displays, a device registry entry,
+    /// WindowServer's records), and ColorSync re-reads that registry on each of its requests, about
+    /// one a second while anything captures the screen.
     var serial: UInt32 = VirtualStage.serialNum
     /// The display's product ID. Every display Sill keeps at once needs its own identity: two with
     /// the same vendor and product were one monitor to macOS, which took the older offline when the
     /// newer came (a probe of 2026-10-12; with distinct IDs three stayed online together). Sill's
     /// desk gives each window's display one from a pool (DeskStages).
     var productID: UInt32 = VirtualStage.productID
-    /// Every serial a display of this run has had: macOS refuses one again once its display is gone.
-    static var usedSerials: Set<UInt32> = []
-    /// A serial no display of this run has had.
-    static func freshSerial() -> UInt32 {
-        var s: UInt32
-        repeat { s = UInt32.random(in: 10_000...9_999_999) } while usedSerials.contains(s)
-        return s
-    }
 
     init(sizer: WindowSizer, catalog: WindowCatalog) {
         self.sizer = sizer
@@ -657,14 +651,13 @@ final class VirtualStage {
             do {
                 d = try make(serial)
             } catch {
-                // macOS refuses a serial whose display was torn down earlier in its session (seen on
-                // 27.0.1): a serial this run has not used, kept for this stage's later displays.
-                let fresh = Self.freshSerial()
-                print("Virtual display serial \(serial) refused (\(error)); using \(fresh).")
-                d = try make(fresh)
-                serial = fresh
+                // Refused while the window server still holds an earlier display of this identity
+                // (its removal is asynchronous, up to about a second): tried once more after that,
+                // never under a new identity (`serial`).
+                print("Virtual display serial \(serial) refused (\(error)); trying it again in 1 s.")
+                try await Task.sleep(for: .seconds(1))
+                d = try make(serial)
             }
-            Self.usedSerials.insert(serial)
         } catch {
             creationFailures += 1
             if creationFailures >= 2 { disabledReason = "creating the display failed \(creationFailures) times (\(error))" }

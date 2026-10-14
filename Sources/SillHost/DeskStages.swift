@@ -52,6 +52,10 @@ final class DeskStages {
         cannotTake[id].map { Date().timeIntervalSince($0) >= (picked ? 30 : 300) } ?? true
     }
 
+    /// The lowest slot free. Slots are identities (`serial(forSlot:)`), so the identities the system
+    /// ever records are as many as the most windows the desk has held at once, never one per display
+    /// made: macOS keeps every display identity it has seen for good, and ColorSync re-reads them on
+    /// each of its requests.
     private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) && !spares.contains { $0.slot == s } }! }
 
     /// Displays windows have left, kept for the next window that needs one, so a window coming and going
@@ -185,8 +189,8 @@ final class DeskStages {
         if let stage = stages[id], let kept = stage.handOver() {
             let d = kept.display
             // Torn down by the window server while kept (sleep, another display arriving): forgotten.
-            d.onTerminated = { [weak self] in
-                Task { @MainActor [weak self] in self?.spares.removeAll { $0.spare.display === d } }
+            d.onTerminated = { [weak self, weak d] in
+                Task { @MainActor [weak self] in self?.spares.removeAll { $0.spare.display === d || $0.spare.display.isAlive == false } }
             }
             spares.append((kept, slots[id] ?? 0))
         }

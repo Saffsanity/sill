@@ -209,8 +209,18 @@ the new kinds is sent by it, and a host sends it none.
 ## Open (by hand, or not done)
 
 - The desk takes windows while their displays fit in a quarter of the host's memory (each display a
-  framebuffer of its own, up to about 130 MB); side streams stay at 6 live windows beside the focused
-  one.
+  framebuffer of its own, up to about 130 MB). Every display costs the whole Mac: while anything captures the screen, WindowServer asks
+  ColorSync about once a second for every display's profile, and colorsync.displayservices builds
+  one per display on one serial queue (15–90 ms each; with a long day of displays it was busy 58 s
+  of every minute, new displays took seconds to come up, and WindowServer's watchdog fired once).
+  The identities are fixed per slot (product 0x100 plus the slot, a serial kept per slot), so they
+  number as many as the most windows the desk has held at once, never one per display made: macOS keeps every
+  display identity it has seen (a ColorSync profile, a registry entry, WindowServer's records), and
+  ColorSync re-reads that registry on each request. Side streams stay at 6 live windows beside the
+  focused one.
+- macOS's own bug (FB17797423): after one virtual display is removed while others stay, a stream of a
+  display made later can show another display's picture. The desk keeps displays a window leaves and
+  removes them only together; the picture check (DeskPicture) catches the rest.
 - The stuck right button: the viewer now sends an up its stream view would miss (the view moved to
   another window under a held button, the likeliest path) and the host lets go of a button still
   held at a new press; not seen since, not reproduced on purpose.
