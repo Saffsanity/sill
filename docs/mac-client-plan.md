@@ -14,7 +14,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 - **Sill Viewer** (`Sources/MacClient`, product `SillClient`, `.build/Sill Viewer.app`, bundle
   `me.saffer.sill.client`): a menu bar icon (connect, the other Mac's windows and apps, Desktop,
   gestures, Capture System Shortcuts, Share Clipboard, Play Sound, the host's quality settings,
-  Disconnect, Launch at Login). Each host window opened from it is a borderless window here at 1:1, with a small
+  Disconnect, Launch at Login; at launch it reconnects to the Mac it was connected to when it quit). Each host window opened from it is a borderless window here at 1:1, with a small
   pill above it for this Mac's close, minimize and full screen, and a drag on the picture's top
   strip moving the window. The focused window streams at full rate; every other open window
   streams too, at 15 fps (side streams). New windows of an app already open here open by

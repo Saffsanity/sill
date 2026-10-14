@@ -555,6 +555,21 @@ extension StreamClient {
                          afterQuit: afterQuit)
     }
 
+    /// A saved Mac reconnected to as if its session had just ended (the automatic reconnect, §7.4):
+    /// its network row once listed, else its saved addresses, for `redialWindow`. Sill Viewer at
+    /// launch, for the Mac it was connected to when it last quit. Not a Mac that removed this device
+    /// or has a new key (they wait for a tap). False when nothing is tried.
+    @discardableResult
+    func reconnectAtLaunch(_ macID: String) -> Bool {
+        guard !connected, connection == nil, reconnect == nil, let saved = savedMac(macID),
+              saved.revoked != true, saved.newKey != true else { return false }
+        let name = displayName(macID)
+        reconnect = lostReconnect(session: nil, saved: saved, name: name, remoteAllowed: true)
+        status = "Reconnecting to \(name)…"
+        reconnectIfListed()
+        return true
+    }
+
     /// The automatic reconnect's look, at every browser change, path change and due time
     /// (§7.4): the Mac's network row at once (over its cable first when it says "Wired": `dial`);
     /// its Direct row only once that has stayed Direct for `directWait` and the network last listed

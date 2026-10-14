@@ -34,9 +34,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         client.connectFromLaunchArgument()   // -SillConnect host:port, for the off-Bonjour test hosts
         #endif
+        if let last = UserDefaults.standard.string(forKey: Self.lastMacKey), !client.connected, client.reconnectAtLaunch(last) {
+            // Back to the Mac it was connected to when it quit, without a window in the way (it may be
+            // a launch at login); the connect window only if that has not worked after a while.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectPatience) { [weak self] in
+                guard let self, !self.client.connected else { return }
+                self.showConnectWindow()
+            }
+            return
+        }
         if !client.connected { showConnectWindow() }
         NSApp.activate()
     }
+
+    /// The saved Mac (its Mac ID) this app was connected to when it last quit, reconnected to at
+    /// launch; forgotten by Disconnect, so a Mac left on purpose stays left.
+    private static let lastMacKey = "SillClient.lastMac"
+    /// How long a launch's reconnect has before the connect window shows (the reconnect itself goes
+    /// on, DiscoveryPolicy.redialWindow).
+    private static let reconnectPatience: TimeInterval = 15
 
     func applicationWillTerminate(_ notification: Notification) {
         windows.closeAll()   // keeps the list of open windows for the next session (closeAll does not forget it)
@@ -59,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func connectedChanged(_ connected: Bool) {
         if connected {
+            if let mac = client.session?.macID { UserDefaults.standard.set(mac, forKey: Self.lastMacKey) }
             connectWindow?.orderOut(nil)
             // The session starts empty: the windows open last time with this Mac come back
             // (StreamWindows), and with none the status item's menu opens so one can be picked.
@@ -117,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func disconnect() {
+        UserDefaults.standard.removeObject(forKey: Self.lastMacKey)
         windows.letGo()
         client.disconnect()
     }
