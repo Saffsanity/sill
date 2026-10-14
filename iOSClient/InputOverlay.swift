@@ -52,6 +52,7 @@ final class InputOverlayView: UIView, UIKeyInput {
     private let strokes = StrokeObserver()
     /// The finger pan, for where a scroll that a stroke's silence closes ends.
     private weak var scrollPan: UIPanGestureRecognizer?
+    private weak var wheelPan: UIPanGestureRecognizer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -85,7 +86,17 @@ final class InputOverlayView: UIView, UIKeyInput {
         pan.minimumNumberOfTouches = 1
         pan.maximumNumberOfTouches = 2
         pan.allowedTouchTypes = directOnly
+        // Two fingers on a trackpad (a Magic Keyboard's, a Mac's for the iPad app there) arrive as
+        // scroll events, not touches: the same pan, coast included.
+        pan.allowedScrollTypesMask = .continuous
         addGestureRecognizer(pan)
+
+        // A mouse wheel's clicks: scrolls without the coast, which a wheel never has on a Mac.
+        let wheel = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        wheel.allowedTouchTypes = []
+        wheel.allowedScrollTypesMask = .discrete
+        addGestureRecognizer(wheel)
+        wheelPan = wheel
 
         // Pencil hover on the iPads that support it, and the trackpad/mouse pointer everywhere.
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
@@ -193,7 +204,7 @@ final class InputOverlayView: UIView, UIKeyInput {
             send(.scrollGesture(.ended, x: p.x, y: p.y))
             // Only a real lift coasts. A cancel means the system took the touch (an alert, a
             // system gesture), and flinging the Mac's content then would be a surprise.
-            if gesture.state == .ended { startMomentum(velocity: gesture.velocity(in: self), at: p) }
+            if gesture.state == .ended, gesture !== wheelPan { startMomentum(velocity: gesture.velocity(in: self), at: p) }
         default:
             lastPanTranslation = .zero
         }
