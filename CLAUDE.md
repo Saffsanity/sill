@@ -16,8 +16,9 @@ open).** A macOS client (`Sources/MacClient`, product `SillClient`, `Scripts/mak
 new and shared). Each host window a borderless window here at 1:1 with a pill for this Mac's
 controls; the others live at 15 fps (side streams); the remote app's menus in the menu bar (held by its Dock icon, which takes the bar while one of its windows is in front); Sill's
 controls in a menu bar icon; a Dock icon per remote app and none of its own (`Sources/SillDockProxy`: its windows, its minimised windows (a stand-in), the
-app's own Dock menu items and its badge from the other Mac); windows restored after a restart and
-new windows of open apps opened by themselves, as is an app the viewer's own action opens there; a
+app's own Dock menu items and its badge from the other Mac); windows restored after a restart (the viewer reconnects at launch to the Mac it was
+connected to when it quit; Launch at Login in its menu) and new windows of open apps opened by
+themselves, as is an app the viewer's own action opens there; a
 scroll or hover reaches a window in the background without bringing it forward; each display a
 Desktop window. The main stream goes to the window of the source the host last listed, decided in
 stream order (`MainRouter`), and a side stream only after its own parameter sets.
