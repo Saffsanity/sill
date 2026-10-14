@@ -27,9 +27,11 @@ package final class StreamCoordinator {
     /// highest, so a ProMotion device is not held to a 60 Hz one beside it; a re-sent viewport
     /// from either is then a no-op instead of a restart. Cleared when the client leaves.
     private var clientFPS: [ObjectIdentifier: Int] = [:]
-    private var wantedFPS: Int { min(maxFPS, max(24, clientFPS.values.max() ?? 60)) }
+    private var wantedFPS: Int { wantedFPS(under: maxFPS) }
+    private func wantedFPS(under limit: Int) -> Int { min(limit, max(24, clientFPS.values.max() ?? 60)) }
     /// What the next pipeline will run at: the software encoder is not asked for more than 60.
-    private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
+    private var effectiveFPS: Int { effectiveFPS(under: maxFPS) }
+    private func effectiveFPS(under limit: Int) -> Int { useSoftwareEncoder ? min(wantedFPS(under: limit), 60) : wantedFPS(under: limit) }
     /// The devices whose app is not in front (`SideStreamRequest.background`).
     private var backgroundConnections: Set<ObjectIdentifier> = []
     /// Every connected device's app is in the background and none wants the main window at full
@@ -40,10 +42,10 @@ package final class StreamCoordinator {
         return true
     }
     /// The main stream's rate: the devices' (`effectiveFPS`), or the side streams' in the background.
-    private var mainStreamFPS: Int { mainInBackground ? min(effectiveFPS, SideStreamRequest.defaultFPS) : effectiveFPS }
-    /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
-    /// keeps its share of bits.
-    private var streamBitrate: Int { bitrate * fps / 60 }
+    private var mainStreamFPS: Int { mainStreamFPS(under: maxFPS) }
+    private func mainStreamFPS(under limit: Int) -> Int {
+        mainInBackground ? min(effectiveFPS(under: limit), SideStreamRequest.defaultFPS) : effectiveFPS(under: limit)
+    }
     /// The quality the pipeline runs: the away pair while it runs the away quality (`awayRunning`),
     /// else the home pair (HostConfig.effective).
     private var scale: CGFloat { config.effective(away: awayRunning).captureScale }
@@ -831,12 +833,8 @@ package final class StreamCoordinator {
     /// low-latency rate control follow a live change.
     private func restartNeeded(for new: HostConfig, away: Bool) -> Bool {
         guard active != .none else { return false }
-        let wanted = min(new.maxFPS, max(24, clientFPS.values.max() ?? 60))
-        let unbackgrounded = useSoftwareEncoder ? min(wanted, 60) : wanted
-        let newFPS = mainInBackground ? min(unbackgrounded, SideStreamRequest.defaultFPS) : unbackgrounded
         let pair = new.effective(away: away)
-        let newScale = mainInBackground ? 1 : useSoftwareEncoder ? min(pair.captureScale, 1.0) : pair.captureScale
-        if newFPS != fps || newScale != captureScale { return true }
+        if mainStreamFPS(under: new.maxFPS) != fps || mainCaptureScale(of: pair.captureScale) != captureScale { return true }
         if pair.bitrate != bitrate || new.prioritizeSpeed != config.prioritizeSpeed { return true }
         if new.virtualDisplay != config.virtualDisplay, case .window = active { return true }
         return false
@@ -2293,10 +2291,12 @@ package final class StreamCoordinator {
     }
 
     /// Retina normally; points when the software encoder is carrying the stream.
-    private var captureScale: CGFloat { mainInBackground ? 1 : sideCaptureScale }
+    private var captureScale: CGFloat { mainCaptureScale(of: scale) }
+    private func mainCaptureScale(of quality: CGFloat) -> CGFloat { mainInBackground ? 1 : sideCaptureScale(of: quality) }
     /// The quality's scale (the software encoder's 1×), whatever the devices' apps: a full-speed
     /// side stream's.
-    private var sideCaptureScale: CGFloat { useSoftwareEncoder ? min(scale, 1.0) : scale }
+    private var sideCaptureScale: CGFloat { sideCaptureScale(of: scale) }
+    private func sideCaptureScale(of quality: CGFloat) -> CGFloat { useSoftwareEncoder ? min(quality, 1.0) : quality }
 
     /// "Safari — Apple Developer" for the app's menu; just the app for an untitled window.
     private static func menuTitle(for w: SCWindow) -> String {

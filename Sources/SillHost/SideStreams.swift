@@ -253,7 +253,6 @@ final class SideStreams {
     private func start(_ w: SCWindow, fps: Int, scale streamScale: CGFloat) async {
         let id = w.windowID
         let s = settings()
-        let bitrate = max(2_000_000, s.bitratePer60 * fps / 60)
         let stream = Stream(id: id, size: w.frame.size, fps: fps, scale: streamScale)
         // Registered before anything waits, so a reconcile meanwhile sees it starting.
         streams[id] = stream
@@ -326,11 +325,8 @@ final class SideStreams {
                 await pill.start(w)
                 stream.pill = pill
             }
-            if let rect = plan.sourceRect {
-                try await stream.capture.start(filter: plan.filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: rect)
-            } else {
-                try await stream.capture.start(filter: plan.filter, width: width, height: height, fps: fps, showsCursor: false)
-            }
+            try await stream.capture.start(filter: plan.filter, width: width, height: height, fps: fps, showsCursor: false,
+                                           sourceRect: plan.sourceRect)
             print("Side stream: \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") (window \(id)) at \(width)×\(height), \(fps) fps, \(bitrate / 1_000_000) Mbps\(stream.cropFrame != nil ? ", with its app" : "")")
         } catch {
             print("Side stream of window \(id) did not start: \(error)")
