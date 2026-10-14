@@ -139,7 +139,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             self?.lastOtherFront = app.bundleIdentifier
             // A Dock icon in front (its menu bar open) is this app in front; another app is not.
             self?.updatePill()
-            self?.appActiveChanged()
+            self?.appActiveChanged(ownChange: false)
         }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
@@ -278,15 +278,20 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         NSApp.isActive || NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.hasPrefix(DockProxies.iconIDPrefix) == true
     }
 
-    private func appActiveChanged() {
+    /// `ownChange`: this app became active or resigned (another app coming forward changes nothing
+    /// to send unless it ends a spell out of front).
+    private func appActiveChanged(ownChange: Bool = true) {
         if inFront {
+            let wasOut = inactiveSince != nil
             inactiveSince = nil
-            requestSideStreams()
+            if ownChange || wasOut { requestSideStreams() }
         } else if inactiveSince == nil {
             let since = Date()
             inactiveSince = since
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.backgroundDelay) { [weak self] in
                 guard let self, self.inactiveSince == since else { return }
+                // Its Dock icon in front since (its menus open): still in front.
+                if self.inFront { self.inactiveSince = nil; return }
                 self.requestSideStreams()
             }
         }
