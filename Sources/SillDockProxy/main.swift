@@ -5,9 +5,9 @@ import CryptoKit
 // this app per remote app, named after it, and launches it while that app has a window open there.
 // It has no window of its own: its icon is the remote app's, clicking it brings that app's windows
 // forward in Sill Viewer, and its Dock menu lists them. Its menu bar is the remote app's menus as the
-// other Mac has them: Sill Viewer, which has none (no Dock icon of its own), has this take the menu bar
-// while one of the app's windows is in front, and the keyboard goes straight back to Sill Viewer. It talks to Sill Viewer by
-// distributed notifications and quits when told to, or when Sill Viewer goes. A notification carries
+// other Mac has them: Sill Viewer, which has none (no Dock icon of its own), has this take the menu
+// bar while one of the app's windows is in front, and the keyboard goes straight back to Sill Viewer.
+// It talks to Sill Viewer by distributed notifications and quits when told to, or when Sill Viewer goes. A notification carries
 // nothing anyone else could read: Sill Viewer's state for this app is in a file only this user reads
 // (`<slug>.state` beside the copies), and a request is signed with Sill Viewer's key from there
 // (`token`) and carries a counter that must rise, so a watcher can neither forge nor replay one.
@@ -104,10 +104,11 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
         center.addObserver(forName: Self.menuName, object: app, queue: .main) { [weak self] _ in self?.readMenu() }
         NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
             // A remote menu chosen from or closed: the keyboard back to Sill Viewer's window.
-            guard let self, NSApp.isActive, let viewer = self.viewer else { return }
-            NSRunningApplication(processIdentifier: viewer)?.activate()
+            guard let self, NSApp.isActive else { return }
+            self.handBack()
         }
         NSApp.mainMenu = ownMenuBar(remote: [])
+        readMenuBar()   // sent before this launched: the file is there
         if let viewer {
             watch(viewer)
             post(["ask": "state"])
@@ -176,6 +177,11 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidDeminiaturize(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, let id = standIns.first(where: { $0.value === window })?.key else { return }
         post(["ask": "window", "window": id])
+        handBack()
+    }
+
+    /// The keyboard back to Sill Viewer, whose windows are this app's.
+    private func handBack() {
         if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
     }
 
@@ -207,13 +213,8 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Clicked in the Dock, or switched to: Sill Viewer brings this app's windows forward. Asked by Sill
     /// Viewer to take the menu bar: only the keyboard goes back.
     func applicationDidBecomeActive(_ notification: Notification) {
-        if Date().timeIntervalSince1970 - menuBarAt < 2 {
-            menuBarAt = 0
-            if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
-            return
-        }
-        post(["ask": heard ? "focus" : "launch"])
-        if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
+        if Date().timeIntervalSince1970 - menuBarAt < 2 { menuBarAt = 0 } else { post(["ask": heard ? "focus" : "launch"]) }
+        handBack()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -381,7 +382,7 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func pick(_ item: NSMenuItem) {
         guard let id = item.representedObject as? String else { return }
         post(["ask": "window", "window": id])
-        if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
+        handBack()
     }
 
     private func post(_ info: [String: String]) {
@@ -441,11 +442,10 @@ while let a = args.next() {
     default: break
     }
 }
-// Kept in the Dock and clicked: no arguments, the app from the Info.plist, the icon beside the copy.
+// Kept in the Dock and clicked: no arguments, the app from the Info.plist, the icon the copy's own
+// (AppIcon.icns, DockProxies.installIcon).
 if app == nil, let remote = Bundle.main.object(forInfoDictionaryKey: "SillRemoteApp") as? String {
     app = remote
-    let png = Bundle.main.bundleURL.deletingPathExtension().appendingPathExtension("png").path
-    if icon == nil, FileManager.default.fileExists(atPath: png) { icon = png }
 }
 guard let app else { exit(2) }
 let delegate = Proxy(app: app, viewer: viewer, icon: icon)

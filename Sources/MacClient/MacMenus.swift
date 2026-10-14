@@ -2,8 +2,10 @@ import AppKit
 import StreamProtocol
 
 /// The other Mac's menu bar for the app it streams (kinds 24, 25, 27; docs/menu-bar-plan.md), as
-/// this Mac's menu bar (MainMenu): the top level as the shared MacMenuState has it, each menu read from the other Mac as it opens (a "Loading…" row until the answer), each item
-/// pressed there through Accessibility. The Mac's shortcuts show as text only: a real key
+/// this Mac's menu bar while the Dock icons are off (MainMenu; with them on, the icons read the
+/// menus through StreamWindows): the top level as the shared MacMenuState has it, each menu read
+/// from the other Mac as it opens (a "Loading…" row until the answer), each item pressed there
+/// through Accessibility. The Mac's shortcuts show as text only: a real key
 /// equivalent here would take the key from the stream, which sends it to the other Mac anyway.
 /// Main thread.
 enum MacMenus {

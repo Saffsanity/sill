@@ -4,9 +4,9 @@ import SwiftUI
 import StreamProtocol
 
 /// The app: one StreamClient (the iPhone and iPad app's session, shared), the other Mac's windows as
-/// this Mac's windows (StreamWindows), the controlled app's menus in the menu bar (MainMenu), and
-/// Sill's own controls in a status item (StatusMenu). The connect window shows while no session is
-/// up, and from the status item.
+/// this Mac's windows (StreamWindows), the controlled app's menus in the menu bar (the Dock icons',
+/// DockProxies, or this app's own, MainMenu), and Sill's own controls in a status item (StatusMenu).
+/// The connect window shows while no session is up, and from the status item.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let client = StreamClient()
     private let reporter = ClientStatsReporter()

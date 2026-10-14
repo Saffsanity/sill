@@ -2375,19 +2375,36 @@ package final class StreamCoordinator {
     /// The Dock badges of the apps a Mac client shows (`WindowList.badges`), read every 2 s while one
     /// is connected, and sent with the window list when they change.
     private func watchBadges() {
-        guard badgeTimer == nil, !synthetic, sideStreams?.wholeApp == true else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 0.5, repeating: 2)
-        timer.setEventHandler { [weak self] in Task { @MainActor in self?.readBadges() } }
+        guard badgeTimer == nil else { return }
+        badgeTimer = whileMacClient(every: 2, first: 0.5, on: .main) { [weak self] in
+            Task { @MainActor in self?.readBadges() }
+        }
+    }
+
+    /// A timer for a Mac client's Dock (its badges, its bounces): started only while one is connected
+    /// and not on a synthetic host; each tick's reader stops it once none is (`stopWithoutMacClient`).
+    private func whileMacClient(every interval: Double, first: Double, on queue: DispatchQueue,
+                                _ tick: @escaping @Sendable () -> Void) -> DispatchSourceTimer? {
+        guard !synthetic, sideStreams?.wholeApp == true else { return nil }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + first, repeating: interval)
+        timer.setEventHandler(handler: tick)
         timer.resume()
-        badgeTimer = timer
+        return timer
+    }
+
+    /// Stops `timer` once the last Mac client has left; true then.
+    private func stopWithoutMacClient(_ timer: inout DispatchSourceTimer?) -> Bool {
+        guard sideStreams?.wholeApp != true else { return false }
+        timer?.cancel()
+        timer = nil
+        return true
     }
     private var badgeTimer: DispatchSourceTimer?
     private var dockBadges: [String: String] = [:]
 
     private func readBadges() {
-        guard sideStreams?.wholeApp == true else {   // the last Mac client left: stop until another comes
-            badgeTimer?.cancel(); badgeTimer = nil
+        if stopWithoutMacClient(&badgeTimer) {
             if !dockBadges.isEmpty { dockBadges = [:]; broadcastList() }
             return
         }
@@ -2407,22 +2424,17 @@ package final class StreamCoordinator {
     /// 250 ms off the main actor while one is connected (`AttentionWatch`), and sent with the window list
     /// when the set changes: a one-time bounce lasts about a second, so it is seen.
     private func watchAttention() {
-        guard attentionTimer == nil, !synthetic, sideStreams?.wholeApp == true else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
-        timer.setEventHandler { [weak self] in
+        guard attentionTimer == nil else { return }
+        attentionTimer = whileMacClient(every: 0.25, first: 0.25, on: .global(qos: .utility)) { [weak self] in
             let asking = AttentionWatch.bundleIDs()
             Task { @MainActor in self?.readAttention(asking) }
         }
-        timer.resume()
-        attentionTimer = timer
     }
     private var attentionTimer: DispatchSourceTimer?
     private var dockAttention: [String] = []
 
     private func readAttention(_ asking: Set<String>?) {
-        guard sideStreams?.wholeApp == true else {   // the last Mac client left: stop until another comes
-            attentionTimer?.cancel(); attentionTimer = nil
+        if stopWithoutMacClient(&attentionTimer) {
             if !dockAttention.isEmpty { dockAttention = []; broadcastList() }
             return
         }

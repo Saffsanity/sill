@@ -13,9 +13,15 @@ import StreamProtocol
 /// ~/Library/Application Support/Sill Viewer/Dock and are made again only when the helper or the
 /// name changes. Main thread.
 ///
+/// The helper is a regular app, so while it is in front the menu bar is its own: the remote app's
+/// menus as the other Mac has them (`setMenuBar`, `takeMenuBar`), each read as it opens
+/// (`onMenuOpen`, `setMenuContent`) and pressed there (`onMenuPress`); it gives the keyboard back to
+/// Sill Viewer as it comes forward, and again when a menu closes.
+///
 /// The two talk by distributed notifications, which any process here can post and read, so none
-/// carries anything: what a Dock icon shows (the window titles, the menu) is in a file only this user
-/// can read (`<slug>.state`), and the notification only says it changed. A Dock icon's request is
+/// carries anything: what a Dock icon shows is in files only this user can read (`<slug>.state`,
+/// the window titles and its Dock menu; `.menubar`, the top level; `.menu`, the menu opened last), and
+/// the notification only says one changed. A Dock icon's request is
 /// signed: an HMAC of its contents under the key Sill Viewer writes there at each launch (`token`,
 /// 0600), with a counter that must rise, so a process that watches the notifications learns what was
 /// asked (a window's ID, a menu item's title) but can neither forge a request nor replay one.
@@ -168,6 +174,7 @@ final class DockProxies {
         iconWritten.remove(app)
         tell(app, ["quit": true])
         running[app] = nil
+        for kind in ["menubar", "menu"] { try? FileManager.default.removeItem(at: Self.folder.appendingPathComponent("\(Self.slug(app)).\(kind)")) }
     }
 
     /// `state` written where only this user reads it, and the app's Dock icon told it changed.
@@ -212,6 +219,12 @@ final class DockProxies {
                    "parkedFrames": parked.map { NSStringFromRect($0.parked!.frame) }, "parkedPictures": parked.map { $0.parked!.picture },
                    "menuBarAt": menuBarAt[app] ?? 0])
     }
+
+    /// Every Dock icon's bundle ID begins so.
+    static let iconIDPrefix = "me.saffer.sill.client.dock."
+
+    /// The app's Dock icon's process, while it runs.
+    func iconPID(_ app: String) -> pid_t? { running[app].flatMap { $0.isTerminated ? nil : $0.processIdentifier } }
 
     /// Whether the app's Dock icon is running, so a window can be minimised into it.
     func hasIcon(_ app: String) -> Bool { Self.enabled && running[app].map { !$0.isTerminated } == true }
@@ -356,7 +369,7 @@ final class DockProxies {
             guard var plist = NSDictionary(contentsOf: plistURL) as? [String: Any] else { return nil }
             plist["CFBundleName"] = name
             plist["CFBundleDisplayName"] = name
-            plist["CFBundleIdentifier"] = "me.saffer.sill.client.dock.\(slug(app))"
+            plist["CFBundleIdentifier"] = Self.iconIDPrefix + slug(app)
             plist["SillRemoteApp"] = app   // a copy kept in the Dock and clicked starts with no arguments
             (plist as NSDictionary).write(to: plistURL, atomically: true)
             try fm.createDirectory(at: dest.appendingPathComponent("Contents/Resources"), withIntermediateDirectories: true)
