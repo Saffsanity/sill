@@ -225,5 +225,5 @@ the new kinds is sent by it, and a host sends it none.
   app's badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad
   connected (the stream stops, as on main). The Dock icons' signing was tested live before its
   fields were length-framed; since then both sides' signing was compiled and compared.
-- Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
-  separate spike).
+- Not forwarded: the other Mac's notification banners (readable through Accessibility, not built:
+  docs/notifications-spike.md). Its Dock badges and bounces are.

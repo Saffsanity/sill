@@ -231,9 +231,8 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
   other: minimised into a remote app's own icon and back by each of the three ways, the stand-in and
   the picture gone after.
 - **The remote app's menus in its Dock icon's menu bar.** An accessory app has no menu bar: the bar
-  stays with the regular app active before it (an earlier note here, that the remote menus still
-  showed, was wrong: they were the last native app's). So each app's Dock icon holds the other Mac's
-  menus for that app: while one of its windows is in front here, Sill Viewer has the icon take the menu
+  stays with the regular app active before it. So each app's Dock icon holds the other Mac's menus
+  for that app: while one of its windows is in front here, Sill Viewer has the icon take the menu
   bar (it is activated, and hands activation straight back, so the keyboard stays with the window; the
   bar stays with it, the regular app active last; tried with two test apps). Each menu is asked for as
   it opens ("Loading…" until the other Mac answers, through Sill Viewer), a choice is pressed there, and

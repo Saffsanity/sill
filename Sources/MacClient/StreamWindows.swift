@@ -124,13 +124,19 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             windowLog("menus: \(title) chosen in the menu bar")
             self.client.pressMenuItem(row)
         }
-        client.$menus.sink { [weak self] _ in DispatchQueue.main.async { self?.pushMenuBar() } }.store(in: &subscriptions)
+        client.$menus.sink { [weak self] _ in DispatchQueue.main.async { self?.menusChanged() } }.store(in: &subscriptions)
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
             self?.scheduleMenuBar()
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.cameForward = true
-            self?.scheduleMenuBar()
+            guard let self else { return }
+            self.cameForward = !(self.lastOtherFront?.hasPrefix(DockProxies.iconIDPrefix) ?? false)
+            self.scheduleMenuBar()
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.processIdentifier != getpid() else { return }
+            self?.lastOtherFront = app.bundleIdentifier
         }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
@@ -240,7 +246,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         // Every window open here, the focused one too: the host streams it as the main stream, not
         // as a side one, and keeps them all on Sill's desk, also between two picks.
         // Only windows still open: a closing one is still among AppKit's while it closes, and asked
-        // for then, the host kept it on its desk, captured, the sharing indicator on (2026-10-12).
+        // for then, the host kept it on its desk, captured, the sharing indicator on.
         // A window minimised into its app's Dock icon is put away, so not among AppKit's ordered ones:
         // still asked for, last, so the host keeps it on its desk.
         let windows = NSApp.orderedWindows.compactMap { $0 as? StreamWindow }.filter { open[$0.source] === $0 }
@@ -289,23 +295,30 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     /// opening names one.
     private var menuRows: [String: [String: MacMenuState.Row]] = [:]
 
-    /// The streamed app's top-level menus to its Dock icon, as the other Mac sent them: new ones while
-    /// one of its windows is in front are shown by the icon taking the bar again (a menu bar's owner
-    /// that is not active keeps showing what it had: after the Dock, ⌘Tab or a window restored, the
-    /// icon took the bar before the other Mac's menus for it came, 2026-10-14).
-    private func pushMenuBar() {
-        guard let app = streamedApp else { return }
+    /// The streamed app's top-level menus to its Dock icon, when they changed (or the icon is a new
+    /// process); its shape then, or nil when nothing streams.
+    @discardableResult
+    private func sendMenuBar() -> (app: String, shape: String)? {
+        guard let app = streamedApp else { return nil }
         let state = client.menus
         let top = state.menus.compactMap { row in row.id.map { (id: $0, title: row.title, enabled: row.enabled && !state.stale) } }
         let note = top.isEmpty ? state.note : nil
-        let shape = top.map { "\($0.id)|\($0.title)|\($0.enabled)" }.joined(separator: ",") + "#" + (note ?? "")
-        guard pushedShape[app] != shape else { return }
-        pushedShape[app] = shape
-        dock.setMenuBar(app, top: top, note: note)
-        if keyApp == app, shownShape[app] != shape { scheduleMenuBar() }
+        let shape = "\(dock.iconPID(app) ?? 0)#" + top.map { "\($0.id)|\($0.title)|\($0.enabled)" }.joined(separator: ",") + "#" + (note ?? "")
+        if sentShape[app] != shape {
+            sentShape[app] = shape
+            dock.setMenuBar(app, top: top, note: note)
+        }
+        return (app, shape)
     }
-    /// Each app's menus as last sent to its Dock icon, and as last shown there (the icon active after them).
-    private var pushedShape: [String: String] = [:]
+
+    /// The other Mac's menus changed: shown by the icon taking the bar again when its window is in front
+    /// (an owner that is not active keeps showing what it had).
+    private func menusChanged() {
+        guard let sent = sendMenuBar(), sent.app == keyApp, shownShape[sent.app] != sent.shape else { return }
+        scheduleMenuBar()
+    }
+    /// Each app's menus as last sent to its Dock icon, and as it last took the bar with.
+    private var sentShape: [String: String] = [:]
     private var shownShape: [String: String] = [:]
 
     /// The app of the window in front here, if it has a Dock icon.
@@ -315,10 +328,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         return app
     }
 
-    /// The menu bar's hand-over, once the click that brought a window forward is over: this app's
-    /// activation and its key window come in either order (from another app, the first notice had
-    /// neither yet, and the bar stayed with that app: 2026-10-14), and taken mid-click, the Dock icon's
-    /// moment in front lost the rest of the click.
+    /// The menu bar's hand-over, once this app is active with its key window (they come in either order)
+    /// and no button is down (taken mid-click, the Dock icon's moment in front lost the click).
     private func scheduleMenuBar(after delay: Double = 0.15) {
         menuBarWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -331,27 +342,27 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     }
     private var menuBarWork: DispatchWorkItem?
 
-    /// A window of an app with a Dock icon came to the front: that icon takes the menu bar. Always when
-    /// this app came forward or the front app changed, whoever macOS says holds the bar: after ⌘Tab or a
-    /// Dock click to the icon, which hands activation straight back, macOS named the icon the owner while
-    /// the bar still showed the app in front before (2026-10-14). Again when the menus it has were sent
-    /// after it last took it. Not within a second of the last time, which its hand-back would repeat.
+    /// The front window's app's Dock icon takes the menu bar: always when this app came forward or the
+    /// front app changed (after ⌘Tab or the Dock, macOS names the icon the owner while the bar still
+    /// shows the app before), and when its menus changed since it last took it; never twice within a
+    /// second (its own hand-back would repeat it).
     private func menuBarToFront() {
         let forward = cameForward
         cameForward = false
         guard let app = keyApp else { return }
-        pushMenuBar()
-        let current = pushedShape[app]
+        let shape = sendMenuBar()?.shape
         let recent = lastMenuBar.map { $0.app == app && Date().timeIntervalSince($0.at) < 1 } ?? false
-        let force = !recent && (forward || lastMenuBar?.app != app || (current != nil && shownShape[app] != current))
+        let force = !recent && (forward || lastMenuBar?.app != app || shownShape[app] != shape)
         dock.takeMenuBar(app, force: force)
         if force || lastMenuBar?.app != app { lastMenuBar = (app, Date()) }
-        shownShape[app] = current
+        shownShape[app] = shape
     }
-    /// This app came forward since the menu bar was last handed over.
+    /// This app came forward from another (not from one of its own Dock icons, whose menus were in use).
     private var cameForward = false
     /// The app whose Dock icon last took the menu bar, and when.
     private var lastMenuBar: (app: String, at: Date)?
+    /// The last app other than this one in front, to tell a return from a Dock icon's menus.
+    private var lastOtherFront: String?
 
     private func menuOpened(_ app: String, id: String, top: Bool, title: String, token: String) {
         let answer: (MacMenuState.Content) -> Void = { [weak self] content in self?.answerMenu(app, token: token, content) }
@@ -633,8 +644,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         pill.show(over: nil, title: "", image: nil)
         keeping = false
         defer { keeping = true; restored = false }
-        for window in open.values { window.delegate = nil; window.close() }
+        for window in open.values { window.delegate = nil; window.forgetPicture(); window.close() }
         open.removeAll()
+        fullSpeed.removeAll()
+        menuRows.removeAll(); sentShape.removeAll(); shownShape.removeAll(); lastMenuBar = nil; cameForward = false
         known = nil
         sideFeeds.removeAll()
         client.requestSideStreams([], wholeApp: true, screen: Self.largestScreen)

@@ -1,11 +1,12 @@
 import AppKit
 import StreamProtocol
 
-/// The menu bar: this app's own menu first (macOS requires it), then, while one of the other Mac's
-/// windows is key, that app's menus as the other Mac has them, read as each opens (MacMenus). While
-/// the connect window is key, Edit instead, so its fields can paste. Sill's controls are the status
-/// item's. Rebuilt when the key window changes and when the other Mac's top level changes
-/// (MacMenuHub). Main thread.
+/// The menu bar: this app's own menu first (macOS requires it), then Edit, so the connect window's
+/// fields can paste. With the remote apps' Dock icons off (DockProxies.enabled), this app is a regular
+/// one and, while one of the other Mac's windows is key, that app's menus as the other Mac has them
+/// follow instead, read as each opens (MacMenus); with them on, those menus are the Dock icons' own.
+/// Sill's controls are the status item's. Rebuilt when the key window changes and when the other
+/// Mac's top level changes (MacMenuHub). Main thread.
 final class MainMenu: NSObject {
     private let client: StreamClient
     /// The top level the bar was last built from, so an unchanged one is not rebuilt (a rebuild
@@ -25,7 +26,7 @@ final class MainMenu: NSObject {
         rebuild()
     }
 
-    private var remoteKey: Bool { NSApp.keyWindow is StreamWindow && client.connected }
+    private var remoteKey: Bool { !DockProxies.enabled && NSApp.keyWindow is StreamWindow && client.connected }
 
     func rebuild() {
         let remote = remoteKey

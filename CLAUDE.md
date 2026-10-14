@@ -52,7 +52,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
   built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
   on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's 30 s backoff and a real
-  badge by hand; notifications and Dock bounces a separate spike, a stacked docs pull request in the fork).
+  badge by hand; notification banners not forwarded: docs/notifications-spike.md).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
