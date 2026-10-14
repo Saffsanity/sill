@@ -37,6 +37,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's Picture Smoothing (PictureSmoothing), never sent.
+    @AppStorage(PictureSmoothing.defaultsKey) private var smoothingRaw = PictureSmoothing.automatic.rawValue
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -456,6 +458,17 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        Rows {
+            AdaptiveRow(title: "Picture Smoothing", since: nil) {
+                Picker("Picture Smoothing", selection: Binding(get: { PictureSmoothing.stored(smoothingRaw) },
+                                                               set: { smoothingRaw = $0.rawValue; client.setSmoothing($0) })) {
+                    ForEach(PictureSmoothing.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+        Footnote(text: PictureSmoothing.footnote)
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)

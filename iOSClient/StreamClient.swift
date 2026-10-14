@@ -431,6 +431,28 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// Picture Smoothing's renderer while a level other than Automatic is chosen. Main thread.
+    private var smoothingRenderer: MetalStreamRenderer?
+
+    /// Picture Smoothing (PictureSmoothing; This iPad in the Settings panel): Automatic draws with the
+    /// system's video layer, every other level with Sill's own renderer and that level's filter. A
+    /// change of who draws asks for a keyframe (the source picked again), since that path starts at
+    /// one; a change of filter only draws the last frame again. Main thread.
+    func setSmoothing(_ smoothing: PictureSmoothing) {
+        var renderer: MetalStreamRenderer?
+        if let filter = smoothing.filter {
+            renderer = smoothingRenderer ?? MetalStreamRenderer(filter: filter)
+            renderer?.setFilter(filter)
+            if renderer == nil { print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead") }
+        }
+        let newPath = renderer !== smoothingRenderer
+        smoothingRenderer = renderer
+        let view = displayView
+        view.showRenderer(renderer)
+        queue.async { view.useRenderer(renderer) }
+        if newPath, active != .none { request(active) }
+    }
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
@@ -826,6 +848,8 @@ final class StreamClient: ObservableObject {
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
+        let smoothing = PictureSmoothing.stored(UserDefaults.standard.string(forKey: PictureSmoothing.defaultsKey))
+        if smoothing.usesOwnRenderer { setSmoothing(smoothing) }
         // Back from the background: the pings stopped while the app was suspended, which is no loss.
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.resetLiveness()
