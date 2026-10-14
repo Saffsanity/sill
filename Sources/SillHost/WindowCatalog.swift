@@ -81,14 +81,11 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
-    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
-    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
     /// The display a device picked for the Desktop (kind 40); nil, or gone, the main display.
     var desktopDisplayID: CGDirectDisplayID?
     /// This Mac's own displays, never Sill's hidden ones (VirtualDisplay's vendor), for a device to pick.
     private(set) var realDisplays: [SCDisplay] = []
-    static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == 0x5111 }
+    static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == VirtualStage.vendorID }
 
     /// The Desktop is `id` from now on, at once (the next refresh keeps it). False when it is not one
     /// of this Mac's own displays.
@@ -109,10 +106,10 @@ final class WindowCatalog {
         }
     }
 
-    /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
-    /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
-    /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
-    /// the client's bar and the coordinator can still find it.
+    /// The windows on Sill's hidden displays (the iPad's virtual display, the Mac viewers' desk). Set
+    /// right after a successful placement, cleared on release. One ScreenCaptureKit stops listing as
+    /// on screen there is fetched from the full window list, so its tile stays in the client's bar and
+    /// the coordinator can still find it.
     var stagedWindowIDs: Set<CGWindowID> = []
 
     /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
@@ -254,17 +251,23 @@ final class WindowCatalog {
 
     // MARK: Windows
 
+    /// The last scan for windows in other Spaces, and when (`refreshWindows`).
+    private var lastElsewhere: [SCWindow] = []
+    private var elsewhereAt = Date.distantPast
+    private static let elsewhereInterval: TimeInterval = 6
+
     func refreshWindows() async {
         refreshSeq += 1
         let seq = refreshSeq
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
-        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
-        // poll, and only then. Fetched before the sequence check so its await cannot let an older
-        // refresh overwrite a newer one.
+        // Every window, on screen or not: for a staged window the on-screen list dropped, at every poll,
+        // and for windows in other Spaces every `elsewhereInterval` (between, the last scan's). Fetched
+        // before the sequence check so its await cannot let an older refresh overwrite a newer one.
         var pinnedAll: [SCWindow] = []
-        var elsewhere: [SCWindow] = []
+        var elsewhere = lastElsewhere
         let missing = stagedWindowIDs.filter { id in !content.windows.contains(where: { $0.windowID == id }) }
-        if let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+        let scan = !missing.isEmpty || Date().timeIntervalSince(elsewhereAt) >= Self.elsewhereInterval
+        if scan, let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
             for id in missing {
                 guard let w = all.windows.first(where: { $0.windowID == id && !Self.isOwn($0) }) else { continue }
                 pinnedAll.append(w)
@@ -280,7 +283,12 @@ final class WindowCatalog {
                 guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, w.owningApplication != nil else { return false }
                 return WindowSpaces.inSomeSpace(w.windowID)
             }
+            lastElsewhere = elsewhere
+            elsewhereAt = Date()
         }
+        // One shown now is no longer elsewhere.
+        let onScreen = Set(content.windows.map(\.windowID))
+        elsewhere.removeAll { onScreen.contains($0.windowID) }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }

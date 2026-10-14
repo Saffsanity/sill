@@ -30,6 +30,8 @@ final class SideStreams {
         /// Whether whole-app capture was asked for when it started (a window neither on the desk nor
         /// cropped, off screen, is captured alone though it was).
         var wholeApp = false
+        /// Its window was off screen when it started (captured alone for that): tried again once it shows.
+        var offScreen = false
         let startedAt = Date()
         let capture = WindowCapture()
         var encoder: HEVCEncoder?
@@ -119,11 +121,6 @@ final class SideStreams {
         for id in Array(streams.keys) { await stop(id) }
     }
 
-    func stopAll() async {
-        wanted.removeAll()
-        await reconcile()
-    }
-
     /// Brings the running streams to what is asked: one at a time, a request made meanwhile runs after.
     func reconcile() async {
         if reconciling { again = true; return }
@@ -183,10 +180,9 @@ final class SideStreams {
         for (id, stream) in streams where DesktopWindow.display(of: id) == nil {
             let w = target[id]
             let moved = stream.cropFrame.map { $0.origin != w?.frame.origin } ?? false
-            // Captured alone though whole-app capture was asked for (off screen when it started): tried
-            // again once the window shows, at most every 30 s.
-            let alone = stream.wholeApp && !stream.onDesk && stream.cropFrame == nil
-            let retry = alone && w?.isOnScreen == true && Date().timeIntervalSince(stream.startedAt) > 30
+            // Captured alone because its window was off screen when it started: tried again once the
+            // window shows, at most every 30 s (alone for another reason, the desk's refusal, it stays).
+            let retry = stream.offScreen && !stream.onDesk && stream.cropFrame == nil && w?.isOnScreen == true && Date().timeIntervalSince(stream.startedAt) > 30
             if w == nil || w!.frame.size != stream.size || fps[id] != stream.fps || moved
                 || stream.wholeApp != wholeApp || retry { await stop(id) }
         }
@@ -268,6 +264,7 @@ final class SideStreams {
             }
             stream.encoder = enc
             stream.wholeApp = wholeApp
+            stream.offScreen = wholeApp && !w.isOnScreen
             streams[id] = stream
             encoders.set(id, enc)
             var staged: (filter: SCContentFilter, sourceRect: CGRect, size: CGSize)?

@@ -8,9 +8,6 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "sill.capture", qos: .userInteractive)
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
-    /// The stream's first complete frame, once, before `onFrame` has it (on the capture queue): the
-    /// desk's picture check (DeskPicture). Set, or cleared, by the caller before each start.
-    var onFirstFrame: ((CVPixelBuffer) -> Void)?
     /// The stream ended on its own (window closed, permission revoked). Called on an SCK thread.
     var onStopped: ((Error) -> Void)?
     /// The stats line's keys: "cap" for the stream, "side.cap" for a side stream (SideStreams).
@@ -22,10 +19,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// `SCStream.updateConfiguration` wedged the stream on macOS 27 (frames stopped, the next
     /// `stopCapture` never returned, and the coordinator's switch flag stayed set for good).
     ///
-    /// `sourceRect`: `--virtual-display` only. The part of a display filter to encode, in points in
-    /// the display's own coordinate system (origin at its top-left, SCStream.h), i.e. exactly the
-    /// staged window's rectangle, so the device gets the window and nothing else. Nil (the default,
-    /// and the whole default path) leaves the configuration exactly as it was.
+    /// `sourceRect`: the part of a display filter to encode (a window on its hidden display, or cropped
+    /// from its own: AppCrop), in points in the display's own coordinate system (origin at its
+    /// top-left, SCStream.h), i.e. exactly the window's rectangle, so the device gets the window and
+    /// nothing else. Nil (a window or a whole display) leaves the configuration as it was.
     func start(filter: SCContentFilter, width: Int, height: Int, fps: Int, showsCursor: Bool, sourceRect: CGRect? = nil) async throws {
         let config = SCStreamConfiguration()
         config.width = width
@@ -83,7 +80,6 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         Stats.shared.bump("\(statsPrefix).complete")
         framesSeen += 1
         if framesSeen == 1, statsPrefix == "cap" { print("Capture: first frame \(CVPixelBufferGetWidth(pixelBuffer))×\(CVPixelBufferGetHeight(pixelBuffer))") }
-        if framesSeen == 1, let first = onFirstFrame { onFirstFrame = nil; first(pixelBuffer) }
         onFrame?(pixelBuffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 
