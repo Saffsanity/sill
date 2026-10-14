@@ -374,7 +374,7 @@ for raw in UInt8.min...UInt8.max where !known.contains(where: { $0.1 == raw }) {
     let header = Data([raw]) + Data(count: 9) + Data([0, 0, 0, 3])
     if StreamMessageKind(rawValue: raw) != nil || StreamMessage.parseHeader(header)?.kind != .unknown { unknownRaw.append(raw) }
 }
-check(unknownRaw.isEmpty, "every other kind (42…254) is unknown to this build: \(unknownRaw)")
+check(unknownRaw.isEmpty, "every other kind (43…254) is unknown to this build: \(unknownRaw)")
 let message = StreamMessage(kind: .macPointer, timestamp: 1_790_000_000.25, isKeyframe: false, payload: Wire.encode(over)).serialized()
 let header = StreamMessage.parseHeader(message)
 check(message.first == 26 && header?.kind == .macPointer && header?.payloadLength == message.count - StreamMessage.headerLength

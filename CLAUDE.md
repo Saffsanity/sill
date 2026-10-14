@@ -24,34 +24,48 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
 - Wire, additive and gated by window-list flags: the middle button (kind 8, `middleButton`), side
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
   `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
-  Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), input to a
-  window in the background (kind 8 with `window`, `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices' `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`, `fullRate`), windows no one can see here paused (`SideStreamRequest.paused`: minimised or covered, kept on the desk, not captured or sent; the background ones that stream at 1× unless at full speed), the main stream at 1× and 15 fps while every viewer has been out of front for 3 s (`SideStreamRequest.background`; not a window at full speed), AAC-ELD
-  sound (kind 33, `audioCodec`). A window ID with the top bit set is a display (`DesktopWindow`).
+  Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), the desk made
+  again (42, `rebuildDesk`), input to a window in the background (kind 8 with `window`,
+  `windowInput`), Dock badges (`badges`), Dock bounces (`attention`, from LaunchServices'
+  `LSWantsAttention`), windows at full speed in the background (`SideStreamRequest.fullRate`,
+  `fullRate`), windows no one can see here paused (`SideStreamRequest.paused`: minimised or covered,
+  kept on the desk, not captured or sent; the background ones that stream at 1× unless at full
+  speed), the main stream at 1× and 15 fps while every viewer has been out of front for 3 s
+  (`SideStreamRequest.background`; not a window at full speed); in kind 29 itself, AAC-ELD sound
+  (`audioCodec`, with `audio`). The clipboard (32) needs no flag. A window ID with the top bit set
+  is a display (`DesktopWindow`).
   The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
   of its own with its own identity taken as needed while they fit in a quarter of its memory (two displays with one vendor and product ID
-  are one monitor to macOS, which took the older offline: not a one-display limit), made once at
+  are one monitor to macOS, which took the older offline: not a one-display limit), made at
   120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
-  on macOS 27.0.1); a full-screen window's display resized live to the viewer window
-  (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
+  on macOS 27.0.1); a display a window leaves kept for the next (`DeskStages.spares`: every display
+  made and removed leaves macOS's ColorSync service more work for the login session, and a display
+  made after another was removed can stream a third's picture), all removed together once the desk
+  is empty; the main stream's picture compared with the window alone at start and every 10 s
+  (`DeskPicture`), the window captured alone when it is another display's, the viewer's pill
+  refresh (kind 42) making every display again; a full-screen window's display resized live to the
+  viewer window (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
   the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
   goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows go to
   the desk, never the iPad's Virtual Display staging; one the desk fails to take is captured where
-  it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s. Take-back (the menu's Shared Windows,
+  it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s when picked, 5 minutes beside it (`DeskStages.mayTry`); no display is made for a window Accessibility cannot find, and a picked window its app has put away is shown first, as its Dock icon would. Take-back (the menu's Shared Windows,
   Stop Sharing; an app brought forward on the host) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
   (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
   (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `protocol` 243 with 36
-  mutants, `stream-rate` 15 with 7 (a stream's rate capped at its size: 3930×2188 runs at 60 where the device asks 120; StreamRate) (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (26, 9
+  mutants), `stream-rate` 15 with 7 (a stream's rate capped at its size: 3930×2188 runs at 60 where
+  the device asks 120; StreamRate), `protocol` (every new payload), `compatibility`, `menus`,
+  `pointer-control` and `key-strokes` updated.
   Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
   `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
   built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
-  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's 30 s backoff and a real
+  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's retry wait and a real
   badge by hand; notification banners not forwarded: docs/notifications-spike.md).
 
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again

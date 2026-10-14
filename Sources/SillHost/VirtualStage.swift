@@ -120,19 +120,15 @@ final class VirtualStage {
 
     /// The window's rectangle in display-local points, trimmed to even output pixels.
     private(set) var captureRect: CGRect = .zero
-    /// Height of the menu bar macOS draws on the virtual display. A guess until measured from
-    /// NSScreen after the first display comes up, then cached for the process.
-    /// The virtual display's menu bar height, measured once per run and kept for every stage after
-    /// (Sill's desk makes many: each guessing anew made every display twice, and macOS refuses a
-    /// serial whose display was just torn down).
-    /// The virtual display's menu bar as last measured, kept across launches (30 pt on macOS 27), so
-    /// a launch's first display is not made twice.
+    /// The virtual display's menu bar as last measured, kept for every stage and across launches (30 pt
+    /// on macOS 27): each guessing anew made every display twice.
     private static var measuredInset: CGFloat? = {
         let v = UserDefaults.standard.double(forKey: "SillVirtualMenuBar")
         return v > 0 ? CGFloat(v) : nil
     }() {
         didSet { if let v = measuredInset { UserDefaults.standard.set(Double(v), forKey: "SillVirtualMenuBar") } }
     }
+    /// Height of the menu bar macOS draws on the virtual display: a guess until measured.
     private var menuInset: CGFloat = VirtualStage.measuredInset ?? 24
     private var insetMeasured = VirtualStage.measuredInset != nil
     /// Set when staging must not be attempted again this run (API missing, repeated failures).
@@ -370,8 +366,6 @@ final class VirtualStage {
             p = current                                       // same window: keep its original frame
         } else if let fresh = sizer.placement(for: window) {
             p = fresh
-        } else if mayReachOtherSpace, let found = await fromOtherSpace(window) {
-            p = found
         } else {
             throw Failure.axWindowNotFound
         }
@@ -621,7 +615,7 @@ final class VirtualStage {
     }
 
     /// The refresh rate the next display is made at; see `prepare`.
-    private(set) var refreshHz = 60
+    private var refreshHz = 60
 
     /// Reuses the current display if `env` fits below its menu bar and its refresh rate matches,
     /// else (re)creates it, waits for it to come online at 2×, measures the menu bar once, and
@@ -963,7 +957,7 @@ final class VirtualStage {
 
     /// A full-screen window cannot be moved home: its Space would outlive the display on another one,
     /// out of sight (a browser's, 2026-10-12, after a quit). Out of full screen first, waiting for it
-    /// (1.5 s at most). Synchronous, for the teardowns that cannot wait in a Task (Quit, `keep`).
+    /// (about 3 s at most). Synchronous, for the teardowns that cannot wait in a Task (Quit, `keep`).
     func leaveFullScreenNow() {
         guard let p = placement, WindowSizer.isFullScreen(p.element) else { return }
         _ = WindowSizer.perform(.fullScreen, element: p.element)
@@ -1002,9 +996,7 @@ final class VirtualStage {
         AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
         for _ in 0..<15 {
             try? await Task.sleep(for: .milliseconds(100))
-            let onScreen = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
-                .contains { ($0[kCGWindowNumber as String] as? CGWindowID) == window.windowID }
-            if onScreen {
+            if WindowSizer.isOnScreen(window.windowID) {
                 try? await Task.sleep(for: .milliseconds(300))   // the Space's slide done
                 // Full screen there (a Space of its own, left behind by a quit): out of it first,
                 // or it cannot be moved.
@@ -1017,33 +1009,6 @@ final class VirtualStage {
                 return
             }
         }
-    }
-
-    /// A window Accessibility does not list (it lists only the windows of the Space shown): a window
-    /// left full screen in a Space of its own on another display (a host quit before it left). Its
-    /// app is brought forward, which shows that Space, the window found again, and taken out of full
-    /// screen so it can come to the desk. Nil when it still cannot be found.
-    private func fromOtherSpace(_ window: SCWindow) async -> WindowSizer.Placement? {
-        guard !window.isOnScreen, let pid = window.owningApplication?.processID else { return nil }
-        // It changes what the Mac shows: once a minute a window at most.
-        if let last = Self.reachedFor[window.windowID], Date().timeIntervalSince(last) < 60 { return nil }
-        Self.reachedFor[window.windowID] = Date()
-        print("\(window.owningApplication?.applicationName ?? "?") — \(window.title ?? ""): not in the Space shown; bringing its app forward to reach it")
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        var found: WindowSizer.Placement?
-        for _ in 0..<15 {
-            try? await Task.sleep(for: .milliseconds(100))
-            if let p = sizer.placement(for: window) { found = p; break }
-        }
-        guard let p = found else { return nil }
-        if WindowSizer.isFullScreen(p.element) {
-            _ = WindowSizer.perform(.fullScreen, element: p.element)
-            let deadline = Date().addingTimeInterval(3)
-            while Date() < deadline, WindowSizer.isFullScreen(p.element) { try? await Task.sleep(for: .milliseconds(100)) }
-            try? await Task.sleep(for: .milliseconds(800))   // out of its Space, back on the desktop
-        }
-        return sizer.placement(for: window) ?? p
     }
 
     /// The window server tore the display down (sleep, another display arriving). The object is

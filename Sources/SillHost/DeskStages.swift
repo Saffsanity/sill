@@ -41,20 +41,25 @@ final class DeskStages {
     /// needed, the lowest free first; no fixed number of windows.
     private var slots: [UInt32: Int] = [:]
 
-    /// Windows the desk could not take (Accessibility found no window to move, or it refused the
-    /// move), by when: not tried again for `retryAfter`, so no display is made and removed for them
-    /// over and over. Captured where they are meanwhile.
+    /// Windows the desk could not take (Accessibility found no window to move, it refused the move,
+    /// or no room was left), by when: captured where they are meanwhile, and not tried again for a
+    /// while (`mayTry`), so no display is made and removed for them over and over (see `spares`).
     private var cannotTake: [UInt32: Date] = [:]
-    static let retryAfter: TimeInterval = 300
+
+    /// Whether the desk tries `id` again: a window picked on the device 30 s after it could not take
+    /// it, one shown beside it 5 minutes after.
+    func mayTry(_ id: UInt32, picked: Bool) -> Bool {
+        cannotTake[id].map { Date().timeIntervalSince($0) >= (picked ? 30 : 300) } ?? true
+    }
 
     private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) && !spares.contains { $0.slot == s } }! }
 
-    /// Displays windows have left, kept for the next window that needs one: a window coming and going
+    /// Displays windows have left, kept for the next window that needs one, so a window coming and going
     /// makes no display. Every display made and removed leaves macOS's ColorSync service more work for
-    /// the rest of the login session (2026-10-14: about 40 in a morning saturated it, and WindowServer,
-    /// waiting on it, was killed by its watchdog), and a display made after another was removed can
-    /// stream a third's picture (DeskPicture). As many as windows were on the desk at once; all removed
-    /// together once the desk is empty (`keep`), or made again by hand (`releaseAll`).
+    /// the rest of the login session (about 40 in a morning saturated it, and WindowServer, waiting on
+    /// it, was killed by its watchdog), and a display made after another was removed can stream a
+    /// third's picture (DeskPicture). As many as windows were on the desk at once; all removed together
+    /// once the desk is empty (`keep`), or made again by hand (`releaseAll`).
     private var spares: [(spare: VirtualStage.Spare, slot: Int)] = []
 
     /// What the desk's displays may take of this Mac's memory in all: each holds a framebuffer of its
@@ -97,15 +102,10 @@ final class DeskStages {
         let id = window.windowID
         let stage: VirtualStage
         if let existing = stages[id] { stage = existing } else {
-            // No display for a window that cannot go on one: every display made and removed leaves
-            // macOS's ColorSync service more work for the rest of the login session (2026-10-14: a
-            // window Accessibility could not find was tried every few seconds, a display made and
-            // removed each time, and about 40 in a morning saturated it and hung WindowServer).
-            // A window picked on the device (`fps`, the main stream) is always tried, and in another
-            // Space Accessibility finds it only once the stage has brought that Space into view.
-            if fps == nil, let failed = cannotTake[id], Date().timeIntervalSince(failed) < Self.retryAfter {
-                throw VirtualStage.Failure.axWindowNotFound
-            }
+            // No display for a window that cannot go on one (see `spares`). A window picked on the device
+            // (`fps`, the main stream) in another Space is found by Accessibility only once the stage
+            // has brought that Space into view, so it is not looked up first.
+            guard mayTry(id, picked: fps != nil) else { throw VirtualStage.Failure.axWindowNotFound }
             if fps == nil || window.isOnScreen, sizer.placement(for: window) == nil {
                 cannotTake[id] = Date()
                 throw VirtualStage.Failure.axWindowNotFound
@@ -117,7 +117,7 @@ final class DeskStages {
                 slots[id] = kept.slot
                 print("Sill's desk: window \(id) takes kept display \(kept.spare.display.displayID) (\(spares.count) more kept).")
             } else {
-                guard roomForAnother() else { throw TooMany(count: stages.count) }
+                guard roomForAnother() else { cannotTake[id] = Date(); throw TooMany(count: stages.count) }
                 let slot = freeSlot()
                 stage.productID = 0x100 + UInt32(slot)
                 stage.serial = Self.serial(forSlot: slot)
@@ -157,7 +157,9 @@ final class DeskStages {
         }
         cannotTake[id] = nil
         var filter = prepared.filter
-        if let display = stage.scDisplay, let owner = window.owningApplication,
+        // The display's filter is used for the main stream, and for a window beside it only in full
+        // screen (otherwise captured alone): not fetched for nothing.
+        if fps != nil || stage.isFullScreenNow, let display = stage.scDisplay, let owner = window.owningApplication,
            let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 2) {
             filter = AppCrop.filter(display: display, owner: owner.processID, applications: content.applications)
         }
@@ -217,6 +219,7 @@ final class DeskStages {
     func releaseAll() {
         for id in staged { release(id) }
         removeSpares()
+        cannotTake.removeAll()
     }
 
     /// A display just larger than the window: room for its menu bar, rounded up to 16 points, and

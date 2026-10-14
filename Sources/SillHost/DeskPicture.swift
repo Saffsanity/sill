@@ -1,14 +1,13 @@
 import CoreGraphics
 import CoreVideo
 
-/// Whether the picture a hidden display gives of a window is the window. Seen on macOS 27.0.1
-/// (2026-10-14): once one of Sill's hidden displays has been removed while others stay, a display
-/// made afterwards can stream another display's picture live (a one-off screenshot of it is right,
-/// and so is the window captured alone), and waiting or resizing it does not mend it; only a desk
-/// whose displays are all made again from none is right again. The main stream's crop of such a
-/// display, which leaves out every other app and the wallpaper, then showed nothing of the window:
-/// black. So the main stream's first frame is compared with a small screenshot of the window alone,
-/// cell by cell (StreamCoordinator's `checkDeskPicture`). Pure.
+/// Whether the picture a hidden display gives of a window is the window. On macOS 27.0.1, once one of
+/// Sill's hidden displays has been removed while others stay, a display made afterwards can stream
+/// another display's picture live (a one-off screenshot of it is right, and so is the window captured
+/// alone); waiting or resizing it does not mend it, a desk whose displays are all made again from none
+/// does. The main stream's crop of such a display leaves out every other app and the wallpaper, so it
+/// shows black. The stream's frames are compared with a small screenshot of the window alone, cell by
+/// cell, at start and every 10 s (StreamCoordinator's `watchDeskPicture`). Pure.
 enum DeskPicture {
     static let columns = 16, rows = 10
     /// How far a cell may be from the window's own (of 255) and still be the same picture: the two

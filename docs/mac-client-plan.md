@@ -33,7 +33,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 - **On the host** nothing new to set up: the same pairing and trust list as an iPhone (Settings ›
   Devices). While a viewer shows a window, that window lives on a hidden virtual display of its own
   ("Sill's desk"), so it is never covered, never limited by the host's own screens, and the person
-  at the host keeps their desk. One the desk cannot take is captured where it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s. Windows go back where they were when the viewer closes them,
+  at the host keeps their desk. One the desk cannot take is captured where it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s when picked, 5 minutes beside it. A display a window leaves is kept for the next (every display made and removed leaves macOS's ColorSync service more work for the login session, and a display made after another was removed can stream a third's picture); the kept ones go together once the desk is empty. The main stream's picture is compared with the window alone at start and every 10 s, and a window whose display shows another's is captured alone; the pill's refresh (kind 42) makes every display again. Windows go back where they were when the viewer closes them,
   disconnects or quits, and when Sill quits. The host's menu lists the windows a Mac viewer shows
   (Shared Windows), each with Stop Sharing; and bringing a shared app forward on the host (its Dock
   icon, ⌘Tab) takes its windows back, home and in front, while the viewer may open them again. Both
@@ -57,6 +57,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 | 39 `dockMenu` | both | `DockMenu`: an app's own Dock menu on the host, asked for and one item pressed | the list says `dockMenu` |
 | 40 `pickDisplay` | device → host | `PickDisplay`: which of the host's displays the Desktop is | the list names its `displays` |
 | 41 `takenBack` | host → device | `TakenBack`: windows the person at the host took back; the device closes its windows of them | only to a Mac viewer |
+| 42 `rebuildDesk` | device → host | no payload: every hidden display removed together and made again | the list says `rebuildDesk` |
 | 2 (`WindowList.badges`) | host → device | each listed app's Dock badge, by bundle ID | while a Mac viewer is connected |
 
 A window ID can name one of the host's displays (`DesktopWindow`: the display ID with the top bit
@@ -64,9 +65,10 @@ set), so a Desktop window has its side stream, drops and take-back like any othe
 
 Every field added to an existing payload is optional, and a host or device from before skips the
 new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
-`protocol` (round-trips and refusals of every new payload, 239 checks, 32 mutants), `compatibility`,
-`menus` and `pointer-control` know kinds 29–41 (42 unknown); `main-router` (32 checks, 15 mutants)
-holds the viewer's routing of the main and side streams.
+`protocol` (round-trips and refusals of every new payload), `compatibility`, `menus` and
+`pointer-control` know kinds 29–42 (43 unknown); `main-router` (32 checks, 15 mutants) holds the
+viewer's routing of the main and side streams; `desk-picture` (26 checks, 9 mutants) the comparison
+of a hidden display's picture with the window alone.
 
 ## Sill's desk (DeskStages, VirtualStage)
 
@@ -221,7 +223,7 @@ the new kinds is sent by it, and a host sends it none.
 - Confirmed by hand on the build before the last fix: opening, closing and switching windows of
   several apps, new windows included, each showing its own picture and none black (the rewritten
   router and the desk's placement fixes). Not yet confirmed by hand: the last fix (a window the desk
-  could not take captured where it is for 30 s, and captured again once it holds still after a move, at once after a resize); a real
+  could not take captured where it is for a while, and captured again once it holds still after a move, at once after a resize); a real
   app's badge drawn on its Dock icon here; the system's Stop Sharing with an iPhone or iPad
   connected (the stream stops, as on main). The Dock icons' signing was tested live before its
   fields were length-framed; since then both sides' signing was compiled and compared.
