@@ -58,7 +58,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
   (a viewer's click that picked it comes right after). Dock icons'
   requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
-- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (26, 9
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (37, 15
   mutants), `stream-rate` 15 with 7 (a stream's rate capped at its size: 3930×2188 runs at 60 where
   the device asks 120; StreamRate), `protocol` (every new payload), `compatibility`, `menus`,
   `pointer-control` and `key-strokes` updated.

@@ -32,6 +32,24 @@ check(!DeskPicture.differs(bright.map { $0 - UInt8(DeskPicture.cellTolerance) },
 check(DeskPicture.differs(bright.map { $0 - UInt8(DeskPicture.cellTolerance + 1) }, bright), "every cell off by more than the tolerance differs")
 check(!DeskPicture.differs(bright.map { $0 - 30 }, bright), "a slightly darker picture (a video's frame later) is the window")
 check(!DeskPicture.differs([], []), "no cells: no verdict")
+// A dark window (a dark theme: cells 20-60, text a little brighter) against a black or flat picture.
+let dark = (0..<160).map { UInt8(20 + ($0 * 7) % 41) }
+check(DeskPicture.differs(black, dark), "black against a dark window with detail differs")
+check(DeskPicture.differs([UInt8](repeating: 16, count: 160), dark), "video-range black against a dark window differs")
+check(DeskPicture.differs([UInt8](repeating: 30, count: 160), dark), "a flat grey against a dark window differs")
+check(!DeskPicture.differs(dark, dark), "a dark window shown as itself is the window")
+check(!DeskPicture.differs(dark.map { $0 + 4 }, dark), "a dark window a little brighter is the window")
+let flatDark = [UInt8](repeating: 25, count: 160)
+check(!DeskPicture.differs(black, flatDark), "black against a dark window with no detail: no verdict either way, kept")
+check(!DeskPicture.differs(flatDark, flatDark), "a flat window shown flat is the window")
+let justDetail = (0..<160).map { UInt8(20 + ($0 % 2) * DeskPicture.detailSpread) }
+let justUnder = (0..<160).map { UInt8(20 + ($0 % 2) * (DeskPicture.detailSpread - 1)) }
+check(DeskPicture.differs(black, justDetail), "a window spanning exactly the detail spread counts as detail")
+check(!DeskPicture.differs(black, justUnder), "a window spanning just under it does not")
+let justFlat = (0..<160).map { UInt8(($0 % 2) * DeskPicture.flatSpread) }
+let justNotFlat = (0..<160).map { UInt8(($0 % 2) * (DeskPicture.flatSpread + 1)) }
+check(DeskPicture.differs(justFlat, dark), "a picture spanning exactly the flat spread is flat")
+check(!DeskPicture.differs(justNotFlat, dark), "a picture spanning just over it is not flat")
 check(!DeskPicture.differs(black, Array(bright.prefix(10))), "cells of another count: no verdict")
 var someNoise = bright
 for i in stride(from: 0, to: n, by: 3) { someNoise[i] = 10 }   // a third of the cells far off
