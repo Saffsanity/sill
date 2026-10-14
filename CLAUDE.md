@@ -33,7 +33,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   needs no flag. A window ID with the top bit set is a display (`DesktopWindow`).
   The iOS app sends none of them.
 - Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
-  of its own with its own identity taken as needed while they fit in a quarter of its memory (two displays with one vendor and product ID
+  of its own, its identity fixed per slot (never a new one), while they fit in a quarter of its memory (each costs the whole Mac: ColorSync builds a profile per display about once a second while anything captures; two displays with one vendor and product ID
   are one monitor to macOS, which took the older offline: not a one-display limit), made at
   120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
   on macOS 27.0.1); a display a window leaves kept for the next (`DeskStages.spares`: every display
