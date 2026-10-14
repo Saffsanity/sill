@@ -121,6 +121,14 @@ final class SideStreams {
         for id in Array(streams.keys) { await stop(id) }
     }
 
+    /// Every capture stopped, waited for: the exit path, before the desk's displays go.
+    func stopCapturesNow(timeout: TimeInterval) {
+        for stream in streams.values {
+            stream.capture.stopNow(timeout: timeout)
+            stream.pill?.stopNow(timeout: timeout)
+        }
+    }
+
     /// Brings the running streams to what is asked: one at a time, a request made meanwhile runs after.
     func reconcile() async {
         if reconciling { again = true; return }
@@ -168,7 +176,11 @@ final class SideStreams {
             // this Mac and make its display again when it streams.
             var keep = Set(wanted.values.flatMap(\.windows))
             if let main { keep.insert(main) }
-            desk.keep(wholeApp ? keep : [])   // no device asks for it any more: every window goes home
+            if !wholeApp { keep = [] }   // no device asks for it any more: every window goes home
+            // A capture still running on a display as it is removed left WindowServer's display streams
+            // delivering nothing, for every app, until it restarted (macOS 27.0.1): stopped first.
+            for id in Array(streams.keys) where DesktopWindow.display(of: id) == nil && !keep.contains(id) { await stop(id) }
+            desk.keep(keep)
         }
         for (id, stream) in streams where DesktopWindow.display(of: id) != nil {
             let size = displays[id].map { CGDisplayBounds($0.displayID).size }

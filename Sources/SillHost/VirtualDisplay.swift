@@ -301,8 +301,68 @@ final class VirtualDisplay {
 
     /// Releases the CGVirtualDisplay; the display disappears. Safe to call twice.
     func destroy() {
+        if object != nil { Self.noteRemoved(vendorID: vendorID, productID: productID, serialNum: serialNum) }
         object = nil
         displayID = 0
+    }
+
+    // MARK: Identities being taken down
+
+    /// How long an identity rests after its display was removed before a display of it is made again.
+    /// The window server takes a display down asynchronously (about a second), and re-making the same
+    /// vendor, product and serial while it still is (a new Sill launched 3 s after the last quit) went
+    /// with WindowServer's display streams stopping for every app (macOS 27.0.1).
+    static let identityRest: TimeInterval = 3
+    private static let removedKey = "SillVirtualDisplayRemoved"
+
+    private static func identityKey(_ vendorID: UInt32, _ productID: UInt32, _ serialNum: UInt32) -> String {
+        "\(vendorID).\(productID).\(serialNum)"
+    }
+
+    /// When a display of this identity was last removed, by this process or an earlier one (saved in
+    /// the defaults, so a relaunch knows).
+    private static func noteRemoved(vendorID: UInt32, productID: UInt32, serialNum: UInt32) {
+        var removed = UserDefaults.standard.dictionary(forKey: removedKey) as? [String: Double] ?? [:]
+        let now = Date().timeIntervalSince1970
+        removed = removed.filter { now - $0.value < 60 }
+        removed[identityKey(vendorID, productID, serialNum)] = now
+        UserDefaults.standard.set(removed, forKey: removedKey)
+    }
+
+    /// Whether a display of this identity is still listed by the window server.
+    static func identityOnline(vendorID: UInt32, productID: UInt32, serialNum: UInt32) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains {
+            CGDisplayVendorNumber($0) == vendorID && CGDisplayModelNumber($0) == productID && CGDisplaySerialNumber($0) == serialNum
+        }
+    }
+
+    /// Waits, at most `timeout`, until no display of this identity is listed and it has rested
+    /// `identityRest` since its last removal. True when it is free.
+    static func waitUntilIdentityFree(vendorID: UInt32, productID: UInt32, serialNum: UInt32, timeout: TimeInterval = 5) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        let key = identityKey(vendorID, productID, serialNum)
+        while true {
+            let removedAt = (UserDefaults.standard.dictionary(forKey: removedKey) as? [String: Double])?[key]
+            let rested = removedAt.map { Date().timeIntervalSince1970 - $0 >= identityRest } ?? true
+            if rested && !identityOnline(vendorID: vendorID, productID: productID, serialNum: serialNum) { return true }
+            if Date() >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// The exit path: waits, at most `timeout`, until none of Sill's displays (vendor 0x5111) is listed.
+    static func waitUntilAllRemoved(timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+            var count: UInt32 = 0
+            guard CGGetOnlineDisplayList(64, &ids, &count) == .success,
+                  ids.prefix(Int(count)).contains(where: { CGDisplayVendorNumber($0) == 0x5111 }) else { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
     }
 }
 

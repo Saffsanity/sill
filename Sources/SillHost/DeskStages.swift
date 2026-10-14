@@ -164,8 +164,9 @@ final class DeskStages {
         var filter = prepared.filter
         // The display's filter is used for the main stream, and for a window beside it only in full
         // screen (otherwise captured alone): not fetched for nothing.
-        if fps != nil || stage.isFullScreenNow, let display = stage.scDisplay, let owner = window.owningApplication,
-           let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 2) {
+        if fps != nil || stage.isFullScreenNow, let owner = window.owningApplication,
+           let content = await WindowCatalog.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: true, timeout: 2),
+           let display = content.displays.first(where: { $0.displayID == stage.display?.displayID }) ?? stage.scDisplay {
             filter = AppCrop.filter(display: display, owner: owner.processID, applications: content.applications)
         }
         return (filter, prepared.sourceRect, prepared.outputSize ?? prepared.sourceRect.size)

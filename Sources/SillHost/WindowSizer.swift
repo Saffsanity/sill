@@ -187,9 +187,27 @@ final class WindowSizer {
         // Every later move/restore (and the atexit emergency restore) goes through this element.
         AXUIElementSetMessagingTimeout(ax, 1.0)
         // The AX frame is live; the SCWindow's can be two seconds stale (the catalog's poll).
-        let original = Self.frame(of: ax) ?? Self.liveBounds(of: window.windowID) ?? window.frame
+        var original = Self.frame(of: ax) ?? Self.liveBounds(of: window.windowID) ?? window.frame
+        // A window found on one of Sill's own displays (macOS moved it back onto a display re-made under
+        // an identity it remembered, or the last Sill quit without putting it home) has no home there:
+        // that display goes. Its home is the middle of the main display instead.
+        if Self.onSillDisplay(original) {
+            let main = CGDisplayBounds(CGMainDisplayID())
+            let size = CGSize(width: min(original.width, main.width), height: min(original.height, main.height - 30))
+            original = CGRect(x: main.midX - size.width / 2, y: main.minY + 30 + (main.height - 30 - size.height) / 2,
+                              width: size.width, height: size.height).integral
+            print("Window placement: \"\(window.title ?? "")\" was on one of Sill's own displays; its home is the main display.")
+        }
         return Placement(windowID: window.windowID, pid: pid, element: ax, originalFrame: original,
                          appName: window.owningApplication?.applicationName ?? "?", title: window.title ?? "")
+    }
+
+    /// Whether `frame`'s middle is on one of Sill's virtual displays (vendor 0x5111).
+    static func onSillDisplay(_ frame: CGRect) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetDisplaysWithPoint(CGPoint(x: frame.midX, y: frame.midY), 64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains { CGDisplayVendorNumber($0) == 0x5111 }
     }
 
     /// Moves and resizes the window to `frame`, wherever that is: no on-screen clamping here, the

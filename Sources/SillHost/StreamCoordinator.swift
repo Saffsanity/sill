@@ -1933,7 +1933,18 @@ package final class StreamCoordinator {
     /// streamed right: 2026-10-14): the latest frame against a small screenshot of the window alone.
     /// Another display's picture leaves this window captured alone (`deskWindowAlone`).
     private func watchDeskPicture(_ id: UInt32, _ w: SCWindow, _ frames: GridBox, _ pipeline: OutputSwitch) async {
-        for _ in 0..<30 where frames.get() == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<60 where frames.get() == nil && !capture.deliveredAnything { try? await Task.sleep(for: .milliseconds(50)) }
+        // Nothing at all from the display in 3 s, not even a notice that nothing changed: WindowServer
+        // has stopped delivering display streams (it did after a display was removed under a running
+        // capture, for every app, until it restarted; macOS 27.0.1). A window captured alone still
+        // came through, so the window streams alone; said once a stream.
+        if encoderLive === pipeline, !capture.deliveredAnything, frames.get() == nil {
+            Stats.shared.bump("desk.noDisplayFrames")
+            print("Sill's desk: the capture of \(w.owningApplication?.applicationName ?? "?")'s hidden display delivered nothing in 3 s (WindowServer is not delivering display streams); it streams as the window alone.")
+            deskWindowAlone.insert(id)
+            if case .window(id) = active, !switching { await select(active) }
+            return
+        }
         while encoderLive === pipeline {
             if await checkDeskPicture(id, w, frames, pipeline) { return }
             try? await Task.sleep(for: .seconds(10))
@@ -2602,8 +2613,17 @@ package final class StreamCoordinator {
         if #available(macOS 14.2, *) { (appAudio as? AppAudio)?.stop() }   // the apps' sound back on this Mac
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        // Every capture stopped, and the stop confirmed, before a display goes: a display removed with
+        // a capture still running on it left WindowServer's display streams delivering nothing, for
+        // every app on the Mac, until WindowServer restarted (macOS 27.0.1, a quit mid-stream).
+        capture.stopNow(timeout: 1)
+        mainPill?.stopNow(timeout: 1)
+        sideStreams?.stopCapturesNow(timeout: 1)
         stage.release()
         desk.releaseAll()
+        // And the displays gone before the process is: a new Sill made right after would otherwise
+        // remake the same identities while the window server is still taking them down.
+        VirtualDisplay.waitUntilAllRemoved(timeout: 1.5)
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
