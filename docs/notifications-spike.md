@@ -226,11 +226,18 @@ remote app's name, a badged-style `AppIcon.icns` in Resources, ad hoc signed, li
   minimises it. Restoring the stand-in, picking the window in the menu or the Dock icon's menu, or
   clicking the Dock icon with every window of the app minimised brings the real window back, and the
   stand-in goes. Focusing the app restores nothing, as on a Mac. With the Dock icons on (the default)
-  Sill Viewer runs as an accessory app: no Dock icon or ⌘Tab entry of its own, its menu bar the remote
-  app's as before, its controls in the menu bar icon. A Desktop window, which has no app, minimises as
-  macOS does it. Seen on one Mac against the other: minimised into a remote app's own icon and back by
-  each of the three ways, the stand-in and the picture gone after, and the menu bar showing the
-  remote app's menus with no Sill Viewer Dock icon.
+  Sill Viewer runs as an accessory app: no Dock icon or ⌘Tab entry of its own, its controls in the menu
+  bar icon. A Desktop window, which has no app, minimises as macOS does it. Seen on one Mac against the
+  other: minimised into a remote app's own icon and back by each of the three ways, the stand-in and
+  the picture gone after.
+- **The remote app's menus in its Dock icon's menu bar.** An accessory app has no menu bar: the bar
+  stays with the regular app active before it (an earlier note here, that the remote menus still
+  showed, was wrong: they were the last native app's). So each app's Dock icon holds the other Mac's
+  menus for that app: while one of its windows is in front here, Sill Viewer has the icon take the menu
+  bar (it is activated, and hands activation straight back, so the keyboard stays with the window; the
+  bar stays with it, the regular app active last; tried with two test apps). Each menu is asked for as
+  it opens ("Loading…" until the other Mac answers, through Sill Viewer), a choice is pressed there, and
+  a menu closed hands the keyboard back.
 - **Full speed in the background.** A bolt in a window's pill (after the lights; the accent colour lit,
   grey not) keeps that window at the main stream's rate when another is in front, where the others get
   15 fps: `SideStreamRequest.fullRate` names it, two at most (each costs the host's one encoder and the

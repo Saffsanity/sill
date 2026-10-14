@@ -115,6 +115,19 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         client.$hostRebuildDesk.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.updatePill() }
         }.store(in: &subscriptions)
+        // The other Mac's menus in the menu bar: this app has none of its own (an accessory app, no Dock
+        // icon), so the app's Dock icon holds them and takes the menu bar while one of its windows is
+        // in front (DockProxies.takeMenuBar); it asks for each menu as it opens and passes a choice back.
+        dock.onMenuOpen = { [weak self] app, id, top, title, token in self?.menuOpened(app, id: id, top: top, title: title, token: token) }
+        dock.onMenuPress = { [weak self] app, id, title in
+            guard let self, app == self.streamedApp, let row = self.menuRows[app]?[id], row.title == title else { return }
+            windowLog("menus: \(title) chosen in the menu bar")
+            self.client.pressMenuItem(row)
+        }
+        client.$menus.sink { [weak self] _ in DispatchQueue.main.async { self?.pushMenuBar() } }.store(in: &subscriptions)
+        for name in [NSWindow.didBecomeKeyNotification, NSApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.menuBarToFront() }
+        }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
             guard let self else { return }
@@ -232,6 +245,68 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         client.requestSideStreams(ids, wholeApp: true, screen: Self.largestScreen,
                                   audio: client.hostAudio && AudioPlayer.enabled ? true : nil, audioCodec: AudioPlayer.codec,
                                   fullRate: fullSpeed.filter { ids.contains($0) })
+    }
+
+    // MARK: The menu bar, held by the app's Dock icon
+
+    /// The app the main stream shows: the other Mac sends its menus.
+    private var streamedApp: String? {
+        if case .window(let id) = local(client.active) { return appOf[id] }
+        return nil
+    }
+    /// The rows the Dock icons were sent, by app and the other Mac's id: a choice or a submenu's
+    /// opening names one.
+    private var menuRows: [String: [String: MacMenuState.Row]] = [:]
+
+    /// The streamed app's top-level menus to its Dock icon, as the other Mac sent them.
+    private func pushMenuBar() {
+        guard let app = streamedApp else { return }
+        let state = client.menus
+        let top = state.menus.compactMap { row in row.id.map { (id: $0, title: row.title, enabled: row.enabled && !state.stale) } }
+        dock.setMenuBar(app, top: top, note: top.isEmpty ? state.note : nil)
+    }
+
+    /// A window of an app with a Dock icon came to the front: that icon takes the menu bar.
+    private func menuBarToFront() {
+        guard NSApp.isActive, let key = NSApp.keyWindow as? StreamWindow, case .window(let id) = key.source,
+              let app = appOf[id], dock.hasIcon(app) else { return }
+        pushMenuBar()
+        dock.takeMenuBar(app)
+    }
+
+    private func menuOpened(_ app: String, id: String, top: Bool, title: String, token: String) {
+        let answer: (MacMenuState.Content) -> Void = { [weak self] content in self?.answerMenu(app, token: token, content) }
+        guard app == streamedApp else {
+            dock.setMenuContent(app, token: token, content: ["message": "Click one of this app’s windows for its menus."])
+            return
+        }
+        if top {
+            guard let version = client.menus.version else { return answer(.message("The menus are on their way.")) }
+            client.fetchTopMenu(id: id, title: title, builtVersion: version, completion: answer)
+        } else {
+            guard let row = menuRows[app]?[id] else { return answer(.message("The menus changed; open it again.")) }
+            client.fetchMenu(row, completion: answer)
+        }
+    }
+
+    private func answerMenu(_ app: String, token: String, _ content: MacMenuState.Content) {
+        switch content {
+        case .message(let text):
+            dock.setMenuContent(app, token: token, content: ["message": text])
+        case .sections(let sections, let more):
+            var rows = menuRows[app] ?? [:]
+            let encoded = sections.map { section in
+                section.map { row -> [String: String] in
+                    if let id = row.id { rows[id] = row }
+                    let kind = row.kind == .submenu ? "submenu" : row.kind == .note ? "note" : "item"
+                    let mark = row.mark == .on ? "on" : row.mark == .mixed ? "mixed" : "off"
+                    return ["kind": kind, "id": row.id ?? "", "title": row.title, "key": row.key ?? "",
+                            "enabled": row.enabled ? "1" : "0", "mark": mark]
+                }
+            }
+            menuRows[app] = rows
+            dock.setMenuContent(app, token: token, content: ["sections": encoded, "more": more])
+        }
     }
 
     /// The windows marked full speed in their pill (the bolt), oldest first, at most

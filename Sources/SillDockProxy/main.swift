@@ -3,8 +3,10 @@ import CryptoKit
 
 // A Dock icon for one of the other Mac's apps (Sill Viewer's DockProxies): Sill Viewer makes a copy of
 // this app per remote app, named after it, and launches it while that app has a window open there.
-// It has no window and no menus of its own: its icon is the remote app's, clicking it brings that
-// app's windows forward in Sill Viewer, and its Dock menu lists them. It talks to Sill Viewer by
+// It has no window of its own: its icon is the remote app's, clicking it brings that app's windows
+// forward in Sill Viewer, and its Dock menu lists them. Its menu bar is the remote app's menus as the
+// other Mac has them: Sill Viewer, which has none (no Dock icon of its own), has this take the menu bar
+// while one of the app's windows is in front, and the keyboard goes straight back to Sill Viewer. It talks to Sill Viewer by
 // distributed notifications and quits when told to, or when Sill Viewer goes. A notification carries
 // nothing anyone else could read: Sill Viewer's state for this app is in a file only this user reads
 // (`<slug>.state` beside the copies), and a request is signed with Sill Viewer's key from there
@@ -38,6 +40,12 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The app's own Dock menu on the other Mac (New Finder Window…): pressed there.
     private var remote: [(id: String, title: String, enabled: Bool)] = []
     private var exitWatch: DispatchSourceProcess?
+    /// When Sill Viewer last asked this to take the menu bar: that activation hands the keyboard back.
+    private var menuBarAt: Double = 0
+    /// The remote menus open now, by the token their contents will come back under.
+    private var openMenus: [String: NSMenu] = [:]
+    static let menuBarName = Notification.Name("me.saffer.sill.client.dock.menubar")
+    static let menuName = Notification.Name("me.saffer.sill.client.dock.menu")
     private var iconDate: Date?
 
     init(app: String, viewer: pid_t?, icon: String?) {
@@ -54,6 +62,7 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
                   let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
             if state["quit"] as? Bool == true { self.told = true; NSApp.terminate(nil); return }
             self.heard = true
+            self.menuBarAt = state["menuBarAt"] as? Double ?? self.menuBarAt
             if let path = state["icon"] as? String { self.showIcon(path) }
             // The app's badge on the other Mac ("3"), as its own Dock icon shows it there.
             let badge = state["badge"] as? String ?? ""
@@ -91,6 +100,14 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 i < titles.count ? (ids[i], titles[i], i < states.count ? states[i] : "") : nil
             }
         }
+        center.addObserver(forName: Self.menuBarName, object: app, queue: .main) { [weak self] _ in self?.readMenuBar() }
+        center.addObserver(forName: Self.menuName, object: app, queue: .main) { [weak self] _ in self?.readMenu() }
+        NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            // A remote menu chosen from or closed: the keyboard back to Sill Viewer's window.
+            guard let self, NSApp.isActive, let viewer = self.viewer else { return }
+            NSRunningApplication(processIdentifier: viewer)?.activate()
+        }
+        NSApp.mainMenu = ownMenuBar(remote: [])
         if let viewer {
             watch(viewer)
             post(["ask": "state"])
@@ -187,8 +204,14 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return .terminateNow
     }
 
-    /// Clicked in the Dock, or switched to: Sill Viewer brings this app's windows forward.
+    /// Clicked in the Dock, or switched to: Sill Viewer brings this app's windows forward. Asked by Sill
+    /// Viewer to take the menu bar: only the keyboard goes back.
     func applicationDidBecomeActive(_ notification: Notification) {
+        if Date().timeIntervalSince1970 - menuBarAt < 2 {
+            menuBarAt = 0
+            if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
+            return
+        }
         post(["ask": heard ? "focus" : "launch"])
         if let viewer { NSRunningApplication(processIdentifier: viewer)?.activate() }
     }
@@ -227,6 +250,127 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         post(["ask": "menu"])   // read again on the other Mac for the next opening (Sill Viewer paces it)
         return menu
+    }
+
+    // MARK: The remote app's menus
+
+    /// The menu bar: the app's own menu first (the remote one of its name when the other Mac sends it,
+    /// as an app's first menu is), then the other Mac's menus, each read as it opens.
+    private func ownMenuBar(remote: [(id: String, title: String, enabled: Bool)], note: String = "") -> NSMenu {
+        let bar = NSMenu(title: "Main Menu")
+        let name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "App"
+        var rest = remote
+        let appItem = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+        if let first = rest.first, first.title == name {
+            appItem.submenu = remoteMenu(id: first.id, title: first.title, top: true)
+            rest.removeFirst()
+        } else {
+            let menu = NSMenu(title: name)
+            menu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "")
+            appItem.submenu = menu
+        }
+        bar.addItem(appItem)
+        for r in rest {
+            let item = NSMenuItem(title: r.title, action: nil, keyEquivalent: "")
+            item.submenu = remoteMenu(id: r.id, title: r.title, top: true)
+            item.isEnabled = r.enabled
+            bar.addItem(item)
+        }
+        if remote.isEmpty, !note.isEmpty {
+            let item = NSMenuItem(title: "Menus", action: nil, keyEquivalent: "")
+            let menu = NSMenu(title: "Menus")
+            menu.addItem(disabled(note))
+            item.submenu = menu
+            bar.addItem(item)
+        }
+        return bar
+    }
+
+    private func readMenuBar() {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("\(slug).menubar")),
+              let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let ids = state["ids"] as? [String] ?? [], titles = state["titles"] as? [String] ?? [], enabled = state["enabled"] as? [String] ?? []
+        let top = ids.indices.compactMap { i in i < titles.count ? (id: ids[i], title: titles[i], enabled: i < enabled.count ? enabled[i] == "1" : true) : nil }
+        let shape = top.map { "\($0.id)\u{1}\($0.title)\u{1}\($0.enabled)" }.joined(separator: "\u{2}") + (state["note"] as? String ?? "")
+        guard shape != builtShape || NSApp.mainMenu == nil else { return }   // a rebuild closes an open menu
+        builtShape = shape
+        NSApp.mainMenu = ownMenuBar(remote: top, note: state["note"] as? String ?? "")
+    }
+    private var builtShape = ""
+
+    /// A remote menu: "Loading…" until the other Mac's answer for this opening comes back.
+    private func remoteMenu(id: String, title: String, top: Bool) -> NSMenu {
+        let menu = NSMenu(title: title)
+        menu.autoenablesItems = false
+        let loader = Loader(proxy: self, id: id, top: top)
+        menu.delegate = loader
+        objc_setAssociatedObject(menu, &loaderKey, loader, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        menu.addItem(disabled("Loading…"))
+        return menu
+    }
+
+    fileprivate func opening(_ menu: NSMenu, id: String, top: Bool) {
+        let token = UUID().uuidString
+        openMenus = openMenus.filter { $0.value !== menu }
+        openMenus[token] = menu
+        menu.removeAllItems()
+        menu.addItem(disabled("Loading…"))
+        post(["ask": "menuOpen", "menu": id, "top": top ? "1" : "0", "title": menu.title, "token": token])
+    }
+
+    private func readMenu() {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("\(slug).menu")),
+              let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let token = state["token"] as? String, let menu = openMenus.removeValue(forKey: token) else { return }
+        menu.removeAllItems()
+        if let message = state["message"] as? String {
+            menu.addItem(disabled(message))
+            return
+        }
+        let sections = state["sections"] as? [[[String: String]]] ?? []
+        for (i, section) in sections.enumerated() {
+            if i > 0 { menu.addItem(.separator()) }
+            for row in section { menu.addItem(item(row)) }
+        }
+        if let more = state["more"] as? Int, more > 0 { menu.addItem(disabled("\(more) more on the other Mac")) }
+    }
+
+    private func item(_ row: [String: String]) -> NSMenuItem {
+        let title = row["title"] ?? "", id = row["id"] ?? "", enabled = row["enabled"] == "1"
+        switch row["kind"] {
+        case "note":
+            return disabled(title)
+        case "submenu":
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.isEnabled = enabled && !id.isEmpty
+            if item.isEnabled { item.submenu = remoteMenu(id: id, title: title, top: false) }
+            return item
+        default:
+            let item = NSMenuItem(title: title, action: #selector(pressRemote(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+            item.isEnabled = enabled
+            item.state = row["mark"] == "on" ? .on : row["mark"] == "mixed" ? .mixed : .off
+            // The other Mac's shortcut as text: a real key equivalent here would take the key, which
+            // reaches the other Mac through the stream anyway.
+            if let key = row["key"], !key.isEmpty {
+                let text = NSMutableAttributedString(string: title + "    ")
+                text.append(NSAttributedString(string: key, attributes: [.foregroundColor: NSColor.secondaryLabelColor]))
+                item.attributedTitle = text
+            }
+            return item
+        }
+    }
+
+    @objc private func pressRemote(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String else { return }
+        post(["ask": "menuPress", "item": id, "title": item.title])
+    }
+
+    private func disabled(_ text: String) -> NSMenuItem {
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     @objc private func pickRemote(_ item: NSMenuItem) {
@@ -274,6 +418,16 @@ final class Proxy: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return String(String(s).prefix(100))
     }
 }
+
+/// A remote menu's delegate: each opening asks Sill Viewer for its items.
+private final class Loader: NSObject, NSMenuDelegate {
+    weak var proxy: Proxy?
+    let id: String
+    let top: Bool
+    init(proxy: Proxy, id: String, top: Bool) { self.proxy = proxy; self.id = id; self.top = top }
+    func menuWillOpen(_ menu: NSMenu) { proxy?.opening(menu, id: id, top: top) }
+}
+private var loaderKey: UInt8 = 0
 
 var app: String?
 var viewer: pid_t?
