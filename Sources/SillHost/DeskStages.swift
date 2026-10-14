@@ -47,7 +47,15 @@ final class DeskStages {
     private var cannotTake: [UInt32: Date] = [:]
     static let retryAfter: TimeInterval = 300
 
-    private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) }! }
+    private func freeSlot() -> Int { (0...).first { s in !slots.values.contains(s) && !spares.contains { $0.slot == s } }! }
+
+    /// Displays windows have left, kept for the next window that needs one: a window coming and going
+    /// makes no display. Every display made and removed leaves macOS's ColorSync service more work for
+    /// the rest of the login session (2026-10-14: about 40 in a morning saturated it, and WindowServer,
+    /// waiting on it, was killed by its watchdog), and a display made after another was removed can
+    /// stream a third's picture (DeskPicture). As many as windows were on the desk at once; all removed
+    /// together once the desk is empty (`keep`), or made again by hand (`releaseAll`).
+    private var spares: [(spare: VirtualStage.Spare, slot: Int)] = []
 
     /// What the desk's displays may take of this Mac's memory in all: each holds a framebuffer of its
     /// own (about 130 MB for a Retina display at the largest size), so a new window goes on the desk
@@ -56,9 +64,8 @@ final class DeskStages {
 
     /// The framebuffers the desk's displays hold now, in bytes, and the largest of them.
     private var framebuffers: (total: Double, largest: Double) {
-        let each = stages.values.compactMap { s -> Double? in
-            guard let d = s.display else { return nil }
-            return Double(d.madeWidthPt * d.scale) * Double(d.madeHeightPt * d.scale) * 4
+        let each = (stages.values.compactMap(\.display) + spares.map(\.spare.display)).map { d in
+            Double(d.madeWidthPt * d.scale) * Double(d.madeHeightPt * d.scale) * 4
         }
         return (each.reduce(0, +), each.max() ?? 0)
     }
@@ -101,12 +108,19 @@ final class DeskStages {
                 cannotTake[id] = Date()
                 throw VirtualStage.Failure.axWindowNotFound
             }
-            guard roomForAnother() else { throw TooMany(count: stages.count) }
-            let slot = freeSlot()
             stage = VirtualStage(sizer: sizer, catalog: catalog)
-            stage.productID = 0x100 + UInt32(slot)
-            stage.serial = Self.serial(forSlot: slot)
-            slots[id] = slot
+            if let kept = spares.popLast() {
+                // A display another window left: no new one (`spares`).
+                stage.adopt(kept.spare)
+                slots[id] = kept.slot
+                print("Sill's desk: window \(id) takes kept display \(kept.spare.display.displayID) (\(spares.count) more kept).")
+            } else {
+                guard roomForAnother() else { throw TooMany(count: stages.count) }
+                let slot = freeSlot()
+                stage.productID = 0x100 + UInt32(slot)
+                stage.serial = Self.serial(forSlot: slot)
+                slots[id] = slot
+            }
             stages[id] = stage
         }
         if let room { stage.deskRoom = CGSize(width: max(room.width, stage.deskRoom?.width ?? 0), height: max(room.height, stage.deskRoom?.height ?? 0)) }
@@ -154,14 +168,34 @@ final class DeskStages {
         return stage.captureRectOnScreen
     }
 
-    /// Every staged window not in `keep` goes home and its display goes.
+    /// Every staged window not in `keep` goes home, its display kept for the next (`spares`); once
+    /// none is left on the desk, the kept displays go together.
     func keep(_ keep: Set<UInt32>) {
         for id in staged.subtracting(keep) { release(id) }
+        if stages.isEmpty { removeSpares() }
     }
 
+    /// The window home, its display kept for the next window (`spares`).
     func release(_ id: UInt32) {
-        stages[id]?.release()   // the window home, its display gone (its identity kept for the next)
+        if let stage = stages[id], let kept = stage.handOver() {
+            let d = kept.display
+            // Torn down by the window server while kept (sleep, another display arriving): forgotten.
+            d.onTerminated = { [weak self] in
+                Task { @MainActor [weak self] in self?.spares.removeAll { $0.spare.display === d } }
+            }
+            spares.append((kept, slots[id] ?? 0))
+        }
         forget(id)
+    }
+
+    /// The kept displays removed, together.
+    private func removeSpares() {
+        guard !spares.isEmpty else { return }
+        let ids = spares.map { String($0.spare.display.displayID) }
+        for s in spares { s.spare.display.onTerminated = nil; s.spare.display.destroy() }
+        spares.removeAll()
+        VirtualStage.arrangementChangedAt = Date()
+        print("Sill's desk: removed its kept displays \(ids.joined(separator: ", ")).")
     }
 
     private func forget(_ id: UInt32) {
@@ -176,8 +210,11 @@ final class DeskStages {
         }
     }
 
+    /// Every window home and every display removed, kept ones too (a quit, the last device gone, or
+    /// the desk made again by hand).
     func releaseAll() {
         for id in staged { release(id) }
+        removeSpares()
     }
 
     /// A display just larger than the window: room for its menu bar, rounded up to 16 points, and

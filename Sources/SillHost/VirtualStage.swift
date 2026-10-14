@@ -898,6 +898,55 @@ final class VirtualStage {
         scDisplay = nil
     }
 
+    /// A desk display kept for another window (DeskStages' pool), alive, with what the stage had
+    /// learnt of it.
+    struct Spare {
+        let display: VirtualDisplay
+        let scDisplay: SCDisplay
+        let scale: Int
+        let refreshHz: Int
+        let menuInset: CGFloat
+        let insetMeasured: Bool
+        let productID: UInt32
+        let serial: UInt32
+        /// The window just sent home from it, still listed there for a moment: the next window's
+        /// eviction scan must not take it for a stranger (`lastReleased`).
+        let lastReleased: (windowID: CGWindowID, element: AXUIElement)?
+    }
+
+    /// Window home, and the display handed over alive for another window rather than removed: nil
+    /// (and the display removed) when it is not in a state to be used again.
+    func handOver() -> Spare? {
+        leaveFullScreenNow()
+        releaseWindow()
+        guard let d = display, d.isAlive, let sc = scDisplay else { destroyDisplay(); return nil }
+        // Fitted to a full-screen window: back to the size it was made at.
+        if d.widthPt != d.madeWidthPt || d.heightPt != d.madeHeightPt { _ = d.resize(widthPt: d.madeWidthPt, heightPt: d.madeHeightPt) }
+        generation += 1   // its termination is no longer this stage's
+        display = nil
+        scDisplay = nil
+        return Spare(display: d, scDisplay: sc, scale: displayScale, refreshHz: refreshHz, menuInset: menuInset,
+                     insetMeasured: insetMeasured, productID: productID, serial: serial, lastReleased: lastReleased)
+    }
+
+    /// Takes a kept display (`handOver`) as this stage's own, before `ensureDeskDisplay`, which uses
+    /// it while it fits.
+    func adopt(_ s: Spare) {
+        display = s.display
+        scDisplay = s.scDisplay
+        displayScale = s.scale
+        refreshHz = s.refreshHz
+        menuInset = s.menuInset
+        insetMeasured = s.insetMeasured
+        productID = s.productID
+        serial = s.serial
+        lastReleased = s.lastReleased
+        generation += 1
+        let gen = generation
+        s.display.onTerminated = { [weak self] in Task { @MainActor [weak self] in self?.lost(generation: gen) } }
+        Stats.shared.bump("vd.pooled")
+    }
+
     /// Window home, then display gone.
     func release() {
         leaveFullScreenNow()
