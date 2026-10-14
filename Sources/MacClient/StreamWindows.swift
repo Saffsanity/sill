@@ -323,7 +323,10 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         let forward = cameForward
         cameForward = false
         guard let app = keyApp else { return }
-        let shape = sendMenuBar()?.shape
+        // Until the other Mac streams this window's app, the menus it sent are another app's: they say
+        // nothing of this one's (compared, every click forced a hand-over while the stream switched).
+        let sent = sendMenuBar()
+        let shape = sent?.app == app ? sent?.shape : shownShape[app]
         let recent = lastMenuBar.map { $0.app == app && Date().timeIntervalSince($0.at) < 1 } ?? false
         let force = !recent && (forward || lastMenuBar?.app != app || shownShape[app] != shape)
         dock.takeMenuBar(app, force: force)
