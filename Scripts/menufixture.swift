@@ -50,7 +50,8 @@ if arguments[1] == "label" {
         }
         return nil
     }
-    for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
+    // Slow Close's title bar reads as static text too, and the window is in front of the label's.
+    for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] where (attribute(window, kAXTitleAttribute) as? String) != "Slow Close" {
         if let v = find(window, depth: 0) { print(v); exit(0) }
     }
     print("(no label)")
