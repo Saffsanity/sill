@@ -4,15 +4,21 @@ import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "Sources/SillHost/DeskPicture.swift")
 MUTANTS = [
-    ("the mean, not the middle cell", "return diffs[diffs.count / 2] > cellTolerance", "return diffs.reduce(0, +) / diffs.count > cellTolerance"),
-    ("the largest cell", "return diffs[diffs.count / 2] > cellTolerance", "return diffs[diffs.count - 1] > cellTolerance"),
-    ("at the tolerance", "return diffs[diffs.count / 2] > cellTolerance", "return diffs[diffs.count / 2] >= cellTolerance"),
+    ("the mean, not the middle cell", "if diffs[diffs.count / 2] > cellTolerance {", "if diffs.reduce(0, +) / diffs.count > cellTolerance {"),
+    ("the largest cell", "if diffs[diffs.count / 2] > cellTolerance {", "if diffs[diffs.count - 1] > cellTolerance {"),
+    ("at the tolerance", "if diffs[diffs.count / 2] > cellTolerance {", "if diffs[diffs.count / 2] >= cellTolerance {"),
     ("a looser tolerance", "static let cellTolerance = 48", "static let cellTolerance = 96"),
     ("unsorted", ".map { abs(Int($0) - Int($1)) }.sorted()", ".map { abs(Int($0) - Int($1)) }"),
     ("cells of another count compared", "guard frame.count == window.count, !frame.isEmpty else { return false }", "guard !frame.isEmpty, !window.isEmpty else { return false }"),
     ("the frame's rows bottom first", "out[r * columns + c] = UInt8(sum / max(n, 1))", "out[(rows - 1 - r) * columns + c] = UInt8(sum / max(n, 1))"),
     ("the frame's columns right first", "out[r * columns + c] = UInt8(sum / max(n, 1))", "out[r * columns + (columns - 1 - c)] = UInt8(sum / max(n, 1))"),
     ("any frame size", "guard w >= columns, h >= rows, let base", "guard let base"),
+    ("no flat rule", "return spread(frame) <= flatSpread && spread(window) >= detailSpread", "return false"),
+    ("flat rule ignores the window", "return spread(frame) <= flatSpread && spread(window) >= detailSpread", "return spread(frame) <= flatSpread"),
+    ("flat rule ignores the frame", "return spread(frame) <= flatSpread && spread(window) >= detailSpread", "return spread(window) >= detailSpread"),
+    ("flat at less than its spread", "return spread(frame) <= flatSpread && spread(window) >= detailSpread", "return spread(frame) < flatSpread && spread(window) >= detailSpread"),
+    ("detail only over its spread", "return spread(frame) <= flatSpread && spread(window) >= detailSpread", "return spread(frame) <= flatSpread && spread(window) > detailSpread"),
+    ("spread as the brightest cell", "static func spread(_ cells: [UInt8]) -> Int { Int(cells.max() ?? 0) - Int(cells.min() ?? 0) }", "static func spread(_ cells: [UInt8]) -> Int { Int(cells.max() ?? 0) }"),
 ]
 caught = 0
 for name, old, new in MUTANTS:

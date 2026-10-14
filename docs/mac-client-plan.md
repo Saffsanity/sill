@@ -67,7 +67,7 @@ Every field added to an existing payload is optional, and a host or device from 
 new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
 `protocol` (round-trips and refusals of every new payload), `compatibility`, `menus` and
 `pointer-control` know kinds 29–42 (43 unknown); `main-router` (32 checks, 15 mutants) holds the
-viewer's routing of the main and side streams; `desk-picture` (26 checks, 9 mutants) the comparison
+viewer's routing of the main and side streams; `desk-picture` (37 checks, 15 mutants) the comparison
 of a hidden display's picture with the window alone.
 
 ## Sill's desk (DeskStages, VirtualStage)
