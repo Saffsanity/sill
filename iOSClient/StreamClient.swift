@@ -750,6 +750,8 @@ final class StreamClient: ObservableObject {
     @Published var hostLiveDrag = false
     /// Whether the Mac reads its apps' Dock menus for this device (`WindowList.dockMenu`, kind 39).
     @Published var hostDockMenu = false
+    /// Whether the Mac makes its hidden displays again on this device's word (`WindowList.rebuildDesk`, kind 42).
+    @Published var hostRebuildDesk = false
     /// Whether the Mac takes a scroll or a hover over a window shown beside the streamed one
     /// (`WindowList.windowInput`; kind 8 with a window).
     var hostWindowInput = false
@@ -2933,6 +2935,7 @@ final class StreamClient: ObservableObject {
         hostFileDrop = false
         hostLiveDrag = false
         hostDockMenu = false
+        hostRebuildDesk = false
         hostWindowInput = false
         hostBadges = [:]
         hostAttention = []
@@ -3476,6 +3479,7 @@ final class StreamClient: ObservableObject {
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
                 if self.hostDockMenu != (list.dockMenu == true) { self.hostDockMenu = list.dockMenu == true }
+                if self.hostRebuildDesk != (list.rebuildDesk == true) { self.hostRebuildDesk = list.rebuildDesk == true }
                 self.hostWindowInput = list.windowInput == true
                 if self.hostBadges != (list.badges ?? [:]) { self.hostBadges = list.badges ?? [:] }
                 if self.hostAttention != Set(list.attention ?? []) { self.hostAttention = Set(list.attention ?? []) }

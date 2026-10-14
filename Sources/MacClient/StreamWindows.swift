@@ -106,6 +106,15 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             windowLog("dock: \(app) › \(title) pressed on the other Mac")
             self.client.send(.dockMenu, payload: Wire.encode(DockMenu(app: app, token: UInt32.random(in: 1...UInt32.max), press: id, title: title)))
         }
+        // The pill's refresh: the other Mac makes its hidden displays again (a picture black or wrong).
+        pill.onRefresh = { [weak self] in
+            guard let self, self.client.hostRebuildDesk, self.client.connected else { return }
+            windowLog("refresh: asking the other Mac to make its hidden displays again")
+            self.client.send(.rebuildDesk, payload: Data())
+        }
+        client.$hostRebuildDesk.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updatePill() }
+        }.store(in: &subscriptions)
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
             guard let self else { return }
@@ -453,7 +462,8 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             image = NSApp.applicationIconImage
         }
         pill.show(over: key, title: title(key.source), image: image,
-                  fullSpeed: client.hostFullRate ? Self.sideID(key.source).map { fullSpeed.contains($0) } : nil)
+                  fullSpeed: client.hostFullRate ? Self.sideID(key.source).map { fullSpeed.contains($0) } : nil,
+                  refresh: client.hostRebuildDesk)
     }
 
     /// From a Dock icon: one window, or every window of the app (the most recent one key).

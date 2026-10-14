@@ -8,17 +8,24 @@ import AppKit
 /// only while that window is key and the app is in front; over the window's top-left corner when
 /// there is no room above it. After the lights, a bolt, where the other Mac streams windows in the
 /// background at full speed: lit, this window keeps the main stream's rate when another is in front
-/// (StreamWindows.fullSpeed). Main thread.
+/// (StreamWindows.fullSpeed). At its end, where the other Mac makes its hidden displays again on this
+/// Mac's word, a refresh button: a picture that came out black or wrong is made again (`onRefresh`).
+/// Main thread.
 final class WindowPill: NSPanel {
     private weak var parentStream: StreamWindow?
     private let label = NSTextField(labelWithString: "")
     private let icon = NSImageView()
     private let bolt = BoltButton()
+    private let refresh = NSButton()
     private static let height: CGFloat = 26
     /// The bolt pressed: full speed on or off for the window under the pill.
     var onFullSpeed: ((StreamWindow) -> Void)?
+    /// The refresh button pressed.
+    var onRefresh: (() -> Void)?
     /// Where the icon starts: after the lights, and after the bolt when it shows.
     private var lead: CGFloat { bolt.isHidden ? 72 : 92 }
+    /// What the refresh button takes at the pill's end, when it shows.
+    private var tail: CGFloat { refresh.isHidden ? 14 : 34 }
     private var windowTitle = ""
     private var noteUntil: Date?
 
@@ -61,14 +68,26 @@ final class WindowPill: NSPanel {
         label.lineBreakMode = .byTruncatingTail
         label.frame = NSRect(x: 94, y: (Self.height - 16) / 2, width: 100, height: 16)
         effect.addSubview(label)
+        refresh.isBordered = false
+        refresh.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh Picture")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        refresh.contentTintColor = .secondaryLabelColor
+        refresh.toolTip = "Refresh the picture: the other Mac makes Sill's hidden displays again (for a picture that stays black or wrong)."
+        refresh.setAccessibilityLabel("Refresh Picture")
+        refresh.target = self
+        refresh.action = #selector(refreshPressed)
+        refresh.isHidden = true
+        effect.addSubview(refresh)
     }
+
+    @objc private func refreshPressed() { onRefresh?() }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     /// Shows the pill over `window`, or hides it (nil). `fullSpeed`: the bolt, lit or not; nil, none
-    /// (a host that streams every background window at one rate).
-    func show(over window: StreamWindow?, title: String, image: NSImage?, fullSpeed: Bool? = nil) {
+    /// (a host that streams every background window at one rate). `refresh`: the refresh button shows.
+    func show(over window: StreamWindow?, title: String, image: NSImage?, fullSpeed: Bool? = nil, refresh canRefresh: Bool = false) {
         #if DEBUG
         FileHandle.standardError.write(Data("pill: \(window.map { "over \($0.title) \($0.frame)" } ?? "hidden")\n".utf8))
         #endif
@@ -84,6 +103,7 @@ final class WindowPill: NSPanel {
         icon.image = image
         bolt.isHidden = fullSpeed == nil
         bolt.on = fullSpeed == true
+        refresh.isHidden = !canRefresh
         icon.frame.origin.x = lead
         label.frame.origin.x = lead + 22
         place()
@@ -95,8 +115,9 @@ final class WindowPill: NSPanel {
     func place() {
         guard let window = parentStream else { return }
         let titleWidth = min(ceil(label.intrinsicContentSize.width), 360)
-        let width = min(lead + 22 + titleWidth + 14, max(window.frame.width, 120))
-        label.frame.size.width = width - lead - 22 - 14
+        let width = min(lead + 22 + titleWidth + tail, max(window.frame.width, 120))
+        label.frame.size.width = width - lead - 22 - tail
+        refresh.frame = NSRect(x: width - 28, y: (Self.height - 20) / 2, width: 20, height: 20)
         let screenTop = (window.screen ?? NSScreen.main)?.visibleFrame.maxY ?? .greatestFiniteMagnitude
         var origin = NSPoint(x: window.frame.minX + 6, y: window.frame.maxY + 4)
         // No room above (full screen, or a window at the top): inside its top-left corner, where the

@@ -363,7 +363,7 @@ let known: [(StreamMessageKind, UInt8)] = [
     (.launchApp, 7), (.input, 8), (.viewport, 9), (.ping, 10), (.pong, 11), (.clientStats, 12), (.tick, 13), (.cursorShape, 14),
     (.windowCommand, 15), (.hostSettings, 16), (.changeSettings, 17), (.macInfo, 18), (.pairRequest, 19), (.pairResult, 20),
     (.pairingWanted, 21), (.goodbye, 22), (.hello, 23), (.macMenu, 24), (.pressMenuItem, 25), (.macPointer, 26),
-    (.fetchMenu, 27), (.gesture, 28), (.sideStreams, 29), (.sideParameterSets, 30), (.sideFrame, 31), (.clipboard, 32), (.audio, 33), (.fileChunk, 34), (.fileDrop, 35), (.dragOffer, 36), (.fileRequest, 37), (.liveDrag, 38), (.dockMenu, 39), (.pickDisplay, 40), (.takenBack, 41),
+    (.fetchMenu, 27), (.gesture, 28), (.sideStreams, 29), (.sideParameterSets, 30), (.sideFrame, 31), (.clipboard, 32), (.audio, 33), (.fileChunk, 34), (.fileDrop, 35), (.dragOffer, 36), (.fileRequest, 37), (.liveDrag, 38), (.dockMenu, 39), (.pickDisplay, 40), (.takenBack, 41), (.rebuildDesk, 42),
     (.unknown, 255),
 ]
 for (kind, raw) in known {
