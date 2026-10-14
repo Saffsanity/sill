@@ -126,7 +126,7 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         }
         client.$menus.sink { [weak self] _ in DispatchQueue.main.async { self?.pushMenuBar() } }.store(in: &subscriptions)
         for name in [NSWindow.didBecomeKeyNotification, NSApplication.didBecomeActiveNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.menuBarToFront() }
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.scheduleMenuBar() }
         }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
@@ -292,6 +292,22 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         let top = state.menus.compactMap { row in row.id.map { (id: $0, title: row.title, enabled: row.enabled && !state.stale) } }
         dock.setMenuBar(app, top: top, note: top.isEmpty ? state.note : nil)
     }
+
+    /// The menu bar's hand-over, once the click that brought a window forward is over: this app's
+    /// activation and its key window come in either order (from another app, the first notice had
+    /// neither yet, and the bar stayed with that app: 2026-10-14), and taken mid-click, the Dock icon's
+    /// moment in front lost the rest of the click.
+    private func scheduleMenuBar(after delay: Double = 0.15) {
+        menuBarWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if NSEvent.pressedMouseButtons != 0 { self.scheduleMenuBar(after: 0.1); return }
+            self.menuBarToFront()
+        }
+        menuBarWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+    private var menuBarWork: DispatchWorkItem?
 
     /// A window of an app with a Dock icon came to the front: that icon takes the menu bar.
     private func menuBarToFront() {
