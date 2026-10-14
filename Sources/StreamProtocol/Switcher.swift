@@ -91,20 +91,23 @@ public struct WindowList: Codable {
     public var displays: [DisplayInfo]?
     /// The one the Desktop shows now.
     public var desktopDisplay: UInt32?
+    /// True: this host makes its hidden displays again on a device's word (kind 42). Nil before
+    /// 2026-10-14, to which a device sends none.
+    public var rebuildDesk: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
                 sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
                 liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil,
                 windowInput: Bool? = nil, badges: [String: String]? = nil, attention: [String]? = nil,
-                fullRate: Bool? = nil) {
+                fullRate: Bool? = nil, rebuildDesk: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
         self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
         self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
         self.dockMenu = dockMenu; self.windowInput = windowInput; self.badges = badges
         self.attention = attention; self.fullRate = fullRate
-        self.displays = displays; self.desktopDisplay = desktopDisplay
+        self.displays = displays; self.desktopDisplay = desktopDisplay; self.rebuildDesk = rebuildDesk
     }
 }
 
