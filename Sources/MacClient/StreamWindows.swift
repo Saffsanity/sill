@@ -125,8 +125,12 @@ final class StreamWindows: NSObject, NSWindowDelegate {
             self.client.pressMenuItem(row)
         }
         client.$menus.sink { [weak self] _ in DispatchQueue.main.async { self?.pushMenuBar() } }.store(in: &subscriptions)
-        for name in [NSWindow.didBecomeKeyNotification, NSApplication.didBecomeActiveNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.scheduleMenuBar() }
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.scheduleMenuBar()
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.cameForward = true
+            self?.scheduleMenuBar()
         }
         // The person at the other Mac took these windows back: they close here (and may be opened again).
         client.onTakenBack = { [weak self] ids in
@@ -300,15 +304,27 @@ final class StreamWindows: NSObject, NSWindowDelegate {
     }
     private var menuBarWork: DispatchWorkItem?
 
-    /// A window of an app with a Dock icon came to the front: that icon takes the menu bar, again when
-    /// the menus it has were sent after it last took it.
+    /// A window of an app with a Dock icon came to the front: that icon takes the menu bar. Always when
+    /// this app came forward or the front app changed, whoever macOS says holds the bar: after ⌘Tab or a
+    /// Dock click to the icon, which hands activation straight back, macOS named the icon the owner while
+    /// the bar still showed the app in front before (2026-10-14). Again when the menus it has were sent
+    /// after it last took it. Not within a second of the last time, which its hand-back would repeat.
     private func menuBarToFront() {
+        let forward = cameForward
+        cameForward = false
         guard let app = keyApp else { return }
         pushMenuBar()
         let current = pushedShape[app]
-        dock.takeMenuBar(app, force: current != nil && shownShape[app] != current)
+        let recent = lastMenuBar.map { $0.app == app && Date().timeIntervalSince($0.at) < 1 } ?? false
+        let force = !recent && (forward || lastMenuBar?.app != app || (current != nil && shownShape[app] != current))
+        dock.takeMenuBar(app, force: force)
+        if force || lastMenuBar?.app != app { lastMenuBar = (app, Date()) }
         shownShape[app] = current
     }
+    /// This app came forward since the menu bar was last handed over.
+    private var cameForward = false
+    /// The app whose Dock icon last took the menu bar, and when.
+    private var lastMenuBar: (app: String, at: Date)?
 
     private func menuOpened(_ app: String, id: String, top: Bool, title: String, token: String) {
         let answer: (MacMenuState.Content) -> Void = { [weak self] content in self?.answerMenu(app, token: token, content) }
