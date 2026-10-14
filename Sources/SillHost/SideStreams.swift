@@ -103,6 +103,12 @@ final class SideStreams {
         Task { await reconcile() }
     }
 
+    /// Every running stream stopped, what the devices ask for kept: the desk is made again under them
+    /// (`StreamCoordinator.rebuildDesk`), and `changed()` starts them on its new displays.
+    func stopStreams() async {
+        for id in Array(streams.keys) { await stop(id) }
+    }
+
     func stopAll() async {
         wanted.removeAll()
         await reconcile()

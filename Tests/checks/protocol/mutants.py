@@ -5,6 +5,7 @@ WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
     ("badges not kept", "Switcher.swift", "self.windowInput = windowInput; self.badges = badges", "self.windowInput = windowInput; self.badges = nil"),
+    ("the desk flag not kept", "Switcher.swift", "self.rebuildDesk = rebuildDesk", "self.rebuildDesk = nil"),
     ("window input: the window dropped", "SideStreams.swift", '        object["window"] = window\n', ""),
     ("window input: any key count", "SideStreams.swift", "guard object.count == 2,", "guard object.count >= 2,"),
     ("window input: a click allowed", "SideStreams.swift", "case .pointer(.move, _, _), .scroll, .scrollGesture: return true", "case .pointer, .scroll, .scrollGesture: return true"),

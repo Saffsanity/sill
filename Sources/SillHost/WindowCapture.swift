@@ -8,6 +8,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "sill.capture", qos: .userInteractive)
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
+    /// The stream's first complete frame, once, before `onFrame` has it (on the capture queue): the
+    /// desk's picture check (DeskPicture). Set, or cleared, by the caller before each start.
+    var onFirstFrame: ((CVPixelBuffer) -> Void)?
     /// The stream ended on its own (window closed, permission revoked). Called on an SCK thread.
     var onStopped: ((Error) -> Void)?
     /// The stats line's keys: "cap" for the stream, "side.cap" for a side stream (SideStreams).
@@ -80,6 +83,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         Stats.shared.bump("\(statsPrefix).complete")
         framesSeen += 1
         if framesSeen == 1, statsPrefix == "cap" { print("Capture: first frame \(CVPixelBufferGetWidth(pixelBuffer))×\(CVPixelBufferGetHeight(pixelBuffer))") }
+        if framesSeen == 1, let first = onFirstFrame { onFirstFrame = nil; first(pixelBuffer) }
         onFrame?(pixelBuffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 

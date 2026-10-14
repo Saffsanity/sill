@@ -333,6 +333,15 @@ package final class StreamCoordinator {
     /// Sill's desk: the windows a device shows as its own, each on a virtual display of its own
     /// (DeskStages), while a device asks for whole-app capture.
     private(set) lazy var desk = DeskStages(sizer: sizer, catalog: catalog)
+    /// Windows whose hidden display gave another display's picture (DeskPicture): their main stream
+    /// captures the window alone, without its menus and popovers, until the desk is made again by
+    /// hand (the viewer's refresh). Never made again by itself: every display made and removed leaves
+    /// macOS's ColorSync service more work for the rest of the login session (2026-10-14: about 40 in
+    /// a morning saturated it, and WindowServer, waiting on it, was killed by its watchdog).
+    private var deskWindowAlone: Set<UInt32> = []
+    /// The desk being made again (`rebuildDesk`).
+    private var rebuildingDesk = false
+    private var lastRebuildAsk: [ObjectIdentifier: CFAbsoluteTime] = [:]
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -1197,6 +1206,14 @@ package final class StreamCoordinator {
             } else {
                 fileDrops.drop(d, at: point, device: deviceName(connection))
             }
+        case .rebuildDesk:
+            guard !synthetic else { return }
+            let id = ObjectIdentifier(connection)
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - (lastRebuildAsk[id] ?? 0) >= 5 else { return }   // one every 5 s at most
+            lastRebuildAsk[id] = now
+            print("Sill's desk: \(deviceName(connection)) asked for the hidden displays to be made again.")
+            Task { @MainActor in await self.rebuildDesk() }
         case .dockMenu:
             guard !synthetic, let d = Wire.decode(DockMenu.self, from: message.payload) else { return }
             let id = ObjectIdentifier(connection)
@@ -1617,6 +1634,7 @@ package final class StreamCoordinator {
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
         var cropRect: CGRect? = nil      // a window cropped from its display with its app (AppCrop)
+        var deskCheck: (id: UInt32, window: SCWindow)?   // a desk display's picture to check (DeskPicture)
         mainCropFrame = nil
         var picked: SCWindow?            // the resolved window, for the fallback after a failed start
         let width: Int, height: Int
@@ -1729,11 +1747,18 @@ package final class StreamCoordinator {
                 if let staged {
                     watchFullScreen()
                     // Sill's desk: the window on a display of its own, sized to the device's window.
-                    filter = staged.filter
-                    cropRect = staged.sourceRect
+                    if deskWindowAlone.contains(id) {
+                        filter = SCContentFilter(desktopIndependentWindow: w)
+                        cropRect = nil
+                    } else {
+                        filter = staged.filter
+                        cropRect = staged.sourceRect
+                        // A full-screen window's crop is a band of its display, not the window's frame.
+                        if desk.isFullScreen(id) != true { deskCheck = (id, w) }
+                    }
                     mainCropFrame = nil
                     size = staged.size
-                    describe += ", on Sill's desk"
+                    describe += deskWindowAlone.contains(id) ? ", on Sill's desk (the window alone: its display's picture was wrong)" : ", on Sill's desk"
                     let pill = SharePill()
                     await pill.start(w)
                     mainPill = pill
@@ -1787,7 +1812,7 @@ package final class StreamCoordinator {
 
         do {
             try await startPipeline(source: source, filter: filter, sourceRect: sourceRect ?? cropRect, width: width, height: height, describe: describe,
-                                    title: title, kind: kind)
+                                    title: title, kind: kind, deskCheck: deskCheck)
         } catch {
             // `picked`, not a catalog lookup: a staged window may have left the on-screen list.
             if virtualDisplay, stage.isStaged, let w = picked {
@@ -1819,7 +1844,8 @@ package final class StreamCoordinator {
     /// `active`. Throws with `active` untouched if either refuses; the caller decides what to do.
     /// `title` and `kind` describe the stream in the app's menu.
     private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
-                               title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
+                               title: String, kind: HostStatusSnapshot.Stream.Kind,
+                               deskCheck: (id: UInt32, window: SCWindow)? = nil) async throws {
         let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
         enc.onHung = { [weak self, weak enc] in
@@ -1846,8 +1872,19 @@ package final class StreamCoordinator {
         announced = source
         defer { announced = nil }   // `active` is set below; a failed start sends `.none` from `select`
         server.broadcast(listMessage())
+        let frameGrid = GridBox()
         if let filter {
-            capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
+            if deskCheck != nil {
+                // The desk's picture check (DeskPicture): the first frame's cells, then the latest's at
+                // most once a second, on the capture queue.
+                capture.onFrame = { pixelBuffer, pts in
+                    if frameGrid.due() { frameGrid.set(DeskPicture.grid(pixelBuffer)) }
+                    enc.encode(pixelBuffer, pts: pts)
+                }
+            } else {
+                capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
+            }
+            capture.onFirstFrame = deskCheck == nil ? nil : { pixelBuffer in frameGrid.set(DeskPicture.grid(pixelBuffer)) }
             try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
@@ -1855,6 +1892,7 @@ package final class StreamCoordinator {
         }
         encoder = enc
         active = source
+        if let deskCheck { Task { @MainActor in await self.watchDeskPicture(deskCheck.id, deskCheck.window, frameGrid, live) } }
         print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
         status.update {
             $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
@@ -1864,6 +1902,72 @@ package final class StreamCoordinator {
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
         // may already have fired, and that report was ignored (no current encoder yet).
         if enc.isDead { Task { @MainActor in await self.encoderHung(enc) } }
+    }
+
+    // MARK: Sill's desk, made again
+
+    /// A desk display's picture of the window it holds (DeskPicture), compared once its stream has
+    /// started and every 10 s while it runs (a display made or removed beside it can re-bind one that
+    /// streamed right: 2026-10-14): the latest frame against a small screenshot of the window alone.
+    /// Another display's picture leaves this window captured alone (`deskWindowAlone`).
+    private func watchDeskPicture(_ id: UInt32, _ w: SCWindow, _ frames: GridBox, _ pipeline: OutputSwitch) async {
+        for _ in 0..<30 where frames.get() == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        while encoderLive === pipeline {
+            if await checkDeskPicture(id, w, frames, pipeline) { return }
+            try? await Task.sleep(for: .seconds(10))
+        }
+    }
+
+    /// One comparison, twice over half a second apart before it acts (a window that changed between
+    /// the frame and the screenshot differs once); true when it acted (the window captured alone).
+    private func checkDeskPicture(_ id: UInt32, _ w: SCWindow, _ frames: GridBox, _ pipeline: OutputSwitch) async -> Bool {
+        for attempt in 0..<2 {
+            if attempt > 0 { try? await Task.sleep(for: .milliseconds(500)) }
+            guard let differs = await deskPictureDiffers(w, frames, pipeline), differs else { return false }
+        }
+        Stats.shared.bump("desk.wrongPicture")
+        let app = w.owningApplication?.applicationName ?? "?"
+        print("Sill's desk: \(app)'s picture from its hidden display is not the window (ScreenCaptureKit streams another display's picture there); it streams as the window alone, without its menus and popovers, until the desk is made again (the viewer's refresh).")
+        deskWindowAlone.insert(id)
+        if case .window(id) = active, !switching { await select(active) }
+        return true
+    }
+
+    /// Whether the stream's picture differs from the window alone now; nil when it cannot tell. The
+    /// frame is the next one after asking (or the last, for a window that has not changed since),
+    /// the screenshot taken right after it.
+    private func deskPictureDiffers(_ w: SCWindow, _ frames: GridBox, _ pipeline: OutputSwitch) async -> Bool? {
+        guard encoderLive === pipeline, !rebuildingDesk, w.frame.width >= 16, w.frame.height >= 16 else { return nil }
+        let asked = frames.ask()
+        for _ in 0..<6 where frames.takenAt < asked { try? await Task.sleep(for: .milliseconds(50)) }
+        guard let frame = frames.get() else { return nil }
+        let c = SCStreamConfiguration()
+        c.width = DeskPicture.columns * 10
+        c.height = max(DeskPicture.rows, Int((CGFloat(c.width) * w.frame.height / w.frame.width).rounded()))
+        c.showsCursor = false
+        guard let image = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: w), configuration: c),
+              let window = DeskPicture.grid(image), encoderLive === pipeline, !rebuildingDesk else { return nil }
+        return DeskPicture.differs(frame, window)
+    }
+
+    /// Every hidden display of the desk removed together and made again, on a device's word (the
+    /// viewer's refresh): the streams stop, the windows go home, and once no hidden display is left
+    /// they go back to new ones, the main window first. Displays made with none left stream their own
+    /// pictures (DeskPicture), and windows captured alone go back to theirs. Only by hand: each
+    /// display made costs ColorSync work for the rest of the login session (`deskWindowAlone`).
+    func rebuildDesk() async {
+        guard !rebuildingDesk, !desk.staged.isEmpty else { return }
+        rebuildingDesk = true
+        deskWindowAlone.removeAll()
+        let count = desk.staged.count
+        await sideStreams?.stopStreams()
+        await capture.stop()
+        desk.releaseAll()
+        try? await Task.sleep(for: .milliseconds(800))
+        rebuildingDesk = false
+        print("Sill's desk: \(count) hidden display\(count == 1 ? "" : "s") removed together; making \(count == 1 ? "it" : "them") again.")
+        if active != .none, !switching { await select(active) }
+        sideStreams?.changed()
     }
 
     // MARK: Bringing the target forward
@@ -2863,7 +2967,8 @@ package final class StreamCoordinator {
                                                       audio: synthetic ? nil : true, fileDrop: synthetic ? nil : true,
                                                       liveDrag: synthetic ? nil : true, dockMenu: synthetic ? nil : true,
                                                       displays: catalog.displayInfos, desktopDisplay: catalog.display?.displayID,
-                                                      windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges)))
+                                                      windowInput: true, badges: dockBadges.isEmpty ? nil : dockBadges,
+                                                      rebuildDesk: synthetic ? nil : true)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }
@@ -2979,6 +3084,21 @@ extension ClientRoute {
 
 /// One pipeline's frames going out or not (`encoderLive`). Thread-safe: read on the encoder's callback
 /// thread, turned off on the main actor.
+/// The desk picture check's latest frame (DeskPicture.grid), from the capture queue to the main actor.
+final class GridBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var grid: [UInt8]?
+    private var taken: CFAbsoluteTime = 0
+    private var asked = false
+    func set(_ g: [UInt8]?) { lock.lock(); grid = g; taken = CFAbsoluteTimeGetCurrent(); asked = false; lock.unlock() }
+    func get() -> [UInt8]? { lock.lock(); defer { lock.unlock() }; return grid }
+    var takenAt: CFAbsoluteTime { lock.lock(); defer { lock.unlock() }; return taken }
+    /// The next frame's cells wanted (a check is about to compare); when it was asked.
+    func ask() -> CFAbsoluteTime { lock.lock(); defer { lock.unlock() }; asked = true; return CFAbsoluteTimeGetCurrent() }
+    /// Asked for, or a second since the last: time for another frame's cells.
+    func due() -> Bool { lock.lock(); defer { lock.unlock() }; return asked || CFAbsoluteTimeGetCurrent() - taken >= 1 }
+}
+
 final class OutputSwitch: @unchecked Sendable {
     private let lock = NSLock()
     private var isOn = true

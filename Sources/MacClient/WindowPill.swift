@@ -6,12 +6,19 @@ import AppKit
 /// its strip moves this window too: StreamInputView), and its buttons, with that Mac's own
 /// green-button menu, are that Mac's. A child window of the focused one, so it moves with it; shown
 /// only while that window is key and the app is in front; over the window's top-left corner when
-/// there is no room above it. Main thread.
+/// there is no room above it. At its end, where the other Mac makes its hidden displays again on
+/// this Mac's word, a refresh button: a picture that came out black or wrong is made again (`onRefresh`).
+/// Main thread.
 final class WindowPill: NSPanel {
     private weak var parentStream: StreamWindow?
     private let label = NSTextField(labelWithString: "")
     private let icon = NSImageView()
+    private let refresh = NSButton()
     private static let height: CGFloat = 26
+    /// The refresh button pressed.
+    var onRefresh: (() -> Void)?
+    /// What the refresh button takes at the pill's end, when it shows.
+    private var tail: CGFloat { refresh.isHidden ? 14 : 34 }
 
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 200, height: Self.height),
@@ -45,13 +52,25 @@ final class WindowPill: NSPanel {
         label.lineBreakMode = .byTruncatingTail
         label.frame = NSRect(x: 94, y: (Self.height - 16) / 2, width: 100, height: 16)
         effect.addSubview(label)
+        refresh.isBordered = false
+        refresh.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh Picture")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        refresh.contentTintColor = .secondaryLabelColor
+        refresh.toolTip = "Refresh the picture: the other Mac makes Sill's hidden displays again (for a picture that stays black or wrong)."
+        refresh.setAccessibilityLabel("Refresh Picture")
+        refresh.target = self
+        refresh.action = #selector(refreshPressed)
+        refresh.isHidden = true
+        effect.addSubview(refresh)
     }
+
+    @objc private func refreshPressed() { onRefresh?() }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// Shows the pill over `window`, or hides it (nil).
-    func show(over window: StreamWindow?, title: String, image: NSImage?) {
+    /// Shows the pill over `window`, or hides it (nil). `refresh`: the refresh button shows.
+    func show(over window: StreamWindow?, title: String, image: NSImage?, refresh canRefresh: Bool = false) {
         #if DEBUG
         FileHandle.standardError.write(Data("pill: \(window.map { "over \($0.title) \($0.frame)" } ?? "hidden")\n".utf8))
         #endif
@@ -64,6 +83,7 @@ final class WindowPill: NSPanel {
         parentStream = window
         label.stringValue = title
         icon.image = image
+        refresh.isHidden = !canRefresh
         place()
         if parent !== window { window.addChildWindow(self, ordered: .above) }
         orderFront(nil)
@@ -73,8 +93,9 @@ final class WindowPill: NSPanel {
     func place() {
         guard let window = parentStream else { return }
         let titleWidth = min(ceil(label.intrinsicContentSize.width), 360)
-        let width = min(94 + titleWidth + 14, max(window.frame.width, 120))
-        label.frame.size.width = width - 94 - 14
+        let width = min(94 + titleWidth + tail, max(window.frame.width, 120))
+        label.frame.size.width = width - 94 - tail
+        refresh.frame = NSRect(x: width - 28, y: (Self.height - 20) / 2, width: 20, height: 20)
         let screenTop = (window.screen ?? NSScreen.main)?.visibleFrame.maxY ?? .greatestFiniteMagnitude
         var origin = NSPoint(x: window.frame.minX + 6, y: window.frame.maxY + 4)
         // No room above (full screen, or a window at the top): inside its top-left corner, where the
