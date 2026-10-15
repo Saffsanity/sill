@@ -159,6 +159,10 @@ final class StreamClient: ObservableObject {
     // Remote access (StreamClient+Remote.swift). Published on main; the DEBUG harness seeds them.
     /// The Macs this device paired with (SavedMacs), persisted in `SavedMacs.defaultsKey`.
     @Published var savedMacs: [SavedMac] = []
+    /// Custom group names assigned to saved Macs (ConnectionList), persisted in `ConnectionList.groupsKey`.
+    @Published var macGroups: [String: String] = [:]
+    /// Last-stream preview pictures for saved Macs (ConnectionList), stored in Caches/SillPreviews.
+    @Published var macPreviews: [String: UIImage] = [:]
     /// This connection's latest kind 18: who the Mac is and how to reach it from afar. Verified
     /// against the pin when the Mac is a saved one; otherwise decoded unverified, shown in the
     /// panel's Away from home group and never saved.
@@ -880,6 +884,8 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// DEBUG: Mac groups seeded for this run by `-Sill.macGroups '<JSON>'`; nothing is written back.
+    private(set) var macGroupsSeeded = false
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -895,6 +901,12 @@ final class StreamClient: ObservableObject {
         } else {
             savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         }
+        if let i = arguments.firstIndex(of: "-" + ConnectionList.groupsKey), i + 1 < arguments.count {
+            macGroups = ConnectionList.decodeGroups(arguments[i + 1])
+            macGroupsSeeded = true
+        } else {
+            macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
+        }
         // A bracketed IPv6 address starts so too (`-SillConnect '[::1]:P'`): an address argument
         // the argument domain dropped goes into the registration domain (this run's memory, never
         // saved), where every reader of UserDefaults finds it. Its readers are this client's
@@ -906,7 +918,9 @@ final class StreamClient: ObservableObject {
         }
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
+        macGroups = ConnectionList.decodeGroups(UserDefaults.standard.string(forKey: ConnectionList.groupsKey))
         #endif
+        loadSavedPreviews()
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
@@ -3110,6 +3124,12 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
+        // Off screen (in the background) the snapshot is blank and would replace a good picture.
+        if connected, videoSize != .zero, UIApplication.shared.applicationState == .active,
+           let macID = session?.macID, savedMac(macID) != nil,
+           let preview = displayView.snapshot(maxWidth: 320, includePointer: false) {
+            savePreview(preview, for: macID)
+        }
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         firstListDeadline?.cancel()
         firstListDeadline = nil

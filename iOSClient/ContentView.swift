@@ -921,8 +921,21 @@ struct ConnectScreen: View {
     let scannerOverride: CodeScanner.Mode?
     @AccessibilityFocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// The Duo's hinge (iOS 27.1): with the fold, where the column goes (ConnectLayout).
     @Environment(\.duoEnvironment) private var duoEnvironment
+    /// Rows or tiles on the connect screen (ConnectionList).
+    @AppStorage(ConnectionList.styleKey) private var styleRaw = ConnectionList.Style.list.rawValue
+    /// The saved Mac whose New Group… alert is up, and the name typed there.
+    @State private var newGroupFor: String?
+    @State private var newGroupName = ""
+
+    private var style: ConnectionList.Style {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "SillConnectCase") == "tiles" { return .tiles }
+        #endif
+        return ConnectionList.storedStyle(styleRaw)
+    }
 
     init(client: StreamClient, adding: Bool = false, typed: Bool = false, scannerOverride: CodeScanner.Mode? = nil) {
         self.client = client
@@ -1017,6 +1030,11 @@ struct ConnectScreen: View {
             .duoLog(posture, size: geo.size, screen: "connect screen")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .alert("New Group", isPresented: Binding(get: { newGroupFor != nil }, set: { if !$0 { newGroupFor = nil } })) {
+            TextField("Name", text: $newGroupName)
+            Button("Add") { if let id = newGroupFor { client.setGroup(newGroupName, for: id) } }
+            Button("Cancel", role: .cancel) {}
+        }
         .onChange(of: client.pairing) { old, new in
             // Paired but no session came (10 s): the card closes, and the Mac is a saved row.
             if case .paired = old, new == .idle, !client.connected { fold() }
@@ -1061,6 +1079,23 @@ struct ConnectScreen: View {
                 .padding(.horizontal, 10)
                 .accessibilityAddTraits(carded ? .isHeader : [])
                 .accessibilityFocused($titleFocused)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .trailing) {
+                    if !carded, client.pendingLink == nil, style == .tiles || client.macs.contains(where: { $0.macID != nil }) {
+                        Button {
+                            styleRaw = style.toggled.rawValue
+                        } label: {
+                            Image(systemName: style == .tiles ? "list.bullet" : "square.grid.2x2")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Palette.accent)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 4)
+                        .accessibilityLabel(style == .tiles ? "Show as list" : "Show as tiles")
+                    }
+                }
 
             if let link = client.pendingLink {
                 LinkConfirmation(link: link, pair: {
@@ -1085,12 +1120,12 @@ struct ConnectScreen: View {
                     .padding(.top, 4)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             } else {
-                rows
+                rows(layout)
             }
         }
     }
 
-    @ViewBuilder private var rows: some View {
+    @ViewBuilder private func rows(_ layout: ConnectLayout) -> some View {
         Text(client.status)
             .font(.system(size: 13))
             .foregroundStyle(Palette.muted)
@@ -1114,28 +1149,35 @@ struct ConnectScreen: View {
             .accessibilityHint("Opens the App Store.")
         }
 
-        ForEach(client.macs) { mac in
-            // The kind of link, never the Wi-Fi network's name: that needs Location access, which
-            // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
-            // from home; at home, what a tap does first when it pairs ("Not paired", "Wired" over
-            // the cable) or cannot connect ("Update Sill"), with VoiceOver's label and hint for it
-            // (DiscoveryPolicy.RowWord). The row a tap's ask is waiting on is lit, as the drawer
-            // lights the app on screen, while the status line says "Pairing with…".
-            DrawerRow(height: 50, highlighted: client.homeAsk.map { $0.phase == .asking && $0.target.row == mac.id } ?? false,
-                      title: mac.name, trailing: mac.word,
-                      action: { client.connect(to: mac) }) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 32, height: 32)
+        let sections = ConnectionList.sections(for: client.macs, macID: \.macID, groups: client.macGroups)
+        if style == .list, sections.count <= 1, sections.first?.title == nil {
+            ForEach(client.macs) { mac in
+                macRow(mac)
             }
-            .accessibilityLabel(mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name))
-            .accessibilityHint(mac.route == .remote ? "Connects through your VPN or the internet."
-                               : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct))
-            .contextMenu { menu(for: mac) }
+        } else {
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                if let sectionTitle = section.title {
+                    Text(sectionTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 4)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if style == .tiles {
+                    let cols = ConnectionList.columns(forWidth: layout.columnWidth, accessibleText: typeSize.isAccessibilitySize)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: cols), spacing: 10) {
+                        ForEach(section.items) { mac in
+                            macTile(mac)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                } else {
+                    ForEach(section.items) { mac in
+                        macRow(mac)
+                    }
+                }
+            }
         }
 
         if client.showsNearbyHint {
@@ -1184,8 +1226,9 @@ struct ConnectScreen: View {
         .accessibilityHint("Pairs this \(device) with a Mac so you can reach it away from home.")
     }
 
-    /// A saved Mac's row: Connect (a Remote row) or Connect Remotely (its network row, to try the
-    /// VPN path at home), and Forget. Other Macs' rows have no menu.
+    /// A saved Mac's row or tile: Connect (a Remote row) or Connect Remotely (its network row, to
+    /// try the VPN path at home), Group, Show as Tiles/List, Remove Preview Picture, and Forget.
+    /// Other Macs' rows have no menu.
     @ViewBuilder private func menu(for mac: FoundMac) -> some View {
         if let id = mac.macID {
             if mac.route == .remote {
@@ -1193,9 +1236,125 @@ struct ConnectScreen: View {
             } else if mac.route == .network {
                 Button { client.connectRemotely(id) } label: { Label("Connect Remotely", systemImage: "globe") }
             }
+            let currentGroup = ConnectionList.cleanGroup(client.macGroups[id])
+            Menu {
+                Button { client.setGroup(nil, for: id) } label: {
+                    if currentGroup == nil { Label("None", systemImage: "checkmark") } else { Text("None") }
+                }
+                Divider()
+                ForEach(ConnectionList.availableGroups(in: client.macGroups), id: \.self) { group in
+                    Button { client.setGroup(group, for: id) } label: {
+                        if currentGroup == group { Label(group, systemImage: "checkmark") } else { Text(group) }
+                    }
+                }
+                Divider()
+                Button { newGroupName = ""; newGroupFor = id } label: {
+                    Label("New Group…", systemImage: "folder.badge.plus")
+                }
+            } label: {
+                Label(currentGroup.map { "Group: \($0)" } ?? "Group", systemImage: "folder")
+            }
+            Button {
+                styleRaw = style.toggled.rawValue
+            } label: {
+                Label(style == .tiles ? "Show as List" : "Show as Tiles",
+                      systemImage: style == .tiles ? "list.bullet" : "square.grid.2x2")
+            }
+            if client.macPreviews[id] != nil {
+                Button(role: .destructive) { client.removePreview(for: id) } label: {
+                    Label("Remove Preview Picture", systemImage: "photo.badge.minus")
+                }
+            }
             let name = client.savedMac(id) != nil ? client.displayName(id) : mac.name
             Button(role: .destructive) { client.forget(id) } label: { Label("Forget \(name)", systemImage: "trash") }
         }
+    }
+
+    private func macRow(_ mac: FoundMac) -> some View {
+        // The kind of link, never the Wi-Fi network's name: that needs Location access, which
+        // Sill does not ask for (DiscoveryPolicy.method); "Remote" for a saved Mac dialed away
+        // from home; at home, what a tap does first when it pairs ("Not paired", "Wired" over
+        // the cable) or cannot connect ("Update Sill"), with VoiceOver's label and hint for it
+        // (DiscoveryPolicy.RowWord). The row a tap's ask is waiting on is lit, as the drawer
+        // lights the app on screen, while the status line says "Pairing with…".
+        DrawerRow(height: 50, highlighted: asking(mac),
+                  title: mac.name, trailing: mac.word,
+                  action: { client.connect(to: mac) }) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.iconFallback)
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 32, height: 32)
+        }
+        .accessibilityLabel(rowLabel(mac))
+        .accessibilityHint(rowHint(mac))
+        .contextMenu { menu(for: mac) }
+    }
+
+    /// The row or tile a tap's ask is waiting on.
+    private func asking(_ mac: FoundMac) -> Bool {
+        client.homeAsk.map { $0.phase == .asking && $0.target.row == mac.id } ?? false
+    }
+
+    private func rowLabel(_ mac: FoundMac) -> String {
+        mac.route == .remote ? "\(mac.name), Remote" : mac.homeWord.label(name: mac.name)
+    }
+
+    private func rowHint(_ mac: FoundMac) -> String {
+        mac.route == .remote ? "Connects through your VPN or the internet."
+            : mac.homeWord.hint(name: mac.name, device: device, direct: mac.direct)
+    }
+
+    private func macTile(_ mac: FoundMac) -> some View {
+        let highlighted = asking(mac)
+        let preview = mac.macID.flatMap { client.macPreviews[$0] }
+        return Button(action: { client.connect(to: mac) }) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    Rectangle().fill(Palette.iconFallback.opacity(0.35))
+                    if let preview {
+                        Image(uiImage: preview)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+                .frame(height: 92)
+                .clipped()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mac.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let word = mac.word {
+                        Text(word)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            }
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(highlighted ? Palette.accent.opacity(0.22) : Palette.control))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(highlighted ? Palette.accent.opacity(0.55) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(rowLabel(mac))
+        .accessibilityHint(rowHint(mac))
+        .contextMenu { menu(for: mac) }
     }
 
     private func unfold() {

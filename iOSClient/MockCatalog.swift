@@ -514,6 +514,7 @@ enum MockCatalog {
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
         case pairingrequired // Require pairing turned on while this device was connected without pairing
         case asleep          // the automatic reconnect's dials of a listed row not answered: "Mac mini isn’t answering. It may be asleep…" (issue #69)
+        case tiles           // tiles with stored preview pictures and Home / Work / Other groups
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
@@ -673,6 +674,16 @@ enum MockCatalog {
             // dials have not connected: the line after DiscoveryPolicy.reconnectQuietAfter of them.
             client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true), studio]
             client.status = DiscoveryPolicy.reconnectLine(mac: "Mac mini", failed: DiscoveryPolicy.reconnectQuietAfter, direct: false)
+        case .tiles:
+            let mini = home("Mac mini", .wifi, saved: true, homeTLS: true)
+            let pro = remote("Noah Saffer’s MacBook Pro in the Studio", "A3C5HR4RBV67YR21")
+            let second = remote("Mac mini (2)", "0123456789ABCDEF")
+            client.macs = [mini, studio, pro, second, home("Office iMac", .wired, saved: false)]
+            if client.macGroups.isEmpty {
+                client.macGroups = ["HOMEPAIRING8": "Home", "HOMEPAIRING6": "Home", "A3C5HR4RBV67YR21": "Work"]
+            }
+            client.macPreviews = ["HOMEPAIRING8": thumbnail(seed: 0), "HOMEPAIRING6": thumbnail(seed: 1),
+                                  "A3C5HR4RBV67YR21": thumbnail(seed: 2)]
         }
         return client
     }

@@ -174,6 +174,10 @@ extension StreamClient {
     /// Writes the list only (`recomputeMacs` itself writes what it learns of a Mac's door).
     func storeSavedMacs() {
         if !savedMacsSeeded { UserDefaults.standard.set(SavedMacs.encode(savedMacs), forKey: SavedMacs.defaultsKey) }
+        pruneSavedPreviews()
+        guard !savedMacsSeeded else { return }
+        let kept = Set(savedMacs.map(\.macID))
+        for macID in macGroups.keys where !kept.contains(macID) { setGroup(nil, for: macID) }
     }
 
     /// Forget: the record only. The Mac lists this device until it is removed there, and the
@@ -184,8 +188,64 @@ extension StreamClient {
         savedMacs.removeAll { $0.macID == macID }
         savedSightings.since[macID] = nil
         savedSightings.leftAt[macID] = nil
+        setGroup(nil, for: macID)
+        removePreview(for: macID)
         persistSavedMacs()
         status = "Forgot \(name). It still lists this \(Self.deviceWord) until you remove it in Sill’s Settings on the Mac."
+    }
+
+    // MARK: Connection groups and preview pictures
+
+    func setGroup(_ group: String?, for macID: String) {
+        let next = ConnectionList.settingGroup(group, for: macID, in: macGroups)
+        guard next != macGroups else { return }
+        macGroups = next
+        if !macGroupsSeeded {
+            UserDefaults.standard.set(ConnectionList.encodeGroups(macGroups), forKey: ConnectionList.groupsKey)
+        }
+    }
+
+    private static var previewsDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("SillPreviews", isDirectory: true)
+    }
+
+    func loadSavedPreviews() {
+        guard let dir = Self.previewsDirectory else { return }
+        var loaded: [String: UIImage] = [:]
+        for mac in savedMacs {
+            guard let name = ConnectionList.previewFileName(for: mac.macID),
+                  let data = try? Data(contentsOf: dir.appendingPathComponent(name)),
+                  let image = UIImage(data: data) else { continue }
+            loaded[mac.macID] = image
+        }
+        macPreviews = loaded
+        pruneSavedPreviews()
+    }
+
+    func savePreview(_ image: UIImage, for macID: String) {
+        guard let name = ConnectionList.previewFileName(for: macID) else { return }
+        macPreviews[macID] = image
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let data = image.jpegData(compressionQuality: 0.72) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: dir.appendingPathComponent(name), options: .atomic)
+    }
+
+    func removePreview(for macID: String) {
+        macPreviews.removeValue(forKey: macID)
+        guard let dir = Self.previewsDirectory, let name = ConnectionList.previewFileName(for: macID) else { return }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+    }
+
+    func pruneSavedPreviews() {
+        let kept = Set(savedMacs.map(\.macID))
+        macPreviews = macPreviews.filter { kept.contains($0.key) }
+        guard !savedMacsSeeded, let dir = Self.previewsDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        for stale in ConnectionList.stalePreviewFiles(in: files, keepingMacIDs: kept) {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale))
+        }
     }
 
     /// The card's Cancel while a pairing dial runs: it stops, nothing is saved. The home card's too:
