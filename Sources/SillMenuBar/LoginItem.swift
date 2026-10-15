@@ -14,7 +14,7 @@ final class LoginItemModel {
     /// The last register or unregister error, shown inline (never as an alert).
     private(set) var error: String?
     /// SMAppService needs the app bundle; the bare SillMenuBar binary has none.
-    let available = Bundle.main.bundleURL.pathExtension == "app"
+    let available = !EmbeddedControl.enabled && Bundle.main.bundleURL.pathExtension == "app"
 
     /// On, or on and waiting for the user's approval. A never-registered app reports .notFound
     /// (measured), which is simply off: it must not disable the toggle.

@@ -102,7 +102,8 @@ enum DebugHooks {
         }
         let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library")
-        return library.appendingPathComponent("Logs/Sill/Sill.log")
+        let logName = EmbeddedControl.enabled ? (Bundle.main.bundleIdentifier ?? "Sill-Embedded") : "Sill"
+        return library.appendingPathComponent("Logs").appendingPathComponent(logName).appendingPathComponent("Sill.log")
     }
 
     /// The timed hooks, which Sill.app itself ignores.

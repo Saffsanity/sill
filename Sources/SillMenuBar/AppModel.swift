@@ -43,6 +43,7 @@ final class AppModel {
     nonisolated static let bundled = Bundle.main.bundleURL.pathExtension == "app"
 
     /// Wired by the app delegate: the status item's glyph and tooltip, and the windows.
+    @ObservationIgnored var onHostStarted: (() -> Void)?
     @ObservationIgnored var onPresentation: ((StatusPresentation) -> Void)?
     @ObservationIgnored var showSettings: ((SettingsTab?) -> Void)?
     @ObservationIgnored var showLog: (() -> Void)?
@@ -70,12 +71,12 @@ final class AppModel {
         self.settings = settings
         permissions = PermissionsModel(settings: settings)
         let updates = UpdateChecker(configuration: DebugHooks.updateConfiguration(testPattern: CommandLine.arguments.contains("--synthetic")),
-                                    automatic: settings.updateCheck)
+                                    automatic: !EmbeddedControl.enabled && settings.updateCheck)
         self.updates = updates
         // The switch reaches the checker from launch on: Settings… is in the menu before the host
         // is up (up to a second or more), and -SillSetAfter counts from launch. Before `start()`
         // the checker only records it.
-        settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(settings.updateCheck) }
+        settings.onUpdateCheckChange = { [settings, updates] in updates.setAutomatic(!EmbeddedControl.enabled && settings.updateCheck) }
         presentation = StatusText.present(snapshot: HostStatusSnapshot(),
                                           permissions: PermissionState(screenRecording: true, accessibility: true),
                                           startupError: nil, hasCoordinator: false)
@@ -124,15 +125,17 @@ final class AppModel {
                 remote.setAddressName(settings.remoteAddressName)
                 settings.onAddressNameChange = { [settings, weak remote] in remote?.setAddressName(settings.remoteAddressName) }
                 await c.start(preselect: nil, promptForPermissions: false)
+                onHostStarted?()
                 Stats.shared.startPrinting()
                 print("Sill \(Self.version) (\(Self.build)) running from \(Bundle.main.bundlePath); log file \(HostLog.shared.fileURL?.path ?? "none")")
                 onboardIfNeeded()
             } catch {
                 startupError = "\(error)"
+                if EmbeddedControl.enabled { Swift.print("SILL_EMBEDDED_FAILED") }
                 print("Sill couldn’t start: \(error)")
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
-            startUpdates()
+            if !EmbeddedControl.enabled { startUpdates() }
         }
     }
 
@@ -188,13 +191,13 @@ final class AppModel {
             // The strong keychain: no other process can pre-create or read these items. Logged so a
             // release build can be confirmed hardened (and Noah's on-device pass can read it back).
             print("Remote access: the identity is in the data-protection keychain (access group \(group)).")
-            return KeychainIdentityStore(accessGroup: group)
+            return KeychainIdentityStore(accessGroup: group, namespace: EmbeddedControl.enabled ? Bundle.main.bundleIdentifier : nil)
         case .legacy:
             // No keychain-access-groups entitlement (a development build, or a release with no
             // embedded provisioning profile): the login keychain, the profile-free fallback. Said in
             // the log so a build that should have hardened but did not is visible.
             print("Remote access: the identity is in the login keychain (no keychain-access-groups entitlement — a development build, or a release with no embedded provisioning profile; docs/keychain-plan.md).")
-            return KeychainIdentityStore()
+            return KeychainIdentityStore(namespace: EmbeddedControl.enabled ? Bundle.main.bundleIdentifier : nil)
         case .memory:
             return MemoryIdentityStore()
         case .testDirectory(let path):

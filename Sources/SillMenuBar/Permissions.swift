@@ -28,7 +28,7 @@ final class PermissionsModel {
     var allGranted: Bool { screenRecording && accessibility }
 
     /// Only inside Sill.app: relaunching the bare binary would open its folder instead.
-    let canRelaunch = Bundle.main.bundleURL.pathExtension == "app"
+    let canRelaunch = !EmbeddedControl.enabled && Bundle.main.bundleURL.pathExtension == "app"
 
     @ObservationIgnored private let settings: HostSettings
 

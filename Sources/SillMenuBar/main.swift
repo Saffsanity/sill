@@ -10,6 +10,14 @@ setvbuf(stdout, nil, _IOLBF, 0)
 // A write to a closed pipe (stdout of a Terminal that went away) must not end the host.
 signal(SIGPIPE, SIG_IGN)
 
+// A managed bundle is never an independent app or login item. Its owner must
+// supply the control pipe; Finder launches without --embedded exit immediately.
+if Bundle.main.object(forInfoDictionaryKey: "SillManagedHost") as? Bool == true,
+   !EmbeddedControl.enabled {
+    fputs("This host must be started by its containing app.\n", stderr)
+    exit(2)
+}
+
 // Before anything prints: the host's lines go to the Log window's ring and the log file too.
 HostLog.shared.configure(keepLines: 5_000, fileURL: DebugHooks.logFileURL)
 

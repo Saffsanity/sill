@@ -87,6 +87,9 @@ jobs:
       - name: Build the Mac host, the CLI and the probes (swift build -c release)
         run: swift build -c release
 
+      - name: Embedded synthetic host lifecycle
+        run: python3 Tests/embedded-host/run.py
+
       - name: Pure checks (Tests/checks/run-all.sh)
         run: Tests/checks/run-all.sh
 

@@ -92,7 +92,9 @@ private struct GeneralPane: View {
             Section {
                 Toggle("Launch at login", isOn: Binding(get: { model.loginItem.isOn }, set: { model.loginItem.set($0) }))
                     .disabled(!model.loginItem.available)
-                if !model.loginItem.available {
+                if EmbeddedControl.enabled {
+                    Footnote("Launch at login is managed by the app that includes this host.")
+                } else if !model.loginItem.available {
                     Footnote("Available when Sill runs from its app bundle.")
                 } else if model.loginItem.needsApproval {
                     LabeledContent("Waiting for your approval") {
@@ -147,7 +149,9 @@ private struct GeneralPane: View {
             ClipboardSection(shareClipboard: $settings.config.shareClipboard,
                              access: previewClipboardAccess ?? model.permissions.clipboardAccess,
                              allow: { model.permissions.allowClipboard() })
-            if let preview = previewUpdates {
+            if EmbeddedControl.enabled {
+                Section { Footnote("This streaming host is managed and updated by the app that includes it. Restart streaming there after granting permissions.") }
+            } else if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
                 UpdatesSection(pane: model.updates.pane, automatic: $settings.updateCheck,
