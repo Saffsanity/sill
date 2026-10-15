@@ -8,8 +8,8 @@ import AppKit
 /// only while that window is key and the app is in front; over the window's top-left corner when
 /// there is no room above it. After the lights, a bolt, where the other Mac streams windows in the
 /// background at full speed: lit, this window keeps the main stream's rate when another is in front
-/// (StreamWindows.fullSpeed). At its end, where the other Mac makes its hidden displays again on this
-/// Mac's word, a refresh button: a picture that came out black or wrong is made again (`onRefresh`).
+/// (StreamWindows.fullSpeed). At its end, where the other Mac has hidden displays, a refresh button:
+/// the other Mac starts their captures again, for a picture that came out black or wrong (`onRefresh`).
 /// Main thread.
 final class WindowPill: NSPanel {
     private weak var parentStream: StreamWindow?

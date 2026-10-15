@@ -4,7 +4,8 @@ import Foundation
 // Sources/StreamProtocol compiled into this binary:
 //   swiftc -O Sources/StreamProtocol/*.swift Tests/checks/compatibility/main.swift -o check
 // Given a path, it also writes the payloads that H4 read with an older StreamProtocol (cb0ec55's),
-// and the trackpad gestures plan's H6 (a kind 28 message, a window list with `gestures`).
+// the trackpad gestures plan's H6 (a kind 28 message, a window list with `gestures`), and the
+// clipboard's (a kind 32 message, a window list with `clipboard`).
 var failures = 0
 var checks = 0
 func check(_ ok: Bool, _ what: @autoclosure () -> String, line: Int = #line) {
@@ -171,8 +172,8 @@ let sidePacked = SideStreamRequest.pack(window: 0x0102_0304, Data([9, 8]))
 check(sidePacked == Data([1, 2, 3, 4, 9, 8]) && SideStreamRequest.unpack(sidePacked)?.window == 0x0102_0304
       && SideStreamRequest.unpack(sidePacked)?.payload == Data([9, 8]) && SideStreamRequest.unpack(Data([1, 2, 3])) == nil,
       "a side stream's payload: the window ID big-endian, then the rest")
-let sideList = WindowList(macName: "Mac mini", windows: [], active: .desktop, sideStreams: 6, clipboard: true)
-check(json(sideList).contains(#""sideStreams":6"#) && json(sideList).contains(#""clipboard":true"#)
+let sideList = WindowList(macName: "Mac mini", windows: [], active: .desktop, sideStreams: 6, clipboard: ClipboardPolicy.imageGeneration)
+check(json(sideList).contains(#""sideStreams":6"#) && json(sideList).contains(#""clipboard":2"#)
       && !json(list).contains("sideStreams") && !json(list).contains("clipboard")
       && decodedOld?.sideStreams == nil && decodedOld?.clipboard == nil, "sideStreams and clipboard: said by a host that has them, nil from an older one")
 check(json(Clipboard()) == "{}" && Wire.decode(Clipboard.self, from: Data(#"{"text":"hi"}"#.utf8))?.text == "hi", "a clipboard's text, none to ask")
@@ -200,6 +201,28 @@ check(PointerAction.middleDown.isButtonDown && PointerAction.leftDown.isButtonDo
 for (action, raw) in [(PointerAction.move, "move"), (.leftDown, "leftDown"), (.leftUp, "leftUp"), (.rightDown, "rightDown"), (.rightUp, "rightUp")] {
     check(action.rawValue == raw, "\(raw) keeps its spelling")
 }
+// Kind 32, the clipboard (docs/clipboard-plan.md), and the window list's `clipboard`: additive both
+// ways. A host says it in its list, a device sends kind 32 only then, and an older peer skips the kind.
+let shares = WindowList(macName: "Mac mini", windows: [], active: .desktop, launchID: "L", hostVersion: "0.6", protocol: 1,
+                        gestures: TrackpadGesture.generation, clipboard: ClipboardPolicy.generation)
+check(json(shares).contains(#""clipboard":1"#) && json(shares).contains(#""gestures":1"#), "a list from a host that shares the clipboard says clipboard 1: \(json(shares))")
+check(!json(takes).contains("clipboard") && !json(list).contains("clipboard"), "a list without it leaves the key out")
+check(decodedOld != nil && decodedOld?.clipboard == nil, "an older host's list decodes, clipboard nil")
+check(Wire.decode(WindowList.self, from: Wire.encode(shares)).map { $0.clipboard == 1 && $0.gestures == 1 } == true, "clipboard round-trips beside gestures")
+check(StreamMessageKind.clipboard.rawValue == 32 && StreamMessageKind(rawValue: 32) == .clipboard, "kind 32 is the clipboard")
+check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) != nil }, "viewer kinds remain defined")
+let clip = Clipboard(text: "Hello")
+check(json(clip) == #"{"text":"Hello"}"# && json(Clipboard()) == "{}" && json(Clipboard(stop: true)) == #"{"stop":true}"#, "kind 32's keys: \(json(clip))")
+check(Wire.decode(Clipboard.self, from: Data(#"{"text":"a","image":"AQID","later":1}"#.utf8)) == Clipboard(text: "a", image: Data([1, 2, 3])),
+      "pull request #66's shape decodes here, unknown keys skipped")
+let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: Wire.encode(clip)).serialized()
+check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
+      "the clipboard's header parses, then the JSON")
+
+check(json(Clipboard(accepts: 2)) == #"{"accepts":2}"#, "an image viewer explicitly opts in")
+check(Wire.decode(Clipboard.self, from: Data(#"{"accepts":2,"text":"a"}"#.utf8)) == Clipboard(text: "a", accepts: 2), "the generation is additive beside text")
+check(ClipboardPolicy.viewerSubscription(hostClipboard: 2)?.accepts == 2, "viewer subscribes with accepts 2")
+check(ClipboardPolicy.payload(Clipboard(image: Data([1])), forAccepts: nil) == nil, "{} subscribers receive no image")
 
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
@@ -212,6 +235,8 @@ if let out {
         "gestureMessage": gestureMessage.base64EncodedString(),
         "windowListGestures": String(decoding: Wire.encode(takes), as: UTF8.self),
         "windowListMiddleButton": String(decoding: Wire.encode(middle), as: UTF8.self),
+        "windowListClipboard": String(decoding: Wire.encode(shares), as: UTF8.self),
+        "clipboardMessage": clipboardMessage.base64EncodedString(),
     ]
     try! JSONSerialization.data(withJSONObject: payloads, options: [.sortedKeys, .prettyPrinted]).write(to: URL(fileURLWithPath: out))
 }

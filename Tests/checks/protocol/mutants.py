@@ -9,6 +9,8 @@ MUTANTS = [
     ("background not kept", "SideStreams.swift", "self.background = background", "self.background = nil"),
     ("host full rate flag not kept", "Switcher.swift", "self.attention = attention; self.fullRate = fullRate", "self.attention = attention; self.fullRate = nil"),
     ("attention not kept", "Switcher.swift", "self.attention = attention;", "self.attention = nil;"),
+    ("image sent to a {} subscriber", "ClipboardPolicy.swift", "let image = (accepts ?? generation) >= imageGeneration ? clip.image : nil", "let image = clip.image"),
+    ("viewer subscribes without accepts", "ClipboardPolicy.swift", "return Clipboard(accepts: imageGeneration)", "return Clipboard()"),
     ("badges not kept", "Switcher.swift", "self.windowInput = windowInput; self.badges = badges", "self.windowInput = windowInput; self.badges = nil"),
     ("the desk flag not kept", "Switcher.swift", "self.rebuildDesk = rebuildDesk", "self.rebuildDesk = nil"),
     ("window input: the window dropped", "SideStreams.swift", '        object["window"] = window\n', ""),
@@ -41,6 +43,7 @@ MUTANTS = [
     ("server verify block blind to ALPN", "RemoteTLS.swift", "complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, negotiatedALPN(metadata)))", "complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, nil))"),
     ("a host stops offering sill-pair/1", "RemoteTLS.swift", "public static let serverALPNs = [sessionALPN, pairingALPN]", "public static let serverALPNs = [sessionALPN]"),
     ("a later host offers sill/2 instead of sill/1", "RemoteTLS.swift", "public static let serverALPNs = [sessionALPN, pairingALPN]", 'public static let serverALPNs = ["sill/2", pairingALPN]'),
+    ("the clipboard numbered 43", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 43"),
     ("the server offers sill/1 alone, whatever serverALPNs says", "RemoteTLS.swift",
      "for alpn in serverALPNs { sec_protocol_options_add_tls_application_protocol(sp, alpn) }", "sec_protocol_options_add_tls_application_protocol(sp, sessionALPN)"),
 ]

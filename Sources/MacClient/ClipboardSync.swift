@@ -15,41 +15,74 @@ final class ClipboardSync {
 
     private let client: StreamClient
     /// The local clipboard's changeCount when it last went across or was set from the other Mac.
-    private var synced = NSPasteboard.general.changeCount
+    private var synced: Int?
     private var subscriptions = Set<AnyCancellable>()
     private var timer: Timer?
+    private var subscribed = false
+    private var accepting: Int?
 
     init(client: StreamClient) {
         self.client = client
         client.onClipboard = { [weak self] clip in self?.received(clip) }
-        client.$hostClipboard.removeDuplicates().sink { [weak self] shares in
-            DispatchQueue.main.async {
-                guard shares, Self.enabled, let self else { return }
-                self.synced = NSPasteboard.general.changeCount   // what is here now stays here
-                self.client.sendClipboard(Clipboard())             // the other Mac’s copies from now on
+        client.$hostClipboard.removeDuplicates().sink { [weak self] capability in
+            // A reset and the next list can arrive before the queued update: forget the old
+            // connection now so even a reconnect with the same generation subscribes again.
+            if !ClipboardPolicy.hostTakes(capability) {
+                self?.subscribed = false
+                self?.accepting = nil
             }
+            DispatchQueue.main.async { self?.updateSubscription() }
+        }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateSubscription() }
         }.store(in: &subscriptions)
         client.onMoved = { [weak self] in
-            guard let self, Self.enabled, self.client.hostClipboard else { return }
-            self.client.sendClipboard(Clipboard())   // the Mac's copies on the new connection too
+            self?.subscribed = false
+            self?.updateSubscription()
         }
         let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.sendIfChanged() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
 
+    private func updateSubscription() {
+        guard client.connected, let request = ClipboardPolicy.viewerSubscription(hostClipboard: client.hostClipboard) else {
+            subscribed = false
+            accepting = nil
+            return
+        }
+        if Self.enabled {
+            guard !subscribed || accepting != request.accepts else { return }
+            synced = nil
+            client.sendClipboard(request)
+            subscribed = true
+            accepting = request.accepts
+        } else if subscribed {
+            client.sendClipboard(Clipboard(stop: true))
+            subscribed = false
+            accepting = nil
+        }
+    }
+
     private func received(_ clip: Clipboard) {
-        guard Self.enabled else { return }
+        guard Self.enabled, subscribed, ClipboardPolicy.hostTakes(client.hostClipboard) else { return }
+        let clip = Clipboard(text: clip.text, image: (client.hostClipboard ?? 0) >= ClipboardPolicy.imageGeneration ? clip.image : nil)
+        guard clip.text != nil || clip.image != nil, let payload = clip.payload(within: ClipboardPolicy.maxPayload),
+              let clip = Wire.decode(Clipboard.self, from: payload) else { return }
         ClipboardPasteboard.write(clip)
-        synced = NSPasteboard.general.changeCount
+        synced = ClipboardPasteboard.canRead ? NSPasteboard.general.changeCount : nil
     }
 
     private func sendIfChanged() {
         let board = NSPasteboard.general
-        guard Self.enabled, client.connected, client.hostClipboard, board.changeCount != synced else { return }
-        synced = board.changeCount
+        updateSubscription()
+        guard Self.enabled, client.connected, subscribed, ClipboardPolicy.hostTakes(client.hostClipboard),
+              ClipboardPolicy.viewerMayRead(access: ClipboardPasteboard.access) else { synced = nil; return }
+        guard let synced else { self.synced = board.changeCount; return }
+        guard board.changeCount != synced else { return }
+        self.synced = board.changeCount
         guard !ClipboardPasteboard.fromOtherMac else { return }   // the other Mac's copy, or one Sill here wrote
-        let clip = ClipboardPasteboard.read(imageLimit: Clipboard.maxImageFromDevice)
+        let clip = ClipboardPasteboard.read(imageLimit: (client.hostClipboard ?? 0) >= ClipboardPolicy.imageGeneration ? Clipboard.maxImageFromDevice : 0)
         guard clip.text != nil || clip.image != nil else { return }
         client.sendClipboard(clip)
     }
