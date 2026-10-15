@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import StreamProtocol
 
 /// The Settings panel: the Mac's streaming settings, changed from here the way the Sill menu on
@@ -365,7 +366,12 @@ struct HostSettingsPanel: View {
             }
             RowDivider()
             Button {
-                UIPasteboard.general.string = ConnectionInfo.text(rows, at: Date())
+                // Local only, and its change count marked handled, so Universal Clipboard does not carry
+                // it to the Mac and the Paste on ‹Mac› chip never offers Sill's own diagnostic text back.
+                let board = UIPasteboard.general
+                board.setItems([[UTType.utf8PlainText.identifier: ConnectionInfo.text(rows, at: Date())]],
+                               options: [.localOnly: true])
+                client.clipboardHandled = board.changeCount
                 copiedAt = Date()
                 AccessibilityNotification.Announcement("Copied").post()
             } label: {
@@ -377,6 +383,7 @@ struct HostSettingsPanel: View {
             .buttonStyle(.plain)
             .rowFrame()
         }
+        .padding(.bottom, 8)
         .task(id: copiedAt) {
             guard copiedAt != nil else { return }
             try? await Task.sleep(for: .seconds(2))
