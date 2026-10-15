@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 import Network
 import StreamProtocol
 
@@ -9,7 +10,17 @@ struct ContentView: View {
     @StateObject private var statsReporter = ClientStatsReporter()
 
     var body: some View {
-        root.onAppear { statsReporter.attach(to: client) }
+        root.onAppear {
+            statsReporter.attach(to: client)
+            #if DEBUG
+            // `-SillSpotlightTap mac:<Mac ID>`: a tap on that saved Mac's Spotlight item, at launch.
+            if let id = UserDefaults.standard.string(forKey: "SillSpotlightTap") { client.openFromSpotlight(id) }
+            #endif
+        }
+        // A saved Mac tapped in Spotlight (StreamClient.indexSavedMacs): dialed as a tap on its row.
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            if let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String { client.openFromSpotlight(id) }
+        }
     }
 
     @ViewBuilder private var root: some View {

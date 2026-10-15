@@ -880,6 +880,10 @@ final class StreamClient: ObservableObject {
 
     /// DEBUG: saved Macs seeded for this run by `-Sill.savedMacs '<JSON>'`; nothing is written back.
     private(set) var savedMacsSeeded = false
+    /// A Spotlight tap's saved Mac, until its row is dialed (`openFromSpotlight`). Main thread.
+    var spotlightPick: String?
+    /// One Spotlight write at a time (`indexSavedMacs`). Main thread.
+    var spotlightRun = SpotlightMacs.Run()
 
     init() {
         // The hello is built here, on the main thread: it reads UIDevice (the device's name), which
@@ -907,6 +911,7 @@ final class StreamClient: ObservableObject {
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
+        indexSavedMacs()
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).
@@ -1258,6 +1263,7 @@ final class StreamClient: ObservableObject {
         }
         #endif
         macs = next
+        trySpotlightPick()
         #if DEBUG
         if let prefix = pendingTapRow, let mac = macs.first(where: { $0.route != .remote && $0.name.hasPrefix(prefix) }) {
             pendingTapRow = nil
