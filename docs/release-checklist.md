@@ -257,6 +257,61 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       require-pairing; do security delete-generic-password -s me.saffer.sill.remote -a $a; done`, and
       the "Sill Remote Access" key in Keychain Access — and re‑pair. On a Mac you own, never in CI.
 
+### 6. Homebrew
+
+Sill for Mac is a cask, `sill`, in Sill's own tap. Homebrew's main repository (homebrew/cask)
+comes later, when the cask qualifies (below).
+
+- [x] Done 2026-10-14: the public repository
+      [Saffsanity/homebrew-sill](https://github.com/Saffsanity/homebrew-sill) is the tap
+      `saffsanity/sill`. It holds `Casks/sill.rb` (the release's `Sill.dmg` by its version and
+      SHA-256, `depends_on arch: :arm64` and `depends_on macos: :sonoma` as the app's own
+      Info.plist and binary say, a livecheck on the latest GitHub release, and a `zap` for
+      `~/Library/Logs/Sill` and `~/Library/Preferences/me.saffer.sill.mac.plist`, all Sill leaves
+      outside the keychain), a README and Sill's license. Its workflow is the one `brew tap-new`
+      writes, for casks only (`brew test-bot --only-cleanup-before`, `--only-setup` and
+      `--only-tap-syntax`: style, `readall` and `audit`), and `brew audit --cask --online
+      --strict`, which downloads the image and checks its SHA-256, the version against the
+      latest release and the minimum macOS against the app. It runs on pull requests and on
+      pushes to main.
+- Installing: `brew install --cask saffsanity/sill/sill` taps it and trusts that one cask. Since
+      Homebrew 6 a cask from a tap that isn't Homebrew's own loads only once it is trusted: after
+      `brew tap saffsanity/sill` alone, `brew install --cask sill` stops at "Refusing to load cask
+      saffsanity/sill/sill from untrusted tap saffsanity/sill" until `brew trust --cask
+      saffsanity/sill/sill`.
+- On this Mac, never install the cask into /Applications, where Sill.app runs: give `brew install
+      --cask` an `--appdir` of a scratch folder (Homebrew remembers it, and `brew uninstall`
+      removes the app from there), and never `brew uninstall --zap`, which trashes the running
+      Sill's settings and log.
+- [ ] Homebrew's main repository, so that `brew install --cask sill` works with no tap. On
+      2026-10-14 `brew audit --cask --new --online --strict saffsanity/sill/sill` failed one rule
+      alone: "GitHub repository too new (22 days old, 30 days required)". Saffsanity/sill was made
+      on 2026-09-22, so that passes from 2026-10-22. Two more rules run only in homebrew/cask's
+      own checks: the homepage's domain must be 30 days old (getsill.app was registered on
+      2026-09-25, so from 2026-10-25), and a pull request from the repository's owner is a
+      self-submission, which needs 90 forks, 90 watchers or 225 stars instead of 30, 30 or 75
+      (on 2026-10-14: 228 stars, 8 forks, 1 watcher, so it holds only while the stars stay at 225
+      or more). The earliest day is 2026-10-25.
+- The pull request is Noah's own. Homebrew's rules for AI-assisted pull requests
+      ([Responsible AI Usage](https://docs.brew.sh/Responsible-AI-Usage), and the template's last
+      checkbox): no commit names an AI as author or co-author (no `Co-Authored-By` trailer), the
+      description names the tool, the author has reviewed it all, the `zap` paths included, and
+      answers every question and review comment himself, without AI; a contributor who isn't a
+      maintainer may have one AI-assisted pull request open at a time.
+- The steps ([How to Open a Homebrew Pull Request](https://docs.brew.sh/How-To-Open-a-Homebrew-Pull-Request)):
+      fork Homebrew/homebrew-cask, `brew tap --force homebrew/cask`, add the fork as a remote of
+      `$(brew --repository homebrew/cask)`, and on a branch from `origin/HEAD` copy the tap's cask to
+      `Casks/s/sill.rb` with the version then current. Run `brew audit --cask --new --online
+      --strict sill`, `brew style --fix --cask sill`, `HOMEBREW_NO_INSTALL_FROM_API=1 brew install
+      --cask --appdir=<a scratch folder> sill`, `brew uninstall --cask sill` and `brew lgtm
+      --online`; then one commit and a pull request, both titled "sill <version> (new cask)", the
+      template's boxes ticked only for what was run.
+- Once it merges: in the tap, delete `Casks/sill.rb` and add `tap_migrations.json` with
+      `{ "sill": "homebrew/cask" }`, in one commit, "sill: migrate to homebrew/cask", so a Mac
+      that installed from the tap moves over at its next `brew update`. Then
+      `site/download.html`, the README, the tap's README and part 2's Homebrew item say `brew
+      install --cask sill`.
+
 ## Part 2: every release
 
 - [ ] Versions: one number for both apps. From 0.5.1 on, a release's Sill for Mac and Sill for
@@ -342,6 +397,17 @@ write straight to the strong keychain and only your own dev Macs need the reset 
       `.sha256`, `spctl -a -vv -t open --context context:primary-signature` on the image and
       `spctl -a -vv -t exec` on the Sill.app inside each ("Notarized Developer ID"), and the app's
       `CFBundleShortVersionString` and `CFBundleVersion`.
+- [ ] Homebrew: bump the cask once the release is published (its `Sill.dmg` must answer). In the
+      tap (part 1 §6), from a Mac that has it tapped and the cask trusted: `brew bump-cask-pr
+      --no-fork --version <version> --sha256 <SHA-256> saffsanity/sill/sill`, the SHA-256 the one in
+      the release's `Sill.dmg.sha256`, commits `sill <version>` on a branch of the tap, pushes it
+      and opens a pull request there; merge it when its `brew test-bot` run is green (it downloads
+      the image and checks the SHA-256, and the version against the latest release). By hand it is
+      the same two lines, `version` and `sha256` in `Casks/sill.rb`, a commit `sill <version>` and
+      a pull request. Then `brew update` and `brew upgrade --cask sill` offer the release. Once the
+      cask is in Homebrew's main repository there is nothing to do: BrewTestBot opens the bump
+      there within about three hours of the release, since the cask has a livecheck, and `brew
+      bump-cask-pr sill` refuses to; check that it merged (`brew info --cask sill`).
 - [x] Done 2026-09-27 with Sill for Mac 0.3.1 (PR #33; sill-site 39754b9): the download page
       moved to Sill.dmg, after the release that carries it was published and its
       `releases/latest/download/Sill.dmg` answered.

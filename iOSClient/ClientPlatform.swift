@@ -64,6 +64,25 @@ enum ClientPlatform {
         #endif
     }
 
+    /// Posted when the app goes to the background, where iOS may suspend it; nil on the Mac, where an
+    /// app keeps running whether in front or not.
+    static var didEnterBackground: Notification.Name? {
+        #if canImport(UIKit)
+        return UIApplication.didEnterBackgroundNotification
+        #else
+        return nil
+        #endif
+    }
+
+    /// The app is in the background now (iOS); never on the Mac. Main thread.
+    static var inBackground: Bool {
+        #if canImport(UIKit)
+        return UIApplication.shared.applicationState == .background
+        #else
+        return false
+        #endif
+    }
+
     /// The warning haptic (iPhone) and a VoiceOver announcement: a refused menu choice.
     static func warn(announcing text: String) {
         #if canImport(UIKit)

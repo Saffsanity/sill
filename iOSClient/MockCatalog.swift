@@ -69,6 +69,16 @@ enum MockCatalog {
         client.active = active
         client.apps = mockApps
         client.videoSize = CGSize(width: 2800, height: 1800)
+        // `-SillVideoSize 848x844`: the mock's frame at another shape, so the harness draws a phone's
+        // Larger Picture pane as a window the Mac fitted to its room would make it (or a taller one).
+        if let raw = UserDefaults.standard.string(forKey: "SillVideoSize") {
+            let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
+            if parts.count == 2, parts[0] > 0, parts[1] > 0 {
+                client.videoSize = CGSize(width: parts[0], height: parts[1])
+            } else {
+                print("-SillVideoSize \(raw): not WxH")
+            }
+        }
 
         var icons: [String: UIImage] = [:]
         for app in mockWindows.map({ ($0.bundleID, $0.appName) }) + mockApps.map({ ($0.bundleID, $0.name) }) {
@@ -482,6 +492,7 @@ enum MockCatalog {
         case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
         case pairingrequired // Require pairing turned on while this device was connected without pairing
+        case asleep          // the automatic reconnect's dials of a listed row not answered: "Mac mini isn’t answering. It may be asleep…" (issue #69)
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
@@ -636,6 +647,11 @@ enum MockCatalog {
         case .pairingrequired:
             client.macs = [home("Mac mini", .wifi), studio]
             client.status = Copy.pairingRequired(mac: "Mac mini", device: device)
+        case .asleep:
+            // A saved Mac whose row stays listed (a Bonjour Sleep Proxy answers for it) and whose
+            // dials have not connected: the line after DiscoveryPolicy.reconnectQuietAfter of them.
+            client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true), studio]
+            client.status = DiscoveryPolicy.reconnectLine(mac: "Mac mini", failed: DiscoveryPolicy.reconnectQuietAfter, direct: false)
         }
         return client
     }
