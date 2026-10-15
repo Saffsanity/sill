@@ -8,6 +8,19 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**A stream's rate capped at what the encoder keeps up with at its size (2026-10-15, branch `stream-rate`
+from main at 5c323e6; split out of #73 at Noah's suggestion, since it changes every device's stream).**
+`StreamRate` (pure, `Tests/checks/stream-rate`, 15 checks and 7 mutants): a hardware stream keeps the
+devices' rate while its pixel rate fits `hardwareBudget` (520 MP/s, about 80–90 % of what a fresh
+session managed on an M2 Pro and an M2 Max), else steps down through 90, 60, 48 and 30 (never under
+30 unless asked for less); the software encoder keeps its own cap of 60. `startPipeline` encodes and
+captures at that rate, with the bitrate scaled to it; the log line says so ("Streaming … at 3024×1964,
+60 fps (of 120: what the encoder keeps up with at this size), … Mbps") and the menu's card shows the
+rate that runs; `fps` stays the devices' rate, which every restart rule compares against. Measured on 2026-10-13 on the M2 Max: a fresh session
+at 3930×2188 (8.6 MP) returned 65 fps at best, so at 120 fps half the frames were captured only to be
+dropped before the encoder. A Standard window (1920×1050) at 120 fps is unchanged; a Retina laptop
+window (3024×1964) asked at 120 runs at 60.
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
