@@ -495,6 +495,20 @@ extension StreamClient {
         // At home over TLS: removed, pairing now required, or another key as the saved Mac
         // (StreamClient+Home). Every other end goes on below.
         if homeSessionEnded(s, error: error, goodbye: goodbye?.reason) { return }
+        // The automatic reconnect's own dial of a row ended before it connected, without a goodbye
+        // (it waited 5 s, failed, or brought no window list): one dial of the listing that did not
+        // connect, not a session's end. The reconnect keeps what it was (its loss, its remote dials'
+        // timing, its count of dials and its line) and looks again when DiscoveryPolicy.redialRow
+        // says (issue #69). Before, it began afresh: "‹Mac› disconnected…", a new loss, and a dial at
+        // once, every 5 s for good to a row whose dial only waits.
+        if !connected, goodbye == nil, reconnect != nil, let s, !s.route.isRemote {
+            #if DEBUG
+            print("reconnect: the dial of \(hostName) did not connect (\(error.map { "\($0)" } ?? end.map { "\($0)" } ?? "closed"))")
+            #endif
+            tearDown(status: status, restartSearch: false)
+            reconnectIfListed()
+            return
+        }
         let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
         if goodbye?.reason == Goodbye.removed, let mac = saved,
            DiscoveryPolicy.removalRevokes(remote: s?.route.isRemote == true, trust: s?.home, savedKey: mac.fingerprintData),
@@ -601,12 +615,51 @@ extension StreamClient {
             let id = mac.macID ?? r.macID
             let decision = homeDecision(mac, macID: id, tap: false)
             if DiscoveryPolicy.sessionTrust(decision, savedPin: id.flatMap { savedMac($0)?.fingerprintData }) != nil {
+                // When (issue #69): the first dial of a listing at once, then 5, 10, 20 and every 30 s
+                // while its dials do not connect (a Mac a sleep proxy answers for, one stopped), 12 at
+                // most, in the foreground only (DiscoveryPolicy.redialRow). A listing seen afresh
+                // starts again: the Mac's record renewed is the best sign it is back.
+                let listing = mac.direct ? directSince[mac.name] : sightings.since[mac.name]
+                if r.rowListing != listing {
+                    r.rowListing = listing
+                    r.rowDials = 0
+                    r.lastRowDialAt = nil
+                }
+                let line = DiscoveryPolicy.reconnectLine(mac: r.name, failed: r.rowDials, direct: mac.direct)
+                let due = DiscoveryPolicy.redialRow(failed: r.rowDials, lastDialAt: r.lastRowDialAt, foreground: appInForeground, now: now)
+                guard due.dial else {
+                    // Listed, and not dialled now: the line for the dials so far ("…may be asleep…",
+                    // "Stopped trying…"), and the next look. No remote dial while a row lists the Mac.
+                    reconnect = r
+                    if status != line { status = line }
+                    #if DEBUG
+                    let note = "\(r.rowDials) \(due.recheckAt ?? -1) \(appInForeground)"
+                    if lastRedialNote != note {
+                        lastRedialNote = note
+                        let next = due.recheckAt.map { String(format: "the next in %.1f s", $0 - now) }
+                            ?? (appInForeground ? "no more of this listing" : "the next once back in the foreground")
+                        print("reconnect: \(mac.name) is listed; \(r.rowDials) dial\(r.rowDials == 1 ? "" : "s") of it did not connect; \(next)")
+                    }
+                    #endif
+                    if let at = due.recheckAt {
+                        let work = DispatchWorkItem { [weak self] in self?.reconnectIfListed() }
+                        reconnectCheck = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, at - now), execute: work)
+                    }
+                    return false
+                }
                 if dialingAutomatically, let c = connection { connection = nil; c.cancel(); tearDown(status: status, restartSearch: false) }
                 cancelRemoteDial()
+                r.rowDials += 1
+                r.lastRowDialAt = now
                 reconnect = r        // kept until the row's connection is ready (a TLS one's: its first window list)
+                #if DEBUG
+                lastRedialNote = nil
+                print("reconnect: dialing \(mac.name) (dial \(r.rowDials) of this listing)")
+                #endif
                 // False only when a TLS dial finds no key and none can be made: the status says why.
                 guard dial(mac, macID: id, tap: false) else { return false }
-                status = mac.direct ? "Reconnecting to \(r.name) directly…" : "Reconnecting to \(r.name)…"
+                status = line
                 return true
             }
             if decision == .updateSill { status = DiscoveryPolicy.updateSillStatus(mac: mac.name) }

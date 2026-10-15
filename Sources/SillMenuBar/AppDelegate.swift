@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         model.onPresentation = { [weak item] p in item?.show(p) }
         model.showSettings = { [weak self] tab in self?.showSettings(tab: tab) }
+        model.settingsWindowForTests = { [weak self] in self?.settingsWindow }
         model.showLog = { [weak self] in self?.showLog() }
         // An offer can come from a device's request (its ask at the home door, or kind 21), and the
         // cable notice from a device pairing over the cable, each on a main-actor hop: showing a

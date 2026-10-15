@@ -18,6 +18,7 @@
 		A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00A /* PortraitStreamScreen.swift */; };
 		A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F501 /* PhonePortraitLayout.swift */; };
 		A1000001000000000000A901 /* KeyChords.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F901 /* KeyChords.swift */; };
+		A1000001000000000000AC01 /* HardwareKeyboardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */; };
 		A1000001000000000000A00A /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00B /* TrackpadView.swift */; };
 		A1000001000000000000A701 /* TrackpadGestures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F701 /* TrackpadGestures.swift */; };
 		A1000001000000000000A00B /* MockCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F00C /* MockCatalog.swift */; };
@@ -26,6 +27,8 @@
 		A1000001000000000000A011 /* StreamClient+Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F011 /* StreamClient+Viewport.swift */; };
 		A1000001000000000000A012 /* HostSettingsLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F012 /* HostSettingsLedger.swift */; };
 		A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F013 /* HostSettingsPanel.swift */; };
+		A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FC64 /* StreamClient+Clipboard.swift */; };
+		A1000001000000000000AD64 /* ClipboardChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000FD64 /* ClipboardChip.swift */; };
 		A1000001000000000000A014 /* DiscoveryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F014 /* DiscoveryPolicy.swift */; };
 		A1000001000000000000A015 /* SessionLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F015 /* SessionLink.swift */; };
 		A1000001000000000000A020 /* MessageReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001000000000000F020 /* MessageReader.swift */; };
@@ -68,6 +71,7 @@
 		A1000001000000000000F00A /* PortraitStreamScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitStreamScreen.swift; sourceTree = "<group>"; };
 		A1000001000000000000F501 /* PhonePortraitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePortraitLayout.swift; sourceTree = "<group>"; };
 		A1000001000000000000F901 /* KeyChords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyChords.swift; sourceTree = "<group>"; };
+		A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareKeyboardPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00B /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
 		A1000001000000000000F701 /* TrackpadGestures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadGestures.swift; sourceTree = "<group>"; };
 		A1000001000000000000F00C /* MockCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCatalog.swift; sourceTree = "<group>"; };
@@ -75,6 +79,8 @@
 		A1000001000000000000F011 /* StreamClient+Viewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Viewport.swift"; sourceTree = "<group>"; };
 		A1000001000000000000F012 /* HostSettingsLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsLedger.swift; sourceTree = "<group>"; };
 		A1000001000000000000F013 /* HostSettingsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSettingsPanel.swift; sourceTree = "<group>"; };
+		A1000001000000000000FC64 /* StreamClient+Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StreamClient+Clipboard.swift"; sourceTree = "<group>"; };
+		A1000001000000000000FD64 /* ClipboardChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardChip.swift; sourceTree = "<group>"; };
 		A1000001000000000000F014 /* DiscoveryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryPolicy.swift; sourceTree = "<group>"; };
 		A1000001000000000000F015 /* SessionLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLink.swift; sourceTree = "<group>"; };
 		A1000001000000000000F020 /* MessageReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageReader.swift; sourceTree = "<group>"; };
@@ -126,7 +132,10 @@
 				A1000001000000000000F00A /* PortraitStreamScreen.swift */,
 				A1000001000000000000F501 /* PhonePortraitLayout.swift */,
 				A1000001000000000000F901 /* KeyChords.swift */,
+				A1000001000000000000FC01 /* HardwareKeyboardPolicy.swift */,
 				A1000001000000000000F013 /* HostSettingsPanel.swift */,
+				A1000001000000000000FC64 /* StreamClient+Clipboard.swift */,
+				A1000001000000000000FD64 /* ClipboardChip.swift */,
 				A1000001000000000000F402 /* TourOverlay.swift */,
 				A1000001000000000000F401 /* TourPolicy.swift */,
 				A1000001000000000000FB01 /* DuoPosture.swift */,
@@ -267,7 +276,10 @@
 				A1000001000000000000A009 /* PortraitStreamScreen.swift in Sources */,
 				A1000001000000000000A501 /* PhonePortraitLayout.swift in Sources */,
 				A1000001000000000000A901 /* KeyChords.swift in Sources */,
+				A1000001000000000000AC01 /* HardwareKeyboardPolicy.swift in Sources */,
 				A1000001000000000000A013 /* HostSettingsPanel.swift in Sources */,
+				A1000001000000000000AC64 /* StreamClient+Clipboard.swift in Sources */,
+				A1000001000000000000AD64 /* ClipboardChip.swift in Sources */,
 				A1000001000000000000A402 /* TourOverlay.swift in Sources */,
 				A1000001000000000000A401 /* TourPolicy.swift in Sources */,
 				A1000001000000000000AB01 /* DuoPosture.swift in Sources */,
