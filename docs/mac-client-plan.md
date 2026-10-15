@@ -192,7 +192,7 @@ the new kinds is sent by it, and a host sends it none.
   never offered, and input its own host posted is never sent back).
 - Each display as a Desktop window of its own; Finder listed and opened; an app's own Dock menu item
   pressed on the other Mac; Dock icons named after their apps, with the app's icon badged.
-- Stop Sharing from the host's menu, and an app brought forward on the host, each taking its windows
+- Stop Sharing from the host's menu, and an app brought forward on the host by someone there (input there in the last 2 s), each taking its windows
   back, the viewer closing them and opening them again on request.
 - Sound over AAC-ELD, by hand ("audio streaming is working").
 - The main stream into the right window, with the router before it was rewritten to follow the

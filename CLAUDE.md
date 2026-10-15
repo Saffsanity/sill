@@ -49,7 +49,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows go to
   the desk, never the iPad's Virtual Display staging; one the desk fails to take is captured where
   it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s when picked, 5 minutes beside it (`DeskStages.mayTry`); no display is made for a window Accessibility cannot find, and a picked window its app has put away is shown first, as its Dock icon would. Take-back (the menu's Shared Windows,
-  Stop Sharing; an app brought forward on the host) and following an app a device opened run only
+  Stop Sharing; an app brought forward on the host by someone there: input there in the last 2 s) and following an app a device opened run only
   while every device is a Mac viewer. A retired pipeline's frames stop at the switch
   (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
   (a viewer's click that picked it comes right after). Dock icons'
