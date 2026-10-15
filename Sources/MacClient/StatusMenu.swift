@@ -229,8 +229,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private func shareClipboardItem() -> NSMenuItem {
         let item = toggle("Share Clipboard", ClipboardSync.enabled) { ClipboardSync.enabled.toggle() }
-        item.toolTip = client.hostClipboard ? "Copies on either Mac paste on the other." : "\(client.macName)’s Sill does not share its clipboard yet."
-        item.isEnabled = client.hostClipboard
+        item.toolTip = ClipboardPolicy.hostTakes(client.hostClipboard) ? "Copies on either Mac paste on the other." : "\(client.macName)’s Sill does not share its clipboard yet."
+        item.isEnabled = ClipboardPolicy.hostTakes(client.hostClipboard)
         return item
     }
 

@@ -356,7 +356,7 @@ check(MacPointer(x: .nan, y: 0.5, inside: true).position == nil && MacPointer(x:
 check(MacPointer(x: 1.2, y: -0.1, inside: true).position.map { $0.x == 1.2 && $0.y == -0.1 } == true,
       "position: out-of-range values are passed on (the sprite clamps them)")
 
-// The kind: 26, between the Mac's menus' 24, 25 and 27, every other kind unchanged, and a reader that knows it
+// The kind: 26, between the Mac's menus' 24, 25 and 27 (and the clipboard's 32 since), every other kind unchanged, and a reader that knows it
 // takes it with its payload.
 let known: [(StreamMessageKind, UInt8)] = [
     (.parameterSets, 0), (.frame, 1), (.windowList, 2), (.thumbnail, 3), (.appIcon, 4), (.appList, 5), (.selectSource, 6),

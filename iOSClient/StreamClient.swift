@@ -277,8 +277,9 @@ final class StreamClient: ObservableObject {
     private var settingsExpiry: DispatchWorkItem?
     /// The worst round trip of the last second that had a pong (`linkStats.rtt.max`), for the pick
     /// timeout. Kept across seconds without one: a stalled slow link reports no rtt at all, and
-    /// that must not shrink the timeout back to 4 s. Nil until measured; cleared on tear-down.
-    private var lastRttMaxMs: Int?
+    /// that must not shrink the timeout back to 4 s. Nil until measured; cleared on tear-down. Read by
+    /// the clipboard's Paste too (ClipboardPolicy.receiptWait).
+    private(set) var lastRttMaxMs: Int?
     #if DEBUG
     /// Harness `pending` case: the mock never answers and never times out.
     var mockFrozen = false
@@ -789,10 +790,9 @@ final class StreamClient: ObservableObject {
     /// This session's Mac takes the middle button (`WindowList.middleButton`); false for a Mac before
     /// 2026-10-12, which is sent none (the Mac client's middle clicks). Cleared with the session.
     var hostMiddleButton = false
-    /// How many windows this session's Mac streams besides the picked one (`WindowList.sideStreams`),
-    /// and whether it shares its clipboard (`clipboard`); 0 and false for a Mac before 2026-10-12.
+    /// How many windows this session's Mac streams besides the picked one (`WindowList.sideStreams`);
+    /// 0 for a Mac before 2026-10-12.
     @Published var hostSideStreams = 0
-    @Published var hostClipboard = false
     /// Whether this session's Mac sends the sound of the apps shown (kind 33); false before 2026-10-12.
     @Published var hostAudio = false
     /// Whether this session's Mac takes files dropped on its windows (kinds 34, 35); false before 2026-10-12.
@@ -839,6 +839,38 @@ final class StreamClient: ObservableObject {
     /// six, nil from a Mac before 2026-09-27, which is sent none (`sendGesture`). Cleared with the
     /// session.
     @Published var hostGestures: Int?
+    /// The clipboard (kind 32, StreamClient+Clipboard, docs/clipboard-plan.md): what this session's
+    /// Mac takes and sends (`WindowList.clipboard`, 1 for text), nil from a Mac before it or with Share
+    /// clipboard with devices off. Cleared with the session.
+    @Published var hostClipboard: Int?
+    #if canImport(UIKit)
+    /// The chip "Paste on ‹Mac›" is offered (ClipboardPolicy.offersChip) until it is used, dismissed or
+    /// its time is up; the stream screen hides it while something is open over the stream.
+    @Published var clipboardChip = false
+    /// "Sent to ‹Mac›’s clipboard…" or "Too long to send…", for a moment after a Paste.
+    @Published var clipboardNote: ClipboardNote?
+    /// This connection sent its subscription and no stop since (ClipboardPolicy.deviceSubscription).
+    var clipboardSubscribed = false
+    /// When Sill last became active: a session that starts soon after gets the chip's look too.
+    var clipboardActivatedAt: TimeInterval?
+    /// What this device sent last, and its clipboard's change count right after: the Mac's echo of it
+    /// is not written again (ClipboardPolicy.deviceWrites).
+    var clipboardSent: ClipboardPolicy.Sent?
+    var clipboardChipExpiry: DispatchWorkItem?
+    var clipboardNoteExpiry: DispatchWorkItem?
+    /// The chip is on screen (StreamScreen: nothing open over the stream, no note in its place), its time
+    /// on screen so far, since when that counts, and whether VoiceOver was told it came; Sill is active
+    /// (ClipboardPolicy.chipCounts: its 20 s run only while all say so, and VoiceOver is off).
+    var clipboardChipOnScreen = false
+    var clipboardChipShownFor: TimeInterval = 0
+    var clipboardChipCountingSince: TimeInterval?
+    var clipboardChipAnnounced = false
+    var clipboardAppActive = UIApplication.shared.applicationState == .active
+    /// A Paste waiting for the pong that says the Mac has read it (ClipboardPolicy.receiptLength), and
+    /// its timeout (`receiptWait`).
+    var clipboardReceipt: ClipboardReceipt?
+    var clipboardReceiptExpiry: DispatchWorkItem?
+    #endif
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?
@@ -945,6 +977,10 @@ final class StreamClient: ObservableObject {
                 self?.appInForeground = false
             }
         }
+        // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
+        #if canImport(UIKit)
+        observeClipboardActivation()
+        #endif
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The
@@ -2404,6 +2440,10 @@ final class StreamClient: ObservableObject {
         // connection too, and forgets them when the old one goes: both again on the new one.
         if let side = sideRequest, hostSideStreams > 0 { send(.sideStreams, payload: Wire.encode(side)) }
         onMoved?()
+        #if canImport(UIKit)
+        // The Mac keeps the clipboard's subscription per connection: the new one subscribes too.
+        clipboardMoved()
+        #endif
         if fenced {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.fenceTimeout) { [weak self] in
                 guard let self, let released = self.link.release(old) else { return }
@@ -3149,7 +3189,7 @@ final class StreamClient: ObservableObject {
         hostGestures = nil
         hostMiddleButton = false
         hostSideStreams = 0
-        hostClipboard = false
+        hostClipboard = nil
         hostAudio = false
         hostFileDrop = false
         hostLiveDrag = false
@@ -3206,6 +3246,10 @@ final class StreamClient: ObservableObject {
         // Nor its menus: an open one says "Not connected.", the button goes, and the iPad's bar
         // loses the Mac's menus at its next rebuild.
         resetMenus()
+        // Nor the clipboard's subscription, its chip or its note.
+        #if canImport(UIKit)
+        resetClipboard()
+        #endif
     }
 
     // MARK: - Client → host
@@ -3697,7 +3741,6 @@ final class StreamClient: ObservableObject {
                 if self.hostGestures != list.gestures { self.hostGestures = list.gestures }
                 self.hostMiddleButton = list.middleButton == true
                 if self.hostSideStreams != (list.sideStreams ?? 0) { self.hostSideStreams = list.sideStreams ?? 0 }
-                if self.hostClipboard != (list.clipboard == true) { self.hostClipboard = list.clipboard == true }
                 if self.hostAudio != (list.audio == true) { self.hostAudio = list.audio == true }
                 if self.hostFileDrop != (list.fileDrop == true) { self.hostFileDrop = list.fileDrop == true }
                 if self.hostLiveDrag != (list.liveDrag == true) { self.hostLiveDrag = list.liveDrag == true }
@@ -3707,6 +3750,12 @@ final class StreamClient: ObservableObject {
                 if self.hostBadges != (list.badges ?? [:]) { self.hostBadges = list.badges ?? [:] }
                 if self.hostDisplays != (list.displays ?? []) { self.hostDisplays = list.displays ?? [] }
                 if self.desktopDisplay != list.desktopDisplay { self.desktopDisplay = list.desktopDisplay }
+                #if canImport(UIKit)
+                // The clipboard: subscribe (or stop) as the Mac's word and this device's switch say.
+                self.hostClipboardChanged(list.clipboard)
+                #else
+                self.hostClipboard = list.clipboard
+                #endif
                 if !self.sessionListed {
                     self.sessionListed = true
                     #if DEBUG
@@ -3817,9 +3866,16 @@ final class StreamClient: ObservableObject {
         case .sideFrame:
             guard let (window, payload) = SideStreamRequest.unpack(data) else { return }
             onSideFrame?(window, payload, header.isKeyframe)
+        #if !canImport(UIKit)
         case .clipboard:
-            guard let clip = Wire.decode(Clipboard.self, from: data), clip.text != nil || clip.image != nil else { return }
-            DispatchQueue.main.async { self.onClipboard?(clip) }
+            guard data.count <= ClipboardPolicy.maxPayload, let clip = Wire.decode(Clipboard.self, from: data),
+                  clip.text != nil || clip.image != nil else { return }
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.onClipboard?(clip)
+            }
+        #endif
         case .audio:
             onAudio?(data)
         case .dragOffer:
@@ -3842,6 +3898,13 @@ final class StreamClient: ObservableObject {
                 self.receiveSettings(state)
             }
         case .pong:
+            // A Paste's receipt (StreamClient+Clipboard): its own random payload, not a time.
+            #if canImport(UIKit)
+            if data.count == ClipboardPolicy.receiptLength {
+                DispatchQueue.main.async { self.clipboardReceiptCame(data) }
+                return
+            }
+            #endif
             // The host echoes the ping's payload unchanged: our own monotonic send time.
             guard data.count >= 8 else { return }
             let sent = Double(bitPattern: data.readBigEndianUInt64())
@@ -3872,6 +3935,16 @@ final class StreamClient: ObservableObject {
                 guard self.connection === from else { return }
                 self.goodbye = goodbye
             }
+        #if canImport(UIKit)
+        case .clipboard:
+            // Text copied on the Mac (StreamClient+Clipboard): written to this device's clipboard while
+            // its switch is on. Only from the current connection.
+            let from = connection
+            DispatchQueue.main.async {
+                guard self.connection === from else { return }
+                self.receiveClipboard(data)
+            }
+        #endif
         case .macMenu:
             // The Mac's menus: a top level, or the answer to one of this connection's kind 27s or 25s
             // (MacMenuState). One that does not decode is dropped: its completion times out.
@@ -4241,7 +4314,8 @@ extension StreamClient {
     /// This device's clipboard to the Mac (kind 32); an empty one asks for the Mac's from now on.
     /// Only to a Mac that shares it. Main thread.
     func sendClipboard(_ clip: Clipboard) {
-        guard hostClipboard, let payload = clip.payload(within: Clipboard.messageFromDevice) else { return }
+        guard ClipboardPolicy.hostTakes(hostClipboard), clip.image == nil || (hostClipboard ?? 0) >= ClipboardPolicy.imageGeneration,
+              let payload = clip.payload(within: ClipboardPolicy.maxPayload) else { return }
         send(.clipboard, payload: payload)
     }
 

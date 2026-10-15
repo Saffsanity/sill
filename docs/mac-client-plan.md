@@ -46,7 +46,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 | 8 (`PointerAction.middleDown/Up`) | device → host | the middle button | the host's list says `middleButton` |
 | 29 `sideStreams` | device → host | `SideStreamRequest`: the other windows shown, `wholeApp`, the device's largest screen, `audio` | the list says `sideStreams` |
 | 30, 31 | host → device | a side window's parameter sets and frames, prefixed by its window ID | asked by 29 |
-| 32 `clipboard` | both | `Clipboard`: text and image (PNG or JPEG) | the list says `clipboard`; the host sends only to a device that asked |
+| 32 `clipboard` | both | Main’s `Clipboard`: text, image (PNG or JPEG), `accepts`, `stop` | subscribe only when the list says `clipboard` ≥ 1; generation 2 handles images; the host sends images only to a subscription with `accepts` ≥ 2; `{}` gets text alone; `stop` ends the subscription |
 | 8, with `window` | device → host | `WindowInput`: a scroll or a hover over a window shown beside the streamed one, which stays in the background | the list says `windowInput` |
 | 33 `audio` | host → device | `AudioPacket`: ~10 ms of 16-bit PCM, or an AAC-ELD packet (`audioCodec` "aac-eld" in 29) | `audio: true` in 29 and the list says `audio` |
 | 34 `fileChunk` | both | `FileChunk`: a part of a file (≤ 512 KB) | the list says `fileDrop` |
@@ -64,11 +64,20 @@ A window ID can name one of the host's displays (`DesktopWindow`: the display ID
 set), so a Desktop window has its side stream, drops and take-back like any other.
 
 Every field added to an existing payload is optional, and a host or device from before skips the
-new kinds (the compatibility floor in CLAUDE.md). The iOS app sends none of them. Checks:
+new kinds (the compatibility floor in CLAUDE.md). The iOS app keeps main’s text-only kind 32
+subscription (`{}`) and sends none of the other Mac viewer additions. Checks:
 `protocol` (round-trips and refusals of every new payload), `compatibility`, `menus` and
 `pointer-control` know kinds 29–42 (43 unknown); `main-router` (32 checks, 15 mutants) holds the
 viewer's routing of the main and side streams; `desk-picture` (37 checks, 15 mutants) the comparison
 of a hidden display's picture with the window alone.
+
+The clipboard retains main’s `HostClipboard`, `ClipboardPolicy`, host switch, permission policy,
+rate limit and size caps: text at most 256 KiB UTF-8, JSON at most 1 MiB in either direction.
+The viewer subscribes with `accepts: 2` once the host advertises text or images, sends
+`stop` when Share Clipboard goes off, and sends nothing to an older or disabled host. Images
+are fitted before encoding; an oversized image is omitted, keeping text only if it fits.
+Clipboard reads skip concealed, transient, remote and Sill-originated copies before reading
+contents; received copies stay on this Mac (`currentHostOnly`).
 
 ## Sill's desk (DeskStages, VirtualStage)
 
@@ -259,3 +268,38 @@ the new kinds is sent by it, and a host sends it none.
   fields were length-framed; since then both sides' signing was compiled and compared.
 - Not forwarded: the other Mac's notifications and Dock bounces (no public way to read either; a
   separate spike).
+
+## Merge after #78 (2026-10-15)
+
+Merged main at `2ecb639` into `mac-client`, keeping the desk and capture teardown path and main’s
+clipboard host, settings, permission handling and iOS text path. The duplicate clipboard type was
+removed. The viewer declares `accepts: 2` only after a host advertises clipboard support; it sends
+images only to generation 2 hosts. A host filters every copy and relay by each subscriber’s
+acceptance; an explicit `{}` returns a connection to text alone. Both directions retain main’s
+256 KiB text and 1 MiB JSON caps.
+
+Local verification:
+
+- `swift build -c release` and the iOS Debug simulator build with `ARCHS=arm64`, signing disabled
+  and `OTHER_SWIFT_FLAGS='-D SILL_NO_DUO_SDK'`: passed, only the known warnings.
+- `Tests/checks/run-all.sh`: all 47 suites passed (566 seconds). After the final subscription
+  declaration adjustment, clipboard, compatibility and protocol passed again (51 seconds): 281,
+  124 and 244 checks respectively, plus protocol’s 8 external cross-checks.
+- Clipboard, compatibility and protocol mutants: 74/74, 29/29 and 36/36 caught. The two image
+  negotiation mutants were rerun in each suite after that final adjustment.
+- `python3 Scripts/clipboard-check/viewer.py`: the production viewer clipboard code with an
+  isolated session, defaults and named pasteboard, 16 assertions passed; a mutant at its actual
+  subscription send call omitting `accepts` was caught (1/1). Includes toggles, the host switch,
+  text to a generation 1 host, images only to generation 2, receive without echo, connection moves
+  and a fast reconnect with the same generation.
+- `python3 Scripts/clipboard-check/run.py`: 23 wire assertions passed using `Scripts/sillclient.py`
+  and synthetic hosts on loopback with software encoding forced. Text-only and image subscribers,
+  stop, renegotiation to `{}`, relay filtering, image pasteboard readback and `--no-clipboard`.
+- The Xcode project parses and has 116 top-level objects with no duplicate object definitions;
+  the viewer’s AC21/FC21 and AC22/FC22 remain distinct from main’s additions.
+
+These checks used named pasteboards, never the general clipboard. The viewer smoke substitutes
+only its pasteboard, the permission answer for that named board, its defaults and session transport.
+Real macOS paste permission prompts and another live two-Mac desktop session were not exercised in
+this merge run; the earlier two-Mac results above predate it. Validation and deployment stay with
+the reviewing session.

@@ -267,33 +267,6 @@ public enum FolderZip {
 }
 #endif
 
-/// A clipboard's text and image, either way (kind 32). From a device, neither asks the host to send
-/// its clipboard from now on, which it then does whenever it changes; a host never sends one
-/// unasked. The image is PNG or JPEG (`ClipboardImage.fit`); older readers skip the key.
-public struct Clipboard: Codable, Hashable, Sendable {
-    public var text: String?
-    public var image: Data?
-    public init(text: String? = nil, image: Data? = nil) { self.text = text; self.image = image }
-    /// Under the host's 1 MB limit for a device's message, with room for the JSON.
-    public static let maxBytes = 900_000
-    /// An image's bytes, base64 in the JSON (a third more): from a device under its 1 MB message,
-    /// from the host under a device's 4 MB.
-    public static let maxImageFromDevice = 600_000
-    public static let maxImageFromHost = 2_600_000
-    /// The whole message's limits: a host closes a device's message over 1 MB, a device a host's
-    /// over 4 MB.
-    public static let messageFromDevice = 1_000_000
-    public static let messageFromHost = 4_000_000
-
-    /// The JSON for one message under `limit`: whole, else without the image, else nothing.
-    public func payload(within limit: Int) -> Data? {
-        if let whole = try? JSONEncoder().encode(self), whole.count <= limit { return whole }
-        guard image != nil, let text = try? JSONEncoder().encode(Clipboard(text: self.text)), text.count <= limit,
-              self.text != nil else { return nil }
-        return text
-    }
-}
-
 #if canImport(ImageIO)
 import ImageIO
 import CoreGraphics
@@ -344,16 +317,27 @@ public enum ClipboardPasteboard {
     /// The private type on a pasteboard item Sill wrote from the other Mac's clipboard.
     public static let fromOtherMacType = NSPasteboard.PasteboardType("me.saffer.sill.clipboard.from-other-mac")
 
+    /// Background reads follow the same macOS paste privacy policy as the host.
+    public static var canRead: Bool {
+        if #available(macOS 15.4, *) {
+            return ClipboardPolicy.hostLooks(ClipboardPolicy.macAccess(raw: NSPasteboard.general.accessBehavior.rawValue))
+        }
+        return true
+    }
+
     /// Whether the pasteboard holds what Sill wrote from the other Mac (not a copy made on this one).
-    public static var fromOtherMac: Bool { NSPasteboard.general.types?.contains(fromOtherMacType) == true }
+    public static var fromOtherMac: Bool { NSPasteboard.general.types?.contains(fromOtherMacType) == true || NSPasteboard.general.types?.contains(NSPasteboard.PasteboardType(ClipboardPolicy.ownType)) == true }
 
     /// Its text (when not too long) and its image (PNG, TIFF or JPEG, made to fit `imageLimit`).
     public static func read(imageLimit: Int) -> Clipboard {
         let board = NSPasteboard.general
+        let types = (board.pasteboardItems ?? []).flatMap { $0.types.map(\.rawValue) }
+        guard !types.contains(where: { ClipboardPolicy.markerTypes.contains($0) }),
+              !types.contains(ClipboardPolicy.remoteClipboardType), !fromOtherMac else { return Clipboard() }
         var text = board.string(forType: .string)
-        if let t = text, t.isEmpty || t.utf8.count > Clipboard.maxBytes { text = nil }
+        if let t = text, t.isEmpty || t.utf8.count > Clipboard.maxTextBytes { text = nil }
         var image: Data?
-        for type in [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")] {
+        for type in [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")] where imageLimit > 0 {
             if let data = board.data(forType: type) { image = ClipboardImage.fit(data, limit: imageLimit); break }
         }
         return Clipboard(text: text, image: image)
@@ -363,8 +347,9 @@ public enum ClipboardPasteboard {
     /// marked as the other Mac's; nothing when the pasteboard holds that already.
     public static func write(_ clip: Clipboard) {
         let board = NSPasteboard.general
-        guard !holds(clip) else { return }
-        board.clearContents()
+        guard clip.text != nil || clip.image.flatMap(NSBitmapImageRep.init(data:)) != nil else { return }
+        if canRead, holds(clip) { return }
+        board.prepareForNewContents(with: .currentHostOnly)
         let item = NSPasteboardItem()
         item.setData(Data(), forType: fromOtherMacType)
         if let text = clip.text { item.setString(text, forType: .string) }

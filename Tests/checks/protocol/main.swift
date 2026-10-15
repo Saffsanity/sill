@@ -465,6 +465,13 @@ check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs)
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
+check("clipboard: accepts is optional and generation 2 round-trips",
+      Wire.encode(Clipboard()) == Data("{}".utf8) && Wire.decode(Clipboard.self, from: Wire.encode(Clipboard(accepts: 2)))?.accepts == 2)
+check("clipboard: image host advertises generation 2",
+      Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, clipboard: ClipboardPolicy.imageGeneration)))?.clipboard == 2)
+check("clipboard: viewer subscription explicitly accepts images", ClipboardPolicy.viewerSubscription(hostClipboard: 2)?.accepts == 2)
+check("clipboard: {} subscription never receives images", ClipboardPolicy.payload(Clipboard(image: Data([1])), forAccepts: nil) == nil)
+
 // The Mac client's payloads (2026-10-12; SideStreams.swift): kinds 29–37, each round-trips and
 // rejects what it should.
 do {

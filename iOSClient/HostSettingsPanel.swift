@@ -19,9 +19,10 @@ import StreamProtocol
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
 /// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
-/// larger, `largerPictureOffered`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose
-/// gesture rows, as accessibility actions, do their gestures (`client.sendGesture`), since VoiceOver
-/// keeps three fingers for itself; then Take the Tour.
+/// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
+/// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
+/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
+/// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
@@ -46,6 +47,9 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
+    /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
+    @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -455,13 +459,14 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then its
-    /// switch for three-finger gestures, and what each does when the Mac takes them (Take the Tour
-    /// follows it). After the Mac's rows because it is the least changed, and the compact halves'
-    /// 259 pt show the Mac's rows first. The switches reach nothing on the Mac; a gesture row,
-    /// activated by VoiceOver, Voice Control or Switch Control, does its gesture on the Mac as three
-    /// fingers would (`sendGesture`: the switch, the Mac's `gestures`, the Desktop first while a
-    /// window streams).
+    /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share
+    /// Clipboard while the Mac shares its clipboard, with Paste on ‹Mac› (the system's Paste control)
+    /// under it while on, then its switch for three-finger gestures, and what each does when the Mac
+    /// takes them (Take the Tour follows it). After the Mac's rows because it is the least changed, and
+    /// the compact halves' 259 pt show the Mac's rows first. The switches reach nothing on the Mac but
+    /// the clipboard's, which subscribes or stops; a gesture row, activated by VoiceOver, Voice Control
+    /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the switch,
+    /// the Mac's `gestures`, the Desktop first while a window streams).
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
@@ -479,6 +484,26 @@ struct HostSettingsPanel: View {
                 .rowFrame()
             }
             Footnote(text: Self.largerPictureFooter)
+        }
+        // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
+        if ClipboardPolicy.hostTakes(client.hostClipboard) {
+            Rows {
+                Toggle(isOn: $clipboardOn) {
+                    Text(ClipboardPolicy.Copy.switchTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: clipboardOn) { _, _ in client.clipboardSwitchChanged() }
+                if clipboardOn {
+                    RowDivider()
+                    ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
+                }
+            }
+            if clipboardOn, let note = client.clipboardNote {
+                Footnote(text: note.text, warning: note.warning, top: 6)
+                    .padding(.bottom, -6)
+                    .accessibilityHidden(true)      // announced as it came
+            }
+            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
         }
         Rows {
             Toggle(isOn: $gesturesOn) {
@@ -726,6 +751,31 @@ private struct GestureRow: View {
             .foregroundStyle(Palette.muted)
             .frame(width: 24)
             .accessibilityHidden(true)
+    }
+}
+
+/// "Paste on ‹Mac›" with the system's Paste button (ClipboardPasteButton): beside it when they fit,
+/// under it when larger text leaves no room, as `AdaptiveRow` does. The title is the row's words for
+/// VoiceOver; the button reads "Paste" with its hint.
+private struct ClipboardPasteRow: View {
+    @ObservedObject var client: StreamClient
+    let title: String
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text(title).foregroundStyle(Palette.text)
+                Spacer(minLength: 8)
+                ClipboardPasteButton(client: client)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
+                ClipboardPasteButton(client: client)
+            }
+            .padding(.vertical, 8)
+        }
+        .id(typeSize)
+        .rowFrame()
     }
 }
 
