@@ -2877,6 +2877,12 @@ whose session has settled in it gets a new session in place, on by default
   stalled. A waiting new session is dropped when the stream's session dies
   (the watchdog, `abandon`), with the encoder, or when it is made after the
   encoder went.
+- Relapses (2026-10-13): a new session is judged on its first frames, while every fresh session is
+  fast, so the slow state came back with the next quiet spell and the stream replaced its session
+  every 10–13 s (222 times in a day on a Mac viewer, each a keyframe and a hitch). Two swaps in a row
+  slow again within 30 s of taking over (`relapseWithin`, `maxRelapses`) and the stream keeps its
+  session, one line: "…the last 2 new sessions each went slow within 30 s, so this stream keeps this
+  one and gets no other." A failed make is no relapse. `encoder-slowstate` 1,211 checks, 33 mutants.
 - `SILL_TEST_ENCODER_RECYCLE=1` or `0` overrides the constant for one process
   (an A/B from one binary; a "TEST:" line says so).
 
