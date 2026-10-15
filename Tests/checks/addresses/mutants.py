@@ -4,6 +4,7 @@ WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 A = os.path.join(WT, "Sources/SillHost/AddressList.swift"); P = os.path.join(WT, "Sources/SillHost/PairingWindow.swift")
 M = [
     (A, "unnamed tunnels shown", "services.filter { !$0.name.isEmpty && isTunnel($0.interface) }", "services.filter { isTunnel($0.interface) }"),
+    (A, "a nameless service hides its tunnel", "where !vpns.contains(where: { $0.interface == t.interface })", "where !input.services.contains(where: { $0.interface == t.interface })"),
     (A, "temporary IPv6 shown", "return e.flags & IPv6Entry.temporary == 0 && e.flags & IPv6Entry.deprecated == 0", "return e.flags & IPv6Entry.deprecated == 0"),
     (A, "deprecated IPv6 shown", "return e.flags & IPv6Entry.temporary == 0 && e.flags & IPv6Entry.deprecated == 0", "return e.flags & IPv6Entry.temporary == 0"),
     (A, "100.64/10 on a LAN shown", "return onTunnel || !IPBytes.isCarrierShared(b)", "return true"),

@@ -168,6 +168,14 @@ package final class StreamCoordinator {
     /// The client's last stream panel size and text scale. One stream, so with several clients
     /// the last one to report wins.
     private var viewport: Viewport?
+    /// The windows Sill sized for a device in regular mode, each with its way back (WindowRestore,
+    /// issue #57): recorded at the first fit (`fitToViewport`), put back when the window stops
+    /// streaming (`restoreFits`), handed to the virtual display's stage when it takes the window.
+    private var fits = WindowRestore.Ledger<WindowSizer.Placement>()
+    /// The window streaming in regular mode was in full screen when the catalog last listed it (its
+    /// frame covered a display), or when it was picked: off the list, it may be leaving full screen
+    /// (`windowsChanged`, WindowRestore.keepsStreaming).
+    private var listedFullScreen: CGWindowID?
     /// Each connection's kind 17 changes of the last second (applied or refused), and when its
     /// "ignored" line was last printed: `settingsPerSecond` a second, one line a second at most.
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
@@ -208,7 +216,7 @@ package final class StreamCoordinator {
     /// In every window list (`WindowList.launchID`): a device moving its session from AWDL to the
     /// network checks that the new connection reaches this same running host, since the Bonjour
     /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
-    private let launchID = UUID().uuidString
+    private let launchID: String
     /// In every window list (`WindowList.hostVersion`, with `protocol`): Sill.app's version; nil
     /// from the CLI, which has no bundle. For later devices, which can then say which Mac to update.
     private let hostVersion: String?
@@ -247,6 +255,10 @@ package final class StreamCoordinator {
     /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
     /// MenuMirror). Reads and presses nothing for a device that never asked.
     let menus: MenuMirror
+    /// The clipboard both ways (kind 32, HostClipboard; docs/clipboard-plan.md), for the devices that
+    /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
+    /// nothing while nobody subscribes.
+    let clipboard: HostClipboard
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -304,6 +316,10 @@ package final class StreamCoordinator {
         gesturesDry = synthetic                            // a test host never posts a gesture (§7.4)
         testHotKeys = synthetic ? Self.testHotKeyTable() : nil
         menus = MenuMirror(server: server)
+        let launch = UUID().uuidString
+        launchID = launch
+        // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
+        clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -384,6 +400,7 @@ package final class StreamCoordinator {
                 self.linkReports[id] = nil
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
+                self.clipboard.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -556,6 +573,7 @@ package final class StreamCoordinator {
     /// a device connecting, not a login.
     package func start(preselect: String?, promptForPermissions: Bool = true) async {
         for line in testHookLines { print(line) }
+        if let line = clipboard.testHookLine { print(line) }   // TEST ONLY, and only with one of its variables set
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
             // TEST ONLY: a gate that must never touch the Mac's one hardware encoder (Noah may be
@@ -643,6 +661,9 @@ package final class StreamCoordinator {
         guard !shuttingDown else { return false }
         var new = requested.validated()
         if !appKitLoop { new.virtualDisplay = false }
+        // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
+        // out now, not after a restart. The lists say `clipboard` again (or no longer).
+        if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -1004,6 +1025,10 @@ package final class StreamCoordinator {
             // and answers this device alone. JSON that does not decode has no token to answer.
             guard let r = Wire.decode(FetchMenu.self, from: message.payload) else { return }
             menus.fetch(r, from: connection, who: deviceName(connection))
+        case .clipboard:
+            // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
+            // it reads and writes the pasteboard at once, and says nothing per copy.
+            clipboard.received(message.payload, from: connection, who: deviceName(connection))
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
@@ -1084,14 +1109,18 @@ package final class StreamCoordinator {
     /// Resizes the streamed window to the client's panel at its text scale, if one is set and the
     /// window is not already there. Returns the size the window actually took, or nil if nothing
     /// changed. Mac points throughout: the panel in device points divided by the scale (device
-    /// points per Mac point). Scale nil means leave the window alone, and nothing ever restores
-    /// an earlier size on its own.
+    /// points per Mac point). Scale nil means leave the window alone, and so is a window in full
+    /// screen (WindowRestore.fit). Every resize the app took, or left unanswered (a busy app may take
+    /// it later), is a fit for `fits`: the window goes back to its own frame when it stops streaming
+    /// (`restoreFits`, issue #57). None once the host is shutting down: nothing would put it back.
     private func fitToViewport(_ window: SCWindow) -> CGSize? {
-        guard let v = viewport, let textScale = v.scale, textScale > 0, v.width > 0, v.height > 0 else { return nil }
+        guard !shuttingDown, let v = viewport, let textScale = v.scale, textScale > 0, v.width > 0, v.height > 0 else { return nil }
         let target = CGSize(width: (v.width / textScale).rounded(), height: (v.height / textScale).rounded())
         let current = Self.liveBounds(of: window.windowID)?.size ?? window.frame.size
         if abs(current.width - target.width) <= 2, abs(current.height - target.height) <= 2 { return nil }
-        guard let actual = sizer.resize(window: window, to: target) else { return nil }
+        guard let fit = sizer.resize(window: window, to: target) else { return nil }
+        fits.fitted(window.windowID, handle: fit.placement, before: fit.before, after: fit.after, asked: target)
+        let actual = fit.after.size
         // Asked again for a size the app already refused (its minimum): nothing moved.
         guard abs(actual.width - current.width) >= 1 || abs(actual.height - current.height) >= 1 else { return nil }
         Stats.shared.bump("win.resized")
@@ -1176,6 +1205,7 @@ package final class StreamCoordinator {
     func select(_ source: StreamSource, bringForward: Bool = false) async {
         guard !switching, !shuttingDown else { return }
         switching = true
+        if source != active { missingPolls = 0 }    // a window's looks off the list are its own
         restartOf = (source == active && source != .none) ? source : nil
         defer {
             switching = false
@@ -1209,8 +1239,8 @@ package final class StreamCoordinator {
             // no-op when the pick's select commits them first.
             if pendingConfig != nil || (awayWanted != awayRunning && flipWait == nil) { Task { @MainActor in await self.applyPending() } }
             // A stream that did not start (its window gone, capture refused): nothing streams, so
-            // the links have nothing to be judged at.
-            if active == .none { judgeLinks(nil) }
+            // the links have nothing to be judged at, and a window sized for it goes back.
+            if active == .none { judgeLinks(nil); restoreFits(keeping: nil) }
         }
 
         await capture.stop()
@@ -1282,6 +1312,10 @@ package final class StreamCoordinator {
                 stage.release()
             }
         }
+        // In regular mode, every window Sill sized but the one about to stream goes back to its own
+        // frame (WindowRestore, issue #57): another window or the Desktop picked, `.none` when the
+        // last device leaves or the stream stops. A restart of the same window keeps it fitted.
+        if case .window(let next) = source { restoreFits(keeping: next) } else { restoreFits(keeping: nil) }
 
         var filter: SCContentFilter?     // nil only for the synthetic test pattern
         var sourceRect: CGRect? = nil    // set only when the window streams from the virtual display
@@ -1305,12 +1339,18 @@ package final class StreamCoordinator {
             }
             print("Selecting window \(w.windowID) \(w.owningApplication?.applicationName ?? "?") — \(w.title ?? "") frame \(w.frame) onScreen \(w.isOnScreen) active \(w.isActive)")
             picked = w
+            listedFullScreen = WindowRestore.coversDisplay(w.frame, WindowSizer.displayFrames()) ? id : nil
             title = Self.menuTitle(for: w)
             var size = w.frame.size
             if virtualDisplay, stage.disabledReason == nil {
                 let want = wantedStage(for: w)
+                // A window Sill sized in regular mode (the virtual display turned on while it
+                // streamed): the stage keeps the frame it would have gone back to as its way home.
+                let home = stageHome(for: id)
                 do {
-                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale, refreshHz: fps)
+                    let prepared = try await stage.prepare(window: w, wanted: want.size, envelope: want.envelope, captureScale: captureScale,
+                                                           refreshHz: fps, home: home)
+                    _ = fits.take(id)     // the stage puts it back from now on; a staging that failed keeps the record
                     guard !shuttingDown else { stage.release(); active = .none; broadcastList(); return }
                     filter = prepared.filter
                     sourceRect = prepared.sourceRect
@@ -1467,7 +1507,9 @@ package final class StreamCoordinator {
     // most, and Accessibility only when the app is not active or a cover is found. An app that
     // lets the activation run into its timeout (a beach ball) gets no further AX calls from
     // either: each would hold the main actor for another second.
-    /// Consecutive catalog polls the staged full-screen window has been missing from every list.
+    /// Consecutive catalog polls the streamed window has been missing from the list while it may be
+    /// entering or leaving full screen: the staged full-screen window, or in regular mode one that was
+    /// full screen when last listed or that Sill fitted (`windowsChanged`).
     private var missingPolls = 0
     private var lastRaiseCheck: CFAbsoluteTime = 0
     private var lastActivationAt: CFAbsoluteTime = 0
@@ -1841,22 +1883,53 @@ package final class StreamCoordinator {
     /// Called by HostShutdown on the main queue just before `exit` (or, for the app's Quit, just
     /// before AppKit exits): every key and button a device holds down on the Mac goes up (a modifier
     /// left down would outlive Sill: the Mac's next click a ⌘-click), every connected device hears why
-    /// (kind 22 "quit", at most 0.1 s), then window home, display gone. Capture and encoder need no
-    /// stop; the process is about to end. The CLI without --virtual-display lets go of the keys and
-    /// dies of the signal with no goodbye, as before (`releaseKeysForExit`): its devices notice by
-    /// liveness.
+    /// (kind 22 "quit", at most 0.1 s), then a window Sill sized goes back to its own frame
+    /// (`restoreFits`), the staged window home, display gone. Capture and encoder need no stop; the
+    /// process is about to end. The CLI without --virtual-display lets go of the keys, puts a sized
+    /// window back and dies of the signal with no goodbye (`releaseKeysForExit`): its devices notice
+    /// by liveness.
     package func shutdownForExit() {
         injector.releaseAll()
         server.goodbyeAll(Goodbye(reason: Goodbye.quit), within: 0.1)
         shuttingDown = true
+        restoreFits(keeping: nil)
         stage.release()
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:
-    /// every key and button a device holds down on the Mac goes up, and nothing else happens (no
-    /// goodbye, nothing printed), as before.
+    /// every key and button a device holds down on the Mac goes up, and a window Sill sized for a
+    /// device goes back to its own frame (a line each, only when a window was sized); nothing else
+    /// happens (no goodbye), as before.
     package func releaseKeysForExit() {
         injector.releaseAll()
+        restoreFits(keeping: nil)
+    }
+
+    // MARK: A window Sill sized goes back (WindowRestore, issue #57)
+
+    /// Puts back every window Sill sized but `keep` (nil: every one) as it stops streaming
+    /// (`WindowRestore.Ledger.restore`, which runs `WindowRestore.stop` for each): WindowRestore decides
+    /// from its frame now (gone, already home, left as it is because it is full screen or was resized on
+    /// the Mac, or restored: its whole original frame, or its own size where it was moved), and it is
+    /// moved through the element its first fit matched, as the virtual display's restore moves a window.
+    /// A window the virtual display holds goes home with the stage, to the frame `stageHome` gave it:
+    /// only when Quit or a signal lands while `select` waits in `prepare`. One line for each window acted
+    /// on; none for one gone or already home.
+    private func restoreFits(keeping keep: CGWindowID?) {
+        var windows = WindowSizer.AXWindows(sizer: sizer)
+        for s in fits.restore(keeping: keep, staged: stage.placement?.windowID, on: &windows) {
+            if case .restore = s.decision { Stats.shared.bump(s.done ? "win.restored" : "win.restoreFailed") }
+            if let line = s.line { print(line) }
+        }
+    }
+
+    /// Where a window Sill sized would go back to now, for the virtual display's stage to keep as its
+    /// way home when it takes the window (`VirtualStage.prepare(…, home:)`); nil when it has no
+    /// record, or would stay as it is.
+    private func stageHome(for id: CGWindowID) -> CGRect? {
+        guard let entry = fits.entries[id] else { return nil }
+        var windows = WindowSizer.AXWindows(sizer: sizer)
+        return WindowRestore.stageHome(entry.handle, entry.record, on: &windows)
     }
 
     /// An encoder's watchdog fired. A hardware hang is remembered whichever encoder reports it, as
@@ -2111,10 +2184,23 @@ package final class StreamCoordinator {
                     missingPolls += 1
                     if missingPolls <= 3 { broadcastList(); return }
                     missingPolls = 0
+                } else if !(virtualDisplay && stage.isStaged) {
+                    // In regular mode too: one that was full screen when last listed, or that Sill fitted
+                    // and Accessibility says is full screen now, keeps streaming through three looks, so a
+                    // fitted window's way back is not decided mid-change (issue #57's review).
+                    missingPolls += 1
+                    var windows = WindowSizer.AXWindows(sizer: sizer)
+                    if WindowRestore.keepsStreaming(fits.entries[id]?.handle, looks: missingPolls, wasFullScreen: listedFullScreen == id, on: &windows) {
+                        broadcastList(); return
+                    }
+                    missingPolls = 0
                 }
                 await select(.none); return
             }
             missingPolls = 0
+            if !(virtualDisplay && stage.isStaged), let scw = catalog.window(id: id) {
+                listedFullScreen = WindowRestore.coversDisplay(scw.frame, WindowSizer.displayFrames()) ? id : nil
+            }
             if virtualDisplay, stage.isStaged {
                 // Full screen: the crop is a band of the display, not the window's frame. Stay put
                 // while the window still covers the display; restart once it has left full screen.
@@ -2236,7 +2322,7 @@ package final class StreamCoordinator {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation)))
+                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

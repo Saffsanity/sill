@@ -52,6 +52,23 @@ import StreamProtocol
 ///     -SillPrintMenuAfter <s>                  print the status menu as it would open (as menu.txt
 ///                                              draws it, "menu: " before each line) and Settings ›
 ///                                              General's update line, s seconds after launch
+///     -SillSettingsAfter '<s> <tab>[; <s> <tab> …]'
+///                                              open Settings on that tab s seconds after launch,
+///                                              as the menu does, and 0.6 s later print the window's
+///                                              frame, its pane's whole height and how much shows,
+///                                              the visible frame it fits and the cap (issue #59).
+///                                              A tab by its name or the start of one (remote,
+///                                              general, virtual); close closes the window; report
+///                                              prints it as it stands; end scrolls the pane to its
+///                                              last row; height=<points> sets
+///                                              -SillTestScreenHeight (0: the screen's own) and
+///                                              posts the screens' change, as the Dock or a
+///                                              display would
+///     -SillTestScreenHeight <points>           the Settings window fits the top <points> of its
+///                                              screen's visible frame, as if the screen were that
+///                                              short with the Dock at its bottom
+///     -SillSettingsShot <dir>                  each -SillSettingsAfter step also writes the window
+///                                              (title bar, toolbar, pane) to <dir>/settings-<s>s-<tab>.png
 ///     -SillRenderPreviews <dir>                write the Settings panes (the Devices and Remote
 ///                                              Access panes in each of their states, General's
 ///                                              update section in each of its), the pairing
@@ -64,7 +81,9 @@ import StreamProtocol
 /// itself, an app bundle's executable, ignores every `-Sill…After` hook and `-requirePairing`, each
 /// with one line (docs/home-pairing-plan.md §6.6): they open, answer or remove pairings, or change
 /// what the doors admit, and any process of this user can start Sill.app with arguments, which then
-/// runs with Sill's Screen Recording and Accessibility grants. `--synthetic`, `-SillLogFile`,
+/// runs with Sill's Screen Recording and Accessibility grants. `-SillTestScreenHeight` and
+/// `-SillSettingsShot` go with `-SillSettingsAfter` and are ignored the same way: Sill.app has no
+/// use for them. `--synthetic`, `-SillLogFile`,
 /// `-SillRenderPreviews` and the update check's `-SillUpdateFeed`, `-SillUpdateNow`,
 /// `-SillUpdateVersion` and `-SillUpdateInterval` stay: they bear on no door and no pairing (a feed
 /// on this Mac only).
@@ -88,7 +107,18 @@ enum DebugHooks {
 
     /// The timed hooks, which Sill.app itself ignores.
     static let timedHooks = ["SillSetAfter", "SillPairAfter", "SillCancelPairingAfter", "SillUnpairAfter",
-                             "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillQuitAfter"]
+                             "SillCableNoticeAfter", "SillMenuAfter", "SillPrintMenuAfter", "SillSettingsAfter", "SillQuitAfter"]
+    /// The Settings window's test arguments (issue #59), which Sill.app itself ignores too.
+    static let windowHooks = ["SillTestScreenHeight", "SillSettingsShot"]
+
+    /// TEST ONLY (-SillTestScreenHeight <points>, and -SillSettingsAfter's height=): the Settings
+    /// window fits the top <points> of its screen's visible frame (SettingsWindowFit.visible). Nil in
+    /// Sill.app itself, and without it.
+    static var testScreenHeight: CGFloat? = {
+        guard !AppModel.bundled else { return nil }
+        let h = UserDefaults.standard.double(forKey: "SillTestScreenHeight")
+        return h > 0 ? CGFloat(h) : nil
+    }()
 
     /// The update check's configuration: GitHub and the plan's schedule, with the running version
     /// from the bundle, unless the test arguments above say otherwise. Read once, when the model is
@@ -122,7 +152,7 @@ enum DebugHooks {
     static func schedule(model: AppModel) {
         let defaults = UserDefaults.standard
         if AppModel.bundled {
-            for name in timedHooks where defaults.object(forKey: name) != nil {
+            for name in timedHooks + windowHooks where defaults.object(forKey: name) != nil {
                 print("-\(name) ignored: Sill.app itself takes no test hook (use the bare SillMenuBar binary).")
             }
             return
@@ -200,6 +230,43 @@ enum DebugHooks {
                 print("Settings › General's update line: \(model.updates.pane.line)")
             }
         }
+        let shots = defaults.string(forKey: "SillSettingsShot").flatMap { $0.isEmpty ? nil : $0 }
+            .map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) }
+        if let shots { try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true) }
+        for (label, delay, step) in settingsSteps(defaults.string(forKey: "SillSettingsAfter")) {
+            after(delay) {
+                // Once the layout pass has sized the window.
+                @MainActor func report(_ name: String) {
+                    after(0.6) {
+                        let controller = model.settingsWindowForTests?()
+                        print("SillSettingsAfter \(label) s: \(controller?.fitReport() ?? "no Settings window")")
+                        if let shots, let controller {
+                            let url = shots.appendingPathComponent("settings-\(label)s-\(name).png")
+                            print("SillSettingsAfter \(label) s: \(controller.writeShot(to: url) ? "wrote" : "couldn’t write") \(url.path)")
+                        }
+                    }
+                }
+                switch step {
+                case .close:
+                    model.settingsWindowForTests?()?.close()
+                    print("SillSettingsAfter \(label) s: closed Settings")
+                case .tab(let tab):
+                    model.showSettings?(tab)
+                    report(tab.rawValue)
+                case .report:
+                    report("report")
+                case .end:
+                    let scrolled = model.settingsWindowForTests?()?.scrollPaneToEnd() ?? false
+                    print("SillSettingsAfter \(label) s: \(scrolled ? "scrolled the pane to its end" : "no pane to scroll")")
+                    report("end")
+                case .height(let h):
+                    testScreenHeight = h > 0 ? h : nil
+                    print("SillSettingsAfter \(label) s: the test screen height is \(h > 0 ? "\(Int(h)) pt" : "the screen's own") now; posting the screens' change")
+                    NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: NSApp)
+                    report("height\(Int(h))")
+                }
+            }
+        }
         let quitAfter = defaults.double(forKey: "SillQuitAfter")
         if quitAfter > 0 {
             after(quitAfter) {
@@ -215,6 +282,41 @@ enum DebugHooks {
             MainActor.assumeIsolated { body() }
         }
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private enum SettingsStep { case tab(SettingsTab), close, report, end, height(CGFloat) }
+
+    /// "2 remote; 4 report; 6 height=700; 8 close" (-SillSettingsAfter): each step's seconds as
+    /// written, as a number, and what it does. A tab by its raw value or title, or the start of one,
+    /// without spaces and in any case; a bad step is skipped with a line.
+    private static func settingsSteps(_ spec: String?) -> [(String, Double, SettingsStep)] {
+        guard let spec else { return [] }
+        return spec.split(separator: ";").compactMap { raw in
+            let parts = raw.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let delay = Double(parts[0]), delay > 0 else {
+                print("SillSettingsAfter: can’t read “\(raw)”; expected '<seconds> <tab or step>'")
+                return nil
+            }
+            let word = parts[1].lowercased().replacingOccurrences(of: " ", with: "")
+            if word == "close" { return (parts[0], delay, .close) }
+            if word == "report" { return (parts[0], delay, .report) }
+            if word == "end" { return (parts[0], delay, .end) }
+            if word.hasPrefix("height=") {
+                guard let h = Double(word.dropFirst("height=".count)), h >= 0 else {
+                    print("SillSettingsAfter: can’t read “\(parts[1])”; expected height=<points>")
+                    return nil
+                }
+                return (parts[0], delay, .height(CGFloat(h)))
+            }
+            let matches = SettingsTab.allCases.filter {
+                $0.rawValue.lowercased().hasPrefix(word) || $0.title.lowercased().replacingOccurrences(of: " ", with: "").hasPrefix(word)
+            }
+            guard matches.count == 1, let tab = matches.first else {
+                print("SillSettingsAfter: “\(parts[1])” is no step: a tab (general, devices, streaming, virtual display, permissions, remote access, or the start of one), close, report, end or height=<points>")
+                return nil
+            }
+            return (parts[0], delay, .tab(tab))
+        }
     }
 
     /// "3; 9.5; 15" (or "3, 9.5"): the times a hook fires; a bad entry is skipped with a line.
@@ -245,6 +347,7 @@ enum DebugHooks {
         case "remoteAccess": config.remoteAccess = flag
         case "remotePort": if let v = Int(value) { config.remotePort = v }
         case "internetAccess": config.internetAccess = flag
+        case "shareClipboard": config.shareClipboard = flag
         case "remoteAddressName": addressName = value
         case "requirePairing": requirePairing = flag
         case "updateCheck": updateCheck = flag
@@ -268,7 +371,8 @@ enum DebugHooks {
         let neverChecked = updatePaneSamples()[0].pane
         for tab in SettingsTab.allCases where tab != .remoteAccess && tab != .devices {
             for (name, appearance) in appearances {
-                render(SettingsPane(tab: tab, model: model, previewUpdates: neverChecked).background(Color(nsColor: .windowBackgroundColor)),
+                render(SettingsPane(tab: tab, model: model, previewUpdates: neverChecked, previewClipboardAccess: .allowed)
+                        .background(Color(nsColor: .windowBackgroundColor)),
                        appearance: appearance, to: out.appendingPathComponent("pane-\(tab.rawValue)-\(name).png"))
             }
         }
@@ -280,6 +384,21 @@ enum DebugHooks {
                 .background(Color(nsColor: .windowBackgroundColor))
             for (name, appearance) in appearances {
                 render(pane, appearance: appearance, to: out.appendingPathComponent("pane-devices-\(sample.name)-\(name).png"))
+            }
+        }
+        // General's clipboard section in each of macOS's answers (ClipboardPolicy.MacAccess), and with
+        // the switch off, when it says nothing of them.
+        let clipboardSamples: [(String, Bool, ClipboardPolicy.MacAccess)] = [
+            ("allowed", true, .allowed), ("notasked", true, .notAsked), ("asks", true, .asks), ("denied", true, .denied),
+            ("off-denied", false, .denied),
+        ]
+        for (sampleName, on, access) in clipboardSamples {
+            let section = Form { ClipboardSection(shareClipboard: .constant(on), access: access) }
+                .formStyle(.grouped)
+                .frame(width: 520)
+                .background(Color(nsColor: .windowBackgroundColor))
+            for (name, appearance) in appearances {
+                render(section, appearance: appearance, to: out.appendingPathComponent("pane-clipboard-\(sampleName)-\(name).png"))
             }
         }
         for sample in updatePaneSamples() {

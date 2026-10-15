@@ -12,11 +12,14 @@ struct SettingsPane: View {
     /// The previews (DebugHooks): General's update section in this state instead of the live one,
     /// so a render does not depend on what an earlier run stored.
     var previewUpdates: UpdatePolicy.Pane?
+    /// …and its clipboard section with macOS's answer as given, never read from this Mac.
+    var previewClipboardAccess: ClipboardPolicy.MacAccess?
 
     var body: some View {
         Group {
             switch tab {
-            case .general: GeneralPane(model: model, settings: model.settings, previewUpdates: previewUpdates)
+            case .general: GeneralPane(model: model, settings: model.settings, previewUpdates: previewUpdates,
+                                       previewClipboardAccess: previewClipboardAccess)
             case .devices: LiveDevicesPane(model: model, settings: model.settings)
             case .streaming: StreamingPane(model: model, settings: model.settings)
             case .virtualDisplay: VirtualDisplayPane(model: model, settings: model.settings)
@@ -80,6 +83,7 @@ private struct GeneralPane: View {
     let model: AppModel
     @Bindable var settings: HostSettings
     var previewUpdates: UpdatePolicy.Pane?
+    var previewClipboardAccess: ClipboardPolicy.MacAccess?
 
     private static let runsFromApplications = Bundle.main.bundlePath.hasPrefix("/Applications/")
 
@@ -137,6 +141,12 @@ private struct GeneralPane: View {
             } footer: {
                 Footnote("Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off.")
             }
+            // The clipboard both ways (HostClipboard): at once, no restart. Each device has its own
+            // switch too. macOS's answer is read with the permissions (once a second while this pane
+            // shows, and when Sill becomes active), never in a preview.
+            ClipboardSection(shareClipboard: $settings.config.shareClipboard,
+                             access: previewClipboardAccess ?? model.permissions.clipboardAccess,
+                             allow: { model.permissions.allowClipboard() })
             if let preview = previewUpdates {
                 UpdatesSection(pane: preview, automatic: .constant(true))
             } else {
@@ -170,6 +180,38 @@ private struct GeneralPane: View {
         case .failed: return "Not visible (the listener failed)"
         case .waiting: return "Not yet (waiting for the network)"
         case .starting, .registering: return "Registering…"
+        }
+    }
+}
+
+// MARK: Clipboard
+
+/// Share clipboard with devices (HostClipboard, docs/clipboard-plan.md): the switch and its footnote,
+/// and while the switch is on and macOS does not allow every read Sill makes on its own
+/// (ClipboardPolicy.MacAccess), why what is copied here stays on this Mac and the way to allow it.
+/// Drawn alone in the previews in each of macOS's answers (DebugHooks).
+struct ClipboardSection: View {
+    @Binding var shareClipboard: Bool
+    let access: ClipboardPolicy.MacAccess
+    var allow: () -> Void = {}
+
+    var body: some View {
+        Section {
+            Toggle("Share clipboard with devices", isOn: $shareClipboard)
+            if shareClipboard, let warning = ClipboardPolicy.Copy.macAccessWarning(access) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Warning(warning)
+                    if let hint = ClipboardPolicy.Copy.macAccessHint(access) {
+                        Text(hint)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button(ClipboardPolicy.Copy.macAccessButton, action: allow)
+                }
+            }
+        } footer: {
+            Footnote(ClipboardPolicy.Copy.macFootnote)
         }
     }
 }

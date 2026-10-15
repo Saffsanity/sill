@@ -1,5 +1,6 @@
-"""H2 (docs/first-run-walkthrough-plan.md, §14 step 1) mutants of TourPolicy.swift: each changes it in one
-place, is compiled with the check and must make it fail. usage: mutants.py WORKTREE"""
+"""H2 (docs/first-run-walkthrough-plan.md, §14 step 1) mutants of TourPolicy.swift, and of Larger Picture's
+rule in PhonePortraitLayout.swift (docs/larger-picture-plan.md): each changes one in one place, is compiled
+with the check and must make it fail. usage: mutants.py WORKTREE"""
 import os, subprocess, sys, tempfile
 WT = sys.argv[1]; HERE = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(WT, "iOSClient/TourPolicy.swift")
@@ -80,19 +81,45 @@ MUTANTS = [
     ("one word of the copy changed", "plain(\" to scroll.\")", "plain(\" to scroll it.\")"),
     ("no Keyboard row on a phone's bar card", "if layout != .portrait { rows.append(keyboardRow) }", "if layout == .landscape { rows.append(keyboardRow) }"),
     ("the keyboard key's row on a phone", "if layout != .phone {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")", "if true {\n                rows.append(row(\"keyboard\", [strong(\"The keyboard key\")"),
-    ("a phone's laptop hint as the halves'", "rows: rows, hint: layout == .phone ? \"Under the windows", "rows: rows, hint: layout == .portrait ? \"Under the windows"),
+    ("a phone's laptop hint as the halves'", 'case .phone: hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."',
+     'case .phone: hint = "Below the bar: the row of keys, then the trackpad."'),
     ("Aa not said to be a window's", "plain(\": touch it and slide to make a window’s text larger or smaller.\")", "plain(\": touch it and slide to make text larger or smaller.\")"),
     ("the caps not spoken by name", "spoken: \"Command, Option, Control and Shift stay on for the next key or trackpad click: tap Command, then C, to copy.\")", "spoken: nil)"),
+    # Larger Picture (docs/larger-picture-plan.md): no thumbnails on a phone.
+    ("Larger Picture's bar card lights the strip", "case .bar where layout == .phone && !thumbnails: return [.apps, .textSize, .keyboard]",
+     "case .bar where layout == .phone && !thumbnails: return [.strip, .textSize, .keyboard]"),
+    ("Larger Picture's bar card without Apps", "case .bar where layout == .phone && !thumbnails: return [.apps, .textSize, .keyboard]",
+     "case .bar where layout == .phone && !thumbnails: return [.textSize, .keyboard]"),
+    ("no thumbnails in the halves too", "case .bar where layout == .phone && !thumbnails:", "case .bar where layout != .landscape && !thumbnails:"),
+    ("Larger Picture's bar card about the thumbnails", "if layout == .phone && !thumbnails {\n                rows[0] = voiceOver", "if false {\n                rows[0] = voiceOver"),
+    ("Apps' row says tap under VoiceOver", 'plain(" lists the apps on \\(mac). Choose an open one again for its next window.")',
+     'plain(" lists the apps on \\(mac): tap an open one again for its next window.")'),
+    ("Larger Picture's bar hint as the thumbnails'", 'case .phone where !thumbnails: hint = "Under the picture, in the row of buttons: Apps, Aa and Keyboard."',
+     'case .phone where false: hint = "Under the picture, in the row of buttons: Apps, Aa and Keyboard."'),
+    ("Larger Picture's laptop hint under the windows", 'hint = thumbnails ? "Under the windows: the row of keys, then the trackpad." : "Under the buttons: the row of keys, then the trackpad."',
+     'hint = "Under the windows: the row of keys, then the trackpad."'),
+    ("the picture's room ignored", "let half = room ?? stream", "let half = stream"),
+]
+# Larger Picture only while a window streams (Noah, 2026-10-15): the rule is PhonePortraitLayout's
+# (compiled into this check), and the tour's targets, words and places follow it. Each of these
+# changes PhonePortraitLayout.swift instead.
+LAYOUT = os.path.join(WT, "iOSClient/PhonePortraitLayout.swift")
+LAYOUT_MUTANTS = [
+    ("the Desktop with Larger Picture's tour", "switchOn && streaming == .window", "switchOn && streaming != .nothing"),
+    ("nothing streaming with Larger Picture's tour", "switchOn && streaming == .window", "switchOn && streaming != .desktop"),
+    ("what streams ignored (the Desktop's tour about Apps, as before 2026-10-15)", "switchOn && streaming == .window", "switchOn"),
+    ("the switch ignored while a window streams", "switchOn && streaming == .window", "streaming == .window"),
 ]
 caught = 0
-for name, old, new in MUTANTS:
-    src = open(F).read()
+for (name, old, new), path in [(m, F) for m in MUTANTS] + [(m, LAYOUT) for m in LAYOUT_MUTANTS]:
+    src = open(path).read()
     if src.count(old) != 1:
         print(f"{name}: NOT APPLIED (pattern found {src.count(old)} times)"); continue
     with tempfile.TemporaryDirectory() as t:
-        mf = os.path.join(t, "TourPolicy.swift"); open(mf, "w").write(src.replace(old, new, 1))
+        mf = os.path.join(t, os.path.basename(path)); open(mf, "w").write(src.replace(old, new, 1))
+        sources = [mf, LAYOUT] if path == F else [F, mf]
         exe = os.path.join(t, "c")
-        r = subprocess.run(["swiftc", "-O", mf, os.path.join(WT, "iOSClient/PhonePortraitLayout.swift"), os.path.join(WT, "iOSClient/DuoPosture.swift"),
+        r = subprocess.run(["swiftc", "-O", *sources, os.path.join(WT, "iOSClient/DuoPosture.swift"),
                             os.path.join(HERE, "main.swift"), "-o", exe], capture_output=True, text=True)
         if not os.path.exists(exe): print(f"{name}: did not compile ({r.stderr.strip().splitlines()[:1]})"); continue
         r = subprocess.run([exe], capture_output=True, text=True, timeout=300)
@@ -102,5 +129,6 @@ for name, old, new in MUTANTS:
             print(f"{name}: caught ({failed[0][:100] if failed else f'exit status {r.returncode}'})")
         else:
             print(f"{name}: NOT CAUGHT")
-print(f"mutants caught: {caught} of {len(MUTANTS)}")
-sys.exit(0 if caught == len(MUTANTS) else 1)
+total = len(MUTANTS) + len(LAYOUT_MUTANTS)
+print(f"mutants caught: {caught} of {total}")
+sys.exit(0 if caught == total else 1)

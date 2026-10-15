@@ -74,6 +74,9 @@ struct StreamScreen: View {
                     .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            MacClipboardChip(client: client).padding(16)
+        }
         // Under the floating sidebar's inset too, so no strip of window background shows beside it.
         .background(Color.black.ignoresSafeArea())
     }
@@ -360,6 +363,16 @@ private struct SettingsPopover: View {
                 }
                 if !state.persistent {
                     Text("SillHost keeps these until it quits.").foregroundStyle(.secondary)
+                }
+                if ClipboardPolicy.hostTakes(client.hostClipboard) {
+                    Section {
+                        Toggle("Share Clipboard", isOn: Binding(
+                            get: { StreamClient.clipboardOn },
+                            set: { UserDefaults.standard.set($0, forKey: StreamClient.clipboardKey); client.clipboardSwitchChanged() }))
+                    } footer: {
+                        Text("Text you copy on \(mac) lands on this Mac’s clipboard. To send this Mac’s, use Paste on the chip that appears when you come back to the viewer.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 HStack(spacing: 8) {
