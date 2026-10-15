@@ -171,6 +171,20 @@ check(P.macAccess(raw: nil) == .allowed, "before macOS 15.4 (no such setting): e
 check(P.macAccess(raw: 0) == .notAsked && P.macAccess(raw: 1) == .asks && P.macAccess(raw: 2) == .allowed && P.macAccess(raw: 3) == .denied,
       "0 default (not asked yet), 1 ask, 2 always allow, 3 always deny")
 check(P.macAccess(raw: 4) == .asks && P.macAccess(raw: -1) == .asks, "a value this build does not know: as asking, nothing read in the background")
+for (access, mayRead) in [(P.MacAccess.allowed, true), (.notAsked, true), (.asks, false), (.denied, false)] {
+    check(P.viewerMayRead(access: access) == mayRead, "viewer reads under \(access.rawValue): \(mayRead)")
+    for on in [false, true] {
+        check(P.viewerNeedsAccessHelp(access: access, switchOn: on) == (on && (access == .asks || access == .denied)),
+              "viewer clipboard permission help under \(access.rawValue), sharing \(on)")
+    }
+}
+check(P.viewerMayRead(access: P.macAccess(raw: nil)), "viewer reads before macOS 15.4")
+check(!P.viewerMayRead(access: P.macAccess(raw: 4)), "an unknown permission answer never enables viewer reads")
+check(P.pastePrivacyURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard",
+      "viewer opens the host's existing Paste from Other Apps route")
+check(C.viewerAccessButton == "Allow Clipboard Access…", "viewer permission menu item")
+check(C.viewerAccessHint == "Set this app to Allow under Paste from Other Apps in Privacy & Security. Copies from the other Mac still arrive.",
+      "viewer permission help keeps incoming copies available")
 check(P.hostLooks(.allowed) && !P.hostLooks(.notAsked) && !P.hostLooks(.asks) && !P.hostLooks(.denied), "the host reads only while every read is allowed")
 for was in [nil, .allowed, .notAsked, .asks, .denied] as [P.MacAccess?] {
     for now in [.allowed, .notAsked, .asks, .denied] as [P.MacAccess] {

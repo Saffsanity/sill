@@ -17,9 +17,9 @@ with tempfile.TemporaryDirectory(prefix="sill-clipboard-viewer-") as t:
         text = source.read_text()
         if source.name == "SideStreams.swift":
             text = text.replace("NSPasteboard.general", "testBoard")
-            start = text.index("    public static var canRead: Bool {")
-            end = text.index("    /// Whether the pasteboard holds", start)
-            text = text[:start] + "    public static var canRead: Bool { true }\n\n" + text[end:]
+            start = text.index("    public static var access: ClipboardPolicy.MacAccess {")
+            end = text.index("    /// Unprompted reads only:", start)
+            text = text[:start] + "    public static var access: ClipboardPolicy.MacAccess { testAccess }\n\n" + text[end:]
         path = target / source.name
         path.write_text(text)
         files.append(str(path))

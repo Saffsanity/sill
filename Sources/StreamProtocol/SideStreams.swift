@@ -317,28 +317,44 @@ public enum ClipboardPasteboard {
     /// The private type on a pasteboard item Sill wrote from the other Mac's clipboard.
     public static let fromOtherMacType = NSPasteboard.PasteboardType("me.saffer.sill.clipboard.from-other-mac")
 
-    /// Background reads follow the same macOS paste privacy policy as the host.
-    public static var canRead: Bool {
+    /// Reading the permission answer itself never reads clipboard contents or brings an alert.
+    public static var access: ClipboardPolicy.MacAccess {
         if #available(macOS 15.4, *) {
-            return ClipboardPolicy.hostLooks(ClipboardPolicy.macAccess(raw: NSPasteboard.general.accessBehavior.rawValue))
+            return ClipboardPolicy.macAccess(raw: NSPasteboard.general.accessBehavior.rawValue)
         }
-        return true
+        return .allowed
     }
 
+    /// Unprompted reads only: a received copy's duplicate check must never bring an alert.
+    public static var canRead: Bool { ClipboardPolicy.hostLooks(access) }
+
     /// Whether the pasteboard holds what Sill wrote from the other Mac (not a copy made on this one).
-    public static var fromOtherMac: Bool { NSPasteboard.general.types?.contains(fromOtherMacType) == true || NSPasteboard.general.types?.contains(NSPasteboard.PasteboardType(ClipboardPolicy.ownType)) == true }
+    public static var fromOtherMac: Bool {
+        guard ClipboardPolicy.viewerMayRead(access: access) else { return false }
+        let types = NSPasteboard.general.types ?? []
+        return types.contains(fromOtherMacType) || types.contains(NSPasteboard.PasteboardType(ClipboardPolicy.ownType))
+    }
 
     /// Its text (when not too long) and its image (PNG, TIFF or JPEG, made to fit `imageLimit`).
     public static func read(imageLimit: Int) -> Clipboard {
+        guard ClipboardPolicy.viewerMayRead(access: access) else { return Clipboard() }
         let board = NSPasteboard.general
         let types = (board.pasteboardItems ?? []).flatMap { $0.types.map(\.rawValue) }
         guard !types.contains(where: { ClipboardPolicy.markerTypes.contains($0) }),
               !types.contains(ClipboardPolicy.remoteClipboardType), !fromOtherMac else { return Clipboard() }
+        guard ClipboardPolicy.viewerMayRead(access: access) else { return Clipboard() }
         var text = board.string(forType: .string)
         if let t = text, t.isEmpty || t.utf8.count > Clipboard.maxTextBytes { text = nil }
+        // The first read may have brought macOS's alert. Honor its answer before reading more.
+        guard ClipboardPolicy.viewerMayRead(access: access) else { return Clipboard() }
         var image: Data?
         for type in [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")] where imageLimit > 0 {
-            if let data = board.data(forType: type) { image = ClipboardImage.fit(data, limit: imageLimit); break }
+            guard ClipboardPolicy.viewerMayRead(access: access) else { return Clipboard() }
+            if let data = board.data(forType: type) {
+                guard ClipboardPolicy.viewerMayRead(access: access) else { return Clipboard() }
+                image = ClipboardImage.fit(data, limit: imageLimit)
+                break
+            }
         }
         return Clipboard(text: text, image: image)
     }

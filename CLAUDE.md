@@ -65,6 +65,10 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   and 16 actual viewer-code assertions with named pasteboards, plus its subscription call-site
   mutant caught. Release and iOS simulator builds passed. The plan’s merge section distinguishes
   these checks from a real two-Mac session and macOS’s permission prompt.
+- Viewer permission follow-up: a new local copy may bring macOS’s first prompt while it has not
+  asked yet; Ask and Deny stop polling, while received copies still write. While Share Clipboard
+  is on, Ask or Deny shows Allow Clipboard Access… beside it, opening the host’s existing Paste
+  from Other Apps pane in System Settings.
 - Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
   built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
   on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's retry wait and a real

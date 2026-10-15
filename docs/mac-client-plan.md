@@ -78,6 +78,10 @@ The viewer subscribes with `accepts: 2` once the host advertises text or images,
 are fitted before encoding; an oversized image is omitted, keeping text only if it fits.
 Clipboard reads skip concealed, transient, remote and Sill-originated copies before reading
 contents; received copies stay on this Mac (`currentHostOnly`).
+A new local copy may bring macOS’s first permission prompt for the viewer while it has not asked
+before; Ask or Deny stops polling, while received copies still write. With Share Clipboard on,
+Ask or Deny shows Allow Clipboard Access… beside it, opening the host’s existing Paste from Other
+Apps pane in System Settings.
 
 ## Sill's desk (DeskStages, VirtualStage)
 

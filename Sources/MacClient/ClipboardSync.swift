@@ -77,7 +77,7 @@ final class ClipboardSync {
         let board = NSPasteboard.general
         updateSubscription()
         guard Self.enabled, client.connected, subscribed, ClipboardPolicy.hostTakes(client.hostClipboard),
-              ClipboardPasteboard.canRead else { synced = nil; return }
+              ClipboardPolicy.viewerMayRead(access: ClipboardPasteboard.access) else { synced = nil; return }
         guard let synced else { self.synced = board.changeCount; return }
         guard board.changeCount != synced else { return }
         self.synced = board.changeCount

@@ -251,6 +251,20 @@ public enum ClipboardPolicy {
         }
     }
 
+    /// The viewer is used directly: its first new copy may let macOS ask once. A person who
+    /// chose Ask must not get a prompt at every polled copy; Deny is never read either.
+    public static func viewerMayRead(access: MacAccess) -> Bool {
+        access == .allowed || access == .notAsked
+    }
+
+    /// The viewer's menu offers a way to allow copies while sharing is on and reads stay blocked.
+    public static func viewerNeedsAccessHelp(access: MacAccess, switchOn: Bool) -> Bool {
+        switchOn && (access == .asks || access == .denied)
+    }
+
+    /// The host's Settings › General route to Privacy & Security › Paste from Other Apps.
+    public static let pastePrivacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!
+
     /// Whether the host reads its pasteboard at all: only while macOS allows every read. While it
     /// asks, each read would bring macOS's alert, at every copy, and the read would wait for the
     /// answer; while it denies, a read gets nothing.
@@ -445,6 +459,8 @@ public enum ClipboardPolicy {
             case .asks, .denied: return "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives."
             }
         }
+        public static let viewerAccessButton = "Allow Clipboard Access…"
+        public static let viewerAccessHint = "Set this app to Allow under Paste from Other Apps in Privacy & Security. Copies from the other Mac still arrive."
         public static let macAccessButton = "Allow in System Settings…"
         /// The host's line when macOS's answer changes while a device shares the clipboard (`accessLine`).
         public static func macAccessLine(_ access: MacAccess) -> String {

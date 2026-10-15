@@ -4,6 +4,7 @@ import Combine
 import Foundation
 
 let testBoard = NSPasteboard(name: NSPasteboard.Name("me.saffer.sill.test.clipboard-merge.viewer.\(getpid())"))
+var testAccess: ClipboardPolicy.MacAccess = .allowed
 let defaultsName = "me.saffer.sill.test.clipboard-merge.viewer.\(getpid())"
 let testDefaults = UserDefaults(suiteName: defaultsName)!
 defer { testDefaults.removePersistentDomain(forName: defaultsName) }
@@ -95,4 +96,35 @@ count = client.sent.count
 text("disabled host")
 tick()
 check(client.sent.count == count, "disabled host gets no clipboard traffic")
+testAccess = .notAsked
+client.hostClipboard = 2
+tick()
+count = client.sent.count
+check(client.sent.last == Clipboard(accepts: 2), "default permission subscribes without reading an existing copy")
+text("first default-state copy")
+tick()
+check(client.sent.count == count + 1 && client.sent.last?.text == "first default-state copy", "default permission reads a new copy so macOS can ask once")
+for access in [ClipboardPolicy.MacAccess.asks, .denied] {
+    testAccess = access
+    count = client.sent.count
+    text("blocked local copy")
+    tick()
+    check(client.sent.count == count, "no local copy sent while macOS \(access.rawValue)")
+}
+testAccess = .allowed
+count = client.sent.count
+tick()
+check(client.sent.count == count, "granting permission never exports a copy made while reads were blocked")
+text("new allowed copy")
+tick()
+check(client.sent.count == count + 1 && client.sent.last?.text == "new allowed copy", "an allowed viewer sends a new local copy")
+for access in [ClipboardPolicy.MacAccess.allowed, .notAsked, .asks, .denied] {
+    testAccess = access
+    count = client.sent.count
+    let remote = "incoming \(access.rawValue)"
+    client.onClipboard?(Clipboard(text: remote, image: image()))
+    tick()
+    check(testBoard.string(forType: .string) == remote && testBoard.data(forType: .png) == image(), "incoming copies write under \(access.rawValue)")
+    check(client.sent.count == count, "incoming copies never echo under \(access.rawValue)")
+}
 print("Viewer checks: \(checks) passed")

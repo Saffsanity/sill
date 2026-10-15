@@ -6,6 +6,15 @@ WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 P = "ClipboardPolicy.swift"
 MUTANTS = [
+    ('viewer never prompts in the default state', 'ClipboardPolicy.swift', 'access == .allowed || access == .notAsked', 'access == .allowed'),
+    ('viewer refuses reads when allowed', 'ClipboardPolicy.swift', 'access == .allowed || access == .notAsked', 'access == .notAsked'),
+    ('viewer polls reads while macOS asks', 'ClipboardPolicy.swift', 'access == .allowed || access == .notAsked', 'access == .allowed || access == .notAsked || access == .asks'),
+    ('viewer polls reads while macOS denies', 'ClipboardPolicy.swift', 'access == .allowed || access == .notAsked', 'access == .allowed || access == .notAsked || access == .denied'),
+    ('viewer permission help missing while macOS asks', 'ClipboardPolicy.swift', 'switchOn && (access == .asks || access == .denied)', 'switchOn && access == .denied'),
+    ('viewer permission help missing while macOS denies', 'ClipboardPolicy.swift', 'switchOn && (access == .asks || access == .denied)', 'switchOn && access == .asks'),
+    ('viewer permission help with sharing off', 'ClipboardPolicy.swift', 'switchOn && (access == .asks || access == .denied)', 'access == .asks || access == .denied'),
+    ('viewer permission help before the first prompt', 'ClipboardPolicy.swift', 'switchOn && (access == .asks || access == .denied)', 'switchOn && (access == .notAsked || access == .asks || access == .denied)'),
+    ('viewer opens a different permission pane', 'ClipboardPolicy.swift', 'security?Privacy_Pasteboard', 'security?Privacy_Accessibility'),
     ("image sent to a {} subscriber", "ClipboardPolicy.swift", "let image = (accepts ?? generation) >= imageGeneration ? clip.image : nil", "let image = clip.image"),
     ("viewer subscribes without accepts", "ClipboardPolicy.swift", "return Clipboard(accepts: imageGeneration)", "return Clipboard()"),
     # The wire.
@@ -40,8 +49,8 @@ MUTANTS = [
     # macOS's paste privacy (the review's finding: the host read whatever macOS said).
     ("macOS's default (not asked yet) read as allowed", P, "case 0?: return .notAsked", "case 0?: return .allowed"),
     ("macOS's deny read as allowed", P, "case 3?: return .denied", "case 3?: return .allowed"),
-    ("an answer this build does not know read as allowed", P, "        default: return .asks\n        }\n    }\n\n    /// Whether the host reads",
-     "        default: return .allowed\n        }\n    }\n\n    /// Whether the host reads"),
+    ("an answer this build does not know read as allowed", P, "        default: return .asks\n        }\n    }\n\n    /// The viewer is used directly:",
+     "        default: return .allowed\n        }\n    }\n\n    /// The viewer is used directly:"),
     ("before macOS 15.4 read as asking", P, "case nil, 2?: return .allowed", "case 2?: return .allowed"),
     ("the host reads while macOS asks", P, "public static func hostLooks(_ access: MacAccess) -> Bool { access == .allowed }",
      "public static func hostLooks(_ access: MacAccess) -> Bool { access != .denied }"),

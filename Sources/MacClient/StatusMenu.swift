@@ -39,6 +39,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(submenu("Gestures", gestureItems()))
             menu.addItem(captureItem())
             menu.addItem(shareClipboardItem())
+            if ClipboardPolicy.viewerNeedsAccessHelp(access: ClipboardPasteboard.access, switchOn: ClipboardSync.enabled) {
+                let allow = action(ClipboardPolicy.Copy.viewerAccessButton) {
+                    if !NSWorkspace.shared.open(ClipboardPolicy.pastePrivacyURL),
+                       let root = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
+                        NSWorkspace.shared.open(root)
+                    }
+                }
+                allow.toolTip = ClipboardPolicy.Copy.viewerAccessHint
+                menu.addItem(allow)
+            }
             menu.addItem(playSoundItem())
             if let key = NSApp.orderedWindows.first(where: { $0 is StreamWindow && $0.styleMask.contains(.fullScreen) }) {
                 menu.addItem(action("Exit Full Screen") { key.toggleFullScreen(nil) })
