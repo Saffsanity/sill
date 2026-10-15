@@ -92,6 +92,8 @@ final class StreamServer {
         /// A TLS home session over the USB cable to an iPhone or iPad (CableLink, read at
         /// registration): no radio to keep awake, so no ticks.
         var onCable = false
+        /// Its connection runs over QUIC rather than TCP (`RemoteTLS.isQUIC`).
+        var isQUIC = false
         /// Bytes handed to the connection that it has not taken yet (`.contentProcessed`), every
         /// message `inflight` counts: every client's, which its link judge reads (the home branch of
         /// `broadcast` never does); and, remote clients only, the keyframes among them it is still
@@ -363,6 +365,7 @@ final class StreamServer {
     var homeTLS: Bool { homeDoor != nil }
 
     private var listener: NWListener                 // replaced whole, never reconfigured
+    private var quicListener: NWListener?            // QUIC over UDP on the same port at a TLS home door
     /// The Mac's name and `_sill._tcp`, a test registration (SILL_TEST_SERVICE_TYPE), or nil (the
     /// synthetic hosts, which devices must never find).
     private let serviceNameAndType: (name: String, type: String)?
@@ -634,6 +637,9 @@ final class StreamServer {
             switch state {
             case .ready:
                 portLock.lock(); readyPort = l.port?.rawValue; portLock.unlock()
+                if let door = homeDoor, let p = l.port {
+                    startHomeQUICListener(door: door, port: p, peerToPeer: l.parameters.includePeerToPeer)
+                }
             case .failed(let e):
                 if case .settling(let n) = swap {
                     // A replacement failed after binding: its own fallback (another port, else the
@@ -673,6 +679,34 @@ final class StreamServer {
         l.newConnectionHandler = { [weak self] c in self?.accept(c, peerToPeer: acceptsPeerToPeer) }
     }
 
+    /// Runs a QUIC listener on the same UDP `port` beside a TLS home door's TCP listener.
+    private func startHomeQUICListener(door: Door, port: NWEndpoint.Port, peerToPeer: Bool) {
+        quicListener?.cancel()
+        quicListener = nil
+        let params = RemoteTLS.quicParameters(quic: door.quicOptions(), peerToPeer: peerToPeer)
+        let ql: NWListener
+        do {
+            if loopbackOnly {
+                Self.bindToLoopback(params, port: port)
+                ql = try NWListener(using: params)
+            } else {
+                ql = try NWListener(using: params, on: port)
+            }
+        } catch {
+            return
+        }
+        quicListener = ql
+        RemoteTLS.attachQUICGroups(ql, queue: queue) { [weak self, weak ql] c in
+            guard let self, let ql, ql === self.quicListener else { c.cancel(); return }
+            self.accept(c, peerToPeer: peerToPeer)
+        }
+        ql.stateUpdateHandler = { [weak self, weak ql] state in
+            guard let self, let ql, ql === self.quicListener else { return }
+            if case .failed = state { ql.cancel(); self.quicListener = nil }
+        }
+        ql.start(queue: queue)
+    }
+
     /// Direct Wireless Connection, from the coordinator. Before `start()` the listener is built with
     /// it; after, the listener is replaced (see the MARK above). Thread-safe; returns at once.
     /// Requests during a replacement coalesce, and the newest wins.
@@ -690,6 +724,8 @@ final class StreamServer {
         swapCount += 1
         let n = swapCount
         swap = .cancelling(n)
+        quicListener?.cancel()
+        quicListener = nil
         let old = listener
         let oldPort = old.port   // nil for a listener that failed or was never ready: any port then
         // Its registration ending is not the Mac leaving: the status keeps the name through the
@@ -987,6 +1023,7 @@ final class StreamServer {
         // peer's key); a home route without a peer is a plain connection and keeps the plain door's
         // tick rule (the pacing harness's home client, Scripts/pacing).
         client.encrypted = route.encrypted
+        client.isQUIC = RemoteTLS.isQUIC(connection)
         client.onCable = route.cableDevice != nil
         let id = ObjectIdentifier(connection)
         connection.stateUpdateHandler = { [weak self] state in
@@ -1543,9 +1580,12 @@ final class StreamServer {
         } else {
             let tooMuch: Bool
             if !client.keyframesInFlight.isEmpty {
-                tooMuch = client.pendingBytes - client.keyframeBytesInFlight > Self.remoteHoldCap
+                let cap = client.isQUIC ? Self.quicHoldCap : Self.remoteHoldCap
+                tooMuch = client.pendingBytes - client.keyframeBytesInFlight > cap
             } else {
-                tooMuch = client.pendingBytes > max(Self.remoteBacklogBudget, client.backlogFloor + Self.remoteBacklogSlack)
+                let budget = client.isQUIC ? Self.quicBacklogBudget : Self.remoteBacklogBudget
+                let slack = client.isQUIC ? Self.quicBacklogSlack : Self.remoteBacklogSlack
+                tooMuch = client.pendingBytes > max(budget, client.backlogFloor + slack)
             }
             if tooMuch {
                 Stats.shared.bump("net.dropped")
@@ -1571,6 +1611,12 @@ final class StreamServer {
     /// Low preset's deltas (60 × ~8 KB), what piles up while a large keyframe is taken on a hotspot;
     /// past it the stream is more than the link carries.
     static let remoteHoldCap = 512 * 1024
+    /// QUIC runs in user space with no kernel TCP send buffer (~380–590 KB) underneath
+    /// `NWConnection.send`, so `pendingBytes` includes the in-flight congestion window and any
+    /// burst of frames (e.g. two 312.5 KB deltas at 120 fps) that TCP hides in the socket buffer.
+    static let quicBacklogBudget = 768 * 1024
+    static let quicBacklogSlack = 512 * 1024
+    static let quicHoldCap = 1024 * 1024
     /// A queue this short holds nothing but control messages (pongs, a settings reply): a
     /// keyframe asked for now leads it.
     static let remoteIdleBytes = 16 * 1024
@@ -1630,6 +1676,46 @@ final class StreamServer {
         if isFrame {
             client.inflightFrames += 1
             if client.oldestUnackedFrameAt == nil { client.oldestUnackedFrameAt = now }
+        }
+        let chunkSize = 65536
+        if client.isQUIC, data.count > chunkSize {
+            // Feed large messages to user-space QUIC in 64 KB slices so `pendingBytes` and
+            // `keyframeBytesInFlight` drain as packets cross the congestion window instead of
+            // jumping only when the last byte of a multi-megabyte keyframe is taken.
+            var offset = 0
+            while offset < data.count {
+                let end = min(offset + chunkSize, data.count)
+                let slice = data.subdata(in: offset..<end)
+                let sliceBytes = slice.count
+                let isLast = end == data.count
+                offset = end
+                client.connection.send(content: slice, completion: .contentProcessed { [weak client] _ in
+                    guard let client else { return }
+                    client.pendingBytes -= sliceBytes
+                    client.takenThisSecond += sliceBytes
+                    if remote, let seq = keyframeSeq,
+                       let i = client.keyframesInFlight.firstIndex(where: { $0.seq == seq }) {
+                        client.keyframeBytesInFlight -= sliceBytes
+                        client.keyframesInFlight[i].bytes -= sliceBytes
+                        if isLast || client.keyframesInFlight[i].bytes <= 0 {
+                            client.keyframesInFlight.remove(at: i)
+                            if client.keyframesInFlight.isEmpty { client.backlogFloor = client.pendingBytes }
+                        }
+                    }
+                    if isLast {
+                        client.inflight -= 1
+                        if isFrame {
+                            client.inflightFrames -= 1
+                            if client.inflightFrames <= 0 {
+                                client.inflightFrames = 0; client.oldestUnackedFrameAt = nil
+                            } else {
+                                client.oldestUnackedFrameAt = Date().timeIntervalSince1970
+                            }
+                        }
+                    }
+                })
+            }
+            return
         }
         client.connection.send(content: data, completion: .contentProcessed { [weak client] _ in
             guard let client else { return }

@@ -74,7 +74,7 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 out="$root/.build/pacing"
-base=origin/main full=0 repeat=1 only="" list=0
+base=origin/main full=0 repeat=1 only="" list=0 quic=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) base="$2"; shift 2 ;;
@@ -82,8 +82,9 @@ while [ $# -gt 0 ]; do
         --repeat) repeat="$2"; shift 2 ;;
         --cases) only="$2"; shift 2 ;;
         --list) list=1; shift ;;
+        --quic) quic=1; shift ;;
         -h|--help) sed -n '2,72p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--list]" >&2; exit 2 ;;
+        *) echo "usage: Scripts/pacing/run.sh [--full] [--cases a,b] [--repeat N] [--base REF] [--quic] [--list]" >&2; exit 2 ;;
     esac
 done
 
@@ -165,6 +166,26 @@ for c in "${selected[@]}"; do
     for i in $(seq 1 "$n"); do
         for build in base new; do
             run="$name-$i-$build"
+            run_build="$build"
+            run_argv=("${argv[@]}")
+            if [ "$quic" = 1 ]; then
+                run_build="new"
+                if [ "$build" = "new" ] && [ "$relay" = "bottleneck" ] && [ "$door" = "Remote" ]; then
+                    # Compare TCP (base) against QUIC over UDP (new) on the same working-tree build.
+                    q_argv=()
+                    sep=0
+                    for tok in "${argv[@]}"; do
+                        if [ "$tok" = "--" ]; then
+                            if [ "$sep" = 0 ]; then q_argv+=("--quic" "--"); else q_argv+=("--udp" "--"); fi
+                            sep=$((sep + 1))
+                        else
+                            q_argv+=("$tok")
+                        fi
+                    done
+                    q_argv+=("--quic")
+                    run_argv=("${q_argv[@]}")
+                fi
+            fi
             for try in 1 2 3; do
                 if ! calm; then
                     echo "$(date +%T) skipped $run: load $(load1)" | tee -a "$runs/load.txt"
@@ -172,7 +193,7 @@ for c in "${selected[@]}"; do
                 fi
                 start="$(load1)"
                 echo "$(date +%T) $run (${secs} s, load $start)" | tee -a "$runs/load.txt"
-                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$build" "$secs" "${argv[@]}" > "$runs/$run.run.txt" 2>&1; then
+                if ! DOOR="$door" RELAY="$relay" python3 "$here/run.py" "$run" "$run_build" "$secs" "${run_argv[@]}" > "$runs/$run.run.txt" 2>&1; then
                     echo "    $run did not run: $(tail -n 1 "$runs/$run.run.txt")" | tee -a "$runs/load.txt"
                     missed=$((missed + 1)); break
                 fi

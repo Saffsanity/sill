@@ -50,6 +50,8 @@ struct HostSettingsPanel: View {
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
+    /// This device's transport preference (`RemoteTLS.Transport`), read by `DeviceTLS` at each dial.
+    @AppStorage(RemoteTLS.Transport.defaultsKey) private var transportRaw = RemoteTLS.Transport.tcp.rawValue
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -520,6 +522,17 @@ struct HostSettingsPanel: View {
             }
         }
         Footnote(text: gesturesFooter)
+        Rows {
+            AdaptiveRow(title: "Transport", since: nil) {
+                Picker("Transport", selection: Binding(get: { RemoteTLS.Transport.stored(transportRaw) },
+                                                       set: { transportRaw = $0.rawValue })) {
+                    ForEach(RemoteTLS.Transport.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+        }
+        Footnote(text: RemoteTLS.Transport.footnote)
     }
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
