@@ -432,12 +432,50 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// Picture Smoothing's renderer while a level other than Automatic is chosen. Main thread.
+    private var smoothingRenderer: MetalStreamRenderer?
+    private var smoothingRecovery = PictureSmoothing.DecoderRecovery()
+
+    /// Picture Smoothing (PictureSmoothing; This iPad in the Settings panel): Automatic draws with the
+    /// system's video layer, every other level with Sill's own renderer and that level's filter. A
+    /// change of who draws asks for a keyframe (the source picked again), since that path starts at
+    /// one; a change of filter only draws the last frame again. Main thread.
+    func setSmoothing(_ smoothing: PictureSmoothing) {
+        var renderer: MetalStreamRenderer?
+        if let filter = smoothing.filter {
+            if let existing = smoothingRenderer {
+                renderer = existing
+                existing.setFilter(filter, on: queue)
+            } else if let made = MetalStreamRenderer(filter: filter) {
+                renderer = made
+            } else {
+                print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead")
+            }
+        }
+        let newPath = renderer !== smoothingRenderer
+        smoothingRenderer = renderer
+        let view = displayView
+        view.showRenderer(renderer)
+        queue.async { view.useRenderer(renderer) }
+        if newPath, active != .none { request(active) }
+    }
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
+        view.renderQueue = queue
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        view.onNeedsKeyframe = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.active != .none else { return }
+                let activeApp = UIApplication.shared.applicationState == .active
+                if self.smoothingRecovery.shouldAskKeyframe(now: ProcessInfo.processInfo.systemUptime, active: activeApp) {
+                    self.request(self.active)
+                }
+            }
+        }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view
@@ -907,6 +945,8 @@ final class StreamClient: ObservableObject {
         #else
         savedMacs = SavedMacs.decode(UserDefaults.standard.string(forKey: SavedMacs.defaultsKey))
         #endif
+        let smoothing = PictureSmoothing.stored(UserDefaults.standard.string(forKey: PictureSmoothing.defaultsKey))
+        if smoothing.usesOwnRenderer { setSmoothing(smoothing) }
         // Back from the background: the pings stopped while the app was suspended, which is no loss;
         // and the browsers, whose connection to mDNSResponder iOS may have made defunct meanwhile, are
         // made again (`cameForward`, issue #69).

@@ -583,6 +583,17 @@ struct StreamScreen: View {
                 scaleOpen = true
             }
         }
+        // `-SillSmoothingAt '<s> <level>[; <s> <level>…]'`: Picture Smoothing changed at those
+        // seconds, as its picker in the Settings panel changes it.
+        for step in (defaults.string(forKey: "SillSmoothingAt") ?? "").split(separator: ";") {
+            let parts = step.split(separator: " ")
+            guard parts.count == 2, let at = Double(parts[0]), let level = PictureSmoothing(rawValue: String(parts[1])) else { continue }
+            after(at) {
+                print("harness: Picture Smoothing \(level.title)")
+                UserDefaults.standard.set(level.rawValue, forKey: PictureSmoothing.defaultsKey)
+                client.setSmoothing(level)
+            }
+        }
     }
     private static var launchArgumentsRan = false
 
