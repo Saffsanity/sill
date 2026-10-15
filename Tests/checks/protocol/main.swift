@@ -531,8 +531,10 @@ do {
         check("window input: round-trip", WindowInput.decode(windowed) == WindowInput(window: 0x8000_0003, event: scroll))
         check("window input: a host from before would take it as the streamed window's (hence the list's flag)",
               Wire.decode(InputEvent.self, from: windowed) == scroll)
+        // As JSON objects: JSONEncoder's key order differs from one encoding to the next, which no reader minds.
+        func object(_ d: Data) -> NSDictionary? { (try? JSONSerialization.jsonObject(with: d)) as? NSDictionary }
         check("window input: without a window, the plain kind 8 every device sends",
-              WindowInput(window: nil, event: scroll).encoded() == Wire.encode(scroll)
+              object(WindowInput(window: nil, event: scroll).encoded()).map { $0 == object(Wire.encode(scroll)) } == true
               && WindowInput.decode(Wire.encode(scroll)) == WindowInput(window: nil, event: scroll))
         check("window input: a third key, or a window that is no number, is refused",
               WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":5,"extra":1}"#.utf8)) == nil
