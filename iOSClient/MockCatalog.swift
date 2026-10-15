@@ -107,6 +107,25 @@ enum MockCatalog {
             default: break
             }
         }
+        // The clipboard (docs/clipboard-plan.md): `-SillClipboardChip 1` offers the chip over the
+        // stream (as after a copy on this device), and `-SillClipboardNote sent|long|notsent` shows a Paste's
+        // note in its place and under the Settings group's Paste; neither goes away by itself here.
+        if ClipboardPolicy.hostTakes(client.hostClipboard) {
+            if UserDefaults.standard.bool(forKey: "SillClipboardChip") { client.clipboardChip = true }
+            switch UserDefaults.standard.string(forKey: "SillClipboardNote") {
+            case "sent":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.sent(mac: "Mac mini"), spoken: ClipboardPolicy.Copy.sentSpoken(mac: "Mac mini"),
+                                                     warning: false, at: 0)
+            case "long":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.tooLong(mac: "Mac mini"), spoken: ClipboardPolicy.Copy.tooLong(mac: "Mac mini"),
+                                                     warning: true, at: 0)
+            case "notsent":
+                client.clipboardNote = ClipboardNote(text: ClipboardPolicy.Copy.notSent(mac: "Mac mini"), spoken: ClipboardPolicy.Copy.notSent(mac: "Mac mini"),
+                                                     warning: true, at: 0)
+            default:
+                break
+            }
+        }
         // nil under `-SillLive 1`: the mock is never shown then, and must say nothing on the console.
         if let menus { client.showMockMenus(macMenus(menus)) }
         if let pointer { seedPointer(client, pointer, pencilPointer: pencilPointer) }
@@ -380,6 +399,8 @@ enum MockCatalog {
         // A Mac from this build takes the trackpad gestures (its window list says so); an older one
         // does not, and its Settings panel says to update it.
         client.hostGestures = c == .legacy ? nil : TrackpadGesture.generation
+        // …and shares its clipboard (`WindowList.clipboard` 1): the Settings panel's Share Clipboard.
+        client.hostClipboard = c == .legacy ? nil : ClipboardPolicy.generation
         guard c != .legacy else { return }
         var state = HostSettingsState(
             settings: StreamSettings(maxFPS: 120, bitrate: 15_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: false,

@@ -33,7 +33,7 @@
   <h1>Privacy Policy</h1>
   <p class="muted">Last updated October 14, 2026</p>
 
-  <p class="lede">Sill collects nothing. There is no account and no server: your screen and what you type travel only between your own devices, and Sill never sends anything about you to the developer.</p>
+  <p class="lede">Sill collects nothing. There is no account and no server: your screen, what you type and what you copy travel only between your own devices, and Sill never sends anything about you to the developer.</p>
 
   <p>This policy covers the Sill app for iPhone and iPad and Sill for Mac.</p>
 
@@ -64,6 +64,9 @@
     <li>The name of your Mac, its open windows with their titles and small previews, and the apps installed on it with their icons.</li>
     <li>The menus of the app you’re using, read from its menu bar: their titles while you’re connected, and a menu’s items, with their shortcuts and which ones are checked or turned off, when you open that menu on your iPhone or iPad.</li>
     <li>The shape of the pointer and, while it is over what you’re looking at, where it is.</li>
+    <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
+    <li>While Share Clipboard is on, what you copy on your Mac (text), so you can paste it on your iPhone or iPad; copies a password manager marks as concealed are never sent.</li>
+    <!-- /Clipboard -->
     <li>Sill’s streaming settings, and whether the connection keeps up with them.</li>
     <li>Which version of Sill for Mac it runs.</li>
   </ul>
@@ -75,6 +78,9 @@
     <li>The size of the area that shows your Mac, and the scale and frame rate it wants.</li>
     <li>Changes you make in Sill’s settings panel.</li>
     <li>Which of the app’s menus to show, and the menu items you choose.</li>
+    <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
+    <li>When you tap Paste in Sill to paste on your Mac, the text on your device’s clipboard, which becomes your Mac’s. Sill never reads your device’s clipboard by itself.</li>
+    <!-- /Clipboard -->
     <li>While it’s connected, once a second, a short report: the frame rate, how long frames and replies took, and the device’s name and model, such as “iPad (iPad14,1)”. iOS gives apps a generic name like “iPad”, not the name you gave your device.</li>
     <li>When it connects, which version of Sill it runs, so your Mac can say when the app needs an update to keep working with it.</li>
   </ul>
@@ -107,13 +113,16 @@
     <li>The names of Mac computers it has seen with Direct Wireless Connection on, so it knows to look for them nearby.</li>
     <li>Which parts of the tour of Sill’s controls you have seen, and whether you skipped it, so it shows you only what you haven’t seen.</li>
     <li>Whether three-finger gestures are on, and whether Larger Picture is.</li>
+    <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this item out. -->
+    <li>Whether Share Clipboard is on, and a count that tells Sill whether you copied something new since it last sent or received text, never what you copied. Text your Mac sends stays on the device’s clipboard for 10 minutes, and Universal Clipboard does not pass it to your other devices.</li>
+    <!-- /Clipboard -->
     <li>The Mac computers you paired: each one’s name, key and addresses, and when it last connected.</li>
     <li>This device’s pairing key, in its keychain. It isn’t synced, and it works only on this device: a backup can put it back on this same iPhone or iPad, never on another.</li>
   </ul>
   <h3>On your Mac</h3>
   <ul>
     <li>Sill’s settings.</li>
-    <li>A log of what Sill did, in the Library/Logs/Sill folder in your home folder. It includes window and app names, the menu items and three-finger gestures chosen from a device, device names and network addresses. It stays on your Mac unless you send it to someone, and Sill keeps at most two log files of 10 MB each.</li>
+    <li>A log of what Sill did, in the Library/Logs/Sill folder in your home folder. It includes window and app names, the menu items and three-finger gestures chosen from a device, which devices share the clipboard, device names and network addresses, never what you copy. It stays on your Mac unless you send it to someone, and Sill keeps at most two log files of 10 MB each.</li>
     <li>In your Mac’s keychain, in a part that only Sill can read and that is never synced or moved to another Mac: its keys, the devices you paired (each one’s name, model and key, when and how it paired, and for one that connected over a USB cable the code made from its serial number) and whether pairing is required. With Sill’s settings: when each device last connected, and how.</li>
   </ul>
 

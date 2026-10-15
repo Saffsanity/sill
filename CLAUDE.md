@@ -8,6 +8,82 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
+the plan, its open questions with the default taken for each, the results and the review's fixes are
+in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
+first. Wire, host and device; additive.
+- Wire: kind 32 `clipboard`, both ways, JSON `Clipboard {text, image, stop}` (Clipboard.swift): pull
+  request #66's number and shape (`image` reserved for a later generation; `stop`, a device's switch
+  going off, is this change's); `WindowList.clipboard: Int?` (1: text), so #66's `Bool` becomes an
+  Int as it rebases (a Bool does not decode). A device sends kind 32 only to a host that says 1 or
+  more; any kind 32 subscribes, and `{}` is text alone: a host sends `image` only to a subscription
+  that says it takes images (the floor; #66's host sends one to every subscriber). Text at most
+  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (audio, #66's).
+- Rules, pure, both ends: `ClipboardPolicy` (StreamProtocol). Never sent: an item a password manager
+  or another app marks `org.nspasteboard.ConcealedType` or `org.nspasteboard.TransientType` (and
+  three older markers), one from another device through Universal Clipboard
+  (`com.apple.is-remote-clipboard`: reading it fetches it from there, found while building), the
+  host's own write; types are judged before any data is read. A device's subscriptions and texts are
+  rated 4 a second, its stop never (`hostReceives`).
+- Host: `HostClipboard` (main actor; the pasteboard read and written on a queue of its own,
+  `Board`, so a slow read never holds up input): the look at the change count four times a second
+  while a device subscribes (Task.sleep, not a RunLoop timer), and only while macOS allows every read
+  (`MacClipboard.access`, NSPasteboard's `accessBehavior`, macOS 15.4 and later: while it would ask,
+  an alert at every copy, or denies, nothing is read, nothing copied meanwhile is sent, one line when
+  that changes); an empty pasteboard waits up to a second for its contents (`hostWaits`: found live,
+  9 of 12 slow copies lost before, none now); what was on the clipboard when the first subscribed is
+  never sent; a device's text written `.currentHostOnly` with this launch's marker and passed to the
+  other subscribers; one line per subscription or stop ("Clipboard: iPad (iPad14,1) shares the
+  clipboard."), none per copy, never contents; `clip.sent`/`clip.recv`. `HostConfig.shareClipboard`
+  (on): Settings › General's `ClipboardSection`, "Share clipboard with devices" (`shareClipboard`),
+  and while macOS asks or denies, why and "Allow in System Settings…" (Paste from Other Apps,
+  `Privacy_Pasteboard`; one read on that click first while macOS has not asked about Sill, so it is
+  listed); the CLI's `--no-clipboard`; the Mac's alone, applied at once by `setTarget`. A synthetic
+  host shares a pasteboard of its own (TEST ONLY `SILL_TEST_PASTEBOARD`, `SILL_TEST_CLIPBOARD_LOG=1`,
+  `SILL_TEST_CLIPBOARD_ACCESS`), never this Mac's clipboard.
+- Device: `StreamClient+Clipboard` (subscription, `stop`, the Mac's text written `.localOnly` with a
+  10-minute expiration, the handled change count `Sill.clipboardHandled`) and `ClipboardChip`: when
+  Sill becomes active (or a session starts within 15 s after) with new text on the clipboard
+  (`changeCount`, `hasStrings`: no prompt), "Paste on ‹Mac›" / "Then press ⌘V there." with the
+  system's Paste control (`PasteButton`, UIPasteControl) and Dismiss; its 20 s run only while it
+  shows with Sill active, never under VoiceOver, which is told when it first shows (`chipCounts`);
+  under the bar sideways (bottom corner while the link's line shows), above the window bar or row 1
+  upright. A Paste is "Sent to ‹Mac›’s clipboard" only once a ping sent after the text comes back (a
+  16-byte random payload, the receipt; none in max(4 s, 4 × the worst round trip): "Didn’t reach
+  ‹Mac›. Try Paste again." and the chip again). Settings › This iPad: Share Clipboard
+  (`Sill.shareClipboard`, on) and Paste on ‹Mac›, while the Mac says it. Harness:
+  `-SillClipboardChip 1`, `-SillClipboardNote sent|long|notsent`; live, `-SillSettingsScript '<t> paste
+  TEXT'` and `-SillSettingsCloseAt <s>`.
+- The review (2026-10-14, eight findings, all taken; the plan's "The review"): the stop lost to the rate
+  and macOS's paste privacy (the two should-fixes), the floor's image rule, "Sent" before the Mac had it,
+  the chip unannounced and running out unseen, the Mac's footnote and the support page's sentence, the
+  site's words marked `<!-- Clipboard` for the release (docs/release-checklist.md part 1 §3 cuts them
+  for a republish before it), and on-by-default's effect on the device's clipboard left to Noah (open
+  question 1).
+- Verified (the plan's Results): `Tests/checks/clipboard` 259 checks and 72 of 72 mutants (in CI's matrix);
+  `Tests/checks/run-all.sh` all 41; `swift build -c release` from `git archive` (only the CaptureProbe
+  warning); the iOS app Debug and Release for the simulator and Debug for a device (only the
+  StreamClient capture warning); H2 against origin/main (idle identical masked and sorted; a client that
+  never subscribes, no new line); live on loopback (the review's stop sequence: the copy went to the
+  client against 7e6468a, not against this build; the rate on texts; macOS's four answers through a
+  file, copies made while it asked or denied never sent, one made after reads came back sent); on a
+  private iPad simulator, the receipt and its absence through a relay that stops forwarding, the chip
+  waiting under the Settings panel, through an app switch and under VoiceOver's stand-in, harness photos
+  byte for byte the reviewed build's but the new note. Earlier (7e6468a): the XCUITest tap on the
+  chip's Paste, two devices, every marker, the bare app's switch. This Mac's own clipboard was never
+  read or written.
+- **Untested, for Noah:** on the iPad and iPhone with this Sill.app, at home and through Tailscale:
+  copy in TextEdit, paste on the device; copy in Notes, back to Sill, Paste on the chip, ⌘V on the
+  Mac; a password copied in 1Password and in the Passwords app never arrives (and Sill.log has no
+  line for it); Universal Clipboard on (same Apple Account): the chip may come once for the Mac's own
+  copy (known), an iPhone copy is not passed on; Settings › General's switch live; VoiceOver on the
+  chip (its announcement, no time limit); Split View (the chip waits for Sill's next activation; the
+  panel's Paste works). From the review: macOS's paste alert through `defaults write
+  me.saffer.sill.mac EnablePasteboardPrivacyDeveloperPreview -bool yes` (the plan's step 9: the
+  orange line, Allow in System Settings…, Allow and Deny, then `defaults delete` it); Paste right
+  after 10 s away from Sill ("Sent" only when ⌘V pastes it); on by default replacing a photo on the
+  device's clipboard, and that clipboard empty 10 minutes later (say whether either should change).
+
 **A hardware keyboard and trackpad on the device (2026-10-14, branch `hardware-keyboard` from main at
 985a733, PR #80; issues #67 and #68; the plan, its eleven open questions with the defaults taken, and the
 results are in `docs/hardware-keyboard-plan.md`).** Noah: "Work on the keyboard and trackpad change (#67
@@ -4849,7 +4925,14 @@ good.
   messages the host had read on the connection). `Gesture.swift` —
   `TrackpadGesture` (kind 28, device → host: a three- or four-finger gesture
   by name, and its fingers), sent only to a host whose `WindowList.gestures`
-  is 1 or more.
+  is 1 or more. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
+  `image` reserved for a later generation, a device's `stop`) and its 256 KB
+  cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
+  device's message asks of the host and the rate, which a stop never meets;
+  which change of the Mac's pasteboard the host sends and to whom, and only
+  while macOS allows every read (`MacAccess`); the device's subscription,
+  which text from the Mac it writes, a Paste's receipt, the chip and its time,
+  every word; pure, `Tests/checks/clipboard`).
 - `Sources/SillHost/` — the `SillHostCore` library. `StreamCoordinator` (main
   actor; owns the pipeline, switches sources on client request, raises the
   picked window in regular mode (never on the virtual display), applies
@@ -4866,8 +4949,16 @@ good.
   `HostStatus`),
   `HostConfig` (the knobs: maxFPS, captureScale, bitrate per 60 fps, the
   away pair awayBitrate and awayCaptureScale, prioritizeSpeed, virtualDisplay,
-  directWireless, remoteAccess, remotePort, internetAccess, requirePairing;
-  `standard` is the CLI's values and the app's defaults; `effective(away:)`),
+  directWireless, remoteAccess, remotePort, internetAccess, requirePairing,
+  shareClipboard; `standard` is the CLI's values and the app's defaults;
+  `effective(away:)`), `HostClipboard` (the clipboard's host side: who
+  subscribed, the look at the pasteboard's change count four times a second
+  while one has and macOS allows every read, a device's text written
+  `.currentHostOnly` with this launch's marker and passed to the others, one
+  line a subscription and none per copy; a synthetic host's own pasteboard,
+  the TEST ONLY SILL_TEST_PASTEBOARD, SILL_TEST_CLIPBOARD_LOG and
+  SILL_TEST_CLIPBOARD_ACCESS; `MacClipboard`, macOS's paste privacy for the
+  look and for Settings › General's `ClipboardSection`),
   `AwayPolicy` (who counts as away, when the away quality is the target, its
   two lines; pure, `Tests/checks/away-quality`), `LinkJudge` (each device's
   link judged once a second from the sweep: fine, behind, stalled, the carried
@@ -5010,7 +5101,7 @@ good.
 - `Sources/SillHostCLI/main.swift` — the CLI: flags, `dispatchMain` vs
   `NSApplication.run`, the Terminal permission hint; `--pairing` (the home
   door's TLS with pairing required, a throwaway identity, the code and link
-  on its own stdout) and `--print-cable`.
+  on its own stdout), `--print-cable` and `--no-clipboard`.
 - `Sources/SillMenuBar/` — the app: `main.swift` (AppKit lifecycle, accessory
   policy), `AppDelegate` (launch order, Quit, the modal-loop rule), `AppModel`
   (owns the coordinator, presentation, App Nap guard, onboarding),
@@ -5345,7 +5436,15 @@ good.
   the gesture decided as one of its three fingers lifts, and whether it goes
   to the Mac; pure, `Tests/checks/gestures`; pbxproj A701/F701) and, in
   InputOverlay.swift, `StrokeObserver` (the recognizer on both surfaces that
-  feeds it every direct touch and takes none). The
+  feeds it every direct touch and takes none). The clipboard:
+  `StreamClient+Clipboard` (the subscription at the first window list that
+  says `clipboard` and on a move's new connection, `stop` when the switch goes
+  off, the Mac's text written `.localOnly` for 10 minutes, the chip's look when
+  Sill becomes active and its time while it shows, Paste's send and its
+  receipt, a ping whose pong says the Mac read it; pbxproj AC64/FC64) and `ClipboardChip`
+  (the chip and `ClipboardPasteButton`, the system's Paste control;
+  AD64/FD64); StreamScreen places the chip, the Settings panel's This iPad
+  group has Share Clipboard and Paste on ‹Mac›. The
   first-run tour: `TourPolicy` (its steps and targets per layout, the halves,
   a phone's rows and sideways; when it shows by itself, what it remembers,
   what a session decided and the reconnect's, a rotation mid-run, the crease,
@@ -5428,7 +5527,7 @@ good.
   caught), and `build.sh` where a check compiles a module (StreamProtocol's
   sources with `import StreamProtocol` stripped), or a `module.txt` naming the
   files `module.py` compiles as one module (pairing at home's checks):
-  `addresses`, `ask-limits`, `cable-link`, `clientlink`, `compatibility`,
+  `addresses`, `ask-limits`, `cable-link`, `clientlink`, `clipboard`, `compatibility`,
   `device-gate`, `dmg-layout` (Scripts/dmg-layout's `.DS_Store` and alias
   writer, against Finder's own layout of the file, make-dmg.sh's layout
   arguments and the SVG's size and edge), `door-policy`, `duo` (DuoPosture;
@@ -5502,6 +5601,9 @@ SILL_TEST_INPUT_LOG=1 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TES
 python3 Scripts/sillclient.py PORT 3 desktop --input='{"key":{"hidUsage":44,"down":true,"modifiers":1048576}}@1' --input='{"key":{"hidUsage":44,"down":false,"modifiers":1048576}}@1.05' --tap=0.5,0.5@1.5   # an older device's Spotlight key, then a tap
 python3 Scripts/sillclient.py PORT 8 none --gesture=swipeUp@3 --gesture=swipeDown@4   # a synthetic host logs "Gesture from …: swipe up → Mission Control (shortcut 108: key 160, fn) (not posted: a test host)"
 SILL_TEST_LOOPBACK=1 SILL_TEST_HOTKEYS='108=off,173=off' .build/release/SillHost --synthetic   # TEST ONLY: the gestures read this table (over macOS 27's own; `defaults` alone) instead of this Mac's shortcuts
+swift run -c release SillHost --no-clipboard  # share nothing of the clipboard with devices (on by default, as in Sill.app)
+SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_PASTEBOARD=me.saffer.sill.test.x SILL_TEST_CLIPBOARD_LOG=1 .build/release/SillHost --synthetic   # the clipboard on a pasteboard of its own (never this Mac's), each decision printed with sizes
+python3 Scripts/sillclient.py PORT 6 none --clipboard --copy=hello@2 --expect=clipboard=none   # subscribe, send text as a device's Paste does; each kind 32 printed
 SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/run.sh --rev origin/main base && Tests/touchrig/compare.py .build/touchrig/base.log .build/touchrig/new.log   # the surfaces under synthesized touches
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
@@ -5529,7 +5631,7 @@ whatever launched it), Sill.app's to Sill itself.
 Sill.app: the log is `~/Library/Logs/Sill/Sill.log` (`tail -F`, not `-f`: at
 10 MB it moves to Sill.1.log; Show Log… in the menu); settings are `defaults
 read me.saffer.sill.mac` (maxFPS, captureScale, bitrate, prioritizeSpeed,
-virtualDisplay, directWireless, updateCheck; the update check keeps
+virtualDisplay, directWireless, shareClipboard, updateCheck; the update check keeps
 updateLastCheck, updateETag, updateLatestTag and updateLatestURL), and a launch
 argument such as `-maxFPS 60` or `-updateCheck 0` overrides one for one run. A device's change from its Settings panel is saved there too, like a
 menu click; the CLI keeps a device's change until SillHost quits. Test arguments for the bare binary (`.build/release/SillMenuBar`,
@@ -5757,7 +5859,12 @@ is made again after 1, 2, 4… s; the console's "browser: …" lines, and the
 reconnect's "reconnect: …"),
 `-SillPointer mac@X,Y|device@X,Y|hidden|pencil@X,Y` (the pointer sprite in one
 of docs/pointer-visibility-plan.md's states over the mock's frame, which it
-draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip), and in
+draws as a dim rectangle; `-SillPencilPointer 1` is Q2's flip),
+`-SillClipboardChip 1` and `-SillClipboardNote sent|long|notsent` (the clipboard's
+chip and a Paste's note on the mock's stream, docs/clipboard-plan.md; the mock Mac
+shares its clipboard in every settings case but `legacy`; live, `-SillSettingsScript
+'<t> paste TEXT'` sends TEXT as the Paste control hands it over, and
+`-SillSettingsCloseAt <s>` closes the panel `-SillSettings 1` opened), and in
 the normal app and under `-SillLive 1` `-SillPairURL '<sill://pair…>'` (pair
 at launch, no confirmation, at the link's own addresses only: a confirmed link
 tries the home rows first, which `-SillTapRow` and `-SillHomeLink` below reach),
@@ -5897,8 +6004,9 @@ device keeps working with Macs from the first public build on, or each says why
   the plain-TCP `_sill._tcp` door, which only development builds and the CLI without `--pairing`
   keep; the ALPNs `sill/1` and `sill-pair/1`, which every host offers for good at both doors
   (`RemoteTLS.serverALPNs`: a later generation's `sill/2` only ever goes beside them); the 14-byte
-  header; kinds 0–28 and their payloads (HEVC with ParameterSets; the JSON of Switcher, Input,
-  Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu and Gesture), inside `sill/1` at
+  header; kinds 0–28 and 32 and their payloads (HEVC with ParameterSets; the JSON of Switcher,
+  Input, Viewport, HostSettings, Remote, Compatibility, Pointer, MacMenu, Gesture and Clipboard;
+  29 to 31 stay free, 29 the audio plan's, 30 and 31 pull request #66's), inside `sill/1` at
   both doors (19 and 20 on their own `sill-pair/1` connection, the next bullet); the ping echo; a
   kind 16 within 2 s of the first window list, one per connection since Sill for Mac 0.5.1 (away
   from home, docs/remote-bundle-plan.md §4): its `settings` the pair that connection's controls
@@ -5918,7 +6026,15 @@ device keeps working with Macs from the first public build on, or each says why
   MacMenuItem's `id`, `title`, `separator`, `enabled`, `mark`, `key`, `submenu`; FetchMenu's and
   PressMenuItem's `version`, `id`, `title`, `token`); a trackpad gesture (kind 28, Gesture.swift)
   goes only to a host whose window list says `gestures` 1 or more, as one of its six names with
-  `fingers`, and a later generation of gestures says 2 and goes only to a host that says so.
+  `fingers`, and a later generation of gestures says 2 and goes only to a host that says so; the
+  clipboard (kind 32, Clipboard.swift, docs/clipboard-plan.md) goes from a device only to a host
+  whose window list says `clipboard` 1 or more (an Int: 1 is text, a later generation with images
+  says 2), and from a host only to a connection that sent a kind 32 and no `stop` since: any kind
+  32 subscribes, `{"stop":true}` ends it, `text` (at most 256 KB, the JSON at most 1 MiB) becomes
+  the receiver's clipboard, `image` is reserved for that later generation; a subscription says what
+  the device takes, `{}` being text alone, so a host sends `image` only to a connection whose
+  subscription carries a later field saying it takes images (`"accepts":2`, say), never to one that
+  sent `{}`.
 - Pairing as 1.0 does it (docs/home-pairing-plan.md §3): the Bonjour TXT keys `r` (the recognition
   tag) and `p` ("1" pairing required, "0" open, no `p` a plain door, any other value read as "1");
   a `sill-pair/1` connection is exactly one kind 19, with no hello (the device gate judges sessions

@@ -44,6 +44,7 @@ final class HostSettings {
         static let askedScreenRecording = "askedScreenRecording", askedAccessibility = "askedAccessibility"
         static let logShowsStats = "logShowsStats"
         static let updateCheck = "updateCheck"
+        static let shareClipboard = "shareClipboard"
     }
 
     var config: HostConfig {
@@ -110,6 +111,8 @@ final class HostSettings {
             Key.internetAccess: standard.internetAccess,
             Key.remoteAddressName: "",
             Key.updateCheck: true,
+            // On, like the CLI: each device has its own switch, and a password manager's copies never go.
+            Key.shareClipboard: standard.shareClipboard,
         ])
         config = HostConfig(maxFPS: defaults.integer(forKey: Key.maxFPS),
                             captureScale: CGFloat(defaults.double(forKey: Key.captureScale)),
@@ -125,7 +128,8 @@ final class HostSettings {
                             // Never a default or a launch argument: it lives with the trust list
                             // (the identity store), from which AppModel reads it at launch, before
                             // the host starts, and to which the Devices pane saves it.
-                            requirePairing: HostConfig.standard.requirePairing).validated()
+                            requirePairing: HostConfig.standard.requirePairing,
+                            shareClipboard: defaults.bool(forKey: Key.shareClipboard)).validated()
         remoteAddressName = defaults.string(forKey: Key.remoteAddressName) ?? ""
         updateCheck = defaults.bool(forKey: Key.updateCheck)
         settingsTab = defaults.string(forKey: Key.settingsTab).flatMap(SettingsTab.init(rawValue:)) ?? .general
@@ -149,6 +153,7 @@ final class HostSettings {
         if config.remoteAccess != old.remoteAccess { defaults.set(config.remoteAccess, forKey: Key.remoteAccess) }
         if config.remotePort != old.remotePort { defaults.set(config.remotePort, forKey: Key.remotePort) }
         if config.internetAccess != old.internetAccess { defaults.set(config.internetAccess, forKey: Key.internetAccess) }
+        if config.shareClipboard != old.shareClipboard { defaults.set(config.shareClipboard, forKey: Key.shareClipboard) }
     }
 
     // MARK: Remote devices seen (display only)

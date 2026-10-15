@@ -117,6 +117,18 @@
     <li>If Sill for Mac stopped without quitting, for example after Force Quit, resize the window yourself.</li>
   </ul>
 
+  <!-- Clipboard: for the release that ships it (PR #78); a republish before that release takes this section out. -->
+  <h2 id="clipboard">Copy and paste between your Mac and your iPhone or iPad</h2>
+  <p>While Share Clipboard is on, text you copy on your Mac while your iPhone or iPad is connected is ready to paste on the device. To paste on your Mac what you copied on your iPhone or iPad, come back to Sill and tap Paste, on the note by Sill’s bar or in the settings panel, then press ⌘V on your Mac. Sill never reads your iPhone or iPad’s clipboard by itself.</p>
+  <ul>
+    <li>Both apps have the switch: Share clipboard with devices in Sill’s Settings › General on your Mac, and Share Clipboard in the settings panel on your iPhone or iPad.</li>
+    <li>Only text goes, up to 256 KB at a time, and only what you copy while a device is connected. Copies a password manager marks as concealed stay on your Mac, and so does text that came to your Mac from another of your devices through Universal Clipboard.</li>
+    <li>Text from your Mac stays on your iPhone or iPad’s clipboard for 10 minutes.</li>
+    <li>If nothing arrives, update Sill on both: an older Sill on either side doesn’t share the clipboard.</li>
+    <li>If what you copy on your Mac doesn’t arrive, look under Share clipboard with devices in Sill’s Settings › General on your Mac. When macOS asks before apps read the clipboard, Sill says so there and takes you to where you allow it: Paste from Other Apps, in System Settings › Privacy & Security.</li>
+  </ul>
+  <!-- /Clipboard -->
+
   <h2 id="stutter">The picture stutters or lags</h2>
   <ul>
     <li>Pick a lower Quality in the settings panel on your iPhone or iPad, or in the Sill menu on your Mac.<!-- Remote Access: take this sentence out for a release without Remote Access. --> Away from home, Sill streams at a quality of its own, which the Sill menu doesn’t change: lower it in the settings panel on your iPhone or iPad, tap the quality it suggests when the connection can’t keep up, or set it in Sill’s Settings › Streaming under Away from home.<!-- /Remote Access --></li>
@@ -135,7 +147,7 @@
   </ul>
 
   <h2 id="log">Sending a log</h2>
-  <p>A log helps with problems that aren’t listed here. On your Mac, choose Show Log… in the Sill menu, or open the Sill folder in Library/Logs in your home folder. The log lists your window names, device names and network addresses, so read it before you send it.</p>
+  <p>A log helps with problems that aren’t listed here. On your Mac, choose Show Log… in the Sill menu, or open the Sill folder in Library/Logs in your home folder. The log lists your window names, device names and network addresses, never what you copy, so read it before you send it.</p>
 </main>
 
 <footer class="site-footer">

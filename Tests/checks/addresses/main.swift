@@ -46,6 +46,15 @@ let l2 = hosts(AddressList.build(input2))
 check("WireGuard (its own name) and a point-to-point tunnel (VPN (utun9)); a service's tunnel not twice (\(l2))",
       l2 == ["10.99.0.2/vpn/Home WireGuard", "100.88.123.45/vpn/Tailscale", "10.8.0.6/vpn/VPN (utun9)",
              "fd99::2/vpn/Home WireGuard", "fd7a:115c:a1e0::abcd:ef01/vpn/Tailscale", "10.128.0.34/lan/Wi-Fi"])
+// Tailscale from the App Store: its service has State: keys but no Setup: key, so no name. Its
+// tunnel is listed as a point-to-point one, beside a non-NE tunnel (Tunnelblick).
+let appStore = [S(id: "ts", name: "", interface: "utun4", ipv4: ["100.88.123.45"], ipv6: [V6(address: "fd7a:115c:a1e0::abcd:ef01", flags: 0)]),
+                S(id: "wifi", name: "Wi-Fi", interface: "en0", ipv4: ["10.128.0.34"], ipv6: [])]
+let l5 = hosts(AddressList.build(AddressList.Input(services: appStore, primaryInterface: "en0",
+                                                   tunnels: [AddressList.Tunnel(interface: "utun4", ipv4: ["100.88.123.45"]),
+                                                             AddressList.Tunnel(interface: "utun9", ipv4: ["10.8.0.6"])])))
+check("a nameless service's tunnel is listed as VPN (utun4) (\(l5))",
+      l5 == ["100.88.123.45/vpn/VPN (utun4)", "10.8.0.6/vpn/VPN (utun9)", "10.128.0.34/lan/Wi-Fi"])
 input2.primaryInterface = "en7"
 check("Wi-Fi and Ethernet: only the primary one's IPv4 (Ethernet primary)", hosts(AddressList.build(input2)).last == "192.168.1.30/lan/Ethernet")
 input2.primaryInterface = "utun4"
