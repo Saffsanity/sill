@@ -3269,6 +3269,12 @@ final class StreamClient: ObservableObject {
         return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
     }
 
+    /// This device's switch for Larger Picture (the Settings panel's This iPhone group; issue #58,
+    /// docs/larger-picture-plan.md): off unless turned on. The device's own preference, never sent to
+    /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window
+    /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
+    static let largerPictureKey = "Sill.largerPicture"
+
     /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
     /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
     /// only while this device's switch is on and the Mac says it takes gestures. While a window

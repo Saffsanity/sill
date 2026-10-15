@@ -96,24 +96,41 @@ struct ContentView: View {
 /// * `-SillDrawer 1` — start with the app drawer open. This, `-SillScaleOpen 1` and `-SillSettings 1`
 ///   also work in a live session (the normal app with `-SillConnect`, and `-SillLive 1`), where each
 ///   opens 1.5 s after the stream screen shows, once the Desktop has started (StreamScreen).
+///   `-SillDrawerSearch <text>`: the open drawer searches for that text with the keyboard up for its
+///   field (in a live session the real keyboard), so a photo shows what the keyboard leaves in view.
 /// * `-SillScaleOpen 1` — start with the Aa slider unfolded (as while a finger holds it);
 ///   `-SillScale 1.5` sets the scale it opens at.
 /// * `-SillWindowMenu 1` — open the first thumbnail's traffic lights and keep them open.
 /// * `-SillKeyboard 1` — start with the software keyboard shown: in the mock only the Keyboard
 ///   button lights (a real keyboard upsets the fake screen); under `-SillLive 1` and in the normal
 ///   app (with `-SillConnect`) the input view takes first responder half a second after the stream
-///   screen shows, so the keyboard really comes up. A simulator shows it only with no hardware
-///   keyboard connected to it (booted headless, or I/O › Keyboard › Connect Hardware Keyboard off).
+///   screen shows, so the keyboard really comes up. A simulator shows it only while UIKit there
+///   counts no hardware keyboard: a fresh one (Tests/keyrig's keys make it count one for good).
 /// * `-SillKeyboardToggle <s>[,<s>…]` — at each of these seconds after the stream screen shows, the
 ///   keyboard toggles as the Keyboard button does (the Settings panel put away, then the input
 ///   view's first responder toggled): a stand-in for a tap, since no gate drives the UI. In the
 ///   normal app too, and in the mock (where a real keyboard then upsets the fake screen).
+/// * `-SillHardwareKeyboard 1|0` — a hardware keyboard is attached, or not, for this run, whatever
+///   GameController says (HardwareKeyboardMonitor; docs/hardware-keyboard-plan.md). A simulator's
+///   GameController always counts the simulator's own keyboard, so without it the stream's input view
+///   takes the keyboard by itself there (an empty input view: nothing drawn). The console says
+///   "keyboard: …" for what the rule does, and "hwkey: usage 41 down via pressesBegan: to the Mac"
+///   (or `keyCommand`) for every hardware key the input view sees.
+/// * `-SillKeyProbe 1` — GameController's keyboard handler prints every key it sees as well
+///   ("hwkey: usage 41 down via GameController"), beside UIKit's channels.
+/// * `-SillEscViaCommand 1` — the input view hands a hardware Esc on from pressesBegan, as a device
+///   that keeps it from there would, so its Esc key commands take it (UIKit's own dispatch).
+/// * `-SillTurnAt <s>[,<s>…]` — at each of these seconds after the stream screen shows, the scene is
+///   asked for the other orientation, a turn mid-session (an iPhone's; iPadOS's windowing refuses).
 /// * `-SillInputTest 1` — with `-SillConnect` on this Mac's loopback (127.0.0.1, ::1, [::1] or
 ///   localhost), once per launch, in the portrait key row's and trackpad's own code: the key row
 ///   taps cmd, esc, shift and ctrl through its caps' action 1.0, 1.4, 1.8 and 2.0 s after it shows
 ///   (⌘esc goes out; shift and ctrl stay latched), then the trackpad checks that a touch at its
 ///   centre lands on it and strokes 60 pt right and 40 down (2.6 s), taps with shift and ctrl held
-///   around the click (3.2 s) and scrolls five 8 pt steps (3.8 s). Each event goes out as the
+///   around the click (3.2 s) and scrolls five 8 pt steps (3.8 s); in every layout, the stream's
+///   input view sends Esc and ⇧Esc through its key command's own action (4.4 s, only while it holds
+///   the keyboard), a trackpad's two-finger scroll of 40 pt down with its coast (5 s) and a wheel's
+///   30 pt up (7.2 s). Each event goes out as the
 ///   controls send it, and the console says what ran ("input test: …"). A synthetic host counts
 ///   what it gets as `in.dry` and posts nothing; a real host (Sill.app, SillHost without
 ///   `--synthetic`) posts it on this Mac, and the test does not check which it reached: point it
@@ -198,6 +215,23 @@ struct ContentView: View {
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
 ///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-Sill.largerPicture 1` — not a harness argument either: this device's Larger Picture switch
+///   (the Settings panel's This iPhone group; docs/larger-picture-plan.md) on for one run, in the
+///   normal app too. A phone held upright then has, while a window streams, no thumbnails, the
+///   picture's room down to the keyboard's estimated top less the rows (PhonePortraitLayout), and the
+///   Menus button in row 1; with the Desktop or nothing streaming (`-SillActive desktop|none` in the
+///   mock, whose default is a window) the usual arrangement, and the console's `larger picture: the
+///   switch on, the Desktop streams: the standard arrangement` says so.
+///   `-SillVideoSize 848x844` gives the mock's frame another shape (2800x1800 otherwise), so the
+///   pane at the top of that room can be drawn as a window the Mac fitted to it, or a taller one.
+///   `-SillLargerPictureToggle <s>[,<s>…]` switches it at those seconds after the stream screen
+///   shows, as the Settings panel's switch does (saved; leave out `-Sill.largerPicture`, which would
+///   hold it), so a live run shows the one new viewport each switch sends.
+/// * `-SillAXDump <s>` — `s` seconds after the stream screen shows, the console lists its
+///   accessibility elements in the order the accessibility tree hands them to VoiceOver ("ax: 1
+///   Open the app list (33,463 55×50)"). SwiftUI builds that tree only for an assistive technology:
+///   on a private simulator, `xcrun simctl spawn UDID defaults write com.apple.Accessibility
+///   ApplicationAccessibilityEnabled -bool true` first. In the mock and the normal app.
 /// * `-SillVoiceOver 1` — the Settings panel acts as if VoiceOver were on: the This iPad group's
 ///   footnote says VoiceOver keeps three fingers and its rows do the gestures instead (they are
 ///   accessibility actions whether or not it is on).
@@ -249,8 +283,10 @@ struct ContentView: View {
 ///   which have no finger (`InputScript`): `t` is seconds since the session's first window list, and
 ///   a step is `down`, `pad DX,DY`, `lift` or `click` on the portrait pad, `tap X,Y` on the stream
 ///   (a frame fraction), `key USAGE` (a hardware key) or `row USAGE` (a key of the portrait key
-///   row). The console says "input script: …" at each. It runs only when the session was dialled
-///   by `-SillConnect` to a loopback address and the host's first window list has no version
+///   row), `esc [MODS]`, `scroll DX,DY`, `wheel DX,DY`, `keyboard attach|detach` or `orient
+///   landscape|portrait` (InputScript has them all). The console says "input script: …" at each.
+///   It runs only when the session was dialled by `-SillConnect` to a loopback address and the
+///   host's first window list has no version
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
 ///   …" and nothing is sent. Point it only at `--synthetic` hosts.
 /// * `-SillSettingsScript '<t> <step>; …'` — the Settings panel's controls for the simulator gates,
@@ -359,7 +395,10 @@ struct ContentView: View {
 /// larger simulator, or in the normal app.
 ///
 /// Console lines for the gates, in the harness and the normal app alike: `viewport: 386×241 pt,
-/// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen).
+/// scale none, 60 fps` for each viewport the stream screen sends the Mac (StreamScreen); on a phone
+/// held upright `trackpad: 412×389 pt, vertical span 257.5 pt` whenever the pad or its span changes,
+/// and `keyboard: up, 320 pt tall, its top at 574 pt in the stream screen; the key row ends 10 pt
+/// above it, …` each time the software keyboard moves (PortraitStreamScreen).
 ///
 /// Launch arguments land in `NSArgumentDomain`, which is not persisted, so a normal launch is
 /// exactly the app it was before. None of this is built in Release.
@@ -592,7 +631,15 @@ struct LayoutHarness: View {
 /// * `gesture NAME[,FINGERS]` — a three-finger (or four-finger) gesture a surface decided, through
 ///   `StreamClient.sendGesture` as a surface's decision goes (the switch, the Mac's `gestures`, the
 ///   Desktop first while a window streams): swipeUp, swipeDown, swipeLeft, swipeRight, pinch or
-///   spread; the console says whether it went ("input script: t=… gesture swipeUp: sent").
+///   spread; the console says whether it went ("input script: t=… gesture swipeUp: sent");
+/// * `esc [MODS]` — Esc through the stream's key command, as UIKit hands it the command, with MODS
+///   (`shift+command` and the like), only while the input view takes Esc (it holds the keyboard and no
+///   EscapeKey is on screen in its window); the console says whether it went;
+/// * `scroll DX,DY` — the iPad's trackpad: a two-finger scroll of DX, DY points in five steps, lifted at
+///   600 pt/s (so it coasts), through the scroll path its recognizer takes;
+/// * `wheel DX,DY` — a mouse's wheel: the same steps as plain deltas, no gesture, no coast;
+/// * `keyboard attach|detach` — a hardware keyboard attaching or going, as GameController says it;
+/// * `orient landscape|portrait` — the scene asked for that orientation (an iPhone's).
 /// The pad and the overlay register themselves as they join a window, and each step calls their
 /// own methods, so the feed, the anchor and the sprite get what a finger would give them. The
 /// console prints "input script: t=… <step>" as each runs. Once per launch.
@@ -607,6 +654,8 @@ enum InputScript {
     enum Step: Equatable, CustomStringConvertible {
         case down, pad(dx: Double, dy: Double), lift, click, tap(x: Double, y: Double), key(UInt16), row(UInt16)
         case gesture(TrackpadGestures.Gesture, fingers: Int)
+        case esc(modifiers: String), scroll(dx: Double, dy: Double), wheel(dx: Double, dy: Double)
+        case keyboard(attached: Bool), orient(String)
 
         var description: String {
             switch self {
@@ -618,7 +667,28 @@ enum InputScript {
             case .key(let usage): return "key \(usage)"
             case .row(let usage): return "row \(usage)"
             case .gesture(let g, let fingers): return "gesture \(g.rawValue)" + (fingers == 3 ? "" : ",\(fingers)")
+            case .esc(let modifiers): return "esc" + (modifiers.isEmpty ? "" : " \(modifiers)")
+            case .scroll(let dx, let dy): return "scroll \(dx),\(dy)"
+            case .wheel(let dx, let dy): return "wheel \(dx),\(dy)"
+            case .keyboard(let attached): return "keyboard \(attached ? "attach" : "detach")"
+            case .orient(let orientation): return "orient \(orientation)"
             }
+        }
+
+        /// `esc`'s modifiers, "shift+command" and the like, as the key command's flags; nil when a name
+        /// does not read.
+        static func flags(_ names: String) -> UIKeyModifierFlags? {
+            var flags = UIKeyModifierFlags()
+            for name in names.split(separator: "+") where !name.isEmpty {
+                switch name {
+                case "shift": flags.insert(.shift)
+                case "control", "ctrl": flags.insert(.control)
+                case "option", "opt": flags.insert(.alternate)
+                case "command", "cmd": flags.insert(.command)
+                default: return nil
+                }
+            }
+            return flags
         }
     }
 
@@ -649,6 +719,12 @@ enum InputScript {
                 let fingers = parts.count == 2 ? Int(parts[1]) : 3
                 guard let fingers, fingers == 3 || fingers == 4 else { return nil }
                 step = .gesture(g, fingers: fingers)
+            case ("esc", 2): step = .esc(modifiers: "")
+            case ("esc", 3): guard Step.flags(words[2]) != nil else { return nil }; step = .esc(modifiers: words[2])
+            case ("scroll", 3) where pair.count == 2: step = .scroll(dx: pair[0], dy: pair[1])
+            case ("wheel", 3) where pair.count == 2: step = .wheel(dx: pair[0], dy: pair[1])
+            case ("keyboard", 3) where words[2] == "attach" || words[2] == "detach": step = .keyboard(attached: words[2] == "attach")
+            case ("orient", 3) where words[2] == "landscape" || words[2] == "portrait": step = .orient(words[2])
             default: return nil
             }
             steps.append((at, step))
@@ -721,6 +797,21 @@ enum InputScript {
             let went = client.sendGesture(g, fingers: fingers)
             print(String(format: "input script: t=%.2f ", at) + "\(step): " + (went ? "sent" : "not sent (the switch is off, or the Mac takes none)"))
             return
+        case .esc(let names):
+            let taken = overlay?.scriptEscape(Step.flags(names) ?? []) ?? false
+            print(String(format: "input script: t=%.2f ", at) + "\(step): "
+                  + (taken ? "the stream's key command sent it" : "not the stream's (it does not hold the keyboard, or an EscapeKey is on screen in its window)"))
+            return
+        case .scroll(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .trackpad) } else { done = false }
+        case .wheel(let dx, let dy): if let overlay { overlay.scriptScroll(dx: dx, dy: dy, from: .wheel) } else { done = false }
+        case .keyboard(let attached): HardwareKeyboardMonitor.shared.scriptSet(attached: attached)
+        case .orient(let orientation):
+            let mask: UIInterfaceOrientationMask = orientation == "portrait" ? .portrait : .landscapeRight
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                    print("input script: orient \(orientation) refused: \(error.localizedDescription)")
+                }
+            }
         }
         print(String(format: "input script: t=%.2f ", at) + (done ? "\(step)" : "\(step): nothing to take it in this layout"))
     }

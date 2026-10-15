@@ -69,6 +69,16 @@ enum MockCatalog {
         client.active = active
         client.apps = mockApps
         client.videoSize = CGSize(width: 2800, height: 1800)
+        // `-SillVideoSize 848x844`: the mock's frame at another shape, so the harness draws a phone's
+        // Larger Picture pane as a window the Mac fitted to its room would make it (or a taller one).
+        if let raw = UserDefaults.standard.string(forKey: "SillVideoSize") {
+            let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
+            if parts.count == 2, parts[0] > 0, parts[1] > 0 {
+                client.videoSize = CGSize(width: parts[0], height: parts[1])
+            } else {
+                print("-SillVideoSize \(raw): not WxH")
+            }
+        }
 
         var icons: [String: UIImage] = [:]
         for app in mockWindows.map({ ($0.bundleID, $0.appName) }) + mockApps.map({ ($0.bundleID, $0.name) }) {
