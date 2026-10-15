@@ -1,0 +1,25 @@
+[package]
+name = "sill-host-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sill host for Linux: X11 capture, XTest input, EWMH windows, Avahi (Wayland later)"
+
+[lib]
+name = "sill_host_linux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sill-host-linux"
+path = "src/main.rs"
+
+[dependencies]
+sill-host-core = { path = "../sill-host-core" }
+
+# Linux only, so `cargo check --workspace` on macOS and Windows stays light and green. Every one is
+# MIT, Apache-2.0 or both (README.md: no GPL linked in; FFmpeg runs as a subprocess).
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["shm", "composite", "xfixes", "xtest", "randr"] }
+libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
