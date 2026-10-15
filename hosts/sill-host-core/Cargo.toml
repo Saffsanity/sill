@@ -1,0 +1,25 @@
+[package]
+name = "sill-host-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Sill host without an OS: doors, sessions, catalog, pacing, settings, pairing, an FFmpeg HEVC encoder and a synthetic backend"
+
+[[bin]]
+name = "sill-host-synthetic"
+path = "src/bin/sill-host-synthetic.rs"
+
+[dependencies]
+sill-protocol = { path = "../sill-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Licences: socket2, ctrlc, png, jpeg-encoder MIT OR Apache-2.0; if-addrs MIT OR BSD-3-Clause.
+socket2 = { version = "0.6", features = ["all"] }
+if-addrs = "0.13"
+ctrlc = { version = "3", features = ["termination"] }
+png = "0.18"
+jpeg-encoder = "0.6"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -1,0 +1,11 @@
+# Sill hosts for Windows and Linux, in Rust: the same wire protocol as Sill for Mac (Sources/), so the
+# iPhone, iPad and Mac clients connect to them unchanged. See README.md for the layout and who owns what.
+[workspace]
+resolver = "2"
+members = ["sill-protocol", "sill-host-core", "sill-host-windows", "sill-host-linux"]
+
+[workspace.package]
+version = "0.5.1"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.92"
