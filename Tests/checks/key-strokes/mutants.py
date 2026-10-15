@@ -141,6 +141,20 @@ MUTANTS = [
     ("the right-hand keys hold nothing on the device", CHORDS,
      "private var held: UInt64 { down.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }",
      "private var held: UInt64 { down.reduce(0) { $0 | ($1 < 0xE4 ? KeyModifiers.flag(forKey: $1)?.rawValue ?? 0 : 0) } }"),
+    # The device: Esc's key command, one key press sent once (#67)
+    ("a press the command sent goes again (no swallowing)", CHORDS, "if let sent = commandedAt[usage], time <= sent {",
+     "if let sent = commandedAt[usage], time <= sent - 1000 {"),
+    ("a later press swallowed too", CHORDS, "if let sent = commandedAt[usage], time <= sent {", "if let sent = commandedAt[usage], time <= sent + 10 {"),
+    ("the command sends while the press holds the key down", CHORDS,
+     "guard !down.contains(usage), let press = began(usage, modifiers: modifiers) else { return [] }",
+     "guard let press = began(usage, modifiers: modifiers) else { return [] }"),
+    ("the command's key goes down without its up", CHORDS, "return [press] + (ended(usage).map { [$0] } ?? [])", "return [press]"),
+    ("the command's time forgotten", CHORDS, "        commandedAt[usage] = time\n", ""),
+    ("a swallowed press not remembered", CHORDS, "            swallowed.insert(usage)\n            return .swallow", "            return .swallow"),
+    ("a swallowed press's up to the text system", CHORDS, "        if swallowed.remove(usage) != nil { return .swallow }\n", ""),
+    ("a swallowed press's up swallowed for ever", CHORDS, "if swallowed.remove(usage) != nil { return .swallow }",
+     "if swallowed.contains(usage) { return .swallow }"),
+    ("letting go of the keys keeps swallowed presses", CHORDS, "        swallowed.removeAll()\n", ""),
 ]
 caught = 0
 for name, rel, old, new in MUTANTS:
