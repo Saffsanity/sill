@@ -37,7 +37,12 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
         window.title = "Pair iPhone or iPad"
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
-        window.sharingType = .none
+        // `.none` also hides the window from screen-sharing and remote-desktop clients (Apple's
+        // Screen Sharing, ARD, VNC), so a Mac reached only that way never shows its code (issue
+        // #108). `defaults write me.saffer.sill.mac pairingWindowVisibleToRemoteDesktop -bool true`
+        // keeps the window visible to them: the Desktop stream still leaves it out.
+        let visibleToRemoteDesktop = UserDefaults.standard.bool(forKey: "pairingWindowVisibleToRemoteDesktop")
+        window.sharingType = visibleToRemoteDesktop ? .readOnly : .none
         super.init(window: window)
         let host = NSHostingController(rootView: LivePairDeviceView(model: model, state: state, close: { [weak self] in self?.close() }))
         host.sizingOptions = [.preferredContentSize]
