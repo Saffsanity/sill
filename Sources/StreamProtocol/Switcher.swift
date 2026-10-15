@@ -59,8 +59,8 @@ public struct WindowList: Codable {
     /// How many windows this host streams besides the one picked (kinds 29–31, SideStreams.swift); nil
     /// from every host before 2026-10-12, to which a device sends no kind 29.
     public var sideStreams: Int?
-    /// True: this host shares its clipboard's text (kind 32) with a device that asks. Nil before 2026-10-12.
-    public var clipboard: Bool?
+    /// Clipboard generation (kind 32): 1 for text, 2 for images; nil while sharing is off.
+    public var clipboard: Int?
     /// True: this host sends the sound of the apps a device shows (kind 33) when it asks. Nil before 2026-10-12.
     public var audio: Bool?
     /// True: this host takes files dropped on its windows (kinds 34 and 35). Nil before 2026-10-12.
@@ -97,13 +97,14 @@ public struct WindowList: Codable {
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
-                sideStreams: Int? = nil, clipboard: Bool? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
+                sideStreams: Int? = nil, clipboard: Int? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
                 liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil,
                 windowInput: Bool? = nil, badges: [String: String]? = nil, attention: [String]? = nil,
                 fullRate: Bool? = nil, rebuildDesk: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
-        self.middleButton = middleButton; self.sideStreams = sideStreams; self.clipboard = clipboard
+        self.middleButton = middleButton; self.sideStreams = sideStreams
+        self.clipboard = clipboard
         self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
         self.dockMenu = dockMenu; self.windowInput = windowInput; self.badges = badges
         self.attention = attention; self.fullRate = fullRate

@@ -11,13 +11,17 @@ import StreamProtocol
 /// iPad window, which a system presentation would escape; and a tall sheet or a flipped popover
 /// could cross the half-folded crease. Its height follows its content; only the middle scrolls,
 /// where the room under the bar is short (259 pt in the compact halves at 500×710, an iPad window
-/// that narrow; 275 on an iPhone SE on its side), so the header and Disconnect are always in reach.
+/// that narrow; 279 on an iPhone SE upright with Larger Picture; 275 on an SE on its side), so the
+/// header and Disconnect are always in reach.
 ///
 /// Every control shows `client.settings.displayed` (the Mac's value with this device's unanswered
 /// pick over it) and sends through `client.changeSettings`, one field per control, from its action
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
-/// This iPad (or iPhone), whose switch is a preference here (`StreamClient.gesturesKey`) and sends
-/// nothing to the Mac, and whose rows, as accessibility actions, do their gestures
+/// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
+/// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
+/// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
+/// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
+/// `StreamClient.gesturesKey`), and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
@@ -37,6 +41,15 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
+    /// read by the stream screen, never sent.
+    @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
+    /// iPhone without a hinge whose picture it makes larger.
+    @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
+    /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
+    @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -99,6 +112,10 @@ struct HostSettingsPanel: View {
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .accessibilityAction(.escape, close)
+        // Esc on a hardware keyboard closes it, with priority over the text and focus systems, as the
+        // tour's and the pairing overlay's do: SwiftUI's `.cancelAction` shortcut on Done (kept for
+        // ⌘.) does not ask for priority (docs/hardware-keyboard-plan.md §1).
+        .background(EscapeKey(action: close))
         .onAppear { headerFocused = true }
         // A refused change: the control has already gone back to the Mac's value, and the reason
         // is in the footer or the note. The haptic is a no-op on an iPad.
@@ -187,6 +204,7 @@ struct HostSettingsPanel: View {
             .padding(.vertical, -11)
             .padding(.horizontal, -4)
             .font(.body.weight(.semibold))
+            // ⌘. (and Esc where SwiftUI gets it first); Esc itself is the panel's EscapeKey.
             .keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, 4)
@@ -441,12 +459,14 @@ struct HostSettingsPanel: View {
 
     // MARK: This device
 
-    /// This device's own group, after the Mac's: its switch for three-finger gestures, and what each
-    /// does when the Mac takes them (Take the Tour follows it). After the Mac's rows because it is
-    /// the least changed, and the compact halves' 259 pt show the Mac's rows first. The switch
-    /// reaches nothing; a row, activated by VoiceOver, Voice Control or Switch Control, does its
-    /// gesture on the Mac as three fingers would (`sendGesture`: the switch, the Mac's `gestures`,
-    /// the Desktop first while a window streams).
+    /// This device's own group, after the Mac's: on an iPhone its switch for Larger Picture, then Share
+    /// Clipboard while the Mac shares its clipboard, with Paste on ‹Mac› (the system's Paste control)
+    /// under it while on, then its switch for three-finger gestures, and what each does when the Mac
+    /// takes them (Take the Tour follows it). After the Mac's rows because it is the least changed, and
+    /// the compact halves' 259 pt show the Mac's rows first. The switches reach nothing on the Mac but
+    /// the clipboard's, which subscribes or stops; a gesture row, activated by VoiceOver, Voice Control
+    /// or Switch Control, does its gesture on the Mac as three fingers would (`sendGesture`: the switch,
+    /// the Mac's `gestures`, the Desktop first while a window streams).
     @ViewBuilder private var thisDevice: some View {
         Text("This \(device)")
             .font(.footnote.weight(.medium))
@@ -456,6 +476,35 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
+        if offersLargerPicture {
+            Rows {
+                Toggle(isOn: $largerPicture) {
+                    Text("Larger Picture").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: Self.largerPictureFooter)
+        }
+        // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
+        if ClipboardPolicy.hostTakes(client.hostClipboard) {
+            Rows {
+                Toggle(isOn: $clipboardOn) {
+                    Text(ClipboardPolicy.Copy.switchTitle).foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+                .onChange(of: clipboardOn) { _, _ in client.clipboardSwitchChanged() }
+                if clipboardOn {
+                    RowDivider()
+                    ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
+                }
+            }
+            if clipboardOn, let note = client.clipboardNote {
+                Footnote(text: note.text, warning: note.warning, top: 6)
+                    .padding(.bottom, -6)
+                    .accessibilityHidden(true)      // announced as it came
+            }
+            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
+        }
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)
@@ -475,6 +524,13 @@ struct HostSettingsPanel: View {
 
     /// The Mac's window list said it takes the gestures (`WindowList.gestures`).
     private var macTakesGestures: Bool { (client.hostGestures ?? 0) >= TrackpadGesture.generation }
+
+    /// Under Larger Picture's switch: that it is a window's picture (the Desktop, which Aa never
+    /// resizes, keeps the thumbnails: `PhonePortraitLayout.largerPicture(switchOn:streaming:)`), what
+    /// it gives up, where windows come from instead, that the Mac fits a window to the taller picture
+    /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
+    /// closes (StreamScreen's `largerPictureHeld`).
+    static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
@@ -698,6 +754,31 @@ private struct GestureRow: View {
     }
 }
 
+/// "Paste on ‹Mac›" with the system's Paste button (ClipboardPasteButton): beside it when they fit,
+/// under it when larger text leaves no room, as `AdaptiveRow` does. The title is the row's words for
+/// VoiceOver; the button reads "Paste" with its hint.
+private struct ClipboardPasteRow: View {
+    @ObservedObject var client: StreamClient
+    let title: String
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text(title).foregroundStyle(Palette.text)
+                Spacer(minLength: 8)
+                ClipboardPasteButton(client: client)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true)
+                ClipboardPasteButton(client: client)
+            }
+            .padding(.vertical, 8)
+        }
+        .id(typeSize)
+        .rowFrame()
+    }
+}
+
 /// A hairline between rows, inset like the system's.
 private struct RowDivider: View {
     var body: some View {
@@ -793,5 +874,20 @@ private extension View {
     /// A row inside a group: at least 44 pt tall, inset 14 pt.
     func rowFrame() -> some View {
         frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 14)
+    }
+}
+
+/// Whether the Settings panel offers Larger Picture (This iPhone's first switch): the stream screen's
+/// say, true on an iPhone without a hinge whose picture Larger Picture makes larger
+/// (`PhonePortraitLayout.offersLargerPicture`); false everywhere else, the iPhone Duo and an iPad
+/// included, and on an iPhone that Display Zoom makes 320 pt wide.
+private struct LargerPictureOfferedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var largerPictureOffered: Bool {
+        get { self[LargerPictureOfferedKey.self] }
+        set { self[LargerPictureOfferedKey.self] = newValue }
     }
 }

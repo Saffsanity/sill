@@ -62,8 +62,8 @@ final class DeskStages {
     /// makes no display. Every display made and removed leaves macOS's ColorSync service more work for
     /// the rest of the login session (about 40 in a morning saturated it, and WindowServer, waiting on
     /// it, was killed by its watchdog), and a display made after another was removed can stream a
-    /// third's picture (DeskPicture). As many as windows were on the desk at once; all removed together
-    /// once the desk is empty (`keep`), or made again by hand (`releaseAll`).
+    /// third's picture (DeskPicture). As many as windows were on the desk at once; all removed, one at
+    /// a time, once the desk is empty (`keep`) and at exit (`releaseAll`).
     private var spares: [(spare: VirtualStage.Spare, slot: Int)] = []
 
     /// What the desk's displays may take of this Mac's memory in all: each holds a framebuffer of its
@@ -179,10 +179,13 @@ final class DeskStages {
     }
 
     /// Every staged window not in `keep` goes home, its display kept for the next (`spares`); once
-    /// none is left on the desk, the kept displays go together.
+    /// none is left on the desk, the kept displays go, one at a time (`VirtualDisplay.removeInTurn`).
     func keep(_ keep: Set<UInt32>) {
         for id in staged.subtracting(keep) { release(id) }
-        if stages.isEmpty { removeSpares() }
+        if stages.isEmpty, !spares.isEmpty {
+            let displays = takeSpares()
+            Task { @MainActor in Self.report(await VirtualDisplay.removeInTurn(displays), of: displays.count) }
+        }
     }
 
     /// The window home, its display kept for the next window (`spares`).
@@ -198,14 +201,19 @@ final class DeskStages {
         forget(id)
     }
 
-    /// The kept displays removed, together.
-    private func removeSpares() {
-        guard !spares.isEmpty else { return }
-        let ids = spares.map { String($0.spare.display.displayID) }
-        for s in spares { s.spare.display.onTerminated = nil; s.spare.display.destroy() }
+    /// The kept displays, out of the desk's hands, to be removed (one at a time: `removeInTurn`).
+    private func takeSpares() -> [VirtualDisplay] {
+        let displays = spares.map(\.spare.display)
+        for d in displays { d.onTerminated = nil }
         spares.removeAll()
         VirtualStage.arrangementChangedAt = Date()
-        print("Sill's desk: removed its kept displays \(ids.joined(separator: ", ")).")
+        print("Sill's desk: removing its kept displays \(displays.map { String($0.displayID) }.joined(separator: ", ")), one at a time.")
+        return displays
+    }
+
+    private static func report(_ late: [CGDirectDisplayID], of count: Int) {
+        print(late.isEmpty ? "Sill's desk: its \(count) kept display\(count == 1 ? "" : "s") removed."
+                           : "Sill's desk: display\(late.count == 1 ? "" : "s") \(late.map(String.init).joined(separator: ", ")) still listed after its wait.")
     }
 
     private func forget(_ id: UInt32) {
@@ -220,11 +228,13 @@ final class DeskStages {
         }
     }
 
-    /// Every window home and every display removed, kept ones too (a quit, the last device gone, or
-    /// the desk made again by hand).
+    /// Every window home and every display removed, kept ones too, one at a time, each gone before the
+    /// next goes and before this returns: the exit path (`StreamCoordinator.shutdownForExit`), which
+    /// must never end the process with a display still being taken down. Blocks.
     func releaseAll() {
         for id in staged { release(id) }
-        removeSpares()
+        let displays = takeSpares()
+        if !displays.isEmpty { Self.report(VirtualDisplay.removeInTurn(displays), of: displays.count) }
         cannotTake.removeAll()
     }
 

@@ -465,6 +465,13 @@ check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs)
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
 
+check("clipboard: accepts is optional and generation 2 round-trips",
+      Wire.encode(Clipboard()) == Data("{}".utf8) && Wire.decode(Clipboard.self, from: Wire.encode(Clipboard(accepts: 2)))?.accepts == 2)
+check("clipboard: image host advertises generation 2",
+      Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, clipboard: ClipboardPolicy.imageGeneration)))?.clipboard == 2)
+check("clipboard: viewer subscription explicitly accepts images", ClipboardPolicy.viewerSubscription(hostClipboard: 2)?.accepts == 2)
+check("clipboard: {} subscription never receives images", ClipboardPolicy.payload(Clipboard(image: Data([1])), forAccepts: nil) == nil)
+
 // The Mac client's payloads (2026-10-12; SideStreams.swift): kinds 29–37, each round-trips and
 // rejects what it should.
 do {
@@ -531,8 +538,10 @@ do {
         check("window input: round-trip", WindowInput.decode(windowed) == WindowInput(window: 0x8000_0003, event: scroll))
         check("window input: a host from before would take it as the streamed window's (hence the list's flag)",
               Wire.decode(InputEvent.self, from: windowed) == scroll)
+        // As JSON objects: JSONEncoder's key order differs from one encoding to the next, which no reader minds.
+        func object(_ d: Data) -> NSDictionary? { (try? JSONSerialization.jsonObject(with: d)) as? NSDictionary }
         check("window input: without a window, the plain kind 8 every device sends",
-              WindowInput(window: nil, event: scroll).encoded() == Wire.encode(scroll)
+              object(WindowInput(window: nil, event: scroll).encoded()).map { $0 == object(Wire.encode(scroll)) } == true
               && WindowInput.decode(Wire.encode(scroll)) == WindowInput(window: nil, event: scroll))
         check("window input: a third key, or a window that is no number, is refused",
               WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":5,"extra":1}"#.utf8)) == nil

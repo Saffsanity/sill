@@ -114,6 +114,9 @@ package struct HostStatusSnapshot: Equatable {
     /// stuck, not busy, and the re-check has stopped probing it (a restart of the Mac fixes that).
     /// Cleared as soon as one of those frames comes back.
     package var hardwareEncoderStuck = false
+    /// WindowServer delivers no display stream on this Mac (StreamCoordinator.displayStreamsDead):
+    /// windows stream alone, without their menus, until it does again.
+    package var displayStreamsDead = false
     /// The virtual display setting as the host runs it.
     package var virtualDisplayOn = false
     /// Why the virtual display is off for this run: the private API is missing, or the system took

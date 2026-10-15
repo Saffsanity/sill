@@ -73,8 +73,11 @@ public enum StreamMessageKind: UInt8 {
                              // it streams (kind 6), each to be streamed too at a lower rate; an empty list stops them
     case sideParameterSets = 30 // host → device: window ID (UInt32 BE) + ParameterSets.encoded(), as kind 0 for that window
     case sideFrame = 31      // host → device: window ID (UInt32 BE) + one HEVC access unit, as kind 1 for that window
-    case clipboard = 32      // either way: JSON Clipboard — the sender's clipboard changed (or, from a device with no
-                             // text, a request to be sent the host's from now on)
+    case clipboard = 32      // both ways: JSON Clipboard. Device → host: any kind 32 subscribes the connection to
+                             // the Mac's copies (an empty one at connect, while the device's Share Clipboard is
+                             // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
+                             // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
+                             // on the Mac (or sent by another device), only to a connection that subscribed
     case audio = 33          // host → device: AudioPacket — about 10 ms of the sound of the apps whose windows the
                              // device shows (it asked: SideStreamRequest.audio), only from a host whose list says `audio`
     case fileChunk = 34      // either way: FileChunk — part of a file dropped on one of the host's windows here, or
@@ -93,8 +96,9 @@ public enum StreamMessageKind: UInt8 {
                              // only to a host whose list names its `displays`
     case takenBack = 41      // host → device: JSON TakenBack — windows the person at the Mac stopped sharing (gone
                              // home there); the device closes its windows of them and may open them again
-    case rebuildDesk = 42    // device → host: no payload — make every one of Sill's hidden displays again, together
-                             // (a window's picture from its display came out wrong); only to a host whose list
+    case rebuildDesk = 42    // device → host: no payload — start the captures of Sill's hidden displays again (a
+                             // window's picture came out wrong; hosts before 2026-10-15 made every display
+                             // again); only to a host whose list
                              // says `rebuildDesk`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
