@@ -32,6 +32,13 @@ import Foundation
 /// One no faster (its median at least `noFasterFraction` of the replaced session's: then the
 /// engine is slow, as beside another app, not the session) ends the replacing for this stream
 /// (`gaveUp`).
+///
+/// So does a relapse: a new session judged faster is judged on its first frames, while every fresh
+/// session is fast (9–17 ms for its first seconds), and the slow state comes back with the next
+/// quiet spell. Condemned again within `relapseWithin` of taking over, and the one before it too
+/// (`maxRelapses` in a row), the stream keeps the session it has (`Event.relapsed`): on a Mac viewer
+/// on 2026-10-13 a stream replaced its session every 10–13 s for 22 minutes, 64 times, each a full
+/// keyframe and a hitch, for 5–7 s of the fast state at a time (222 replacements that day).
 struct EncoderSlowState {
     static let window: CFTimeInterval = 2
     /// Frames a second from the capture: in each half of `window` for a replace, and in the second
@@ -49,6 +56,10 @@ struct EncoderSlowState {
     static let minReturns = 10
     /// At most one new session in this long (one that could not be made counts too).
     static let minSpacing: CFTimeInterval = 10
+    /// Slow again this soon after a new session took over is a relapse; `maxRelapses` in a row and
+    /// the stream keeps its session.
+    static let relapseWithin: CFTimeInterval = 30
+    static let maxRelapses = 2
     /// A new session is judged on this many frames after its first, or on those back within
     /// `judgeWithin` of the swap (or before the motion ended) if there are at least `minJudged`.
     static let judgeFrames = 30
@@ -87,6 +98,8 @@ struct EncoderSlowState {
         case replace(Slow)
         /// The new session's verdict, once.
         case judged(Report)
+        /// Slow again soon after each of the last swaps: no new session; the stream keeps this one.
+        case relapsed(Slow, count: Int)
     }
 
     private struct Judging {
@@ -119,6 +132,10 @@ struct EncoderSlowState {
     private var fastest = CFTimeInterval.infinity
     /// A new session was no faster: the stream keeps the one it has.
     private(set) var gaveUp = false
+    /// Swaps in a row whose session was condemned within `relapseWithin` of taking over.
+    private var relapses = 0
+    /// When a new session last took over (a session that could not be made is no relapse).
+    private var lastSwap = -CFTimeInterval.infinity
     /// Capture times, and the frames back (when, and their turnaround), within the last `window`.
     private var captures: [CFTimeInterval] = []
     private var returns: [(at: CFTimeInterval, turnaround: CFTimeInterval)] = []
@@ -173,6 +190,11 @@ struct EncoderSlowState {
             guard median >= max(Self.slowTurnaround, Self.slowFactor * fastest) else { return nil }
             let slow = Slow(turnaround: median, inputFPS: Double(captures.count) / Self.window,
                             outputFPS: Double(returns.count) / Self.window)
+            relapses = now - lastSwap < Self.relapseWithin ? relapses + 1 : 0
+            if relapses >= Self.maxRelapses {
+                gaveUp = true
+                return .relapsed(slow, count: relapses)
+            }
             phase = .making(slow)
             return .replace(slow)
         }
@@ -183,6 +205,7 @@ struct EncoderSlowState {
         guard case .making(let slow) = phase else { return }
         phase = .judging(Judging(slow: slow, swapAt: now, lastOldReturn: lastReturnAt))
         lastAttempt = now
+        lastSwap = now
         fastest = .infinity
     }
 

@@ -679,6 +679,8 @@ enum DebugHooks {
         software.encodedFPS = 0
         var stuck = software
         stuck.hardwareEncoderStuck = true
+        var deadStreams = streaming
+        deadStreams.displayStreamsDead = true
         var fallback = streaming
         fallback.stream?.onVirtualDisplay = false
         fallback.lastStageFailure = "needs Accessibility"
@@ -702,6 +704,7 @@ enum DebugHooks {
             Sample(name: "two-devices", snapshot: two),
             Sample(name: "software-encoder", snapshot: software),
             Sample(name: "software-encoder-stuck", snapshot: stuck),
+            Sample(name: "display-streams-dead", snapshot: deadStreams),
             Sample(name: "virtual-display-fallback", snapshot: fallback),
             Sample(name: "permissions-missing", snapshot: idle,
                    permissions: PermissionState(screenRecording: false, accessibility: false)),

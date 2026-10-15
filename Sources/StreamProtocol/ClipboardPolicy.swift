@@ -9,6 +9,8 @@ import Foundation
 public enum ClipboardPolicy {
     /// `WindowList.clipboard` from a host that takes and sends text.
     public static let generation = 1
+    /// Text and images, negotiated independently for each subscribing connection.
+    public static let imageGeneration = 2
     /// The most a kind 32's JSON may be, either way (Clipboard.maxTextBytes says why).
     public static let maxPayload = StreamMessage.maxClientPayload
     /// A device's subscriptions and texts a second, per connection: a tap sends one. More is a runaway
@@ -44,6 +46,19 @@ public enum ClipboardPolicy {
     public static var subscription: Data { Wire.encode(Clipboard()) }
     /// A device's switch going off: `{"stop":true}`.
     public static var stopping: Data { Wire.encode(Clipboard(stop: true)) }
+
+    /// The Mac viewer can receive images; a text host ignores accepts. Nil means no subscription.
+    public static func viewerSubscription(hostClipboard: Int?) -> Clipboard? {
+        guard hostTakes(hostClipboard) else { return nil }
+        return Clipboard(accepts: imageGeneration)
+    }
+
+    /// Text goes to every subscriber; images only to a subscriber that explicitly accepts them.
+    public static func payload(_ clip: Clipboard, forAccepts accepts: Int?) -> Data? {
+        let image = (accepts ?? generation) >= imageGeneration ? clip.image : nil
+        guard image != nil else { return clip.text.flatMap { payload(text: $0) } }
+        return Clipboard(text: clip.text, image: image).payload(within: maxPayload)
+    }
 
     // MARK: The host
 
@@ -104,11 +119,27 @@ public enum ClipboardPolicy {
                                    ownMarker: () -> String?, text: () -> String?) -> HostDecision {
         if let own = ownChangeCount, own == changeCount { return .skip(.own) }
         if types.contains(where: { markerTypes.contains($0) }) { return .skip(.marked) }
+        if types.contains("me.saffer.sill.clipboard.from-other-mac") { return .skip(.own) }
         if types.contains(remoteClipboardType) { return .skip(.remote) }
         if types.contains(ownType), ownMarker() == launchID { return .skip(.own) }
         guard let text = text() else { return .skip(.noText) }
         guard !text.isEmpty else { return .skip(.empty) }
         guard let data = payload(text: text) else { return .skip(.tooLong) }
+        return .send(data)
+    }
+
+    /// Generation 2 keeps the text policy's marker/privacy decisions before reading an image.
+    public static func hostContentsDecides(types: [String], changeCount: Int, ownChangeCount: Int?, launchID: String,
+                                           ownMarker: () -> String?, text: () -> String?, image: () -> Data?) -> HostDecision {
+        let decision = hostDecides(types: types, changeCount: changeCount, ownChangeCount: ownChangeCount,
+                                   launchID: launchID, ownMarker: ownMarker, text: text)
+        let words: String?
+        switch decision {
+        case .send(let data): words = Wire.decode(Clipboard.self, from: data)?.text
+        case .skip(.noText): words = nil
+        default: return decision
+        }
+        guard let image = image(), let data = Clipboard(text: words, image: image).payload(within: maxPayload) else { return decision }
         return .send(data)
     }
 
@@ -127,6 +158,8 @@ public enum ClipboardPolicy {
         case subscribe
         /// The same, and this text becomes the Mac's clipboard (and goes to every other subscriber).
         case set(String)
+        /// Generation 2: image and optional text become the host clipboard.
+        case image(Clipboard)
         /// Send this connection nothing more.
         case stop
         /// Nothing: not subscribed, nothing set.
@@ -135,9 +168,14 @@ public enum ClipboardPolicy {
 
     /// `stop` wins over anything with it; text that is not empty sets; anything else (`{}`, empty
     /// text, an image alone, which this generation does not take) subscribes.
-    public static func fromDevice(_ payload: Data) -> FromDevice {
+    public static func fromDevice(_ payload: Data, takesImages: Bool = false) -> FromDevice {
+        guard payload.count <= maxPayload else { return .refuse(.tooLong) }
         guard let clip = Wire.decode(Clipboard.self, from: payload) else { return .refuse(.undecodable) }
         if clip.stop == true { return .stop }
+        if takesImages, clip.image != nil {
+            guard clip.text == nil || clip.text!.utf8.count <= Clipboard.maxTextBytes else { return .refuse(.tooLong) }
+            return .image(Clipboard(text: clip.text, image: clip.image))
+        }
         guard let text = clip.text, !text.isEmpty else { return .subscribe }
         guard text.utf8.count <= Clipboard.maxTextBytes else { return .refuse(.tooLong) }
         return .set(text)
@@ -155,8 +193,8 @@ public enum ClipboardPolicy {
     /// off, and a stop lost to the rate left the Mac's copies going to that device (found in review:
     /// off, on, off, on, off within a second, and the next copy still went). Neither a stop nor a
     /// refusal counts against the rate.
-    public static func hostReceives(_ payload: Data, arrivals: [Double], now: Double) -> (ask: FromDevice, kept: [Double]) {
-        let ask = fromDevice(payload)
+    public static func hostReceives(_ payload: Data, arrivals: [Double], now: Double, takesImages: Bool = false) -> (ask: FromDevice, kept: [Double]) {
+        let ask = fromDevice(payload, takesImages: takesImages)
         guard countsAgainstRate(ask) else { return (ask, arrivals) }
         let admitted = admits(arrivals: arrivals, now: now)
         return (admitted.taken ? ask : .refuse(.rate), admitted.kept)
@@ -167,7 +205,7 @@ public enum ClipboardPolicy {
     /// does nothing.
     static func countsAgainstRate(_ ask: FromDevice) -> Bool {
         switch ask {
-        case .subscribe, .set: return true
+        case .subscribe, .set, .image: return true
         case .stop, .refuse: return false
         }
     }
@@ -212,6 +250,20 @@ public enum ClipboardPolicy {
         default: return .asks
         }
     }
+
+    /// The viewer is used directly: its first new copy may let macOS ask once. A person who
+    /// chose Ask must not get a prompt at every polled copy; Deny is never read either.
+    public static func viewerMayRead(access: MacAccess) -> Bool {
+        access == .allowed || access == .notAsked
+    }
+
+    /// The viewer's menu offers a way to allow copies while sharing is on and reads stay blocked.
+    public static func viewerNeedsAccessHelp(access: MacAccess, switchOn: Bool) -> Bool {
+        switchOn && (access == .asks || access == .denied)
+    }
+
+    /// The host's Settings › General route to Privacy & Security › Paste from Other Apps.
+    public static let pastePrivacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!
 
     /// Whether the host reads its pasteboard at all: only while macOS allows every read. While it
     /// asks, each read would bring macOS's alert, at every copy, and the read would wait for the
@@ -407,6 +459,8 @@ public enum ClipboardPolicy {
             case .asks, .denied: return "Set Sill to Allow under Paste from Other Apps in Privacy & Security. Text a device sends with Paste still arrives."
             }
         }
+        public static let viewerAccessButton = "Allow Clipboard Access…"
+        public static let viewerAccessHint = "Set this app to Allow under Paste from Other Apps in Privacy & Security. Copies from the other Mac still arrive."
         public static let macAccessButton = "Allow in System Settings…"
         /// The host's line when macOS's answer changes while a device shares the clipboard (`accessLine`).
         public static func macAccessLine(_ access: MacAccess) -> String {

@@ -87,6 +87,11 @@ private struct DuoPostureReader: ViewModifier {
     @State private var hinge: DuoPosture.Hinge = .unknown
 
     func body(content: Content) -> some View {
+        // SILL_NO_DUO_SDK: a build with an SDK before iOS 27.1 (a device build from Xcode 27.0) leaves
+        // the hinge out: every layout is then what it is on a device without one.
+        #if SILL_NO_DUO_SDK
+        content
+        #else
         if #available(iOS 27.1, *) {
             content
                 .environment(\.duoEnvironment, DuoEnvironment(hinge: hinge))
@@ -101,9 +106,11 @@ private struct DuoPostureReader: ViewModifier {
         } else {
             content
         }
+        #endif
     }
 }
 
+#if !SILL_NO_DUO_SDK
 @available(iOS 27.1, *)
 extension DuoPosture.Hinge {
     init(_ context: DeviceHingeContext) {
@@ -118,6 +125,7 @@ extension DuoPosture.Hinge {
         }
     }
 }
+#endif
 
 extension DuoPosture {
     /// The posture as the view `geo` measures sees it: the hinge from the environment (before its
@@ -132,12 +140,14 @@ extension DuoPosture {
             let origin = geo.frame(in: .named(displaySpace)).origin
             return DuoPosture(hinge: environment.hinge, fold: fold?.offsetBy(dx: -origin.x, dy: -origin.y))
         case .reservedRegions:
+            #if !SILL_NO_DUO_SDK
             if #available(iOS 27.1, *) {
                 let region = geo.reservedRegions(kind: .division, options: .includeInactive).first
                 let hinge = hinge(reported: environment.hinge, regionActive: region?.isActive)
                 guard hinge != .unknown else { return .unknown }
                 return DuoPosture(hinge: hinge, fold: region?.frame)
             }
+            #endif
             return .unknown
         }
     }

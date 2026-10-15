@@ -5,6 +5,8 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("image sent to a {} subscriber", "ClipboardPolicy.swift", "let image = (accepts ?? generation) >= imageGeneration ? clip.image : nil", "let image = clip.image"),
+    ("viewer subscribes without accepts", "ClipboardPolicy.swift", "return Clipboard(accepts: imageGeneration)", "return Clipboard()"),
     ("no leading v dropped", "Compatibility.swift", "if let first = scalars.first, first == \"v\" || first == \"V\" { scalars.removeFirst() }", ""),
     ("only a lowercase v dropped", "Compatibility.swift", "first == \"v\" || first == \"V\"", "first == \"v\""),
     ("trailing dots kept", "Compatibility.swift", "while prefix.last == \".\" { prefix.removeLast() }", ""),
@@ -17,15 +19,20 @@ MUTANTS = [
     ("compared over the shorter only", "Compatibility.swift", "for i in 0..<max(a.components.count, b.components.count) {", "for i in 0..<min(a.components.count, b.components.count) {"),
     ("reconnect false by default (old goodbyes change)", "Remote.swift", "reconnect: Bool? = nil) {", "reconnect: Bool? = false) {"),
     ("protocol 1 by default", "Switcher.swift", "hostVersion: String? = nil, protocol: Int? = nil, gestures", "hostVersion: String? = nil, protocol: Int? = 1, gestures"),
-    ("gestures 1 by default", "Switcher.swift", "protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {", "protocol: Int? = nil, gestures: Int? = 1, clipboard: Int? = nil) {"),
-    ("clipboard 1 by default", "Switcher.swift", "gestures: Int? = nil, clipboard: Int? = nil) {", "gestures: Int? = nil, clipboard: Int? = 1) {"),
-    ("clipboard never stored", "Switcher.swift", "        self.clipboard = clipboard\n", "        self.clipboard = nil\n"),
-    ("kind 32 as 31", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 31"),
+    ("middleButton true by default", "Switcher.swift", "middleButton: Bool? = nil,\n", "middleButton: Bool? = true,\n"),
+    ("sideStreams 6 by default", "Switcher.swift", "sideStreams: Int? = nil, clipboard: Int? = nil, audio:", "sideStreams: Int? = 6, clipboard: Int? = nil, audio:"),
+    ("clipboard 1 by default", "Switcher.swift", "sideStreams: Int? = nil, clipboard: Int? = nil, audio:", "sideStreams: Int? = nil, clipboard: Int? = 1, audio:"),
+    ("the middle button not a button down", "Input.swift", "self == .leftDown || self == .rightDown || self == .middleDown }", "self == .leftDown || self == .rightDown }"),
+    ("gestures 1 by default", "Switcher.swift", "hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton", "hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = 1, middleButton"),
+    ("clipboard never stored", "Switcher.swift", "self.clipboard = clipboard\n", "self.clipboard = nil\n"),
+    ("kind 32 as 43", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 43"),
     ("gestures never stored", "Switcher.swift", "self.protocol = `protocol`; self.gestures = gestures", "self.protocol = `protocol`; self.gestures = nil"),
     ("fingers 3 by default", "Gesture.swift", "public init(gesture: String, fingers: Int? = nil) {", "public init(gesture: String, fingers: Int? = 3) {"),
     ("a name misspelt", "Gesture.swift", 'public static let swipeLeft = "swipeLeft"', 'public static let swipeLeft = "swipeleft"'),
     ("spread left out of the names", "Gesture.swift", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch, spread]", "public static let names = [swipeUp, swipeDown, swipeLeft, swipeRight, pinch]"),
-    ("kind 28 as 29", "StreamMessage.swift", "case gesture = 28", "case gesture = 29"),
+    ("kind 28 as 43", "StreamMessage.swift", "case gesture = 28", "case gesture = 43"),
+    ("side streams' window ID little-endian", "SideStreams.swift", "d.appendBigEndian(window)", "d.appendBigEndian(window.byteSwapped)"),
+    ("the clipboard at 43", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 43"),
     ("device never nil", "Compatibility.swift", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device", "self.appVersion = appVersion; self.build = build; self.protocol = `protocol`; self.device = device ?? \"\""),
 ]
 caught = 0

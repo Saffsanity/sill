@@ -2,7 +2,9 @@ import Foundation
 import Network
 import Security
 import CryptoKit
+#if canImport(UIKit)
 import UIKit
+#endif
 import StreamProtocol
 
 // Pairing at home on the device (docs/home-pairing-plan.md §7): the one TLS builder every
@@ -498,7 +500,7 @@ extension StreamClient {
         #endif
         let dialer = HomeDialer(targets: [ask.target], pin: pin, identity: identity, queue: queue)
         homeDialer = dialer
-        let deviceName = UIDevice.current.name
+        let deviceName = ClientPlatform.deviceName
         dialer.onWinner = { [weak self, weak dialer] w in
             guard let self, let dialer else { w.connection.cancel(); return }
             let check = self.cableCheck(w.connection)
@@ -662,7 +664,7 @@ extension StreamClient {
         homeWithdrawal?.cancel()
         let dialer = HomeDialer(targets: [target], pin: key, identity: identity, queue: queue)
         homeWithdrawal = dialer
-        let deviceName = UIDevice.current.name
+        let deviceName = ClientPlatform.deviceName
         #if DEBUG
         print("home: telling \(target.label) its code is no longer needed")
         #endif
@@ -736,7 +738,7 @@ extension StreamClient {
         #endif
         let dialer = HomeDialer(targets: [t.target], pin: t.key, identity: identity, queue: queue)
         overlayAskDialer = dialer
-        let deviceName = UIDevice.current.name
+        let deviceName = ClientPlatform.deviceName
         dialer.onWinner = { [weak self, weak dialer] w in
             guard let self, let dialer else { w.connection.cancel(); return }
             self.homeExchange(w, identity: identity, deviceName: deviceName, method: PairRequest.ask, cable: nil, key: nil) { outcome in
@@ -881,7 +883,7 @@ extension StreamClient {
         #endif
         let dialer = HomeDialer(targets: targets, pin: pin, identity: identity, queue: queue)
         homeDialer = dialer
-        let deviceName = UIDevice.current.name
+        let deviceName = ClientPlatform.deviceName
         let retry: (Double) -> Void = { [weak self] after in
             DispatchQueue.main.asyncAfter(deadline: .now() + after) {
                 guard let self, self.pairingAttempt == attempt else { return }   // cancelled, or another pairing began
@@ -1065,7 +1067,7 @@ extension StreamClient {
             guard !finished else { return }
             let proof = key.map { Base64URL.encode(PairingProof.deviceProof(key: $0, deviceFingerprint: fpDevice, macFingerprint: fpMac)) } ?? ""
             let request = PairRequest(method: method, proof: proof, name: deviceName,
-                                      model: ClientStatsReporter.hardwareIdentifier, cable: cable)
+                                      model: ClientPlatform.hardwareIdentifier, cable: cable)
             let message = StreamMessage(kind: .pairRequest, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                                         payload: Wire.encode(request))
             c.send(content: message.serialized(), completion: .contentProcessed { _ in })

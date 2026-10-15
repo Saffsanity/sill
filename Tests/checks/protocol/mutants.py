@@ -4,6 +4,23 @@ import os, shutil, subprocess, sys, tempfile
 WT = sys.argv[1]
 HERE = os.path.dirname(os.path.abspath(__file__))
 MUTANTS = [
+    ("full rate windows not kept", "SideStreams.swift", "self.fullRate = fullRate;", "self.fullRate = nil;"),
+    ("paused windows not kept", "SideStreams.swift", "self.paused = paused", "self.paused = nil"),
+    ("background not kept", "SideStreams.swift", "self.background = background", "self.background = nil"),
+    ("host full rate flag not kept", "Switcher.swift", "self.attention = attention; self.fullRate = fullRate", "self.attention = attention; self.fullRate = nil"),
+    ("attention not kept", "Switcher.swift", "self.attention = attention;", "self.attention = nil;"),
+    ("image sent to a {} subscriber", "ClipboardPolicy.swift", "let image = (accepts ?? generation) >= imageGeneration ? clip.image : nil", "let image = clip.image"),
+    ("viewer subscribes without accepts", "ClipboardPolicy.swift", "return Clipboard(accepts: imageGeneration)", "return Clipboard()"),
+    ("badges not kept", "Switcher.swift", "self.windowInput = windowInput; self.badges = badges", "self.windowInput = windowInput; self.badges = nil"),
+    ("the desk flag not kept", "Switcher.swift", "self.rebuildDesk = rebuildDesk", "self.rebuildDesk = nil"),
+    ("window input: the window dropped", "SideStreams.swift", '        object["window"] = window\n', ""),
+    ("window input: any key count", "SideStreams.swift", "guard object.count == 2,", "guard object.count >= 2,"),
+    ("window input: a click allowed", "SideStreams.swift", "case .pointer(.move, _, _), .scroll, .scrollGesture: return true", "case .pointer, .scroll, .scrollGesture: return true"),
+    ("audio packet without the channel byte", "SideStreams.swift", "        d.append(channels)\n", ""),
+    ("audio packet takes a stereo half sample", "SideStreams.swift", "body.count % (2 * channels) == 0", "body.count % 2 == 0"),
+    ("file chunk offset read from the total", "SideStreams.swift", "let offset = d.readBigEndian(UInt64.self, at: 14 + n)", "let offset = d.readBigEndian(UInt64.self, at: 6 + n)"),
+    ("file chunk name uncapped", "SideStreams.swift", "name.utf8.prefix(1024)", "name.utf8.prefix(100_000)"),
+    ("file request drops trash", "SideStreams.swift", "self.transfer = transfer; self.trash = trash", "self.transfer = transfer; self.trash = nil"),
     ("Damm table entry swapped", "Pairing.swift", "[7, 0, 9, 2, 1, 5, 4, 8, 6, 3]", "[7, 0, 9, 2, 1, 5, 4, 8, 3, 6]"),
     ("typed-code check digit ignored", "Pairing.swift", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) == 0", "guard checkDigit(kept.compactMap { $0.wholeNumberValue }) >= 0"),
     ("proof_D label changed", "Pairing.swift", 'Data("\\(label) device".utf8)', 'Data("\\(label) devices".utf8)'),
@@ -26,7 +43,7 @@ MUTANTS = [
     ("server verify block blind to ALPN", "RemoteTLS.swift", "complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, negotiatedALPN(metadata)))", "complete(verify(peerLeaf(metadata).flatMap { SPKI.fingerprint(of: $0) }, nil))"),
     ("a host stops offering sill-pair/1", "RemoteTLS.swift", "public static let serverALPNs = [sessionALPN, pairingALPN]", "public static let serverALPNs = [sessionALPN]"),
     ("a later host offers sill/2 instead of sill/1", "RemoteTLS.swift", "public static let serverALPNs = [sessionALPN, pairingALPN]", 'public static let serverALPNs = ["sill/2", pairingALPN]'),
-    ("the clipboard numbered 30", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 30"),
+    ("the clipboard numbered 43", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 43"),
     ("the server offers sill/1 alone, whatever serverALPNs says", "RemoteTLS.swift",
      "for alpn in serverALPNs { sec_protocol_options_add_tls_application_protocol(sp, alpn) }", "sec_protocol_options_add_tls_application_protocol(sp, sessionALPN)"),
 ]

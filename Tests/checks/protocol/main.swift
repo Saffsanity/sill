@@ -366,9 +366,11 @@ check("kinds 18–22 parse as macInfo, pairRequest, pairResult, pairingWanted, g
 check("kind 23 is hello (update-notice); 24, 25 and 27 the Mac's menus; 26 the Mac's pointer",
       header(23)?.kind == .hello && header(24)?.kind == .macMenu && header(25)?.kind == .pressMenuItem
       && header(27)?.kind == .fetchMenu && header(26)?.kind == .macPointer)
-check("kind 28 is gesture (trackpad gestures), 29 unknown (skipped)", header(28)?.kind == .gesture && header(29)?.kind == .unknown)
-check("kind 32 is the clipboard; 29, 30, 31 and 33 unknown (skipped)",
-      header(32)?.kind == .clipboard && [29, 30, 31, 33].allSatisfy { header(UInt8($0))?.kind == .unknown })
+check("rebuildDesk: a window list's flag round-trips, nil from a host before",
+      Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, rebuildDesk: true)))?.rebuildDesk == true
+      && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.rebuildDesk == nil)
+check("kind 28 is gesture (trackpad gestures), 29–32 side streams and the clipboard, 33 audio, 34–37 files, 38 the live drag, 39 the Dock menu, 40 the Desktop's display, 41 windows taken back, 42 the desk made again, 43 unknown (skipped)",
+      header(28)?.kind == .gesture && header(29)?.kind == .sideStreams && header(32)?.kind == .clipboard && header(33)?.kind == .audio && header(35)?.kind == .fileDrop && header(37)?.kind == .fileRequest && header(38)?.kind == .liveDrag && header(39)?.kind == .dockMenu && header(40)?.kind == .pickDisplay && header(41)?.kind == .takenBack && header(42)?.kind == .rebuildDesk && header(43)?.kind == .unknown)
 check("kinds 16 and 17 unchanged", header(16)?.kind == .hostSettings && header(17)?.kind == .changeSettings)
 check("caps: 1 MiB client, 4 KiB pairing, 32 MiB frames, 4 MiB other",
       StreamMessage.maxClientPayload == 1_048_576 && StreamMessage.maxPairingPayload == 4096
@@ -462,6 +464,144 @@ check("TLS: an ALPN the host does not offer — refused (\(r.box.lines.joined(se
 check("floor: every host offers sill/1 and sill-pair/1 (\(RemoteTLS.serverALPNs))",
       RemoteTLS.serverALPNs.contains("sill/1") && RemoteTLS.serverALPNs.contains("sill-pair/1"))
 check("floor: the two names never change", RemoteTLS.sessionALPN == "sill/1" && RemoteTLS.pairingALPN == "sill-pair/1")
+
+check("clipboard: accepts is optional and generation 2 round-trips",
+      Wire.encode(Clipboard()) == Data("{}".utf8) && Wire.decode(Clipboard.self, from: Wire.encode(Clipboard(accepts: 2)))?.accepts == 2)
+check("clipboard: image host advertises generation 2",
+      Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, clipboard: ClipboardPolicy.imageGeneration)))?.clipboard == 2)
+check("clipboard: viewer subscription explicitly accepts images", ClipboardPolicy.viewerSubscription(hostClipboard: 2)?.accepts == 2)
+check("clipboard: {} subscription never receives images", ClipboardPolicy.payload(Clipboard(image: Data([1])), forAccepts: nil) == nil)
+
+// The Mac client's payloads (2026-10-12; SideStreams.swift): kinds 29–37, each round-trips and
+// rejects what it should.
+do {
+    let packed = SideStreamRequest.pack(window: 0xDEAD_BEEF, Data([1, 2, 3]))
+    let un = SideStreamRequest.unpack(packed)
+    check("side stream: the window ID and the rest round-trip", un?.window == 0xDEAD_BEEF && un?.payload == Data([1, 2, 3]))
+    check("side stream: under 4 bytes is nothing", SideStreamRequest.unpack(Data([1, 2])) == nil)
+    let req = SideStreamRequest(windows: [7, 9], fps: 15, wholeApp: true, screen: [5120, 1440], audio: true)
+    check("side stream request: JSON round-trip with audio", Wire.decode(SideStreamRequest.self, from: Wire.encode(req)) == req)
+    check("side stream request: an older device's JSON (no audio) decodes",
+          Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1]}"#.utf8))?.audio == nil)
+
+    let samples: [Int16] = [0, 1, -1, 32767, -32768, 1234]
+    let audio = samples.withUnsafeBufferPointer { AudioPacket.pack(sampleRate: 48_000, channels: 2, samples: $0) }
+    let a = AudioPacket.unpack(audio)
+    check("audio: rate, channels and samples round-trip", a?.sampleRate == 48_000 && a?.channels == 2 && a?.samples == samples)
+    check("audio: an odd sample count for stereo is refused", AudioPacket.unpack(audio.dropLast(2)) == nil)
+    var badRate = audio; badRate[0] = 0xFF
+    check("audio: a sample rate out of range is refused", AudioPacket.unpack(badRate) == nil)
+    check("audio: a header alone is a packet of no samples", AudioPacket.unpack(audio.prefix(5))?.samples.isEmpty == true)
+
+    let chunk = FileChunk.pack(id: 42, name: "Résumé ✓.pdf", total: 1_000_000, offset: 524_288, bytes: Data([9, 8, 7]))
+    let c = FileChunk.unpack(chunk)
+    check("file chunk: id, name, total, offset and bytes round-trip",
+          c?.id == 42 && c?.name == "Résumé ✓.pdf" && c?.total == 1_000_000 && c?.offset == 524_288 && c?.bytes == Data([9, 8, 7]))
+    check("file chunk: cut inside the name is refused", FileChunk.unpack(chunk.prefix(10)) == nil)
+    check("file chunk: a part is under the host's 1 MB limit for a device's message", FileChunk.maxBytes + 2_048 < 1_000_000)
+    let long = FileChunk.unpack(FileChunk.pack(id: 1, name: String(repeating: "a", count: 5_000), total: 0, offset: 0, bytes: Data()))
+    check("file chunk: a name is cut at 1,024 bytes", long?.name.utf8.count == 1_024)
+
+    let drop = FileDrop(files: [1, 2], x: 0.25, y: 0.75, offer: 5, window: 77)
+    check("file drop: JSON round-trip with an offer and a window", Wire.decode(FileDrop.self, from: Wire.encode(drop)) == drop)
+    check("file drop: a drop of this Mac's files has neither", Wire.decode(FileDrop.self, from: Data(#"{"files":[3],"x":0.5,"y":0.5}"#.utf8)).map { $0.offer == nil && $0.window == nil } == true)
+    let offer = DragOffer(id: 9, files: [.init(name: "a.txt", size: 12)])
+    check("drag offer: JSON round-trip", Wire.decode(DragOffer.self, from: Wire.encode(offer)) == offer)
+    let fr = FileRequest(offer: 9, index: 0, transfer: 3, trash: true)
+    check("file request: JSON round-trip with trash", Wire.decode(FileRequest.self, from: Wire.encode(fr)).map { $0 == fr && $0.trash == true } == true)
+    check("file request: without trash it is a fetch", Wire.decode(FileRequest.self, from: Data(#"{"offer":1,"index":0,"transfer":2}"#.utf8))?.trash == nil)
+    let live = LiveDrag(id: 4, phase: LiveDrag.move, window: 77, x: 0.25, y: 0.5, modifiers: 1 << 19)
+    check("live drag: JSON round-trip of a move", Wire.decode(LiveDrag.self, from: Wire.encode(live)) == live)
+    let started = LiveDrag(id: 5, phase: LiveDrag.start, offer: 9)
+    check("live drag: a start of the host's own files carries the offer", Wire.decode(LiveDrag.self, from: Wire.encode(started))?.offer == 9)
+    let sent = LiveDrag(id: 6, phase: LiveDrag.filesSent, files: [1, 2], folders: [2])
+    check("live drag: the files sent, folders among them", Wire.decode(LiveDrag.self, from: Wire.encode(sent)).map { $0.files == [1, 2] && $0.folders == [2] } == true)
+    check("live drag: a cancel needs only its id and phase", Wire.decode(LiveDrag.self, from: Data(#"{"id":7,"phase":"cancel","x":0,"y":0}"#.utf8)).map { $0.phase == LiveDrag.cancel && $0.window == nil && $0.offer == nil } == true)
+    check("live drag: an unknown phase still decodes (the host ignores it)", Wire.decode(LiveDrag.self, from: Data(#"{"id":8,"phase":"later","x":0,"y":0}"#.utf8))?.phase == "later")
+    let enc = AudioPacket.packEncoded(sampleRate: 48_000, channels: 2, cookie: Data([1, 2, 3]), packet: Data(repeating: 7, count: 100))
+    check("audio: a compressed packet round-trips (rate, channels, cookie, packet)", AudioPacket.unpackEncoded(enc).map { $0.sampleRate == 48_000 && $0.channels == 2 && $0.cookie == Data([1, 2, 3]) && $0.packet.count == 100 } == true)
+    check("audio: a compressed packet is never read as plain samples", AudioPacket.unpack(enc) == nil)
+    let plainAudio = [Int16](repeating: 5, count: 960).withUnsafeBufferPointer { AudioPacket.pack(sampleRate: 48_000, channels: 2, samples: $0) }
+    check("audio: a plain packet is not a compressed one", AudioPacket.unpackEncoded(plainAudio) == nil && AudioPacket.unpack(plainAudio)?.samples.count == 960)
+    check("audio: the codec asked for round-trips; absent from an older device", Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1], audio: true, audioCodec: AudioPacket.aacELD)))?.audioCodec == "aac-eld"
+          && Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1],"audio":true}"#.utf8))?.audioCodec == nil)
+    let dm = DockMenu(app: "com.apple.finder", token: 3, items: [.init(id: 3, title: "New Finder Window", enabled: true), .init(id: 4, title: "", enabled: false, separator: true)])
+    check("dock menu: JSON round-trip of an answer", Wire.decode(DockMenu.self, from: Wire.encode(dm)) == dm)
+    check("dock menu: a press names the item and its title", Wire.decode(DockMenu.self, from: Wire.encode(DockMenu(app: "a", token: 4, press: 3, title: "New Finder Window"))).map { $0.press == 3 && $0.title == "New Finder Window" && $0.items == nil } == true)
+    check("dock menu: an ask is the app and a token", Wire.decode(DockMenu.self, from: Data(#"{"app":"a","token":1}"#.utf8)).map { $0.press == nil && $0.items == nil } == true)
+    let shown = WindowList(macName: "M", windows: [], active: .desktop, displays: [DisplayInfo(id: 1, name: "Built-in", width: 1728, height: 1117, main: true), DisplayInfo(id: 5, name: "LG", width: 2560, height: 1440)], desktopDisplay: 5)
+    check("displays: the host's displays and the Desktop's round-trip", Wire.decode(WindowList.self, from: Wire.encode(shown)).map { $0.displays?.count == 2 && $0.desktopDisplay == 5 && $0.displays?[0].main == true } == true)
+    check("displays: absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.displays == nil)
+    do {   // input over a window beside the streamed one: kind 8 with a window key
+        let scroll = InputEvent.scroll(x: 0.25, y: 0.5, dx: 0, dy: 0.1)
+        let windowed = WindowInput(window: DesktopWindow.id(display: 3), event: scroll).encoded()
+        check("window input: round-trip", WindowInput.decode(windowed) == WindowInput(window: 0x8000_0003, event: scroll))
+        check("window input: a host from before would take it as the streamed window's (hence the list's flag)",
+              Wire.decode(InputEvent.self, from: windowed) == scroll)
+        // As JSON objects: JSONEncoder's key order differs from one encoding to the next, which no reader minds.
+        func object(_ d: Data) -> NSDictionary? { (try? JSONSerialization.jsonObject(with: d)) as? NSDictionary }
+        check("window input: without a window, the plain kind 8 every device sends",
+              object(WindowInput(window: nil, event: scroll).encoded()).map { $0 == object(Wire.encode(scroll)) } == true
+              && WindowInput.decode(Wire.encode(scroll)) == WindowInput(window: nil, event: scroll))
+        check("window input: a third key, or a window that is no number, is refused",
+              WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":5,"extra":1}"#.utf8)) == nil
+              && WindowInput.decode(Data(#"{"scroll":{"x":0,"y":0,"dx":0,"dy":1},"window":"5"}"#.utf8)) == nil)
+        check("window input: only a move, a scroll and its phases",
+              WindowInput.allowed(scroll) && WindowInput.allowed(.pointer(.move, x: 0, y: 0))
+              && WindowInput.allowed(.scrollGesture(.began, x: 0, y: 0)) && !WindowInput.allowed(.pointer(.leftDown, x: 0, y: 0))
+              && !WindowInput.allowed(.key(hidUsage: 4, down: true, modifiers: 0)) && !WindowInput.allowed(.text("a")))
+        check("window input: the list's flag round-trips, nil from a host before",
+              Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, windowInput: true)))?.windowInput == true
+              && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.windowInput == nil)
+    }
+    check("full rate: a request's windows at full speed round-trip, nil from a device before",
+          Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1, 2, 3], fullRate: [2, 3])))?.fullRate == [2, 3]
+          && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.fullRate == nil)
+    check("paused: a request's unseen windows round-trip, nil from a device before",
+          Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1, 2, 3], paused: [3])))?.paused == [3]
+          && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.paused == nil)
+    check("background: a request from a viewer out of front round-trips, nil from a device before",
+          Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1], background: true)))?.background == true
+          && Wire.decode(SideStreamRequest.self, from: Wire.encode(SideStreamRequest(windows: [1])))?.background == nil
+          && Wire.decode(SideStreamRequest.self, from: Data(#"{"windows":[1]}"#.utf8))?.background == nil)
+    check("full rate: a host's flag round-trips, nil from a host before",
+          Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, fullRate: true)))?.fullRate == true
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.fullRate == nil)
+    check("attention: round-trip, nil from a host before",
+          Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, attention: ["a.b", "c.d"])))?.attention == ["a.b", "c.d"]
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.attention == nil)
+    check("badges: round-trip, nil from a host before",
+          Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none, badges: ["a.b": "3"])))?.badges == ["a.b": "3"]
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .none)))?.badges == nil)
+    check("taken back: round-trip", Wire.decode(TakenBack.self, from: Wire.encode(TakenBack(windows: [7, DesktopWindow.id(display: 2)])))?.windows == [7, 0x8000_0002])
+    check("pick display: round-trip", Wire.decode(PickDisplay.self, from: Wire.encode(PickDisplay(display: 5)))?.display == 5)
+    let liveList = WindowList(macName: "M", windows: [], active: .desktop, liveDrag: true)
+    check("live drag: the list's flag round-trips; absent from an older host", Wire.decode(WindowList.self, from: Wire.encode(liveList))?.liveDrag == true
+          && Wire.decode(WindowList.self, from: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)))?.liveDrag == nil)
+    // A folder as one file: zipped and unpacked whole (a nested file, a symbolic link, the top folder's name).
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory.appendingPathComponent("sill-check-\(UUID().uuidString)")
+    let src = base.appendingPathComponent("My Folder ✓")
+    try? fm.createDirectory(at: src.appendingPathComponent("inner"), withIntermediateDirectories: true)
+    try? Data("hello".utf8).write(to: src.appendingPathComponent("inner/a.txt"))
+    try? fm.createSymbolicLink(atPath: src.appendingPathComponent("link").path, withDestinationPath: "inner/a.txt")
+    let zipped = FolderZip.zip(src)
+    let out = base.appendingPathComponent("out")
+    try? fm.createDirectory(at: out, withIntermediateDirectories: true)
+    let back = zipped.flatMap { FolderZip.unzip($0, into: out, name: "My Folder ✓") }
+    check("folder zip: unpacked under its own name", back?.lastPathComponent == "My Folder ✓")
+    check("folder zip: a nested file whole", back.flatMap { try? Data(contentsOf: $0.appendingPathComponent("inner/a.txt")) } == Data("hello".utf8))
+    check("folder zip: a symbolic link kept as a link",
+          back.flatMap { try? fm.destinationOfSymbolicLink(atPath: $0.appendingPathComponent("link").path) } == "inner/a.txt")
+    check("folder zip: a missing folder gives nothing", FolderZip.zip(base.appendingPathComponent("nope")) == nil)
+    try? fm.removeItem(at: base); if let zipped { try? fm.removeItem(at: zipped) }
+    let fd = FileDrop(files: [1, 2], x: 0, y: 0, folders: [2])
+    check("file drop: folders round-trip", Wire.decode(FileDrop.self, from: Wire.encode(fd))?.folders == [2])
+    check("drag offer: a folder says so", Wire.decode(DragOffer.self, from: Wire.encode(DragOffer(id: 1, files: [.init(name: "d", size: 0, folder: true)])))?.files.first?.folder == true)
+
+    let clip = Clipboard(text: "hi", image: nil)
+    check("clipboard: JSON round-trip", Wire.decode(Clipboard.self, from: Wire.encode(clip)) == clip)
+}
 
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

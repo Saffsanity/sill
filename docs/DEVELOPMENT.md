@@ -312,6 +312,34 @@ with the test service type), the privacy manifest `PrivacyInfo.xcprivacy`, and
 the package reference. Nothing else. A new source file needs its four
 `project.pbxproj` entries added by hand.
 
+## Sill Viewer: controlling one Mac from another
+
+`Sources/MacClient` is a Mac client for the same host: the other Mac runs Sill.app (or `SillHost`)
+as it always does, and this Mac shows its windows as windows of its own and controls them. The
+session code is the iPhone and iPad app's own (`Sources/MacClient/Shared` links to it).
+docs/mac-client-plan.md has the design, the wire, Sill's desk, sound, files and what has been tested.
+
+```
+Scripts/make-client-app.sh --open          # .build/Sill Viewer.app (release; --debug for the test arguments; --notarize)
+```
+
+- **Connect** from the menu bar icon: a Mac on the same network is listed, and a tap asks to pair
+  (type the code the other Mac shows). Away from home (Tailscale) turn Remote Access on in Sill.app
+  and use Add a Mac with the address and code from its Pair iPhone or iPad… window.
+- **Windows**: pick one from the icon's menu, or an app (all its windows). Each opens as a window
+  here; the pill above the focused one has this Mac's close, minimize and full screen. On the host
+  each lives on a hidden display of its own while it is shown ("Sill's desk"), and goes back when
+  closed here or when the viewer leaves. macOS asks once per display identity what to show on
+  "Sill": choose Extended Display, Set as Default.
+- **Keys** go to the other Mac while a window has the keyboard, ⌘W and ⌘Q included; ⌃⌥⌘⎋ gives the
+  keyboard back. ⌘Tab, ⌘Space and the other shortcuts macOS keeps go across only with Capture System
+  Shortcuts (Accessibility for Sill Viewer).
+- **Clipboard, sound and files**: Share Clipboard and Play Sound in the icon's menu (sound needs the
+  host's audio recording permission once); drop files on a window, or drag them out of one (onto
+  the Trash too).
+- The device key is in the login keychain (`me.saffer.sill.device-key`); saved Macs are in
+  `defaults read me.saffer.sill.client`. On the other Mac this Mac is a device in Settings › Devices.
+
 ## Permissions
 
 - The first launch opens Settings on Permissions. Screen Recording and

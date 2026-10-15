@@ -1,5 +1,8 @@
 import Combine
+import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 import StreamProtocol
 
 // MARK: - Client stats reporter
@@ -44,27 +47,16 @@ final class ClientStatsReporter: ObservableObject {
     /// "iPad (iPad14,1)": the user-visible name is generic on iOS 16+ without an entitlement, so the
     /// hardware identifier is what tells an iPad Mini from a simulator in the Mac's log.
     static let deviceName: String = {
-        let name = UIDevice.current.name
-        let id = hardwareIdentifier
+        let name = ClientPlatform.deviceName
+        let id = ClientPlatform.hardwareIdentifier
         return id.isEmpty ? name : "\(name) (\(id))"
     }()
 
-    /// "iPad14,1", or "iPad16,6 simulator": also what a pairing request gives as the model.
-    static var hardwareIdentifier: String {
-        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
-            return "\(simulated) simulator"
-        }
-        var info = utsname()
-        uname(&info)
-        return withUnsafeBytes(of: &info.machine) { raw in
-            String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
-        }
-    }
 }
 
 // MARK: - HUD (DEBUG only)
 
-#if DEBUG
+#if DEBUG && canImport(UIKit)
 /// The on-screen readout: "58 fps · age 9/24 ms · rtt 7/80 ms · 3024×1898" in a translucent
 /// capsule at the display view's top-right; each pair is the last second's median/max, "–" for a
 /// second without a sample. Only built when launched with `-SillHUD 1`; never in Release.
