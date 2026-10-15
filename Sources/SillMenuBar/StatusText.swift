@@ -87,6 +87,11 @@ enum StatusText {
                                    subtitle: "Streaming with the software encoder, up to 60 fps, until it is free again.",
                                    action: .none))
         }
+        if s.displayStreamsDead {
+            attention.append(.init(title: "Screen Capture Stopped Working",
+                                   subtitle: "Windows stream without their menus. Logging out fixes this.",
+                                   action: .none))
+        }
         let remotePortTaken = remotePortInUse(s.remote)
         if let port = remotePortTaken {
             attention.append(.init(title: "Remote Access Can’t Start", subtitle: "Port \(port) is in use by another app.",
@@ -325,7 +330,7 @@ enum StatusText {
     private static func virtualDisplayNote(_ s: HostStatusSnapshot) -> String {
         if let problem = s.virtualDisplayProblem { return "Unavailable: \(problem)" }
         if s.virtualDisplayOn, s.stream?.onVirtualDisplay == true { return "The streamed window is on the virtual display" }
-        return "Picked windows leave this screen while they stream"
+        return "For iPhone and iPad; a Mac viewer always moves windows"
     }
 
     /// "Safari — A very long window title that goes on" → "Safari — A very long…that goes on".

@@ -76,8 +76,11 @@ final class VirtualDisplay {
     }
 
     let name: String
-    let widthPt: Int
-    let heightPt: Int
+    private(set) var widthPt: Int
+    private(set) var heightPt: Int
+    /// The size the display was made at: its ceiling (its maxPixels), which `resize` never passes.
+    let madeWidthPt: Int
+    let madeHeightPt: Int
     let scale: Int
     let refreshHz: Double
     let vendorID: UInt32
@@ -126,6 +129,7 @@ final class VirtualDisplay {
         self.name = name
         self.widthPt = widthPt
         self.heightPt = heightPt
+        self.madeWidthPt = widthPt; self.madeHeightPt = heightPt
         self.scale = scale
         self.refreshHz = refreshHz
         self.vendorID = vendorID
@@ -212,6 +216,22 @@ final class VirtualDisplay {
         return hasRequestedMode
     }
 
+    /// Gives the display one mode of `widthPt`×`heightPt` points, live: the display and its ID stay,
+    /// and what is on it is laid out again, as when a person picks another resolution. At most the
+    /// size it was made at. False when macOS refuses it (the size it had stays).
+    @discardableResult
+    func resize(widthPt w: Int, heightPt h: Int) -> Bool {
+        guard let object, w >= 320, h >= 240, w <= madeWidthPt, h <= madeHeightPt else { return false }
+        guard let mode = try? Runtime.newMode(width: UInt32(w), height: UInt32(h), refreshRate: refreshHz),
+              let settings = try? Runtime.newObject("CGVirtualDisplaySettings") else { return false }
+        try? Runtime.setUInt32(settings, "setHiDPI:", scale == 2 ? 1 : 0)
+        try? Runtime.setObject(settings, "setModes:", [mode] as NSArray)
+        guard (try? Runtime.applySettings(object, settings)) == true else { return false }
+        widthPt = w; heightPt = h
+        selectRequestedMode()
+        return true
+    }
+
     /// Picks the mode whose point size and pixel size match the request. Public API.
     @discardableResult
     func selectRequestedMode() -> Bool {
@@ -281,8 +301,129 @@ final class VirtualDisplay {
 
     /// Releases the CGVirtualDisplay; the display disappears. Safe to call twice.
     func destroy() {
+        if object != nil { Self.noteRemoved(vendorID: vendorID, productID: productID, serialNum: serialNum) }
         object = nil
         displayID = 0
+    }
+
+    // MARK: Identities being taken down
+
+    /// How long an identity rests after its display was removed before a display of it is made again.
+    /// The window server takes a display down asynchronously (about a second), and re-making the same
+    /// vendor, product and serial while it still is (a new Sill launched 3 s after the last quit) went
+    /// with WindowServer's display streams stopping for every app (macOS 27.0.1).
+    static let identityRest: TimeInterval = 3
+    private static let removedKey = "SillVirtualDisplayRemoved"
+
+    private static func identityKey(_ vendorID: UInt32, _ productID: UInt32, _ serialNum: UInt32) -> String {
+        "\(vendorID).\(productID).\(serialNum)"
+    }
+
+    /// When a display of this identity was last removed, by this process or an earlier one (saved in
+    /// the defaults, so a relaunch knows).
+    private static func noteRemoved(vendorID: UInt32, productID: UInt32, serialNum: UInt32) {
+        var removed = UserDefaults.standard.dictionary(forKey: removedKey) as? [String: Double] ?? [:]
+        let now = Date().timeIntervalSince1970
+        removed = removed.filter { now - $0.value < 60 }
+        removed[identityKey(vendorID, productID, serialNum)] = now
+        UserDefaults.standard.set(removed, forKey: removedKey)
+    }
+
+    /// Whether a display of this identity is still listed by the window server.
+    static func identityOnline(vendorID: UInt32, productID: UInt32, serialNum: UInt32) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains {
+            CGDisplayVendorNumber($0) == vendorID && CGDisplayModelNumber($0) == productID && CGDisplaySerialNumber($0) == serialNum
+        }
+    }
+
+    /// Waits, at most `timeout`, until no display of this identity is listed and it has rested
+    /// `identityRest` since its last removal. True when it is free.
+    static func waitUntilIdentityFree(vendorID: UInt32, productID: UInt32, serialNum: UInt32, timeout: TimeInterval = 5) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        let key = identityKey(vendorID, productID, serialNum)
+        while true {
+            let removedAt = (UserDefaults.standard.dictionary(forKey: removedKey) as? [String: Double])?[key]
+            let rested = removedAt.map { Date().timeIntervalSince1970 - $0 >= identityRest } ?? true
+            if rested && !identityOnline(vendorID: vendorID, productID: productID, serialNum: serialNum) { return true }
+            if Date() >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// Whether the window server still lists display `id`.
+    static func isOnline(_ id: CGDirectDisplayID) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains(id)
+    }
+
+    /// Removes `displays` one at a time, each off the display list (at most `each`) before the next is
+    /// released. Released together, the window server takes them down one after another, 0.1–0.4 s
+    /// each, and a quit that waited 1.5 s for seven left the last one to go with the process, as it
+    /// died: WindowServer's display streams then stopped for every app until it restarted (macOS
+    /// 27.0.1, 2026-10-15). Blocks the calling thread: the exit path. Returns the displays that were
+    /// still listed when their wait ran out.
+    ///
+    /// The display list this process reads is its own copy, updated from the main run loop: with the
+    /// main thread asleep it kept listing a display WindowServer had removed 0.3 s in, and every wait
+    /// ran out (2026-10-15, two displays: 4.8 s to exit). So on the main thread the wait runs the run
+    /// loop (`pause`).
+    @discardableResult
+    static func removeInTurn(_ displays: [VirtualDisplay], each: TimeInterval = 1.5) -> [CGDirectDisplayID] {
+        var late: [CGDirectDisplayID] = []
+        for d in displays {
+            let id = d.displayID
+            d.destroy()
+            guard id != 0 else { continue }
+            let deadline = Date().addingTimeInterval(each)
+            while isOnline(id), Date() < deadline { pause() }
+            if isOnline(id) { late.append(id) }
+        }
+        return late
+    }
+
+    /// 20 ms, the main run loop running meanwhile when this is the main thread, so the display list
+    /// (and the display reconfiguration callbacks behind it) keep up.
+    private static func pause() {
+        let until = Date().addingTimeInterval(0.02)
+        if Thread.isMainThread, RunLoop.current.run(mode: .default, before: until) {
+            let left = until.timeIntervalSinceNow
+            if left > 0 { Thread.sleep(forTimeInterval: left) }
+        } else {
+            let left = until.timeIntervalSinceNow
+            if left > 0 { Thread.sleep(forTimeInterval: left) }
+        }
+    }
+
+    /// `removeInTurn`, waiting without blocking: a desk emptied while the host runs.
+    @MainActor @discardableResult
+    static func removeInTurn(_ displays: [VirtualDisplay], each: TimeInterval = 1.5) async -> [CGDirectDisplayID] {
+        var late: [CGDirectDisplayID] = []
+        for d in displays {
+            let id = d.displayID
+            d.destroy()
+            guard id != 0 else { continue }
+            let deadline = Date().addingTimeInterval(each)
+            while isOnline(id), Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+            if isOnline(id) { late.append(id) }
+        }
+        return late
+    }
+
+    /// The exit path: waits, at most `timeout`, until none of Sill's displays (vendor 0x5111) is listed.
+    static func waitUntilAllRemoved(timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+            var count: UInt32 = 0
+            guard CGGetOnlineDisplayList(64, &ids, &count) == .success,
+                  ids.prefix(Int(count)).contains(where: { CGDisplayVendorNumber($0) == 0x5111 }) else { return }
+            pause()
+        }
     }
 }
 

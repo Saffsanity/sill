@@ -23,6 +23,9 @@ final class WindowCatalog {
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
     /// is not listed (the CLI has no windows; see `resolveOwnApplication`).
     private(set) var ownApplication: SCRunningApplication?
+    /// Sill Viewer on this Mac, if it runs: its windows show other Macs, never sent in a Desktop (two
+    /// Macs each showing the other's Desktop would show each other without end).
+    private(set) var viewerApplications: [SCRunningApplication] = []
 
     /// Fires when the window list changes (new, closed, retitled, resized, reordered).
     var onWindowsChanged: (([WindowInfo]) -> Void)?
@@ -78,16 +81,36 @@ final class WindowCatalog {
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
 
-    /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
-    /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
-    /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
-    var preferMainDisplay = false
+    /// The display a device picked for the Desktop (kind 40); nil, or gone, the main display.
+    var desktopDisplayID: CGDirectDisplayID?
+    /// This Mac's own displays, never Sill's hidden ones (VirtualDisplay's vendor), for a device to pick.
+    private(set) var realDisplays: [SCDisplay] = []
+    static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == VirtualStage.vendorID }
 
-    /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
-    /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
-    /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
-    /// the client's bar and the coordinator can still find it.
-    var stagedWindowID: CGWindowID?
+    /// The Desktop is `id` from now on, at once (the next refresh keeps it). False when it is not one
+    /// of this Mac's own displays.
+    func pickDesktop(_ id: CGDirectDisplayID) -> Bool {
+        guard let d = realDisplays.first(where: { $0.displayID == id }) else { return false }
+        desktopDisplayID = id
+        display = d
+        return true
+    }
+
+    /// The displays as a device lists them: their names (NSScreen's), sizes in points, the main one.
+    var displayInfos: [DisplayInfo] {
+        realDisplays.map { d in
+            let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == d.displayID }
+            let b = CGDisplayBounds(d.displayID)
+            return DisplayInfo(id: d.displayID, name: screen?.localizedName ?? "Display \(d.displayID)", width: b.width, height: b.height,
+                               main: d.displayID == CGMainDisplayID() ? true : nil)
+        }
+    }
+
+    /// The windows on Sill's hidden displays (the iPad's virtual display, the Mac viewers' desk). Set
+    /// right after a successful placement, cleared on release. One ScreenCaptureKit stops listing as
+    /// on screen there is fetched from the full window list, so its tile stays in the client's bar and
+    /// the coordinator can still find it.
+    var stagedWindowIDs: Set<CGWindowID> = []
 
     /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
     /// an off-screen window that probes layer backing on the new screen). They carry the app's
@@ -95,6 +118,8 @@ final class WindowCatalog {
     /// server drops them onto a real display when a virtual display goes away.
     static func isSystemHelperWindow(_ w: SCWindow) -> Bool {
         (w.title ?? "").lowercased().contains("layerprobe")
+            // Sill Viewer's windows (and its Dock icons') show other Macs: never offered to a device.
+            || (w.owningApplication?.bundleIdentifier ?? "").hasPrefix("me.saffer.sill.client")
     }
 
     /// Window list and thumbnails, while a client is connected.
@@ -226,25 +251,54 @@ final class WindowCatalog {
 
     // MARK: Windows
 
+    /// The last scan for windows in other Spaces, and when (`refreshWindows`).
+    private var lastElsewhere: [SCWindow] = []
+    private var elsewhereAt = Date.distantPast
+    private static let elsewhereInterval: TimeInterval = 6
+
     func refreshWindows() async {
         refreshSeq += 1
         let seq = refreshSeq
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return }
-        // The staged window, if the on-screen list dropped it: one extra SCShareableContent call per
-        // poll, and only then. Fetched before the sequence check so its await cannot let an older
-        // refresh overwrite a newer one.
-        var pinned: SCWindow? = nil
-        if let id = stagedWindowID, !content.windows.contains(where: { $0.windowID == id }),
-           let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
-            pinned = all.windows.first { $0.windowID == id && !Self.isOwn($0) }
-            if pinned != nil { print("Catalog: the staged window \(id) is not in the on-screen list; pinned it from the full list.") }
+        // Every window, on screen or not: for a staged window the on-screen list dropped, at every poll,
+        // and for windows in other Spaces every `elsewhereInterval` (between, the last scan's). Fetched
+        // before the sequence check so its await cannot let an older refresh overwrite a newer one.
+        var pinnedAll: [SCWindow] = []
+        var elsewhere = lastElsewhere
+        let missing = stagedWindowIDs.filter { id in !content.windows.contains(where: { $0.windowID == id }) }
+        let scan = !missing.isEmpty || Date().timeIntervalSince(elsewhereAt) >= Self.elsewhereInterval
+        if scan, let all = await Self.shareableContent(excludingDesktopWindows: false, onScreenWindowsOnly: false, timeout: 3) {
+            for id in missing {
+                guard let w = all.windows.first(where: { $0.windowID == id && !Self.isOwn($0) }) else { continue }
+                pinnedAll.append(w)
+            }
+            // Windows out of sight, in another Space (a full-screen one, another desktop): listed too,
+            // so a device can reach every window an app has, not just those on screen now. Titled
+            // windows only: apps keep many untitled windows they never show.
+            let shown = Set(content.windows.map(\.windowID))
+            // A window in a Space (another desktop, a full-screen Space, or minimized from one), any
+            // app's: an app's own hidden windows (a chat app's hidden helper, ordered out) are in
+            // none, and are not listed (2026-10-12).
+            elsewhere = all.windows.filter { w in
+                guard !shown.contains(w.windowID), let title = w.title, !title.isEmpty, w.owningApplication != nil else { return false }
+                return WindowSpaces.inSomeSpace(w.windowID)
+            }
+            lastElsewhere = elsewhere
+            elsewhereAt = Date()
         }
+        // One shown now is no longer elsewhere.
+        let onScreen = Set(content.windows.map(\.windowID))
+        elsewhere.removeAll { onScreen.contains($0.windowID) }
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        viewerApplications = content.applications.filter { $0.bundleIdentifier == "me.saffer.sill.client" }
+        // The Desktop is one of this Mac's own displays, never Sill's hidden ones (the first listed
+        // could be one: the Desktop showed a window staged there, not the Mac's screen).
+        realDisplays = content.displays.filter { !Self.isSills($0.displayID) }
+        display = realDisplays.first { $0.displayID == desktopDisplayID }
+            ?? realDisplays.first { $0.displayID == CGMainDisplayID() } ?? realDisplays.first ?? content.displays.first
+
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
@@ -252,7 +306,11 @@ final class WindowCatalog {
                 && app.processID != Self.ownPID
                 && !Self.isSystemHelperWindow(w)
         }
-        if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        for pinned in pinnedAll where !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
+        for w in elsewhere where !visible.contains(where: { $0.windowID == w.windowID }) && w.windowLayer == 0
+            && w.frame.width > 100 && w.frame.height > 100 && w.owningApplication?.processID != Self.ownPID && !Self.isSystemHelperWindow(w) {
+            visible.append(w)
+        }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
         // fixed order in the bar, so keep first-seen order and append newcomers.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
@@ -366,6 +424,11 @@ final class WindowCatalog {
                 apps.append((display, id, url.path))
             }
         }
+        // Finder, which lives in CoreServices, not in an applications folder.
+        let finder = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        if let id = Bundle(url: finder)?.bundleIdentifier, !seen.contains(id) {
+            apps.append((FileManager.default.displayName(atPath: finder.path).replacingOccurrences(of: ".app", with: ""), id, finder.path))
+        }
         return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -389,5 +452,24 @@ final class WindowCatalog {
         image.draw(in: NSRect(x: 0, y: 0, width: size, height: size), from: .zero, operation: .copy, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
         return rep.representation(using: .png, properties: [:])
+    }
+}
+
+/// Whether a window belongs to a Space (SkyLight's own answer, read-only; the window server's private
+/// interface, looked up at run time like SymbolicHotKeys'). Unknown, every window counts as in one.
+enum WindowSpaces {
+    private typealias MainConnection = @convention(c) () -> Int32
+    private typealias CopySpaces = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+    private static let calls: (MainConnection, CopySpaces)? = {
+        guard let sl = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW),
+              let conn = dlsym(sl, "SLSMainConnectionID") ?? dlsym(sl, "CGSMainConnectionID"),
+              let copy = dlsym(sl, "SLSCopySpacesForWindows") ?? dlsym(sl, "CGSCopySpacesForWindows") else { return nil }
+        return (unsafeBitCast(conn, to: MainConnection.self), unsafeBitCast(copy, to: CopySpaces.self))
+    }()
+
+    static func inSomeSpace(_ id: CGWindowID) -> Bool {
+        guard let (conn, copy) = calls else { return true }
+        let spaces = copy(conn(), 7, [id] as CFArray)?.takeRetainedValue() as? [Any] ?? []
+        return !spaces.isEmpty
     }
 }

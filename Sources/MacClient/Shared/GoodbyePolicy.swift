@@ -1,0 +1,1 @@
+../../../iOSClient/GoodbyePolicy.swift

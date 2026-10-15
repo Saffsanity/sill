@@ -220,9 +220,27 @@ final class WindowSizer {
         // Every later move/restore (and the atexit emergency restore) goes through this element.
         AXUIElementSetMessagingTimeout(ax, 1.0)
         // The AX frame is live; the SCWindow's can be two seconds stale (the catalog's poll).
-        let original = Self.frame(of: ax) ?? Self.liveBounds(of: window.windowID) ?? window.frame
+        var original = Self.frame(of: ax) ?? Self.liveBounds(of: window.windowID) ?? window.frame
+        // A window found on one of Sill's own displays (macOS moved it back onto a display re-made under
+        // an identity it remembered, or the last Sill quit without putting it home) has no home there:
+        // that display goes. Its home is the middle of the main display instead.
+        if Self.onSillDisplay(original) {
+            let main = CGDisplayBounds(CGMainDisplayID())
+            let size = CGSize(width: min(original.width, main.width), height: min(original.height, main.height - 30))
+            original = CGRect(x: main.midX - size.width / 2, y: main.minY + 30 + (main.height - 30 - size.height) / 2,
+                              width: size.width, height: size.height).integral
+            print("Window placement: \"\(window.title ?? "")\" was on one of Sill's own displays; its home is the main display.")
+        }
         return Placement(windowID: window.windowID, pid: pid, element: ax, originalFrame: original,
                          appName: window.owningApplication?.applicationName ?? "?", title: window.title ?? "")
+    }
+
+    /// Whether `frame`'s middle is on one of Sill's virtual displays (vendor 0x5111).
+    static func onSillDisplay(_ frame: CGRect) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetDisplaysWithPoint(CGPoint(x: frame.midX, y: frame.midY), 64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains { CGDisplayVendorNumber($0) == 0x5111 }
     }
 
     /// Moves and resizes the window to `frame`, wherever that is: no on-screen clamping here, the
@@ -307,17 +325,33 @@ final class WindowSizer {
         // the main thread for the ~1.5 s default per candidate.
         for c in candidates { AXUIElementSetMessagingTimeout(c, 0.5) }
 
-        let title = window.title ?? ""
-        let titled = title.isEmpty ? [] : candidates.filter { string(of: $0, kAXTitleAttribute) == title }
+        // Titles compared without invisible formatting characters: a window list can carry a
+        // left-to-right mark (U+200E) at the start that Accessibility's title has not.
+        let title = Self.plain(window.title ?? "")
+        let titled = title.isEmpty ? [] : candidates.filter { Self.plain(string(of: $0, kAXTitleAttribute) ?? "") == title }
         if titled.count == 1 { return titled[0] }
 
         let bounds = liveBounds(of: window.windowID) ?? window.frame
         let pool = titled.isEmpty ? candidates : titled
-        return pool.first { candidate in
+        if let exact = pool.first(where: { candidate in
             guard let f = frame(of: candidate) else { return false }
             return abs(f.minX - bounds.minX) <= frameTolerance && abs(f.minY - bounds.minY) <= frameTolerance
                 && abs(f.width - bounds.width) <= frameTolerance && abs(f.height - bounds.height) <= frameTolerance
+        }) { return exact }
+        // The window's place can differ where it is not on screen (another Space): the one window of
+        // its size, if only one.
+        let sized = pool.filter { candidate in
+            guard let f = frame(of: candidate) else { return false }
+            return abs(f.width - bounds.width) <= frameTolerance && abs(f.height - bounds.height) <= frameTolerance
         }
+        return sized.count == 1 ? sized[0] : nil
+    }
+
+    /// A title without the invisible formatting characters (marks and isolates of text direction,
+    /// zero-width ones), trimmed.
+    static func plain(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.properties.generalCategory != .format }))
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// The window server's current bounds (CG global, top-left origin — the same space AX uses).
@@ -325,6 +359,12 @@ final class WindowSizer {
         guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
               let bounds = list.first?[kCGWindowBounds as String] as? NSDictionary else { return nil }
         return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    }
+
+    /// Whether the window server draws the window now (on a display, in the Space shown there).
+    static func isOnScreen(_ id: CGWindowID) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]]
+        return (list?.first?[kCGWindowIsOnscreen as String] as? Bool) == true
     }
 
     // MARK: Staying on screen

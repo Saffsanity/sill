@@ -67,14 +67,39 @@ public enum StreamMessageKind: UInt8 {
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
-    // The clipboard (Clipboard.swift, ClipboardPolicy.swift), after the gesture's 28: 29 is the audio
-    // plan's, 30 and 31 the Mac client's side streams (pull request #66, which shares this number and
-    // shape). Older readers map it to `.unknown` and skip it.
+    // More windows live at once, and the clipboard (2026-10-12, the Mac client; SideStreams.swift). Only to and
+    // from a host whose window list says `sideStreams` (29–31) or `clipboard` (32); older peers skip them.
+    case sideStreams = 29    // device → host: JSON SideStreamRequest — the windows this device shows besides the one
+                             // it streams (kind 6), each to be streamed too at a lower rate; an empty list stops them
+    case sideParameterSets = 30 // host → device: window ID (UInt32 BE) + ParameterSets.encoded(), as kind 0 for that window
+    case sideFrame = 31      // host → device: window ID (UInt32 BE) + one HEVC access unit, as kind 1 for that window
     case clipboard = 32      // both ways: JSON Clipboard. Device → host: any kind 32 subscribes the connection to
                              // the Mac's copies (an empty one at connect, while the device's Share Clipboard is
                              // on), its text becomes the Mac's clipboard, and `stop` ends the subscription; only
                              // to a host whose window list says `clipboard` 1 or more. Host → device: text copied
                              // on the Mac (or sent by another device), only to a connection that subscribed
+    case audio = 33          // host → device: AudioPacket — about 10 ms of the sound of the apps whose windows the
+                             // device shows (it asked: SideStreamRequest.audio), only from a host whose list says `audio`
+    case fileChunk = 34      // either way: FileChunk — part of a file dropped on one of the host's windows here, or
+                             // (host → device) of a file the device asked for (kind 37)
+    case fileDrop = 35       // device → host: JSON FileDrop — those files, all sent, dropped at a point of the picture;
+                             // both only to a host whose list says `fileDrop`
+    case dragOffer = 36      // host → device: JSON DragOffer — the files an app here is dragging under this device's
+                             // held button (empty: the drag ended), so a drag out of the window can carry them
+    case fileRequest = 37    // device → host: JSON FileRequest — one file of an offer, sent back as kind 34
+    case liveDrag = 38       // device → host: JSON LiveDrag — a drag of files over the host's windows, followed live
+                             // (the host's own drag held, or one it starts with files sent); only to a host whose
+                             // list says `liveDrag`
+    case dockMenu = 39       // both ways: JSON DockMenu — an app's own Dock menu on the host (Finder's New Finder
+                             // Window…), asked for and pressed by a device; only to a host whose list says `dockMenu`
+    case pickDisplay = 40    // device → host: JSON PickDisplay — which of the host's own displays the Desktop is;
+                             // only to a host whose list names its `displays`
+    case takenBack = 41      // host → device: JSON TakenBack — windows the person at the Mac stopped sharing (gone
+                             // home there); the device closes its windows of them and may open them again
+    case rebuildDesk = 42    // device → host: no payload — start the captures of Sill's hidden displays again (a
+                             // window's picture came out wrong; hosts before 2026-10-15 made every display
+                             // again); only to a host whose list
+                             // says `rebuildDesk`
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

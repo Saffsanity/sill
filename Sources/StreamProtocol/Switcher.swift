@@ -53,19 +53,62 @@ public struct WindowList: Codable {
     /// 2026-09-27, to which a device sends no kind 28. A later generation of gestures says 2 and
     /// goes only to a host that says so.
     public var gestures: Int?
-    /// What this host takes and sends of the clipboard (kind 32, Clipboard.swift): 1 is text
-    /// (`ClipboardPolicy.generation`). Nil from every host before 2026-10-14, and from one whose Share
-    /// clipboard with devices is off: a device sends no kind 32 to either. A later generation
-    /// (images) says 2, and a device sends images only to a host that says so. An Int, as `gestures`:
-    /// pull request #66's `Bool` (never released) does not decode here and becomes an Int as it
-    /// rebases.
+    /// True: this host takes the middle button (PointerAction.middleDown and .middleUp). Nil from every
+    /// host before 2026-10-12, to which a device sends neither: its kind 8 would not decode there.
+    public var middleButton: Bool?
+    /// How many windows this host streams besides the one picked (kinds 29–31, SideStreams.swift); nil
+    /// from every host before 2026-10-12, to which a device sends no kind 29.
+    public var sideStreams: Int?
+    /// Clipboard generation (kind 32): 1 for text, 2 for images; nil while sharing is off.
     public var clipboard: Int?
+    /// True: this host sends the sound of the apps a device shows (kind 33) when it asks. Nil before 2026-10-12.
+    public var audio: Bool?
+    /// True: this host takes files dropped on its windows (kinds 34 and 35). Nil before 2026-10-12.
+    public var fileDrop: Bool?
+    /// True: this host follows a drag of files over its windows as it goes (kind 38, LiveDrag), so the app
+    /// under the pointer shows where they would land and the modifier keys choose move, copy or alias.
+    /// Nil before 2026-10-12, to which a device sends no kind 38 and drops only where it lets go (kind 35).
+    public var liveDrag: Bool?
+    /// True: this host reads and presses its apps' own Dock menus for a device (kind 39, DockMenu). Nil
+    /// before 2026-10-12, to which a device sends no kind 39.
+    public var dockMenu: Bool?
+    /// True: this host takes a scroll or a hover over a window shown beside the streamed one (kind 8
+    /// with a `window`, WindowInput). Nil before 2026-10-12, to which a device sends none.
+    public var windowInput: Bool?
+    /// Each app's Dock badge on the host ("3", "•"), by bundle ID, for the apps with a window listed:
+    /// a Mac client shows it on its Dock icon of that app. Nil before 2026-10-12 and from a host that
+    /// reads none (no Accessibility, a test host); an app without a badge is left out.
+    public var badges: [String: String]?
+    /// The apps with a window listed whose Dock icon bounces on the host now (they asked for the user's
+    /// attention), by bundle ID, sorted: a Mac client bounces its Dock icon of that app until it is left
+    /// out again. Nil before 2026-10-13 and from a host that reads none; empty is left out too.
+    public var attention: [String]?
+    /// True: this host streams the windows a device names in `SideStreamRequest.fullRate` at the main
+    /// stream's rate. Nil before 2026-10-13, to which a device sends none.
+    public var fullRate: Bool?
+    /// The host's own displays (never Sill's hidden ones), for a device that picks which the Desktop
+    /// is (kind 40); nil from a host before 2026-10-12, whose Desktop is its main display.
+    public var displays: [DisplayInfo]?
+    /// The one the Desktop shows now.
+    public var desktopDisplay: UInt32?
+    /// True: this host makes its hidden displays again on a device's word (kind 42). Nil before
+    /// 2026-10-14, to which a device sends none.
+    public var rebuildDesk: Bool?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
-                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {
+                hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, middleButton: Bool? = nil,
+                sideStreams: Int? = nil, clipboard: Int? = nil, audio: Bool? = nil, fileDrop: Bool? = nil,
+                liveDrag: Bool? = nil, dockMenu: Bool? = nil, displays: [DisplayInfo]? = nil, desktopDisplay: UInt32? = nil,
+                windowInput: Bool? = nil, badges: [String: String]? = nil, attention: [String]? = nil,
+                fullRate: Bool? = nil, rebuildDesk: Bool? = nil) {
         self.macName = macName; self.windows = windows; self.active = active; self.launchID = launchID
         self.hostVersion = hostVersion; self.protocol = `protocol`; self.gestures = gestures
+        self.middleButton = middleButton; self.sideStreams = sideStreams
         self.clipboard = clipboard
+        self.audio = audio; self.fileDrop = fileDrop; self.liveDrag = liveDrag
+        self.dockMenu = dockMenu; self.windowInput = windowInput; self.badges = badges
+        self.attention = attention; self.fullRate = fullRate
+        self.displays = displays; self.desktopDisplay = desktopDisplay; self.rebuildDesk = rebuildDesk
     }
 }
 
@@ -123,4 +166,33 @@ public enum ImageBlob {
         guard let id = String(data: d.subdata(in: idStart..<(idStart + len)), encoding: .utf8) else { return nil }
         return (id, d.subdata(in: (idStart + len)..<d.endIndex))
     }
+}
+
+/// One of the host's own displays, as a device lists it to pick the Desktop (kind 40).
+public struct DisplayInfo: Codable, Hashable, Sendable {
+    public var id: UInt32
+    public var name: String
+    public var width: Double
+    public var height: Double
+    public var main: Bool?
+    public init(id: UInt32, name: String, width: Double, height: Double, main: Bool? = nil) {
+        self.id = id; self.name = name; self.width = width; self.height = height; self.main = main
+    }
+}
+
+/// Which of the host's displays the Desktop is (kind 40).
+public struct PickDisplay: Codable, Hashable, Sendable {
+    public var display: UInt32
+    public init(display: UInt32) { self.display = display }
+}
+
+/// One of the host's displays where a window ID goes (a side stream, kind 29–31; a drop's `window`):
+/// its display ID with the top bit set, which no window ID has. A Mac client shows each of the host's
+/// displays as a Desktop window of its own, the focused one the Desktop (`PickDisplay`) and the others
+/// side streams; only to a host that lists its `displays`.
+public enum DesktopWindow {
+    public static let bit: UInt32 = 0x8000_0000
+    public static func id(display: UInt32) -> UInt32 { display | bit }
+    /// The display a tagged ID names; nil for a window's.
+    public static func display(of id: UInt32) -> UInt32? { id & bit != 0 ? id & ~bit : nil }
 }

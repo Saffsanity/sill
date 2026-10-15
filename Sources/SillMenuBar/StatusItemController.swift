@@ -29,6 +29,8 @@ struct MenuEntry: Equatable {
         case showPairingRequest(name: String, showing: Bool)
         /// Sill 0.4 Is Available…: the release's page on GitHub, in the browser (UpdateChecker).
         case openUpdate(URL)
+        /// Stop Sharing a window (nil: every window): it goes home and the devices close it (kind 41).
+        case stopSharing(UInt32?)
     }
 
     var kind: Kind
@@ -62,7 +64,8 @@ enum MenuBuilder {
     /// glyph means Sill needs the person before it can work, and an update needs nothing.
     static func entries(presentation p: StatusPresentation, config: HostConfig, login: LoginState,
                         permissions: PermissionState,
-                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil) -> [MenuEntry] {
+                        update: (offer: UpdatePolicy.Offer, running: SillVersion)? = nil,
+                        shared: [(id: UInt32, title: String)] = []) -> [MenuEntry] {
         var menu: [MenuEntry] = [MenuEntry(kind: .card, title: p.header)]
         for a in p.attention {
             let action: MenuEntry.Action = switch a.action {
@@ -81,6 +84,18 @@ enum MenuBuilder {
                                   subtitle: UpdatePolicy.menuSubtitle(running: update.running), action: .openUpdate(update.offer.url)))
         }
         menu.append(.separator)
+
+        // What a device shows now, each to stop sharing on its own: it comes back here, and the
+        // device may open it again.
+        if !shared.isEmpty {
+            menu.append(MenuEntry(kind: .item, title: "Shared Windows", enabled: false))
+            for w in shared {
+                menu.append(MenuEntry(kind: .item, title: "Stop Sharing “\(w.title.count > 60 ? String(w.title.prefix(59)) + "…" : w.title)”",
+                                      action: .stopSharing(w.id)))
+            }
+            if shared.count > 1 { menu.append(MenuEntry(kind: .item, title: "Stop Sharing All", action: .stopSharing(nil))) }
+            menu.append(.separator)
+        }
 
         menu.append(MenuEntry(kind: .item, title: "Virtual Display", subtitle: p.virtualDisplayNote,
                               checked: config.virtualDisplay, action: .setVirtualDisplay(!config.virtualDisplay)))
@@ -155,7 +170,7 @@ enum MenuBuilder {
                                           accessibility: model.permissions.accessibility)
         let update = model.updates.offer.flatMap { offer in model.updates.runningVersion.map { (offer: offer, running: $0) } }
         return entries(presentation: model.presentation, config: model.settings.config, login: login, permissions: permissions,
-                       update: update)
+                       update: update, shared: model.coordinator?.sharedWindows ?? [])
     }
 
     /// The menu as text, for the previews: "✓" checked, "⚠" attention, "(off)" disabled.
@@ -300,6 +315,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .showPairing: model.pairDevice()
         case .showPairingRequest(let name, let showing): model.showPairingRequest(name: name, showing: showing)
         case .openUpdate(let url): NSWorkspace.shared.open(url)   // the browser; no modal loop
+        case .stopSharing(let id):
+            let coordinator = model.coordinator
+            Task { await coordinator?.takeBack(id) }
         case .quit: NSApp.terminate(nil)
         }
     }
