@@ -605,8 +605,29 @@ final class StreamWindows: NSObject, NSWindowDelegate {
         return capture(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0)?.takeRetainedValue()
     }
 
+    /// A hide of the pill waiting out `pillHideDelay` (`updatePill`).
+    private var pillHide: DispatchWorkItem?
+    /// How long the pill stays up with neither this app nor its Dock icon in front, or no key window.
+    private static let pillHideDelay: TimeInterval = 0.3
+
     private func updatePill() {
-        guard inFront, let key = NSApp.keyWindow as? StreamWindow else { pill.show(over: nil, title: "", image: nil); return }
+        guard inFront, let key = NSApp.keyWindow as? StreamWindow else {
+            // Not at once: a click on a window passes the front between this app and the app's Dock
+            // icon (it takes the menu bar, then hands it back), and for a moment neither reads as in
+            // front, nor is a window key; the pill hid and showed a few times on each click. It hides
+            // once that has lasted `pillHideDelay`.
+            guard pillHide == nil else { return }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pillHide = nil
+                if self.inFront, NSApp.keyWindow is StreamWindow { self.updatePill() } else { self.pill.show(over: nil, title: "", image: nil) }
+            }
+            pillHide = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.pillHideDelay, execute: work)
+            return
+        }
+        pillHide?.cancel()
+        pillHide = nil
         var image: NSImage?
         // The app's icon with Sill Viewer's in its corner, as its Dock icon has it: the other Mac's
         // window, not this Mac's; a Desktop window has Sill Viewer's own.
