@@ -245,14 +245,21 @@ developer can't reach:
   titles, thumbnails, app icons, its name, the menus of the app in use (their
   titles, and a menu's items when the device opens it) and where its own
   pointer is over the picture.
+- The clipboard (from the version after 0.5.1, docs/clipboard-plan.md), while
+  Share Clipboard is on in both apps: text copied on the Mac comes to the
+  device's clipboard (local only, for 10 minutes), and text the person sends
+  with Paste goes to the Mac's. Only to and from the user's own Mac, so the
+  answer stays the same; the app reads the clipboard only through the
+  system's Paste control, never by itself.
 - Pairing (once per device, at home or for Remote Access) sends the device's
   public key, name and model to that Mac, which keeps them in its list of
   paired devices (Sill for Mac's Settings › Devices, where they can be
   removed).
 - Kept on the device only: each Mac's thumbnail order, the names of Macs
   seen with Direct Wireless Connection on, which steps of the first-run
-  tour were seen (or that it was skipped) and whether three-finger gestures
-  are on; the device's key and the paired
+  tour were seen (or that it was skipped), whether three-finger gestures and
+  Share Clipboard are on, and the clipboard's change count Sill last handled
+  (never its contents); the device's key and the paired
   Macs, each with its key's fingerprint, its name and, with Remote Access, its
   addresses (Keychain and app storage); and camera frames, which are read for
   the pairing code and never saved or sent.
@@ -327,6 +334,14 @@ Good to know
 ```
 
 Local-only build: delete the bullet that starts "Away from home".
+
+**For the next version, not 0.5.1** (the clipboard, docs/clipboard-plan.md: it ships with the next
+submission of both apps, and needs Sill for Mac from the same release): add this bullet to "Made for
+touch", after the one that starts "Type with":
+
+```text
+• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill, then press ⌘V on your Mac. Copies a password manager marks as concealed stay on your Mac.
+```
 
 The source is public under the Apache License 2.0 (since 2026-09-26), so the
 listing may call Sill open source, as the live description does and the last

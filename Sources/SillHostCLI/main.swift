@@ -34,6 +34,12 @@ config.virtualDisplay = virtualDisplay
 // CLAUDE.md. A device can still turn it on or off; that lasts until SillHost quits.
 config.directWireless = CommandLine.arguments.contains("--direct-wireless")
 
+// `SillHost --no-clipboard`: share nothing of the clipboard with devices for this run (kind 32,
+// docs/clipboard-plan.md). On by default, as in Sill.app: a device whose Share Clipboard is on is
+// sent the text copied on this Mac while it is connected, and its own text becomes this Mac's.
+// A --synthetic host shares a pasteboard of its own, never this Mac's clipboard.
+config.shareClipboard = !CommandLine.arguments.contains("--no-clipboard")
+
 // `SillHost --remote[=PORT]`: the remote door for this run (TLS 1.3, paired devices only), on
 // PORT or any free port, so it never collides with Sill.app's 7455. A new in-memory identity and
 // trust list every run. A pairing window is always open (a fresh one after each use or expiry);
