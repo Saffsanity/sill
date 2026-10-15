@@ -46,6 +46,9 @@ final class SideStreams {
     var mainWindow: () -> UInt32? = { nil }
     /// Sill's desk, where a whole-app device's windows live (nil: none, a test host).
     var desk: () -> DeskStages? = { nil }
+    /// WindowServer delivers no display stream (StreamCoordinator.displayStreamsDead): every window
+    /// is captured alone, a full-screen one and one cropped with its app too.
+    var displayStreamsDead: () -> Bool = { false }
 
     private var wanted: [ObjectIdentifier: (connection: NWConnection, windows: [UInt32], fps: Int, wholeApp: Bool, screen: CGSize?)] = [:]
     /// The largest screen of the devices that asked (Sill's desk makes each window's room that big).
@@ -109,8 +112,8 @@ final class SideStreams {
         Task { await reconcile() }
     }
 
-    /// Every running stream stopped, what the devices ask for kept: the desk is made again under them
-    /// (`StreamCoordinator.rebuildDesk`), and `changed()` starts them on its new displays.
+    /// Every running stream stopped, what the devices ask for kept: the desk's captures start again
+    /// (`StreamCoordinator.refreshDesk`), and `changed()` starts them again.
     func stopStreams() async {
         for id in Array(streams.keys) { await stop(id) }
     }
@@ -287,14 +290,14 @@ final class SideStreams {
                 // the video was a quarter of it, in a corner (2026-10-12).
                 let scale = min(s.scale, desk()?.scale(for: id) ?? s.scale)
                 let width = evenPixels(staged.size.width * scale), height = evenPixels(staged.size.height * scale)
-                if desk()?.isFullScreen(id) == true {
+                if desk()?.isFullScreen(id) == true, !displayStreamsDead() {
                     try await stream.capture.start(filter: staged.filter, width: width, height: height, fps: fps, showsCursor: false,
                                                    sourceRect: staged.sourceRect)
                 } else {
                     try await stream.capture.start(filter: SCContentFilter(desktopIndependentWindow: w), width: width, height: height,
                                                    fps: fps, showsCursor: false)
                 }
-            } else if wholeApp, w.isOnScreen, let crop = await AppCrop.crop(for: w) {
+            } else if wholeApp, !displayStreamsDead(), w.isOnScreen, let crop = await AppCrop.crop(for: w) {
                 // On screen only: cropped from its display, a window in another Space showed what
                 // lay there instead (other apps' windows), not itself.
                 stream.cropFrame = crop.frame

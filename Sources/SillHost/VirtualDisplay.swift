@@ -353,6 +353,49 @@ final class VirtualDisplay {
         }
     }
 
+    /// Whether the window server still lists display `id`.
+    static func isOnline(_ id: CGDirectDisplayID) -> Bool {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(64, &ids, &count) == .success else { return false }
+        return ids.prefix(Int(count)).contains(id)
+    }
+
+    /// Removes `displays` one at a time, each off the display list (at most `each`) before the next is
+    /// released. Released together, the window server takes them down one after another, 0.1–0.4 s
+    /// each, and a quit that waited 1.5 s for seven left the last one to go with the process, as it
+    /// died: WindowServer's display streams then stopped for every app until it restarted (macOS
+    /// 27.0.1, 2026-10-15). Blocks the calling thread: the exit path. Returns the displays that were
+    /// still listed when their wait ran out.
+    @discardableResult
+    static func removeInTurn(_ displays: [VirtualDisplay], each: TimeInterval = 1.5) -> [CGDirectDisplayID] {
+        var late: [CGDirectDisplayID] = []
+        for d in displays {
+            let id = d.displayID
+            d.destroy()
+            guard id != 0 else { continue }
+            let deadline = Date().addingTimeInterval(each)
+            while isOnline(id), Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            if isOnline(id) { late.append(id) }
+        }
+        return late
+    }
+
+    /// `removeInTurn`, waiting without blocking: a desk emptied while the host runs.
+    @MainActor @discardableResult
+    static func removeInTurn(_ displays: [VirtualDisplay], each: TimeInterval = 1.5) async -> [CGDirectDisplayID] {
+        var late: [CGDirectDisplayID] = []
+        for d in displays {
+            let id = d.displayID
+            d.destroy()
+            guard id != 0 else { continue }
+            let deadline = Date().addingTimeInterval(each)
+            while isOnline(id), Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+            if isOnline(id) { late.append(id) }
+        }
+        return late
+    }
+
     /// The exit path: waits, at most `timeout`, until none of Sill's displays (vendor 0x5111) is listed.
     static func waitUntilAllRemoved(timeout: TimeInterval) {
         let deadline = Date().addingTimeInterval(timeout)

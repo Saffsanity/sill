@@ -5,7 +5,7 @@ import CoreVideo
 /// Sill's hidden displays has been removed while others stay, a display made afterwards can stream
 /// another display's picture live (a one-off screenshot of it is right, and so is the window captured
 /// alone); waiting or resizing it does not mend it, a desk whose displays are all made again from none
-/// does. The main stream's crop of such a display leaves out every other app and the wallpaper, so it
+/// did, but removing displays can stop every display stream on the Mac, so such a window streams alone. The main stream's crop of such a display leaves out every other app and the wallpaper, so it
 /// shows black. The stream's frames are compared with a small screenshot of the window alone, cell by
 /// cell, at start and every 10 s (StreamCoordinator's `watchDeskPicture`). Pure.
 enum DeskPicture {

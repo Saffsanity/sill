@@ -87,6 +87,11 @@ enum StatusText {
                                    subtitle: "Streaming with the software encoder, up to 60 fps, until it is free again.",
                                    action: .none))
         }
+        if s.displayStreamsDead {
+            attention.append(.init(title: "Screen Capture Stopped Working",
+                                   subtitle: "Windows stream without their menus. Logging out fixes this.",
+                                   action: .none))
+        }
         let remotePortTaken = remotePortInUse(s.remote)
         if let port = remotePortTaken {
             attention.append(.init(title: "Remote Access Can’t Start", subtitle: "Port \(port) is in use by another app.",

@@ -342,10 +342,17 @@ package final class StreamCoordinator {
     /// (DeskStages), while a device asks for whole-app capture.
     private(set) lazy var desk = DeskStages(sizer: sizer, catalog: catalog)
     /// Windows whose hidden display gave another display's picture (DeskPicture): their main stream
-    /// captures the window alone, without its menus and popovers, until the desk is made again by
-    /// hand (the viewer's refresh). Never made again by itself (see `DeskStages.spares`).
+    /// captures the window alone, without its menus and popovers, until the viewer's refresh
+    /// (`refreshDesk`) tries the display again.
     private var deskWindowAlone: Set<UInt32> = []
-    /// The desk being made again (`rebuildDesk`).
+    /// WindowServer delivers no display stream at all (`DisplayStreamProbe`; a display removed under
+    /// a capture left it so, for every app, until it restarted): every window, main or beside it,
+    /// streams as the window alone, which still works, and the menu says so. Checked again every
+    /// minute while a device is connected, and at the viewer's refresh; cleared once a display stream
+    /// delivers again.
+    private(set) var displayStreamsDead = false
+    private var displayStreamsCheck: Task<Void, Never>?
+    /// The desk's captures being started again (`refreshDesk`).
     private var rebuildingDesk = false
     private var lastRebuildAsk: [ObjectIdentifier: CFAbsoluteTime] = [:]
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
@@ -1177,6 +1184,7 @@ package final class StreamCoordinator {
                     guard !self.synthetic || VirtualStage.testDesk else { return nil }
                     return self.desk
                 }
+                made.displayStreamsDead = { [unowned self] in self.displayStreamsDead }
                 // Whole-app capture asked for or no longer: the picked window is captured again with it.
                 made.onWholeAppChanged = { [unowned self] in
                     Task { @MainActor in
@@ -1221,8 +1229,8 @@ package final class StreamCoordinator {
             let now = CFAbsoluteTimeGetCurrent()
             guard now - (lastRebuildAsk[id] ?? 0) >= 5 else { return }   // one every 5 s at most
             lastRebuildAsk[id] = now
-            print("Sill's desk: \(deviceName(connection)) asked for the hidden displays to be made again.")
-            Task { @MainActor in await self.rebuildDesk() }
+            print("Sill's desk: \(deviceName(connection)) asked for the desk's captures to start again.")
+            Task { @MainActor in await self.refreshDesk() }
         case .dockMenu:
             guard !synthetic, let d = Wire.decode(DockMenu.self, from: message.payload) else { return }
             let id = ObjectIdentifier(connection)
@@ -1768,7 +1776,7 @@ package final class StreamCoordinator {
                 if let staged {
                     watchFullScreen()
                     // Sill's desk: the window on a display of its own, sized to the device's window.
-                    if deskWindowAlone.contains(id) {
+                    if deskWindowAlone.contains(id) || displayStreamsDead {
                         filter = SCContentFilter(desktopIndependentWindow: w)
                         cropRect = nil
                     } else {
@@ -1779,11 +1787,12 @@ package final class StreamCoordinator {
                     }
                     mainCropFrame = nil
                     size = staged.size
-                    describe += deskWindowAlone.contains(id) ? ", on Sill's desk (the window alone: its display's picture was wrong)" : ", on Sill's desk"
+                    describe += displayStreamsDead ? ", on Sill's desk (the window alone: display streams deliver nothing)"
+                        : deskWindowAlone.contains(id) ? ", on Sill's desk (the window alone: its display's picture was wrong)" : ", on Sill's desk"
                     let pill = SharePill()
                     await pill.start(w)
                     mainPill = pill
-                } else if sideStreams?.wholeApp == true, w.isOnScreen, let crop = await AppCrop.crop(for: w, frame: place) {
+                } else if sideStreams?.wholeApp == true, !displayStreamsDead, w.isOnScreen, let crop = await AppCrop.crop(for: w, frame: place) {
                     filter = crop.filter
                     cropRect = crop.sourceRect
                     mainCropFrame = crop.frame
@@ -1924,7 +1933,7 @@ package final class StreamCoordinator {
         if enc.isDead { Task { @MainActor in await self.encoderHung(enc) } }
     }
 
-    // MARK: Sill's desk, made again
+    // MARK: Sill's desk: its pictures checked, its captures started again
 
     /// A desk display's picture of the window it holds (DeskPicture), compared once its stream has
     /// started and every 10 s while it runs (a display made or removed beside it can re-bind one that
@@ -1938,8 +1947,11 @@ package final class StreamCoordinator {
         // came through, so the window streams alone; said once a stream.
         if encoderLive === pipeline, !capture.deliveredAnything, frames.get() == nil {
             Stats.shared.bump("desk.noDisplayFrames")
-            print("Sill's desk: the capture of \(w.owningApplication?.applicationName ?? "?")'s hidden display delivered nothing in 3 s (WindowServer is not delivering display streams); it streams as the window alone.")
+            print("Sill's desk: the capture of \(w.owningApplication?.applicationName ?? "?")'s hidden display delivered nothing in 3 s; it streams as the window alone.")
             deskWindowAlone.insert(id)
+            // This display alone, or every display stream on the Mac? A moment's stream of the main
+            // display tells.
+            if await DisplayStreamProbe.delivers() == false { await displayStreamsStopped() }
             if case .window(id) = active, !switching { await select(active) }
             return
         }
@@ -1958,7 +1970,7 @@ package final class StreamCoordinator {
         }
         Stats.shared.bump("desk.wrongPicture")
         let app = w.owningApplication?.applicationName ?? "?"
-        print("Sill's desk: \(app)'s picture from its hidden display is not the window (ScreenCaptureKit streams another display's picture there); it streams as the window alone, without its menus and popovers, until the desk is made again (the viewer's refresh).")
+        print("Sill's desk: \(app)'s picture from its hidden display is not the window (ScreenCaptureKit streams another display's picture there); it streams as the window alone, without its menus and popovers, until the viewer's refresh tries its display again.")
         deskWindowAlone.insert(id)
         if case .window(id) = active, !switching { await select(active) }
         return true
@@ -1981,23 +1993,61 @@ package final class StreamCoordinator {
         return DeskPicture.differs(frame, window)
     }
 
-    /// Every hidden display of the desk removed together and made again, on a device's word (the
-    /// viewer's refresh): the streams stop, the windows go home, and once no hidden display is left
-    /// they go back to new ones, the main window first. Displays made with none left stream their own
-    /// pictures (DeskPicture), and windows captured alone go back to theirs. Only by hand, since each
-    /// display made has a lasting cost (see `DeskStages.spares`).
-    func rebuildDesk() async {
+    /// The viewer's refresh (kind 42): every capture of the desk started again on the displays it has,
+    /// windows captured alone back on theirs (a window whose picture is still wrong goes back to the
+    /// window alone at its next check), and, while display streams deliver nothing, a check whether
+    /// they do again. No display is removed or made: until 2026-10-15 this removed every hidden
+    /// display and made them again, and a display removed at the wrong moment stops WindowServer's
+    /// display streams for every app on the Mac until it restarts.
+    func refreshDesk() async {
         guard !rebuildingDesk, !desk.staged.isEmpty else { return }
         rebuildingDesk = true
+        if displayStreamsDead, await DisplayStreamProbe.delivers() == true { displayStreamsDelivering() }
         deskWindowAlone.removeAll()
         let count = desk.staged.count
         await sideStreams?.stopStreams()
         await capture.stop()
-        desk.releaseAll()
-        try? await Task.sleep(for: .milliseconds(800))
         rebuildingDesk = false
-        print("Sill's desk: \(count) hidden display\(count == 1 ? "" : "s") removed together; making \(count == 1 ? "it" : "them") again.")
+        print("Sill's desk: starting the captures of its \(count) hidden display\(count == 1 ? "" : "s") again (none removed or made).")
         if active != .none, !switching { await select(active) }
+        sideStreams?.changed()
+    }
+
+    // MARK: Display streams stopped
+
+    /// No display stream delivers anything, on any display (`DisplayStreamProbe`): every window
+    /// streams alone, the menu says so, and a check every minute while a device is connected watches
+    /// for them coming back. Nothing Sill can do mends it; restarting WindowServer (or logging out) does.
+    private func displayStreamsStopped() async {
+        guard !displayStreamsDead else { return }
+        displayStreamsDead = true
+        Stats.shared.bump("desk.displayStreamsDead")
+        print("Display streams: WindowServer delivers no display stream on this Mac (a moment's stream of the main display got nothing); every window streams alone, without its menus, until it does again. Logging out, or restarting WindowServer, mends it.")
+        status.update { $0.displayStreamsDead = true }
+        sideStreams?.changed()
+        displayStreamsCheck?.cancel()
+        displayStreamsCheck = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self, self.displayStreamsDead, !Task.isCancelled else { return }
+                guard self.catalog.clientCount > 0 else { continue }
+                if await DisplayStreamProbe.delivers() == true {
+                    self.displayStreamsDelivering()
+                    if self.active != .none, !self.switching { await self.select(self.active) }
+                    return
+                }
+            }
+        }
+    }
+
+    private func displayStreamsDelivering() {
+        guard displayStreamsDead else { return }
+        displayStreamsDead = false
+        displayStreamsCheck?.cancel()
+        displayStreamsCheck = nil
+        print("Display streams: WindowServer delivers display streams again; windows go back to their displays.")
+        status.update { $0.displayStreamsDead = false }
+        deskWindowAlone.removeAll()
         sideStreams?.changed()
     }
 
@@ -2584,10 +2634,15 @@ package final class StreamCoordinator {
         mainPill?.stopNow(timeout: 1)
         sideStreams?.stopCapturesNow(timeout: 1)
         stage.release()
+        // The desk's displays removed one at a time, each off the display list before the next goes
+        // (`VirtualDisplay.removeInTurn`): released together, the window server took seven down one
+        // after another for 2 s, the wait below gave up at 1.5, and the last went with the process
+        // as it died, which stopped WindowServer's display streams for every app (2026-10-15).
         desk.releaseAll()
-        // And the displays gone before the process is: a new Sill made right after would otherwise
-        // remake the same identities while the window server is still taking them down.
-        VirtualDisplay.waitUntilAllRemoved(timeout: 1.5)
+        // And every display (the iPad's stage's too) gone before the process is: a new Sill made right
+        // after would otherwise remake the same identities while the window server is still taking
+        // them down.
+        VirtualDisplay.waitUntilAllRemoved(timeout: 3)
     }
 
     /// The CLI's default path at a signal (HostShutdown.installKeyRelease), just before it dies of it:

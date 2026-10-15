@@ -6,8 +6,8 @@ import AppKit
 /// its strip moves this window too: StreamInputView), and its buttons, with that Mac's own
 /// green-button menu, are that Mac's. A child window of the focused one, so it moves with it; shown
 /// only while that window is key and the app is in front; over the window's top-left corner when
-/// there is no room above it. At its end, where the other Mac makes its hidden displays again on
-/// this Mac's word, a refresh button: a picture that came out black or wrong is made again (`onRefresh`).
+/// there is no room above it. At its end, where the other Mac has hidden displays, a refresh button:
+/// the other Mac starts their captures again, for a picture that came out black or wrong (`onRefresh`).
 /// Main thread.
 final class WindowPill: NSPanel {
     private weak var parentStream: StreamWindow?
