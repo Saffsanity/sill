@@ -58,8 +58,16 @@ fi
 
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Packaging/Info.plist)"
 
-swift build -c release --product SillMenuBar
-bin="$(swift build -c release --product SillMenuBar --show-bin-path)"
+# Universal, so one Sill.app runs on Apple silicon and Intel Macs: one build per architecture, joined
+# with lipo. Not one `swift build --arch arm64 --arch x86_64`: that needs Xcode's XCBuild, and the
+# Command Line Tools alone must still build this. Each architecture has its own scratch path: in one
+# shared .build, every switch of triple costs a relink (16 s measured), so no rebuild stays at ~2 s.
+bin=.build/universal
+for arch in arm64 x86_64; do
+    swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch"
+    cp "$(swift build -c release --product SillMenuBar --triple "$arch-apple-macosx" --scratch-path "$bin/$arch" --show-bin-path)/SillMenuBar" "$bin/SillMenuBar-$arch"
+done
+lipo -create "$bin/SillMenuBar-arm64" "$bin/SillMenuBar-x86_64" -output "$bin/SillMenuBar"
 app=.build/Sill.app
 stage=.build/Sill.app.partial      # assembled aside, so a failed run never leaves half a bundle
 rm -rf "$stage"
