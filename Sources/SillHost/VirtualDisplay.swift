@@ -367,6 +367,11 @@ final class VirtualDisplay {
     /// died: WindowServer's display streams then stopped for every app until it restarted (macOS
     /// 27.0.1, 2026-10-15). Blocks the calling thread: the exit path. Returns the displays that were
     /// still listed when their wait ran out.
+    ///
+    /// The display list this process reads is its own copy, updated from the main run loop: with the
+    /// main thread asleep it kept listing a display WindowServer had removed 0.3 s in, and every wait
+    /// ran out (2026-10-15, two displays: 4.8 s to exit). So on the main thread the wait runs the run
+    /// loop (`pause`).
     @discardableResult
     static func removeInTurn(_ displays: [VirtualDisplay], each: TimeInterval = 1.5) -> [CGDirectDisplayID] {
         var late: [CGDirectDisplayID] = []
@@ -375,10 +380,23 @@ final class VirtualDisplay {
             d.destroy()
             guard id != 0 else { continue }
             let deadline = Date().addingTimeInterval(each)
-            while isOnline(id), Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            while isOnline(id), Date() < deadline { pause() }
             if isOnline(id) { late.append(id) }
         }
         return late
+    }
+
+    /// 20 ms, the main run loop running meanwhile when this is the main thread, so the display list
+    /// (and the display reconfiguration callbacks behind it) keep up.
+    private static func pause() {
+        let until = Date().addingTimeInterval(0.02)
+        if Thread.isMainThread, RunLoop.current.run(mode: .default, before: until) {
+            let left = until.timeIntervalSinceNow
+            if left > 0 { Thread.sleep(forTimeInterval: left) }
+        } else {
+            let left = until.timeIntervalSinceNow
+            if left > 0 { Thread.sleep(forTimeInterval: left) }
+        }
     }
 
     /// `removeInTurn`, waiting without blocking: a desk emptied while the host runs.
@@ -404,7 +422,7 @@ final class VirtualDisplay {
             var count: UInt32 = 0
             guard CGGetOnlineDisplayList(64, &ids, &count) == .success,
                   ids.prefix(Int(count)).contains(where: { CGDisplayVendorNumber($0) == 0x5111 }) else { return }
-            Thread.sleep(forTimeInterval: 0.05)
+            pause()
         }
     }
 }
