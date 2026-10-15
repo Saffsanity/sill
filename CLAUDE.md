@@ -8,6 +8,37 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Sill for Android (2026-10-14, branch `android-client` from main at 985a733; `android/README.md`
+has setup, the map to the iOS files and what differs).** A user's request: Sill on their Android
+devices, reachable over their Tailscale tailnet, near the iOS app's features. A native Kotlin client
+(Compose UI, MediaCodec HEVC, the Android Keystore, Conscrypt TLS 1.3, NSD) in `android/`, speaking
+the wire protocol of `Sources/StreamProtocol` as it is: **no Mac change**, any Sill for Mac from
+0.4.0 serves it (the remote door over Tailscale; the TLS home door at home).
+- In it: pairing by the typed code (PBKDF2 and the proofs) and by the `sill://pair` link (QR via
+  Google's code scanner, pasted, or opened from another app behind a confirmation); the session
+  (hello first, 0.25 s pings, ClientStats, liveness by bytes, GoodbyePolicy's reconnect); kinds 0–28:
+  the stream, the catalog and thumbnails, Apps (launch), window commands, kind 16/17 through a port
+  of HostSettingsLedger, the Mac's menus (MacMenuState), the Mac's pointer and cursor shape (26, 14),
+  three- and four-finger gestures (28), kind 18's address refresh; input as InputOverlay and
+  TrackpadView have it (tap, long-press right-click, scroll with phases and the device's momentum,
+  the relative trackpad with hold-to-drag, latched modifiers, the key row, hardware keys as HID
+  usages, typed text, mouse, wheel and S Pen); three arrangements (sideways, a phone upright with the
+  16:10 pane, a tablet or unfolded Fold upright); at home the Mac's Bonjour row by its recognition
+  tag ("Wi‑Fi", its home door dialed first), and an unpaired Mac's ask ("On this network").
+- Decoder size: phones' HEVC decoders can stop below a Retina capture (the Galaxy A15's MediaTek:
+  2560×1440, 1080p at 60), so a stream this device cannot decode asks the Mac for Standard by itself,
+  and the viewport's fps is capped at what the decoder sustains.
+- Verified on a Galaxy A15 (Android 14) against `SillHost --synthetic` on loopback through `adb
+  reverse` (the remote door with `SILL_TEST_ORIGIN=vpn`, and `--pairing`'s home door with a stand-in
+  `_silltest._tcp` record): both pairings, streaming (decode 24 ms at 1512×948), input in the host's
+  `SILL_TEST_INPUT_LOG`, a settings change ("away bitrate 4 → 15"), the menus against
+  `Scripts/menufixture.swift` (Probe › Set Label A pressed), the scripted pointer, the reconnect, the
+  ask and the Wi‑Fi row; release (R8) build 2.9 MB; `./gradlew testDebugUnitTest` 17 tests, the
+  pairing vectors of `Tests/checks/protocol` among them.
+- **Untested:** a real Sill.app over Tailscale (the user installs Sill for Mac 0.5.1 and turns on
+  Remote Access), the hardware encoder's 60 fps on the phone, the Z Fold4 and Tab S8 Ultra, IMEs
+  beyond Samsung Keyboard's key events.
+
 **Release 0.5.1 (2026-10-09, branch `release-0.5.1` from main at 05f2bb8, main merged in again
 at e3ce043 after PR #47; PR #48; Noah's go the same day: "When #47 passes the CI, merge it, then
 once that is merged do #48. Then run the release procedure").** Noah: "I want the release in the GitHub to line up with the app version, I want
@@ -4907,6 +4938,11 @@ good.
   active keyboards) must add its category and reason there before the next
   upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
+- `android/` — Sill for Android (Gradle, AGP 9, Kotlin, Compose; `./gradlew assembleDebug`,
+  `testDebugUnitTest`): `protocol/` the wire format and JSON, `crypto/` pairing, identity and TLS,
+  `net/` saved Macs, the dialer, pairing, the session and Bonjour, `client/` the client's state
+  (SillClient, the settings ledger, the menus, keys), `video/` the HEVC decoder, `ui/` the screens and
+  `ui/input/` the touch, trackpad and keyboard surfaces. `android/README.md` maps each to its iOS file.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 - `docs/DEVELOPMENT.md` — building, running and testing from source; the
   README's developer material until 2026-09-25, so a plan's "README" means a
