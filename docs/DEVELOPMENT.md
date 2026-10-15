@@ -76,7 +76,13 @@ Remote access below), Launch at Login, Permissions, Show Log… and Settings…
 Changes apply at once; a change to a streaming setting restarts the current
 stream for a moment. Opening Sill.app while it runs (Finder,
 Spotlight) shows Settings, which is also where Quit Sill is when the menu bar
-has no room for the icon.
+has no room for the icon. Settings is as tall as its tab needs, up to its
+screen's height between the menu bar and the Dock less 24 pt; a taller tab
+scrolls, and a window Sill's own resizing leaves partly off the screen is
+moved back on, 12 pt clear of the edge it ran past (issue #59,
+docs/settings-window-plan.md: one constraint in `SettingsWindowController`,
+its arithmetic in `SettingsWindowFit`, checked by
+`Tests/checks/settings-window`).
 
 Quality is the stream's bitrate per 60 fps (a 120 fps stream gets twice as
 much): Low 4 Mbps (for a slow link away from home), Efficient 8, Balanced 15
@@ -197,6 +203,22 @@ with the rate (the knob is per 60 fps, 1–200 Mbps).
    the cable. A session from away (Remote access, below) keeps its way in until
    it ends.
 
+When a session ends by itself, the device reconnects: the Mac's row at once,
+then, while that row stays listed and nothing answers (a sleeping Mac whose
+record an Apple TV or HomePod keeps up as a Bonjour Sleep Proxy, or a Mac whose
+Sill is stuck), again 5, 10, 20 and every 30 s after, 12 times at most and only
+while Sill is in front. After the third the status line says the Mac may be
+asleep, and after the twelfth that it stopped trying. The row listed afresh
+(the Mac's Sill relaunched), Sill back from the background, or a tap starts
+again. Back from the background the device also makes its Bonjour browser again
+(and the nearby one, if it runs), since iOS cuts a suspended app's connection
+to mDNSResponder and a browser made before then lists what it saw then; the
+rows it had stay up for the new browser's first 3 s, so a Mac that stays listed
+never blinks. A Desktop stream that the Mac stops (its capture stopped) is
+asked for again by itself, at most once every 10 s.
+docs/reconnect-after-sleep-plan.md has the rules;
+`iOSClient/DiscoveryPolicy.swift` is them, checked in `Tests/checks/policy`.
+
 The gear at the end of the bar opens Settings: the Mac's streaming settings,
 changed from the device, and Disconnect at the bottom. After the Mac's settings
 come the device's own: This iPad (or iPhone), with Three-Finger Gestures
@@ -293,6 +315,44 @@ setting back to its default, quit Sill, run `defaults delete
 me.saffer.sill.mac <key>` (`bitrate`, `maxFPS`, `captureScale`, `awayBitrate`,
 `awayCaptureScale`, `prioritizeSpeed`, `virtualDisplay` or `directWireless`)
 and open Sill again.
+
+## Windows sized for a device
+
+Without the virtual display, Aa (text size) on the device resizes the window
+it streams on the Mac itself, through Accessibility, to the device's panel at
+that scale (nothing happens until Aa is first touched; a window in full screen
+is not resized: "Window sizing: ‹app› — ‹title› is full screen; not
+resizing."). The window goes back to its own frame when it stops streaming:
+another window or the Desktop picked, the last device disconnecting (with
+several connected, the first to leave changes nothing), the stream stopping
+(the window closed, a stream that failed to start), and Sill quitting (Quit,
+logout, a `kill` or hangup, and Ctrl-C of `SillHost`). Moved on the Mac
+meanwhile, it gets its own size back where it is now, kept on its display;
+resized on the Mac after Sill last sized it, or full screen, it is left as it
+is (full screen, it keeps the size Sill gave it when it leaves full screen). A
+resize on the Mac while it streams, from any edge or corner, is undone by the
+next fit within about two seconds, so it does not count, and the window still
+goes back to its old place; a move and a resize both made before that fit are
+taken as the window's edges show them. A window that enters or leaves full
+screen while it streams is off the window list for a second or two: it keeps
+streaming through three of the catalog's looks, as a window on the virtual
+display does, and goes back at the stop like any other (a pick, Disconnect or
+Quit within that second can still leave it at the size Sill gave it). A busy
+app that does not answer the size in time is still recorded ("… did not answer
+the size in time; if it takes it later, it still goes back."). Turning the
+virtual display on while such a window streams stages it with that frame as its
+way home. Each window acted on gets one line in the log: "Restored Safari —
+Apple Developer to (212,95,1280×800)", "…, its own size where it was moved",
+"Left … at (…): it was resized on the Mac", "Left … as it is: it is full
+screen", or "Could not restore …" (an app that does not answer Accessibility is
+left where it is rather than wait out a second for each write). The frames are
+kept in memory only: after a crash or `kill -9` the window stays at the size
+Sill gave it. `Sources/SillHost/WindowRestore.swift` is the rule and the
+sequences that fit a window and put it back (over `WindowRestore.Access`, which
+`WindowSizer.AXWindows` answers through Accessibility), checked in
+`Tests/checks/window-restore` against a stand-in Mac;
+docs/restore-window-frames-plan.md has the reasons, and The restore probe
+(below) checks it against a real window.
 
 ## Trackpad gestures
 
@@ -661,6 +721,24 @@ device's does: the host reads a menu only under that title).
 fixture without a host (it needs Accessibility for whatever runs it). The
 file's header says how to build and run it.
 
+### The restore probe
+
+`Scripts/restore-probe/run.sh` checks that a window Sill sized goes back, with
+the real `WindowSizer.resize` and the restore the host runs, against a window
+of its own (`owner.swift`, in a bundle that never comes to the front, at the
+lower left behind every other window): fourteen steps (a stop, a rotation's
+re-fit, moved, moved then re-fitted, resized, an app's minimum, a window that
+closes, the nudge at a display's edge, a window that cannot be resized, an app
+that does not answer, the virtual display's way home worked out without a
+display, two windows, an app stopped with `SIGSTOP` during a fit so its size
+goes unanswered and lands once it runs again, and the left edge dragged in
+before a re-fit), each frame before, during and after, in about 35 s. It
+touches no other window, posts no input and makes no virtual display, and the
+front app must not change. It needs Accessibility and Screen Recording for the
+terminal, and an unlocked screen: while the screen is locked the window server
+shows a new window transformed and Accessibility lists none, so it says so and
+exits 2.
+
 ### Test arguments for the bare app
 
 `.build/release/SillMenuBar` is Sill.app without its bundle. It keeps its
@@ -677,6 +755,31 @@ settings in the defaults domain `SillMenuBar` (delete it after), and takes:
   look.
 - A setting as a launch argument, such as `-maxFPS 60`, for one run. Sill.app
   takes these too.
+- The Settings window on a short screen (issue #59):
+  `-SillSettingsAfter '<s> <tab>[; <s> <tab> …]'` opens Settings on that tab
+  (its name or the start of one: `remote`, `general`, `virtual`) s seconds
+  after launch, as the menu does, and 0.6 s later prints the window's frame,
+  the pane's whole height and how much of it shows ("shows 596 of 909,
+  scrolls"), the visible frame it fits in and the cap. A step can also be
+  `close`, `report` (print the window as it stands), `end` (scroll the pane
+  to its last row) or `height=<points>`
+  (as `-SillTestScreenHeight`, `0` for the screen's own, then the screens'
+  change is posted as the Dock or a display would). `-SillTestScreenHeight
+  <points>` makes the window fit the top `<points>` of the screen's visible
+  frame, as if the screen were that short with the Dock at its bottom, and
+  `-SillSettingsShot <dir>` writes each step's window (title bar, toolbar and
+  pane) to `<dir>/settings-<s>s-<tab>.png`. The window's frame is saved in
+  the `SillMenuBar` domain (`NSWindow Frame SillSettings`); a launch argument
+  of that name places it for one run. For example:
+
+  ```
+  SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 \
+    .build/release/SillMenuBar --synthetic -SillTestScreenHeight 700 \
+    -SillSettingsAfter '2 general; 4 remote; 6 height=500; 8 height=0' -SillQuitAfter 10
+  ```
+
+Sill.app itself ignores every `-Sill…After` argument, `-SillTestScreenHeight`,
+`-SillSettingsShot` and `-requirePairing`, with one line each.
 
 `--encoder-selftest` and `--virtual-display-selftest` work in the app too.
 
@@ -715,6 +818,16 @@ simulator:
   settings of the mock Mac) and `-SillConnectCase …`: the drawer, the Settings
   panel or the connect screen in a given state.
 - `-SillHUD 1`: fps, frame age, round trip and frame size over the stream.
+- `-SillBrowserFail N` (the normal app and `-SillLive 1`): each of the first N
+  network browsers is reported failed as iOS reports a suspended app's
+  (-65569), so the device makes it again after 1, 2, 4… s; the simulator's
+  browsers use this Mac's own mDNSResponder, which never cuts them. Sending the
+  app to the background and back (`xcrun simctl launch <udid>
+  com.apple.Preferences`, then `xcrun simctl launch <udid> me.saffer.sill`)
+  makes the network browser again, and the nearby one if it runs. The console
+  says "browser: …", and the automatic reconnect's dials "reconnect: …".
+  `-SillConnectCase asleep` shows the connect screen's line after three dials
+  that did not connect.
 - `-SillConnect 127.0.0.1:PORT`: connect by address, also in the normal app.
   There, and under `-SillLive 1`, `-SillDrawer 1`, `-SillSettings 1` and
   `-SillScaleOpen 1` open theirs 1.5 s after the stream starts.
@@ -951,6 +1064,19 @@ no profile yet, so publish from your Mac with `release.sh --publish` and leave
 both submissions are the run's artifact `notary-v<version>` for 30 days: when
 the job's log says a notary log lists issues, read them there.
 
+Homebrew: Sill for Mac is also the cask `sill` in Sill's own tap,
+[Saffsanity/homebrew-sill](https://github.com/Saffsanity/homebrew-sill), so
+`brew install --cask saffsanity/sill/sill` installs it (that command taps
+the repository and trusts the one cask, which Homebrew 6 and later need for a
+tap that isn't Homebrew's own). The cask names the release's `Sill.dmg` by
+its version and SHA-256, so each release bumps it once it is published
+(docs/release-checklist.md, part 2), and the tap's `brew test-bot` workflow
+checks every pull request, downloading the image. It moves to Homebrew's main
+repository once it qualifies (docs/release-checklist.md, part 1 §6). On a Mac
+where Sill.app runs from /Applications, try the cask only with `brew install
+--cask --appdir=<a scratch folder>`, and never `brew uninstall --zap`, which
+trashes the running Sill's settings and log.
+
 The iOS app goes to App Store Connect (TestFlight, then the App Store) from
 `Scripts/release-ios.sh`: a Release archive signed by Xcode's automatic
 signing on team 9B2KKVM937, exported as `.build/ios/export/Sill.ipa` and
@@ -975,10 +1101,15 @@ record field by field.
   or QUIC with FEC; measure before deciding.
 - The encoder is fixed to one size, so a resized window restarts the pipeline
   (a brief black frame on the device).
+- A window Sill sized for a device goes back when it stops streaming, but not
+  after a crash or `kill -9`: the frames are kept in memory only.
 - Single window at a time. Every connection runs over TLS 1.3 to paired
   devices only (with Require pairing off, to any device at home, still
   encrypted); only the command-line host without `--pairing` keeps a plain,
-  open home door. The device reconnects on a timer when the Mac drops it.
+  open home door. The device reconnects by itself when the Mac drops it (The
+  iOS app, above). Whether its dials wake a Mac asleep behind a Bonjour Sleep
+  Proxy (an Apple TV or HomePod, with Wake for network access on) is
+  untested; from away they cannot (Remote access, above).
 - Bonjour at home, your VPN or a port forward away (Remote access above).
   iCloud auto-pairing comes with milestone 5.
 
@@ -996,9 +1127,10 @@ record field by field.
   iOS app's build for App Store Connect and TestFlight), `sillclient.py` (a
   wire-format test client), `sillrelay.py` (a relay that slows or cuts the
   link, for tests), `sillfeed.py` (a stand-in for GitHub's releases feed,
-  for the update check's tests), `pacing/` (the pacing harness, above), and
+  for the update check's tests), `pacing/` (the pacing harness, above),
   `menufixture.swift` and `menu-check/` (the menus' test app, and the menu
-  reader's checks against it).
+  reader's checks against it), and `restore-probe/` (a window Sill sized goes
+  back, against a window of its own, above).
 - `Tests/checks/`: the pure checks (above). `Tests/touchrig/`: the touch rig
   (above). `Tests/duorig/`: folds and turns the iPhone Duo simulator (TEST
   ONLY, above). `.github/`: the CI, release and TestFlight workflows, and the

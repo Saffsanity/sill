@@ -22,9 +22,11 @@ server in between.
 [![Download on the App Store](https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83)](https://apps.apple.com/app/id6816359860)
 
 Sill for Mac is a free, notarized download from
-[getsill.app](https://getsill.app/download). Sill for iPhone and iPad is free
-on the [App Store](https://apps.apple.com/app/id6816359860), and you can also
-build it from source (below).
+[getsill.app](https://getsill.app/download); with [Homebrew](https://brew.sh),
+`brew install --cask saffsanity/sill/sill` installs the same download from
+Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
+and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
+and you can also build it from source (below).
 
 ## Screenshots
 
@@ -95,13 +97,21 @@ Sill has layouts of its own.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
   its Settings, offers a quality the link can carry.
+- **Text size**: Aa on your device resizes the window you stream on your Mac,
+  through Accessibility, so its text shows at the size you pick, and keeps it
+  at that size while it streams. The window goes back to its own size and
+  place when Sill stops showing it: you pick another window or the Desktop,
+  your last device disconnects, or you quit Sill. If you moved it on your Mac
+  meanwhile, it keeps its new place.
 - **The virtual display** (off by default) moves a window you stream onto a
   display of its own on your Mac, so it keeps updating when other windows
   cover it. It uses a private macOS API, which is one reason Sill for Mac comes
   from the website and not from the Mac App Store.
 
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
-does not play sound from your Mac. Only the iPhones and iPads you paired can
+does not play sound from your Mac. Your Mac needs to be awake, with Sill open.
+Sill may not be able to wake it. After a restart Sill opens only once someone
+logs in, with Launch at Login on. Only the iPhones and iPads you paired can
 connect, unless you turn off Require pairing in Settings › Devices; then any
 device on your network can, still encrypted. Pairing at home came with Sill
 for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and each needs the other:

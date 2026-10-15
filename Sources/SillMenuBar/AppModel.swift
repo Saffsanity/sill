@@ -54,6 +54,8 @@ final class AppModel {
     @ObservationIgnored var closePairingWindow: (() -> Bool)?
     /// The notice for a device that paired by itself over the USB cable (its paired name and key).
     @ObservationIgnored var showCableNotice: ((CableNotice) -> Void)?
+    /// TEST ONLY (-SillSettingsAfter): the Settings window's controller, once it has been made.
+    @ObservationIgnored var settingsWindowForTests: (() -> SettingsWindowController?)?
 
     @ObservationIgnored private var loggedStatus: String?
     @ObservationIgnored private var napActivity: NSObjectProtocol?
