@@ -2,10 +2,13 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Observation
+import SillHostCore
+import StreamProtocol
 
-/// Screen Recording and Accessibility, for Sill itself. TCC keys both to the bundle ID plus the
-/// code's designated requirement, so a rebuild signed with the same Apple Development identity
-/// keeps them, and what Terminal was granted for the SillHost CLI does not carry over.
+/// Screen Recording and Accessibility, for Sill itself, and what macOS lets it do with the clipboard
+/// (`clipboardAccess`). TCC keys them to the bundle ID plus the code's designated requirement, so a
+/// rebuild signed with the same Apple Development identity keeps them, and what Terminal was granted
+/// for the SillHost CLI does not carry over.
 ///
 /// Read on demand, never on a background timer: when the menu opens, once a second while the
 /// Permissions pane is on screen, when Sill becomes active, and whenever the host's status changes
@@ -17,6 +20,10 @@ final class PermissionsModel {
     /// A Screen Recording request was made. A grant reaches ScreenCaptureKit only in a new
     /// process, so the pane offers Relaunch Sill (macOS itself offers Quit & Reopen).
     private(set) var relaunchSuggested = false
+    /// What macOS lets Sill do with the clipboard (ClipboardPolicy.MacAccess, macOS 15.4 and later):
+    /// Settings › General's clipboard section says so while it does not allow every read. Read with
+    /// the rest (MacClipboard.access), which never reads the clipboard itself; `.allowed` until then.
+    private(set) var clipboardAccess = ClipboardPolicy.MacAccess.allowed
 
     var allGranted: Bool { screenRecording && accessibility }
 
@@ -33,6 +40,8 @@ final class PermissionsModel {
         let sr = CGPreflightScreenCaptureAccess(), ax = AXIsProcessTrusted()
         if sr != screenRecording { screenRecording = sr }
         if ax != accessibility { accessibility = ax }
+        let clipboard = MacClipboard.access()
+        if clipboard != clipboardAccess { clipboardAccess = clipboard }
         if sr && ax && settings.permissionsOnboardingDismissed { settings.permissionsOnboardingDismissed = false }
     }
 
@@ -60,6 +69,20 @@ final class PermissionsModel {
             _ = AXIsProcessTrustedWithOptions(options)
         }
         refresh()
+    }
+
+    /// Allow in System Settings, for the clipboard (Settings › General): Privacy & Security › Paste
+    /// from Other Apps, where the person sets Sill to Allow. While macOS has not asked about Sill yet
+    /// (`notAsked`), it is not listed there, so one read first has macOS ask (MacClipboard.askOnce),
+    /// and the pane opens once that alert is answered.
+    func allowClipboard() {
+        guard clipboardAccess == .notAsked else { openPrivacyPane("Privacy_Pasteboard"); return }
+        MacClipboard.askOnce { [weak self] in
+            Task { @MainActor in
+                self?.refresh()
+                self?.openPrivacyPane("Privacy_Pasteboard")
+            }
+        }
     }
 
     /// System Settings › Privacy & Security, at `anchor`'s pane when that link opens, else at the

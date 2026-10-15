@@ -216,7 +216,7 @@ package final class StreamCoordinator {
     /// In every window list (`WindowList.launchID`): a device moving its session from AWDL to the
     /// network checks that the new connection reaches this same running host, since the Bonjour
     /// name it found it by can belong to another Mac too. Per launch, so nothing is stored.
-    private let launchID = UUID().uuidString
+    private let launchID: String
     /// In every window list (`WindowList.hostVersion`, with `protocol`): Sill.app's version; nil
     /// from the CLI, which has no bundle. For later devices, which can then say which Mac to update.
     private let hostVersion: String?
@@ -255,6 +255,10 @@ package final class StreamCoordinator {
     /// The streamed app's menus, for the devices that asked for them (kinds 24, 25 and 27,
     /// MenuMirror). Reads and presses nothing for a device that never asked.
     let menus: MenuMirror
+    /// The clipboard both ways (kind 32, HostClipboard; docs/clipboard-plan.md), for the devices that
+    /// subscribed, while Share clipboard with devices (`HostConfig.shareClipboard`) is on. Looks at
+    /// nothing while nobody subscribes.
+    let clipboard: HostClipboard
     /// TEST ONLY. `SILL_TEST_MENU_PID=<pid>` on a --synthetic host: the test pattern's menus are that
     /// process's (the gates' fixture, Scripts/menufixture.swift), read and pressed through the same
     /// code, never activated (the Desktop's rule). Nil otherwise; `testMenuLine` is what `start`
@@ -312,6 +316,10 @@ package final class StreamCoordinator {
         gesturesDry = synthetic                            // a test host never posts a gesture (§7.4)
         testHotKeys = synthetic ? Self.testHotKeyTable() : nil
         menus = MenuMirror(server: server)
+        let launch = UUID().uuidString
+        launchID = launch
+        // A synthetic host shares a pasteboard of its own, never this Mac's clipboard.
+        clipboard = HostClipboard(server: server, enabled: config.shareClipboard, launchID: launch, synthetic: synthetic)
         let hook = Self.testMenuHook(synthetic: synthetic)
         testMenuPID = hook.pid
         testMenuLine = hook.line
@@ -392,6 +400,7 @@ package final class StreamCoordinator {
                 self.linkReports[id] = nil
                 if self.flipWait == id { self.flipWait = nil }
                 self.menus.clientLeft(connection)
+                self.clipboard.clientLeft(connection)
                 self.releaseKeys(of: id)
                 self.status.update { $0.devices.removeAll { $0.id == id } }
                 // The last device at home left devices away behind: the away quality, at once.
@@ -564,6 +573,7 @@ package final class StreamCoordinator {
     /// a device connecting, not a login.
     package func start(preselect: String?, promptForPermissions: Bool = true) async {
         for line in testHookLines { print(line) }
+        if let line = clipboard.testHookLine { print(line) }   // TEST ONLY, and only with one of its variables set
         if !synthetic, promptForPermissions { InputInjector.ensureAccessibility() }   // prompts once; input is dropped silently without it
         if softwareOnly {
             // TEST ONLY: a gate that must never touch the Mac's one hardware encoder (Noah may be
@@ -651,6 +661,9 @@ package final class StreamCoordinator {
         guard !shuttingDown else { return false }
         var new = requested.validated()
         if !appKitLoop { new.virtualDisplay = false }
+        // Share clipboard with devices, at once rather than between pipelines: off must stop what goes
+        // out now, not after a restart. The lists say `clipboard` again (or no longer).
+        if clipboard.setEnabled(new.shareClipboard) { broadcastList() }
         guard new != target else { return false }
         pendingConfig = new
         publishSettings()
@@ -1012,6 +1025,10 @@ package final class StreamCoordinator {
             // and answers this device alone. JSON that does not decode has no token to answer.
             guard let r = Wire.decode(FetchMenu.self, from: message.payload) else { return }
             menus.fetch(r, from: connection, who: deviceName(connection))
+        case .clipboard:
+            // The clipboard (HostClipboard): a subscription, a device's text, or its stop. No `await`:
+            // it reads and writes the pasteboard at once, and says nothing per copy.
+            clipboard.received(message.payload, from: connection, who: deviceName(connection))
         case .pressMenuItem:
             guard let r = Wire.decode(PressMenuItem.self, from: message.payload) else { return }
             // One of the Mac's menu items chosen from a device acts as a click on it would, and may
@@ -2305,7 +2322,7 @@ package final class StreamCoordinator {
         StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
                       payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
                                                       hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation)))
+                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

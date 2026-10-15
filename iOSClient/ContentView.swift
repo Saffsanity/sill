@@ -215,6 +215,12 @@ struct ContentView: View {
 ///   three-finger gestures (the Settings panel's last group, This iPad) off for one run, in the
 ///   normal app too. The mock Mac takes gestures (`WindowList.gestures` 1) in every settings case
 ///   but `legacy`, whose group then says to update Sill on the Mac.
+/// * `-Sill.shareClipboard 0` — not a harness argument either: this device's Share Clipboard (the
+///   Settings panel's This iPad group) off for one run, in the normal app too. The mock Mac shares its
+///   clipboard (`WindowList.clipboard` 1) in every settings case but `legacy`, whose group then has no
+///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
+///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent` shows a Paste's
+///   note in its place and under the group's Paste (docs/clipboard-plan.md).
 /// * `-Sill.largerPicture 1` — not a harness argument either: this device's Larger Picture switch
 ///   (the Settings panel's This iPhone group; docs/larger-picture-plan.md) on for one run, in the
 ///   normal app too. A phone held upright then has, while a window streams, no thumbnails, the
@@ -290,8 +296,9 @@ struct ContentView: View {
 ///   (Sill.app's always has, and would post the input to this Mac): else "input script: refused:
 ///   …" and nothing is sent. Point it only at `--synthetic` hosts.
 /// * `-SillSettingsScript '<t> <step>; …'` — the Settings panel's controls for the simulator gates,
-///   in the normal app too: `set K=V[,K=V]` (a control's change) or `suggestion` (the link
-///   callout's button), `t` seconds after the session's first window list, under `-SillInputScript`'s
+///   in the normal app too: `set K=V[,K=V]` (a control's change), `suggestion` (the link
+///   callout's button) or `paste TEXT` (the clipboard's Paste with TEXT, as the system's Paste control
+///   hands it over), `t` seconds after the session's first window list, under `-SillInputScript`'s
 ///   guard (a session dialled to a loopback address whose host sends no version: never Sill.app).
 ///   The console says "settings script: …" (`SettingsScript`).
 /// * `-SillMoveHomeTest to:HOST:PORT|refused|other:PORT` — with `-SillDialSaved 1`: a second after the
@@ -820,8 +827,10 @@ enum InputScript {
 /// `-SillSettingsScript '<t> <step>; …'`: the Settings panel's controls for the simulator gates, which
 /// have no finger (docs/remote-bundle-plan.md S3): `t` is seconds since the session's first window
 /// list; a step is `set K=V[,K=V]` (maxFPS, bitrate, captureScale, prioritizeSpeed, virtualDisplay:
-/// a control's change, through `changeSettings` as the panel sends it) or `suggestion` (the link
-/// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none). The
+/// a control's change, through `changeSettings` as the panel sends it), `suggestion` (the link
+/// callout's button: the Mac's suggestion as the panel offers it, or nothing when it offers none) or
+/// `paste TEXT` (the clipboard's Paste, as the system's Paste control hands TEXT over, through
+/// `sendClipboard`, the receipt and its note included: docs/clipboard-plan.md). The
 /// console says "settings script: …" at each. It runs in the normal app too, under InputScript's
 /// guard: only a session dialled to a loopback address (a remote dial's winner through a relay
 /// counts) whose host's first window list has no version, so never Sill.app's settings.
@@ -856,6 +865,12 @@ enum SettingsScript {
             }
             print(when + "suggestion: the callout's button, “\(button.title)”")
             client.changeSettings(button.change)
+        case "paste" where words.count >= 2:
+            // The Settings group's Paste (or the chip's), as the system's Paste control hands over
+            // what it read: the rest of the step is the text (docs/clipboard-plan.md, the receipt).
+            let text = words.dropFirst().joined(separator: " ")
+            print(when + "paste \(text.utf8.count) bytes")
+            client.sendClipboard([text])
         case "set" where words.count == 2:
             var change = HostSettingsChange()
             for pair in words[1].split(separator: ",") {
