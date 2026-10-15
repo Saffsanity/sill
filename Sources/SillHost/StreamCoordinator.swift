@@ -30,9 +30,6 @@ package final class StreamCoordinator {
     private var wantedFPS: Int { min(maxFPS, max(24, clientFPS.values.max() ?? 60)) }
     /// What the next pipeline will run at: the software encoder is not asked for more than 60.
     private var effectiveFPS: Int { useSoftwareEncoder ? min(wantedFPS, 60) : wantedFPS }
-    /// The bitrate knob is per 60 fps; a faster stream gets proportionally more so each frame
-    /// keeps its share of bits.
-    private var streamBitrate: Int { bitrate * fps / 60 }
     /// The quality the pipeline runs: the away pair while it runs the away quality (`awayRunning`),
     /// else the home pair (HostConfig.effective).
     private var scale: CGFloat { config.effective(away: awayRunning).captureScale }
@@ -1453,7 +1450,13 @@ package final class StreamCoordinator {
     /// `title` and `kind` describe the stream in the app's menu.
     private func startPipeline(source: StreamSource, filter: SCContentFilter?, sourceRect: CGRect?, width: Int, height: Int, describe: String,
                                title: String, kind: HostStatusSnapshot.Stream.Kind) async throws {
-        let enc = try HEVCEncoder(width: width, height: height, fps: fps, bitrate: streamBitrate, prioritizeSpeed: prioritizeSpeed,
+        // What the encoder can keep up with at this size (StreamRate): `fps` stays the devices' rate,
+        // which every restart rule compares against, and only this pipeline runs slower.
+        let rate = StreamRate.capped(fps, pixels: width * height, software: useSoftwareEncoder)
+        // The bitrate knob is per 60 fps: a faster stream gets proportionally more, so each frame
+        // keeps its share of bits.
+        let rateBitrate = bitrate * rate / 60
+        let enc = try HEVCEncoder(width: width, height: height, fps: rate, bitrate: rateBitrate, prioritizeSpeed: prioritizeSpeed,
                                   software: useSoftwareEncoder)
         enc.onHung = { [weak self, weak enc] in
             Task { @MainActor in
@@ -1471,17 +1474,17 @@ package final class StreamCoordinator {
         }
         if let filter {
             capture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            try await capture.start(filter: filter, width: width, height: height, fps: fps, showsCursor: false, sourceRect: sourceRect)
+            try await capture.start(filter: filter, width: width, height: height, fps: rate, showsCursor: false, sourceRect: sourceRect)
         } else {
             syntheticCapture.onFrame = { pixelBuffer, pts in enc.encode(pixelBuffer, pts: pts) }
-            syntheticCapture.start(width: width, height: height, fps: fps)
+            syntheticCapture.start(width: width, height: height, fps: rate)
         }
         encoder = enc
         active = source
-        print("Streaming \(describe) at \(width)×\(height), \(fps) fps, \(streamBitrate / 1_000_000) Mbps")
+        print("Streaming \(describe) at \(width)×\(height), \(rate) fps\(rate < fps ? " (of \(fps): what the encoder keeps up with at this size)" : ""), \(rateBitrate / 1_000_000) Mbps")
         status.update {
-            $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: fps,
-                                                  mbps: streamBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
+            $0.stream = HostStatusSnapshot.Stream(kind: kind, title: title, width: width, height: height, fps: rate,
+                                                  mbps: rateBitrate / 1_000_000, onVirtualDisplay: sourceRect != nil,
                                                   softwareEncoder: useSoftwareEncoder)
         }
         // Frames can reach the encoder while `capture.start` is still awaiting, so its watchdog
