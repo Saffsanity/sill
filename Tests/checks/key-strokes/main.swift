@@ -1191,8 +1191,18 @@ struct Keyboard {
 check([uLeft, uRight, 0x51, 0x52, uEsc, 0x4C, 0x4A, 0x4D, 0x4B, 0x4E, 0x3A, 0x45, uLCmd, uRCmd, uLCtrl, uRCtrl, uLOpt, uROpt]
         .allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: 0) },
       "arrows, escape, forward delete, home, end, page up and down, F1 and F12, ⌘, ⌃, ⌥: as keys")
-check(![uS, uSpace, uReturn, 0x2A, 0x2B, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
-      "letters, space, return, delete, tab, shift and caps lock with shift: to the text system")
+check(![uS, uSpace, 0x2A, uLShift, uRShift, 0x39].contains { ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+      "letters, space, delete, shift and caps lock with shift: to the text system")
+check([uReturn, 0x2B].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: shift) && ForwardedKeys.goesAsKey($0, modifiers: shift | capsLock) },
+      "return and tab with shift: as keys (the text system's \\n and \\t carry no shift)")
+check(![uReturn, 0x2B].contains { ForwardedKeys.goesAsKey($0, modifiers: 0) || ForwardedKeys.goesAsKey($0, modifiers: capsLock) },
+      "return and tab alone, or with caps lock: to the text system (an IME's return confirms its text)")
+do {
+    var fk = ForwardedKeys()
+    let down = fk.began(uReturn, modifiers: shift)
+    check(down == .key(hidUsage: uReturn, down: true, modifiers: shift), "⇧Return's down carries shift")
+    check(fk.ended(uReturn) != nil, "⇧Return's up follows its down")
+}
 check([uS, uSpace, uReturn, uLShift].allSatisfy { ForwardedKeys.goesAsKey($0, modifiers: command) && ForwardedKeys.goesAsKey($0, modifiers: option)
                                                   && ForwardedKeys.goesAsKey($0, modifiers: control) },
       "any key while ⌘, ⌃ or ⌥ is held: as a key")

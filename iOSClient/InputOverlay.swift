@@ -549,6 +549,15 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             sendLatched(usage)
             return
         }
+        // The key row's shift latched, then the software keyboard's return or tab: ⇧Return and
+        // ⇧Tab as keys, as a hardware keyboard sends them (ForwardedKeys.shiftedKeyUsages), since
+        // "\n" and "\t" as text carry no shift.
+        if latchedModifiers.contains(.shift), text == "\n" || text == "\t",
+           let character = text.first, let usage = HIDKey.usage(for: character),
+           ForwardedKeys.shiftedKeyUsages.contains(usage) {
+            sendLatched(usage)
+            return
+        }
         send(.text(text))
         consumeLatch()
     }
