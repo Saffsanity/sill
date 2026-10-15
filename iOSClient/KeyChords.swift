@@ -3,7 +3,8 @@ import StreamProtocol
 
 // The keys this device sends for a shortcut: the Spotlight key's ⌘Space, the portrait key row's keys
 // with whatever is latched, a latched ⌘, ⌃ or ⌥ on the software keyboard, the modifiers the portrait
-// trackpad holds down around a click or a drag, and a hardware keyboard's keys. One place, so each
+// trackpad holds down around a click or a drag, and a hardware keyboard's keys (Esc also through a
+// key command, sent once whichever channel iPadOS uses). One place, so each
 // goes out the way a keyboard sends it: a shortcut's modifiers pressed with their own keys around it,
 // and every key's up after its down (2026-09-27, the stuck command after Spotlight). A shortcut sent
 // as one key down and up carrying its modifiers left them set on every Mac from before that fix,
@@ -87,7 +88,8 @@ enum KeyChord {
 }
 
 /// A hardware keyboard's keys on their way to the Mac (InputOverlayView's pressesBegan, pressesEnded
-/// and pressesCancelled). A key goes to the Mac as a key, or to the text system, when it goes down, and
+/// and pressesCancelled, and its Esc key commands: `commanded`, `pressed`, `released`). A key goes to
+/// the Mac as a key, or to the text system, when it goes down, and
 /// its up follows the same way whatever the modifier flags say by then. Judged again at the release,
 /// as before, a key held while ⌘ was let go went up in the text system and stayed down on the Mac, and
 /// ⌘'s own release reached the Mac with command still on it, or not at all (UIKit's flags at a
@@ -100,6 +102,13 @@ enum KeyChord {
 struct ForwardedKeys {
     /// The keys whose down went to the Mac and whose up has not, in the order they went down.
     private(set) var down: [UInt16] = []
+    /// When a key command last sent each key (`commanded`; systemUptime, as UIPress timestamps are),
+    /// so the press of the same key that UIKit may hand pressesBegan after it is known for the same
+    /// key press.
+    private var commandedAt: [UInt16: Double] = [:]
+    /// The keys whose press a key command had sent already (`pressed` swallowed it): their up is
+    /// swallowed too, never handed to the text system.
+    private(set) var swallowed: Set<UInt16> = []
 
     /// The keys the text system never delivers, which go to the Mac as keys whatever is held: the
     /// arrows, escape, forward delete, home, end, page up and down, F1 to F12, and ⌘, ⌃ and ⌥
@@ -143,7 +152,53 @@ struct ForwardedKeys {
     mutating func releaseAll() -> [InputEvent] {
         var ups: [InputEvent] = []
         while let usage = down.last, let up = ended(usage) { ups.append(up) }
+        swallowed.removeAll()
         return ups
+    }
+
+    // MARK: A key command's key (Esc)
+
+    // iPadOS can keep a hardware Escape from pressesBegan (#67), so InputOverlayView also has key
+    // commands for it, asking for priority over the text system. A key command has no up, so its key
+    // goes down and up at once. A device that hands the same press to both must not send it twice:
+    // the press came first (its down is in `down`), and the command sends nothing; or the command came
+    // first, and the press, no later than the command, is swallowed with its up.
+
+    /// What pressesBegan, pressesEnded and pressesCancelled do with a hardware key.
+    enum Press: Equatable {
+        /// To the Mac.
+        case send(InputEvent)
+        /// To the text system (super), which types it.
+        case text
+        /// Nowhere: a key command sent this press already.
+        case swallow
+    }
+
+    /// A key command for `usage`, fired at `time` (systemUptime) with its modifiers: the key's down and
+    /// up as `began` and `ended` make them. Nothing when the key is down on the Mac already: its press
+    /// came first, and that press's own up follows.
+    mutating func commanded(_ usage: UInt16, modifiers: UInt64, at time: Double) -> [InputEvent] {
+        guard !down.contains(usage), let press = began(usage, modifiers: modifiers) else { return [] }
+        commandedAt[usage] = time
+        return [press] + (ended(usage).map { [$0] } ?? [])
+    }
+
+    /// A key pressed (pressesBegan), with UIKit's modifier flags and its press's timestamp: `began`'s
+    /// answer, unless a key command sent the same key press already (the same key, pressed no later than
+    /// the command fired), which is swallowed, and its up with it.
+    mutating func pressed(_ usage: UInt16, modifiers: UInt64, at time: Double) -> Press {
+        if let sent = commandedAt[usage], time <= sent {
+            swallowed.insert(usage)
+            return .swallow
+        }
+        return began(usage, modifiers: modifiers).map { .send($0) } ?? .text
+    }
+
+    /// A key released or its press cancelled (pressesEnded, pressesCancelled): `ended`'s answer, or
+    /// swallowed when its press was.
+    mutating func released(_ usage: UInt16) -> Press {
+        if swallowed.remove(usage) != nil { return .swallow }
+        return ended(usage).map { .send($0) } ?? .text
     }
 
     /// The modifier flags of the modifier keys down on the Mac.

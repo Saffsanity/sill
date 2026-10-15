@@ -266,7 +266,9 @@ question 5). Screen coordinates, the keyboard as the input view shows it: autoco
 so it has no suggestions bar. Measured on the iOS 27 simulators on 2026-09-27 (S2): 320 pt on the
 18 Pro Max, 301 on the 18 Pro and on the 17e; the 15 Pro and the 13 mini taken as the 18 Pro's,
 the SE as the classic 216. (This plan first assumed keyboards with a suggestions bar, 346, 336 and
-260, which put row 3 under the keyboard on the mini and the SE.)
+260, which put row 3 under the keyboard on the mini and the SE.) Measured on 2026-10-14
+(docs/larger-picture-plan.md, Results): the SE's keyboard is 233 pt, so its key row is 24 pt under
+it, not 7; the 12 and 13 mini's is 310 (row 3 14 pt clear); the 15 Pro's 301, as taken.
 
 | Phone | Keyboard's top | Row 1 ends | Row 2 ends | Row 3 ends |
 |---|---|---|---|---|

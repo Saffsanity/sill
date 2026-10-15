@@ -1113,31 +1113,77 @@ struct Keyboard {
     var physical: [UInt16] = []
     var before = false
     var forwarded = ForwardedKeys()
+    /// The clock UIPress timestamps and the key commands' firing share (systemUptime).
+    var time: Double = 1000
     var flags: UInt64 { physical.reduce(0) { $0 | (KeyModifiers.flag(forKey: $1)?.rawValue ?? 0) } }
-    /// A key pressed: its down if it goes to the Mac as a key, else a character typed (the text
-    /// system; a modifier alone types nothing). Unseen (the overlay not taking keys), nothing.
+    /// What the overlay does with an answer of `pressed` or `released`: to the Mac, to the text system
+    /// (a character typed; a modifier alone or a key's up types nothing), or nowhere.
+    func outcome(_ p: ForwardedKeys.Press, _ u: UInt16, down: Bool) -> [InputEvent] {
+        switch p {
+        case .send(let e): return [e]
+        case .text: return down && KeyModifiers.flag(forKey: u) == nil ? [.text("x")] : []
+        case .swallow: return []
+        }
+    }
+    /// A key pressed, as pressesBegan has it (`pressed`): its down if it goes to the Mac as a key, else
+    /// a character typed. Unseen (the overlay not taking keys), nothing.
     mutating func press(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard !physical.contains(u) else { return [] }
         let was = flags
         physical.append(u)
+        time += 0.2
+        if u == uEsc { escSeen = seen }
         guard seen else { return [] }
-        if let e = forwarded.began(u, modifiers: before ? was : flags) { return [e] }
-        return KeyModifiers.flag(forKey: u) == nil ? [.text("x")] : []
+        return outcome(forwarded.pressed(u, modifiers: before ? was : flags, at: time), u, down: true)
     }
     mutating func release(_ u: UInt16, seen: Bool = true) -> [InputEvent] {
         guard let i = physical.firstIndex(of: u) else { return [] }
-        let was = flags
         physical.remove(at: i)
+        time += 0.2
         guard seen else { return [] }
-        _ = was   // UIKit's flags at a release: the up carries the modifier keys down on the Mac instead
-        return forwarded.ended(u).map { [$0] } ?? []
+        // UIKit's flags at a release: the up carries the modifier keys down on the Mac instead.
+        return outcome(forwarded.released(u), u, down: false)
     }
     /// A press cancelled: the same up.
     mutating func cancel(_ u: UInt16) -> [InputEvent] {
         guard let i = physical.firstIndex(of: u) else { return [] }
         physical.remove(at: i)
-        return forwarded.ended(u).map { [$0] } ?? []
+        return outcome(forwarded.released(u), u, down: false)
     }
+
+    /// How a device hands over a hardware Escape (InputOverlayView): `.commandOnly` keeps it from
+    /// pressesBegan and fires the key command (the reported iPad); `.pressFirst` gives pressesBegan the
+    /// press and fires the command only when pressesBegan hands it on (the iOS 27 simulator: never,
+    /// as the overlay keeps Esc, but a device might fire both); `.commandFirst` fires the command, then
+    /// gives pressesBegan the same press.
+    enum EscOrder { case commandOnly, pressFirst, commandFirst }
+
+    /// Esc pressed with what is held, its key command firing 2 ms after the press, in `order`. The
+    /// command fires with UIKit's flags.
+    mutating func esc(_ order: EscOrder) -> [InputEvent] {
+        guard !physical.contains(uEsc) else { return [] }
+        let held = flags
+        physical.append(uEsc)
+        time += 0.2
+        let pressedAt = time, firedAt = time + 0.002
+        switch order {
+        case .commandOnly:
+            escSeen = false
+            return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
+        case .pressFirst:
+            escSeen = true
+            return outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+                + forwarded.commanded(uEsc, modifiers: held, at: firedAt)
+        case .commandFirst:
+            escSeen = true
+            return forwarded.commanded(uEsc, modifiers: held, at: firedAt)
+                + outcome(forwarded.pressed(uEsc, modifiers: held, at: pressedAt), uEsc, down: true)
+        }
+    }
+    /// Whether pressesBegan saw the last Esc, so pressesEnded sees its release too.
+    var escSeen = true
+    /// Esc let go: pressesEnded only where pressesBegan had the press.
+    mutating func releaseEsc() -> [InputEvent] { release(uEsc, seen: escSeen) }
 }
 
 // Which keys go to the Mac as keys: the ones the text system never delivers, ⌘, ⌃ and ⌥ themselves,
@@ -1222,9 +1268,87 @@ do {
     check(kb.release(uLCmd).isEmpty, "a release after that: nothing")
 }
 
+// Esc through its key command (#67): down and up at once, as the press would have sent them.
+do {
+    var kb = Keyboard()
+    let events = kb.esc(.commandOnly) + kb.releaseEsc()
+    check(events == [key(uEsc, true, 0), key(uEsc, false, 0)], "Esc by its key command alone: \(events)")
+    check(kb.forwarded.down.isEmpty && kb.forwarded.swallowed.isEmpty, "then nothing is down or swallowed")
+}
+// ⇧Esc: the down carries shift (the text system's, so no shift key went), the up the keys down: none.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLShift) + kb.esc(.commandOnly) + kb.releaseEsc() + kb.release(uLShift)
+    check(events == [key(uEsc, true, shift), key(uEsc, false, 0)], "⇧Esc by its key command: \(events)")
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events + tap, from: a); old.send(events + tap)
+    check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "⇧Esc leaves nothing on either Mac")
+}
+// ⌘Esc, ⌘ forwarded first: Esc's down and up both carry command (⌘ is down on the Mac), then ⌘'s up.
+do {
+    var kb = Keyboard()
+    let events = kb.press(uLCmd) + kb.esc(.commandOnly) + kb.releaseEsc() + kb.release(uLCmd)
+    check(events == [key(uLCmd, true, command), key(uEsc, true, command), key(uEsc, false, command), key(uLCmd, false, 0)],
+          "⌘Esc by its key command: \(events)")
+    var mac = Mac(), old = OldMac(); let a = Conn()
+    mac.send(events + tap, from: a); old.send(events + tap)
+    check(mac.table == 0 && mac.broken.isEmpty && old.table == 0 && old.log.last == .pointer(0), "⌘Esc leaves nothing on either Mac")
+}
+// The two channels with one key press: the press first, then its command (sends nothing; the press's up
+// follows), or the command first, then its press (swallowed, and its up): one Esc either way.
+for order in [Keyboard.EscOrder.pressFirst, .commandFirst] {
+    var kb = Keyboard()
+    let events = kb.esc(order) + kb.releaseEsc()
+    check(events == [key(uEsc, true, 0), key(uEsc, false, 0)], "Esc through both channels (\(order)): sent once: \(events)")
+    check(kb.forwarded.down.isEmpty && kb.forwarded.swallowed.isEmpty, "Esc through both channels (\(order)): nothing left")
+}
+// The press the command sent is the one no later than it: a later Esc is a new press, sent.
+do {
+    var kb = Keyboard()
+    _ = kb.esc(.commandFirst) + kb.releaseEsc()
+    let again = kb.press(uEsc) + kb.release(uEsc)
+    check(again == [key(uEsc, true, 0), key(uEsc, false, 0)], "a later Esc press after a command's: sent: \(again)")
+}
+// Held, the command repeats: each repeat a down and up; the press it came with swallowed with its up.
+do {
+    var f = ForwardedKeys()
+    let first = f.commanded(uEsc, modifiers: 0, at: 5.0)
+    let repeated = f.commanded(uEsc, modifiers: 0, at: 5.5)
+    let press = f.pressed(uEsc, modifiers: 0, at: 4.999)
+    let up = f.released(uEsc)
+    check(first == [key(uEsc, true, 0), key(uEsc, false, 0)] && repeated == first && press == .swallow && up == .swallow,
+          "a repeating command and its one press: \(first) \(repeated) \(press) \(up)")
+    check(f.released(uEsc) == .text, "a second release of a swallowed press: the text system's")
+}
+// Esc down through pressesBegan (held): the command sends nothing while it is down.
+do {
+    var f = ForwardedKeys()
+    let down = f.pressed(uEsc, modifiers: 0, at: 1.0)
+    let command = f.commanded(uEsc, modifiers: 0, at: 1.1)
+    let up = f.released(uEsc)
+    check(down == .send(key(uEsc, true, 0)) && command.isEmpty && up == .send(key(uEsc, false, 0)),
+          "the command while the press holds Esc down: nothing: \(down) \(command) \(up)")
+}
+// The overlay letting go (the Settings panel, the tour) forgets a swallowed press: UIKit sends no up.
+do {
+    var f = ForwardedKeys()
+    _ = f.commanded(uEsc, modifiers: 0, at: 2.0)
+    _ = f.pressed(uEsc, modifiers: 0, at: 1.99)
+    check(f.swallowed == [uEsc], "a swallowed press is remembered")
+    check(f.releaseAll().isEmpty && f.swallowed.isEmpty, "releaseAll forgets it")
+}
+// `pressed` and `released` are `began` and `ended` for every other key.
+do {
+    var f = ForwardedKeys()
+    check(f.pressed(uS, modifiers: 0, at: 1) == .text && f.pressed(uLeft, modifiers: 0, at: 1) == .send(key(uLeft, true, 0))
+          && f.released(uLeft) == .send(key(uLeft, false, 0)) && f.released(uS) == .text,
+          "pressed and released for S and ←")
+    check(f.commanded(uS, modifiers: 0, at: 2).isEmpty, "a key the text system takes: no command sends it")
+}
+
 // Random sessions on this device alone: its shortcuts (latched or Spotlight), the trackpad's modified
-// clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go), text
-// and taps. This Mac keeps the invariant after every event; a Mac from before this fix holds no
+// clicks and drags, a hardware keyboard (with presses cancelled and the overlay letting go, and Esc
+// through its key command in each order), text and taps. This Mac keeps the invariant after every event; a Mac from before this fix holds no
 // modifier whenever nothing is pressed on the device, and at the end.
 do {
     var rng = Rng(state: 0xDE71_CE5E)
@@ -1253,11 +1377,23 @@ do {
                 if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)); drag = nil }
                 else { let m = latched(); send(KeyChord.modifiersDown(m) + [.pointer(.leftDown, x: 0.2, y: 0.2)]); drag = m }
             case 4, 5, 6:
-                send(kb.press(rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace]), seen: overlay))
+                let u = rng.pick([uLCmd, uRCmd, uLCtrl, uLOpt, uLShift, uC, uS, uLeft, uEsc, uSpace])
+                // Esc, half the time through its key command, in one of the three orders.
+                if u == uEsc, overlay, rng.chance(50) {
+                    send(kb.esc(rng.pick([.commandOnly, .pressFirst, .commandFirst])))
+                } else {
+                    send(kb.press(u, seen: overlay))
+                }
             case 7, 8:
-                if !kb.physical.isEmpty { send(kb.release(kb.physical[rng.below(kb.physical.count)], seen: overlay)) }
+                if !kb.physical.isEmpty {
+                    let u = kb.physical[rng.below(kb.physical.count)]
+                    send(kb.release(u, seen: overlay && (u != uEsc || kb.escSeen)))
+                }
             case 9:
-                if !kb.physical.isEmpty, overlay { send(kb.cancel(kb.physical[rng.below(kb.physical.count)])) }
+                if !kb.physical.isEmpty, overlay {
+                    let u = kb.physical[rng.below(kb.physical.count)]
+                    if u == uEsc, !kb.escSeen { kb.physical.removeAll { $0 == u } } else { send(kb.cancel(u)) }
+                }
             case 10:
                 // The overlay stops taking keys, or takes them again.
                 if overlay { send(kb.forwarded.releaseAll()) }
@@ -1270,7 +1406,7 @@ do {
             }
         }
         if let m = drag { send([.pointer(.leftUp, x: 0.2, y: 0.2)] + KeyChord.modifiersUp(m)) }
-        for u in kb.physical { send(kb.release(u, seen: overlay)) }
+        for u in kb.physical { send(kb.release(u, seen: overlay && (u != uEsc || kb.escSeen))) }
         if oldHeld == nil, old.table & modifierBits != 0 || !old.down.filter({ macModifiers[$0.key] != nil }).isEmpty {
             oldHeld = "at the end an older Mac holds \(names(old.table & modifierBits)), down \(old.down.keys.sorted())"
         }
