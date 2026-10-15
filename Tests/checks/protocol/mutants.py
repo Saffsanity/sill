@@ -29,6 +29,8 @@ MUTANTS = [
     ("the clipboard numbered 30", "StreamMessage.swift", "case clipboard = 32", "case clipboard = 30"),
     ("the server offers sill/1 alone, whatever serverALPNs says", "RemoteTLS.swift",
      "for alpn in serverALPNs { sec_protocol_options_add_tls_application_protocol(sp, alpn) }", "sec_protocol_options_add_tls_application_protocol(sp, sessionALPN)"),
+    ("Transport.stored ignores quic", "RemoteTLS.swift", "raw == Transport.quic.rawValue ? .quic : .tcp", ".tcp"),
+    ("securityMetadata ignores QUIC metadata", "RemoteTLS.swift", "if let m = connection.metadata(definition: NWProtocolQUIC.definition) as? NWProtocolQUIC.Metadata {\n            return m.securityProtocolMetadata\n        }", ""),
 ]
 results = []
 for name, file, old, new in MUTANTS:

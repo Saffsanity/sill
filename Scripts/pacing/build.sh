@@ -67,6 +67,9 @@ side() {
     if grep -q 'var onClientLinkChanged' "$pkg/Sources/Harness/StreamServer.swift"; then
         defines="${defines:+$defines, }.define(\"LINK_JUDGE\")"
     fi
+    if grep -q 'func quicOptions' "$pkg/Sources/StreamProtocol/RemoteTLS.swift"; then
+        defines="${defines:+$defines, }.define(\"QUIC_TRANSPORT\")"
+    fi
     if [ -n "$defines" ]; then settings=", swiftSettings: [$defines]"; fi
     put "$pkg/Package.swift" <<SWIFT
 // swift-tools-version:5.9
