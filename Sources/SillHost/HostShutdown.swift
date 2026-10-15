@@ -7,7 +7,9 @@ import Darwin
 /// is "not lost" but not where the user left it either.
 ///
 /// The CLI installs it only under the flag; its default path installs `installKeyRelease` instead,
-/// which lets go of a device's keys and then dies of the signal exactly as it did. The menu bar app
+/// which lets go of a device's keys and puts back a window Sill sized for a device, then dies of the
+/// signal exactly as it did. Under the flag, and in the app, `shutdownForExit` puts such a window
+/// back too (WindowRestore, issue #57). The menu bar app
 /// always installs it, because Settings can turn the virtual display on while it runs; its Quit
 /// (NSApp.terminate: the menu, logout, "Quit & Reopen") comes through `releaseForQuit` instead, and
 /// AppKit does the exit.
@@ -66,12 +68,13 @@ package enum HostShutdown {
     }
 
     /// The CLI's default path (no --virtual-display): a Ctrl-C, `kill` or hangup still ends the
-    /// process by that signal as it always did, with nothing printed and the same exit status, but
-    /// first every key and button a device holds down on the Mac goes up
+    /// process by that signal as it always did, with the same exit status, but first every key and
+    /// button a device holds down on the Mac goes up
     /// (StreamCoordinator.releaseKeysForExit), so a modifier held there (a ⌘-drag on the trackpad, a
-    /// hardware ⌘) does not outlive the host and make the Mac's next click a ⌘-click. No goodbye and
-    /// no window restore: those are the flag's (`install`). A signal the process was started ignoring
-    /// (nohup's hangup) stays ignored.
+    /// hardware ⌘) does not outlive the host and make the Mac's next click a ⌘-click, and a window Sill
+    /// sized for a device goes back to its own frame, with a line each (only when a window was
+    /// sized). No goodbye and no virtual display: those are the flag's (`install`). A
+    /// signal the process was started ignoring (nohup's hangup) stays ignored.
     ///
     /// Under dispatchMain the main queue runs on a worker thread, where MainActor.assumeIsolated
     /// traps: the keys go from a main-actor Task. A second signal ends the process at once, and so

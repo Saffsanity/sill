@@ -22,9 +22,11 @@ server in between.
 [![Download on the App Store](https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83)](https://apps.apple.com/app/id6816359860)
 
 Sill for Mac is a free, notarized download from
-[getsill.app](https://getsill.app/download). Sill for iPhone and iPad is free
-on the [App Store](https://apps.apple.com/app/id6816359860), and you can also
-build it from source (below).
+[getsill.app](https://getsill.app/download); with [Homebrew](https://brew.sh),
+`brew install --cask saffsanity/sill/sill` installs the same download from
+Sill's own [tap](https://github.com/Saffsanity/homebrew-sill). Sill for iPhone
+and iPad is free on the [App Store](https://apps.apple.com/app/id6816359860),
+and you can also build it from source (below).
 
 ## Screenshots
 
@@ -62,9 +64,22 @@ Sill has layouts of its own.
 - **Your input** goes back the same way: taps and clicks, scrolls with
   momentum, the on-screen trackpad, keys and typed text, and Apple Pencil as
   the pointer. Sill for Mac turns it into mouse and keyboard events, which
-  needs Accessibility. Three fingers swipe and pinch as on a Mac's trackpad:
-  Mission Control, App Exposé, the Spaces, Apps and Show Desktop, through the
-  keyboard shortcuts your Mac has for them.
+  needs Accessibility. A keyboard attached to your device types on your Mac as
+  soon as the picture shows, Esc included, and a trackpad or a mouse scrolls
+  the window under its pointer. Three fingers swipe and pinch as on a Mac's
+  trackpad: Mission Control, App Exposé, the Spaces, Apps and Show Desktop,
+  through the keyboard shortcuts your Mac has for them.
+- **On iPhone**, held upright, the picture is on top with buttons, keys and a
+  trackpad below. Larger Picture, in the settings panel, gives a window's
+  picture the room of the window thumbnails, down to where the keyboard comes
+  up; the Desktop keeps the usual layout. A window keeps its own shape until
+  you set its text size with Aa, or turn on the virtual display; then your Mac
+  makes it fill the taller picture.
+- **The clipboard** goes both ways while Share Clipboard is on, in both apps:
+  text you copy on your Mac is ready to paste on your device, and Paste in
+  Sill sends what you copied on your device to your Mac's clipboard, where you
+  press ⌘V. Sill never reads your device's clipboard by itself, and copies a
+  password manager marks as concealed stay on your Mac.
 - **On iPhone Duo**, Sill follows the hinge: open it flat and your Mac fills
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
@@ -95,22 +110,32 @@ Sill has layouts of its own.
 - **When the link can't keep up**, Sill for Mac notices that it is holding
   frames back and tells your device, which says so over the picture and, in
   its Settings, offers a quality the link can carry.
+- **Text size**: Aa on your device resizes the window you stream on your Mac,
+  through Accessibility, so its text shows at the size you pick, and keeps it
+  at that size while it streams. The window goes back to its own size and
+  place when Sill stops showing it: you pick another window or the Desktop,
+  your last device disconnects, or you quit Sill. If you moved it on your Mac
+  meanwhile, it keeps its new place.
 - **The virtual display** (off by default) moves a window you stream onto a
   display of its own on your Mac, so it keeps updating when other windows
   cover it. It uses a private macOS API, which is one reason Sill for Mac comes
   from the website and not from the Mac App Store.
 
 Good to know: Sill shows one window, or the whole desktop, at a time, and it
-does not play sound from your Mac. Only the iPhones and iPads you paired can
-connect, unless you turn off Require pairing in Settings › Devices; then any
-device on your network can, still encrypted. Pairing at home came with Sill
-for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and each needs the other:
-the iPhone and iPad app shows an older Sill for Mac as "Update Sill", and an
-older iPhone and iPad app can't connect to Sill for Mac 0.4.0 or later at
-home. Since 0.5.1 the two apps share one version number for each release. With
-Sill for Mac 0.3.1 or earlier, connections on your local network, over the
-cable and over Direct Wireless Connection are not encrypted, and anything that
-reaches your Mac there can connect without pairing: update it.
+does not play sound from your Mac. The clipboard carries text only, up to 256
+KB at a time, and only between apps that both have it. Your Mac needs to be
+awake, with Sill open. Sill may not be able to wake it. After a restart Sill
+opens only once someone logs in, with Launch at Login on. Only the iPhones and
+iPads you paired can connect, unless you turn off Require pairing in Settings
+› Devices; then any device on your network can, still encrypted. Pairing at
+home came with Sill for Mac 0.4.0 and Sill for iPhone and iPad 0.5 (2), and
+each needs the other: the iPhone and iPad app shows an older Sill for Mac as
+"Update Sill", and an older iPhone and iPad app can't connect to Sill for Mac
+0.4.0 or later at home. Since 0.5.1 the two apps share one version number for
+each release. With Sill for Mac 0.3.1 or earlier, connections on your local
+network, over the cable and over Direct Wireless Connection are not encrypted,
+and anything that reaches your Mac there can connect without pairing: update
+it.
 
 ## Tips
 

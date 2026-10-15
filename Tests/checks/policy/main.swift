@@ -20,7 +20,7 @@
 // grid also spans refused listings and failed moves up, and its rule for reconnectNow is the new one).
 import Foundation
 //   swiftc -O iOSClient/DiscoveryPolicy.swift Tests/checks/policy/main.swift Tests/checks/policy/home.swift \
-//     -o .build/checks/policy/check && .build/checks/policy/check
+//     Tests/checks/policy/sleep.swift -o .build/checks/policy/check && .build/checks/policy/check
 typealias P = DiscoveryPolicy
 var fails = 0, passes = 0
 func check(_ name: String, _ ok: Bool) { if !ok { fails += 1; print("FAIL", name) } else { passes += 1; print("ok  ", name) } }
@@ -1271,6 +1271,10 @@ for door in [P.HomeDoor.plain, .pairingRequired, .open] {
     }
 }
 check("home trust: every door, removal, new key and build: pinned to the saved key exactly when a tap's dial is, never plain", homeTrustGrid)
+
+// Issue #69 (docs/reconnect-after-sleep-plan.md): the browsers made again, the reconnect's dials of a
+// row that stays listed, the Desktop after a stop, in sleep.swift.
+afterSleepPolicy()
 
 // Pairing at home (docs/home-pairing-plan.md): sessions and pairing at home over TLS, in home.swift.
 homePolicy()

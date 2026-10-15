@@ -127,6 +127,9 @@ struct StreamScreen: View {
     /// The Menus pull-down closed the Settings panel, which had taken the keyboard down: it comes
     /// back when the pull-down goes (`menusClosed`).
     @State private var keyboardAfterMenus = false
+    /// The Menus pull-down is open: it takes the arrows and Return itself, so a hardware keyboard's
+    /// hold lets go meanwhile (`keyboardTakers`).
+    @State private var menusOpen = false
     /// Pair This iPad… (the panel's Away from home group): the pairing overlay covers the stream.
     /// Up here, like the panel, so a rotation keeps it. An outside sill://pair link shows the same
     /// overlay with its confirmation.
@@ -167,6 +170,16 @@ struct StreamScreen: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     /// The Duo's hinge (iOS 27.1, DuoPostureReader): with the fold, the book and laptop poses.
     @Environment(\.duoEnvironment) private var duoEnvironment
+    /// This device's Larger Picture switch (the Settings panel's This iPhone; docs/larger-picture-plan.md).
+    /// It acts only while a window streams (`largerPictureNow`).
+    @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// Larger Picture as it was in effect when the Settings panel opened (`largerPictureNow`), which
+    /// the arrangement keeps until the panel closes; nil while it is closed. The panel hangs under row
+    /// 1, which the arrangement moves by the picture's growth (157 pt on an 18 Pro Max), so a change
+    /// applied at once would move the panel under the finger: the switch flipped there, or what
+    /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
+    /// the panel goes, in the same motion.
+    @State private var largerPictureHeld: Bool? = nil
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -189,6 +202,11 @@ struct StreamScreen: View {
         // The panel open over the keyboard, as in a session: it took the keyboard down, and closing
         // it puts it back (`-SillSettings 1 -SillKeyboard 1`).
         _keyboardBeforeSettings = State(initialValue: settingsOpen && keyboardShown)
+        // And it holds the Larger Picture it opened with, as `setSettings` does.
+        _largerPictureHeld = State(initialValue: settingsOpen
+            ? PhonePortraitLayout.largerPicture(switchOn: UserDefaults.standard.bool(forKey: StreamClient.largerPictureKey),
+                                                streaming: .init(client.active))
+            : nil)
         _pairingOverlay = State(initialValue: pairingOverlay)
         self.scannerOverride = scannerOverride
     }
@@ -203,6 +221,19 @@ struct StreamScreen: View {
                 : (DuoLayout.drawsPhone(geo.size) ? .phone : .portrait)
             // The fold across this screen, in its own space (iOS 27.1 on the Duo; else as before).
             let posture = DuoPosture.read(geo, duoEnvironment)
+            // Larger Picture on a phone held upright: the software keyboard its rows are kept above;
+            // none with the switch off, while the Desktop or nothing streams (`largerPictureNow`),
+            // sideways, on an iPad, on the iPhone Duo (a hinge), and where the picture would be no
+            // larger (Display Zoom at 320 pt wide). While the Settings panel is open, Larger Picture
+            // as it was in effect when it opened (`largerPictureHeld`). The arrangement, its viewport
+            // (PortraitStreamScreen's picture) and the tour's targets and words all follow from this.
+            let largerKeyboard = layout == .phone
+                ? PhonePortraitLayout.keyboard(for: geo.size, largerPicture: largerPictureHeld ?? largerPictureNow,
+                                               foldable: posture.hinge != .unknown) : nil
+            // The Settings panel's switch: on an iPhone without a hinge whose picture Larger Picture
+            // makes larger, judged on this screen held upright, whichever way it is held now.
+            let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
+                && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
             ZStack {
                 Group {
                     switch duo {
@@ -213,7 +244,7 @@ struct StreamScreen: View {
                     case .innerPortrait:
                         portrait(metrics: .regular)
                     case .outerPortrait:
-                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact)
+                        portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
                     }
                 }
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
@@ -224,11 +255,35 @@ struct StreamScreen: View {
                 .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
+                // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
+                // is told when it first shows (ClipboardPolicy.chipCounts).
+                .onChange(of: clipboardChipOnScreen, initial: true) { _, onScreen in
+                    client.clipboardChipShown(onScreen)
+                }
+                // The clipboard's chip (docs/clipboard-plan.md): a sibling after the layouts, so its
+                // Paste button and Dismiss take their touches over the stream's UIKit input view, and
+                // nothing else does (the frame around it is empty). Near the bar, off the link's line,
+                // inside the stream panel's corner; never while something is open over the stream.
+                if clipboardChipAllowed, client.clipboardChip || client.clipboardNote != nil, let panel = tourTargets[.stream] {
+                    let corner = ClipboardPolicy.chipCorner(landscape: layout == .landscape, linkLineShown: shownLinkLine != nil)
+                    ClipboardChip(client: client)
+                        .frame(maxWidth: max(0, panel.width - 16), alignment: .trailing)
+                        .padding(8)
+                        .frame(width: panel.width, height: panel.height,
+                               alignment: corner == .topTrailing ? .topTrailing : .bottomTrailing)
+                        .position(x: panel.midX, y: panel.midY)
+                        .transition(.opacity)
+                }
                 // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
                 // outside link puts the tour aside until the overlay has closed.
                 if let run = tour, !overlayShown {
-                    TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay),
+                    // With Larger Picture no thumbnails: the bar card is about Apps, and the cards
+                    // upright stand in the picture's whole room, the black under a short picture.
+                    TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
+                                                         thumbnails: largerKeyboard == nil),
                                 layout: layout, targets: tourTargets,
+                                thumbnails: largerKeyboard == nil,
+                                room: largerKeyboard.map { PhonePortraitLayout(size: geo.size, keyboard: $0).picture },
                                 screen: geo.size, bottomInset: geo.safeAreaInsets.bottom,
                                 next: tourNext, skip: tourSkip)
                         .transition(.opacity)
@@ -244,11 +299,28 @@ struct StreamScreen: View {
             .coordinateSpace(.named(TourSpace.name))
             .onPreferenceChange(TourTargetsKey.self) { tourTargets = $0 }
             .onChange(of: layout, initial: true) { _, now in layoutChanged(to: now) }
+            // A thumbnail's lights hang from the strip, which Larger Picture's arrangement has none
+            // of: when the arrangement changes under them (what streams changed, or a turn), they
+            // close rather than wait, unseen, to come back with the strip.
+            .onChange(of: largerKeyboard != nil) { _, _ in
+                #if DEBUG
+                if windowMenu != nil { print("lights: closed, the phone's arrangement changed under them") }
+                #endif
+                closeWindowMenu()
+            }
             .background(TouchWatcher(watch: touches))
             // The layouts and the overlays share this screen's space, and so its fold; the inner
             // display gives the picture the status bar's strip in every pose.
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
+            .environment(\.largerPictureOffered, offersLarger)
+            #if DEBUG
+            // The console's line for the gates: what Larger Picture's rule made of the switch and of
+            // what streams, on a phone held upright, each time one of them or the outcome changes.
+            .onChange(of: layout == .phone ? largerPictureLine(largerKeyboard) : "", initial: true) { _, line in
+                if !line.isEmpty { print(line) }
+            }
+            #endif
         }
         .background(Color.black)
         .overlayPreferenceValue(WindowMenuAnchorKey.self) { anchor in
@@ -292,6 +364,10 @@ struct StreamScreen: View {
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
         }
+        // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
+        // itself while one is attached and nothing open takes it, never as the person's own.
+        .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
+        .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
         // Same wait for Aa: cycling from Off to 0.8× passes three sizes nobody wants the Mac to try.
@@ -342,6 +418,15 @@ struct StreamScreen: View {
     /// Nothing open over the stream: the Settings panel (which has the callout), the drawer, the
     /// pairing overlay, the first-run tour (its dim and card; VoiceOver is on its card meanwhile).
     private var linkLineAllowed: Bool { !settingsOpen && !drawerOpen && !overlayShown && !tourOnScreen }
+
+    /// The clipboard's chip shows where the link's line may, and not over a thumbnail's lights or the
+    /// Aa ruler either (the Settings panel has its own Paste).
+    private var clipboardChipAllowed: Bool { linkLineAllowed && windowMenu == nil && !scaleOpen }
+
+    /// The chip itself on screen, not its note in its place: its time runs only then.
+    private var clipboardChipOnScreen: Bool {
+        clipboardChipAllowed && client.clipboardChip && client.clipboardNote == nil && tourTargets[.stream] != nil
+    }
 
     /// Runs LinkLine on the report and what is open, says the line once a spell, and looks again at
     /// the linger's end.
@@ -396,12 +481,31 @@ struct StreamScreen: View {
         abs(value - value.rounded()) < 0.01 ? "\(Int(value.rounded()))" : String(format: "%.1f", value)
     }
 
+    /// `larger picture: the switch on, the Desktop streams: the standard arrangement`, or `…, a window
+    /// streams: Larger Picture above a 301 pt keyboard`, with `(held … while Settings is open)` while
+    /// the panel holds it; nothing while the switch is off and nothing is held (the other gates'
+    /// consoles stay as they were).
+    private func largerPictureLine(_ keyboard: CGFloat?) -> String {
+        guard largerPicture || largerPictureHeld != nil || keyboard != nil else { return "" }
+        let streaming: String
+        switch client.active {
+        case .none: streaming = "nothing streams"
+        case .desktop: streaming = "the Desktop streams"
+        case .window: streaming = "a window streams"
+        }
+        var line = "larger picture: the switch " + (largerPicture ? "on" : "off") + ", " + streaming + ": "
+        line += keyboard.map { "Larger Picture above a \(Self.points($0)) pt keyboard" } ?? "the standard arrangement"
+        if let held = largerPictureHeld { line += " (held " + (held ? "on" : "off") + " while Settings is open)" }
+        return line
+    }
+
     /// The harness's arguments that act once the stream screen shows (ContentView's contract), once
     /// per launch. `-SillKeyboard 1` brings the software keyboard up for real in a live session (the
     /// mock only lights the button, from its init); `-SillKeyboardToggle <s>[,<s>…]` toggles it at
     /// those seconds as the Keyboard button does, a stand-in for a tap. In a live session (the
     /// normal app with `-SillConnect`, or `-SillLive 1`) `-SillDrawer 1`, `-SillSettings 1` and
-    /// `-SillScaleOpen 1` (with `-SillScale`) open theirs 1.5 s in, once the Desktop has started:
+    /// `-SillScaleOpen 1` (with `-SillScale`) open theirs 1.5 s in, once the Desktop has started
+    /// (`-SillSettingsCloseAt <s>` closes the panel again s seconds in):
     /// its start closes a drawer opened before it, and the normal app has no harness to pass them
     /// in at the start.
     private func runLaunchArguments() {
@@ -428,12 +532,48 @@ struct StreamScreen: View {
                 overlay.toggleKeyboard()
             }
         }
+        // `-SillTurnAt <s>[,<s>…]`: at each second the scene is asked for the other orientation (upright
+        // or sideways, from the screen's shape then), a turn mid-session with no hand on the simulator
+        // (an iPhone's; iPadOS's windowing refuses it, and says so).
+        let turns = (defaults.string(forKey: "SillTurnAt") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 >= 0 }
+        for time in turns {
+            after(time) {
+                for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                    let bounds = scene.keyWindow?.bounds ?? .zero
+                    let mask: UIInterfaceOrientationMask = bounds.width > bounds.height ? .portrait : .landscapeRight
+                    print("turn: at \(Self.points(CGFloat(time))) s, asking for " + (mask == .portrait ? "portrait" : "landscape"))
+                    scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                        print("turn: refused: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        // `-SillAXDump <s>`: s seconds in, the screen's accessibility elements in the order the
+        // accessibility tree hands them out (VoiceOver's order, without VoiceOver), labels and frames.
+        let dump = defaults.double(forKey: "SillAXDump")
+        if dump > 0 { after(dump) { Self.accessibilityDump() } }
+        // `-SillLargerPictureToggle <s>[,<s>…]`: Larger Picture switched at those seconds, as the
+        // Settings panel's switch does (saved; without `-Sill.largerPicture`, which would hold it).
+        let toggles = (defaults.string(forKey: "SillLargerPictureToggle") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == " " }).compactMap { Double($0) }.filter { $0 >= 0 }
+        for time in toggles {
+            after(time) {
+                largerPicture.toggle()
+                print("harness: Larger Picture switched " + (largerPicture ? "on" : "off") + " at " + Self.points(CGFloat(time)) + " s"
+                      + (largerPictureHeld != nil ? "; the Settings panel is open, so it applies when the panel closes" : ""))
+            }
+        }
         guard live else { return }
         if defaults.bool(forKey: "SillDrawer") {
             after(1.5) { print("harness: the drawer opened"); withAnimation(.easeOut(duration: 0.18)) { drawerOpen = true } }
         }
         if defaults.bool(forKey: "SillSettings") {
             after(1.5) { print("harness: the Settings panel opened"); setSettings(true) }
+            // `-SillSettingsCloseAt <s>`: closed again s seconds in, as Done does (the clipboard's chip
+            // waiting under it, then showing: docs/clipboard-plan.md).
+            let closeAt = defaults.double(forKey: "SillSettingsCloseAt")
+            if closeAt > 1.5 { after(closeAt) { print("harness: the Settings panel closed"); setSettings(false) } }
         }
         if defaults.bool(forKey: "SillScaleOpen") {
             after(1.5) {
@@ -445,12 +585,60 @@ struct StreamScreen: View {
         }
     }
     private static var launchArgumentsRan = false
+
+    /// `-SillAXDump`: walks the key window as an assistive technology does (an element, else its
+    /// `accessibilityElements`, else its element count, else its subviews) and prints one line per
+    /// element: "ax: 1 Apps (14,454 76×50)".
+    private static func accessibilityDump() {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
+            print("ax: no key window"); return
+        }
+        var lines: [String] = []
+        var seen = Set<ObjectIdentifier>()
+        func visit(_ object: Any, _ depth: Int) {
+            guard depth < 60, seen.count < 5000, let element = object as? NSObject, !element.accessibilityElementsHidden,
+                  seen.insert(ObjectIdentifier(element)).inserted else { return }
+            if element.isAccessibilityElement {
+                let f = element.accessibilityFrame
+                let label = element.accessibilityLabel ?? element.accessibilityValue ?? "(no label)"
+                lines.append("\(label) (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))")
+                return
+            }
+            if let children = element.accessibilityElements, !children.isEmpty {
+                children.forEach { visit($0, depth + 1) }
+                return
+            }
+            let count = element.accessibilityElementCount()
+            if count != NSNotFound, count > 0 {
+                (0..<count).forEach { if let child = element.accessibilityElement(at: $0) { visit(child, depth + 1) } }
+                return
+            }
+            if let view = element as? UIView {
+                view.subviews.filter { !$0.isHidden && $0.alpha > 0 }.forEach { visit($0, depth + 1) }
+            }
+        }
+        visit(window, 0)
+        for (i, line) in lines.enumerated() { print("ax: \(i + 1) \(line)") }
+    }
     #endif
 
     private func closeWindowMenu() { windowMenu = nil }
 
     /// Pair This iPad…, or an outside link waiting for its confirmation.
     private var overlayShown: Bool { pairingOverlay || client.pendingLink != nil }
+
+    /// What is open over the stream that takes the keyboard for itself or must keep keys from the Mac
+    /// (HardwareKeyboardPolicy.Taker): while any is, a hardware keyboard's hold lets go, and it comes
+    /// back when the last closes.
+    private var keyboardTakers: Set<HardwareKeyboardPolicy.Taker> {
+        var takers: Set<HardwareKeyboardPolicy.Taker> = []
+        if settingsOpen { takers.insert(.settings) }
+        if overlayShown { takers.insert(.pairing) }
+        if tour != nil { takers.insert(.tour) }
+        if drawerOpen { takers.insert(.drawer) }
+        if menusOpen { takers.insert(.menus) }
+        return takers
+    }
 
     /// Pair This iPad…: the panel and the keyboard are put away first, so no key reaches the Mac
     /// while the code is typed, then the overlay covers the stream. What an earlier pairing left
@@ -485,12 +673,20 @@ struct StreamScreen: View {
         overlay.setKeyboard(shown: false)
     }
 
+    /// Larger Picture in effect now (PhonePortraitLayout's rule): the switch, while a window streams.
+    /// The Desktop, which Aa never resizes, and nothing streaming keep the standard arrangement.
+    private var largerPictureNow: Bool {
+        PhonePortraitLayout.largerPicture(switchOn: largerPicture, streaming: .init(client.active))
+    }
+
     /// Opens or closes the Settings panel. Opening puts the drawer, the traffic lights and the Aa
     /// ruler away and takes the keyboard down: with the overlay not first responder no hardware
     /// key reaches the Mac, and Esc (or ⌘.) reaches the panel's Done instead. Closing (Done, a tap
     /// outside, the Settings button, Esc, the VoiceOver escape gesture) puts the keyboard back if
     /// the panel took it down; the Apps and Keyboard buttons close it with `restoreKeyboard: false`
-    /// because they decide about the keyboard themselves.
+    /// because they decide about the keyboard themselves. While it is open the arrangement keeps the
+    /// Larger Picture it opened with (`largerPictureHeld`); a change of the switch, or of what
+    /// streams, applies as it closes.
     private func setSettings(_ open: Bool, restoreKeyboard: Bool = true) {
         guard open != settingsOpen else { return }
         if open {
@@ -501,7 +697,13 @@ struct StreamScreen: View {
             overlay.setKeyboard(shown: false)
         }
         let motion: Animation = open && !reduceMotion ? .spring(duration: 0.25, bounce: 0.15) : .easeOut(duration: 0.18)
-        withAnimation(motion) { settingsOpen = open }
+        withAnimation(motion) {
+            settingsOpen = open
+            // Larger Picture keeps the arrangement the panel opened with while it is open, so the
+            // panel never moves under the finger: a change of the switch, or of what streams,
+            // applies as the panel goes.
+            largerPictureHeld = open ? largerPictureNow : nil
+        }
         if !open {
             if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
             keyboardBeforeSettings = false
@@ -520,6 +722,7 @@ struct StreamScreen: View {
         setSettings(false, restoreKeyboard: false)
         windowMenu = nil
         withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false }
+        menusOpen = true
     }
 
     private func menusClosed() {
@@ -528,6 +731,7 @@ struct StreamScreen: View {
         #endif
         if keyboardAfterMenus { overlay.setKeyboard(shown: true) }
         keyboardAfterMenus = false
+        menusOpen = false
     }
 
     // MARK: The tour
@@ -562,6 +766,8 @@ struct StreamScreen: View {
         if settingsOpen { return "Settings was open" }
         if windowMenu != nil { return "a window's lights were open" }
         if scaleOpen { return "the Aa ruler was open" }
+        // The person's own keyboard: a hardware keyboard's hold is not theirs, so a person with a
+        // keyboard attached still gets the tour (HardwareKeyboardPolicy).
         if keyboardShown { return "the keyboard was up" }
         if overlayShown { return "the pairing overlay was open" }
         // UIKit's word, not the scene phase: in a headless simulator the environment's scenePhase
@@ -571,9 +777,11 @@ struct StreamScreen: View {
     }
 
     /// `keysOnItsSide`: the iPhone Duo open, whose keys and trackpad come with the device on its side.
-    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false) -> TourCopy {
+    /// `thumbnails`: false for a phone with Larger Picture.
+    private func tourCopy(_ run: TourRun, _ layout: TourLayout, keysOnItsSide: Bool = false, thumbnails: Bool = true) -> TourCopy {
         TourPolicy.copy(run.at, layout, mac: client.macName, device: StreamClient.deviceWord,
-                        voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun, keysOnItsSide: keysOnItsSide)
+                        voiceOver: tourVoiceOver, firstOfRun: run.firstOfRun, keysOnItsSide: keysOnItsSide,
+                        thumbnails: thumbnails)
     }
 
     private func tourLog(_ line: @autoclosure () -> String) {
@@ -834,7 +1042,8 @@ struct StreamScreen: View {
         }
     }
 
-    private func portrait(metrics: PortraitMetrics) -> some View {
+    /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.
+    private func portrait(metrics: PortraitMetrics, largerKeyboard: CGFloat? = nil) -> some View {
         PortraitStreamScreen(client: client, metrics: metrics, drawerOpen: $drawerOpen,
                              keyboardShown: $keyboardShown,
                              textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
@@ -846,7 +1055,8 @@ struct StreamScreen: View {
                              onPanelSize: { panelSize = $0 },
                              pairThisDevice: openPairingOverlay,
                              linkLine: shownLinkLine,
-                             takeTour: takeTour)
+                             takeTour: takeTour,
+                             largerKeyboard: largerKeyboard)
     }
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
@@ -1705,6 +1915,9 @@ struct AppDrawer: View {
     @ObservedObject var client: StreamClient
     @Binding var drawerOpen: Bool
     @State private var search = ""
+    /// The search field has the keyboard. Set only by DEBUG `-SillDrawerSearch` (ContentView's
+    /// contract); a tap focuses the field as before.
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 6) {
@@ -1759,11 +1972,29 @@ struct AppDrawer: View {
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .accessibilityLabel("Search apps on this Mac")
+                .focused($searchFocused)
         }
         .frame(height: 48)
         .padding(.horizontal, 14)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
+        #if DEBUG
+        .onAppear(perform: searchFromLaunchArguments)
+        #endif
     }
+
+    #if DEBUG
+    /// `-SillDrawerSearch <text>` (ContentView's contract): the drawer, once open, searches for that
+    /// text with the keyboard up for its field, as a tap and typing would, so a photo shows what the
+    /// keyboard leaves in view of the results.
+    private func searchFromLaunchArguments() {
+        guard let query = UserDefaults.standard.string(forKey: "SillDrawerSearch") else { return }
+        search = query
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            searchFocused = true
+            print("harness: the drawer's search field has the keyboard, searching for \"\(query)\"")
+        }
+    }
+    #endif
 
     private func header(_ title: String) -> some View {
         Text(title)
@@ -1868,5 +2099,19 @@ struct DrawerRow<Leading: View>: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Larger Picture's view of what streams
+
+extension PhonePortraitLayout.Streaming {
+    /// What the Mac's window list says streams (`StreamClient.active`), as Larger Picture's rule
+    /// (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`) reads it.
+    init(_ source: StreamSource) {
+        switch source {
+        case .none: self = .nothing
+        case .desktop: self = .desktop
+        case .window: self = .window
+        }
     }
 }

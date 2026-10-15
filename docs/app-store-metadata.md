@@ -245,14 +245,21 @@ developer can't reach:
   titles, thumbnails, app icons, its name, the menus of the app in use (their
   titles, and a menu's items when the device opens it) and where its own
   pointer is over the picture.
+- The clipboard (from the version after 0.5.1, docs/clipboard-plan.md), while
+  Share Clipboard is on in both apps: text copied on the Mac comes to the
+  device's clipboard (local only, for 10 minutes), and text the person sends
+  with Paste goes to the Mac's. Only to and from the user's own Mac, so the
+  answer stays the same; the app reads the clipboard only through the
+  system's Paste control, never by itself.
 - Pairing (once per device, at home or for Remote Access) sends the device's
   public key, name and model to that Mac, which keeps them in its list of
   paired devices (Sill for Mac's Settings › Devices, where they can be
   removed).
 - Kept on the device only: each Mac's thumbnail order, the names of Macs
   seen with Direct Wireless Connection on, which steps of the first-run
-  tour were seen (or that it was skipped) and whether three-finger gestures
-  are on; the device's key and the paired
+  tour were seen (or that it was skipped), whether three-finger gestures and
+  Share Clipboard are on, and the clipboard's change count Sill last handled
+  (never its contents); the device's key and the paired
   Macs, each with its key's fingerprint, its name and, with Remote Access, its
   addresses (Keychain and app storage); and camera frames, which are read for
   the pairing code and never saved or sent.
@@ -296,9 +303,9 @@ Get started
 Made for touch
 • Tap to click. Touch and hold to right-click. Drag to scroll.
 • Apple Pencil works as a mouse, with hover on iPad models that support it.
-• Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below.
+• Hold your device upright for a laptop layout: the picture on top, a trackpad and a row of keys below. On iPhone, turn on Larger Picture to give a window’s picture more of the screen.
 • On iPhone Duo, open it flat and your Mac fills the inner display. Half open, it’s a laptop: the picture above the fold, a trackpad and keys below. Closed, Sill runs on the cover display.
-• Type with the on-screen keyboard or a hardware keyboard. Shortcuts work too.
+• Type with the on-screen keyboard, or on a hardware keyboard as soon as you connect, with shortcuts and Esc. A trackpad or a mouse scrolls the window under the pointer.
 • Swipe and pinch with three fingers for Mission Control, App Exposé, Spaces, Apps and Show Desktop.
 • Use the menus of the app you’re in: tap Menus in the bar, or on iPad with iPadOS 26 or later, use the menu bar at the top of the screen.
 • Switch windows from live thumbnails in the bar. Touch and hold one to close, minimize or go full screen. Drag it to reorder.
@@ -327,6 +334,14 @@ Good to know
 ```
 
 Local-only build: delete the bullet that starts "Away from home".
+
+**For the next version, not 0.5.1** (the clipboard, docs/clipboard-plan.md: it ships with the next
+submission of both apps, and needs Sill for Mac from the same release): add this bullet to "Made for
+touch", after the one that starts "Type with":
+
+```text
+• Copy text on your Mac and paste it on your iPhone or iPad. To paste on your Mac what you copied on your device, tap Paste in Sill, then press ⌘V on your Mac. Copies a password manager marks as concealed stay on your Mac.
+```
 
 The source is public under the Apache License 2.0 (since 2026-09-26), so the
 listing may call Sill open source, as the live description does and the last
@@ -394,6 +409,21 @@ Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half ope
 
 Sill for iPhone and iPad and Sill for Mac now share one version number: this is 0.5.1, with Sill for Mac 0.5.1 from getsill.app.
 ```
+
+The next version's, a draft: what changed on the device since 0.5.1 (4), as its release notes say it,
+a paragraph a change (the same in the local-only build).
+
+```text
+Larger Picture, in Settings on iPhone: held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. Set a window’s text size with Aa and your Mac makes it as tall as the picture. The Desktop keeps the usual layout.
+
+With a keyboard attached to your iPhone or iPad, what you type goes to your Mac as soon as its picture shows, Esc included, without the Keyboard button. Two fingers on a trackpad, or a mouse’s scroll wheel, now scroll the window under the pointer.
+
+Fixed: after Sill sat in the background for hours, it could stop finding your Mac until you closed and reopened it. Sill now looks again when you come back, keeps trying for a few minutes while your Mac doesn’t answer (when it’s asleep, say), and connects when it does.
+```
+
+Esc and scrolling with a trackpad or a mouse showed on the iPad through Universal Control on 2026-10-15
+(docs/hardware-keyboard-plan.md, "Words that wait for a device"), so their words are in: this draft, the
+description's keyboard bullet, README's How it works and the support page.
 
 ## 6. Export compliance (encryption)
 
@@ -721,6 +751,15 @@ Safe:
   description and App Store Connect's notes in section 7, the same way:
   description 2,872 (local-only 2,651) of 4,000 characters; review notes
   3,952 bytes (local-only 3,709) of 4,000, all ASCII; the rest unchanged.
+- With a hardware keyboard and trackpad (#67, #68; the bullet that starts
+  "Type with the on-screen keyboard" and the next version's What's New), the
+  same way: description 2,899 (local-only 2,678) of 4,000 characters; the next
+  What's New 138 characters; the rest unchanged. With the words that wait for
+  a device (Esc, and scrolling with a trackpad or a mouse): 2,963 (local-only
+  2,742) and 247.
+- With those words in (2026-10-15, after Noah's Universal Control test), the
+  description block as it stands here, Larger Picture's sentence included:
+  3,044 characters; its keyboard paragraph of the next What's New 247.
 - The encryption key, now in `iOSClient/Info.plist`: Release builds of this
   branch for the simulator and for a device each have
   `"ITSAppUsesNonExemptEncryption" => false` in the built Sill.app's

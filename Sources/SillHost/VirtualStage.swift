@@ -271,8 +271,12 @@ final class VirtualStage {
     /// failure undoes what it did (window restored, a display that never worked destroyed) so the
     /// coordinator can fall back to plain window capture.
     /// `refreshHz` is the stream's rate: the display is made at it (a 120 Hz display for a
-    /// ProMotion device), and recreated when it changes.
-    func prepare(window: SCWindow, wanted: CGSize, envelope: CGSize, captureScale: CGFloat, refreshHz: Int = 60) async throws -> Prepared {
+    /// ProMotion device), and recreated when it changes. `home`: the way home for a window the
+    /// coordinator had sized in regular mode (the virtual display turned on while it streamed), the
+    /// frame it would have gone back to (WindowRestore), not the size the device gave it; nil takes
+    /// the window's frame as it is found. Only a window not already staged takes it.
+    func prepare(window: SCWindow, wanted: CGSize, envelope: CGSize, captureScale: CGFloat, refreshHz: Int = 60,
+                 home: CGRect? = nil) async throws -> Prepared {
         self.refreshHz = refreshHz
         // (1) A run-level decision already made.
         if let why = disabledReason { throw Failure.disabled(why) }
@@ -286,7 +290,7 @@ final class VirtualStage {
         if let current = placement, current.windowID == window.windowID {
             p = current                                       // same window: keep its original frame
         } else if let fresh = sizer.placement(for: window) {
-            p = fresh
+            p = home.map { fresh.homed(at: $0) } ?? fresh
         } else {
             throw Failure.axWindowNotFound
         }

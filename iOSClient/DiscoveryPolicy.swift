@@ -663,6 +663,140 @@ enum DiscoveryPolicy {
         return .moveTo(.wifi, interface: wifi)
     }
 
+    // MARK: After the background, and a Mac whose row stays listed (issue #69)
+
+    // iOS takes away the mDNSResponder connection of an app it suspends (kDNSServiceErr_DefunctConnection,
+    // -65569; Apple DTS): a browser made before then goes on listing what it listed then, or fails, and
+    // nothing made one again but a relaunch of the app (#69, 2026-10-13: "close and restart the app on
+    // my iPad before it would reconnect"). A Bonjour Sleep Proxy (an Apple TV, a HomePod) answers for a
+    // sleeping Mac, so its row stays listed while nothing answers a dial, and no browse event comes when
+    // the Mac wakes: the automatic reconnect dialled such a row twice, let each go after 5 s and waited
+    // for good under "Reconnecting…".
+
+    /// The waits before a browser that failed is made again, after 1, 2, 3… failures in a row.
+    static let browserRetry: [Double] = [1, 2, 4, 8, 16, 30]
+    /// A browser that ran this long before it failed counts as the first failure in a row.
+    static let browserStable = 30.0
+    /// How long a browser made again shows the results of the browser it replaced beside its own: the
+    /// network's first word (`networkFirst`). Cached answers come in milliseconds, and a Mac on the
+    /// LAN answers a query well within it, so a Mac that stays listed never leaves the rows, and the
+    /// times its sightings keep (`NetworkSightings`, `PathSightings`, `directSince`) and the
+    /// reconnect's count of dials of its listing (`redialRow`) are not reset by a rebuild. A Mac that
+    /// went leaves this long after the rebuild.
+    static let rebuildSettle = networkFirst
+
+    /// The wait before a browser is made again after `failures` failures in a row: 1, 2, 4, 8, 16,
+    /// then 30 s.
+    static func browserRetryDelay(afterFailures failures: Int) -> Double {
+        browserRetry[min(max(failures, 1), browserRetry.count) - 1]
+    }
+
+    /// Failures in a row once a browser made at `startedAt` fails at `now`, `previous` before it: one
+    /// that ran `browserStable` or longer is the first.
+    static func browserFailures(previous: Int, startedAt: Double, now: Double) -> Int {
+        now - startedAt >= browserStable ? 1 : max(previous, 0) + 1
+    }
+
+    /// Whether to make a browser again now, or when to look again. At once on the app's return from
+    /// the background (`cameForward`), failed or not: one made before the suspension may hold a
+    /// connection iOS made defunct and has not said so yet. One that failed (`failedAt`, its
+    /// `failures` in a row) once `browserRetryDelay` has passed since, and only in the foreground: one
+    /// made in the background would be suspended with the app, and the return makes it anyway. One
+    /// that runs is left alone.
+    static func rebuildBrowser(failedAt: Double?, failures: Int, cameForward: Bool, foreground: Bool,
+                               now: Double) -> (rebuild: Bool, recheckAt: Double?) {
+        if cameForward { return (true, nil) }
+        guard foreground, let failedAt else { return (false, nil) }
+        let due = failedAt + browserRetryDelay(afterFailures: failures)
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// What a browser's rows are read from: while a browser made again settles (before `settleEnds`),
+    /// its own results (`fresh`), then those of the browser it replaced (`kept`) whose names it does
+    /// not list yet; after that, its own alone. A name in both is the new browser's.
+    static func browserResults<R>(kept: [R], fresh: [R], name: (R) -> String, settleEnds: Double?, now: Double) -> [R] {
+        guard let settleEnds, now < settleEnds else { return fresh }
+        let listed = Set(fresh.map(name))
+        return fresh + kept.filter { !listed.contains(name($0)) }
+    }
+
+    /// The waits between the automatic reconnect's dials of one listing of its Mac's row that do not
+    /// connect, counted from the last dial's start: 5, 10, 20, then 30 s. A dial not ready in
+    /// `reconnectDialWait` (StreamClient: 5 s) is let go, so the second follows the first at once.
+    static let reconnectRetry: [Double] = [5, 10, 20, 30]
+    /// After this many dials of a listing that did not connect, the status line says the Mac may be
+    /// asleep (`reconnectLine`): about 20 s after the loss.
+    static let reconnectQuietAfter = 3
+    /// After this many the dials of that listing stop (about 4.6 minutes): each dial through a sleep
+    /// proxy may wake the Mac (Wake on Demand; untested). The row listed afresh, the app's return
+    /// from the background, or a tap starts again.
+    static let reconnectDials = 12
+
+    /// Whether the automatic reconnect dials its Mac's listed row now, or when to look again, after
+    /// `failed` dials of this listing that did not connect, the last of them started at `lastDialAt`:
+    /// the first at once; each next `reconnectRetry` after the last started; none after
+    /// `reconnectDials`; none in the background, whose end looks again. Which row, and when a
+    /// Direct row or a row after a goodbye `quit` may be taken at all, is `reconnectRow`'s.
+    static func redialRow(failed: Int, lastDialAt: Double?, foreground: Bool, now: Double) -> (dial: Bool, recheckAt: Double?) {
+        guard foreground, failed < reconnectDials else { return (false, nil) }
+        guard failed > 0, let last = lastDialAt else { return (true, nil) }
+        let due = last + reconnectRetry[min(failed, reconnectRetry.count) - 1]
+        return now >= due ? (true, nil) : (false, due)
+    }
+
+    /// The status line while the automatic reconnect dials its Mac's listed row (`failed`: the dials
+    /// of this listing that did not connect, a dial under way not counted): "Reconnecting to ‹Mac›…",
+    /// after `reconnectQuietAfter` that the Mac may be asleep, through every later dial (VoiceOver
+    /// hears it once), and after `reconnectDials` that the dials stopped, in the words the remote
+    /// path's end uses.
+    static func reconnectLine(mac: String, failed: Int, direct: Bool) -> String {
+        if failed >= reconnectDials { return "Stopped trying to reach \(mac). Tap it to try again." }
+        if failed >= reconnectQuietAfter {
+            return "\(mac) isn\u{2019}t answering. It may be asleep. Sill keeps trying, or tap it to try now."
+        }
+        return direct ? "Reconnecting to \(mac) directly\u{2026}" : "Reconnecting to \(mac)\u{2026}"
+    }
+
+    /// What this device watched when a window list says nothing streams (`autoDesktop`).
+    enum Watched: Equatable {
+        /// Nothing: the connection's first list, or a pick that never started streaming.
+        case nothing
+        case desktop
+        /// A window, and whether the list still has it.
+        case window(listed: Bool)
+    }
+
+    /// What the device does about a window list that says nothing streams.
+    enum AutoDesktop: Equatable {
+        /// Asks for the Desktop now.
+        case ask
+        /// Asks for it once the closed window's wait has passed (two seconds and the worst recent round
+        /// trip), unless the person picked or launched something meanwhile (StreamClient).
+        case askAfterWait
+        /// Nothing.
+        case leave
+    }
+
+    /// The automatic Desktop requests are at least this far apart, so a Mac that cannot start the
+    /// Desktop is not asked again and again.
+    static let autoDesktopSpacing = 10.0
+
+    /// A window list said nothing streams: the device starts on the Desktop, never on an empty panel.
+    /// At once when it watched nothing; at once when it watched the Desktop and the Mac stopped it
+    /// (ScreenCaptureKit stopped the capture, and the host selected nothing: issue #69; before, the
+    /// Desktop came back only with the host's next window list, which a Mac left alone may never
+    /// send); after the closed window's wait when a window it watched has left the list (a window can
+    /// leave it for a second or two: a Space change, full screen); never when that window is still
+    /// listed, a pick that failed, which is the person's to retry. Never within `autoDesktopSpacing` of
+    /// the last automatic request (`sinceLastAuto`).
+    static func autoDesktop(watched: Watched, sinceLastAuto: Double) -> AutoDesktop {
+        guard sinceLastAuto > autoDesktopSpacing else { return .leave }
+        switch watched {
+        case .nothing, .desktop: return .ask
+        case .window(let listed): return listed ? .leave : .askAfterWait
+        }
+    }
+
     /// The memory after a state from `mac`: true moves it to the front, false removes it, nil (an
     /// older host) keeps the list; capped at `memoryCap`; an empty name changes nothing.
     static func remember(_ list: [String], mac: String, directWireless: Bool?) -> [String] {

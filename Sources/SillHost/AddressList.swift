@@ -7,8 +7,9 @@ import StreamProtocol
 /// its own with swiftc against fixtures shaped like Noah's dynamic store.
 ///
 /// Shown: a named network service on a tunnel (its addresses, kind "vpn", via its name; 100.64/10
-/// only there, and Tailscale's fd7a:115c:a1e0::/48), a point-to-point interface that is no service
-/// but has a routable IPv4 ("VPN (utun6)"), and the primary Wi‑Fi or Ethernet service's IPv4
+/// only there, and Tailscale's fd7a:115c:a1e0::/48), a point-to-point interface that no named
+/// service covers but has a routable IPv4 ("VPN (utun6)"; Tailscale from the App Store has a
+/// service with no Setup: key, so no name), and the primary Wi‑Fi or Ethernet service's IPv4
 /// (kind "lan"). Hidden: loopback and link-local, peer-to-peer (awdl, llw, nan), unnamed tunnels
 /// (utun0–3, the CoreDevice tunnel's ULA), temporary and deprecated IPv6, LAN ULAs. With the
 /// internet switch on, then: the address name (with its own port), the router's IPv4 and one
@@ -67,7 +68,7 @@ enum AddressList {
         let vpns = vpnServices(input.services)
         for s in vpns { if let name = input.magicDNS[s.id] { add(MacAddress(host: name, kind: MacAddress.vpn, via: s.name)) } }
         for s in vpns { for a in s.ipv4 where routableV4(a, onTunnel: true) { add(MacAddress(host: a, kind: MacAddress.vpn, via: s.name)) } }
-        for t in input.tunnels.sorted(by: { $0.interface < $1.interface }) where !input.services.contains(where: { $0.interface == t.interface }) {
+        for t in input.tunnels.sorted(by: { $0.interface < $1.interface }) where !vpns.contains(where: { $0.interface == t.interface }) {
             for a in t.ipv4 where routableV4(a, onTunnel: true) { add(MacAddress(host: a, kind: MacAddress.vpn, via: "VPN (\(t.interface))")) }
         }
         for s in vpns { for e in s.ipv6 where usableV6(e) && !isLinkLocalV6(e.address) { add(MacAddress(host: e.address, kind: MacAddress.vpn, via: s.name)) } }

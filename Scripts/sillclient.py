@@ -72,6 +72,18 @@ The Mac's pointer (kind 26; docs/pointer-visibility-plan.md):
                      --move, --tap, --key and --input go only to a --synthetic host on this Mac (the
                      process listening on PORT, by lsof and ps), which never posts input: anything
                      else exits 2
+The clipboard (kind 32; docs/clipboard-plan.md). Each kind 32 received is printed on one line,
+"clipboard at 1.234s: 12 bytes 'text…'", and the window list's clipboard= when the host says it:
+  --clipboard        a kind 32 {} right after the select: the subscription (the host sends this client
+                     what is copied on its pasteboard from then on; a --synthetic host's is a pasteboard of
+                     its own, SILL_TEST_PASTEBOARD's name, never this Mac's clipboard)
+  --copy=TEXT@T      a kind 32 with this text T seconds in (\n, \t, \xHH and \uXXXX escapes decoded), as a
+                     device's Paste sends it: the host's pasteboard is set to it, and the other subscribers get it
+  --copy-bytes=N@T   the same with N bytes of "x" (the cap is 262,144)
+  --raw32=JSON@T     this literal kind 32 payload T seconds in (split on the last @), as written:
+                     {"stop":true} ends the subscription
+  --expect=clipboard=TEXT  (with --expect's other keys, or alone) at exit, the last kind 32's text;
+                     clipboard=none: none came
 The remote door (TLS 1.3, both keys pinned; PORT is the remote door's):
   --tls              a session (ALPN sill/1) with this client's identity, pinning the Mac's key saved by
                      an earlier pairing in --identity (or given with --pin)
@@ -120,7 +132,7 @@ with status 2 (--raw17 and --input go out as written). Find PORT with: lsof -nP 
 The --synthetic hosts do not advertise over Bonjour, so this is the only way to reach them."""
 import json, re, socket, struct, sys, time
 
-KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer"}
+KIND = {0:"ps",1:"frame",2:"list",3:"thumb",4:"icon",5:"apps",11:"pong",13:"tick",14:"cursor",16:"settings",18:"macinfo",20:"pairresult",22:"goodbye",24:"menu",26:"pointer",32:"clipboard"}
 BOOL = {"1": True, "0": False, "true": True, "false": False, "on": True, "off": False, "yes": True, "no": False}
 BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent", "virtualDisplayAvailable",
              "thisConnectionAway", "awayRunning"}
@@ -129,9 +141,9 @@ BOOL_KEYS = {"prioritizeSpeed", "virtualDisplay", "directWireless", "persistent"
 SET_KEYS = {"maxFPS", "bitrate", "captureScale", "prioritizeSpeed", "virtualDisplay", "directWireless"}
 # Away from home (docs/remote-bundle-plan.md): read from the state's `away`, and its `link`'s state.
 AWAY_KEYS = {"homeBitrate", "homeCaptureScale", "awayBitrate", "awayCaptureScale", "thisConnectionAway", "awayRunning"}
-EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState"} | AWAY_KEYS
+EXPECT_KEYS = SET_KEYS | {"persistent", "virtualDisplayAvailable", "linkState", "clipboard"} | AWAY_KEYS
 TIMED = ("set", "raw17", "pick", "fps-after", "stop-ping", "stop-read", "pairing-wanted", "fetch", "press", "raw25", "raw27",
-         "move", "tap", "key", "input", "gesture", "raw28")
+         "move", "tap", "key", "input", "gesture", "raw28", "copy", "copy-bytes", "raw32")
 INPUT = ("move", "tap", "key", "input")
 # What --gesture may send: TrackpadGesture's six names (Gesture.swift). Anything else goes with --raw28.
 GESTURES = ("swipeUp", "swipeDown", "swipeLeft", "swipeRight", "pinch", "spread")
@@ -161,6 +173,8 @@ def value(k, v):
     if k == "linkState":
         if v not in ("fine", "behind", "stalled"): raise ValueError(f"linkState: fine, behind or stalled, got {v!r}")
         return v
+    if k == "clipboard":
+        return None if v == "none" else unescape(v)
     if k in ("captureScale", "homeCaptureScale", "awayCaptureScale"):
         f = number(v, k, float); return int(f) if f.is_integer() else f   # an integer, as a device-less script would send it
     return number(v, k)
@@ -463,12 +477,14 @@ try:
                           else number(text, "--fps-after") if name == "fps-after"
                           else fractions(text, f"--{name}") if name in ("move", "tap")
                           else gesture(text) if name == "gesture"
+                          else unescape(text) if name == "copy"
+                          else "x" * number(text, "--copy-bytes") if name == "copy-bytes"
                           else usage(text) if name == "key" else text)
             events.append((number(t, f"--{name}'s @T", float), i, name, text, parsed))
         elif name in VALUED:
             if not body: raise ValueError(f"--{name} needs a value")
             if name in ("big-payload", "flood") and number(body, f"--{name}") < 1: raise ValueError(f"--{name} must be at least 1")
-        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--no-select", "--pair-ask",
+        elif a not in ("--junk", "--stats", "--tls", "--expect-tls-fail", "--menus", "--pointer", "--no-select", "--pair-ask", "--clipboard",
                        "--pair-ask=cable", "--pair-cancel") and not a.startswith(("--fps=", "--expect=")):
             raise ValueError(f"unknown flag {a!r}")
     events.sort(key=lambda e: (e[0], e[1]))
@@ -610,6 +626,9 @@ try:
     if "--menus" in flags:
         # The subscription (kind 27 without an id); its token is the first of the shared counter.
         s.sendall(msg(27, json.dumps({"token": 1}).encode())); print("  sent menus subscription (token 1)")
+    if "--clipboard" in flags:
+        # The clipboard's subscription (kind 32 {}), as a device whose Share Clipboard is on sends it.
+        s.sendall(msg(32, b"{}")); print("  sent clipboard subscription")
 except (OSError, ssl.SSLError) as e:
     print(f"TLS refused: {e}"); sys.exit(0 if expect_tls_fail else 1)
 if big_payload:
@@ -667,6 +686,7 @@ def menu_line(it):
     if it.get("enabled") is False: t += " (off)"
     return t
 pinging = True; reading = True; rtts = []; key_times = []; window_frames = {}; first_kinds = []; served = False; ages = []
+clipboards = []        # every kind 32's text, in order (--expect=clipboard checks the last)
 def bump(k, n=1):
     per[k] = per.get(k, 0) + n; tot[k] = tot.get(k, 0) + n
 def fire(e, now):
@@ -717,6 +737,11 @@ def fire(e, now):
         s.sendall(msg(28, json.dumps(parsed).encode())); print(f"  sent gesture {json.dumps(parsed)} at {at}")
     elif name == "raw28":
         s.sendall(msg(28, text.encode())); print(f"  sent raw kind 28 {text} at {at}")
+    elif name in ("copy", "copy-bytes"):
+        body = json.dumps({"text": parsed}, ensure_ascii=False).encode()
+        s.sendall(msg(32, body)); print(f"  sent clipboard text, {len(parsed.encode())} bytes ({len(body)} of JSON) at {at}")
+    elif name == "raw32":
+        s.sendall(msg(32, text.encode())); print(f"  sent raw kind 32 {text} at {at}")
 while time.time() - t0 < dur:
     now = time.time()
     while events and now - t0 >= events[0][0]:
@@ -761,7 +786,18 @@ while time.time() - t0 < dur:
         elif kind == 11:
             rtt = (time.time() - struct.unpack(">d", payload)[0]) * 1000; rtts.append(rtt)
         elif kind == 2:
-            d = json.loads(payload); print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}")
+            d = json.loads(payload)
+            print(f"  windowList: {len(d.get('windows', []))} windows, active={d.get('active')}"
+                  + (f" clipboard={d['clipboard']}" if "clipboard" in d else ""))
+        elif kind == 32:
+            try:
+                d = json.loads(payload)
+            except ValueError:
+                print(f"  clipboard at {time.time()-t0:.3f}s: undecodable {payload[:80]!r}"); continue
+            t = d.get("text")
+            clipboards.append(t)
+            shown = "no text" if t is None else f"{len(t.encode())} bytes {t[:60]!r}" + ("…" if len(t) > 60 else "")
+            print(f"  clipboard at {time.time()-t0:.3f}s: {shown}" + (f" keys={sorted(d)}" if set(d) - {"text"} else ""))
         elif kind == 18:
             ok, i = verify_macinfo(payload, mac_pin)
             addrs = ",".join(f"{a['host']}{':' + str(a['port']) if a.get('port') else ''}/{a['kind']}/{a['via']}" for a in i.get("addresses", []))
@@ -840,7 +876,12 @@ if expect_menus is not None:
     print("EXPECT-MENUS ok" if not menus_failed else f"EXPECT-MENUS FAIL: want {expect_menus}, got {menu_top}")
 if expect is not None:
     problems = []
-    if last_state is None:
+    if "clipboard" in expect:
+        want = expect.pop("clipboard"); got = clipboards[-1] if clipboards else None
+        if got != want: problems.append(f"clipboard: want {want!r}, got {got!r} ({len(clipboards)} received)")
+    if not expect:
+        pass
+    elif last_state is None:
         problems.append("no settings received")
     else:
         for k, want in expect.items():
