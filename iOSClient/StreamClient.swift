@@ -748,8 +748,14 @@ final class StreamClient: ObservableObject {
         var rowListing: Double?
         var rowDials = 0
         var lastRowDialAt: Double?
+        /// The session ended because this device was away (GoodbyePolicy.awayEnd): its "Reconnecting"
+        /// lines say so until the reconnect lands.
+        var away: GoodbyePolicy.Away?
     }
     var reconnect: Reconnect?
+    /// The session's time in the background, from Sill going there with a session up until the
+    /// session ends (GoodbyePolicy.AwaySpell). Main thread.
+    var awaySpell: GoodbyePolicy.AwaySpell?
     /// The reconnect's retry timer chain now running (`scheduleReconnectRetry`).
     private var reconnectRetryChain = 0
     /// The dial in flight, remote or pairing: one at a time each.
@@ -915,7 +921,14 @@ final class StreamClient: ObservableObject {
             self?.cameForward()
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.appInForeground = false
+            guard let self else { return }
+            self.appInForeground = false
+            self.awaySpell = GoodbyePolicy.enteredBackground(connected: self.connected, current: self.awaySpell)
+        }
+        // A device with a passcode locks its data shortly after it locks; Sill may already be
+        // suspended then, so a spell can read "in the background" though the device locked.
+        NotificationCenter.default.addObserver(forName: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.awaySpell?.locked = true
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
@@ -1009,6 +1022,7 @@ final class StreamClient: ObservableObject {
     private func cameForward() {
         let wasInBackground = !appInForeground
         appInForeground = true
+        if wasInBackground { awaySpell?.returnedAt = CACurrentMediaTime() }
         guard browsing, wasInBackground else { return }
         rebuildIfDue(.network, cameForward: true)
         if nearbyBrowser != nil { rebuildIfDue(.nearby, cameForward: true) }
@@ -2716,7 +2730,8 @@ final class StreamClient: ObservableObject {
     }
 
     /// A pong came back on the session connection at `at` (systemUptime). Main thread.
-    private func heardPong(_ at: Double) {
+    private func heardPong(_ at: Double, pingSentAt: Double) {
+        GoodbyePolicy.heardPong(pingSentAt: pingSentAt, spell: &awaySpell)
         #if DEBUG
         if pathTest?.muted == true { return }
         #endif
@@ -3110,6 +3125,7 @@ final class StreamClient: ObservableObject {
         sessionHost = nil
         refusedListing = nil
         resetHomeMove()
+        awaySpell = nil
         queue.async { self.lastParameterSets = nil; self.pendingMove = nil; self.stopMeasuring() }
         firstListDeadline?.cancel()
         firstListDeadline = nil
@@ -3753,7 +3769,7 @@ final class StreamClient: ObservableObject {
             // For DiscoveryPolicy.pongSilence: over a cable the browser no longer lists, no pong means
             // no path.
             let at = ProcessInfo.processInfo.systemUptime
-            DispatchQueue.main.async { self.heardPong(at) }
+            DispatchQueue.main.async { self.heardPong(at, pingSentAt: sent) }
         case .macInfo:
             // Who this Mac is and how to reach it from afar (StreamClient+Remote), with the key the
             // connection it came on showed in its handshake (nil on a plain one): only a kind 18

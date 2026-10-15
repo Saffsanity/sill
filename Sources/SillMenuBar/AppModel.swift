@@ -124,6 +124,7 @@ final class AppModel {
                 remote.setAddressName(settings.remoteAddressName)
                 settings.onAddressNameChange = { [settings, weak remote] in remote?.setAddressName(settings.remoteAddressName) }
                 await c.start(preselect: nil, promptForPermissions: false)
+                startSleepGoodbyes()
                 Stats.shared.startPrinting()
                 print("Sill \(Self.version) (\(Self.build)) running from \(Bundle.main.bundlePath); log file \(HostLog.shared.fileURL?.path ?? "none")")
                 onboardIfNeeded()
@@ -133,6 +134,20 @@ final class AppModel {
             }
             // Never before the host is up, and also when it could not start: a newer Sill may be the fix.
             startUpdates()
+        }
+    }
+
+    // MARK: Sleep and shutdown
+
+    /// The Mac about to sleep, or to shut down, restart or log out: every connected device hears why
+    /// (StreamCoordinator.goodbyeBeforeSleep), instead of finding its connection gone.
+    private func startSleepGoodbyes() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.coordinator?.goodbyeBeforeSleep(shuttingDown: false) }
+        }
+        center.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.coordinator?.goodbyeBeforeSleep(shuttingDown: true) }
         }
     }
 

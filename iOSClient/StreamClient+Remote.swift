@@ -303,7 +303,7 @@ extension StreamClient {
             old.cancel()
         }
         hostName = name
-        status = why == .automatic ? "Reconnecting to \(name) remotely…" : "Connecting to \(name) remotely…"
+        status = why == .automatic ? remoteReconnectLine(name) : "Connecting to \(name) remotely…"
         let candidates = RemoteDialPolicy.order(mac.allAddresses, remotePort: mac.remotePort, lastWorked: mac.lastWorked,
                                                 localIPv4: Self.localIPv4Networks())
         #if DEBUG
@@ -338,7 +338,7 @@ extension StreamClient {
                     if self.reconnect?.macID == macID { self.reconnect?.macID = newer.macID }
                     macID = newer.macID
                     self.hostName = self.displayName(macID)
-                    self.status = why == .automatic ? "Reconnecting to \(self.hostName) remotely…" : "Connecting to \(self.hostName) remotely…"
+                    self.status = why == .automatic ? self.remoteReconnectLine(self.hostName) : "Connecting to \(self.hostName) remotely…"
                 } else if winner.fingerprint != pin {
                     winner.connection.cancel()           // cannot happen: the verify block took no other key
                     self.remoteDialFailed(macID: macID, why: why, failure: .wrongMac, candidate: winner.candidate)
@@ -450,7 +450,7 @@ extension StreamClient {
             default:
                 r.remoteFailures += 1
                 r.nextRemoteAt = ProcessInfo.processInfo.systemUptime + DiscoveryPolicy.remoteRetryDelay(afterFailures: r.remoteFailures)
-                status = "Reconnecting to \(name) remotely…"
+                status = remoteReconnectLine(name)
             }
             reconnect = r
             reconnectIfListed()
@@ -509,7 +509,11 @@ extension StreamClient {
             reconnectIfListed()
             return
         }
-        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil)
+        let away = GoodbyePolicy.awayEnd(goodbye: goodbye, spell: awaySpell)
+        let outcome = GoodbyePolicy.outcome(goodbye, mac: name, device: Self.deviceWord, saved: saved != nil, away: away)
+        #if DEBUG
+        if let away { print("session: ended while this \(Self.deviceWord) was away (\(away))") }
+        #endif
         if goodbye?.reason == Goodbye.removed, let mac = saved,
            DiscoveryPolicy.removalRevokes(remote: s?.route.isRemote == true, trust: s?.home, savedKey: mac.fingerprintData),
            let next = SavedMacs.revoking(mac.macID, in: savedMacs) {
@@ -522,7 +526,7 @@ extension StreamClient {
         }
         tearDown(status: outcome.text)
         reconnect = outcome.reconnect ? lostReconnect(session: s, saved: saved, name: name, remoteAllowed: outcome.remoteAllowed,
-                                                      afterQuit: goodbye?.reason == Goodbye.quit) : nil
+                                                      afterQuit: goodbye?.reason == Goodbye.quit, away: away) : nil
         updateDiscovery()
         if outcome.reconnect {
             scheduleReconnectRetry()
@@ -558,13 +562,19 @@ extension StreamClient {
     /// the session ended with goodbye `quit`, so the Mac's row that is going is left alone for
     /// DiscoveryPolicy.quitWait (`reconnectIfListed`); never for a notice.
     private func lostReconnect(session s: Session?, saved: SavedMac?, name: String, remoteAllowed: Bool,
-                               afterQuit: Bool = false) -> Reconnect {
+                               afterQuit: Bool = false, away: GoodbyePolicy.Away? = nil) -> Reconnect {
         let bonjour = s?.bonjourName ?? saved?.bonjourName
         return Reconnect(macID: saved?.macID, bonjourName: bonjour, name: name,
                          lostAt: ProcessInfo.processInfo.systemUptime, pathAtLoss: pathSignature,
                          remoteAllowed: remoteAllowed,
                          rememberedDirect: bonjour.map { directWirelessMacs.contains($0) } ?? false,
-                         afterQuit: afterQuit)
+                         afterQuit: afterQuit, away: away)
+    }
+
+    /// The automatic remote dial's line, with why the session ended (GoodbyePolicy.awayNote).
+    private func remoteReconnectLine(_ name: String) -> String {
+        let line = "Reconnecting to \(name) remotely…"
+        return GoodbyePolicy.awayNote(reconnect?.away, device: Self.deviceWord).map { "\(line) \($0)" } ?? line
     }
 
     /// The automatic reconnect's look, at every browser change, path change and due time
@@ -625,7 +635,8 @@ extension StreamClient {
                     r.rowDials = 0
                     r.lastRowDialAt = nil
                 }
-                let line = DiscoveryPolicy.reconnectLine(mac: r.name, failed: r.rowDials, direct: mac.direct)
+                let line = DiscoveryPolicy.reconnectLine(mac: r.name, failed: r.rowDials, direct: mac.direct,
+                                                         note: GoodbyePolicy.awayNote(r.away, device: Self.deviceWord))
                 let due = DiscoveryPolicy.redialRow(failed: r.rowDials, lastDialAt: r.lastRowDialAt, foreground: appInForeground, now: now)
                 guard due.dial else {
                     // Listed, and not dialled now: the line for the dials so far ("…may be asleep…",

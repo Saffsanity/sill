@@ -143,6 +143,11 @@ func afterSleepPolicy() {
           (3...11).allSatisfy { P.reconnectLine(mac: mini, failed: $0, direct: false) == quiet && P.reconnectLine(mac: mini, failed: $0, direct: true) == quiet })
     check("reconnectLine: after 12, stopped, in the remote path's words", P.reconnectLine(mac: mini, failed: 12, direct: false) == stopped
           && P.reconnectLine(mac: mini, failed: 40, direct: true) == stopped)
+    check("reconnectLine: a note (why the session ended) follows Reconnecting, on either row",
+          (0...2).allSatisfy { P.reconnectLine(mac: mini, failed: $0, direct: false, note: "(n)") == "Reconnecting to Mac mini\u{2026} (n)"
+              && P.reconnectLine(mac: mini, failed: $0, direct: true, note: "(n)") == "Reconnecting to Mac mini directly\u{2026} (n)" })
+    check("reconnectLine: no note on the asleep or stopped lines, which say something newer",
+          P.reconnectLine(mac: mini, failed: 3, direct: false, note: "(n)") == quiet && P.reconnectLine(mac: mini, failed: 12, direct: true, note: "(n)") == stopped)
 
     // A model of the reconnect as the glue runs it (StreamClient+Remote's reconnectIfListed, the let-go
     // after 5 s, sessionEnded's dial that did not connect, cameForward): it looks every 50 ms (the
