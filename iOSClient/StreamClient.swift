@@ -432,12 +432,25 @@ final class StreamClient: ObservableObject {
         }
     }
 
+    /// When an interrupted display layer may re-pick the source for a keyframe. Main thread.
+    private var keyframeRecovery = KeyframeRecovery()
+
     /// The one display view for the whole session. Landscape and portrait both host it, so a
     /// rotation reparents the same layer (and its last decoded image) instead of creating a fresh
     /// view that would sit black until the next keyframe, up to 4 s later. Main thread.
     private(set) lazy var displayView: HEVCDisplayView = {
         let view = HEVCDisplayView(frame: .zero)
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        view.onNeedsKeyframe = { [weak self] in
+            DispatchQueue.main.async {
+                // In the background the layer reads interrupted at every frame until iOS suspends the
+                // app: a pick then would restart everyone's stream and, in regular mode, raise the
+                // window on the Mac. The return to the front asks once (didBecomeActive).
+                guard let self, UIApplication.shared.applicationState == .active else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if self.keyframeRecovery.shouldAsk(streaming: self.active != .none, now: now) { self.request(self.active) }
+            }
+        }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view
@@ -919,6 +932,13 @@ final class StreamClient: ObservableObject {
         }
         // The clipboard's chip looks when Sill becomes active (StreamClient+Clipboard).
         observeClipboardActivation()
+        // A still window sends no frame to show that the display layer was interrupted meanwhile.
+        // Active, not entering the foreground: only an active app's ask goes out (onNeedsKeyframe).
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            let view = self.displayView
+            self.queue.async { view.recoverIfInterrupted() }
+        }
     }
 
     /// Starts the network browser, once; from then on it is only made again (`rebuildBrowser`). The

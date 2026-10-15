@@ -14,7 +14,9 @@
 #           the cache, presses, the refusals, rates, stale and its retry, a top level that fails to
 #           read, the app gone, subscribers leaving, the tree changed in place, only subscribers
 #           served, a request's deadline, a sweep's one top-level read)
-# usage: Scripts/menu-check/run.sh [reader] [budget] [mirror]   (no argument: all)
+#   close   WindowSizer's close (the bar's long-press Close) against the fixture's Slow Close
+#           window, whose close holds its main thread 4 s: back within its own 1 s timeout
+# usage: Scripts/menu-check/run.sh [reader] [budget] [mirror] [close]   (no argument: all)
 # Everything builds under .build/menu-check/. The fixture runs with the prohibited policy and cannot
 # take the front; `lsappinfo front` is sampled every 0.1 s through each run, and a change fails it.
 # Needs Accessibility for the process that runs it (the terminal, or the app that started it). Safe
@@ -25,7 +27,7 @@ ROOT=${0:A:h:h:h}
 HERE=${0:A:h}
 OUT=$ROOT/.build/menu-check
 mkdir -p $OUT
-steps=("$@"); (( ${#steps} )) || steps=(reader budget mirror)
+steps=("$@"); (( ${#steps} )) || steps=(reader budget mirror close)
 failed=0
 
 encoder_free() {   # BINARY: refuse it if it links VideoToolbox
@@ -54,8 +56,14 @@ mirror)
   encoder_free $OUT/mirror || { failed=1; continue }
   python3 $HERE/fixture.py $OUT/menufixture $OUT/mirror $OUT/mirror || failed=1
   ;;
+close)
+  echo "== close"
+  $HERE/build.sh close $OUT/close || { failed=1; continue }
+  encoder_free $OUT/close || { failed=1; continue }
+  python3 $HERE/fixture.py $OUT/menufixture $OUT/close $OUT/close || failed=1
+  ;;
 *)
-  echo "unknown step $step (reader, budget, mirror)"; failed=1
+  echo "unknown step $step (reader, budget, mirror, close)"; failed=1
   ;;
 esac
 done
