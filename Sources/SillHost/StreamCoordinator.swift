@@ -2482,6 +2482,14 @@ package final class StreamCoordinator {
             DesktopWindow.display(of: id) == nil && catalog.window(id: id)?.owningApplication?.processID == pid
         }
         guard !ids.isEmpty else { return }
+        // Only with someone at this Mac: a key, click or move here in the last 2 s. An app also comes
+        // forward with nobody touching it (the app in front quit, a script or another app's automation
+        // hid and showed apps), and took the viewer's windows back every few minutes (2026-10-15).
+        let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
+        guard idle <= 2 else {
+            print("An app with shared windows came forward with no input at this Mac for \(Int(idle)) s; left shared")
+            return
+        }
         print("An app was brought forward on this Mac: taking back its \(ids.count) shared window\(ids.count == 1 ? "" : "s")")
         Task { for id in ids { await self.takeBack(id) } }
     }
