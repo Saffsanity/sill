@@ -104,7 +104,10 @@ final class WindowCatalog {
     /// static; re-screenshotting them every pass is the bulk of the catalog's cost in use.
     static let staticThumbnailInterval: Duration = .seconds(6)
 
+    /// Every window this host has listed, newest first, those gone included (their place for when
+    /// they come back), at most `seenCap`.
     private var seenOrder: [UInt32] = []
+    static let seenCap = 1024
     private var icons: [String: Data] = [:]
     private var announcedIcons: Set<String> = []
     private var started = false
@@ -254,9 +257,13 @@ final class WindowCatalog {
         }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
-        // fixed order in the bar, so keep first-seen order and append newcomers.
+        // fixed order in the bar, so keep first-seen order, newcomers at the start: a window just
+        // opened is the one most likely wanted next, and the end of a long bar is off screen. A
+        // window counts as new only the first time this host lists it: one that leaves the list and
+        // comes back (minimized, on another Space, briefly off screen) takes its old place again,
+        // so windows that left are remembered (`seenOrder` keeps them, `seenCap` at most; WindowOrder).
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
-        seenOrder = seenOrder.filter { byID[$0] != nil } + visible.map(\.windowID).filter { !seenOrder.contains($0) }
+        seenOrder = WindowOrder.seen(seenOrder, listed: visible.map(\.windowID), cap: Self.seenCap)
         let ordered = seenOrder.compactMap { byID[$0] }
         let newInfos = ordered.map { w in
             WindowInfo(id: w.windowID,

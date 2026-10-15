@@ -223,6 +223,9 @@ final class StreamClient: ObservableObject {
     /// The device's own arrangement of the bar (press, hold and drag), persisted per Mac. Windows
     /// the user has not arranged follow in the host's order.
     @Published private(set) var windowOrder: [UInt32] = []
+    /// Every window id this session's lists have named (a window is new to the bar only once);
+    /// cleared when the session ends or the Mac changes.
+    private var seenWindowIDs: Set<UInt32> = []
     /// When the Desktop was last picked on the device's own initiative (see the window list).
     private var lastAutoDesktop: Date = .distantPast
     /// DEBUG `-SillNoAutoDesktop 1`: the device never picks the Desktop by itself, so a live gate's
@@ -3103,6 +3106,7 @@ final class StreamClient: ObservableObject {
     /// never delivered its window list: the connect screen never left, and its Remote rows must not
     /// vanish for another 3 s. Main thread.
     func tearDown(status: String, restartSearch: Bool = true) {
+        seenWindowIDs = []
         abandonMove()
         resetPath()
         lastMoveAttempt = nil
@@ -3654,10 +3658,27 @@ final class StreamClient: ObservableObject {
                     if let test = UserDefaults.standard.string(forKey: "SillMoveHomeTest") { self.beginMoveHomeTest(test) }
                     #endif
                 }
-                if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
+                // Which windows this list adds to every list from the same Mac in this session.
+                let sameMac = self.macName == list.macName
+                if self.macName != list.macName {
+                    self.macName = list.macName
+                    self.loadWindowOrder()
+                    self.seenWindowIDs = []
+                }
                 let previous = self.active
                 self.windows = list.windows
                 self.active = list.active
+                // A window opened since the session's first list goes at the start of the bar, as the
+                // Mac lists it, also on a bar this device rearranged (whose arrangement otherwise comes
+                // first and every other window after it, so a new one landed at the far end). New means
+                // the first time this session sees it: a window that leaves the list and comes back
+                // (minimized, on another Space) stays where it was.
+                let ids = list.windows.map(\.id)
+                if sameMac, let next = WindowOrder.arranged(self.windowOrder, seen: self.seenWindowIDs, listed: ids) {
+                    self.windowOrder = next
+                    self.persistWindowOrder()
+                }
+                self.seenWindowIDs.formUnion(ids)
                 // Forget thumbnails for windows that are gone.
                 let live = Set(list.windows.map(\.id))
                 self.thumbnails = self.thumbnails.filter { live.contains($0.key) }
