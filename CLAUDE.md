@@ -26,7 +26,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
   `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
   Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), the desk made
-  again (42, `rebuildDesk`), input to a window in the background (kind 8 with `window`,
+  again (42, `rebuildDesk`: since 2026-10-15 the captures started again, no display made), input to a window in the background (kind 8 with `window`,
   `windowInput`), Dock badges (`badges`); in kind 29 itself, AAC-ELD sound (`audioCodec`, with
   `audio`). The clipboard (32) needs no flag. A window ID with the top bit set is a display (`DesktopWindow`).
   The iOS app sends none of them.
@@ -39,7 +39,7 @@ stream order (`MainRouter`), and a side stream only after its own parameter sets
   made after another was removed can stream a third's picture), all removed together once the desk
   is empty; the main stream's picture compared with the window alone at start and every 10 s
   (`DeskPicture`), the window captured alone when it is another display's, the viewer's pill
-  refresh (kind 42) making every display again; every capture stopped before its display goes, an identity made again only once it is off the display list and has rested 3 s (a display removed under a running capture, then remade, stopped WindowServer's display streams for every app until it restarted); a full-screen window's display resized live to the
+  refresh (kind 42) starting the captures again, no display removed or made; the desk's displays removed one at a time, each off the display list before the next goes, at exit before the process ends (a quit that left one being removed as it died, 2026-10-15, and a display removed under a running capture, then remade, stopped WindowServer's display streams for every app until it restarted); when no display stream delivers at all (`DisplayStreamProbe`), every window streams alone and the menu says "Screen Capture Stopped Working" until one does again; every capture stopped before its display goes, an identity made again only once it is off the display list and has rested 3 s; a full-screen window's display resized live to the
   viewer window (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
   the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
   and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it

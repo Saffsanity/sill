@@ -57,7 +57,7 @@ viewer window, and the host's windows kept on hidden displays while they are sho
 | 39 `dockMenu` | both | `DockMenu`: an app's own Dock menu on the host, asked for and one item pressed | the list says `dockMenu` |
 | 40 `pickDisplay` | device → host | `PickDisplay`: which of the host's displays the Desktop is | the list names its `displays` |
 | 41 `takenBack` | host → device | `TakenBack`: windows the person at the host took back; the device closes its windows of them | only to a Mac viewer |
-| 42 `rebuildDesk` | device → host | no payload: every hidden display removed together and made again | the list says `rebuildDesk` |
+| 42 `rebuildDesk` | device → host | no payload: the desk's captures started again (before 2026-10-15: every hidden display removed together and made again) | the list says `rebuildDesk` |
 | 2 (`WindowList.badges`) | host → device | each listed app's Dock badge, by bundle ID | while a Mac viewer is connected |
 
 A window ID can name one of the host's displays (`DesktopWindow`: the display ID with the top bit
@@ -228,6 +228,16 @@ the new kinds is sent by it, and a host sends it none.
   the list and has rested 3 s since its removal, by any Sill process (VirtualDisplay.identityRest); a
   capture's display is looked up afresh, not cached; a window found on a Sill display gets the main
   display as its home; and a display capture that delivers nothing in 3 s streams the window alone.
+- 2026-10-15 10:30: a host restart removed seven desk displays; released together, the window server
+  took them down one after another for 2 s, the exit's wait gave up at 1.5 s, and the last went 0.37 s
+  after the process had died. Display streams stopped for every app again. Now: the desk's displays
+  are removed one at a time, each off the display list (1.5 s at most) before the next goes, at exit
+  and when the desk empties; the viewer's refresh (kind 42) starts the captures again and removes
+  nothing; and when a desk capture delivers nothing, a moment's stream of the main display
+  (`DisplayStreamProbe`) tells whether every display stream is dead: then every window, main or
+  beside it, streams alone (no menus, no full-screen display), the menu says "Screen Capture Stopped
+  Working", and a check every minute while a device is connected, or the viewer's refresh, brings
+  them back once display streams deliver again.
 - macOS's own bug (FB17797423): after one virtual display is removed while others stay, a stream of a
   display made later can show another display's picture. The desk keeps displays a window leaves and
   removes them only together; the picture check (DeskPicture) catches the rest.
