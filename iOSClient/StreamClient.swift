@@ -3388,10 +3388,23 @@ final class StreamClient: ObservableObject {
                     if let test = UserDefaults.standard.string(forKey: "SillMoveHomeTest") { self.beginMoveHomeTest(test) }
                     #endif
                 }
+                // Which windows this list adds to the last one from the same Mac in this session.
+                let sameMac = self.macName == list.macName
+                let known = Set(self.windows.map(\.id))
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
                 let previous = self.active
                 self.windows = list.windows
                 self.active = list.active
+                // A window opened since the last list goes at the start of the bar, as the Mac lists it,
+                // also on a bar this device rearranged (whose arrangement otherwise comes first and every
+                // other window after it, so a new one landed at the far end).
+                if sameMac, !known.isEmpty, !self.windowOrder.isEmpty {
+                    let fresh = list.windows.map(\.id).filter { !known.contains($0) && !self.windowOrder.contains($0) }
+                    if !fresh.isEmpty {
+                        self.windowOrder = fresh + self.windowOrder
+                        self.persistWindowOrder()
+                    }
+                }
                 // Forget thumbnails for windows that are gone.
                 let live = Set(list.windows.map(\.id))
                 self.thumbnails = self.thumbnails.filter { live.contains($0.key) }
