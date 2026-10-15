@@ -2,7 +2,8 @@ import CoreGraphics
 
 /// Where everything goes on a phone held upright (Noah, 2026-09-27; docs/iphone-portrait-plan.md):
 /// the picture in a fixed 16:10 pane at the top, then row 1 (Apps, Aa, Keyboard, Desktop,
-/// Settings, widened to the row), row 2 (the window thumbnails), row 3 (esc, tab, ctrl, opt, cmd,
+/// Settings, widened to the row), row 2 (the window thumbnails, and at its end the Menus and Sound
+/// buttons while the Mac sends its menus and its sound), row 3 (esc, tab, ctrl, opt, cmd,
 /// shift), and the trackpad in everything left. Every rectangle is a function of the stream
 /// screen's size alone, the screen less its top safe-area inset down to its bottom edge (the stream
 /// screen ignores the bottom inset and the keyboard), so nothing moves when the streamed window
@@ -76,6 +77,13 @@ struct PhonePortraitLayout: Equatable {
     /// before it (docs/menu-bar-plan.md §7.5). Row 1 keeps its five.
     let menus: CGRect
     let stripBesideMenus: CGRect
+    /// Row 2 while the Mac sends its sound (docs/audio-plan.md §7.6): the Sound button ends the row,
+    /// under Settings, where Menus goes without it, and the strip ends `gap` before it
+    /// (`stripBesideMenus`: one button at the row's end, whichever). With the Mac's menus too, Menus
+    /// moves one place left, under Desktop, and the strip ends `gap` before that. Row 1 keeps its five.
+    let sound: CGRect
+    let menusBesideSound: CGRect
+    let stripBesideBoth: CGRect
     /// Row 3.
     let keys: CGRect
     let caps: [CGRect]
@@ -129,6 +137,11 @@ struct PhonePortraitLayout: Equatable {
         menus = CGRect(x: settingsButton.minX, y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,
                        width: settingsButton.width, height: Self.buttonHeight)
         stripBesideMenus = CGRect(x: strip.minX, y: strip.minY, width: max(0, menus.minX - Self.gap - strip.minX), height: strip.height)
+        sound = menus
+        let desktopButton = buttons[Button.desktop.rawValue]
+        menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width, height: Self.buttonHeight)
+        stripBesideBoth = CGRect(x: strip.minX, y: strip.minY, width: max(0, menusBesideSound.minX - Self.gap - strip.minX),
+                                 height: strip.height)
 
         // Row 3: six equal caps, `gap` apart.
         keys = CGRect(x: Self.side, y: strip.maxY + Self.rowGap, width: rowWidth, height: Self.capHeight)

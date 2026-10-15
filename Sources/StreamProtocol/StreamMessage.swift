@@ -67,6 +67,12 @@ public enum StreamMessageKind: UInt8 {
     case gesture = 28        // device → host: JSON TrackpadGesture — a three- or four-finger gesture the device
                              // recognized, which the Mac turns into its own shortcut (Mission Control, a Space,
                              // Apps…). Only to a host whose window list says `gestures` 1 or more
+    // The Mac's sound (Audio.swift), after the menus' 24, 25 and 27, the pointer's 26 and the trackpad gesture's 28,
+    // and after 29–42, which PR #66 (Sill Viewer, with #72 and #73) and #78 (the clipboard) take. Older readers map it
+    // to `.unknown` and skip it.
+    case audio = 43          // host → device: AudioMessage — the sound of what streams: a format (JSON AudioFormat),
+                             // then packets (binary AudioPackets). Only to a device whose hello lists the codec
+                             // (Hello.audio), and only while Send Audio is on
     case unknown = 255       // never sent: what parseHeader yields for a kind this build does not know
 }
 

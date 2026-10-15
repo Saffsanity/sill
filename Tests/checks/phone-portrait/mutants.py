@@ -46,6 +46,11 @@ MUTANTS = {
     "M29 the Menus button under Aa": ("let settingsButton = buttons[Button.settings.rawValue]", "let settingsButton = buttons[Button.textSize.rawValue]"),
     "M30 the strip running under the Menus button": ("width: max(0, menus.minX - Self.gap - strip.minX)", "width: strip.width"),
     "M31 the Menus button at the strip's top": ("y: strip.minY + (Self.stripHeight - Self.buttonHeight) / 2,", "y: strip.minY,"),
+    "M32 Sound under Desktop": ("        sound = menus\n", "        sound = CGRect(x: buttons[Button.desktop.rawValue].minX, y: menus.minY, width: menus.width, height: menus.height)\n"),
+    "M33 Menus not moved aside beside Sound": ("        let desktopButton = buttons[Button.desktop.rawValue]", "        let desktopButton = buttons[Button.settings.rawValue]"),
+    "M34 the strip not shortened beside both": ("width: max(0, menusBesideSound.minX - Self.gap - strip.minX),", "width: max(0, menus.minX - Self.gap - strip.minX),"),
+    "M35 Menus beside Sound with no gap": ("        menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width, height: Self.buttonHeight)",
+                                           "        menusBesideSound = CGRect(x: desktopButton.minX, y: menus.minY, width: desktopButton.width + Self.gap, height: Self.buttonHeight)"),
 }
 caught = 0
 for name, (old, new) in MUTANTS.items():

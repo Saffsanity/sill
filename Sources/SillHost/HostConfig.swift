@@ -49,11 +49,18 @@ package struct HostConfig: Equatable, Sendable {
     /// identity store), never in UserDefaults or a launch argument: any process of this user can
     /// write those, and this is the one switch that would let an unpaired key in.
     package var requirePairing: Bool
+    /// Send Audio: every connected device that plays the Mac's sound (its hello lists a codec) gets the
+    /// sound of what streams, the streamed window's app or every app for the Desktop (AudioPipeline,
+    /// kind 43). Off by default: the Mac keeps playing its own sound, so a device beside it would
+    /// double every sound a moment late. The sound's own stream's, not the pipeline's: a change starts
+    /// or stops that stream and never restarts the picture (absent from `restartNeeded`). One value
+    /// home or away: a device away sets it through `applyingAway` like any other field but the quality.
+    package var sendAudio: Bool
 
     /// Every knob is required, so the compiler finds each place that builds one when a knob is added.
     package init(maxFPS: Int, captureScale: CGFloat, bitrate: Int, awayBitrate: Int, awayCaptureScale: CGFloat,
                  prioritizeSpeed: Bool, virtualDisplay: Bool, directWireless: Bool, remoteAccess: Bool, remotePort: Int,
-                 internetAccess: Bool, requirePairing: Bool) {
+                 internetAccess: Bool, requirePairing: Bool, sendAudio: Bool) {
         self.maxFPS = maxFPS
         self.captureScale = captureScale
         self.bitrate = bitrate
@@ -66,6 +73,7 @@ package struct HostConfig: Equatable, Sendable {
         self.remotePort = remotePort
         self.internetAccess = internetAccess
         self.requirePairing = requirePairing
+        self.sendAudio = sendAudio
     }
 
     /// The spike's knobs, formerly the `let`s at the top of the CLI's main.swift, and the app's
@@ -75,12 +83,12 @@ package struct HostConfig: Equatable, Sendable {
     /// exposure. 7455 is unassigned at IANA and below the ephemeral range. Away from home, Low ·
     /// Standard (Noah, 2026-09-25): a slow connection never starts at the home quality. Require
     /// pairing on: a home door that speaks TLS admits only paired devices until the Mac's user says
-    /// otherwise.
+    /// otherwise. Send Audio off in both until Noah has tried it (docs/audio-plan.md, Q1).
     package static let standard = HostConfig(maxFPS: 120, captureScale: 2, bitrate: 15_000_000,
                                              awayBitrate: 4_000_000, awayCaptureScale: 1,
                                              prioritizeSpeed: false, virtualDisplay: false, directWireless: false,
                                              remoteAccess: false, remotePort: 7455, internetAccess: false,
-                                             requirePairing: true)
+                                             requirePairing: true, sendAudio: false)
 
     /// The remote door's port when none is set.
     package static let defaultRemotePort = 7455
@@ -103,7 +111,7 @@ package struct HostConfig: Equatable, Sendable {
     /// What differs from `new`, for the log: "frame rate limit 120 → 60 fps, bitrate 15 → 8 Mbps
     /// per 60 fps, Retina → points, away bitrate 4 → 15 Mbps per 60 fps, away points → Retina, speed
     /// off → on, virtual display off → on, direct wireless off → on, remote access off → on, remote
-    /// port 7455 → 7460, internet access off → on, require pairing on → off".
+    /// port 7455 → 7460, internet access off → on, require pairing on → off, send audio off → on".
     package func changes(to new: HostConfig) -> String {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         func scaleName(_ s: CGFloat) -> String { s >= 1.5 ? "Retina" : "points" }
@@ -120,6 +128,7 @@ package struct HostConfig: Equatable, Sendable {
         if remotePort != new.remotePort { parts.append("remote port \(remotePort) → \(new.remotePort)") }
         if internetAccess != new.internetAccess { parts.append("internet access \(onOff(internetAccess)) → \(onOff(new.internetAccess))") }
         if requirePairing != new.requirePairing { parts.append("require pairing \(onOff(requirePairing)) → \(onOff(new.requirePairing))") }
+        if sendAudio != new.sendAudio { parts.append("send audio \(onOff(sendAudio)) → \(onOff(new.sendAudio))") }
         return parts.isEmpty ? "no change" : parts.joined(separator: ", ")
     }
 
