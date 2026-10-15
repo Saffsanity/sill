@@ -8,17 +8,82 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Sill Viewer, a Mac controlling another Mac (2026-10-11/12, branch `mac-client` from main at
+985a733; docs/mac-client-plan.md has the design, the wire, what was verified and what is
+open).** A macOS client (`Sources/MacClient`, product `SillClient`, `Scripts/make-client-app.sh` →
+`.build/Sill Viewer.app`, `me.saffer.sill.client`) whose session code is the iOS app's own
+(`Sources/MacClient/Shared/` symlinks; `iOSClient/ClientPlatform.swift` and `HEVCSampleFeed.swift`
+new and shared). Each host window a borderless window here at 1:1 with a pill for this Mac's
+controls; the others live at 15 fps (side streams); the remote app's menus in the menu bar; Sill's
+controls in a menu bar icon; a Dock icon per remote app (`Sources/SillDockProxy`: its windows, the
+app's own Dock menu items and its badge from the other Mac); windows restored after a restart (the viewer reconnects at launch to the Mac it was
+connected to when it quit; Launch at Login in its menu) and new windows of open apps opened by
+themselves, as is an app the viewer's own action opens there; a
+scroll or hover reaches a window in the background without bringing it forward; each display a
+Desktop window. The main stream goes to the window of the source the host last listed, decided in
+stream order (`MainRouter`), and a side stream only after its own parameter sets.
+- Wire, additive and gated by window-list flags: the middle button (kind 8, `middleButton`), side
+  streams (29–31, `sideStreams`), the clipboard (32), sound (33, `audio`), files (34–37,
+  `fileDrop`), a drag followed live (38, `liveDrag`), an app's Dock menu (39, `dockMenu`), the
+  Desktop's display (40, `displays`), windows taken back (41, to Mac viewers only), the desk made
+  again (42, `rebuildDesk`: since 2026-10-15 the captures started again, no display made), input to a window in the background (kind 8 with `window`,
+  `windowInput`), Dock badges (`badges`); in kind 29 itself, AAC-ELD sound (`audioCodec`, with
+  `audio`). The clipboard follows main’s kind 32: subscribe only with the `clipboard` flag
+  (1 for text, 2 for images), `stop` ends sharing, and images go only to subscribers whose
+  `accepts` is 2 or more. A window ID with the top bit set is a display (`DesktopWindow`).
+  The iOS app uses main’s text clipboard path and sends none of the other Mac viewer additions.
+- Host: Sill's desk (`DeskStages`, `VirtualStage`): every window a viewer shows on a hidden display
+  of its own, its identity fixed per slot (never a new one), while they fit in a quarter of its memory (each costs the whole Mac: ColorSync builds a profile per display about once a second while anything captures; two displays with one vendor and product ID
+  are one monitor to macOS, which took the older offline: not a one-display limit), made at
+  120 Hz at the viewer's largest screen, 2× up to 3792×2160 pt and 1× beyond (7680 px has no mode
+  on macOS 27.0.1); a display a window leaves kept for the next (`DeskStages.spares`: every display
+  made and removed leaves macOS's ColorSync service more work for the login session, and a display
+  made after another was removed can stream a third's picture), all removed together once the desk
+  is empty; the main stream's picture compared with the window alone at start and every 10 s
+  (`DeskPicture`), the window captured alone when it is another display's, the viewer's pill
+  refresh (kind 42) starting the captures again, no display removed or made; the desk's displays removed one at a time, each off the display list before the next goes, at exit before the process ends (a quit that left one being removed as it died, 2026-10-15, and a display removed under a running capture, then remade, stopped WindowServer's display streams for every app until it restarted); when no display stream delivers at all (`DisplayStreamProbe`), every window streams alone and the menu says "Screen Capture Stopped Working" until one does again; every capture stopped before its display goes, an identity made again only once it is off the display list and has rested 3 s; a full-screen window's display resized live to the
+  viewer window (`VirtualDisplay.resize`) and left full screen before it goes home. `AppAudio` (a process tap of
+  the shown apps and their helpers, muted on the host, AAC-ELD or 10 ms PCM, off the main actor), `FileDrops`
+  and `DragOut` (offers scoped to their device), `LiveDrags` (a drag over its windows followed as it
+  goes, the device's modifier keys held: the app under it highlights, Finder moves or copies), `HostClipboard`, `AppCrop` and `SharePill`, windows
+  in other Spaces listed, a press that lets go of a button still held. A Mac viewer's windows go to
+  the desk, never the iPad's Virtual Display staging; one the desk fails to take is captured where
+  it is, not raised or resized there for the pick or the viewer window (a click on it still raises it, so the click lands), and the desk is not tried again for it for 30 s when picked, 5 minutes beside it (`DeskStages.mayTry`); no display is made for a window Accessibility cannot find, and a picked window its app has put away is shown first, as its Dock icon would. Take-back (the menu's Shared Windows,
+  Stop Sharing; an app brought forward on the host by someone there: input there in the last 2 s) and following an app a device opened run only
+  while every device is a Mac viewer. A retired pipeline's frames stop at the switch
+  (`OutputSwitch`); the window list naming a new source goes out before its first frame, and input goes to that source from then
+  (a viewer's click that picked it comes right after). Dock icons'
+  requests are signed (an HMAC under a key Sill Viewer writes at launch, 0600, and a rising counter).
+- Checks: `mac-keys` (695, 7 mutants), `main-router` (32, 15 mutants), `desk-picture` (37, 15
+  mutants), `protocol` (every new payload), `compatibility`, `menus`, `pointer-control` and `key-strokes` updated.
+  Both apps notarized (`sill-notary`) during development, before the last commits. The iPhone build from Xcode 27.0 takes
+  `OTHER_SWIFT_FLAGS=-D SILL_NO_DUO_SDK`.
+- Merge after #78 (2026-10-15): main’s clipboard host, settings, permissions and iOS text path;
+  the viewer subscribes with `accepts: 2` once the host advertises clipboard support, sends images
+  only to generation 2 hosts, and sends `stop` when sharing goes off. Checks: all 47 suites;
+  clipboard 281/74 mutants, compatibility 124/29, protocol 244 + 8/36; 23 synthetic wire assertions
+  and 16 actual viewer-code assertions with named pasteboards, plus its subscription call-site
+  mutant caught. Release and iOS simulator builds passed. The plan’s merge section distinguishes
+  these checks from a real two-Mac session and macOS’s permission prompt.
+- Viewer permission follow-up: a new local copy may bring macOS’s first prompt while it has not
+  asked yet; Ask and Deny stop polling, while received copies still write. While Share Clipboard
+  is on, Ask or Deny shows Allow Clipboard Access… beside it, opening the host’s existing Paste
+  from Other Apps pane in System Settings.
+- Verified between two Macs on one network, each a host and a viewer of the other, and the iOS app
+  built for a device: the plan's "Verified". **Open:** the plan's "Open" (the stuck right button not reproduced
+  on purpose, Tailscale with Remote Access, the Dock menu's flash on the host, the desk's retry wait and a real
+  badge by hand; notifications and Dock bounces a separate spike).
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
 first. Wire, host and device; additive.
-- Wire: kind 32 `clipboard`, both ways, JSON `Clipboard {text, image, stop}` (Clipboard.swift): pull
-  request #66's number and shape (`image` reserved for a later generation; `stop`, a device's switch
-  going off, is this change's); `WindowList.clipboard: Int?` (1: text), so #66's `Bool` becomes an
-  Int as it rebases (a Bool does not decode). A device sends kind 32 only to a host that says 1 or
-  more; any kind 32 subscribes, and `{}` is text alone: a host sends `image` only to a subscription
-  that says it takes images (the floor; #66's host sends one to every subscriber). Text at most
-  256 KB of UTF-8, the JSON at most 1 MiB either way. Kinds 29–31 stay free (audio, #66's).
+- Wire: main’s kind 32 `clipboard`, both ways, JSON `Clipboard {text, image, stop, accepts}`
+  (Clipboard.swift). `WindowList.clipboard: Int?`: 1 for text; this merge keeps the Mac viewer’s
+  images as generation 2. The unreleased Bool on #66 became an Int. A device sends kind 32 only to
+  a host that says 1 or more; any kind 32 subscribes, `stop` ends sharing, and `{}` is text alone:
+  images go only to subscriptions with `accepts` 2 or more. Text at most 256 KB of UTF-8, JSON at
+  most 1 MiB either way. Kinds 29–31 remain the Mac viewer’s side streams.
 - Rules, pure, both ends: `ClipboardPolicy` (StreamProtocol). Never sent: an item a password manager
   or another app marks `org.nspasteboard.ConcealedType` or `org.nspasteboard.TransientType` (and
   three older markers), one from another device through Universal Clipboard
@@ -60,7 +125,7 @@ first. Wire, host and device; additive.
   site's words marked `<!-- Clipboard` for the release (docs/release-checklist.md part 1 §3 cuts them
   for a republish before it), and on-by-default's effect on the device's clipboard left to Noah (open
   question 1).
-- Verified (the plan's Results): `Tests/checks/clipboard` 259 checks and 72 of 72 mutants (in CI's matrix);
+- Verified on main before this merge (the plan's Results): `Tests/checks/clipboard` 259 checks and 72 of 72 mutants (in CI's matrix);
   `Tests/checks/run-all.sh` all 41; `swift build -c release` from `git archive` (only the CaptureProbe
   warning); the iOS app Debug and Release for the simulator and Debug for a device (only the
   StreamClient capture warning); H2 against origin/main (idle identical masked and sorted; a client that
@@ -4926,7 +4991,7 @@ good.
   `TrackpadGesture` (kind 28, device → host: a three- or four-finger gesture
   by name, and its fingers), sent only to a host whose `WindowList.gestures`
   is 1 or more. `Clipboard.swift` — `Clipboard` (kind 32, both ways: `text`,
-  `image` reserved for a later generation, a device's `stop`) and its 256 KB
+  `image` in generation 2, a device's `stop`, the subscription's `accepts`) and its 256 KB
   cap; `ClipboardPolicy.swift` — the clipboard's rules for both ends (what a
   device's message asks of the host and the rate, which a stop never meets;
   which change of the Mac's pasteboard the host sends and to whom, and only
@@ -5290,6 +5355,18 @@ good.
   Connect record) and every release's steps.
 - `Sources/VirtualDisplayProbe/` — CLI experiment for milestone 3; run it from
   Terminal (needs Screen Recording + Accessibility): `.build/release/VirtualDisplayProbe "Activity Monitor" --seconds 20`.
+- `Sources/MacClient/` — Sill Viewer, the Mac client (docs/mac-client-plan.md): `Shared/` symlinks
+  to iOSClient's session files; `main` and `AppDelegate` (AppKit), `StatusMenu` (the menu bar
+  icon), `MainMenu` and `MacMenus` (the remote app's menus in the menu bar), `StreamWindows` (a
+  window per host window, the side streams' feeds, restore, the Dock, drops; `StreamWindow`,
+  `DropContainer`, `SideView`), `MainRouter` (the main stream into the right window),
+  `StreamInputView` (input, drags out, `FilePromises`), `LiveDrop` (a drag followed live on the host), `WindowPill`, `ConnectView`,
+  `HEVCDisplayView`, `ClipboardSync`, `AudioPlayer`, `DockProxies`, `SystemKeyTap`, `MacKeyMap`,
+  DEBUG `MacInputTest` (and `MacResizeTest`). `Sources/SillDockProxy/` is the Dock icon helper.
+  `Packaging/Client-Info.plist`, `Scripts/make-client-app.sh`. iOSClient's `ClientPlatform.swift` and
+  `HEVCSampleFeed.swift` are shared by both clients. Host side: `SideStreams`, `DeskStages`,
+  `AppCrop` (+ `SharePill`), `HostClipboard`, `AppAudio`, `FileDrops` (+ `DragOut`), `LiveDrags` in
+  `Sources/SillHost`; `Sources/StreamProtocol/SideStreams.swift` their payloads.
 - `iOSClient/` — `Sill.xcodeproj` and its sources: `StreamClient` (Bonjour: a
   network browser and, when `DiscoveryPolicy` says, a nearby peer-to-peer one,
   each made again after the background and after a failure (`cameForward`,
@@ -5608,6 +5685,7 @@ SILL_TOUCHRIG_SIM='Sill touchrig' Tests/touchrig/run.sh new && Tests/touchrig/ru
 Tests/checks/run-all.sh                 # every pure check, as CI runs them (~5 min; --mutants adds the mutants, well over an hour)
 Scripts/pacing/run.sh                   # remote pacing and the link's judge, this tree against origin/main, no encoder, all on loopback (~25 min; --full ~45; --list)
 SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1 SILL_TEST_ORIGIN=vpn SILL_TEST_PATTERN=noise .build/release/SillHost --synthetic --remote   # an away session whose stream follows its quality
+Scripts/make-client-app.sh --debug --open   # .build/Sill Viewer.app, the Mac client (-SillConnect, -SillInputTest 1, -SillMenuTest press)
 Scripts/make-app.sh                     # .build/Sill.app, signed with the Apple Development identity (~2 s unchanged)
 Scripts/make-app.sh --install --open    # Noah: replace /Applications/Sill.app (a running one quits first), launch it
 SILL_SIGN_IDENTITY='Developer ID Application: … (9B2KKVM937)' Scripts/make-app.sh --release   # M6
@@ -6051,7 +6129,8 @@ device keeps working with Macs from the first public build on, or each says why
   three cases (a new source goes in an optional field, with `active` still one of the three). A new
   `InputEvent` case, scroll phase or window command goes only to a host that said it takes it (a
   kind or a field only newer hosts send), and a gesture ends with a scroll phase the first build
-  knows.
+  knows. The middle button is such a case: `PointerAction.middleDown/Up` only to a
+  host whose window list says `middleButton` true.
 - A device is refused, never served wrong. A host that can no longer serve older devices raises
   `DeviceGate.minimumDeviceVersion` ("0" today) by the plan's §4.6, and they get kind 22 "update"
   before anything else. A device from 2026-09-25 on that receives it shows the host's message word

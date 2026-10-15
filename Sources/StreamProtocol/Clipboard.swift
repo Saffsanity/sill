@@ -1,7 +1,7 @@
 import Foundation
 
-/// Kind 32, both ways: the clipboard (docs/clipboard-plan.md). Text in this generation
-/// (`WindowList.clipboard` 1); the rules are ClipboardPolicy's.
+/// Kind 32, both ways: the clipboard (docs/clipboard-plan.md). Generation 1 is text,
+/// generation 2 also handles images; the rules are ClipboardPolicy's.
 ///
 /// - Device → host, only to a host whose window list says `clipboard` 1 or more: any kind 32
 ///   subscribes the connection to the Mac's copies (an empty one, `{}`, is what a device sends at
@@ -11,7 +11,7 @@ import Foundation
 ///   another device. A subscription says what the device takes, and `{}` is text alone: a host sends
 ///   `image` only to a connection whose subscription carries a later field saying it takes images
 ///   (for example `"accepts":2`, the generation), never to one that sent `{}`, which drops it
-///   (found in review: #66's host sends an image to every subscriber; as it rebases it follows this).
+///   (`accepts: 2` opts into images).
 ///
 /// HostSettings.swift's rules apply: JSON; every field optional and left out when nil, so `{}` is a
 /// subscription; fields added later are optional. Pull request #66 (a Mac client) uses this number
@@ -19,16 +19,18 @@ import Foundation
 public struct Clipboard: Codable, Hashable, Sendable {
     /// The text: at most `maxTextBytes` of UTF-8, never empty when sent.
     public var text: String?
-    /// Reserved for a later generation (`clipboard` 2): an image, PNG or JPEG (#66's). A host of this
-    /// generation ignores it, and a device sends none to it; a later host sends it only to a device
+    /// Generation 2: an image, PNG or JPEG. A text-only host ignores it; a host sends it only to a device
     /// whose subscription said it takes images, never to one that subscribed with `{}`.
     public var image: Data?
     /// Device → host: true, this device's Share Clipboard went off; the host sends it nothing more
     /// until its next kind 32. Never from a host.
     public var stop: Bool?
 
-    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil) {
-        self.text = text; self.image = image; self.stop = stop
+    /// Device → host: the generation this connection takes; nil means text alone.
+    public var accepts: Int?
+
+    public init(text: String? = nil, image: Data? = nil, stop: Bool? = nil, accepts: Int? = nil) {
+        self.text = text; self.image = image; self.stop = stop; self.accepts = accepts
     }
 
     /// The most text either way: 256 KB of UTF-8 (262,144 bytes). The whole message's JSON also
@@ -37,4 +39,19 @@ public struct Clipboard: Codable, Hashable, Sendable {
     /// `maxOtherHostPayload`): JSON writes a control character as six bytes, so 256 KB of text can
     /// be more than 1 MiB as JSON, and then it is not sent.
     public static let maxTextBytes = 256 * 1024
+    /// Image bytes before base64, leaving space for text and JSON under the shared 1 MiB cap.
+    public static let maxImageFromDevice = 600_000
+    public static let maxImageFromHost = 600_000
+    public static let messageFromDevice = ClipboardPolicy.maxPayload
+    public static let messageFromHost = ClipboardPolicy.maxPayload
+
+    /// Whole when it fits the policy and wire caps, otherwise text alone when that fits.
+    public func payload(within limit: Int) -> Data? {
+        guard text == nil || text!.utf8.count <= Self.maxTextBytes else { return nil }
+        let cap = min(limit, ClipboardPolicy.maxPayload)
+        let whole = Wire.encode(self)
+        if !whole.isEmpty, whole.count <= cap { return whole }
+        guard image != nil, let text, let fallback = ClipboardPolicy.payload(text: text), fallback.count <= cap else { return nil }
+        return fallback
+    }
 }

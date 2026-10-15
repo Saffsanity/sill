@@ -30,6 +30,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Sill sends the sound of the apps you control from another Mac to that Mac, and silences them here while it does.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_sill._tcp</string>

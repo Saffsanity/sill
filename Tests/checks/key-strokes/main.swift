@@ -743,6 +743,7 @@ struct Glue {
         case .pointer(.leftUp, _, _): left = false; log.append("left up" + at)
         case .pointer(.rightDown, _, _): right = true; log.append("right down")
         case .pointer(.rightUp, _, _): right = false; log.append("right up" + at)
+        case .pointer(.middleDown, _, _), .pointer(.middleUp, _, _): log.append("middle")   // no device here sends it
         case .key(let u, let d, let m):
             for s in keys.key(usage: u, down: d, modifiers: m, from: ObjectIdentifier(c)) ?? [] {
                 log.append("key \(s.virtualKey) \(s.down ? "down" : "up") (\(names(s.flags)))")
@@ -788,6 +789,11 @@ check(!DroppedInput.stillGoes(.pointer(.leftUp, x: 0, y: 0), keyDown: { _ in fal
       && !DroppedInput.stillGoes(key(uC, false, 0), keyDown: { _ in false }, leftDown: true, rightDown: true)
       && DroppedInput.stillGoes(key(uC, false, 0), keyDown: { $0 == uC }, leftDown: false, rightDown: false),
       "an up goes only for what is down")
+// The middle button's up, likewise (the Mac client's).
+check(DroppedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: false, rightDown: false, middleDown: true)
+      && !DroppedInput.stillGoes(.pointer(.middleUp, x: 0, y: 0), keyDown: { _ in false }, leftDown: true, rightDown: true)
+      && !DroppedInput.stillGoes(.pointer(.middleDown, x: 0, y: 0), keyDown: { _ in false }, leftDown: false, rightDown: false, middleDown: true),
+      "a middle button's up goes only while it is down, and its down never")
 // Random: a device's finger and keys, each event placed or not; whatever it does, once it has let go
 // of everything nothing is down on the Mac, and a move while none of its buttons is down is a move.
 do {

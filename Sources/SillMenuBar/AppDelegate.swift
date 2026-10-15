@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         RunLoop.main.add(poll, forMode: .common)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 4) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2 + HostShutdown.watchdog) {
             print("Quit timed out; exiting anyway.")
             exit(0)
         }

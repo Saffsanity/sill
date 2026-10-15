@@ -38,7 +38,7 @@ final class HostClipboard {
     /// Share clipboard with devices.
     private(set) var enabled: Bool
     /// The window lists' `clipboard`: the generation while on, nil while off.
-    var advertised: Int? { enabled ? ClipboardPolicy.generation : nil }
+    var advertised: Int? { enabled ? ClipboardPolicy.imageGeneration : nil }
 
     private let server: StreamServer
     /// The pasteboard, on its own queue: `NSPasteboard.general`, or a synthetic host's own.
@@ -52,7 +52,7 @@ final class HostClipboard {
     let testHookLine: String?
 
     /// The subscribers, by connection, and each one's name for the lines.
-    private var subscribers: [ObjectIdentifier: (connection: NWConnection, who: String)] = [:]
+    private var subscribers: [ObjectIdentifier: (connection: NWConnection, who: String, accepts: Int?)] = [:]
     /// In the order they subscribed, for a stable order of sends.
     private var order: [ObjectIdentifier] = []
     private var look: Task<Void, Never>?
@@ -148,18 +148,24 @@ final class HostClipboard {
         guard enabled else { return }
         let id = ObjectIdentifier(connection)
         // What it asks first, then the rate, which a stop never meets (ClipboardPolicy.hostReceives).
-        let got = ClipboardPolicy.hostReceives(payload, arrivals: arrivals[id] ?? [], now: ProcessInfo.processInfo.systemUptime)
+        let got = ClipboardPolicy.hostReceives(payload, arrivals: arrivals[id] ?? [], now: ProcessInfo.processInfo.systemUptime, takesImages: true)
         arrivals[id] = got.kept
+        let accepts = Wire.decode(Clipboard.self, from: payload)?.accepts
         switch got.ask {
         case .subscribe:
-            subscribe(connection, who: who)
+            subscribe(connection, who: who, accepts: accepts, replacesAcceptance: true)
         case .set(let text):
-            subscribe(connection, who: who)
-            board.write(text)
+            subscribe(connection, who: who, accepts: accepts)
+            board.write(Clipboard(text: text))
             Stats.shared.bump("clip.recv")
             let others = ClipboardPolicy.forward(to: order, from: id).compactMap { subscribers[$0]?.connection }
             if testLog { print("Test clipboard: \(text.utf8.count) bytes from \(who) set on the pasteboard, sent to \(others.count) other device\(others.count == 1 ? "" : "s").") }
             send(payload: ClipboardPolicy.payload(text: text), to: others)
+        case .image(let clip):
+            subscribe(connection, who: who, accepts: accepts)
+            board.write(clip)
+            Stats.shared.bump("clip.recv")
+            send(clip, excluding: id)
         case .stop:
             guard let gone = subscribers.removeValue(forKey: id) else { return }
             order.removeAll { $0 == id }
@@ -179,14 +185,17 @@ final class HostClipboard {
         if subscribers.isEmpty { stopLooking() }
     }
 
-    private func subscribe(_ connection: NWConnection, who: String) {
+    private func subscribe(_ connection: NWConnection, who: String, accepts: Int?, replacesAcceptance: Bool = false) {
         let id = ObjectIdentifier(connection)
-        guard subscribers[id] == nil else { return }
+        if let previous = subscribers[id] {
+            if replacesAcceptance || accepts != nil { subscribers[id] = (connection, previous.who, accepts) }
+            return
+        }
         if let testBoardName, !saidTestBoard {
             saidTestBoard = true
             print("Test clipboard: a pasteboard of this host's own, \(testBoardName), never this Mac's clipboard.")
         }
-        subscribers[id] = (connection, who)
+        subscribers[id] = (connection, who, accepts)
         order.append(id)
         print(ClipboardPolicy.Copy.sharesLine(device: who))
         startLooking()
@@ -222,9 +231,8 @@ final class HostClipboard {
         guard let (count, decision) = looked.change else { return }
         switch decision {
         case .send(let payload):
-            let to = order.compactMap { subscribers[$0]?.connection }
-            if testLog { print("Test clipboard: change \(count) sent to \(to.count) device\(to.count == 1 ? "" : "s") (\(payload.count) bytes of JSON).") }
-            send(payload: payload, to: to)
+            let sent = Wire.decode(Clipboard.self, from: payload).map { send($0) } ?? 0
+            if testLog { print("Test clipboard: change \(count) sent to \(sent) device\(sent == 1 ? "" : "s") (\(payload.count) bytes of JSON before subscriber filtering).") }
         case .skip(let why):
             if testLog { print("Test clipboard: change \(count) not sent (\(why.rawValue)).") }
         }
@@ -306,20 +314,34 @@ final class HostClipboard {
             }
             seen = count
             let own = NSPasteboard.PasteboardType(ClipboardPolicy.ownType)
-            let decision = ClipboardPolicy.hostDecides(types: types, changeCount: count, ownChangeCount: ownChangeCount,
+            let decision = ClipboardPolicy.hostContentsDecides(types: types, changeCount: count, ownChangeCount: ownChangeCount,
                                                        launchID: launchID,
                                                        ownMarker: { self.board.string(forType: own) },
-                                                       text: { self.board.string(forType: .string) })
+                                                       text: { self.board.string(forType: .string) },
+                                                       image: {
+                for type in [NSPasteboard.PasteboardType.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")] {
+                    if let data = self.board.data(forType: type) {
+                        return ClipboardImage.fit(data, limit: Clipboard.maxImageFromHost)
+                    }
+                }
+                return nil
+            })
             return Look(access: access, change: (count, decision))
         }
 
         /// A device's text, for this Mac only, marked as this launch's, its change count kept. Written
         /// whatever macOS says of reads: writing needs no leave.
-        func write(_ text: String) {
+        func write(_ clip: Clipboard) {
             queue.async {
+                if let image = clip.image, NSBitmapImageRep(data: image) == nil, clip.text == nil { return }
                 let prepared = self.board.prepareForNewContents(with: .currentHostOnly)
                 let item = NSPasteboardItem()
-                item.setString(text, forType: .string)
+                if let text = clip.text { item.setString(text, forType: .string) }
+                if let image = clip.image, let rep = NSBitmapImageRep(data: image) {
+                    item.setData(image, forType: image.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? .png : NSPasteboard.PasteboardType("public.jpeg"))
+                    if let tiff = rep.tiffRepresentation { item.setData(tiff, forType: .tiff) }
+                }
+                item.setData(Data(), forType: ClipboardPasteboard.fromOtherMacType)
                 item.setString(self.launchID, forType: NSPasteboard.PasteboardType(ClipboardPolicy.ownType))
                 self.board.writeObjects([item])
                 // The count after it: read back while macOS allows reads, as the looks do; else the one
@@ -329,6 +351,19 @@ final class HostClipboard {
                 self.seen = count
             }
         }
+    }
+
+    /// Apply the subscription's generation to each recipient, including relayed device images.
+    @discardableResult
+    private func send(_ clip: Clipboard, excluding sender: ObjectIdentifier? = nil) -> Int {
+        var sent = 0
+        for id in order where id != sender {
+            guard let subscriber = subscribers[id],
+                  let payload = ClipboardPolicy.payload(clip, forAccepts: subscriber.accepts) else { continue }
+            send(payload: payload, to: [subscriber.connection])
+            sent += 1
+        }
+        return sent
     }
 
     private func send(payload: Data?, to connections: [NWConnection]) {

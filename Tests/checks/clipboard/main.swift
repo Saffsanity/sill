@@ -28,8 +28,8 @@ func header(_ kind: UInt8) -> StreamHeader? {
 }
 check(StreamMessageKind.clipboard.rawValue == 32 && StreamMessageKind(rawValue: 32) == .clipboard, "kind 32 is clipboard")
 check(header(32)?.kind == .clipboard && header(32)?.payloadLength == 2, "a kind 32 header parses")
-check([29, 30, 31, 33].allSatisfy { StreamMessageKind(rawValue: $0) == nil && header($0)?.kind == .unknown },
-      "29 (the audio plan's), 30 and 31 (#66's side streams) and 33 are not this build's")
+check(header(29)?.kind == .sideStreams && header(30)?.kind == .sideParameterSets && header(31)?.kind == .sideFrame && header(33)?.kind == .audio,
+      "29–31 remain side streams; 33 remains audio")
 check(StreamMessageKind(rawValue: 28) == .gesture, "28 is still the gesture")
 let message = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe: false, payload: P.subscription).serialized()
 check(message.first == 32 && StreamMessage.parseHeader(message)?.kind == .clipboard && message.count == StreamMessage.headerLength + 2,
@@ -64,6 +64,35 @@ check(Wire.decode(Clipboard.self, from: data("[]")) == nil, "not an object")
 check(Clipboard.maxTextBytes == 262_144, "the text cap: 256 KB")
 check(P.maxPayload == 1_048_576 && P.maxPayload == StreamMessage.maxClientPayload && P.maxPayload <= StreamMessage.maxOtherHostPayload,
       "the JSON cap: the host's on a device's message, within a device's on a host's")
+
+
+// Generation 2: subscriptions opt into images; the text-only device remains unchanged.
+check(P.imageGeneration == 2, "images use generation 2")
+check(json(Clipboard(accepts: 2)) == #"{"accepts":2}"#, "the optional accepts field")
+check(Wire.decode(Clipboard.self, from: data(#"{"accepts":2,"later":true}"#)) == Clipboard(accepts: 2), "accepts round-trips beside an unknown field")
+check(P.viewerSubscription(hostClipboard: nil) == nil && P.viewerSubscription(hostClipboard: 0) == nil, "viewer sends nothing to an older or disabled host")
+check(P.viewerSubscription(hostClipboard: 1) == Clipboard(accepts: 2), "viewer declares accepts 2 to a text host; that host sends only text")
+check(P.viewerSubscription(hostClipboard: 2) == Clipboard(accepts: 2) && P.viewerSubscription(hostClipboard: 3) == Clipboard(accepts: 2), "viewer subscribes with accepts 2 on image hosts")
+let picture = Clipboard(text: "caption", image: Data([1, 2, 3]))
+for accepts in [nil, 0, 1] as [Int?] {
+    check(P.payload(picture, forAccepts: accepts).flatMap { Wire.decode(Clipboard.self, from: $0) } == Clipboard(text: "caption"), "a text subscriber never gets the image")
+    check(P.payload(Clipboard(image: picture.image), forAccepts: accepts) == nil, "an image alone never goes to a text subscriber")
+}
+check(P.payload(picture, forAccepts: 2).flatMap { Wire.decode(Clipboard.self, from: $0) } == picture, "an image subscriber receives text and image")
+check(P.fromDevice(Wire.encode(picture), takesImages: true) == .image(picture), "an image-capable host takes a viewer image")
+check(P.fromDevice(Wire.encode(Clipboard(image: picture.image, stop: true)), takesImages: true) == .stop, "stop wins over an image")
+check(P.fromDevice(Data(repeating: 32, count: P.maxPayload + 1), takesImages: true) == .refuse(.tooLong), "oversize image JSON refused before decode")
+let imageRate = P.hostReceives(Wire.encode(picture), arrivals: [0, 0, 0, 0], now: 0, takesImages: true)
+check(imageRate.ask == .refuse(.rate), "images obey the device rate cap")
+check(Clipboard(text: String(repeating: "a", count: Clipboard.maxTextBytes + 1)).payload(within: P.maxPayload) == nil, "viewer text obeys the text cap")
+check(Clipboard(image: Data(count: P.maxPayload)).payload(within: P.maxPayload) == nil, "viewer image base64 obeys the whole JSON cap")
+var imageReads = 0
+let protectedImage = P.hostContentsDecides(types: [P.concealedType], changeCount: 1, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil }, image: { imageReads += 1; return picture.image })
+check(protectedImage == .skip(.marked) && imageReads == 0, "concealed images never read")
+let remoteImage = P.hostContentsDecides(types: [P.remoteClipboardType], changeCount: 1, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil }, image: { imageReads += 1; return picture.image })
+check(remoteImage == .skip(.remote) && imageReads == 0, "Universal Clipboard images never read")
+let imageDecision = P.hostContentsDecides(types: ["public.png"], changeCount: 1, ownChangeCount: nil, launchID: "L", ownMarker: { nil }, text: { nil }, image: { picture.image })
+check(imageDecision == .send(Wire.encode(Clipboard(image: picture.image))), "an image-only pasteboard can be sent")
 
 // MARK: - payload(text:)
 
@@ -142,6 +171,20 @@ check(P.macAccess(raw: nil) == .allowed, "before macOS 15.4 (no such setting): e
 check(P.macAccess(raw: 0) == .notAsked && P.macAccess(raw: 1) == .asks && P.macAccess(raw: 2) == .allowed && P.macAccess(raw: 3) == .denied,
       "0 default (not asked yet), 1 ask, 2 always allow, 3 always deny")
 check(P.macAccess(raw: 4) == .asks && P.macAccess(raw: -1) == .asks, "a value this build does not know: as asking, nothing read in the background")
+for (access, mayRead) in [(P.MacAccess.allowed, true), (.notAsked, true), (.asks, false), (.denied, false)] {
+    check(P.viewerMayRead(access: access) == mayRead, "viewer reads under \(access.rawValue): \(mayRead)")
+    for on in [false, true] {
+        check(P.viewerNeedsAccessHelp(access: access, switchOn: on) == (on && (access == .asks || access == .denied)),
+              "viewer clipboard permission help under \(access.rawValue), sharing \(on)")
+    }
+}
+check(P.viewerMayRead(access: P.macAccess(raw: nil)), "viewer reads before macOS 15.4")
+check(!P.viewerMayRead(access: P.macAccess(raw: 4)), "an unknown permission answer never enables viewer reads")
+check(P.pastePrivacyURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard",
+      "viewer opens the host's existing Paste from Other Apps route")
+check(C.viewerAccessButton == "Allow Clipboard Access…", "viewer permission menu item")
+check(C.viewerAccessHint == "Set this app to Allow under Paste from Other Apps in Privacy & Security. Copies from the other Mac still arrive.",
+      "viewer permission help keeps incoming copies available")
 check(P.hostLooks(.allowed) && !P.hostLooks(.notAsked) && !P.hostLooks(.asks) && !P.hostLooks(.denied), "the host reads only while every read is allowed")
 for was in [nil, .allowed, .notAsked, .asks, .denied] as [P.MacAccess?] {
     for now in [.allowed, .notAsked, .asks, .denied] as [P.MacAccess] {
@@ -382,7 +425,7 @@ for _ in 0..<5_000 {
             if !hostOn { modelFailures += 1; break }    // a kind 32 to a host that did not say it takes it
             let payload = step.send == .subscribe ? P.subscription : P.stopping
             switch P.fromDevice(payload) {
-            case .subscribe, .set: hostSubscribed = true
+            case .subscribe, .set, .image: hostSubscribed = true
             case .stop: hostSubscribed = false
             case .refuse: modelFailures += 1
             }
@@ -427,7 +470,7 @@ for _ in 0..<5_000 {
             let got = P.hostReceives(payload, arrivals: arrivals, now: now)
             arrivals = got.kept
             switch got.ask {
-            case .subscribe, .set: hostSubscribed = true
+            case .subscribe, .set, .image: hostSubscribed = true
             case .stop: hostSubscribed = false
             case .refuse(.rate): if step.send == .subscribe { refusedSubscriptions += 1 }
             case .refuse: quickFailures += 1
