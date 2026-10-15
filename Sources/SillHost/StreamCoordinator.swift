@@ -1181,7 +1181,7 @@ package final class StreamCoordinator {
                     return nil
                 }
                 made.desk = { [unowned self] in
-                    guard !self.synthetic || VirtualStage.testDesk else { return nil }
+                    guard !self.synthetic || VirtualStage.testDesk, !self.displayStreamsDead else { return nil }
                     return self.desk
                 }
                 made.displayStreamsDead = { [unowned self] in self.displayStreamsDead }
@@ -1711,7 +1711,7 @@ package final class StreamCoordinator {
                 // Sill's desk takes the window off this Mac's displays: nothing there to raise or fit.
                 // A window the desk just failed to take is captured where it is for a while, not
                 // tried again at every restart (DeskStages.mayTry).
-                let toDesk = deskWanted && desk.mayTry(id, picked: true)
+                let toDesk = deskWanted && !displayStreamsDead && desk.mayTry(id, picked: true)
                 // A Mac viewer's window is never raised or resized on this Mac's own screens, the desk
                 // or not: the person here keeps their desk.
                 if comeForward, !shuttingDown, !deskWanted { activateAndRaise(window: w) }
@@ -2016,7 +2016,7 @@ package final class StreamCoordinator {
     // MARK: Display streams stopped
 
     /// No display stream delivers anything, on any display (`DisplayStreamProbe`): every window
-    /// streams alone, the menu says so, and a check every minute while a device is connected watches
+    /// goes home off the desk and streams alone from there, the menu says so, and a check every minute while a device is connected watches
     /// for them coming back. Nothing Sill can do mends it; restarting WindowServer (or logging out) does.
     private func displayStreamsStopped() async {
         guard !displayStreamsDead else { return }
@@ -2024,6 +2024,13 @@ package final class StreamCoordinator {
         Stats.shared.bump("desk.displayStreamsDead")
         print("Display streams: WindowServer delivers no display stream on this Mac (a moment's stream of the main display got nothing); every window streams alone, without its menus, until it does again. Logging out, or restarting WindowServer, mends it.")
         status.update { $0.displayStreamsDead = true }
+        // Off the desk too: a window on a hidden display WindowServer no longer composites is never
+        // redrawn there, so captured alone it only ever reported that nothing changed (the stream
+        // froze, 2026-10-15). Each window goes home, where it is drawn; its display is kept, not
+        // removed (`DeskStages.release`).
+        await sideStreams?.stopStreams()
+        await capture.stop()
+        for id in desk.staged { desk.release(id) }
         sideStreams?.changed()
         displayStreamsCheck?.cancel()
         displayStreamsCheck = Task { @MainActor [weak self] in
