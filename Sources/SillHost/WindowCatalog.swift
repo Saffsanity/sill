@@ -254,9 +254,10 @@ final class WindowCatalog {
         }
         if let pinned, !visible.contains(where: { $0.windowID == pinned.windowID }) { visible.append(pinned) }
         // The system's order is not front-to-back and shuffles between polls. The brief wants a
-        // fixed order in the bar, so keep first-seen order and append newcomers.
+        // fixed order in the bar, so keep first-seen order, newcomers at the start: a window just
+        // opened is the one most likely wanted next, and the end of a long bar is off screen.
         let byID = Dictionary(uniqueKeysWithValues: visible.map { ($0.windowID, $0) })
-        seenOrder = seenOrder.filter { byID[$0] != nil } + visible.map(\.windowID).filter { !seenOrder.contains($0) }
+        seenOrder = visible.map(\.windowID).filter { !seenOrder.contains($0) } + seenOrder.filter { byID[$0] != nil }
         let ordered = seenOrder.compactMap { byID[$0] }
         let newInfos = ordered.map { w in
             WindowInfo(id: w.windowID,
