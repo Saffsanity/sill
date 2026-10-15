@@ -65,16 +65,38 @@ final class HEVCDisplayView: UIView {
                       width: size.width, height: size.height)
     }
 
-    /// The picture as it shows now, cropped to the video (no letterbox), with the pointer sprite if it
-    /// shows: Capture Screen. Nil while no video has arrived. Main thread.
-    func snapshot() -> UIImage? {
+    /// The picture as it shows now, cropped to the video (no letterbox): Capture Screen (full size,
+    /// with the pointer sprite if it shows) or a saved Mac's tile preview (`maxWidth: 320,
+    /// includePointer: false`). Nil while no video has arrived. Main thread.
+    func snapshot(maxWidth: CGFloat? = nil, includePointer: Bool = true) -> UIImage? {
         let rect = Self.videoRect(in: bounds, videoSize: pointerVideoSize)
         guard rect.width > 0, rect.height > 0 else { return nil }
+        let width = maxWidth.map { min($0, rect.width) } ?? rect.width
+        let scale = width / rect.width
+        let size = CGSize(width: width, height: (rect.height * scale).rounded())
+        guard size.width > 0, size.height > 0 else { return nil }
         let format = UIGraphicsImageRendererFormat.preferred()
         // The screen's pixels: drawHierarchy draws what the screen shows, so more would only enlarge it.
-        format.scale = window?.screen.scale ?? 2
-        return UIGraphicsImageRenderer(size: rect.size, format: format).image { _ in
-            drawHierarchy(in: CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: bounds.size), afterScreenUpdates: false)
+        format.scale = maxWidth == nil ? (window?.screen.scale ?? 2) : 2
+        let wasHidden = cursorLayer.isHidden
+        if !includePointer {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            cursorLayer.isHidden = true
+            CATransaction.commit()
+        }
+        defer {
+            if !includePointer {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                cursorLayer.isHidden = wasHidden
+                CATransaction.commit()
+            }
+        }
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            drawHierarchy(in: CGRect(x: -rect.minX * scale, y: -rect.minY * scale,
+                                     width: bounds.width * scale, height: bounds.height * scale),
+                          afterScreenUpdates: false)
         }
     }
 
