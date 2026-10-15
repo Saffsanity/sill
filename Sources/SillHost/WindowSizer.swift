@@ -20,11 +20,23 @@ final class WindowSizer {
     /// the same window. Covers rounding between the two APIs, not a window that moved.
     private static let frameTolerance: CGFloat = 4
 
+    /// What `resize` did, for the window's way back (WindowRestore, issue #57): the window's element,
+    /// matched once, with the frame it had before this resize (`placement.originalFrame`), and the
+    /// frame the app took (Accessibility's, read back: an app enforces a minimum, snaps to a grid).
+    struct Fit {
+        let placement: Placement
+        let after: CGRect
+        var before: CGRect { placement.originalFrame }
+    }
+
     /// Resizes `window` to `size` in Mac points (top-left anchored), nudging it back onto its
-    /// display if the new size would hang off the edge. Returns the size the app actually took —
-    /// apps enforce minimums and some snap to a grid — or nil if Accessibility is off, the window
-    /// cannot be found through AX, or the app refused.
-    func resize(window: SCWindow, to size: CGSize) -> CGSize? {
+    /// display if the new size would hang off the edge (WindowRestore.fit, the sequence). Returns what
+    /// it did (`Fit`: the size the app actually took is `after.size`; apps enforce minimums and some
+    /// snap to a grid; for a size that went unanswered, the frame it had, in case it takes the size
+    /// later), or nil if Accessibility is off, the window cannot be found through AX, it is in full
+    /// screen (left alone: nothing written, nothing to record), or the app refused the size; a nudge
+    /// made for a refused or unanswered size is put back at once.
+    func resize(window: SCWindow, to size: CGSize) -> Fit? {
         guard AXIsProcessTrusted() else {
             if !warnedUntrusted {
                 warnedUntrusted = true
@@ -40,31 +52,46 @@ final class WindowSizer {
             return nil
         }
         AXUIElementSetMessagingTimeout(ax, 1.0)
-
-        // Move first if the target frame would leave the display, so an app that clamps its frame
-        // to the screen does not shrink the window instead of letting it move.
-        let area = Self.visibleArea(around: Self.frame(of: ax) ?? window.frame)
-        if let origin = Self.position(of: ax), let area {
-            let fitted = Self.keep(CGRect(origin: origin, size: size), in: area)
-            if fitted != origin { _ = Self.set(ax, position: fitted) }   // a window that will not move may still resize
-        }
-
-        var wanted = size
-        guard let value = AXValueCreate(.cgSize, &wanted) else { return nil }
-        let err = AXUIElementSetAttributeValue(ax, kAXSizeAttribute as CFString, value)
-        guard err == .success else {
-            print("Window sizing: AX refused the size (error \(err.rawValue)).")
+        // The frame before is read in the sequence: the AX frame is live; the SCWindow's (the fallback)
+        // can be two seconds stale.
+        let p = Placement(windowID: window.windowID, pid: pid, element: ax, originalFrame: .null,
+                          appName: window.owningApplication?.applicationName ?? "?", title: window.title ?? "")
+        var windows = AXWindows(sizer: self)
+        switch WindowRestore.fit(p, to: size, fallback: Self.liveBounds(of: window.windowID) ?? window.frame, on: &windows) {
+        case .fullScreen:
+            print("Window sizing: \(windows.name(p)) is full screen; not resizing.")
             return nil
+        case .refused(let code):
+            print("Window sizing: AX refused the size (error \(code)).")
+            return nil
+        case .fitted(let before, let after, let timedOut):
+            if timedOut { print("Window sizing: \(windows.name(p)) did not answer the size in time; if it takes it later, it still goes back.") }
+            return Fit(placement: p.homed(at: before), after: after)
         }
-        guard let actual = Self.size(of: ax) else { return nil }
+    }
 
-        // The app may have taken a different size than asked (a minimum, usually larger): check
-        // again with what it actually is.
-        if let origin = Self.position(of: ax), let area {
-            let fitted = Self.keep(CGRect(origin: origin, size: actual), in: area)
-            if fitted != origin { _ = Self.set(ax, position: fitted) }
+    /// WindowRestore's reads and writes through Accessibility (a fit, a fitted window's way back),
+    /// on the element a placement holds. The window server says whether the window is still listed.
+    @MainActor struct AXWindows: @MainActor WindowRestore.Access {
+        let sizer: WindowSizer
+        func frame(_ p: Placement) -> CGRect? { WindowSizer.frame(of: p.element) }
+        func isFullScreen(_ p: Placement) -> Bool { WindowSizer.isFullScreen(p.element) }
+        func isListed(_ p: Placement) -> Bool { WindowSizer.liveBounds(of: p.windowID) != nil }
+        func visibleArea(around r: CGRect) -> CGRect? { WindowSizer.visibleArea(around: r) }
+        func setPosition(_ p: Placement, _ origin: CGPoint) -> WindowRestore.Write { WindowSizer.write(WindowSizer.set(p.element, position: origin)) }
+        func setSize(_ p: Placement, _ size: CGSize) -> WindowRestore.Write { WindowSizer.write(WindowSizer.set(p.element, size: size)) }
+        func put(_ p: Placement, at frame: CGRect) -> Bool { sizer.restore(p.homed(at: frame)) }
+        func name(_ p: Placement) -> String { WindowRestore.name(app: p.appName, title: p.title) }
+    }
+
+    /// An Accessibility write's answer as WindowRestore takes it: cannotComplete is what a messaging
+    /// timeout returns (a busy app, which may still apply the write).
+    private static func write(_ e: AXError) -> WindowRestore.Write {
+        switch e {
+        case .success: return .done
+        case .cannotComplete: return .timedOut
+        default: return .refused(e.rawValue)
         }
-        return actual
     }
 
     // MARK: Placing a window on the virtual display (--virtual-display)
@@ -80,6 +107,12 @@ final class WindowSizer {
         let originalFrame: CGRect
         let appName: String
         let title: String
+
+        /// The same window with `frame` as its way home: the virtual display staging a window Sill
+        /// had fitted, and a fitted window going back (WindowRestore).
+        func homed(at frame: CGRect) -> Placement {
+            Placement(windowID: windowID, pid: pid, element: element, originalFrame: frame, appName: appName, title: title)
+        }
     }
 
     /// The Accessibility window of `pid` whose frame is `rect` (a stranger found on the virtual
@@ -221,7 +254,7 @@ final class WindowSizer {
         if let live = Self.liveBounds(of: p.windowID), !Self.onAnyScreen(live),
            let area = Self.visibleArea(around: CGDisplayBounds(CGMainDisplayID())) {
             // The original display was unplugged while the window was away: keep it reachable.
-            let origin = Self.keep(live, in: area)
+            let origin = WindowRestore.keep(live, in: area)
             _ = Self.set(p.element, position: origin)
             print("Window placement: \(p.appName)'s original display is gone; moved it onto the main display at \(Int(origin.x)),\(Int(origin.y)).")
         }
@@ -296,9 +329,20 @@ final class WindowSizer {
 
     // MARK: Staying on screen
 
+    /// The active displays' frames (CG global points, the virtual display's while it exists), for
+    /// telling a full-screen window from its listed frame (WindowRestore.coversDisplay).
+    static func displayFrames() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
+    }
+
     /// The visible frame (menu bar and Dock excluded) of the display holding most of `rect`, in
-    /// CG global coordinates. NSScreen is bottom-left based on the primary display; flip it.
-    private static func visibleArea(around rect: CGRect) -> CGRect? {
+    /// CG global coordinates. NSScreen is bottom-left based on the primary display; flip it. Also
+    /// the area a moved window's way back is kept in (StreamCoordinator.restoreFits).
+    static func visibleArea(around rect: CGRect) -> CGRect? {
         guard let primaryHeight = NSScreen.screens.first?.frame.height else { return nil }
         let areas = NSScreen.screens.map { screen -> CGRect in
             let v = screen.visibleFrame
@@ -309,17 +353,6 @@ final class WindowSizer {
             return i.isNull ? 0 : i.width * i.height
         }
         return areas.max { overlap($0) < overlap($1) }
-    }
-
-    /// The origin that keeps `frame` inside `area`, moving it as little as possible. A window
-    /// bigger than the area keeps its top-left corner in it, so the title bar stays reachable.
-    private static func keep(_ frame: CGRect, in area: CGRect) -> CGPoint {
-        var origin = frame.origin
-        if frame.maxX > area.maxX { origin.x = area.maxX - frame.width }
-        if frame.maxY > area.maxY { origin.y = area.maxY - frame.height }
-        origin.x = max(origin.x, area.minX)
-        origin.y = max(origin.y, area.minY)
-        return origin
     }
 
     // MARK: AX attribute plumbing

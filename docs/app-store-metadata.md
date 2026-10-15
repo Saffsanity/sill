@@ -395,6 +395,13 @@ Made for iPhone Duo. Open it flat and your Mac fills the inner display. Half ope
 Sill for iPhone and iPad and Sill for Mac now share one version number: this is 0.5.1, with Sill for Mac 0.5.1 from getsill.app.
 ```
 
+For the next version, with whatever else it brings (issue #69, a device change: it
+needs no new Sill for Mac):
+
+```text
+Fixed: after Sill sat in the background for hours, it could stop finding your Mac until you closed and reopened it. Sill now looks again when you come back, keeps trying for a few minutes while your Mac doesn’t answer (when it’s asleep, say), and connects when it does.
+```
+
 ## 6. Export compliance (encryption)
 
 **The key is in the app.** `iOSClient/Info.plist` sets

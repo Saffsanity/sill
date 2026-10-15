@@ -482,6 +482,7 @@ enum MockCatalog {
         case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
         case pairingrequired // Require pairing turned on while this device was connected without pairing
+        case asleep          // the automatic reconnect's dials of a listed row not answered: "Mac mini isn’t answering. It may be asleep…" (issue #69)
     }
 
     /// How the connect screen starts in a case: the card unfolded, on the typed path, and the
@@ -636,6 +637,11 @@ enum MockCatalog {
         case .pairingrequired:
             client.macs = [home("Mac mini", .wifi), studio]
             client.status = Copy.pairingRequired(mac: "Mac mini", device: device)
+        case .asleep:
+            // A saved Mac whose row stays listed (a Bonjour Sleep Proxy answers for it) and whose
+            // dials have not connected: the line after DiscoveryPolicy.reconnectQuietAfter of them.
+            client.macs = [home("Mac mini", .wifi, saved: true, homeTLS: true), studio]
+            client.status = DiscoveryPolicy.reconnectLine(mac: "Mac mini", failed: DiscoveryPolicy.reconnectQuietAfter, direct: false)
         }
         return client
     }
