@@ -70,7 +70,8 @@ final class MetalStreamRenderer {
         self.filter = filter
         layer.device = device
         layer.pixelFormat = .bgra8Unorm
-        layer.framebufferOnly = true
+        // False so UIView.drawHierarchy (Capture Screen, tile previews) can read the drawable.
+        layer.framebufferOnly = false
         layer.isOpaque = true
         layer.backgroundColor = CGColor(gray: 0, alpha: 1)
     }

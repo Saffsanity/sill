@@ -447,15 +447,6 @@ final class StreamClient: ObservableObject {
                 renderer = existing
                 existing.setFilter(filter, on: queue)
             } else if let made = MetalStreamRenderer(filter: filter) {
-                made.onNeedsKeyframe = { [weak self] in
-                    DispatchQueue.main.async {
-                        guard let self, self.active != .none else { return }
-                        let activeApp = UIApplication.shared.applicationState == .active
-                        if self.smoothingRecovery.shouldAskKeyframe(now: ProcessInfo.processInfo.systemUptime, active: activeApp) {
-                            self.request(self.active)
-                        }
-                    }
-                }
                 renderer = made
             } else {
                 print("smoothing: \(smoothing.title) needs Metal; the system's layer draws instead")
@@ -476,6 +467,15 @@ final class StreamClient: ObservableObject {
         let view = HEVCDisplayView(frame: .zero)
         view.renderQueue = queue
         view.onVideoSize = { [weak self] size in self?.videoSize = size }
+        view.onNeedsKeyframe = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.active != .none else { return }
+                let activeApp = UIApplication.shared.applicationState == .active
+                if self.smoothingRecovery.shouldAskKeyframe(now: ProcessInfo.processInfo.systemUptime, active: activeApp) {
+                    self.request(self.active)
+                }
+            }
+        }
         onParameterSets = { ps in view.apply(ps) }
         onFrame = { data, isKey in view.enqueue(data, isKeyframe: isKey) }
         return view

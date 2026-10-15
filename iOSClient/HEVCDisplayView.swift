@@ -31,6 +31,9 @@ final class HEVCDisplayView: UIView {
     /// (`StreamClient.pointerFrameChanged`). Two hooks instead of a chain, so re-hosting after a
     /// rotation cannot stack closures.
     var onVideoSizeForPointer: ((CGSize) -> Void)?
+    /// The active decoder or layer was interrupted and waits for a keyframe. On the queue `enqueue`
+    /// runs on.
+    var onNeedsKeyframe: (() -> Void)?
 
     // MARK: The pointer sprite
     //
@@ -294,6 +297,7 @@ final class HEVCDisplayView: UIView {
         guard ownRenderer !== renderer else { return }
         ownRenderer?.clear()
         ownRenderer = renderer
+        renderer?.onNeedsKeyframe = { [weak self] in self?.onNeedsKeyframe?() }
         if let renderer, let desc = formatDescription { renderer.setFormat(desc) }
         waitingForKeyframe = true
         displayLayer.flushAndRemoveImage()
