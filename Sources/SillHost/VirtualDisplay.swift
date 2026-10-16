@@ -236,7 +236,9 @@ final class VirtualDisplay {
     }
 
     /// Every private class/selector/type encoding this file calls, in the order it calls them.
-    /// Encodings are Objective-C type strings with the frame offsets stripped.
+    /// Encodings are Objective-C type strings with the frame offsets stripped. One of them is not
+    /// a literal: a `BOOL` return is spelled differently per architecture (`Runtime`'s
+    /// `boolReturnEncoding`).
     static let privateAPISurface: [(cls: String, selector: String, encoding: String)] = [
         ("CGVirtualDisplayDescriptor", "init", "@@:"),
         ("CGVirtualDisplayDescriptor", "setName:", "v@:@"),
@@ -249,7 +251,7 @@ final class VirtualDisplay {
         ("CGVirtualDisplayDescriptor", "setQueue:", "v@:@"),
         ("CGVirtualDisplayDescriptor", "setTerminationHandler:", "v@:@?"),
         ("CGVirtualDisplay", "initWithDescriptor:", "@@:@"),
-        ("CGVirtualDisplay", "applySettings:", "B@:@"),
+        ("CGVirtualDisplay", "applySettings:", Runtime.boolReturnEncoding),
         ("CGVirtualDisplay", "displayID", "I@:"),
         ("CGVirtualDisplayMode", "initWithWidth:height:refreshRate:", "@@:IId"),
         ("CGVirtualDisplaySettings", "init", "@@:"),
@@ -408,8 +410,21 @@ private enum Runtime {
         return fn(target, sel)
     }
 
+    /// The encoding of a `BOOL`-returning selector, which is not the same on every architecture:
+    /// `BOOL` is C99 `bool` ("B") where `OBJC_BOOL_IS_BOOL` holds (arm64) and `signed char` ("c")
+    /// where it does not (x86_64 macOS). `applySettings:` is the one selector here that returns
+    /// one, and spelling it "B@:@" outright read as a changed API on an Intel Mac: the guard threw
+    /// `Failure.changedSignature` and every virtual display fell back to streaming the real
+    /// window, though the method was present and working. The runtime reports what the platform
+    /// compiled, so the expectation has to follow it.
+    #if arch(x86_64)
+    static let boolReturnEncoding = "c@:@"
+    #else
+    static let boolReturnEncoding = "B@:@"
+    #endif
+
     static func applySettings(_ display: AnyObject, _ settings: AnyObject) throws -> Bool {
-        let (fn, sel) = try imp(display, "applySettings:", "B@:@", as: ApplyFn.self)
+        let (fn, sel) = try imp(display, "applySettings:", boolReturnEncoding, as: ApplyFn.self)
         return fn(display, sel, settings)
     }
 }
