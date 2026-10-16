@@ -86,7 +86,9 @@ extension View {
 private struct DuoPostureReader: ViewModifier {
     @State private var hinge: DuoPosture.Hinge = .unknown
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        #if compiler(>=6.2)
         if #available(iOS 27.1, *) {
             content
                 .environment(\.duoEnvironment, DuoEnvironment(hinge: hinge))
@@ -101,9 +103,13 @@ private struct DuoPostureReader: ViewModifier {
         } else {
             content
         }
+        #else
+        content
+        #endif
     }
 }
 
+#if compiler(>=6.2)
 @available(iOS 27.1, *)
 extension DuoPosture.Hinge {
     init(_ context: DeviceHingeContext) {
@@ -118,6 +124,7 @@ extension DuoPosture.Hinge {
         }
     }
 }
+#endif
 
 extension DuoPosture {
     /// The posture as the view `geo` measures sees it: the hinge from the environment (before its
@@ -132,12 +139,14 @@ extension DuoPosture {
             let origin = geo.frame(in: .named(displaySpace)).origin
             return DuoPosture(hinge: environment.hinge, fold: fold?.offsetBy(dx: -origin.x, dy: -origin.y))
         case .reservedRegions:
+            #if compiler(>=6.2)
             if #available(iOS 27.1, *) {
                 let region = geo.reservedRegions(kind: .division, options: .includeInactive).first
                 let hinge = hinge(reported: environment.hinge, regionActive: region?.isActive)
                 guard hinge != .unknown else { return .unknown }
                 return DuoPosture(hinge: hinge, fold: region?.frame)
             }
+            #endif
             return .unknown
         }
     }
@@ -163,7 +172,7 @@ private struct DuoLogger: ViewModifier {
 
     func body(content: Content) -> some View {
         #if DEBUG
-        content.onChange(of: line, initial: true) { _, now in
+        content.sillOnChange(of: line, initial: true) { _, now in
             if known { print("duo: \(screen): \(now)") }
         }
         #else

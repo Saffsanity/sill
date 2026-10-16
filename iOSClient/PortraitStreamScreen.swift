@@ -318,7 +318,7 @@ struct PortraitStreamScreen: View {
         return phoneStack(layout, span: span)
             // The viewport: the picture's pane, or with Larger Picture its whole room (never the pane
             // at the picture's shape, which would hold a window at the shape it has).
-            .onChange(of: layout.picture.size, initial: true) { _, size in onPanelSize(size) }
+            .sillOnChange(of: layout.picture.size, initial: true) { _, size in onPanelSize(size) }
             #if DEBUG
             .modifier(PhoneConsole(layout: layout, span: span, video: client.videoSize, origin: origin))
             #endif
@@ -640,7 +640,7 @@ private struct PhoneConsole: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: [layout.trackpad.width, layout.trackpad.height, span], initial: true) { _, _ in
+            .sillOnChange(of: [layout.trackpad.width, layout.trackpad.height, span], initial: true) { _, _ in
                 print(trackpadLine)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { note in

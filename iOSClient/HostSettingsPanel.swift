@@ -93,9 +93,8 @@ struct HostSettingsPanel: View {
                 middle
                 ScrollViewReader { reader in
                     ScrollView { middle }
-                        .scrollIndicatorsFlash(onAppear: true)
-                        .scrollBounceBehavior(.basedOnSize)
-                        .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
+                        .sillScrollPresentation()
+                        .sillDefaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
                         .onAppear { if Self.startsAtGestures { reader.scrollTo(Self.gesturesGroupID, anchor: .top) } }
                 }
             }
@@ -119,12 +118,12 @@ struct HostSettingsPanel: View {
         .onAppear { headerFocused = true }
         // A refused change: the control has already gone back to the Mac's value, and the reason
         // is in the footer or the note. The haptic is a no-op on an iPad.
-        .sensoryFeedback(.warning, trigger: client.settingsRefusals)
-        .onChange(of: client.settingsRefusals) { _, _ in
-            AccessibilityNotification.Announcement("\(mac) kept its setting").post()
+        .sillWarningFeedback(trigger: client.settingsRefusals)
+        .sillOnChange(of: client.settingsRefusals) { _, _ in
+            SillAccessibility.announce("\(mac) kept its setting")
         }
-        .onChange(of: client.settingsProblem) { _, problem in
-            if let problem { AccessibilityNotification.Announcement(problem).post() }
+        .sillOnChange(of: client.settingsProblem) { _, problem in
+            if let problem { SillAccessibility.announce(problem) }
         }
         .task(id: client.connectedAt) {
             olderMac = false
@@ -492,7 +491,7 @@ struct HostSettingsPanel: View {
                     Text(ClipboardPolicy.Copy.switchTitle).foregroundStyle(Palette.text)
                 }
                 .rowFrame()
-                .onChange(of: clipboardOn) { _, _ in client.clipboardSwitchChanged() }
+                .sillOnChange(of: clipboardOn) { _, _ in client.clipboardSwitchChanged() }
                 if clipboardOn {
                     RowDivider()
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))

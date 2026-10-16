@@ -40,11 +40,11 @@ accepted (`sudo xcodebuild -license accept`). With only the Command Line Tools
 selected, the default build system fails to start; `swift build -c release
 --build-system native` works there as a fallback.
 
-Sill is built with Xcode 27, for macOS 14 or later and iOS 17 or later (the
+Sill is built with Xcode 27, for macOS 14 or later and iOS 16 or later (the
 deployment targets). The iOS app needs Xcode 27.1 or a later 27: it reads the
 iPhone Duo's hinge and fold through the iOS 27.1 SDK (`if #available(iOS
-27.1, *)`, so it still runs on iOS 17), and built with the 27.0 SDK it would
-run on the Duo in a compatibility window, 871×669 and sideways only.
+27.1, *)`, so it still runs on iOS 16), and built with an older SDK it omits
+the Duo-only adapter while keeping the ordinary iPhone and iPad layouts.
 
 ### Sill.app, the menu bar host
 

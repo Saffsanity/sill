@@ -452,8 +452,11 @@ They close the connection on an unexpected ALPN or an unexpected key.
 
   About 287 bytes. It is rebuilt at every launch from the stored key: the pin is the key, so the
   certificate is never stored.
-- **TLS identity.** `SecIdentityCreate(nil, certificate, privateKey)` (public on macOS 10.12+ and
-  iOS 11.2+; `SecIdentity.h` in both 27.0 SDKs), then `sec_identity_create`.
+- **TLS identity.** With the required Xcode 27 SDK,
+  `SecIdentityCreate(nil, certificate, privateKey)` combines the certificate and key in memory,
+  then `sec_identity_create` makes the Network.framework identity. Older SDKs do not declare that
+  constructor and cannot run Sill's TLS paths; they are useful only for compile-time deployment
+  auditing.
 - **Why no package.** No Apple API creates a certificate (`SecCertificateCreateWithData` only
   parses). The hand-built DER is verified by `SecCertificateCreateWithData`, by Network.framework on
   both ends and by `openssl x509`. Apple's swift-certificates package would be a dependency

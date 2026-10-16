@@ -138,9 +138,20 @@ public struct RemoteIdentity: @unchecked Sendable {
         guard let fp = SPKI.fingerprint(of: privateKey),
               let der = SelfSignedCertificate.make(key: privateKey),
               let cert = SecCertificateCreateWithData(nil, der as CFData),
-              SPKI.fingerprint(of: cert) == fp,
-              let identity = SecIdentityCreate(nil, cert, privateKey),
-              let tls = sec_identity_create(identity) else { return nil }
+              SPKI.fingerprint(of: cert) == fp else { return nil }
+
+        let tls: sec_identity_t
+        #if compiler(>=6.2)
+        // Xcode 27's public constructor keeps transient identities entirely in memory.
+        guard let identity = SecIdentityCreate(nil, cert, privateKey),
+              let madeTLS = sec_identity_create(identity) else { return nil }
+        tls = madeTLS
+        #else
+        // This repository requires Xcode 27. Older SDKs do not declare the public constructor;
+        // they may type-check the iOS 16 deployment target, but cannot construct Sill's TLS identity.
+        return nil
+        #endif
+
         self.privateKey = privateKey
         certificate = cert
         certificateDER = der

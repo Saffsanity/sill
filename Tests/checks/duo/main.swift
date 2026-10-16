@@ -112,7 +112,7 @@ check(DuoPosture.crease(size(669, 869), .known(rect(0, 373.5, 669, 40)))! == (37
 
 // MARK: - The halves' split (approved (b1) and (b2))
 
-let controls: CGFloat = 12 + 78 + 2 * 10 + 48 + 22     // PortraitMetrics.regular's controls but the trackpad: 180
+let controls: CGFloat = 12 + 78 + CGFloat(2 * 10) + 48 + 22     // PortraitMetrics.regular's controls but the trackpad: 180
 check(controls == 180, "the regular halves' controls")
 // (b1) The laptop pose: the picture above the fold, the controls below it, in whole points.
 check(DuoPosture.portraitSplit(upright, .known(laptopFold), aspect: 1.6, controls: controls) == .init(picture: 455, controls: 496),

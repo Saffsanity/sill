@@ -440,7 +440,9 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         switch gesture.state {
         case .began, .changed:
             if gesture.state == .began { hoverIsPencil = false }
-            if gesture.zOffset > 0 || gesture.altitudeAngle > 0 { hoverIsPencil = true }
+            if #available(iOS 16.4, *), gesture.zOffset > 0 || gesture.altitudeAngle > 0 {
+                hoverIsPencil = true
+            }
             let at = sendPointer(.move, at: gesture.location(in: self), clamped: true)
             if hoverIsPencil { setOwnPointer(at, .pencil) } else { setOwnPointer(nil, .none) }
         default:
