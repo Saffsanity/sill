@@ -137,6 +137,20 @@ check("the cap: 16, the one used longest ago dropped (the oldest pairing, not th
       list.count == 16 && !list.contains { $0.macID == savedMac(11).macID } && list.contains { $0.macID == savedMac(10).macID })
 var re = savedMac(12); re.name = "Renamed"
 check("re-pairing replaces the record", SavedMacs.adding(re, to: list).filter { $0.macID == re.macID }.map(\.name) == ["Renamed"] && SavedMacs.adding(re, to: list).count == 16)
+for host in ["fe8-mac.tail1.ts.net", "fe9-mac.local", "fearless.example.net", "february.example.net", "169.254.example.net", "127.example.net"] {
+    check("a DNS name is not a link-local or loopback IP: \(host)", SavedMacs.keepable(host, allowLoopback: false))
+}
+for host in ["FE80::1", "fe90::1", "fea0::1", "febf::1", "::ffff:169.254.3.4", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "localhost."] {
+    check("non-routable IP spellings stay out of saved addresses: \(host)", !SavedMacs.keepable(host, allowLoopback: false))
+}
+check("mapped and expanded loopback allowed for DEBUG",
+      SavedMacs.keepable("::ffff:127.0.0.1", allowLoopback: true)
+      && SavedMacs.keepable("0:0:0:0:0:0:0:1", allowLoopback: true))
+check("IPv6 addresses outside the link-local /10 stay keepable",
+      SavedMacs.keepable("fe7f::1", allowLoopback: false) && SavedMacs.keepable("fec0::1", allowLoopback: false))
+check("a saved host must parse without a port",
+      !SavedMacs.keepable("not an address", allowLoopback: true)
+      && !SavedMacs.keepable("mac.example.net:7460", allowLoopback: true))
 let info = MacInfo(macID: m1.macID, name: "Studio\u{202E}", issuedAt: 60, remoteAccess: true, remotePort: 7460, internet: false,
                    addresses: [a("mac.tail1.ts.net", "vpn", "Tailscale"), a("fe80::1", "lan", "Wi-Fi"), a("127.0.0.1", "lan", "This Mac"), a("192.168.1.5", "lan", "Wi-Fi")])
 let r1 = SavedMacs.refreshed(m1, info: info, fingerprint: key(1), allowLoopback: false)
@@ -240,6 +254,20 @@ check("superseding: the newer takes the typed addresses, homeTLS and the proof a
 var typedBoth = newRec; typedBoth.typedAddresses = [a("home.example.net", "internet", "")]
 check("superseding: a typed address the newer has already is not repeated",
       SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [oldRec, typedBoth])[0].typedAddresses?.count == 1)
+var changedPort = newRec; changedPort.remotePort = 7460
+let carriedPort = SavedMacs.superseding(old: oldRec.macID, by: changedPort.macID, proof: "mac.tail1.ts.net|7460", in: [oldRec, changedPort])[0]
+check("superseding: an implicit typed port keeps the old destination",
+      carriedPort.typedAddresses?.first?.port == oldRec.remotePort
+      && R.order(carriedPort.allAddresses, remotePort: carriedPort.remotePort, lastWorked: nil, localIPv4: []).contains { $0.key == "home.example.net|\(oldRec.remotePort)" })
+changedPort.typedAddresses = [a("HOME.example.net", "internet", "", port: oldRec.remotePort)]
+check("superseding: deduplicate against the old effective port, case insensitively",
+      SavedMacs.superseding(old: oldRec.macID, by: changedPort.macID, proof: "x|1", in: [oldRec, changedPort])[0].typedAddresses?.count == 1)
+changedPort.typedAddresses = [a("home.example.net", "internet", "")]
+check("superseding: the same host on different effective ports keeps both destinations",
+      SavedMacs.superseding(old: oldRec.macID, by: changedPort.macID, proof: "x|1", in: [oldRec, changedPort])[0].typedAddresses?.count == 2)
+var explicitPort = oldRec; explicitPort.typedAddresses = [a("home.example.net", "internet", "", port: 8443)]
+check("superseding: an explicit typed port stays explicit",
+      SavedMacs.superseding(old: explicitPort.macID, by: changedPort.macID, proof: "x|1", in: [explicitPort, changedPort])[0].typedAddresses?.last?.port == 8443)
 check("superseding: nothing when either is not saved, or they are one record",
       SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [oldRec, office]) == [oldRec, office]
       && SavedMacs.superseding(old: oldRec.macID, by: newRec.macID, proof: "x|1", in: [newRec, office]) == [newRec, office]
