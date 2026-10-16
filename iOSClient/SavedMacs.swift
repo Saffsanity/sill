@@ -207,8 +207,7 @@ enum SavedMacs {
     /// `old`'s addresses; RemoteDialPolicy.successors said `new` may answer there): `old` is gone,
     /// since the Mac it named now holds `new`'s key. `new` keeps what `old` knew that it lacks: the
     /// typed addresses (at their original effective ports), `homeTLS`, and `proof` as the address
-    /// that last worked. Nothing changes
-    /// when either is not saved or they are the same record.
+    /// that last worked. Nothing changes when either is not saved or they are the same record.
     static func superseding(old: String, by new: String, proof: String, in list: [SavedMac]) -> [SavedMac] {
         guard old != new, let o = list.first(where: { $0.macID == old }), list.contains(where: { $0.macID == new }) else { return list }
         return list.compactMap { mac in

@@ -146,7 +146,7 @@ for host in ["FE80::1", "fe90::1", "fea0::1", "febf::1", "::ffff:169.254.3.4", "
 check("mapped and expanded loopback allowed for DEBUG",
       SavedMacs.keepable("::ffff:127.0.0.1", allowLoopback: true)
       && SavedMacs.keepable("0:0:0:0:0:0:0:1", allowLoopback: true))
-check("the IPv6 link-local boundary does not exclude global addresses",
+check("IPv6 addresses outside the link-local /10 stay keepable",
       SavedMacs.keepable("fe7f::1", allowLoopback: false) && SavedMacs.keepable("fec0::1", allowLoopback: false))
 check("a saved host must parse without a port",
       !SavedMacs.keepable("not an address", allowLoopback: true)
