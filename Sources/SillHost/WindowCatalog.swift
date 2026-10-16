@@ -353,20 +353,7 @@ final class WindowCatalog {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities",
                     home.appendingPathComponent("Applications").path]
-        var seen: Set<String> = []
-        var apps: [(name: String, bundleID: String, path: String)] = []
-        for dir in dirs {
-            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for name in names where name.hasSuffix(".app") {
-                let url = URL(fileURLWithPath: dir).appendingPathComponent(name)
-                guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !seen.contains(id) else { continue }
-                seen.insert(id)
-                var display = FileManager.default.displayName(atPath: url.path)
-                if display.hasSuffix(".app") { display.removeLast(4) }
-                apps.append((display, id, url.path))
-            }
-        }
-        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return InstalledApps.find(in: dirs.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
     // MARK: Image encoding (thread-safe)
