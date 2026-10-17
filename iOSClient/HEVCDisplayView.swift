@@ -41,6 +41,9 @@ final class HEVCDisplayView: UIView {
     /// Main-thread copy of the frame size the layer draws. `apply` runs on the network queue and
     /// hops here with it; `clear` zeroes it. Zero hides the sprite: there is no frame to point into.
     private var pointerVideoSize: CGSize = .zero
+    /// SwiftUI scales this view to magnify the streamed picture. Counter-scale the sprite so the
+    /// pointer follows the picture's transform but keeps its normal device-point size.
+    private var zoomScale: CGFloat = 1
     /// Stacking inside this view's layer, which is the video layer: sibling sublayers draw in
     /// zPosition order, so the sprite sits above the picture whatever the display layer adds
     /// underneath, and the DEBUG readout sits above the sprite.
@@ -122,6 +125,19 @@ final class HEVCDisplayView: UIView {
     func setPointer(_ p: CGPoint?) {
         pointer = p
         placeCursor()
+    }
+
+    /// The parent applies this scale around the pointer, magnifying the picture. The cursor is a
+    /// sibling layer inside this view, so an inverse local scale cancels only its size change; its
+    /// position still follows the parent's zoom transform.
+    func setZoomScale(_ scale: CGFloat) {
+        let clamped = max(1, scale)
+        guard abs(clamped - zoomScale) > 0.001 else { return }
+        zoomScale = clamped
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cursorLayer.transform = CATransform3DMakeScale(1 / clamped, 1 / clamped, 1)
+        CATransaction.commit()
     }
 
     #if DEBUG
@@ -321,6 +337,8 @@ final class HEVCDisplayView: UIView {
 
 struct StreamView: UIViewRepresentable {
     let client: StreamClient
+    var zoomScale: CGFloat = 1
+    var onPointerPositionChange: ((CGPoint?) -> Void)? = nil
 
     /// Hosts the client's single display view. SwiftUI may build the new layout's host before it
     /// dismantles the old one, so detach the view from wherever it was first.
@@ -330,6 +348,7 @@ struct StreamView: UIViewRepresentable {
         #if DEBUG
         view.attachDiagnostics(to: client)
         #endif
+        view.setZoomScale(zoomScale)
         wirePointer(view)
         return view
     }
@@ -343,6 +362,7 @@ struct StreamView: UIViewRepresentable {
         client.onCursorShapeChange = { [weak view] shape in view?.setCursorShape(shape) }
         view.setCursorShape(client.cursorShape)
         client.onPointerChange = { [weak view] p in view?.setPointer(p) }
+        client.onPointerPositionChange = onPointerPositionChange
         // A new frame size (another source, an Aa resize) changes what a fraction means: this
         // device's own pointer, while it shows, starts again in the middle and the Mac's goes there
         // too (after the tour, while one shows: `pointerFrameChanged`); the Mac's arrow follows the
@@ -352,5 +372,8 @@ struct StreamView: UIViewRepresentable {
         client.renderPointer()
     }
 
-    func updateUIView(_ uiView: HEVCDisplayView, context: Context) {}
+    func updateUIView(_ uiView: HEVCDisplayView, context: Context) {
+        client.onPointerPositionChange = onPointerPositionChange
+        uiView.setZoomScale(zoomScale)
+    }
 }
