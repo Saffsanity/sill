@@ -8,6 +8,7 @@ import StreamProtocol
 enum HIDKey {
     static let escape: UInt16 = 0x29
     static let tab: UInt16 = 0x2B
+    static let space: UInt16 = 0x2C
     static let deleteBackward: UInt16 = 0x2A
     static let rightArrow: UInt16 = 0x4F
     static let leftArrow: UInt16 = 0x50

@@ -12,8 +12,10 @@ import StreamProtocol
 /// It is also where the keyboard goes: keys and typed text reach the Mac only while this view is first
 /// responder, which its `InputOverlayProxy` decides (HardwareKeyboardPolicy: by itself whenever a
 /// hardware keyboard is attached, else with the Keyboard button), and a trackpad's or a mouse's
-/// scrolling over the picture comes here too (docs/hardware-keyboard-plan.md).
-final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
+/// scrolling over the picture comes here too (docs/hardware-keyboard-plan.md). It is a text input, not
+/// only a key input, so an input method's composition and dictation reach the Mac (#138,
+/// `TextComposition`).
+final class InputOverlayView: UIView, UITextInput, UIGestureRecognizerDelegate {
     /// Pixel size of the streamed frame. Zero until the host's parameter sets arrive; input is
     /// ignored until then, since there is nothing on screen to aim at.
     var videoSize: CGSize = .zero
@@ -37,6 +39,25 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var latchedModifiers: KeyModifiers = []
     /// Fires once a latch has been spent, so the key row can un-highlight itself.
     var onModifiersConsumed: (() -> Void)?
+
+    /// What iPadOS's text system sees: the composition in progress and a tail of what was typed.
+    private var composition = TextComposition()
+    /// The composition in progress, drawn over the picture: the Mac has none of it until it is chosen.
+    private lazy var compositionLabel: UILabel = {
+        let label = PaddedLabel()
+        label.font = .preferredFont(forTextStyle: .title3)
+        label.textColor = .label
+        label.backgroundColor = .secondarySystemBackground.withAlphaComponent(0.92)
+        label.layer.cornerRadius = 8
+        label.layer.masksToBounds = true
+        label.isHidden = true
+        label.isUserInteractionEnabled = false
+        addSubview(label)
+        return label
+    }()
+    weak var inputDelegate: UITextInputDelegate?
+    lazy var tokenizer: UITextInputTokenizer = UITextInputStringTokenizer(textInput: self)
+    var markedTextStyle: [NSAttributedString.Key: Any]?
 
     /// Writes this device's own pointer and what drew it (`StreamClient.setOwnPointer`: a fraction of
     /// the video frame, nil for none). Only ever alongside what is sent anyway; it never sends
@@ -139,6 +160,11 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         strokes.onSilenced = { [weak self] in self?.strokeSilenced() }
         strokes.onGesture = { [weak self] gesture, fingers in _ = self?.sendGesture(gesture, fingers) }
         addGestureRecognizer(strokes)
+
+        // iPadOS shows no input source switch while the hardware keyboard's hold draws nothing: the
+        // composition label says it instead, for a moment.
+        NotificationCenter.default.addObserver(self, selector: #selector(inputModeChanged),
+                                               name: UITextInputMode.currentInputModeDidChangeNotification, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -184,6 +210,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// A finger's tap at `point`, in this view: the pointer goes there, then clicks.
     private func tap(at point: CGPoint) {
         setOwnPointer(nil, .none)
+        forgetTyped()
         guard sendPointer(.move, at: point, clamped: false) != nil else { return }
         sendPointer(.leftDown, at: point, clamped: false)
         sendPointer(.leftUp, at: point, clamped: false)
@@ -194,6 +221,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         guard !strokes.silent else { return }
         guard gesture.state == .began else { return }
         setOwnPointer(nil, .none)
+        forgetTyped()
         let point = gesture.location(in: self)
         guard sendPointer(.move, at: point, clamped: false) != nil else { return }
         sendPointer(.rightDown, at: point, clamped: false)
@@ -478,6 +506,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let point = touch.location(in: self)
         guard let at = sendPointer(.move, at: point, clamped: false) else { return }
         ownPointer(at, for: touch)
+        forgetTyped()
         // A trackpad's secondary click (two fingers, or right button) is a right click on the Mac.
         pointerButtonIsSecondary = touch.type == .indirectPointer && (event?.buttonMask.contains(.secondary) ?? false)
         sendPointer(pointerButtonIsSecondary ? .rightDown : .leftDown, at: point, clamped: false)
@@ -523,6 +552,8 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     @objc var autocapitalizationType: UITextAutocapitalizationType = .none
     @objc var smartQuotesType: UITextSmartQuotesType = .no
     @objc var smartDashesType: UITextSmartDashesType = .no
+    @objc var spellCheckingType: UITextSpellCheckingType = .no
+    @objc var inlinePredictionType: UITextInlinePredictionType = .no
 
     /// Always true: there is text on the Mac, and the delete key has to keep working even though
     /// this view holds no text of its own.
@@ -544,29 +575,53 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     func insertText(_ text: String) {
         setOwnPointer(nil, .none)
-        if !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1,
+        if !composition.isComposing, !latchedModifiers.isDisjoint(with: .shortcutMakers), text.count == 1,
            let character = text.first, let usage = HIDKey.usage(for: character) {
             sendLatched(usage)
             return
         }
-        send(.text(text))
+        typed(composition.insert(text))
         consumeLatch()
     }
 
     func deleteBackward() {
         setOwnPointer(nil, .none)
-        if !latchedModifiers.isDisjoint(with: .shortcutMakers) {
+        if !composition.isComposing, !latchedModifiers.isDisjoint(with: .shortcutMakers) {
             sendLatched(HIDKey.deleteBackward)
             return
         }
-        send(.text("\u{8}"))
+        typed(composition.deleteBackward())
         consumeLatch()
     }
 
     /// One key, down and up, carrying the latched modifier bits, then the latch is spent.
     private func sendLatched(_ usage: UInt16) {
+        forgetTyped()
         KeyChord.press(usage, with: latchedModifiers).forEach(send)
         consumeLatch()
+    }
+
+    /// What the text system's edit leaves for the Mac: text, and a backspace for each character to
+    /// delete (as the keyboard's own backspace goes); the composition label follows.
+    private func typed(_ outputs: [TextComposition.Output]) {
+        for output in outputs {
+            switch output {
+            case .text(let text): send(.text(text))
+            case .backspaces(let count): for _ in 0..<count { send(.text("\u{8}")) }
+            }
+        }
+        showComposition()
+    }
+
+    /// The Mac's caret moved some other way than typing (a click, an arrow, a shortcut): what was typed
+    /// can no longer be revised there, so the text system is told it is gone. A composition carries on.
+    private func forgetTyped() {
+        guard !composition.sent.isEmpty else { return }
+        inputDelegate?.selectionWillChange(self)
+        inputDelegate?.textWillChange(self)
+        composition.reset()
+        inputDelegate?.textDidChange(self)
+        inputDelegate?.selectionDidChange(self)
     }
 
     private func consumeLatch() {
@@ -658,7 +713,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// own window's: Settings open in another Sill window, behind this one, never sees a key pressed
     /// here. A leaf view is in the responder chain only while it is first responder, so this says again
     /// what the chain does.
-    private var takesEscape: Bool { isFirstResponder && !EscapeKey.onScreen(in: window) }
+    private var takesEscape: Bool { isFirstResponder && !composition.isComposing && !EscapeKey.onScreen(in: window) }
 
     override var keyCommands: [UIKeyCommand]? {
         guard takesEscape else { return super.keyCommands }
@@ -680,6 +735,7 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                    to: events.isEmpty ? "already down through pressesBegan" : "to the Mac")
         guard !events.isEmpty else { return }
         setOwnPointer(nil, .none)
+        forgetTyped()
         events.forEach(send)
     }
 
@@ -740,9 +796,16 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                 continue
             }
             #endif
+            // ⌃Space switches iPadOS's input source (to Zhuyin, say): iPadOS's, never the Mac's (#138).
+            if usage == HIDKey.space, UIKeyModifierFlags(rawValue: Int(modifiers)).intersection([.control, .alternate, .command]) == .control {
+                Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "iPadOS's input source switch")
+                unhandled.insert(press)
+                continue
+            }
             let outcome = down ? forwarded.pressed(usage, modifiers: modifiers, at: press.timestamp) : forwarded.released(usage)
             switch outcome {
             case .send(let event):
+                if down { forgetTyped() }
                 send(event)
                 Self.hwkey(usage, down: down, via: channel, modifiers: modifiers, to: "to the Mac")
             case .text:
@@ -762,6 +825,12 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         // A hardware key hides this device's pointer, as typing does (`setOwnPointer`).
         if presses.contains(where: { $0.key != nil }) { setOwnPointer(nil, .none) }
+        // While an input method composes, every key is its own: the arrows pick a candidate, Return
+        // and Space choose, Esc cancels. None reaches the Mac until the composition is chosen.
+        if composition.isComposing {
+            super.pressesBegan(presses, with: event)
+            return
+        }
         let unhandled = forward(presses, down: true, via: "pressesBegan")
         if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
@@ -783,6 +852,155 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// release for them.
     private func releaseForwardedKeys() {
         for up in forwarded.releaseAll() { send(up) }
+    }
+}
+
+// MARK: - Text input (#138)
+
+/// What iPadOS's text system edits (`TextComposition`): an input method's composition, shown over the
+/// picture and sent once chosen, and dictation's text and corrections. The caret is always at the end;
+/// the Mac's own caret is wherever it is there.
+extension InputOverlayView {
+    final class Position: UITextPosition {
+        let offset: Int
+        init(_ offset: Int) { self.offset = offset }
+    }
+
+    final class Range: UITextRange {
+        let range: NSRange
+        init(_ range: NSRange) { self.range = range }
+        override var start: UITextPosition { Position(range.location) }
+        override var end: UITextPosition { Position(range.location + range.length) }
+        override var isEmpty: Bool { range.length == 0 }
+    }
+
+    private func nsRange(_ range: UITextRange) -> NSRange? {
+        guard let start = range.start as? Position, let end = range.end as? Position else { return nil }
+        let lower = min(max(min(start.offset, end.offset), 0), composition.length)
+        let upper = min(max(max(start.offset, end.offset), 0), composition.length)
+        return NSRange(location: lower, length: upper - lower)
+    }
+
+    func text(in range: UITextRange) -> String? {
+        guard let range = nsRange(range) else { return nil }
+        return (composition.document as NSString).substring(with: range)
+    }
+
+    func replace(_ range: UITextRange, withText text: String) {
+        guard let range = nsRange(range) else { return }
+        setOwnPointer(nil, .none)
+        typed(composition.replace(range, with: text))
+    }
+
+    var selectedTextRange: UITextRange? {
+        get { Range(composition.selectedRange) }
+        set {}   // the caret stays at the end: the Mac's caret cannot be moved from here
+    }
+
+    var markedTextRange: UITextRange? { composition.markedRange.map(Range.init) }
+
+    func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        setOwnPointer(nil, .none)
+        composition.setMarked(markedText, selected: selectedRange)
+        showComposition()
+    }
+
+    func unmarkText() { typed(composition.unmark()) }
+
+    var beginningOfDocument: UITextPosition { Position(0) }
+    var endOfDocument: UITextPosition { Position(composition.length) }
+
+    func textRange(from fromPosition: UITextPosition, to toPosition: UITextPosition) -> UITextRange? {
+        guard let from = fromPosition as? Position, let to = toPosition as? Position else { return nil }
+        return Range(NSRange(location: min(from.offset, to.offset), length: abs(to.offset - from.offset)))
+    }
+
+    func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
+        guard let position = position as? Position else { return nil }
+        let new = position.offset + offset
+        return (0...composition.length).contains(new) ? Position(new) : nil
+    }
+
+    func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
+        self.position(from: position, offset: direction == .left || direction == .up ? -offset : offset)
+    }
+
+    func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
+        let a = (position as? Position)?.offset ?? 0, b = (other as? Position)?.offset ?? 0
+        return a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
+    }
+
+    func offset(from: UITextPosition, to toPosition: UITextPosition) -> Int {
+        ((toPosition as? Position)?.offset ?? 0) - ((from as? Position)?.offset ?? 0)
+    }
+
+    func position(within range: UITextRange, farthestIn direction: UITextLayoutDirection) -> UITextPosition? {
+        direction == .left || direction == .up ? range.start : range.end
+    }
+
+    func characterRange(byExtending position: UITextPosition, in direction: UITextLayoutDirection) -> UITextRange? {
+        direction == .left || direction == .up ? textRange(from: beginningOfDocument, to: position)
+            : textRange(from: position, to: endOfDocument)
+    }
+
+    func baseWritingDirection(for position: UITextPosition, in direction: UITextStorageDirection) -> NSWritingDirection { .natural }
+    func setBaseWritingDirection(_ writingDirection: NSWritingDirection, for range: UITextRange) {}
+
+    /// Where an input method's candidates go with a hardware keyboard: beside the composition label.
+    func firstRect(for range: UITextRange) -> CGRect { compositionLabel.isHidden ? caretRect(for: endOfDocument) : compositionLabel.frame }
+    func caretRect(for position: UITextPosition) -> CGRect {
+        let anchor = compositionLabel.isHidden ? compositionAnchor : compositionLabel.frame
+        return CGRect(x: anchor.maxX, y: anchor.minY, width: 2, height: max(anchor.height, 24))
+    }
+    func selectionRects(for range: UITextRange) -> [UITextSelectionRect] { [] }
+    func closestPosition(to point: CGPoint) -> UITextPosition? { endOfDocument }
+    func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? { range.end }
+    func characterRange(at point: CGPoint) -> UITextRange? { nil }
+
+    /// The top middle of the picture, where the composition shows.
+    private var compositionAnchor: CGRect {
+        let rect = HEVCDisplayView.videoRect(in: bounds, videoSize: videoSize)
+        let area = rect.width > 0 ? rect : bounds
+        return CGRect(x: area.midX, y: area.minY + 16, width: 0, height: 0)
+    }
+
+    /// The input source just switched (⌃Space, the Globe key): its name, for a second.
+    @objc func inputModeChanged() {
+        guard isFirstResponder, !composition.isComposing, let language = textInputMode?.primaryLanguage else { return }
+        place(Locale.current.localizedString(forIdentifier: language) ?? language)
+        let shown = compositionLabel.text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, !self.composition.isComposing, self.compositionLabel.text == shown else { return }
+            self.compositionLabel.isHidden = true
+        }
+    }
+
+    /// The composition label: the marked text while an input method composes, hidden otherwise.
+    func showComposition() {
+        guard let marked = composition.marked else { compositionLabel.isHidden = true; return }
+        place(marked)
+    }
+
+    /// The composition label, showing `text` at the top middle of the picture.
+    private func place(_ text: String) {
+        compositionLabel.text = text
+        let size = compositionLabel.sizeThatFits(CGSize(width: bounds.width - 32, height: .greatestFiniteMagnitude))
+        let anchor = compositionAnchor
+        let width = min(size.width, bounds.width - 32)
+        compositionLabel.frame = CGRect(x: min(max(anchor.minX - width / 2, 16), bounds.width - 16 - width),
+                                        y: anchor.minY, width: width, height: size.height)
+        compositionLabel.isHidden = false
+        bringSubviewToFront(compositionLabel)
+    }
+}
+
+/// A label with room around its text.
+private final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+    override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: insets)) }
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let fits = super.sizeThatFits(CGSize(width: size.width - insets.left - insets.right, height: size.height))
+        return CGSize(width: fits.width + insets.left + insets.right, height: fits.height + insets.top + insets.bottom)
     }
 }
 
