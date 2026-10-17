@@ -506,6 +506,7 @@ struct PortraitStreamScreen: View {
                  latched: latched,
                  onModifiersConsumed: { latched = [] },
                  verticalSpan: verticalSpan,
+                 zoomScale: zoomScale,
                  sendGesture: { client.sendGesture($0, fingers: $1) })
             .tourTarget(.trackpad)
     }
