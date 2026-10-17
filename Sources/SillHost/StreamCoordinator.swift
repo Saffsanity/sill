@@ -46,6 +46,8 @@ package final class StreamCoordinator {
     let synthetic: Bool
     let syntheticCapture = SyntheticCapture()
     let injector = InputInjector()
+    /// The Mac's display woken for a device and kept on while it is used (DisplayWake, #134).
+    let displayWake = DisplayWake()
     let sizer = WindowSizer()
     /// The Mac's pointer (PointerWatch): who moves it, and where it is in the streamed source, for
     /// the devices that are not moving it (kind 26, sent by StreamServer). Its geometry follows the
@@ -333,6 +335,7 @@ package final class StreamCoordinator {
         server.pointerWatch = pointer
         injector.watch = pointer
         injector.dryRun = synthetic
+        displayWake.dryRun = synthetic
         injector.testLog = synthetic && inputLog.on
         stage.onWarp = { [pointer] in pointer.sillMoved() }
         // The identity's TXT record (its tag, and `p` on a TLS home door) must be in the first
@@ -355,6 +358,8 @@ package final class StreamCoordinator {
                 guard let self else { return }
                 let id = ObjectIdentifier(connection)
                 self.routes[id] = route
+                // A display asleep gives the capture nothing: the device would show black (#134).
+                self.displayWake.note(.connected)
                 // A paired device shows its paired name until its own stats arrive, and a remote one
                 // its route; a home device its link (Wired, Wi-Fi, Direct) as soon as it is known.
                 self.status.update {
@@ -422,6 +427,7 @@ package final class StreamCoordinator {
                 // Nobody is watching: stop capturing and encoding. The next client picks afresh.
                 if count == 0 { self.viewport = nil; self.clientFPS = [:] }   // the next device starts from scratch
                 if count == 0 { self.gestureChords.forget() }                 // and did not open a view it could close
+                if count == 0 { self.displayWake.allLeft() }                  // the display sleeps by the Mac's settings again
                 // On the software encoder, the hardware is checked only while someone watches.
                 if count == 0 { self.stopRecheck() } else { self.devicesPresent(firstArrived: wasEmpty) }
                 if count > 0 {
@@ -878,6 +884,7 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            displayWake.note(.activity)
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
@@ -914,6 +921,7 @@ package final class StreamCoordinator {
             }
         case .input:
             guard let event = Wire.decode(InputEvent.self, from: message.payload) else { return }
+            displayWake.note(.activity)         // someone works from the device: the display stays on
             let device = ObjectIdentifier(connection)
             guard let rect = currentSourceRect() else {
                 // Nothing streams (between sources, or the stream stopped: the window closed under a
@@ -936,6 +944,7 @@ package final class StreamCoordinator {
             // turns into its own shortcut. At most `gesturesPerSecond` a second per connection: a
             // stroke makes one, so more is a runaway or hostile client.
             guard let gesture = Wire.decode(TrackpadGesture.self, from: message.payload) else { return }
+            displayWake.note(.activity)
             let id = ObjectIdentifier(connection)
             let now = CFAbsoluteTimeGetCurrent()
             var recent = (gestureArrivals[id] ?? []).filter { now - $0 < 1 }
