@@ -131,6 +131,10 @@ public struct RemoteIdentity: @unchecked Sendable {
     /// SHA-256 of the SPKI: this identity's pin.
     public let fingerprint: Data
     public let tls: sec_identity_t
+    #if compiler(<6.2)
+    /// Keeps the certificate in the Keychain for this identity's lifetime on older SDKs.
+    private let legacyKeychain: LegacyKeychainIdentity
+    #endif
 
     /// Builds the certificate and the TLS identity for `privateKey` (P-256). Nil when the key is
     /// not P-256, cannot sign, or the system refuses the result.
@@ -147,9 +151,14 @@ public struct RemoteIdentity: @unchecked Sendable {
               let madeTLS = sec_identity_create(identity) else { return nil }
         tls = madeTLS
         #else
-        // This repository requires Xcode 27. Older SDKs do not declare the public constructor;
-        // they may type-check the iOS 16 deployment target, but cannot construct Sill's TLS identity.
-        return nil
+        // Older public Security APIs form a cross-platform identity from a permanent Keychain key
+        // and its matching certificate. The certificate is this launch's exact random DER and is
+        // removed when this RemoteIdentity dies. Only RemoteKey.generate's uniquely tagged
+        // temporary keys are removed too; stored host and device keys are never removed here.
+        guard let kept = LegacyKeychainIdentity(key: privateKey, certificate: cert, der: der),
+              let madeTLS = sec_identity_create(kept.identity) else { return nil }
+        legacyKeychain = kept
+        tls = madeTLS
         #endif
 
         self.privateKey = privateKey
@@ -163,13 +172,117 @@ public struct RemoteIdentity: @unchecked Sendable {
     public static func shortName(_ fingerprint: Data) -> String { String(MacID.make(fingerprint: fingerprint).prefix(6)) }
 }
 
+#if compiler(<6.2)
+/// The public pre-Xcode-27 bridge from a permanent Keychain key to `SecIdentity`.
+///
+/// The certificate has a fresh random serial and subject, so its DER identifies exactly the item
+/// this instance adds. Cleanup never searches by a shared label and never removes another
+/// certificate or a production key.
+private final class LegacyKeychainIdentity: @unchecked Sendable {
+    static let temporaryTagPrefix = "me.saffer.sill.remote.temporary."
+
+    let identity: SecIdentity
+    private let certificateDER: Data
+    private let temporaryKeyTag: Data?
+
+    init?(key: SecKey, certificate: SecCertificate, der: Data) {
+        guard Self.isPermanent(key) else { return nil }
+
+        let certificateQuery: [String: Any] = [
+            kSecClass as String: kSecClassCertificate,
+            kSecValueData as String: der,
+        ]
+        var add = certificateQuery
+        add[kSecValueRef as String] = certificate
+        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return nil }
+
+        guard let expected = SPKI.fingerprint(of: key),
+              let found = Self.findIdentity(fingerprint: expected) else {
+            SecItemDelete(certificateQuery as CFDictionary)
+            return nil
+        }
+
+        identity = found
+        certificateDER = der
+        temporaryKeyTag = Self.applicationTag(of: key).flatMap { tag in
+            guard let text = String(data: tag, encoding: .utf8),
+                  text.hasPrefix(Self.temporaryTagPrefix) else { return nil }
+            return tag
+        }
+    }
+
+    deinit {
+        SecItemDelete([
+            kSecClass as String: kSecClassCertificate,
+            kSecValueData as String: certificateDER,
+        ] as CFDictionary)
+        if let temporaryKeyTag {
+            SecItemDelete([
+                kSecClass as String: kSecClassKey,
+                kSecAttrApplicationTag as String: temporaryKeyTag,
+                kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+                kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
+            ] as CFDictionary)
+        }
+    }
+
+    private static func isPermanent(_ key: SecKey) -> Bool {
+        guard let attributes = SecKeyCopyAttributes(key) as? [String: Any] else { return false }
+        return (attributes[kSecAttrIsPermanent as String] as? Bool) == true
+    }
+
+    private static func applicationTag(of key: SecKey) -> Data? {
+        (SecKeyCopyAttributes(key) as? [String: Any])?[kSecAttrApplicationTag as String] as? Data
+    }
+
+    private static func findIdentity(fingerprint: Data) -> SecIdentity? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching([
+            kSecClass as String: kSecClassIdentity,
+            kSecReturnRef as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ] as CFDictionary, &result)
+        guard status == errSecSuccess else { return nil }
+
+        let identities: [SecIdentity]
+        if let many = result as? [SecIdentity] {
+            identities = many
+        } else if let result, CFGetTypeID(result) == SecIdentityGetTypeID() {
+            identities = [result as! SecIdentity]
+        } else {
+            return nil
+        }
+
+        return identities.first { identity in
+            var certificate: SecCertificate?
+            return SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess
+                && certificate.flatMap { SPKI.fingerprint(of: $0) } == fingerprint
+        }
+    }
+}
+#endif
+
 /// P-256 keys that live only in memory (the CLI's --remote, test identities) or in a file (TEST
 /// ONLY stores). The app's and the device's keychain keys are made by their own stores.
 public enum RemoteKey {
-    /// A fresh P-256 private key, never stored anywhere.
+    /// A fresh P-256 private key. Xcode 27 keeps it only in memory. Older public Security APIs need
+    /// a permanent Keychain key to form a TLS identity, so there it gets a unique temporary tag and
+    /// `RemoteIdentity` removes it with its matching certificate when the identity dies.
     public static func generate() -> SecKey? {
-        let attrs: [String: Any] = [kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+        var attrs: [String: Any] = [kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
                                     kSecAttrKeySizeInBits as String: 256]
+        #if compiler(<6.2)
+        let tag = Data((LegacyKeychainIdentity.temporaryTagPrefix + UUID().uuidString).utf8)
+        var privateAttrs: [String: Any] = [
+            kSecAttrIsPermanent as String: true,
+            kSecAttrApplicationTag as String: tag,
+            kSecAttrLabel as String: "Sill temporary TLS identity",
+        ]
+        #if os(iOS)
+        privateAttrs[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        #endif
+        attrs[kSecPrivateKeyAttrs as String] = privateAttrs
+        #endif
         return SecKeyCreateRandomKey(attrs as CFDictionary, nil)
     }
 
