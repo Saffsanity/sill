@@ -82,7 +82,7 @@ public class SessionTests
     {
         string Active(string json) => SessionMessages.Decode<WindowList>(Encoding.UTF8.GetBytes(json))!.ActiveName;
         Assert.Equal("none", Active("""{"macName":"Mac","windows":[],"active":{"none":{}}}"""));
-        Assert.Equal("desktop", Active("""{"macName":"Mac","windows":[{"id":1}],"active":{"desktop":{}},"launchID":"x"}"""));
+        Assert.Equal("desktop", Active("""{"macName":"Mac","windows":[{"id":1,"title":"T","appName":"A","bundleID":"b","width":1,"height":1}],"active":{"desktop":{}},"launchID":"x"}"""));
         Assert.Equal("window 4012", Active("""{"macName":"Mac","windows":[],"active":{"window":{"_0":4012}}}"""));
         Assert.Null(SessionMessages.Decode<WindowList>("not json"u8));
     }
@@ -172,5 +172,54 @@ public class SessionTests
         await Assert.ThrowsAsync<SillTls.PinMismatchException>(() =>
             SessionClient.ConnectAsync("127.0.0.1", port, device, SHA256.HashData("another mac"u8), new Hello(null, null, 1, "PC"), cts.Token));
         Assert.Null(await first);
+    }
+}
+
+// The switcher's messages (Switcher.swift, Gesture.swift), as the iOS device sends and reads them.
+public class SwitcherTests
+{
+    private static string Json(byte[] m) => Encoding.UTF8.GetString(m, StreamHeader.Length, m.Length - StreamHeader.Length);
+
+    [Fact]
+    public void AWindowListReadsItsWindows()
+    {
+        var list = SessionMessages.Decode<WindowList>("""
+            {"macName":"Mac","windows":[{"id":42,"title":"Doc","appName":"TextEdit","bundleID":"com.apple.TextEdit","width":800,"height":600}],
+             "active":{"window":{"_0":42}},"gestures":1}
+            """u8)!;
+        Assert.Equal((42u, "Doc", "TextEdit", "com.apple.TextEdit", 800, 600),
+            (list.Windows[0].Id, list.Windows[0].Title, list.Windows[0].AppName, list.Windows[0].BundleId, list.Windows[0].Width, list.Windows[0].Height));
+        Assert.Equal(42u, list.ActiveWindowId);
+        Assert.Equal(1, list.Gestures);
+        Assert.Null(SessionMessages.Decode<WindowList>("""{"macName":"Mac","windows":[],"active":{"desktop":{}}}"""u8)!.ActiveWindowId);
+    }
+
+    [Fact]
+    public void TheSwitchersMessagesAreSwiftsShape()
+    {
+        Assert.Equal((SessionKinds.SelectSource, """{"window":{"_0":42}}"""), (SessionMessages.SelectWindow(42)[0], Json(SessionMessages.SelectWindow(42))));
+        Assert.Equal((SessionKinds.LaunchApp, """{"bundleID":"com.apple.TextEdit"}"""), (SessionMessages.LaunchApp("com.apple.TextEdit")[0], Json(SessionMessages.LaunchApp("com.apple.TextEdit"))));
+        Assert.Equal((SessionKinds.WindowCommand, """{"id":42,"action":"minimize"}"""), (SessionMessages.WindowCommand(42, "minimize")[0], Json(SessionMessages.WindowCommand(42, "minimize"))));
+        Assert.Equal((SessionKinds.Gesture, """{"gesture":"swipeUp","fingers":3}"""), (SessionMessages.Gesture(Gestures.MissionControl)[0], Json(SessionMessages.Gesture(Gestures.MissionControl))));
+    }
+
+    [Fact]
+    public void ImageBlobsSplitTheirKey()
+    {
+        var thumb = ImageBlobs.Thumbnail([1, 2, 3, 4, 0xFF, 0xD8])!.Value;
+        Assert.Equal(0x01020304u, thumb.WindowId);
+        Assert.Equal(new byte[] { 0xFF, 0xD8 }, thumb.Jpeg);
+        Assert.Null(ImageBlobs.Thumbnail([1, 2, 3, 4]));
+        var icon = ImageBlobs.Icon([0, 3, (byte)'a', (byte)'.', (byte)'b', 0x89, 0x50])!.Value;
+        Assert.Equal("a.b", icon.BundleId);
+        Assert.Equal(new byte[] { 0x89, 0x50 }, icon.Png);
+        Assert.Null(ImageBlobs.Icon([0, 3, (byte)'a', (byte)'.', (byte)'b']));
+    }
+
+    [Fact]
+    public void AnAppListDecodes()
+    {
+        var apps = SessionMessages.Decode<List<AppInfo>>("""[{"name":"TextEdit","bundleID":"com.apple.TextEdit"}]"""u8)!;
+        Assert.Equal(("TextEdit", "com.apple.TextEdit"), (apps[0].Name, apps[0].BundleId));
     }
 }

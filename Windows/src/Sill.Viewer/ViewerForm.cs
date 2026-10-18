@@ -14,7 +14,9 @@ namespace Sill.Viewer;
 /// feeds every frame to the decoder (each one is needed: later frames refer to it), and converts
 /// the newest picture to a bitmap only when the window has drawn the last one, so a slow paint
 /// drops pictures rather than queueing them. Mouse and keys go to the Mac (kind 8): left Ctrl is
-/// ⌘, right Ctrl ⌃, Alt ⌥. F11 toggles full screen.
+/// ⌘, right Ctrl ⌃, Alt ⌥; Alt+Tab is the Mac's ⌘Tab and the Windows key alone its Spotlight (a
+/// low-level hook takes both from Windows while this window is in front). The bar on top is the
+/// iPad's: Apps, the Desktop, the windows, and the Mac's gestures. F11 toggles full screen.
 /// </summary>
 sealed class ViewerForm : Form
 {
@@ -45,6 +47,14 @@ sealed class ViewerForm : Form
     private long lastMoveTicks;
     private (double X, double Y) lastPointer = (-1, -1);
 
+    // The iPad's bar and Apps drawer, and what they show.
+    private readonly MacBar bar = new();
+    private readonly AppsDrawer drawer = new();
+    private KeyboardHook? hook;
+    private volatile bool desktopActive, nothingStreams;
+    private long askedAt;   // when the Desktop was last asked for
+    private bool cmdTab, winDown, winUsed;
+
     public ViewerForm(string dir, string? hostOverride)
     {
         this.dir = dir; this.hostOverride = hostOverride;
@@ -54,12 +64,32 @@ sealed class ViewerForm : Form
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Opaque, true);
         KeyPreview = true;
+
+        Controls.Add(drawer);
+        Controls.Add(bar);
+        bar.AppsClicked += () => drawer.Toggle();
+        bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
+        bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
+        bar.WindowCommand += (id, action) => Send(SessionMessages.WindowCommand(id, action));
+        bar.GestureClicked += gesture =>
+        {
+            // As the iPad does: a gesture acts on the Mac's whole screen, so the Desktop streams first.
+            if (!desktopActive) Send(SessionMessages.SelectDesktop());
+            Send(SessionMessages.Gesture(gesture));
+        };
+        drawer.Launch += bundleId => Send(SessionMessages.LaunchApp(bundleId));
+        drawer.Closed += () => { ActiveControl = null; Focus(); };
     }
+
+    /// <summary>Where the Mac's picture goes: the window under the bar.</summary>
+    private Rectangle VideoArea => new(0, bar.Height, ClientSize.Width, Math.Max(1, ClientSize.Height - bar.Height));
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
         Resized();
+        try { hook = new KeyboardHook(SystemKey); }
+        catch (Exception ex) { Log($"No keyboard hook ({ex.Message}): Alt+Tab and the Windows key stay Windows'."); }
         _ = Task.Run(() => RunAsync(stop.Token));
         var timer = new System.Windows.Forms.Timer { Interval = 1000 };
         timer.Tick += (_, _) => UpdateTitle();
@@ -67,9 +97,70 @@ sealed class ViewerForm : Form
     }
 
     protected override void OnResize(EventArgs e) { base.OnResize(e); Resized(); Invalidate(); }
-    private void Resized() { clientWidth = Math.Max(1, ClientSize.Width); clientHeight = Math.Max(1, ClientSize.Height); }
+    private void Resized() { var v = VideoArea; clientWidth = Math.Max(1, v.Width); clientHeight = Math.Max(1, v.Height); }
 
-    protected override void OnFormClosing(FormClosingEventArgs e) { stop.Cancel(); base.OnFormClosing(e); }
+    protected override void OnFormClosing(FormClosingEventArgs e) { hook?.Dispose(); stop.Cancel(); base.OnFormClosing(e); }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+
+    // The keys Windows keeps (the hook's callback, on the UI thread). Only while this window is in
+    // front and the Apps search isn't taking keys; true keeps the key from Windows.
+    private bool SystemKey(int vk, bool down, bool altDown)
+    {
+        const int VK_TAB = 0x09, VK_SHIFT = 0x10, VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_SPACE_HID = 0x2C, TAB_HID = 0x2B;
+        if (GetForegroundWindow() != Handle || drawer.Typing || !connected)
+        {
+            winDown = false;
+            return false;
+        }
+        // Alt+Tab → ⌘Tab: ⌘ held until Alt comes up, Tab (with Shift, backwards) through the apps.
+        if (vk == VK_TAB && altDown)
+        {
+            if (down && !cmdTab)
+            {
+                if (keysDown.Remove(Keys.Menu, out ushort opt)) Send(InputMessages.Key(opt, false, Modifiers()));
+                cmdTab = true;
+                Send(InputMessages.Key(HidKeys.LeftCommand, true, InputMessages.Command));
+            }
+            ulong mods = InputMessages.Command | ((GetKeyState(VK_SHIFT) & 0x8000) != 0 ? InputMessages.Shift : 0);
+            Send(InputMessages.Key(TAB_HID, down, mods));
+            return true;
+        }
+        if (cmdTab && !down && vk is 0x12 or 0xA4 or 0xA5)
+        {
+            cmdTab = false;
+            Send(InputMessages.Key(HidKeys.LeftCommand, false, 0));
+            return false;   // Windows must see Alt come up, or it would think it still held
+        }
+        // The Windows key: alone, Spotlight (⌘Space); held with another key, ⌃ (for a terminal's ⌃C).
+        if (vk is VK_LWIN or VK_RWIN)
+        {
+            if (down) { if (!winDown) { winDown = true; winUsed = false; } }
+            else
+            {
+                winDown = false;
+                if (winUsed)
+                {
+                    if (keysDown.Remove(Keys.LWin, out ushort ctl)) Send(InputMessages.Key(ctl, false, Modifiers()));
+                }
+                else
+                {
+                    Send(InputMessages.Key(HidKeys.LeftCommand, true, InputMessages.Command));
+                    Send(InputMessages.Key(VK_SPACE_HID, true, InputMessages.Command));
+                    Send(InputMessages.Key(VK_SPACE_HID, false, InputMessages.Command));
+                    Send(InputMessages.Key(HidKeys.LeftCommand, false, 0));
+                }
+            }
+            return true;   // both the down and the up: Windows never sees the key, so no Start menu
+        }
+        if (winDown && down && !winUsed)
+        {
+            winUsed = true;
+            keysDown[Keys.LWin] = HidKeys.LeftControl;
+            Send(InputMessages.Key(HidKeys.LeftControl, true, Modifiers()));
+        }
+        return false;
+    }
 
     // ---- input ----
 
@@ -146,6 +237,7 @@ sealed class ViewerForm : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (drawer.Typing && e.KeyCode != Keys.F11) return;
         e.Handled = e.SuppressKeyPress = true;
         if (e.KeyCode == Keys.F11) { FullScreen(FormBorderStyle != FormBorderStyle.None); return; }
         ushort hid = e.KeyCode switch
@@ -165,6 +257,7 @@ sealed class ViewerForm : Form
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
+        if (drawer.Typing && !keysDown.ContainsKey(e.KeyCode)) return;
         e.Handled = e.SuppressKeyPress = true;
         if (!keysDown.Remove(e.KeyCode, out ushort hid)) return;
         Send(InputMessages.Key(hid, false, Modifiers()));
@@ -218,17 +311,18 @@ sealed class ViewerForm : Form
             if (front is not null)
             {
                 // Letterboxed to the window, the Mac's shape kept.
-                float scale = Math.Min((float)ClientSize.Width / front.Width, (float)ClientSize.Height / front.Height);
+                var area = VideoArea;
+                float scale = Math.Min((float)area.Width / front.Width, (float)area.Height / front.Height);
                 int w = (int)(front.Width * scale), h = (int)(front.Height * scale);
                 g.InterpolationMode = scale >= 1 ? InterpolationMode.NearestNeighbor : InterpolationMode.Bilinear;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
                 g.CompositingMode = CompositingMode.SourceCopy;
-                pictureRect = new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+                pictureRect = new Rectangle(area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h);
                 g.DrawImage(front, pictureRect);
             }
             else
             {
-                TextRenderer.DrawText(g, status, Font, ClientRectangle, Color.Gainsboro,
+                TextRenderer.DrawText(g, status, Font, VideoArea, Color.Gainsboro,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             }
         }
@@ -339,7 +433,8 @@ sealed class ViewerForm : Form
         connected = true;
         HevcDecoder? decoder = null;
         ParameterSets? ps = null;
-        bool asked = false, keyed = false;
+        bool keyed = false;
+        nothingStreams = false;
         int pictures = 0;
         try
         {
@@ -353,12 +448,18 @@ sealed class ViewerForm : Form
                 switch (h.Kind)
                 {
                     case SessionKinds.WindowList:
-                        if (SessionMessages.Decode<WindowList>(payload) is { } list && list.ActiveName == "none" && !asked)
+                        var list = SessionMessages.Decode<WindowList>(payload);
+                        if (list is not null)
                         {
-                            asked = true;
-                            await session.SendAsync(SessionMessages.SelectDesktop(), ct);
-                            Log("Asked for the Desktop.");
+                            desktopActive = list.ActiveName == "desktop";
+                            nothingStreams = list.ActiveName == "none";
+                            BeginInvoke(() => bar.SetWindows(list.Windows, list.ActiveWindowId, list.ActiveName == "desktop", list.Gestures >= 1));
                         }
+                        // As the iPad does: whenever the Mac says nothing streams, ask for the Desktop.
+                        // The Mac drops a pick that lands while it is still stopping another stream
+                        // (a viewer closed a moment ago), so the ping loop asks again every 3 s.
+                        if (list is not null && list.ActiveName == "none")
+                            await AskForDesktopAsync(session, ct);
                         break;
                     case SessionKinds.ParameterSets:
                         var next = ParameterSets.Parse(payload);
@@ -390,6 +491,18 @@ sealed class ViewerForm : Form
                         if (picture is not null && (!paintPending || Stopwatch.GetElapsedTime(Interlocked.Read(ref shownAt)).TotalMilliseconds > 500))
                             Show(picture, decoder.Sps);
                         break;
+                    case SessionKinds.Thumbnail:
+                        if (ImageBlobs.Thumbnail(payload) is { } thumb && LoadImage(thumb.Jpeg) is { } thumbImage)
+                            BeginInvoke(() => bar.SetThumbnail(thumb.WindowId, thumbImage));
+                        break;
+                    case SessionKinds.AppIcon:
+                        if (ImageBlobs.Icon(payload) is { } icon && LoadImage(icon.Png) is { } iconImage)
+                            BeginInvoke(() => drawer.SetIcon(icon.BundleId, iconImage));
+                        break;
+                    case SessionKinds.AppList:
+                        if (SessionMessages.Decode<List<AppInfo>>(payload) is { } apps)
+                            BeginInvoke(() => drawer.SetApps(apps));
+                        break;
                     case SessionKinds.Pong:
                         double sent = SessionMessages.PongTime(payload);
                         lock (gate) rtt = Math.Max(rtt ?? 0, clock.Elapsed.TotalSeconds - sent);
@@ -407,6 +520,19 @@ sealed class ViewerForm : Form
         catch (Exception e) { Log(e.ToString()); Status($"The session ended: {e.Message} Reconnecting…"); }
         finally { connected = false; paintPending = false; decoder?.Dispose(); }
         return true;
+    }
+
+    // A JPEG or PNG from the Mac as a bitmap of its own (Image.FromStream keeps its stream).
+    private static Bitmap? LoadImage(byte[] bytes)
+    {
+        try
+        {
+            using var ms = new MemoryStream(bytes);
+            using var img = Image.FromStream(ms);
+            return new Bitmap(img);
+        }
+        catch (ArgumentException) { return null; }
+        catch (ExternalException) { return null; }
     }
 
     // The newest picture to the back bitmap, sampled down to about the window's size, then swapped
@@ -434,6 +560,13 @@ sealed class ViewerForm : Form
         BeginInvoke(Invalidate);
     }
 
+    private async Task AskForDesktopAsync(SessionClient session, CancellationToken ct)
+    {
+        Interlocked.Exchange(ref askedAt, Stopwatch.GetTimestamp());
+        await session.SendAsync(SessionMessages.SelectDesktop(), ct);
+        Log("Asked for the Desktop.");
+    }
+
     // A ping a second (its pong gives the round trip) and ClientStats, so the Mac's log names us.
     private async Task PingAsync(SessionClient session, Stopwatch clock, CancellationToken ct)
     {
@@ -443,6 +576,8 @@ sealed class ViewerForm : Form
             do
             {
                 await session.SendAsync(SessionMessages.Ping(clock.Elapsed.TotalSeconds), ct);
+                if (nothingStreams && Stopwatch.GetElapsedTime(Interlocked.Read(ref askedAt)).TotalSeconds >= 3)
+                    await AskForDesktopAsync(session, ct);
                 var stats = JsonSerializer.SerializeToUtf8Bytes(new { fps = picturesShown, frameAgeMs = -1, rttMs = -1, device = $"{Environment.MachineName} (Windows)" });
                 await session.SendAsync(StreamHeader.Serialize(SessionKinds.ClientStats, 0, false, stats), ct);
             }

@@ -115,7 +115,10 @@ dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p
 
 Self-contained, because an apphost can't find a .NET installed only in the user's folder. It shows
 the Mac's Desktop as it streams and sends the mouse and keys to it: left Ctrl is ⌘, right Ctrl ⌃,
-Alt ⌥. F11 toggles full screen. The Mac's host needs Accessibility (System Settings › Privacy &
+Alt ⌥; Alt+Tab is the Mac's ⌘Tab, and the Windows key alone opens Spotlight (held with another key
+it is ⌃). The bar on top is the iPad's: Apps (search and open an installed app), Desktop, a thumbnail
+per Mac window (click to stream it, right-click to close, minimize or make it full screen), and
+Mission Control, App Exposé, the Spaces, Show Desktop and Launchpad. F11 toggles full screen. The Mac's host needs Accessibility (System Settings › Privacy &
 Security › Accessibility, for the app that started it) or the Mac drops the input. The title
 has the size, pictures shown and received each second, the bitrate, the decode time and the round
 trip. Decoding is in software for now: about 30 fps at 4K (`Sill.Spike session --decode 1` measures it).

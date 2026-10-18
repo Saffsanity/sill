@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net.Security;
 using System.Text.Json;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace Sill.Protocol;
@@ -8,7 +9,8 @@ namespace Sill.Protocol;
 /// <summary>The session's message kinds this client sends or reads (StreamMessage.swift's <c>Kind</c>).</summary>
 public static class SessionKinds
 {
-    public const byte ParameterSets = 0, Frame = 1, WindowList = 2, SelectSource = 6, Viewport = 9,
+    public const byte ParameterSets = 0, Frame = 1, WindowList = 2, Thumbnail = 3, AppIcon = 4, AppList = 5,
+        SelectSource = 6, LaunchApp = 7, WindowCommand = 15, Gesture = 28, Viewport = 9,
         Ping = 10, Pong = 11, ClientStats = 12, Tick = 13, HostSettings = 16, MacInfo = 18, Goodbye = 22, Hello = 23;
 
     /// <summary>What a header from the Mac may announce (StreamMessage.swift's caps): frames
@@ -36,15 +38,34 @@ public sealed record Goodbye(
     [property: JsonPropertyName("minimumVersion")] string? MinimumVersion = null,
     [property: JsonPropertyName("reconnect")] bool? Reconnect = null);
 
-/// <summary>The parts of kind 2 the spike reads. Mirrors <c>WindowList</c> in Switcher.swift
+/// <summary>One Mac window as the switcher shows it. Mirrors <c>WindowInfo</c> in Switcher.swift.</summary>
+public sealed record WindowInfo(
+    [property: JsonPropertyName("id")] uint Id,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("appName")] string? AppName,
+    [property: JsonPropertyName("bundleID")] string? BundleId,
+    [property: JsonPropertyName("width")] int Width,
+    [property: JsonPropertyName("height")] int Height);
+
+/// <summary>An installed app (kind 5 is a list of them). Mirrors <c>AppInfo</c>.</summary>
+public sealed record AppInfo(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("bundleID")] string BundleId);
+
+/// <summary>The parts of kind 2 the client reads. Mirrors <c>WindowList</c> in Switcher.swift
 /// (the rest of its fields are skipped).</summary>
 public sealed record WindowList(
     [property: JsonPropertyName("macName")] string MacName,
-    [property: JsonPropertyName("windows")] IReadOnlyList<JsonElement> Windows,
+    [property: JsonPropertyName("windows")] IReadOnlyList<WindowInfo> Windows,
     [property: JsonPropertyName("active")] JsonElement Active,
     [property: JsonPropertyName("hostVersion")] string? HostVersion = null,
-    [property: JsonPropertyName("protocol")] int? Protocol = null)
+    [property: JsonPropertyName("protocol")] int? Protocol = null,
+    [property: JsonPropertyName("gestures")] int? Gestures = null)
 {
+    /// <summary>The streamed window's id, null for the Desktop or nothing.</summary>
+    public uint? ActiveWindowId => Active.ValueKind == JsonValueKind.Object && Active.TryGetProperty("window", out var w)
+        && w.ValueKind == JsonValueKind.Object && w.TryGetProperty("_0", out var id) && id.TryGetUInt32(out uint v) ? v : null;
+
     /// <summary>"none", "desktop" or "window 1234": <c>StreamSource</c>'s synthesized JSON is an
     /// object with one key, the case.</summary>
     public string ActiveName => Active.ValueKind == JsonValueKind.Object && Active.EnumerateObject().FirstOrDefault() is var p && p.Name is { } n
@@ -62,6 +83,23 @@ public static class SessionMessages
 
     /// <summary>Kind 6 for the Desktop: Swift's synthesized <c>StreamSource.desktop</c>.</summary>
     public static byte[] SelectDesktop() => StreamHeader.Serialize(SessionKinds.SelectSource, 0, false, """{"desktop":{}}"""u8);
+
+    /// <summary>Kind 6 for one window: <c>{"window":{"_0":id}}</c>.</summary>
+    public static byte[] SelectWindow(uint id) =>
+        StreamHeader.Serialize(SessionKinds.SelectSource, 0, false, Encoding.UTF8.GetBytes("{\"window\":{\"_0\":" + id + "}}"));
+
+    /// <summary>Kind 7: open an installed app; the host streams its first window.</summary>
+    public static byte[] LaunchApp(string bundleId) =>
+        StreamHeader.Serialize(SessionKinds.LaunchApp, 0, false, JsonSerializer.SerializeToUtf8Bytes(new { bundleID = bundleId }));
+
+    /// <summary>Kind 15: a window's traffic light, "close", "minimize" or "fullScreen".</summary>
+    public static byte[] WindowCommand(uint id, string action) =>
+        StreamHeader.Serialize(SessionKinds.WindowCommand, 0, false, JsonSerializer.SerializeToUtf8Bytes(new { id, action }));
+
+    /// <summary>Kind 28: a trackpad gesture by name (<see cref="Gestures"/>), which the host turns
+    /// into the Mac's own shortcut. Only to a host whose window list says <c>gestures</c> 1 or more.</summary>
+    public static byte[] Gesture(string name, int fingers = 3) =>
+        StreamHeader.Serialize(SessionKinds.Gesture, 0, false, JsonSerializer.SerializeToUtf8Bytes(new { gesture = name, fingers }));
 
     /// <summary>Kind 10: the sender's clock, a big-endian Double, echoed back as kind 11.</summary>
     public static byte[] Ping(double seconds)
@@ -205,5 +243,29 @@ public sealed class SessionClient : IAsyncDisposable
     {
         await ssl.DisposeAsync().ConfigureAwait(false);
         writing.Dispose();
+    }
+}
+
+/// <summary>Kind 28's names (Gesture.swift) and what the Mac does with each (GestureChords.swift).</summary>
+public static class Gestures
+{
+    public const string MissionControl = "swipeUp", AppExpose = "swipeDown",
+        SpaceRight = "swipeLeft", SpaceLeft = "swipeRight", Apps = "pinch", ShowDesktop = "spread";
+}
+
+/// <summary>Kinds 3 and 4: an image after a key. Mirrors <c>ImageBlob</c> in Switcher.swift.</summary>
+public static class ImageBlobs
+{
+    /// <summary>Kind 3: windowID (4 bytes, big endian), then a JPEG.</summary>
+    public static (uint WindowId, byte[] Jpeg)? Thumbnail(ReadOnlySpan<byte> d) =>
+        d.Length > 4 ? (BinaryPrimitives.ReadUInt32BigEndian(d), d[4..].ToArray()) : null;
+
+    /// <summary>Kind 4: the bundle ID's length (2 bytes, big endian), the ID in UTF-8, then a PNG.</summary>
+    public static (string BundleId, byte[] Png)? Icon(ReadOnlySpan<byte> d)
+    {
+        if (d.Length <= 2) return null;
+        int len = BinaryPrimitives.ReadUInt16BigEndian(d);
+        if (d.Length <= 2 + len) return null;
+        return (Encoding.UTF8.GetString(d.Slice(2, len)), d[(2 + len)..].ToArray());
     }
 }

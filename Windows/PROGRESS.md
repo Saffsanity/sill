@@ -190,6 +190,26 @@ distribution, input, menus, gestures, clipboard.
   learned: on this Mac `lsof -iTCP:<port>` listed no connection while the viewer streamed, so it can't
   tell whether a client is connected.
 
+- 2026-10-18: the iPad's bar on Windows (Jericho: Alt+Tab and the like stay Windows', so reaching
+  the Mac's other apps is tedious; "refer to how the ipad layout is"). `MacBar` across the top: Apps
+  (the `AppsDrawer`: kind 5's apps with kind 4's icons, a search field, a click or Return opens one,
+  kind 7), Desktop (kind 6), a thumbnail per Mac window (kind 2's windows, kind 3's JPEGs; click streams
+  it, right-click closes, minimizes or makes it full screen, kind 15), and the Mac's gestures as
+  buttons (kind 28, only when the window list says `gestures` 1; the Desktop first, as the iPad does):
+  Mission Control, App Exposé, the Spaces left and right, Show Desktop, Launchpad. Nothing in the bar
+  takes focus, so keys stay the Mac's; the Apps search keeps its own while open. `KeyboardHook`
+  (WH_KEYBOARD_LL, only while the viewer is in front): Alt+Tab is ⌘Tab (⌘ held until Alt comes up,
+  Shift+Tab backwards; Alt's own up still reaches Windows), the Windows key alone is Spotlight
+  (⌘Space) and held with another key is ⌃; Windows never sees the Windows key, so no Start menu.
+  Protocol: `WindowInfo`, `AppInfo`, `WindowList.Windows`/`ActiveWindowId`/`Gestures`, `SelectWindow`,
+  `LaunchApp`, `WindowCommand`, `Gesture`, `Gestures`' names, `ImageBlobs` (4 new tests, 115 on the PC).
+  Found while testing it: the viewer asked for the Desktop once, and a viewer opened a moment after
+  another closed asked while the Mac was still stopping that stream, which drops a pick, so it waited
+  black (35 s here, until another client asked; likely Jericho's earlier black window too). It now asks
+  whenever the Mac says nothing streams, again every 3 s, as the iPad does: relaunched straight after
+  a close, the first picture 0.22 s after connecting. Not tried here: the bar's clicks, the gestures
+  and the hook's keys (they would act on Jericho's Mac and need hands on the PC).
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -233,8 +253,8 @@ distribution, input, menus, gestures, clipboard.
   `IMFDXGIDeviceManager`) so the RTX 3050 or the Intel GPU decodes, and draw the NV12 texture with
   Direct3D instead of converting on the CPU; the target is 60 fps at 4K. Decode on its own thread so
   the reader keeps draining the socket.
-- Input: confirm it on the Mac (Accessibility for the host's launcher); then the window list and
-  picking windows, and the Mac's cursor shape (kind 14) instead of Windows' arrow.
+- Jericho's try of the bar, the gestures, Alt+Tab and the Windows key. Then: the Mac's cursor shape
+  (kind 14) instead of Windows' arrow; the strip's scrollbar styled; the clipboard (kind 32).
 - Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
 - The `sillclient.py` comparison on the real-capture host (ticket 06's leftover).
 - Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
