@@ -26,6 +26,7 @@ sealed class ViewerForm : Form
     private readonly Lock gate = new();
     private Bitmap? front, back;
     private volatile bool paintPending;
+    private long shownAt;   // when Show last asked for a paint
     private volatile int clientWidth = 1280, clientHeight = 800;
     private string status = "Connecting…";
     private string macName = "Mac";
@@ -249,11 +250,33 @@ sealed class ViewerForm : Form
 
     private void Status(string text)
     {
+        Log(text);
         lock (gate) status = text;
         BeginInvoke(() => { Invalidate(); UpdateTitle(); });
     }
 
+    // viewer.log beside the key: each step and every error, for when the window alone can't say.
+    private readonly Lock logGate = new();
+    private void Log(string line)
+    {
+        try { lock (logGate) File.AppendAllText(Path.Combine(dir, "viewer.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    // A session at a time; when one ends (the Mac gone, a restart, silence) the next starts 2 s later.
     private async Task RunAsync(CancellationToken ct)
+    {
+        Log($"Viewer started (identity {dir}).");
+        while (!ct.IsCancellationRequested)
+        {
+            if (!await SessionAsync(ct)) return;
+            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { return; }
+        }
+    }
+
+    /// <summary>One session; false when trying again is pointless (no paired Mac, a bad --host).</summary>
+    private async Task<bool> SessionAsync(CancellationToken stopping)
     {
         SavedMac? mac;
         byte[]? pin;
@@ -266,18 +289,21 @@ sealed class ViewerForm : Form
         catch (Exception e) when (e is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
         {
             Status($"No paired Mac in {dir}: pair first with Sill.Spike pair.\n({e.Message})");
-            return;
+            return false;
         }
         macName = mac.Name;
         string host = mac.Host; int port = mac.Port;
         if (hostOverride is not null)
         {
             int colon = hostOverride.LastIndexOf(':');
-            if (colon <= 0 || !int.TryParse(hostOverride[(colon + 1)..], out port)) { Status("--host takes <address>:<port>."); return; }
+            if (colon <= 0 || !int.TryParse(hostOverride[(colon + 1)..], out port)) { Status("--host takes <address>:<port>."); return false; }
             host = hostOverride[..colon].Trim('[', ']');
         }
 
         Status($"Connecting to {mac.Name} at {host}:{port}…");
+        // This session's token: the watchdog cancels it when nothing has arrived for 10 s.
+        using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+        var ct = sessionStop.Token;
         SessionClient session;
         try
         {
@@ -286,24 +312,44 @@ sealed class ViewerForm : Form
         }
         catch (Exception e)
         {
-            Status($"Couldn’t connect to {mac.Name} at {host}:{port}: {e.Message}");
-            return;
+            Status($"Couldn’t connect to {mac.Name} at {host}:{port}: {e.Message} Trying again…");
+            return true;
         }
 
         await using var connection = session;
         Status($"Connected to {mac.Name}. Waiting for the picture…");
         var clock = Stopwatch.StartNew();
+        long lastHeard = Stopwatch.GetTimestamp();
+        _ = Task.Run(async () =>
+        {
+            using var watch = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            try
+            {
+                while (await watch.WaitForNextTickAsync(ct))
+                    if (Stopwatch.GetElapsedTime(Interlocked.Read(ref lastHeard)).TotalSeconds > 10)
+                    {
+                        Log("Nothing from the Mac for 10 s: ending the session.");
+                        sessionStop.Cancel();
+                    }
+            }
+            catch (OperationCanceledException) { }
+        });
         _ = PingAsync(session, clock, ct);
         _ = WriteInputAsync(session, ct);
         connected = true;
         HevcDecoder? decoder = null;
         ParameterSets? ps = null;
         bool asked = false, keyed = false;
+        int pictures = 0;
         try
         {
+            int logged = 0;
             while (await session.ReadAsync(ct) is { } m)
             {
                 var (h, payload) = m;
+                Interlocked.Exchange(ref lastHeard, Stopwatch.GetTimestamp());
+                if (h.Kind is not (SessionKinds.Frame or SessionKinds.Pong or SessionKinds.Tick or 3 or 4 or 26) && logged++ < 40)
+                    Log($"kind {h.Kind}, {payload.Length} B");
                 switch (h.Kind)
                 {
                     case SessionKinds.WindowList:
@@ -311,6 +357,7 @@ sealed class ViewerForm : Form
                         {
                             asked = true;
                             await session.SendAsync(SessionMessages.SelectDesktop(), ct);
+                            Log("Asked for the Desktop.");
                         }
                         break;
                     case SessionKinds.ParameterSets:
@@ -323,6 +370,7 @@ sealed class ViewerForm : Form
                         {
                             decoder?.Dispose();
                             decoder = new HevcDecoder(sps);
+                            Log($"Decoder {decoder.Name} for {sps.Width}×{sps.Height} (coded {sps.CodedWidth}×{sps.CodedHeight}).");
                             keyed = false;
                             lock (gate) size = $"{sps.Width}×{sps.Height}";
                         }
@@ -338,7 +386,9 @@ sealed class ViewerForm : Form
                         var picture = decoder.Push(AnnexB.Build(h.IsKeyframe ? ps : null, payload, nals));
                         double took = clock.Elapsed.TotalMilliseconds - t0;
                         lock (gate) { decodeMs += took; worstDecodeMs = Math.Max(worstDecodeMs, took); }
-                        if (picture is not null && !paintPending) Show(picture, decoder.Sps);
+                        if (picture is not null && pictures++ == 0) Log($"First picture after {clock.Elapsed.TotalSeconds:0.00} s ({took:0} ms to decode).");
+                        if (picture is not null && (!paintPending || Stopwatch.GetElapsedTime(Interlocked.Read(ref shownAt)).TotalMilliseconds > 500))
+                            Show(picture, decoder.Sps);
                         break;
                     case SessionKinds.Pong:
                         double sent = SessionMessages.PongTime(payload);
@@ -350,11 +400,13 @@ sealed class ViewerForm : Form
                         break;
                 }
             }
-            Status($"{mac.Name} closed the session.");
+            Status($"{mac.Name} closed the session. Reconnecting…");
         }
+        catch (OperationCanceledException) when (!stopping.IsCancellationRequested) { Status($"Lost {mac.Name} (nothing for 10 s). Reconnecting…"); }
         catch (OperationCanceledException) { }
-        catch (Exception e) { Status($"The session ended: {e.Message}"); }
-        finally { connected = false; decoder?.Dispose(); }
+        catch (Exception e) { Log(e.ToString()); Status($"The session ended: {e.Message} Reconnecting…"); }
+        finally { connected = false; paintPending = false; decoder?.Dispose(); }
+        return true;
     }
 
     // The newest picture to the back bitmap, sampled down to about the window's size, then swapped
@@ -378,6 +430,7 @@ sealed class ViewerForm : Form
             picturesShown++;
         }
         paintPending = true;
+        Interlocked.Exchange(ref shownAt, Stopwatch.GetTimestamp());
         BeginInvoke(Invalidate);
     }
 

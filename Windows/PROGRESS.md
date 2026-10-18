@@ -178,6 +178,18 @@ distribution, input, menus, gestures, clipboard.
   full screen (double-click and Esc are the Mac's now). One writer keeps kind 8 in order. Not yet
   tried against the Mac: the host needs Accessibility for the app it was started from (Ghostty).
 
+- 2026-10-18: the viewer made diagnosable. Jericho saw nothing after opening it: the window had sat on
+  "Waiting for the picture" (no picture ever drawn), and the `.cmd` launcher left a blank console window
+  over it. Now: `viewer.log` beside the key (each step, the first picture's time, every error); a
+  watchdog ends a session after 10 s with nothing from the Mac, and any session that ends is tried
+  again 2 s later (a host restart, Wi-Fi); a paint that never comes (a hidden window) no longer stops
+  pictures for good (a new one is drawn after 500 ms anyway). The desktop launcher is a `.lnk`
+  straight to the `.exe`. Relaunched in the console session: connected 0.24 s after start, first
+  picture 0.26 s after that (29 ms to decode), then 16–23 pictures a second on a mostly still screen.
+  The first stuck run's cause is not known (its window gave no reason; the log would now). Also
+  learned: on this Mac `lsof -iTCP:<port>` listed no connection while the viewer streamed, so it can't
+  tell whether a client is connected.
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
