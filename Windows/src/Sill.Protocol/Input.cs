@@ -33,6 +33,20 @@ public static class InputMessages
     public static byte[] Scroll(double x, double y, double dx, double dy) =>
         Message($$$"""{"scroll":{"x":{{{N(x)}}},"y":{{{N(y)}}},"dx":{{{N(dx)}}},"dy":{{{N(dy)}}}}}""");
 
+    public enum ScrollPhase { Began, Ended, MomentumBegan, MomentumEnded }
+
+    /// <summary><c>{"scrollGesture":{"_0":"began","x":0.5,"y":0.5}}</c>: the brackets around a run
+    /// of scroll deltas that make the Mac treat them as a trackpad gesture (Input.swift).</summary>
+    public static byte[] ScrollGesture(ScrollPhase phase, double x, double y)
+    {
+        string name = phase switch
+        {
+            ScrollPhase.Began => "began", ScrollPhase.Ended => "ended",
+            ScrollPhase.MomentumBegan => "momentumBegan", _ => "momentumEnded",
+        };
+        return Message($$$"""{"scrollGesture":{"_0":"{{{name}}}","x":{{{N(x)}}},"y":{{{N(y)}}}}}""");
+    }
+
     /// <summary>A key by USB HID usage (page 7) with the modifiers held, CGEventFlags bits.</summary>
     public static byte[] Key(ushort hidUsage, bool down, ulong modifiers) =>
         Message($$$"""{"key":{"hidUsage":{{{hidUsage}}},"down":{{{(down ? "true" : "false")}}},"modifiers":{{{modifiers}}}}}""");

@@ -50,6 +50,9 @@ public sealed unsafe class VideoRenderer : IDisposable
     private readonly Dictionary<(IntPtr, uint), IntPtr> inputViews = [];
     private readonly Dictionary<IntPtr, IntPtr> outputViews = [];
 
+    /// <summary>The colour around a letterboxed picture.</summary>
+    public System.Drawing.Color Background { get; set; } = System.Drawing.Color.Black;
+
     public VideoRenderer(GpuDevice gpu, IntPtr hwnd, int width, int height)
     {
         this.gpu = gpu; this.hwnd = hwnd;
@@ -117,7 +120,7 @@ public sealed unsafe class VideoRenderer : IDisposable
         Rect source = new(crop.Left, crop.Top, crop.Left + crop.Width, crop.Top + crop.Height);
         Rect dest = new(x, y, x + w, y + h);
         Rect target = new(0, 0, width, height);
-        float* black = stackalloc float[] { 0, 0, 0, 1 };
+        float* black = stackalloc float[] { Background.R / 255f, Background.G / 255f, Background.B / 255f, 1 };
         ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int, Rect*, void>)Slot(c, 13))(c, p, 1, &target);     // SetOutputTargetRect
         ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int, float*, void>)Slot(c, 14))(c, p, 0, black);      // SetOutputBackgroundColor (RGB)
         ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, uint, int, Rect*, void>)Slot(c, 30))(c, p, 0, 1, &source);   // SetStreamSourceRect

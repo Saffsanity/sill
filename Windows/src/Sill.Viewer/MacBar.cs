@@ -1,177 +1,408 @@
+using System.Drawing.Drawing2D;
 using Sill.Protocol;
 
 namespace Sill.Viewer;
 
 /// <summary>
-/// The bar across the top, as the iPad's landscape bar: Apps, the Desktop, a thumbnail for each
-/// Mac window (click streams it; right-click for close, minimize, full screen), and the Mac's own
-/// gestures as buttons (Mission Control, App Exposé, the Spaces, Show Desktop, Launchpad), which
-/// the host turns into the Mac's shortcuts. Nothing in it takes keyboard focus, so keys keep going
-/// to the Mac.
+/// The bar across the top, drawn as the iPad's landscape bar (iOSClient/StreamScreen.swift's
+/// <c>TopBar</c> at its regular <c>BarMetrics</c>): Apps on the left, then a thumbnail for each Mac
+/// window (104×66, the app's icon as a badge, the streamed one in an accent halo; click streams it,
+/// right-click closes, minimizes or makes it full screen), and on the right Spaces (the Mac's
+/// gestures, which the iPad does with three fingers, as a menu) and Desktop. One control drawn by
+/// hand: it never takes keyboard focus, so keys keep going to the Mac. The strip scrolls with the
+/// wheel or a drag and fades where it continues.
 /// </summary>
-sealed class MacBar : Panel
+sealed class MacBar : Control
 {
     public event Action? AppsClicked, DesktopClicked;
     public event Action<uint>? WindowClicked;
     public event Action<uint, string>? WindowCommand;
     public event Action<string>? GestureClicked;
 
-    private static readonly Color Back = Color.FromArgb(28, 28, 30), LitColor = Color.FromArgb(10, 132, 255);
-    private readonly FlowLayoutPanel strip;
-    private readonly BarButton desktop;
-    private readonly List<BarButton> gestureButtons = [];
-    private readonly Dictionary<uint, ThumbButton> thumbs = [];
-    private readonly ToolTip tips = new();
+    // BarMetrics.regular, in points; ×dpi/96 in pixels.
+    private const float BarHeight = 86, EdgePad = 22, Gap = 12, ButtonSize = 66, ButtonRadius = 16,
+        ThumbWidth = 104, ThumbHeight = 66, ThumbRadius = 10, ThumbSpacing = 16, ThumbPad = 10, Badge = 24, Fade = 28;
+
+    private enum Part { None, Apps, Spaces, Desktop, Thumb }
+    private readonly record struct Hit(Part Part, uint Window = 0);
+
+    private IReadOnlyList<WindowInfo> windows = [];
+    private uint? activeWindow;
+    private bool desktopActive, gesturesAvailable, appsOpen;
+    private readonly Dictionary<uint, Image> thumbnails = [];
+    private readonly Dictionary<string, Image> icons = [];
+    private float scroll;   // the strip's offset, in pixels
+    private Hit hover, pressed;
+    private Point pressAt;
+    private float pressScroll;
+    private bool dragging;
+    private readonly ToolTip tips = new() { InitialDelay = 500 };
+    private readonly System.Windows.Forms.Timer tipTimer = new() { Interval = 500 };
+    private Font labelFont, iconFont, badgeFont;
+    private string tipText = "";
 
     public MacBar()
     {
+        SetStyle(ControlStyles.Selectable, false);
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        TabStop = false;
         Dock = DockStyle.Top;
-        BackColor = Back;
-        Height = LogicalToDeviceUnits(64);
-        Padding = new Padding(LogicalToDeviceUnits(6));
-
-        var left = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false, BackColor = Back, Padding = Padding.Empty };
-        var apps = Button("Apps", "Your Mac's apps: open one", () => AppsClicked?.Invoke());
-        desktop = Button("Desktop", "Stream the whole Desktop", () => DesktopClicked?.Invoke());
-        left.Controls.AddRange([apps, desktop]);
-
-        var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Back, Padding = Padding.Empty };
-        foreach (var (text, tip, gesture) in new[]
+        BackColor = Palette.Bar;
+        labelFont = Palette.UiFont(11, DeviceDpi);
+        iconFont = Palette.IconFont(20, DeviceDpi);
+        badgeFont = Palette.UiFont(10, DeviceDpi, semibold: true);
+        Height = Px(BarHeight);
+        tipTimer.Tick += (_, _) => { tipTimer.Stop(); ShowTip(); };
+        // The tooltip in the bar's colours, not Windows' light one.
+        tips.OwnerDraw = true;
+        tips.Popup += (_, e) =>
         {
-            ("Mission Control", "Mission Control (a three-finger swipe up)", Gestures.MissionControl),
-            ("App Exposé", "This app's windows (a three-finger swipe down)", Gestures.AppExpose),
-            ("◀ Space", "The Space on the left", Gestures.SpaceLeft),
-            ("Space ▶", "The Space on the right", Gestures.SpaceRight),
-            ("Show Desktop", "Move the windows aside", Gestures.ShowDesktop),
-            ("Launchpad", "All apps (Launchpad)", Gestures.Apps),
-        })
+            var size = TextRenderer.MeasureText(tipText, labelFont);
+            e.ToolTipSize = new Size(size.Width + Px(16), size.Height + Px(10));
+        };
+        tips.Draw += (_, e) =>
         {
-            var b = Button(text, tip, () => GestureClicked?.Invoke(gesture));
-            gestureButtons.Add(b);
-            right.Controls.Add(b);
-        }
-
-        strip = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, BackColor = Back, Padding = new Padding(LogicalToDeviceUnits(8), 0, 0, 0) };
-        Controls.Add(strip);
-        Controls.Add(right);
-        Controls.Add(left);
+            using (var back = new SolidBrush(Palette.Control)) e.Graphics.FillRectangle(back, e.Bounds);
+            using (var edge = new Pen(Palette.ControlHover)) e.Graphics.DrawRectangle(edge, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+            TextRenderer.DrawText(e.Graphics, e.ToolTipText, labelFont, e.Bounds, Palette.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        };
     }
 
-    private BarButton Button(string text, string tip, Action click)
+    private int Px(float points) => (int)Math.Round(points * DeviceDpi / 96f);
+    private float S(float points) => points * DeviceDpi / 96f;
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
     {
-        var b = new BarButton(text) { Height = Height - Padding.Vertical, Margin = new Padding(LogicalToDeviceUnits(2), 0, LogicalToDeviceUnits(2), 0) };
-        b.Click += (_, _) => click();
-        tips.SetToolTip(b, tip);
-        return b;
+        base.OnDpiChangedAfterParent(e);
+        labelFont.Dispose(); iconFont.Dispose(); badgeFont.Dispose();
+        labelFont = Palette.UiFont(11, DeviceDpi);
+        iconFont = Palette.IconFont(20, DeviceDpi);
+        badgeFont = Palette.UiFont(10, DeviceDpi, semibold: true);
+        Height = Px(BarHeight);
+        Invalidate();
     }
+
+    /// <summary>Whether the Apps drawer is showing (its button is lit while it is).</summary>
+    public bool AppsOpen { get => appsOpen; set { appsOpen = value; Invalidate(); } }
 
     /// <summary>Kind 2: the windows, in the host's order, and what streams.</summary>
     public void SetWindows(IReadOnlyList<WindowInfo> windows, uint? activeWindow, bool desktopActive, bool gestures)
     {
-        desktop.Lit = desktopActive;
-        foreach (var b in gestureButtons) b.Enabled = gestures;
+        this.windows = windows;
+        this.activeWindow = activeWindow;
+        this.desktopActive = desktopActive;
+        gesturesAvailable = gestures;
         var keep = windows.Select(w => w.Id).ToHashSet();
-        foreach (var gone in thumbs.Keys.Where(id => !keep.Contains(id)).ToList())
+        foreach (var gone in thumbnails.Keys.Where(id => !keep.Contains(id)).ToList())
         {
-            strip.Controls.Remove(thumbs[gone]);
-            thumbs[gone].Dispose();
-            thumbs.Remove(gone);
+            thumbnails[gone].Dispose();
+            thumbnails.Remove(gone);
         }
-        int index = 0;
-        foreach (var w in windows)
-        {
-            if (!thumbs.TryGetValue(w.Id, out var t))
-            {
-                t = new ThumbButton(w.Id) { Size = new Size(LogicalToDeviceUnits(132), Height - Padding.Vertical - SystemInformation.HorizontalScrollBarHeight), Margin = new Padding(LogicalToDeviceUnits(3), 0, LogicalToDeviceUnits(3), 0) };
-                t.MouseUp += (_, e) =>
-                {
-                    if (e.Button == MouseButtons.Left) WindowClicked?.Invoke(t.WindowId);
-                    else if (e.Button == MouseButtons.Right) Menu(t).Show(t, e.Location);
-                };
-                thumbs[w.Id] = t;
-                strip.Controls.Add(t);
-            }
-            t.AppName = w.AppName ?? "";
-            t.Title = w.Title ?? "";
-            t.Lit = w.Id == activeWindow;
-            tips.SetToolTip(t, string.IsNullOrEmpty(w.Title) ? w.AppName : $"{w.AppName} — {w.Title}");
-            strip.Controls.SetChildIndex(t, index++);
-            t.Invalidate();
-        }
-    }
-
-    private ContextMenuStrip Menu(ThumbButton t)
-    {
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Close", null, (_, _) => WindowCommand?.Invoke(t.WindowId, "close"));
-        menu.Items.Add("Minimize", null, (_, _) => WindowCommand?.Invoke(t.WindowId, "minimize"));
-        menu.Items.Add("Full Screen", null, (_, _) => WindowCommand?.Invoke(t.WindowId, "fullScreen"));
-        return menu;
+        ClampScroll();
+        Invalidate();
     }
 
     /// <summary>Kind 3: a window's thumbnail, refreshed every second or two.</summary>
     public void SetThumbnail(uint id, Image image)
     {
-        if (thumbs.TryGetValue(id, out var t)) { t.Thumbnail?.Dispose(); t.Thumbnail = image; t.Invalidate(); }
-        else image.Dispose();
+        if (thumbnails.Remove(id, out var old)) old.Dispose();
+        thumbnails[id] = image;
+        Invalidate(ThumbRect(id) is { } r ? Rectangle.Inflate(Rectangle.Round(r), Px(12), Px(12)) : ClientRectangle);
     }
 
-    /// <summary>A button that never takes focus, so keys stay the Mac's.</summary>
-    internal sealed class BarButton : Button
+    /// <summary>Kind 4: an app's icon, for the thumbnails' badges.</summary>
+    public void SetIcon(string bundleId, Image image)
     {
-        private bool lit;
-        public bool Lit { get => lit; set { lit = value; BackColor = value ? LitColor : Color.FromArgb(58, 58, 60); } }
+        if (icons.Remove(bundleId, out var old)) old.Dispose();
+        icons[bundleId] = image;
+        Invalidate();
+    }
 
-        public BarButton(string text)
+    // ---- layout ----
+
+    private float ButtonTop => (Height - S(ButtonSize)) / 2;
+    private RectangleF AppsRect => new(S(EdgePad), ButtonTop, S(ButtonSize), S(ButtonSize));
+    private RectangleF DesktopRect => new(Width - S(EdgePad) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
+    private RectangleF SpacesRect => new(DesktopRect.X - S(Gap) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
+    private RectangleF StripRect
+    {
+        get
         {
-            SetStyle(ControlStyles.Selectable, false);
-            TabStop = false;
-            Text = text;
-            AutoSize = true;
-            FlatStyle = FlatStyle.Flat;
-            FlatAppearance.BorderSize = 0;
-            ForeColor = Color.White;
-            Lit = false;
-            Font = new Font("Segoe UI", 9f);
+            float left = AppsRect.Right + S(Gap), right = SpacesRect.X - S(Gap);
+            return new RectangleF(left, 0, Math.Max(0, right - left), Height);
         }
     }
 
-    /// <summary>A window's thumbnail and app name; lit while it streams.</summary>
-    internal sealed class ThumbButton : Control
+    private float StripContent => windows.Count == 0 ? 0 : S(ThumbPad) * 2 + windows.Count * S(ThumbWidth) + (windows.Count - 1) * S(ThumbSpacing);
+
+    private RectangleF? ThumbRect(uint id)
     {
-        public uint WindowId { get; }
-        public Image? Thumbnail { get; set; }
-        public string AppName { get; set; } = "";
-        public string Title { get; set; } = "";
-        public bool Lit { get; set; }
+        int i = windows.ToList().FindIndex(w => w.Id == id);
+        return i < 0 ? null : ThumbRectAt(i);
+    }
 
-        public ThumbButton(uint id)
+    private RectangleF ThumbRectAt(int index) =>
+        new(StripRect.X + S(ThumbPad) + index * (S(ThumbWidth) + S(ThumbSpacing)) - scroll, (Height - S(ThumbHeight)) / 2, S(ThumbWidth), S(ThumbHeight));
+
+    private void ClampScroll() => scroll = Math.Clamp(scroll, 0, Math.Max(0, StripContent - StripRect.Width));
+
+    private Hit HitAt(Point p)
+    {
+        if (AppsRect.Contains(p)) return new(Part.Apps);
+        if (DesktopRect.Contains(p)) return new(Part.Desktop);
+        if (SpacesRect.Contains(p)) return new(Part.Spaces);
+        if (StripRect.Contains(p))
+            for (int i = 0; i < windows.Count; i++)
+                if (ThumbRectAt(i).Contains(p)) return new(Part.Thumb, windows[i].Id);
+        return new(Part.None);
+    }
+
+    // ---- drawing ----
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Palette.Bar);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        DrawButton(g, AppsRect, "", "Apps", appsOpen, new(Part.Apps), enabled: true);
+        DrawButton(g, SpacesRect, "", "Spaces", false, new(Part.Spaces), gesturesAvailable);
+        DrawButton(g, DesktopRect, "", "Desktop", desktopActive, new(Part.Desktop), enabled: true);
+
+        var strip = StripRect;
+        var state = g.Save();
+        g.SetClip(strip);
+        for (int i = 0; i < windows.Count; i++)
         {
-            WindowId = id;
-            SetStyle(ControlStyles.Selectable, false);
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-            TabStop = false;
-            Cursor = Cursors.Hand;
-            Font = new Font("Segoe UI", 8f);
+            var r = ThumbRectAt(i);
+            if (r.Right < strip.X - S(12) || r.X > strip.Right + S(12)) continue;
+            DrawThumb(g, windows[i], r);
         }
+        // Where the strip continues, it fades into the bar.
+        if (scroll > 0.5f) FadeEdge(g, new RectangleF(strip.X, 0, S(Fade), Height), LinearGradientMode.Horizontal, leftToRight: true);
+        if (scroll < StripContent - strip.Width - 0.5f) FadeEdge(g, new RectangleF(strip.Right - S(Fade), 0, S(Fade), Height), LinearGradientMode.Horizontal, leftToRight: false);
+        g.Restore(state);
+    }
 
-        protected override void OnPaint(PaintEventArgs e)
+    private void FadeEdge(Graphics g, RectangleF r, LinearGradientMode mode, bool leftToRight)
+    {
+        var solid = Palette.Bar;
+        var clear = Color.FromArgb(0, solid);
+        using var brush = new LinearGradientBrush(new RectangleF(r.X - 1, r.Y, r.Width + 2, r.Height), leftToRight ? solid : clear, leftToRight ? clear : solid, mode);
+        g.FillRectangle(brush, r);
+    }
+
+    private void DrawButton(Graphics g, RectangleF r, string glyph, string label, bool open, Hit which, bool enabled)
+    {
+        Color fill = open ? Palette.ControlOpen : Palette.Control;
+        if (enabled && pressed == which && hover == which) fill = Palette.ControlPressed;
+        else if (enabled && hover == which && !open) fill = Palette.ControlHover;
+        Palette.FillRounded(g, fill, r, S(ButtonRadius));
+        // The icon over its label, as the iPad's: a 4 pt gap, the pair centred.
+        int iconH = iconFont.Height, labelH = labelFont.Height;
+        float total = iconH + S(2) + labelH, y = r.Y + (r.Height - total) / 2;
+        var text = enabled ? Palette.Text : Palette.Muted;
+        TextRenderer.DrawText(g, glyph, iconFont, Rectangle.Round(new RectangleF(r.X, y, r.Width, iconH)), text,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
+        TextRenderer.DrawText(g, label, labelFont, Rectangle.Round(new RectangleF(r.X, y + iconH + S(2), r.Width, labelH)),
+            enabled ? Palette.BarLabel : Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoClipping);
+    }
+
+    private void DrawThumb(Graphics g, WindowInfo w, RectangleF r)
+    {
+        float radius = S(ThumbRadius);
+        using (var path = Palette.Rounded(r, radius))
         {
-            var g = e.Graphics;
-            g.Clear(Back);
-            int label = Font.Height + 2;
-            var area = new Rectangle(0, 0, Width, Height - label);
-            using (var frame = new SolidBrush(Color.FromArgb(44, 44, 46))) g.FillRectangle(frame, area);
-            if (Thumbnail is { } img)
+            var state = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            if (thumbnails.TryGetValue(w.Id, out var img))
             {
-                float s = Math.Min((float)area.Width / img.Width, (float)area.Height / img.Height);
-                int w = (int)(img.Width * s), h = (int)(img.Height * s);
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
-                g.DrawImage(img, area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h);
+                // Aspect fill, as the iPad's thumbnails: the window's middle, cropped to the card.
+                float s = Math.Max(r.Width / img.Width, r.Height / img.Height);
+                float iw = img.Width * s, ih = img.Height * s;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(img, r.X + (r.Width - iw) / 2, r.Y + (r.Height - ih) / 2, iw, ih);
             }
-            if (Lit) using (var pen = new Pen(LitColor, 3)) g.DrawRectangle(pen, 1, 1, Width - 3, Height - label - 3);
-            TextRenderer.DrawText(g, AppName, Font, new Rectangle(0, Height - label, Width, label), Color.Gainsboro,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            else
+            {
+                using var body = new SolidBrush(Palette.ThumbBody);
+                using var titleBar = new SolidBrush(Palette.ThumbTitleBar);
+                g.FillRectangle(body, r);
+                g.FillRectangle(titleBar, r.X, r.Y, r.Width, S(9));
+            }
+            if (hover.Part == Part.Thumb && hover.Window == w.Id)
+                using (var lighten = new SolidBrush(Color.FromArgb(28, 255, 255, 255))) g.FillRectangle(lighten, r);
+            g.Restore(state);
+            using var edge = new Pen(Color.FromArgb(31, 255, 255, 255), S(1));
+            g.DrawPath(edge, path);
         }
+        if (w.Id == activeWindow)
+        {
+            // The halo: 2 pt of accent, 3 pt clear of the card, following its radius.
+            float inset = S(5) - S(1);
+            using var halo = Palette.Rounded(RectangleF.Inflate(r, inset, inset), radius + S(5));
+            using var pen = new Pen(Palette.Accent, S(2));
+            g.DrawPath(pen, halo);
+        }
+        DrawBadge(g, w, new PointF(r.X - S(6), r.Bottom + S(6) - S(Badge)));
+    }
+
+    // The app's icon at the card's bottom-left corner, in a 2 pt ring of the bar's colour so it cuts
+    // through the card's edge and its halo.
+    private void DrawBadge(Graphics g, WindowInfo w, PointF at)
+    {
+        float size = S(Badge), corner = MathF.Round(Badge * 0.29f) * DeviceDpi / 96f;
+        Palette.FillRounded(g, Palette.Bar, new RectangleF(at.X - S(2), at.Y - S(2), size + S(4), size + S(4)), corner + S(2));
+        var r = new RectangleF(at.X, at.Y, size, size);
+        if (w.BundleId is { } id && icons.TryGetValue(id, out var icon))
+        {
+            using var path = Palette.Rounded(r, corner);
+            var state = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(icon, r);
+            g.Restore(state);
+        }
+        else
+        {
+            Palette.FillRounded(g, Palette.IconFallback, r, corner);
+            string letters = (w.AppName ?? "?").Length >= 2 ? (w.AppName ?? "?")[..2] : w.AppName ?? "?";
+            TextRenderer.DrawText(g, letters, badgeFont, Rectangle.Round(r), Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+
+    // ---- input ----
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (pressed.Part == Part.Thumb || (pressed.Part == Part.None && e.Button == MouseButtons.Left && StripRect.Contains(pressAt)))
+        {
+            if (!dragging && Math.Abs(e.X - pressAt.X) > S(4)) dragging = true;
+            if (dragging) { scroll = pressScroll - (e.X - pressAt.X); ClampScroll(); Invalidate(); return; }
+        }
+        var hit = HitAt(e.Location);
+        if (hit != hover)
+        {
+            hover = hit;
+            tips.Hide(this);
+            tipTimer.Stop();
+            if (hit.Part != Part.None) tipTimer.Start();
+            Invalidate();
+        }
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        hover = default;
+        tipTimer.Stop();
+        tips.Hide(this);
+        Invalidate();
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        tipTimer.Stop();
+        tips.Hide(this);
+        pressAt = e.Location;
+        pressScroll = scroll;
+        dragging = false;
+        pressed = e.Button == MouseButtons.Left ? HitAt(e.Location) : default;
+        Invalidate();
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        var hit = HitAt(e.Location);
+        var was = pressed;
+        bool dragged = dragging;
+        pressed = default;
+        dragging = false;
+        Invalidate();
+        if (e.Button == MouseButtons.Right && hit.Part == Part.Thumb) { WindowMenu(hit.Window).Show(this, e.Location); return; }
+        if (e.Button != MouseButtons.Left || dragged || hit != was) return;
+        switch (hit.Part)
+        {
+            case Part.Apps: AppsClicked?.Invoke(); break;
+            case Part.Desktop: DesktopClicked?.Invoke(); break;
+            case Part.Spaces when gesturesAvailable: SpacesMenu().Show(this, Point.Round(new PointF(SpacesRect.X, SpacesRect.Bottom + S(6)))); break;
+            case Part.Thumb: WindowClicked?.Invoke(hit.Window); break;
+        }
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        // Over the strip the wheel scrolls it, a notch a thumbnail; elsewhere on the bar it does nothing.
+        if (StripContent > StripRect.Width)
+        {
+            scroll -= e.Delta / 120f * (S(ThumbWidth) + S(ThumbSpacing));
+            ClampScroll();
+            Invalidate();
+        }
+        if (e is HandledMouseEventArgs handled) handled.Handled = true;
+    }
+
+    private ContextMenuStrip WindowMenu(uint id)
+    {
+        var menu = Palette.Menu();
+        menu.Items.Add("Close", null, (_, _) => WindowCommand?.Invoke(id, "close"));
+        menu.Items.Add("Minimize", null, (_, _) => WindowCommand?.Invoke(id, "minimize"));
+        menu.Items.Add("Full Screen", null, (_, _) => WindowCommand?.Invoke(id, "fullScreen"));
+        return menu;
+    }
+
+    private ContextMenuStrip SpacesMenu()
+    {
+        var menu = Palette.Menu();
+        foreach (var (text, gesture) in new[]
+        {
+            ("Mission Control", Gestures.MissionControl),
+            ("App Exposé", Gestures.AppExpose),
+            ("Space on the Left", Gestures.SpaceLeft),
+            ("Space on the Right", Gestures.SpaceRight),
+            ("Show Desktop", Gestures.ShowDesktop),
+            ("Launchpad", Gestures.Apps),
+        })
+            menu.Items.Add(text, null, (_, _) => GestureClicked?.Invoke(gesture));
+        return menu;
+    }
+
+    private void ShowTip()
+    {
+        string? text = hover.Part switch
+        {
+            Part.Apps => "Your Mac's apps: open one",
+            Part.Desktop => "Stream the whole Desktop",
+            Part.Spaces => gesturesAvailable ? "Mission Control, the Spaces, Show Desktop" : "This Mac doesn't take gestures (update Sill on it)",
+            Part.Thumb => windows.FirstOrDefault(w => w.Id == hover.Window) is { } w
+                ? (string.IsNullOrEmpty(w.Title) ? w.AppName : $"{w.AppName} — {w.Title}") : null,
+            _ => null,
+        };
+        if (text is null) return;
+        tipText = text;
+        var r = hover.Part switch
+        {
+            Part.Apps => AppsRect, Part.Desktop => DesktopRect, Part.Spaces => SpacesRect,
+            _ => ThumbRect(hover.Window) ?? RectangleF.Empty,
+        };
+        tips.Show(text, this, (int)r.X, (int)(r.Bottom + S(10)), 4000);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            foreach (var i in thumbnails.Values) i.Dispose();
+            foreach (var i in icons.Values) i.Dispose();
+            labelFont.Dispose(); iconFont.Dispose(); badgeFont.Dispose();
+            tips.Dispose(); tipTimer.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

@@ -76,7 +76,7 @@ sealed class ViewerForm : Form
     {
         this.dir = dir; this.hostOverrides = hostOverrides; this.options = options;
         Text = "Sill Viewer";
-        BackColor = Color.Black;
+        BackColor = Palette.Panel;
         ClientSize = new Size(1280, 800);
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Opaque, true);
@@ -87,7 +87,7 @@ sealed class ViewerForm : Form
         Controls.Add(panel);
         panel.SendToBack();   // under the bar and the drawer
         panel.Visible = false;
-        bar.AppsClicked += () => drawer.Toggle();
+        bar.AppsClicked += () => { drawer.Toggle(); bar.AppsOpen = drawer.Visible; };
         bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
         bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
         bar.WindowCommand += (id, action) => Send(SessionMessages.WindowCommand(id, action));
@@ -98,11 +98,17 @@ sealed class ViewerForm : Form
             Send(SessionMessages.Gesture(gesture));
         };
         drawer.Launch += bundleId => Send(SessionMessages.LaunchApp(bundleId));
-        drawer.Closed += () => { ActiveControl = null; Focus(); };
+        drawer.Closed += () => { bar.AppsOpen = false; ActiveControl = null; Focus(); };
     }
 
     /// <summary>Where the Mac's picture goes: the window under the bar.</summary>
     private Rectangle VideoArea => new(0, bar.Height, ClientSize.Width, Math.Max(1, ClientSize.Height - bar.Height));
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Palette.DarkTitleBar(Handle);   // the title bar in the bar's colour, as one with it
+    }
 
     protected override void OnShown(EventArgs e)
     {
@@ -257,7 +263,50 @@ sealed class ViewerForm : Form
     {
         base.OnMouseWheel(e);
         var f = Fraction(e.Location);
-        Send(InputMessages.Scroll(f.X, f.Y, 0, e.Delta / 120.0 * NotchFraction));
+        Glide(0, e.Delta / 120.0 * NotchFraction, f);
+    }
+
+    // The wheel as a trackpad scroll (WheelGlide): each notch eased over ~0.1 s, a step every 16 ms,
+    // so the Mac's content moves smoothly and repaints every frame instead of once a notch.
+    private readonly WheelGlide glide = new();
+    private readonly Lock glideGate = new();
+    private readonly Stopwatch glideClock = Stopwatch.StartNew();
+    private bool gliding;
+
+    private void Glide(double dx, double dy, (double X, double Y) at)
+    {
+        lock (glideGate)
+        {
+            SendGlide(glide.Wheel(dx, dy, at.X, at.Y, glideClock.Elapsed.TotalSeconds));
+            if (gliding) return;
+            gliding = true;
+        }
+        _ = Task.Run(async () =>
+        {
+            using var tick = new PeriodicTimer(TimeSpan.FromMilliseconds(16));
+            while (await tick.WaitForNextTickAsync())
+                lock (glideGate)
+                {
+                    SendGlide(glide.Tick(glideClock.Elapsed.TotalSeconds));
+                    if (!glide.Active) { gliding = false; return; }
+                }
+        });
+    }
+
+    private void FinishGlide()
+    {
+        lock (glideGate) SendGlide(glide.Finish());
+    }
+
+    private void SendGlide(IReadOnlyList<WheelGlide.Output> outputs)
+    {
+        foreach (var o in outputs)
+            Send(o switch
+            {
+                WheelGlide.Began => InputMessages.ScrollGesture(InputMessages.ScrollPhase.Began, o.X, o.Y),
+                WheelGlide.Delta d => InputMessages.Scroll(d.X, d.Y, d.Dx, d.Dy),
+                _ => InputMessages.ScrollGesture(InputMessages.ScrollPhase.Ended, o.X, o.Y),
+            });
     }
 
     protected override void WndProc(ref Message m)
@@ -267,7 +316,7 @@ sealed class ViewerForm : Form
         {
             int delta = (short)((long)m.WParam >> 16);
             var f = Fraction(PointToClient(new Point((short)(long)m.LParam, (short)((long)m.LParam >> 16))));
-            Send(InputMessages.Scroll(f.X, f.Y, -delta / 120.0 * NotchFraction, 0));   // tilted right: content moves left
+            Glide(-delta / 120.0 * NotchFraction, 0, f);   // tilted right: content moves left
             m.Result = 1;
             return;
         }
@@ -328,6 +377,7 @@ sealed class ViewerForm : Form
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
+        FinishGlide();
         foreach (var key in keysDown.Keys.ToList()) { ushort hid = keysDown[key]; keysDown.Remove(key); Send(InputMessages.Key(hid, false, Modifiers())); }
         var f = lastPointer.X < 0 ? (0.5, 0.5) : lastPointer;
         if (leftDown) { leftDown = false; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftUp, f.Item1, f.Item2)); }
@@ -353,7 +403,7 @@ sealed class ViewerForm : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(Color.Black);
+        g.Clear(Palette.Panel);
         lock (gate)
         {
             if (front is not null)
@@ -370,7 +420,7 @@ sealed class ViewerForm : Form
             }
             else
             {
-                TextRenderer.DrawText(g, status, Font, VideoArea, Color.Gainsboro,
+                TextRenderer.DrawText(g, status, Font, VideoArea, Palette.Muted,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             }
         }
@@ -569,7 +619,7 @@ sealed class ViewerForm : Form
                         break;
                     case SessionKinds.AppIcon:
                         if (ImageBlobs.Icon(payload) is { } icon && LoadImage(icon.Png) is { } iconImage)
-                            BeginInvoke(() => drawer.SetIcon(icon.BundleId, iconImage));
+                            BeginInvoke(() => { bar.SetIcon(icon.BundleId, new Bitmap(iconImage)); drawer.SetIcon(icon.BundleId, iconImage); });
                         break;
                     case SessionKinds.AppList:
                         if (SessionMessages.Decode<List<AppInfo>>(payload) is { } apps)
@@ -722,7 +772,7 @@ sealed class ViewerForm : Form
     private void Draw(GpuPicture picture, HevcSps sps)
     {
         var t0 = Stopwatch.GetTimestamp();
-        renderer ??= new VideoRenderer(gpu!, panelHandle, panelWidth, panelHeight);
+        renderer ??= new VideoRenderer(gpu!, panelHandle, panelWidth, panelHeight) { Background = Palette.Panel };
         renderer.Resize(panelWidth, panelHeight);
         int width = Math.Min(sps.Width, picture.Width - sps.Left), height = Math.Min(sps.Height, picture.Height - sps.Top);
         renderer.Draw(picture, (sps.Left, sps.Top, width, height));
