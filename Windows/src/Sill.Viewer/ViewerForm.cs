@@ -23,7 +23,7 @@ sealed class ViewerForm : Form
     private sealed record SavedMac(string Fingerprint, string MacId, string Name, string RecognitionKey, string Host, int Port);
 
     private readonly string dir;
-    private readonly string? hostOverride;
+    private readonly IReadOnlyList<string> hostOverrides;
     private readonly CancellationTokenSource stop = new();
     private readonly Lock gate = new();
     private Bitmap? front, back;
@@ -55,9 +55,9 @@ sealed class ViewerForm : Form
     private long askedAt;   // when the Desktop was last asked for
     private bool cmdTab, winDown, winUsed;
 
-    public ViewerForm(string dir, string? hostOverride)
+    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides)
     {
-        this.dir = dir; this.hostOverride = hostOverride;
+        this.dir = dir; this.hostOverrides = hostOverrides;
         Text = "Sill Viewer";
         BackColor = Color.Black;
         ClientSize = new Size(1280, 800);
@@ -386,29 +386,44 @@ sealed class ViewerForm : Form
             return false;
         }
         macName = mac.Name;
-        string host = mac.Host; int port = mac.Port;
-        if (hostOverride is not null)
+        // The addresses to dial, in order: each --host, else the one saved at pairing.
+        var targets = new List<(string Host, int Port)>();
+        foreach (var h in hostOverrides.Count > 0 ? hostOverrides : [$"{mac.Host}:{mac.Port}"])
         {
-            int colon = hostOverride.LastIndexOf(':');
-            if (colon <= 0 || !int.TryParse(hostOverride[(colon + 1)..], out port)) { Status("--host takes <address>:<port>."); return false; }
-            host = hostOverride[..colon].Trim('[', ']');
+            int colon = h.LastIndexOf(':');
+            if (colon <= 0 || !int.TryParse(h[(colon + 1)..], out int p)) { Status($"--host takes <address>:<port>, not {h}."); return false; }
+            targets.Add((h[..colon].Trim('[', ']'), p));
         }
 
-        Status($"Connecting to {mac.Name} at {host}:{port}…");
         // This session's token: the watchdog cancels it when nothing has arrived for 10 s.
         using var sessionStop = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         var ct = sessionStop.Token;
-        SessionClient session;
-        try
+        SessionClient? session = null;
+        string host = "", tried = "";
+        foreach (var (h, p) in targets)
         {
-            session = await SessionClient.ConnectAsync(host, port, DeviceIdentity.LoadOrCreate(dir), pin,
-                new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{Environment.MachineName} (Windows)"), ct);
+            Status($"Connecting to {mac.Name} at {h}:{p}…");
+            using var dial = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            dial.CancelAfter(TimeSpan.FromSeconds(targets.Count > 1 ? 4 : 15));   // an address that isn't there now (away from home) gives way
+            try
+            {
+                session = await SessionClient.ConnectAsync(h, p, DeviceIdentity.LoadOrCreate(dir), pin,
+                    new Hello("0.1", "viewer", Hello.CurrentProtocol, $"{Environment.MachineName} (Windows)"), dial.Token);
+                host = $"{h}:{p}";
+                break;
+            }
+            catch (Exception e) when (!stopping.IsCancellationRequested)
+            {
+                tried += $"\n{h}:{p}: {(e is OperationCanceledException ? "no answer" : e.Message)}";
+                Log($"Couldn’t connect at {h}:{p}: {e.Message}");
+            }
         }
-        catch (Exception e)
+        if (session is null)
         {
-            Status($"Couldn’t connect to {mac.Name} at {host}:{port}: {e.Message} Trying again…");
+            Status($"Couldn’t reach {mac.Name}. Trying again…{tried}");
             return true;
         }
+        Log($"Connected at {host}.");
 
         await using var connection = session;
         Status($"Connected to {mac.Name}. Waiting for the picture…");

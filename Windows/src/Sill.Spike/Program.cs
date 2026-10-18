@@ -4,6 +4,7 @@
 //
 //   Sill.Spike pair --host <address>:<port> --code <12 digits>
 //   Sill.Spike pair --link '<sill://pair?…>' [--host <address>:<port>]
+//   Sill.Spike pair --ask 1 --host <address>:<port>   (Sill.app opens its code window; type the code here)
 //   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>] [--decode 1]
 //   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png>
 //
@@ -41,8 +42,28 @@ static class Spike
 
     private static async Task<int> PairAsync(Dictionary<string, string> opts, string dir, string name)
     {
+        byte[]? pinnedAsk = null;
         string? code = opts.GetValueOrDefault("code"), url = opts.GetValueOrDefault("link"), hostArg = opts.GetValueOrDefault("host");
-        if ((code is null) == (url is null)) return Usage("Give --code or --link, one of them.");
+        bool ask = opts.ContainsKey("ask");
+        if (ask && url is null && code is null)
+        {
+            if (hostArg is null || !SplitHost(hostArg, out string askHost, out int askPort)) return Usage("--ask needs --host <address>:<port> (the Mac's home door).");
+            using var askIdentity = DeviceIdentity.LoadOrCreate(dir);
+            Console.WriteLine($"Asking {askHost}:{askPort} to show its pairing code…");
+            PairResult? answer; byte[] askedKey;
+            try { (answer, askedKey) = await PairingClient.AskAsync(askHost, askPort, askIdentity, name, "Windows", CancellationToken.None); }
+            catch (Exception e) { Console.Error.WriteLine($"Couldn’t ask: {e.Message}"); return 3; }
+            string askedMac = answer?.Name ?? "The Mac";
+            if (answer?.Reason != PairResult.Shown)
+            {
+                Console.WriteLine(answer is null ? "The Mac didn’t answer the ask." : PairingExchange.Words(answer, askedMac));
+                return 1;
+            }
+            Console.Write($"{PairingExchange.Words(answer, askedMac)} Type it here: ");
+            code = opts.GetValueOrDefault("code-from") is { } file ? WaitForFile(file) : Console.ReadLine() ?? "";
+            pinnedAsk = askedKey;
+        }
+        if ((code is null) == (url is null)) return Usage("Give --code, --link or --ask, one of them.");
 
         PairLink? link = null;
         if (url is not null)
@@ -75,7 +96,7 @@ static class Spike
         try
         {
             outcome = link is null
-                ? await PairingClient.PairWithCodeAsync(host, port, code!, identity, name, "Windows", cts.Token)
+                ? await PairingClient.PairWithCodeAsync(host, port, code!, identity, name, "Windows", cts.Token, pinnedAsk)
                 : await PairingClient.PairWithLinkAsync(host, port, link, identity, name, "Windows", cts.Token);
         }
         catch (Exception e)
@@ -103,6 +124,15 @@ static class Spike
                 Console.WriteLine($"{mac} said yes but didn’t prove it holds its key or the code ({outcome.Verdict}); nothing saved.");
                 return 1;
         }
+    }
+
+    // For a run with no console (over SSH): the code arrives in a file instead of on stdin.
+    private static string WaitForFile(string path)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"(waiting for the code in {path})");
+        for (int i = 0; i < 600 && !File.Exists(path); i++) Thread.Sleep(500);
+        return File.Exists(path) ? File.ReadAllText(path).Trim() : "";
     }
 
     /// <summary>The Mac as a pairing leaves it, for the session (ticket 04).</summary>

@@ -122,3 +122,21 @@ Mission Control, App Exposé, the Spaces, Show Desktop and Launchpad. F11 toggle
 Security › Accessibility, for the app that started it) or the Mac drops the input. The title
 has the size, pictures shown and received each second, the bitrate, the decode time and the round
 trip. Decoding is in software for now: about 30 fps at 4K (`Sill.Spike session --decode 1` measures it).
+
+## With Sill.app (Wi-Fi and Tailscale)
+
+Sill.app keeps its key, so a PC pairs with it once. With Sill.app running on the Mac:
+
+```
+Sill.Spike pair --identity <dir> --ask 1 --host <the Mac's address>:<its home door port>
+```
+
+Sill.app opens its Pair iPhone or iPad window with a code; type it on the PC. Then the viewer can
+use the remote door (Settings › Remote Access, port 7455 by default), which takes this network and
+VPNs such as Tailscale (the home door takes only this network):
+
+```
+Sill.Viewer.exe --identity <dir> --host <Wi-Fi address>:7455 --host <Tailscale name>:7455
+```
+
+The addresses are tried in order, so one shortcut works at home and away.

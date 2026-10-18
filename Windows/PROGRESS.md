@@ -210,6 +210,24 @@ distribution, input, menus, gestures, clipboard.
   a close, the first picture 0.22 s after connecting. Not tried here: the bar's clicks, the gestures
   and the hook's keys (they would act on Jericho's Mac and need hands on the PC).
 
+- 2026-10-18: Tailscale and Sill.app (Jericho: does it work over Tailscale? then "yeah go"). The PC's
+  TCP to the Mac's Tailscale address works (a plain listener took it); the home door refuses it by
+  design (`OriginPolicy.homeAdmits`: loopback, Direct Wireless and this Mac's networks; a VPN only at
+  the remote door). Through a test host's remote door (`--pairing --remote=47456`) over Tailscale the
+  PC paired and streamed at 51 fps ("Remote client connected: MSI (Windows) through Tailscale"). Then
+  Sill.app 0.5.1 itself (home door 49870, Remote Access on 7455, its identity kept across launches):
+  `PairingClient.AskAsync` (kind 19 "ask", no proof; the answers "shown", "openOnMac", "locked" in
+  the iPad's words) and `Sill.Spike pair --ask 1 --host <home door>`, which asks, then pairs with the
+  typed code pinned to the key the ask met (`--code-from <file>` for a run with no console). Sill.app
+  opened its window ("MSI (Windows) at 192.168.100.9 asked to pair; showing the code"); Jericho typed
+  the code on the PC. Sessions to the remote door: by address over Wi-Fi and through Tailscale, both
+  pinned. The viewer takes several `--host`s, tried in order (4 s each when there are several): the
+  desktop shortcut is Sill.app's remote door at 192.168.100.185:7455, then
+  jerichos-mac-mini.tail8c9341.ts.net:7455; the first picture 0.53 s after start. The Mac counts a
+  Tailscale session as away (its away quality). Learned: reading the code off the Mac's screen from the
+  agent's shell set off macOS's "T3 Code is requesting to bypass the system private window picker",
+  the same consent that likely stopped the agent's own `SillHost` capture (-3805).
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -253,7 +271,7 @@ distribution, input, menus, gestures, clipboard.
   `IMFDXGIDeviceManager`) so the RTX 3050 or the Intel GPU decodes, and draw the NV12 texture with
   Direct3D instead of converting on the CPU; the target is 60 fps at 4K. Decode on its own thread so
   the reader keeps draining the socket.
-- Jericho's try of the bar, the gestures, Alt+Tab and the Windows key. Then: the Mac's cursor shape
+- Jericho's try of the bar, the gestures, Alt+Tab and the Windows key, now against Sill.app. Then: the Mac's cursor shape
   (kind 14) instead of Windows' arrow; the strip's scrollbar styled; the clipboard (kind 32).
 - Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
 - The `sillclient.py` comparison on the real-capture host (ticket 06's leftover).

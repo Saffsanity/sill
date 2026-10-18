@@ -16,11 +16,12 @@ public static class PairingClient
     }
 
     /// <summary>The typed path. <paramref name="code"/> must already have passed
-    /// <see cref="PairingCode.Check"/>.</summary>
+    /// <see cref="PairingCode.Check"/>.
+    /// <paramref name="pin"/>, after an ask, holds the code's connection to the key the ask met.</summary>
     public static async Task<Outcome> PairWithCodeAsync(string host, int port, string code, DeviceIdentity identity,
-        string deviceName, string? model, CancellationToken ct)
+        string deviceName, string? model, CancellationToken ct, byte[]? pin = null)
     {
-        var (ssl, macFp) = await SillTls.ConnectAsync(host, port, SillTls.Pairing, identity, pin: null, ct).ConfigureAwait(false);
+        var (ssl, macFp) = await SillTls.ConnectAsync(host, port, SillTls.Pairing, identity, pin, ct).ConfigureAwait(false);
         await using (ssl)
             return await ExchangeAsync(ssl, PairingExchange.ForCode(code, macFp, identity.Fingerprint), macFp, deviceName, model, ct)
                 .ConfigureAwait(false);
@@ -35,6 +36,29 @@ public static class PairingClient
         await using (ssl)
             return await ExchangeAsync(ssl, PairingExchange.ForLink(link, identity.Fingerprint), macFp, deviceName, model, ct)
                 .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The home door's "pair me" (kind 19 "ask", no proof): Sill on the Mac opens its pairing window
+    /// by itself and answers "shown", or says why not ("openOnMac", "locked", "busy"…). Returns the
+    /// answer and the key the Mac presented, to pin the code's connection to.
+    /// </summary>
+    public static async Task<(PairResult? Result, byte[] MacFingerprint)> AskAsync(string host, int port, DeviceIdentity identity,
+        string deviceName, string? model, CancellationToken ct)
+    {
+        var (ssl, macFp) = await SillTls.ConnectAsync(host, port, SillTls.Pairing, identity, pin: null, ct).ConfigureAwait(false);
+        await using (ssl)
+        {
+            var request = new PairRequest(PairRequest.Version, PairRequest.Ask, "", deviceName, model);
+            await ssl.WriteAsync(StreamHeader.Serialize(Kinds.PairRequest, 0, false,
+                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, new System.Text.Json.JsonSerializerOptions
+                { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })), ct).ConfigureAwait(false);
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            wait.CancelAfter(AnswerWait);
+            var m = await MessageStream.ReadAsync(ssl, StreamHeader.MaxPairingPayload, wait.Token).ConfigureAwait(false);
+            if (m is not { } answer || answer.Header.Kind != Kinds.PairResult) return (null, macFp);
+            return (SessionMessages.Decode<PairResult>(answer.Payload), macFp);
+        }
     }
 
     private static async Task<Outcome> ExchangeAsync(Stream ssl, PairingExchange exchange, byte[] macFp,

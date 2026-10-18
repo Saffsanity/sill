@@ -26,6 +26,9 @@ public sealed record PairRequest(
     /// <summary>The one generation of kind 19; a host answers any other <c>closed</c>.</summary>
     public const int Version = 1;
     public const string Qr = "qr", Code = "code";
+    /// <summary>At the home door: "show your code" (no proof). The Mac answers "shown",
+    /// "openOnMac" or "locked" (<see cref="PairResult"/>).</summary>
+    public const string Ask = "ask";
 }
 
 /// <summary>Kind 20: the Mac's answer; it closes the connection after it. Mirrors <c>PairResult</c>.</summary>
@@ -41,7 +44,8 @@ public sealed record PairResult(
     [property: JsonPropertyName("method")] string? Method = null,
     [property: JsonPropertyName("message")] string? Message = null)
 {
-    public const string WrongCode = "code", Closed = "closed", Expired = "expired", Stopped = "stopped", Busy = "busy";
+    public const string WrongCode = "code", Closed = "closed", Expired = "expired", Stopped = "stopped", Busy = "busy",
+        Shown = "shown", OpenOnMac = "openOnMac", Locked = "locked";
 }
 
 /// <summary>
@@ -125,6 +129,13 @@ public sealed class PairingExchange
                 return "This code expired. Choose Pair iPhone or iPad… on your Mac for a new one.";
             case PairResult.Stopped:
                 return $"{mac} stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code.";
+            // An ask's answers (DiscoveryPolicy.swift's HomeCopy, the device's words for each).
+            case PairResult.Shown:
+                return $"{mac} is showing a code.";
+            case PairResult.OpenOnMac:
+                return $"{mac} didn’t show a code by itself. On the Mac, choose Pair iPhone or iPad… in the Sill menu, then try again.";
+            case PairResult.Locked:
+                return $"Unlock {mac}, then try again.";
             default:
                 return $"{mac} isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first.";
         }
