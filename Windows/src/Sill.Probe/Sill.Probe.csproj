@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Ticket 02's probe: run it on the Windows PC. Portable so it builds anywhere; the
+       Windows checks run only on Windows. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+</Project>

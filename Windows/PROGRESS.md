@@ -41,7 +41,7 @@ distribution, input, menus, gestures, clipboard.
 | # | Ticket | Type | Blocked by | Status |
 |---|---|---|---|---|
 | 01 | Windows solution skeleton and CI job | task | none | claimed: done locally, CI not run (needs a push) |
-| 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | open |
+| 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | claimed: probe built, waiting for the PC's report |
 | 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | open |
 | 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | open |
 | 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | open |
@@ -54,8 +54,15 @@ distribution, input, menus, gestures, clipboard.
   `Sill.Protocol.Tests` (10 tests pass); `.github/workflows/windows.yml`; `Windows/**` left
   out of ci.yml. The .NET 10 SDK installed on the Mac with `brew install dotnet`.
 
+- 2026-10-17: ticket 02's probe, `src/Sill.Probe` (OS build, loopback TLS 1.3 with ALPN
+  and mutual P-256 keys, MF HEVC decoder count, optional handshake to a Mac). Built and run on
+  the Mac: everything but TLS works there (.NET on macOS has no TLS 1.3: "The requested
+  security protocol is not supported"). Single-file `win-x64` and `win-arm64` builds in
+  `Windows/artifacts/`. The Windows CI job runs it too (informational).
+
 ## Next
 
-- Ticket 02: a probe in `Windows/` to run on the PC (TLS 1.3 with ALPN, the HEVC decoder),
-  plus `winver` and the HEVC Video Extensions check by hand.
+- Ticket 02: run `Sill.Probe.exe` on the PC (README, "The probe on the PC"), once alone and
+  once with `--host` against `SillHost --pairing`, and paste `probe-report.txt` into the
+  ticket. Its decode check only counts decoders; decoding a real frame is ticket 05.
 - Push `windows-spike` when ready, so the Windows CI job runs and ticket 01 can close.

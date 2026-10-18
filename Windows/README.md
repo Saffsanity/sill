@@ -14,6 +14,9 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
   today; pairing and the session's messages next. The Swift side is the reference:
   `Sources/StreamProtocol/`.
 - `src/Sill.Spike` — the console app (pairing, session, decode to PNG, as the tickets land).
+- `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
+  (mutual, P-256), Media Foundation's HEVC decoders, and with `--host addr:port` a handshake
+  to a Mac's door. `artifacts/` (gitignored) holds single-file builds of it.
 - `tests/Sill.Protocol.Tests` — xUnit tests, with byte fixtures from the Swift serializer.
 
 Status, decisions and the next step: `PROGRESS.md`.
@@ -30,3 +33,18 @@ dotnet test Windows/Sill.Windows.slnx -c Release
 CI: `.github/workflows/windows.yml`, on a Windows runner, for changes under `Windows/`.
 The decoder (Media Foundation's HEVC, which needs HEVC Video Extensions) runs only on
 Windows.
+
+## The probe on the PC
+
+Build it on any machine into one `.exe` (no .NET needed on the PC):
+
+```
+dotnet publish Windows/src/Sill.Probe -c Release -r win-x64 --self-contained \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o Windows/artifacts/probe-win-x64
+```
+
+(`win-arm64` for an ARM PC.) On the PC, from a terminal: `Sill.Probe.exe`, or
+`Sill.Probe.exe --host <Mac's address>:<port>` with `SillHost --pairing` running on the Mac
+(its port is in its log). It writes `probe-report.txt` beside where it ran. The `.exe` is
+unsigned, so SmartScreen may ask first ("More info", "Run anyway"). .NET on macOS has no
+TLS 1.3, so the TLS checks pass only on Windows.

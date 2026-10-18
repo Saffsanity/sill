@@ -53,3 +53,8 @@ jobs:
 
       - name: Test
         run: dotnet test Sill.Windows.slnx -c Release --no-build
+
+      # Ticket 02's probe on the runner: TLS 1.3 with ALPN and the HEVC decoders. A runner
+      # image may have no HEVC decoder; the PC's own run is the one that counts.
+      - name: Probe (informational)
+        run: dotnet run --project src/Sill.Probe -c Release --no-build
