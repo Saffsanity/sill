@@ -23,6 +23,7 @@ PSNR) than ffmpeg's decode. Left for ticket 06: the same from a real capture of 
 | `d3a00b3` | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
 | `5033f42` | Ticket 03's TLS half (`DeviceIdentity`, `SillTls`, `PairingClient`, `Sill.Spike pair`), ticket 02's answer |
 | `38fc29e` | Ticket 04: `Session.cs`, `Sill.Spike session` |
+| `a08f069` | Ticket 05: `HevcDecoder`, `HevcSps`, `Nv12`, `Png`, `Sill.Spike decode`, `session --png` |
 
 ## Where things are
 
