@@ -997,6 +997,16 @@ simulator:
   `-SillKeyProbe 1` adds GameController's own view of each key,
   `-SillEscViaCommand 1` hands Esc on from `pressesBegan` so its key commands
   take it, and `-SillTurnAt 6,12` turns an iPhone's scene at those seconds.
+- Immersive (docs/immersive-plan.md): on an iPad `-SillLayout` screen held
+  sideways, with `-SillHardwareKeyboard 1` and a live session. The console
+  prints `immersive: …` for every state change (and why it does not apply),
+  and `viewport: … device desktop` while the Desktop asks for a display of its
+  own. ⌃⌥⌘B through `Tests/keyrig` is
+  `keys e0:down,e2:down,e3:down,05:down,05:up,e3:up,e2:up,e0:up`.
+  `-SillImmersiveExitAt <s>` taps the revealed bar's Exit s seconds in. To
+  test Exit, set the switch in the app's preferences plist rather than with
+  `-Sill.immersive YES`: an argument masks the app's own write, so Exit
+  would look like it did nothing.
 - `-SillInputTest 1`, with `-SillConnect` on this Mac's loopback: the portrait
   key row taps cmd, esc, shift and ctrl and the trackpad strokes, taps and
   scrolls, through their own code, once; in every layout the stream's input

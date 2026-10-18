@@ -207,7 +207,36 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// positive dy).
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard !strokes.silent else { return }
+        // Immersive's top edge (docs/immersive-plan.md): a drag that began within 20 pt of the
+        // screen's top and goes mostly down reveals the bar, and none of it scrolls the Mac.
+        if gesture.state == .began { edgeSwipeTaken = edgeSwipe(gesture) }
+        if edgeSwipeTaken {
+            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed { edgeSwipeTaken = false }
+            return
+        }
         scroll(gesture, .finger)
+    }
+
+    /// The finger pan in progress revealed Immersive's bar (`edgeSwipe`): the rest of it is not a scroll.
+    private var edgeSwipeTaken = false
+    /// Where the finger pan's first finger landed, in the window's space.
+    private var panLanding: CGPoint?
+
+    /// Whether the pan beginning now is Immersive's edge swipe, and if so, the bar revealed: only while
+    /// Immersive applies (`keyboardProxy.immersiveActive`), judged in the window's space, which is the
+    /// screen's while Immersive applies (it applies only when Sill fills the screen).
+    private func edgeSwipe(_ gesture: UIPanGestureRecognizer) -> Bool {
+        // From where the finger landed (`panLanding`) to where the pan begins: UIKit begins it only
+        // after the finger has moved, and with a translation of zero.
+        guard let proxy = keyboardProxy, proxy.immersiveActive, let window, let start = panLanding else { return false }
+        let now = gesture.location(in: window)
+        guard ImmersivePolicy.revealsFromEdge(startY: Double(start.y), dx: Double(now.x - start.x), dy: Double(now.y - start.y))
+        else { return false }
+        #if DEBUG
+        print("immersive: the top edge's swipe (from \(Int(start.y.rounded())) pt), not a scroll")
+        #endif
+        proxy.immersiveEdge?()
+        return true
     }
 
     /// The iPad's trackpad (two fingers) or a Magic Mouse over the picture: the finger pan's path, at
@@ -300,7 +329,12 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// The pointer's scrolls take scroll events only: no touch at all (UIKit asks this for touches, not
     /// for scroll events).
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !(gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll)
+        // The finger pan's first finger, where it landed: Immersive's edge swipe is judged from there
+        // (`edgeSwipe`), the pan's own `.began` coming only after it has moved.
+        if gestureRecognizer === scrollPan, gestureRecognizer.numberOfTouches == 0 {
+            panLanding = touch.location(in: window)
+        }
+        return !(gestureRecognizer === trackpadScroll || gestureRecognizer === wheelScroll)
     }
 
     /// The pointer's scrolls and its hover run together: the pointer rests over the picture while two
@@ -661,13 +695,70 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private var takesEscape: Bool { isFirstResponder && !EscapeKey.onScreen(in: window) }
 
     override var keyCommands: [UIKeyCommand]? {
-        guard takesEscape else { return super.keyCommands }
-        return (super.keyCommands ?? []) + Self.escapeCommands
+        var commands = super.keyCommands ?? []
+        if takesEscape { commands += Self.escapeCommands }
+        if takesImmersiveToggle { commands.append(Self.immersiveCommand) }
+        return commands.isEmpty ? super.keyCommands : commands
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(InputOverlayView.escapeKeyCommand(_:)) { return takesEscape }
+        if action == #selector(InputOverlayView.immersiveKeyCommand(_:)) { return takesImmersiveToggle }
         return super.canPerformAction(action, withSender: sender)
+    }
+
+    // MARK: Immersive's shortcut (docs/immersive-plan.md)
+
+    /// ⌃⌥⌘B shows or hides the bar while Immersive applies, and never reaches the Mac (R5). Two ways
+    /// in, as Esc's: this command, with priority over the system's own handling and titled for the
+    /// ⌘ list and the menu bar, and `pressesBegan` (`takeImmersiveToggle`), whichever comes first;
+    /// one press toggles once. While Immersive does not apply the chord is the Mac's like any other.
+    private static let immersiveCommand: UIKeyCommand = {
+        let command = UIKeyCommand(title: "Show or Hide the Sill Bar", action: #selector(InputOverlayView.immersiveKeyCommand(_:)),
+                                   input: "b", modifierFlags: [.control, .alternate, .command])
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }()
+
+    /// This view takes the chord: it holds the keyboard and Immersive applies.
+    private var takesImmersiveToggle: Bool { isFirstResponder && keyboardProxy?.immersiveActive == true }
+
+    /// The chord's keys taken from pressesBegan, so their ups are taken too.
+    private var immersiveKeysDown: Set<UInt16> = []
+    /// When the chord last toggled, so the command and pressesBegan never both do for one press.
+    private var immersiveToggledAt: TimeInterval = -1
+
+    @objc private func immersiveKeyCommand(_ command: UIKeyCommand) {
+        guard takesImmersiveToggle else { return }
+        toggleImmersive(via: "keyCommand")
+    }
+
+    private func toggleImmersive(via channel: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - immersiveToggledAt > 0.2 else {
+            Self.hwkey(ImmersivePolicy.toggleUsage, down: true, via: channel, to: "the bar's shortcut, already toggled")
+            return
+        }
+        immersiveToggledAt = now
+        Self.hwkey(ImmersivePolicy.toggleUsage, down: true, via: channel, to: "the bar's shortcut")
+        keyboardProxy?.immersiveToggle?()
+    }
+
+    /// The presses that are not Immersive's chord: the chord itself (down, and later its up) toggles
+    /// the bar here and goes no further, while Immersive applies.
+    private func takeImmersiveToggle(_ presses: Set<UIPress>, down: Bool) -> Set<UIPress> {
+        guard down ? takesImmersiveToggle : !immersiveKeysDown.isEmpty else { return presses }
+        return presses.filter { press in
+            guard let key = press.key else { return true }
+            let usage = UInt16(key.keyCode.rawValue)
+            if down {
+                guard ImmersivePolicy.isToggle(usage: usage, modifiers: UInt64(key.modifierFlags.rawValue)) else { return true }
+                immersiveKeysDown.insert(usage)
+                toggleImmersive(via: "pressesBegan")
+                return false
+            }
+            return immersiveKeysDown.remove(usage) == nil
+        }
     }
 
     /// Esc to the Mac, down and up at once with the command's modifiers, through `ForwardedKeys` as a
@@ -762,11 +853,15 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         // A hardware key hides this device's pointer, as typing does (`setOwnPointer`).
         if presses.contains(where: { $0.key != nil }) { setOwnPointer(nil, .none) }
+        let presses = takeImmersiveToggle(presses, down: true)
+        guard !presses.isEmpty else { return }
         let unhandled = forward(presses, down: true, via: "pressesBegan")
         if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let presses = takeImmersiveToggle(presses, down: false)
+        guard !presses.isEmpty else { return }
         let unhandled = forward(presses, down: false, via: "pressesEnded")
         if !unhandled.isEmpty { super.pressesEnded(unhandled, with: event) }
     }
@@ -774,6 +869,8 @@ final class InputOverlayView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// A press cancelled (the app going to the background, the keyboard disconnected): its key comes
     /// up on the Mac as if released, so neither it nor a modifier stays down there.
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let presses = takeImmersiveToggle(presses, down: false)
+        guard !presses.isEmpty else { return }
         let unhandled = forward(presses, down: false, via: "pressesCancelled")
         if !unhandled.isEmpty { super.pressesCancelled(unhandled, with: event) }
     }
@@ -800,6 +897,11 @@ final class InputOverlayProxy {
     /// The person's own keyboard came up or went: the Keyboard button lights, the tour counts it.
     /// The hardware keyboard's holding never calls it.
     var onOwnChange: ((Bool) -> Void)?
+    /// Immersive applies (StreamScreen, docs/immersive-plan.md): the input view takes ⌃⌥⌘B and the top
+    /// edge's swipe for the bar, through these, instead of sending them to the Mac.
+    var immersiveActive = false
+    var immersiveToggle: (() -> Void)?
+    var immersiveEdge: (() -> Void)?
 
     /// The Keyboard button (and the portrait key row's keyboard cap).
     func toggleKeyboard() { change("the Keyboard button") { $0.toggled() } }

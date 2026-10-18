@@ -180,6 +180,21 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
+    /// This iPad's Immersive switch (the Settings panel's This iPad; docs/immersive-plan.md). It acts
+    /// only with a hardware keyboard, sideways, while something streams (`immersiveApplies`).
+    @AppStorage(StreamClient.immersiveKey) private var immersiveSwitch = false
+    /// The switch as it was when the Settings panel opened, kept until it closes (as
+    /// `largerPictureHeld`): a change applies as the panel goes, so nothing moves under the finger.
+    @State private var immersiveHeld: Bool? = nil
+    /// Immersive's three states and its reveal (ImmersivePolicy), and the reveal's auto-hide.
+    @State private var immersive = ImmersivePolicy()
+    @State private var immersiveHide: Task<Void, Never>? = nil
+    /// Immersive applies (the panel the whole screen, immersed or revealed): with the Desktop
+    /// streaming, the viewport asks the Mac for a display of this screen's own size
+    /// (`Viewport.deviceDesktop`), so the Desktop fills it with no letterbox.
+    @State private var immersiveFull = false
+    /// A hardware keyboard is attached (HardwareKeyboardMonitor), for Immersive.
+    @State private var keyboardAttached = HardwareKeyboardMonitor.shared.attached
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -234,11 +249,17 @@ struct StreamScreen: View {
             // makes larger, judged on this screen held upright, whichever way it is held now.
             let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
+            // Immersive (docs/immersive-plan.md): on an iPad held sideways with a hardware keyboard,
+            // the picture the whole screen and the bar on demand. Its rule is ImmersivePolicy's.
+            let immersiveApplies = immersiveApplies(duo: duo, geo: geo)
+            // Off in this very frame when it stops applying (a keyboard detached), not a turn later.
+            let immersiveState: ImmersivePolicy.State = immersiveApplies ? immersive.state : .off
             ZStack {
                 Group {
                     switch duo {
                     case .innerLandscape:
-                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
+                        landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size),
+                                  immersive: immersiveState)
                     case .outerLandscape:
                         landscape(bar: .compact, width: geo.size.width, fold: posture.info(in: geo.size))
                     case .innerPortrait:
@@ -314,6 +335,20 @@ struct StreamScreen: View {
             .duoFold(posture, size: geo.size, screen: "stream screen")
             .duoStatusBar(posture, size: geo.size)
             .environment(\.largerPictureOffered, offersLarger)
+            .environment(\.immersiveOffered, UIDevice.current.userInterfaceIdiom == .pad)
+            // Immersive: no status bar or home indicator, and the top edge's first swipe Sill's, not
+            // Notification Centre's (R3, R6). Nothing at all while it is off.
+            .immersiveChrome(immersiveState)
+            // What Immersive is told: whether it applies, and whether something open over the stream
+            // holds the bar (R9); the proxy hears whether the input view takes the chord and the edge.
+            .onChange(of: [immersiveApplies, immersiveHolds], initial: true) { _, now in
+                immersiveTimer(immersive.update(applies: now[0], held: now[1]))
+                overlay.immersiveActive = now[0]
+                immersiveFull = now[0]
+                #if DEBUG
+                print("immersive: " + immersive.state.rawValue + (now[0] ? "" : " (" + immersiveWhyNot(duo: duo, geo: geo) + ")"))
+                #endif
+            }
             #if DEBUG
             // The console's line for the gates: what Larger Picture's rule made of the switch and of
             // what streams, on a phone held upright, each time one of them or the outcome changes.
@@ -364,9 +399,18 @@ struct StreamScreen: View {
         .onChange(of: client.connected) { _, up in
             if up { sendViewport() }
         }
+        // Immersive with the Desktop on or off: the Mac makes or removes the device's own display.
+        .onChange(of: immersiveDeviceDesktop) { _, _ in sendViewport(after: 0.25) }
         // A hardware keyboard (docs/hardware-keyboard-plan.md §2): the input view takes the keyboard by
         // itself while one is attached and nothing open takes it, never as the person's own.
-        .onReceive(HardwareKeyboardMonitor.shared.$attached) { overlay.update(attached: $0) }
+        .onReceive(HardwareKeyboardMonitor.shared.$attached) { attached in
+            overlay.update(attached: attached)
+            keyboardAttached = attached
+        }
+        .onAppear {
+            overlay.immersiveToggle = { immersiveToggle() }
+            overlay.immersiveEdge = { immersiveEdge() }
+        }
         .onChange(of: keyboardTakers, initial: true) { _, takers in overlay.update(takers: takers) }
         // Rotation animates, and a Mac window resize restarts the stream, so let the size settle.
         .onChange(of: panelSize) { _, _ in sendViewport(after: 0.25) }
@@ -465,14 +509,20 @@ struct StreamScreen: View {
             let fps = StreamClient.wantedFPS(remote: client.awayCapsFrameRate)
             #if DEBUG
             print("viewport: \(Self.points(panelSize.width))×\(Self.points(panelSize.height)) pt, scale "
-                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps")
+                  + (textScale.map { TextScaleControl.label($0) } ?? "none") + ", \(fps) fps"
+                  + (immersiveDeviceDesktop ? ", device desktop" : ""))
             #endif
             client.sendViewport(Viewport(width: Double(panelSize.width),
                                          height: Double(panelSize.height),
                                          scale: textScale,
-                                         fps: fps))
+                                         fps: fps,
+                                         deviceDesktop: immersiveDeviceDesktop ? true : nil))
         }
     }
+
+    /// The Desktop in Immersive: the Mac makes a display of the panel's size (DeviceDesktop.swift on
+    /// the host). An older host ignores the key and the Mac's own screen letterboxes as before.
+    private var immersiveDeviceDesktop: Bool { immersiveFull && client.active == .desktop }
 
     #if DEBUG
     /// A length for the console: whole points as whole numbers (within a hundredth: a scaled harness
@@ -583,6 +633,15 @@ struct StreamScreen: View {
                 scaleOpen = true
             }
         }
+        // `-SillImmersiveExitAt <s>`: the revealed bar's Exit tapped s seconds in (only while the bar
+        // is revealed, as the button shows only then).
+        let exitAt = defaults.double(forKey: "SillImmersiveExitAt")
+        if exitAt > 0 {
+            after(exitAt) {
+                print("harness: Exit (" + immersive.state.rawValue + ")")
+                if immersive.state == .revealed { exitImmersive() }
+            }
+        }
     }
     private static var launchArgumentsRan = false
 
@@ -679,6 +738,117 @@ struct StreamScreen: View {
         PhonePortraitLayout.largerPicture(switchOn: largerPicture, streaming: .init(client.active))
     }
 
+    // MARK: Immersive (docs/immersive-plan.md)
+
+    /// Immersive applies (ImmersivePolicy.applies): the switch (as it was when Settings opened, while
+    /// it is open), a hardware keyboard, an iPad held sideways, something streaming, VoiceOver off,
+    /// and this scene the whole screen.
+    private func immersiveApplies(duo: DuoLayout, geo: GeometryProxy) -> Bool {
+        ImmersivePolicy.applies(switchOn: immersiveHeld ?? immersiveSwitch, keyboardAttached: keyboardAttached,
+                                landscape: duo == .innerLandscape && UIDevice.current.userInterfaceIdiom == .pad,
+                                streaming: client.active != .none, voiceOver: voiceOverEnabled,
+                                fillsScreen: immersiveFillsScreen(geo))
+    }
+
+    /// This scene the whole screen: its size with the insets it keeps out of (the status bar's strip
+    /// above, while it shows) against its screen's (not a Stage Manager or Split View window).
+    private func immersiveFillsScreen(_ geo: GeometryProxy) -> Bool {
+        #if DEBUG
+        // The harness's fake screen (`-SillLayout`) is the whole screen by construction: iPadOS 27 will
+        // not turn an iPad simulator, so a sideways iPad is checked there (docs/DEVELOPMENT.md).
+        if UserDefaults.standard.string(forKey: "SillLayout") != nil { return true }
+        #endif
+        let scene = UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive } ?? UIApplication.shared.connectedScenes.lazy
+            .compactMap { $0 as? UIWindowScene }.first
+        guard let screen = scene?.screen.bounds.size else { return false }
+        let insets = geo.safeAreaInsets
+        return ImmersivePolicy.fills(size: (Double(geo.size.width + insets.leading + insets.trailing),
+                                            Double(geo.size.height + insets.top + insets.bottom)),
+                                     screen: (Double(screen.width), Double(screen.height)))
+    }
+
+    /// Something open over the stream holds Immersive's bar (R9): whatever takes the keyboard (the
+    /// Settings panel, the pairing overlay, the tour, the Apps drawer, the Menus pull-down), and the
+    /// Aa ruler and a thumbnail's lights, which hang from the bar.
+    private var immersiveHolds: Bool {
+        !keyboardTakers.isEmpty || scaleOpen || windowMenu != nil
+    }
+
+    /// The revealed bar's Exit: Immersive's switch off at once, with no trip to Settings (a panel
+    /// open meanwhile closes first, so its hold lets go and the switch applies now). The panel goes
+    /// back to the bar's layout in one motion; its new size is the one viewport that tells the Mac,
+    /// which removes the device's own display if the Desktop streams.
+    private func exitImmersive() {
+        setSettings(false, restoreKeyboard: false)
+        immersiveHide?.cancel()
+        immersiveHide = nil
+        withAnimation(Self.immersiveMotion) { immersiveSwitch = false }
+        client.noteAction()
+        #if DEBUG
+        print("immersive: Exit: the switch off")
+        #endif
+    }
+
+    /// ⌃⌥⌘B, from the input view (it takes the chord only while Immersive applies).
+    private func immersiveToggle() {
+        let result = immersive.toggle()
+        guard result.taken else { return }
+        immersiveTimer(result.timer)
+        #if DEBUG
+        print("immersive: the shortcut: " + immersive.state.rawValue)
+        #endif
+    }
+
+    /// The top edge's swipe, from the input view.
+    private func immersiveEdge() {
+        immersiveTimer(immersive.edgeSwipe())
+        #if DEBUG
+        print("immersive: the top edge: " + immersive.state.rawValue)
+        #endif
+    }
+
+    /// A touch on the revealed bar: it stays up its full `autoHide` again.
+    private func immersiveTouched() { immersiveTimer(immersive.touched()) }
+
+    /// The auto-hide's timer as the rule asks: started again, stopped, or left.
+    private func immersiveTimer(_ timer: ImmersivePolicy.Timer) {
+        switch timer {
+        case .keep: return
+        case .stop:
+            immersiveHide?.cancel()
+            immersiveHide = nil
+        case .start:
+            immersiveHide?.cancel()
+            immersiveHide = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(ImmersivePolicy.autoHide))
+                guard !Task.isCancelled else { return }
+                immersive.timerFired()
+                immersiveHide = nil
+                #if DEBUG
+                print("immersive: the bar hid itself: " + immersive.state.rawValue)
+                #endif
+            }
+        }
+    }
+
+    /// The bar's slide, and the panel growing to the edges with it: 0.25 s (the plan's "one motion").
+    private static let immersiveMotion: Animation = .easeOut(duration: 0.25)
+
+    #if DEBUG
+    /// Why Immersive does not apply, for the console.
+    private func immersiveWhyNot(duo: DuoLayout, geo: GeometryProxy) -> String {
+        var why: [String] = []
+        if !(immersiveHeld ?? immersiveSwitch) { why.append("the switch off") }
+        if !keyboardAttached { why.append("no hardware keyboard") }
+        if !(duo == .innerLandscape && UIDevice.current.userInterfaceIdiom == .pad) { why.append("not an iPad sideways") }
+        if client.active == .none { why.append("nothing streaming") }
+        if voiceOverEnabled { why.append("VoiceOver") }
+        if !immersiveFillsScreen(geo) { why.append("not the whole screen") }
+        return why.joined(separator: ", ")
+    }
+    #endif
+
     /// Opens or closes the Settings panel. Opening puts the drawer, the traffic lights and the Aa
     /// ruler away and takes the keyboard down: with the overlay not first responder no hardware
     /// key reaches the Mac, and Esc (or ⌘.) reaches the panel's Done instead. Closing (Done, a tap
@@ -703,6 +873,8 @@ struct StreamScreen: View {
             // panel never moves under the finger: a change of the switch, or of what streams,
             // applies as the panel goes.
             largerPictureHeld = open ? largerPictureNow : nil
+            // Immersive's switch too: flipped in the panel, it applies as the panel goes.
+            immersiveHeld = open ? immersiveSwitch : nil
         }
         if !open {
             if restoreKeyboard, keyboardBeforeSettings { overlay.setKeyboard(shown: true) }
@@ -1024,22 +1196,40 @@ struct StreamScreen: View {
         reduceMotion ? .opacity : .scale(scale: 0.94, anchor: anchor).combined(with: .opacity)
     }
 
-    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo) -> some View {
+    /// `immersive`: Immersive's state (docs/immersive-plan.md). Off, the bar over the content area as
+    /// always. Immersed, no bar and the panel the whole screen; revealed, the bar over that same panel,
+    /// which never resizes for it (R7). One tree in all three, the bar drawn over a spacer of its own
+    /// height when off, so the stream's input view is never rebuilt and keeps the keyboard.
+    private func landscape(bar plain: BarMetrics, width: CGFloat, fold: FoldInfo,
+                           immersive: ImmersivePolicy.State = .off) -> some View {
         // The book pose (docs/iphone-duo-plan.md, (a)): nothing on the fold's band; elsewhere as before.
         let (bar, stripWidth) = plain.clearing(fold, width: width)
-        return VStack(spacing: 0) {
-            TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
-                   keyboardShown: $keyboardShown,
-                   textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
-                   settingsOpen: settingsOpen,
-                   // Apps, Menus, Aa, Keyboard, Desktop, Settings, and the strip.
-                   menusFit: MacMenuButton.fits(width: width - 2 * bar.padding, buttons: 6, buttonWidth: bar.buttonWidth,
-                                                gap: bar.gap, thumbWidth: bar.thumbWidth),
-                   toggleKeyboard: { overlay.toggleKeyboard() },
-                   setSettings: { setSettings($0, restoreKeyboard: $1) },
-                   menusOpened: menusOpened, menusClosed: menusClosed)
-            contentArea(bar: bar)
+        let full = ImmersivePolicy.fillsScreen(immersive)
+        return ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: full ? 0 : bar.height)
+                contentArea(bar: bar, fullScreen: full, barOver: immersive == .revealed ? bar.height : 0)
+            }
+            if ImmersivePolicy.barShown(immersive) {
+                TopBar(client: client, metrics: bar, stripWidth: stripWidth, drawerOpen: $drawerOpen,
+                       keyboardShown: $keyboardShown,
+                       textScale: $textScale, scaleOpen: $scaleOpen, windowMenu: $windowMenu,
+                       settingsOpen: settingsOpen,
+                       // Apps, Menus, Aa, Keyboard, Desktop, Settings (and Exit, revealed), and the strip.
+                       menusFit: MacMenuButton.fits(width: width - 2 * bar.padding,
+                                                    buttons: immersive == .revealed ? 7 : 6, buttonWidth: bar.buttonWidth,
+                                                    gap: bar.gap, thumbWidth: bar.thumbWidth),
+                       toggleKeyboard: { overlay.toggleKeyboard() },
+                       setSettings: { setSettings($0, restoreKeyboard: $1) },
+                       menusOpened: menusOpened, menusClosed: menusClosed,
+                       exitImmersive: immersive == .revealed ? exitImmersive : nil)
+                    // A touch anywhere on the revealed bar keeps it up its full 4 s again.
+                    .simultaneousGesture(TapGesture().onEnded { immersiveTouched() }, including: .all)
+                    .transition(.move(edge: .top))
+            }
         }
+        .ignoresSafeArea(edges: full ? .top : [])
+        .animation(Self.immersiveMotion, value: immersive)
     }
 
     /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.
@@ -1061,7 +1251,10 @@ struct StreamScreen: View {
 
     private var streamShape: RoundedRectangle { RoundedRectangle(cornerRadius: 12, style: .continuous) }
 
-    private func contentArea(bar: BarMetrics) -> some View {
+    /// `fullScreen`: Immersive's panel, edge to edge with no inset, corner or border. `barOver`: the
+    /// height of Immersive's revealed bar over the top, which the drawer and the Settings panel hang
+    /// under.
+    private func contentArea(bar: BarMetrics, fullScreen: Bool = false, barOver: CGFloat = 0) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
 
@@ -1079,12 +1272,12 @@ struct StreamScreen: View {
             }
             .background(Palette.panel)
             .overlay(alignment: .top) { LinkLineView(text: shownLinkLine) }
-            .clipShape(streamShape)
-            .overlay(streamShape.strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: fullScreen ? 0 : 12, style: .continuous))
+            .overlay(streamShape.strokeBorder(Color.white.opacity(fullScreen ? 0 : 0.09), lineWidth: 1))
             // The panel itself, inside the padding: the size the host fits the Mac window to.
             .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { panelSize = $0 })
             .tourTarget(.stream)
-            .padding(8)
+            .padding(fullScreen ? 0 : 8)
 
             // The dim comes after the overlay on purpose: with the drawer open a tap on the dim
             // closes the drawer instead of clicking the Mac.
@@ -1099,7 +1292,7 @@ struct StreamScreen: View {
                     .frame(width: 380)
                     .frame(maxHeight: .infinity)
                     .padding(.leading, 22)
-                    .padding(.top, 8)
+                    .padding(.top, 8 + barOver)
                     .padding(.bottom, 14)
                     .transition(.opacity)
             }
@@ -1117,7 +1310,7 @@ struct StreamScreen: View {
                                   takeTour: takeTour)
                     .frame(width: bar.settingsWidth)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 8)
+                    .padding(.top, 8 + barOver)
                     .padding(.bottom, 14)
                     .padding(.trailing, bar.padding)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1234,6 +1427,9 @@ private struct TopBar: View {
     /// The Menus pull-down opened and went (see `StreamScreen.menusOpened`).
     let menusOpened: () -> Void
     let menusClosed: () -> Void
+    /// Immersive's revealed bar: Exit, which turns Immersive off (`StreamScreen.exitImmersive`).
+    /// nil everywhere else, where the bar is main's.
+    var exitImmersive: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: metrics.gap) {
@@ -1285,6 +1481,13 @@ private struct TopBar: View {
                    action: { client.select(.desktop) })
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
+
+            if let exitImmersive {
+                button(open: false, symbol: "arrow.down.right.and.arrow.up.left", label: "Exit",
+                       accessibilityLabel: "Leave Immersive", action: exitImmersive)
+                    .opacity(scaleOpen ? 0 : 1)
+                    .allowsHitTesting(!scaleOpen)
+            }
 
             // Leave's old slot: Disconnect is the Settings panel's pinned last row now.
             button(open: settingsOpen, symbol: "gearshape", label: "Settings",
@@ -2113,5 +2316,21 @@ extension PhonePortraitLayout.Streaming {
         case .desktop: self = .desktop
         case .window: self = .window
         }
+    }
+}
+
+// MARK: - Immersive's chrome
+
+extension View {
+    /// Immersive's system overlays (docs/immersive-plan.md, R3 and R6): while it is on, no status bar,
+    /// no home indicator, and a swipe from the top edge Sill's first (the edge swipe), the system's
+    /// only on a second. Off, nothing at all: today's screen exactly, its status bar the Duo's say.
+    /// No branch around `self`: one would give the whole stream screen a new identity on entering, and
+    /// rebuild the input view out from under the hardware keyboard's hold.
+    func immersiveChrome(_ state: ImmersivePolicy.State) -> some View {
+        let on = ImmersivePolicy.fillsScreen(state)
+        return background { if on { Color.clear.statusBarHidden(true) } }
+            .persistentSystemOverlays(on ? .hidden : .automatic)
+            .defersSystemGestures(on: on ? .top : [])
     }
 }
