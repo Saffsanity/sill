@@ -20,6 +20,7 @@ CI waits for a push. Next: ticket 05, decoding that keyframe with Media Foundati
 | `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
 | `d3a00b3` | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
 | `5033f42` | Ticket 03's TLS half (`DeviceIdentity`, `SillTls`, `PairingClient`, `Sill.Spike pair`), ticket 02's answer |
+| `38fc29e` | Ticket 04: `Session.cs`, `Sill.Spike session` |
 
 ## Where things are
 
