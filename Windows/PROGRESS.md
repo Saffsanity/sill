@@ -14,7 +14,7 @@ Ticket 03's PC-independent half is done (2026-10-18): the code, the proofs, the 
 |---|---|
 | `5d4acda` | The .NET skeleton, its CI job, this file, the agent-skills setup (`docs/agents/`, CLAUDE.md) |
 | `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
-| (next) | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
+| `d3a00b3` | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
 
 ## Where things are
 
