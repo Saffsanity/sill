@@ -80,6 +80,7 @@ sealed class ViewerForm : Form
     // The iPad's bar and Apps drawer, and what they show.
     private readonly MacBar bar = new();
     private readonly AppsDrawer drawer = new();
+    private readonly StatusCard card = new();
     private KeyboardHook? hook;
     private volatile bool desktopActive, nothingStreams;
     private long askedAt;   // when the Desktop was last asked for
@@ -96,6 +97,7 @@ sealed class ViewerForm : Form
         KeyPreview = true;
 
         Controls.Add(drawer);
+        Controls.Add(card);
         Controls.Add(bar);
         Controls.Add(panel);
         panel.SendToBack();   // under the bar and the drawer
@@ -147,7 +149,7 @@ sealed class ViewerForm : Form
         catch (Exception ex) { Log($"No keyboard hook ({ex.Message}): Alt+Tab and the Windows key stay Windows'."); }
         _ = Task.Run(() => RunAsync(stop.Token));
         var timer = new System.Windows.Forms.Timer { Interval = 1000 };
-        timer.Tick += (_, _) => UpdateTitle();
+        timer.Tick += (_, _) => { UpdateTitle(); PlaceCard(); };
         timer.Start();
     }
 
@@ -157,6 +159,7 @@ sealed class ViewerForm : Form
         var v = VideoArea;
         clientWidth = Math.Max(1, v.Width); clientHeight = Math.Max(1, v.Height);
         panel.Bounds = v;
+        if (card.Width > 0) PlaceCard();
         // The drawer floats under the bar on the left, as the iPad's: 22 pt in, 8 under, 14 above the foot.
         float s = DeviceDpi / 96f;
         drawer.Bounds = new Rectangle((int)(22 * s), v.Y + (int)(8 * s), Math.Min(drawer.CardPixels, Math.Max(1, v.Width - (int)(44 * s))),
@@ -450,11 +453,7 @@ sealed class ViewerForm : Form
                 pictureRect = new Rectangle(area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h);
                 g.DrawImage(front, pictureRect);
             }
-            else
-            {
-                TextRenderer.DrawText(g, status, Font, VideoArea, Palette.Muted,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
-            }
+
         }
         paintPending = false;
     }
@@ -480,11 +479,41 @@ sealed class ViewerForm : Form
         Text = $"{macName} — {figures}";
     }
 
-    private void Status(string text)
+    /// <summary>What the viewer is doing, for the title, the log and the status card (the Mac's
+    /// name over it); <paramref name="busy"/> spins the card's spinner (false: nothing will change
+    /// by itself).</summary>
+    private void Status(string text, bool busy = true)
     {
         Log(text);
         lock (gate) status = text;
-        BeginInvoke(() => { Invalidate(); UpdateTitle(); });
+        BeginInvoke(() => { card.Set(macName, text, busy); PlaceCard(); Invalidate(); UpdateTitle(); });
+    }
+
+    /// <summary>Why a dial failed, in a few words for the card (the log keeps the whole error).</summary>
+    private static string Reason(Exception e)
+    {
+        for (var x = e; x is not null; x = x.InnerException)
+            switch (x)
+            {
+                case OperationCanceledException: return "no answer";
+                case SillTls.PinMismatchException: return "not the Mac this PC paired with";
+                case System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused }: return "refused (is Sill open on it?)";
+                case System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NoData }: return "name not found";
+                case System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionReset }: return "closed the connection";
+                case System.Security.Authentication.AuthenticationException: return "the secure connection failed";
+            }
+        return e is IOException ? "closed the connection" : "couldn’t connect";
+    }
+
+    // The card shows while there is no live picture: before a session's first, and after it ends.
+    private void PlaceCard()
+    {
+        var v = VideoArea;
+        card.Location = new Point(v.X + (v.Width - card.Width) / 2, v.Y + (v.Height - card.Height) / 2);
+        bool show = !pictured;
+        if (card.Visible != show) card.Visible = show;
+        if (show) card.BringToFront();
+        drawer.BringToFront();
     }
 
     // viewer.log beside the key: each step and every error, for when the window alone can't say.
@@ -520,7 +549,8 @@ sealed class ViewerForm : Form
         }
         catch (Exception e) when (e is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
         {
-            Status($"No paired Mac in {dir}: pair first with Sill.Spike pair.\n({e.Message})");
+            macName = "Sill";
+            Status($"This PC isn’t paired with a Mac yet. Pair it first (Sill.Spike pair), then open Sill again.\n({e.Message})", busy: false);
             return false;
         }
         macName = mac.Name;
@@ -530,7 +560,7 @@ sealed class ViewerForm : Form
         foreach (var h in hostOverrides.Count > 0 ? hostOverrides : [$"{mac.Host}:{mac.Port}"])
         {
             int colon = h.LastIndexOf(':');
-            if (colon <= 0 || !int.TryParse(h[(colon + 1)..], out int p)) { Status($"--host takes <address>:<port>, not {h}."); return false; }
+            if (colon <= 0 || !int.TryParse(h[(colon + 1)..], out int p)) { Status($"--host takes <address>:<port>, not {h}.", busy: false); return false; }
             targets.Add((h[..colon].Trim('[', ']'), p));
         }
 
@@ -541,7 +571,7 @@ sealed class ViewerForm : Form
         string host = "", tried = "";
         foreach (var (h, p) in targets)
         {
-            Status($"Connecting to {mac.Name} at {h}:{p}…");
+            Status($"Connecting at {h}:{p}…");
             using var dial = CancellationTokenSource.CreateLinkedTokenSource(ct);
             dial.CancelAfter(TimeSpan.FromSeconds(targets.Count > 1 ? 4 : 15));   // an address that isn't there now (away from home) gives way
             try
@@ -553,19 +583,19 @@ sealed class ViewerForm : Form
             }
             catch (Exception e) when (!stopping.IsCancellationRequested)
             {
-                tried += $"\n{h}:{p}: {(e is OperationCanceledException ? "no answer" : e.Message)}";
+                tried += $"\n{h}:{p}: {Reason(e)}";
                 Log($"Couldn’t connect at {h}:{p}: {e.Message}");
             }
         }
         if (session is null)
         {
-            Status($"Couldn’t reach {mac.Name}. Trying again…{tried}");
+            Status($"Couldn’t reach it. Trying again…{tried}");
             return true;
         }
         Log($"Connected at {host}.");
 
         await using var connection = session;
-        Status($"Connected to {mac.Name}. Waiting for the picture…");
+        Status("Connected. Waiting for the picture…");
         var clock = Stopwatch.StartNew();
         long lastHeard = Stopwatch.GetTimestamp();
         _ = Task.Run(async () =>
@@ -678,18 +708,18 @@ sealed class ViewerForm : Form
                         break;
                     case SessionKinds.Goodbye:
                         var bye = SessionMessages.Decode<Goodbye>(payload);
-                        Status($"{mac.Name} ended the session: {bye?.Message ?? bye?.Reason ?? "goodbye"}");
+                        Status($"It ended the session: {bye?.Message ?? bye?.Reason ?? "goodbye"}");
                         break;
                 }
             }
-            Status($"{mac.Name} closed the session. Reconnecting…");
+            Status("It closed the session. Reconnecting…");
         }
         catch (OperationCanceledException) when (!stopping.IsCancellationRequested)
         {
-            Status(endReason ?? $"Lost {mac.Name} (nothing for 10 s). Reconnecting…");
+            Status(endReason ?? "Nothing heard from it for 10 s. Reconnecting…");
         }
         catch (OperationCanceledException) { }
-        catch (Exception e) { Log(e.ToString()); Status($"The session ended: {e.Message} Reconnecting…"); }
+        catch (Exception e) { Log(e.ToString()); Status($"The session ended ({e.Message}). Reconnecting…"); }
         finally
         {
             connected = false;
@@ -698,7 +728,7 @@ sealed class ViewerForm : Form
             try { await videoThread; } catch (Exception e) { Log($"Video thread: {e.Message}"); }
             // Only once the video thread has stopped: its last draw would set it again.
             pictured = false;
-            BeginInvoke(UpdateTitle);
+            BeginInvoke(() => { PlaceCard(); UpdateTitle(); });
             paintPending = false;
         }
         return true;
@@ -828,7 +858,7 @@ sealed class ViewerForm : Form
         renderer.Draw(picture, (sps.Left, sps.Top, width, height));
         pictureWidth = width; pictureHeight = height;
         lock (gate) { picturesShown++; drawMs += Stopwatch.GetElapsedTime(t0).TotalMilliseconds; }
-        pictured = true;
+        if (!pictured) { pictured = true; BeginInvoke(PlaceCard); }
         if (!gpuShowing)
         {
             gpuShowing = true;
@@ -869,7 +899,7 @@ sealed class ViewerForm : Form
             (front, back) = (back, front);
             picturesShown++;
         }
-        pictured = true;
+        if (!pictured) { pictured = true; BeginInvoke(PlaceCard); }
         paintPending = true;
         Interlocked.Exchange(ref shownAt, Stopwatch.GetTimestamp());
         BeginInvoke(Invalidate);
