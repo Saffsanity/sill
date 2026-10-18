@@ -693,10 +693,12 @@ sealed class ViewerForm : Form
         finally
         {
             connected = false;
-            pictured = false;
             jobs = null;
             video.Writer.TryComplete();
             try { await videoThread; } catch (Exception e) { Log($"Video thread: {e.Message}"); }
+            // Only once the video thread has stopped: its last draw would set it again.
+            pictured = false;
+            BeginInvoke(UpdateTitle);
             paintPending = false;
         }
         return true;
