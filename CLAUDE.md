@@ -8,6 +8,21 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**The Full-Screen Viewer on an iPhone (2026-10-18, branch `iphone-viewer` from main at 5c323e6;
+docs/iphone-viewer-plan.md has what it does, the open questions with the defaults taken, the results
+and what a device tests).** A second arrangement for the iPhone's stream screen, as a VNC viewer has
+it, off by default (Settings › This iPhone › Full-Screen Viewer, `Sill.viewerMode`, never sent). Device
+only: no wire change, nothing on the Mac.
+- `ViewerScreen`: the picture fits the whole screen, upright or sideways; pinch zooms it 1× to 8× about
+  the fingers, and the pointer within 44 pt of a side pans it; the whole screen is `TrackpadSurface`
+  (its `travelScale`, the pointer's travel divided by the zoom, and `onPinch`, a two-finger stroke
+  taken over at 8 %: both only the viewer sets); a bar at the top (Windows, Apps, Menus, Keyboard,
+  Keys, Fill or Fit, Settings, Hide). `ViewerCamera` (pure, `Tests/checks/viewer-camera`: 466,423
+  checks, 19 of 19 mutants) places the picture. No tour, no Larger Picture row, and not on the iPhone
+  Duo's inner display while it is on. DEBUG `-SillViewerZoom <z>`.
+- **Untested, for a device:** the plan's list (the pinch's start and end, strokes zoomed in, Fill and
+  Fit, rotation, the keyboard, VoiceOver, five minutes zoomed in).
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
@@ -5332,7 +5347,10 @@ good.
   the key row and the trackpad, at the inner display's size and, for an iPad
   window narrower than 600 pt, the compact one with the key row in two lines;
   and a phone held upright, from `PhonePortraitLayout`; the key row's two sets,
-  twelve and six), `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
+  twelve and six), `ViewerScreen` (the Full-Screen Viewer on an iPhone, docs/iphone-viewer-plan.md: the whole screen the
+  picture and the trackpad, a bar at the top) and `ViewerCamera` (where it puts the picture: fit, fill,
+  the pinch, the edge push; pure, `Tests/checks/viewer-camera`; pbxproj A7FE/F7FE, A7FF/F7FF),
+  `PhonePortraitLayout` (a phone upright, `.outerPortrait` on
   an iPhone, as rects from the stream screen's size: the picture's fixed 16:10
   pane, row 1's five buttons in their band, the strip, six caps, the trackpad
   and its vertical span, the Aa ruler, the drawer and the Settings panel across

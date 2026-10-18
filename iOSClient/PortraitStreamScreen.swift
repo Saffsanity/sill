@@ -726,7 +726,7 @@ private enum Key {
 /// (`.phone`): escape, tab and the four modifiers, six caps across the row; the Keyboard button is
 /// in row 1, and Spotlight is cmd then space on the keyboard (a latched ⌘ turns a typed space into
 /// ⌘Space). Arrows there come from a hardware keyboard.
-private struct KeyRow: View {
+struct KeyRow: View {
     enum Keys { case full, phone }
 
     let metrics: PortraitMetrics

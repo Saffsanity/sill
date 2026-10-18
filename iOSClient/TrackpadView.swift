@@ -85,6 +85,8 @@ struct TrackpadView: UIViewRepresentable {
     let onModifiersConsumed: () -> Void
     var verticalSpan: CGFloat? = nil
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    var travelScale: CGFloat = 1
+    var onPinch: ((UIGestureRecognizer.State, CGFloat, CGPoint) -> Void)? = nil
 
     func makeUIView(context: Context) -> TrackpadSurface {
         let view = TrackpadSurface(frame: .zero)
@@ -104,6 +106,8 @@ struct TrackpadView: UIViewRepresentable {
         uiView.latchedModifiers = latched
         uiView.verticalSpan = verticalSpan
         uiView.sendGesture = sendGesture
+        uiView.travelScale = travelScale
+        uiView.onPinch = onPinch
         // Called from a gesture callback, never from inside a SwiftUI update, so the binding write
         // it performs needs no hop to the next runloop turn.
         uiView.onModifiersConsumed = onModifiersConsumed
@@ -137,6 +141,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// which checks this device's switch and the Mac's `gestures`, and shows the Desktop first while
     /// a window streams). True when it went, which the light tick follows.
     var sendGesture: (TrackpadGestures.Gesture, Int) -> Bool = { _, _ in false }
+    /// The viewer (ViewerScreen): pointer travel is divided by this, so a zoomed-in picture gets a
+    /// finer pointer. 1 everywhere else.
+    var travelScale: CGFloat = 1
+    /// The viewer's pinch: set, a two-finger pinch past `pinchCommit` stops being a scroll and goes
+    /// here instead, as (phase, scale since the last call, the fingers' centroid in this view).
+    var onPinch: ((UIGestureRecognizer.State, CGFloat, CGPoint) -> Void)?
+    private var zooming = false
+    private static let pinchCommit: CGFloat = 0.08
     /// Every direct touch, for three-finger strokes: from the moment three fingers are down, nothing
     /// of the stroke reaches the Mac but its gesture (`strokes.silent`, each finger handler's first
     /// line).
@@ -235,6 +247,10 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         twoFingerTap.numberOfTouchesRequired = 2
         addGestureRecognizer(twoFingerTap)
 
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+
         // Press and hold, then drag: the left button goes down and stays down, so a window or a
         // selection can be dragged from the pad. It has to run alongside the tracker, which is what
         // actually moves the pointer while the button is held.
@@ -268,7 +284,8 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     private func moveCursor(dx: CGFloat, dy: CGFloat) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         catchUp()
-        pad.move(dx: Double(dx / bounds.width * Self.travel), dy: Double(dy / ySpan * Self.travel))
+        let travel = Self.travel / max(travelScale, 0.01)
+        pad.move(dx: Double(dx / bounds.width * travel), dy: Double(dy / ySpan * travel))
         // The sprite first, since it is the feedback the finger is waiting for; then the Mac, whose
         // cursor still has to follow for clicks to land there. No rate limit needed here:
         // sendInput coalesces moves to one every 8 ms.
@@ -342,7 +359,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             panTouches = gesture.numberOfTouches
             if panTouches >= 2 {
                 lastTranslation = .zero
-                beginScroll()
+                if !zooming { beginScroll() }
             } else {
                 // The pan has already held back its ~10 pt of hysteresis. Rebase past it, and if
                 // this stroke is the pan's to drive, move by it now instead of as a jump on the
@@ -359,7 +376,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
                 // A finger joined or left: rebase, or the jump in the translation becomes a jolt.
                 panTouches = gesture.numberOfTouches
                 lastTranslation = translation
-                if panTouches >= 2, !scrolling {
+                if panTouches >= 2, !scrolling, !zooming {
                     beginScroll()
                 } else if panTouches < 2, scrolling {
                     // Fingers rarely lift together, so this is usually the flick's lift-off.
@@ -373,7 +390,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             if panTouches >= 2 { scrollVelocity = gesture.velocity(in: self) }
             guard dx != 0 || dy != 0 else { return }
             if panTouches >= 2 {
-                guard bounds.width > 0, bounds.height > 0 else { return }
+                guard !zooming, bounds.width > 0, bounds.height > 0 else { return }
                 catchUp()
                 // Natural sign, same as the direct-touch overlay: fingers down, content down.
                 send(.scroll(x: cursor.x, y: cursor.y,
@@ -390,6 +407,29 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             if scrolling { endScroll(momentumVelocity: nil) }
             lastTranslation = .zero
             panTouches = 0
+        }
+    }
+
+    /// The viewer's pinch. Until the fingers have spread or closed by `pinchCommit` it is a scroll's
+    /// business; past that the scroll ends (no coast) and the rest of the gesture zooms and pans.
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard let onPinch else { return }
+        switch gesture.state {
+        case .began, .changed:
+            guard gesture.numberOfTouches >= 2 else { return }
+            let at = gesture.location(in: self)
+            if !zooming {
+                guard abs(gesture.scale - 1) > Self.pinchCommit else { return }
+                zooming = true
+                if scrolling { endScroll(momentumVelocity: nil) }
+                onPinch(.began, gesture.scale, at)
+            } else {
+                onPinch(.changed, gesture.scale, at)
+            }
+            gesture.scale = 1
+        default:
+            if zooming { onPinch(.ended, 1, gesture.location(in: self)) }
+            zooming = false
         }
     }
 

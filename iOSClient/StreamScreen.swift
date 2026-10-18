@@ -180,6 +180,9 @@ struct StreamScreen: View {
     /// streams changing meanwhile (a window closed on the Mac, another device's pick). It applies as
     /// the panel goes, in the same motion.
     @State private var largerPictureHeld: Bool? = nil
+    /// The Full-Screen Viewer (ViewerScreen) in place of a phone's arrangements: Settings › This
+    /// iPhone, off by default (docs/iphone-viewer-plan.md).
+    @AppStorage(StreamClient.viewerModeKey) private var viewerMode = false
     #if DEBUG
     /// The console says once when a decision starts to wait.
     @State private var tourWaitLogged: Double? = nil
@@ -234,8 +237,12 @@ struct StreamScreen: View {
             // makes larger, judged on this screen held upright, whichever way it is held now.
             let offersLarger = DuoLayout.phoneArrangement && posture.hinge == .unknown
                 && PhonePortraitLayout.offersLargerPicture(screen: geo.size)
+            let viewerOn = viewerMode && DuoLayout.phoneArrangement && posture.hinge == .unknown
             ZStack {
                 Group {
+                    if viewerOn {
+                        viewer()
+                    } else {
                     switch duo {
                     case .innerLandscape:
                         landscape(bar: .regular, width: geo.size.width, fold: posture.info(in: geo.size))
@@ -246,13 +253,14 @@ struct StreamScreen: View {
                     case .outerPortrait:
                         portrait(metrics: DuoLayout.phoneArrangement ? .phone : .compact, largerKeyboard: largerKeyboard)
                     }
+                    }
                 }
                 // Under the pairing overlay and the tour nothing takes a touch: not the bar, and
                 // not the stream's UIKit input view (nor, so, the Pencil, a hover or a key).
-                .allowsHitTesting(!overlayShown && tour == nil)
+                .allowsHitTesting(!overlayShown && (tour == nil || viewerOn))
                 // The pointer sprite follows the layout: the trackpad's arrow shows only in the
                 // laptop layout, and a rotation re-renders it at once; the Mac's arrow stays.
-                .onChange(of: DuoLayout.of(geo.size).isPortrait, initial: true) { _, portrait in
+                .onChange(of: DuoLayout.of(geo.size).isPortrait || viewerOn, initial: true) { _, portrait in
                     client.setPointerLayout(portrait: portrait)
                 }
                 // The clipboard's chip on screen or not: its 20 s run only while it is, and VoiceOver
@@ -276,7 +284,7 @@ struct StreamScreen: View {
                 }
                 // The tour: a sibling above the layouts, as the pairing overlay is, and under it: an
                 // outside link puts the tour aside until the overlay has closed.
-                if let run = tour, !overlayShown {
+                if let run = tour, !overlayShown, !viewerOn {
                     // With Larger Picture no thumbnails: the bar card is about Apps, and the cards
                     // upright stand in the picture's whole room, the black under a short picture.
                     TourOverlay(run: run, copy: tourCopy(run, layout, keysOnItsSide: posture.onInnerDisplay,
@@ -862,7 +870,7 @@ struct StreamScreen: View {
     private func considerTour() {
         tourWait?.cancel()
         tourWait = nil
-        guard tour == nil, let layout = tourLayout else { return }
+        guard tour == nil, let layout = tourLayout, !(viewerMode && DuoLayout.phoneArrangement) else { return }
         let now = ProcessInfo.processInfo.systemUptime
         // A touch anywhere, input sent to the Mac, or a control used by any means. VoiceOver's
         // swipes that only move its focus are reading, as a look around the screen is, and are not
@@ -1040,6 +1048,18 @@ struct StreamScreen: View {
                    menusOpened: menusOpened, menusClosed: menusClosed)
             contentArea(bar: bar)
         }
+    }
+
+    private func viewer() -> some View {
+        ViewerScreen(client: client, drawerOpen: $drawerOpen, keyboardShown: $keyboardShown,
+                     windowMenu: $windowMenu, latched: $latched, overlay: overlay,
+                     settingsOpen: settingsOpen,
+                     setSettings: { setSettings($0, restoreKeyboard: $1) },
+                     menusOpened: menusOpened, menusClosed: menusClosed,
+                     onPanelSize: { panelSize = $0 },
+                     pairThisDevice: openPairingOverlay,
+                     takeTour: takeTour,
+                     linkLine: shownLinkLine)
     }
 
     /// `largerKeyboard`: Larger Picture's keyboard on a phone (see `body`), nil otherwise.

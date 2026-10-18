@@ -44,6 +44,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
+    /// This device's switch for the Full-Screen Viewer (docs/iphone-viewer-plan.md): off unless turned
+    /// on, read by the stream screen, never sent; offered on an iPhone.
+    @AppStorage(StreamClient.viewerModeKey) private var viewerMode = false
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
@@ -476,7 +479,16 @@ struct HostSettingsPanel: View {
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
             .id(Self.gesturesGroupID)
-        if offersLargerPicture {
+        if DuoLayout.phoneArrangement {
+            Rows {
+                Toggle(isOn: $viewerMode) {
+                    Text("Full-Screen Viewer").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: "The picture fills the screen: pinch to zoom, drag to move the pointer, which moves the picture at its edges. Windows, apps, keys and settings are in the bar at the top.")
+        }
+        if offersLargerPicture && !(viewerMode && DuoLayout.phoneArrangement) {
             Rows {
                 Toggle(isOn: $largerPicture) {
                     Text("Larger Picture").foregroundStyle(Palette.text)
