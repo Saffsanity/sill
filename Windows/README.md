@@ -10,8 +10,9 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
 
 ## Layout
 
-- `src/Sill.Protocol` — the wire format, portable (no Windows API): the 14-byte header
-  today; pairing and the session's messages next. The Swift side is the reference:
+- `src/Sill.Protocol` — the wire format, portable (no Windows API): the 14-byte header,
+  and pairing's pure parts (the typed code, the proofs, the `sill://pair` link, kinds 19 and
+  20, the Mac ID and SPKI fingerprint); the session's messages next. The Swift side is the reference:
   `Sources/StreamProtocol/`.
 - `src/Sill.Spike` — the console app (pairing, session, decode to PNG, as the tickets land).
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN

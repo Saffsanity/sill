@@ -7,13 +7,14 @@ commit as the work it describes (the status line, the ticket's row, a dated log 
 
 Tickets 01 and 02 are built and committed on `windows-spike`, which has not been pushed. Waiting
 on: `probe-report.txt` from the PC (ticket 02), and a push so the Windows CI job runs (ticket 01).
-Ticket 03 is next once 02 is answered. Its PC-independent parts (the Damm check digit, the
-PBKDF2 key, the HMAC proofs) could start before then.
+Ticket 03's PC-independent half is done (2026-10-18): the code, the proofs, the link, kinds 19 and
+20, in `Sill.Protocol`, checked against the plan's vectors. Its TLS half waits for ticket 02.
 
 | Commit | What |
 |---|---|
 | `5d4acda` | The .NET skeleton, its CI job, this file, the agent-skills setup (`docs/agents/`, CLAUDE.md) |
 | `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
+| (next) | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
 
 ## Where things are
 
@@ -54,7 +55,7 @@ distribution, input, menus, gestures, clipboard.
 |---|---|---|---|---|
 | 01 | Windows solution skeleton and CI job | task | none | claimed: done locally, CI not run (needs a push) |
 | 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | claimed: probe built, waiting for the PC's report |
-| 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | open |
+| 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | claimed: pure half done; the TLS half waits for 02 |
 | 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | open |
 | 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | open |
 | 06 | Conformance run with the Mac side | task | 05 | open |
@@ -74,6 +75,15 @@ distribution, input, menus, gestures, clipboard.
 
 - 2026-10-18: this file gained the status section and the open questions.
 
+- 2026-10-18: ticket 03's pure half in `Sill.Protocol`: `Base64Url`, `Spki` (equal to .NET's own
+  `ExportSubjectPublicKeyInfo`), `MacId`, `PairingCode` (Damm), `PairingProof` (PBKDF2 600k,
+  HMAC proofs), `PairLink`, `SafeText`, `PairRequest`/`PairResult` (nulls left out, as Swift),
+  `PairingExchange` (the kind 19 to send; a kind 20 judged as the iOS device judges it, with its
+  words) and `MessageStream.ReadAsync`. The plan's vectors (docs/remote-access-plan.md §3.4, §3.6)
+  match exactly; a link made with Python as `PairLink.url` escapes it parses. 67 tests pass on the
+  Mac. Simplification: a link's `a` addresses are kept as text, as sillclient.py does (the Swift
+  address parser isn't ported; the spike dials a typed address).
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -89,5 +99,9 @@ distribution, input, menus, gestures, clipboard.
   ticket. Its decode check only counts decoders; decoding a real frame is ticket 05.
 - Push `windows-spike` when ready (only with the go-ahead), so the Windows CI job runs and ticket
   01 can close.
-- Then ticket 03: the pairing client over `sill-pair/1` (one kind 19 request, one kind 20 answer),
-  checked against `SillHost --pairing` and the Swift `Pairing.swift`.
+- Then ticket 03's TLS half, once the probe says SChannel does TLS 1.3 with ALPN: a device key
+  (ECDSA P-256) and a self-signed certificate (`CertificateRequest`), `SslStream` with ALPN
+  `sill-pair/1` and that certificate, the Mac's key read in the validation callback (pinned to
+  the link's `k`, or any P-256 key on the typed path), then `PairingExchange` over it; a console
+  command in `Sill.Spike`; checked on the PC against `SillHost --pairing` by code, by link, and
+  with a wrong code. Only testable on Windows (.NET on macOS has no TLS 1.3).
