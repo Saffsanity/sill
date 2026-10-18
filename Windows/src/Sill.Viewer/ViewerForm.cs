@@ -110,6 +110,7 @@ sealed class ViewerForm : Form
             Send(SessionMessages.Gesture(gesture));
         };
         drawer.Launch += bundleId => Send(SessionMessages.LaunchApp(bundleId));
+        drawer.ShowWindow += id => Send(SessionMessages.SelectWindow(id));
         drawer.Closed += () => { bar.AppsOpen = false; ActiveControl = null; Focus(); };
     }
 
@@ -155,6 +156,10 @@ sealed class ViewerForm : Form
         var v = VideoArea;
         clientWidth = Math.Max(1, v.Width); clientHeight = Math.Max(1, v.Height);
         panel.Bounds = v;
+        // The drawer floats under the bar on the left, as the iPad's: 22 pt in, 8 under, 14 above the foot.
+        float s = DeviceDpi / 96f;
+        drawer.Bounds = new Rectangle((int)(22 * s), v.Y + (int)(8 * s), Math.Min(drawer.CardPixels, Math.Max(1, v.Width - (int)(44 * s))),
+            Math.Max(1, v.Height - (int)(22 * s)));
         panelWidth = Math.Max(1, panel.ClientSize.Width); panelHeight = Math.Max(1, panel.ClientSize.Height);
         jobs?.Writer.TryWrite(VideoJob.Redraw);   // a still screen sends nothing: draw the last picture at the new size
     }
@@ -256,6 +261,8 @@ sealed class ViewerForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        // A click beside the open drawer closes it and clicks nothing on the Mac, as a tap does on the iPad.
+        if (drawer.Visible) { drawer.Close(); return; }
         var f = Fraction(e.Location);
         Send(InputMessages.PointerEvent(InputMessages.Pointer.Move, f.X, f.Y));
         if (e.Button == MouseButtons.Left) { leftDown = true; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftDown, f.X, f.Y)); }
@@ -516,6 +523,7 @@ sealed class ViewerForm : Form
             return false;
         }
         macName = mac.Name;
+        BeginInvoke(() => drawer.SetMacName(mac.Name));
         // The addresses to dial, in order: each --host, else the one saved at pairing.
         var targets = new List<(string Host, int Port)>();
         foreach (var h in hostOverrides.Count > 0 ? hostOverrides : [$"{mac.Host}:{mac.Port}"])
@@ -605,7 +613,11 @@ sealed class ViewerForm : Form
                         {
                             desktopActive = list.ActiveName == "desktop";
                             nothingStreams = list.ActiveName == "none";
-                            BeginInvoke(() => bar.SetWindows(list.Windows, list.ActiveWindowId, list.ActiveName == "desktop", list.Gestures >= 1));
+                            BeginInvoke(() =>
+                            {
+                                bar.SetWindows(list.Windows, list.ActiveWindowId, list.ActiveName == "desktop", list.Gestures >= 1);
+                                drawer.SetWindows(list.Windows, list.ActiveWindowId);
+                            });
                         }
                         // As the iPad does: whenever the Mac says nothing streams, ask for the Desktop.
                         // The Mac drops a pick that lands while it is still stopping another stream
