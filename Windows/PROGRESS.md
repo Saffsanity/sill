@@ -168,6 +168,16 @@ distribution, input, menus, gestures, clipboard.
   apphost `.exe` can't find a .NET installed in the user's folder ("You must install .NET", left
   waiting in a dialog), so the viewer is published self-contained and single-file (116 MB).
 
+- 2026-10-18: input in the viewer (Jericho: "i can view but i cant control anything"). `Input.cs` in
+  `Sill.Protocol`: kind 8 as Swift's synthesized `InputEvent` encodes it (pointer, scroll, key, text)
+  and `HidKeys` (Windows virtual keys to USB HID usages), 15 tests. The viewer sends the mouse (moves
+  at most 250 a second, left and right buttons, both wheels: a notch moves the content a 25th of the
+  frame, natural sign) and keys as HID usages with the held modifiers: left Ctrl is ⌘ (Ctrl+C copies
+  on the Mac), right Ctrl ⌃, Alt ⌥ (its window menu suppressed), the Windows key stays Windows'. Arrows
+  and Tab go to the Mac, not to focus; leaving the window lets go of every key and button; F11 toggles
+  full screen (double-click and Esc are the Mac's now). One writer keeps kind 8 in order. Not yet
+  tried against the Mac: the host needs Accessibility for the app it was started from (Ghostty).
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -211,8 +221,8 @@ distribution, input, menus, gestures, clipboard.
   `IMFDXGIDeviceManager`) so the RTX 3050 or the Intel GPU decodes, and draw the NV12 texture with
   Direct3D instead of converting on the CPU; the target is 60 fps at 4K. Decode on its own thread so
   the reader keeps draining the socket.
-- Input: the pointer, clicks, scrolling and keys to the Mac (kind 8, `Input.swift`), then the window
-  list and picking windows.
+- Input: confirm it on the Mac (Accessibility for the host's launcher); then the window list and
+  picking windows, and the Mac's cursor shape (kind 14) instead of Windows' arrow.
 - Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
 - The `sillclient.py` comparison on the real-capture host (ticket 06's leftover).
 - Decide whether the device certificate going to an unpinned key on Windows matters (it is public;

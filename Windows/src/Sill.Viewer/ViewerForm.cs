@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Text.Json;
@@ -11,7 +13,8 @@ namespace Sill.Viewer;
 /// The Mac's Desktop, live. A worker reads the session (the spike's <see cref="SessionClient"/>),
 /// feeds every frame to the decoder (each one is needed: later frames refer to it), and converts
 /// the newest picture to a bitmap only when the window has drawn the last one, so a slow paint
-/// drops pictures rather than queueing them. Double-click for full screen; Esc leaves it.
+/// drops pictures rather than queueing them. Mouse and keys go to the Mac (kind 8): left Ctrl is
+/// ⌘, right Ctrl ⌃, Alt ⌥. F11 toggles full screen.
 /// </summary>
 sealed class ViewerForm : Form
 {
@@ -30,6 +33,16 @@ sealed class ViewerForm : Form
     // Once-a-second figures for the title.
     private int framesIn, picturesShown; private long bytesIn; private double decodeMs, worstDecodeMs; private double? rtt;
     private string size = "";
+
+    // Input: one writer keeps kind 8 in the order it was made; the picture's place in the window
+    // turns a mouse position into the frame fraction the host expects.
+    private readonly Channel<byte[]> outgoing = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+    private volatile bool connected;
+    private Rectangle pictureRect;
+    private readonly Dictionary<Keys, ushort> keysDown = [];
+    private bool leftDown, rightDown;
+    private long lastMoveTicks;
+    private (double X, double Y) lastPointer = (-1, -1);
 
     public ViewerForm(string dir, string? hostOverride)
     {
@@ -57,13 +70,136 @@ sealed class ViewerForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e) { stop.Cancel(); base.OnFormClosing(e); }
 
-    protected override void OnDoubleClick(EventArgs e) { base.OnDoubleClick(e); FullScreen(FormBorderStyle != FormBorderStyle.None); }
+    // ---- input ----
+
+    private void Send(byte[] message) { if (connected) outgoing.Writer.TryWrite(message); }
+
+    private (double X, double Y) Fraction(Point p)
+    {
+        var r = pictureRect;
+        if (r.Width <= 0 || r.Height <= 0) return (0.5, 0.5);
+        return (Math.Clamp((p.X - r.X + 0.5) / r.Width, 0, 1), Math.Clamp((p.Y - r.Y + 0.5) / r.Height, 0, 1));
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        var f = Fraction(e.Location);
+        // At most 250 a second: a 1000 Hz mouse would send four times what the Mac can show.
+        long now = Stopwatch.GetTimestamp();
+        if (f == lastPointer || Stopwatch.GetElapsedTime(lastMoveTicks, now).TotalMilliseconds < 4) return;
+        lastMoveTicks = now; lastPointer = f;
+        Send(InputMessages.PointerEvent(InputMessages.Pointer.Move, f.X, f.Y));
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        var f = Fraction(e.Location);
+        Send(InputMessages.PointerEvent(InputMessages.Pointer.Move, f.X, f.Y));
+        if (e.Button == MouseButtons.Left) { leftDown = true; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftDown, f.X, f.Y)); }
+        if (e.Button == MouseButtons.Right) { rightDown = true; Send(InputMessages.PointerEvent(InputMessages.Pointer.RightDown, f.X, f.Y)); }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        var f = Fraction(e.Location);
+        if (e.Button == MouseButtons.Left && leftDown) { leftDown = false; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftUp, f.X, f.Y)); }
+        if (e.Button == MouseButtons.Right && rightDown) { rightDown = false; Send(InputMessages.PointerEvent(InputMessages.Pointer.RightUp, f.X, f.Y)); }
+    }
+
+    // A wheel notch (120) moves the content a twenty-fifth of the frame; a precision touchpad's
+    // smaller deltas move it in proportion. Natural sign: a wheel turned up moves the content down.
+    private const double NotchFraction = 0.04;
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        var f = Fraction(e.Location);
+        Send(InputMessages.Scroll(f.X, f.Y, 0, e.Delta / 120.0 * NotchFraction));
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_MOUSEHWHEEL = 0x020E, WM_SYSCOMMAND = 0x0112, SC_KEYMENU = 0xF100;
+        if (m.Msg == WM_MOUSEHWHEEL)
+        {
+            int delta = (short)((long)m.WParam >> 16);
+            var f = Fraction(PointToClient(new Point((short)(long)m.LParam, (short)((long)m.LParam >> 16))));
+            Send(InputMessages.Scroll(f.X, f.Y, -delta / 120.0 * NotchFraction, 0));   // tilted right: content moves left
+            m.Result = 1;
+            return;
+        }
+        // Alt alone would open the window menu and take the keys from the Mac.
+        if (m.Msg == WM_SYSCOMMAND && ((int)m.WParam & 0xFFF0) == SC_KEYMENU) return;
+        base.WndProc(ref m);
+    }
+
+    // Every key is the Mac's, arrows and Tab included (WinForms would move focus with them).
+    protected override bool IsInputKey(Keys keyData) => true;
+    protected override bool ProcessDialogKey(Keys keyData) => false;
+
+    [DllImport("user32.dll")] private static extern short GetKeyState(int virtualKey);
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.KeyCode == Keys.Escape && FormBorderStyle == FormBorderStyle.None) FullScreen(false);
-        if (e.KeyCode == Keys.F11) FullScreen(FormBorderStyle != FormBorderStyle.None);
+        e.Handled = e.SuppressKeyPress = true;
+        if (e.KeyCode == Keys.F11) { FullScreen(FormBorderStyle != FormBorderStyle.None); return; }
+        ushort hid = e.KeyCode switch
+        {
+            // Left Ctrl is ⌘, so Ctrl+C copies on the Mac as it does on Windows; right Ctrl is ⌃.
+            Keys.ControlKey => (GetKeyState(0xA3) & 0x8000) != 0 ? HidKeys.LeftControl : HidKeys.LeftCommand,
+            Keys.ShiftKey => HidKeys.LeftShift,
+            Keys.Menu => HidKeys.LeftOption,
+            Keys.LWin or Keys.RWin => 0,   // Windows keeps it (the Start menu)
+            _ => HidKeys.FromVirtualKey((int)e.KeyCode),
+        };
+        if (hid == 0) return;
+        keysDown[e.KeyCode] = hid;
+        Send(InputMessages.Key(hid, true, Modifiers()));
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        e.Handled = e.SuppressKeyPress = true;
+        if (!keysDown.Remove(e.KeyCode, out ushort hid)) return;
+        Send(InputMessages.Key(hid, false, Modifiers()));
+    }
+
+    private ulong Modifiers()
+    {
+        ulong m = 0;
+        foreach (ushort hid in keysDown.Values)
+            m |= hid switch
+            {
+                HidKeys.LeftShift => InputMessages.Shift, HidKeys.LeftControl => InputMessages.Control,
+                HidKeys.LeftOption => InputMessages.Option, HidKeys.LeftCommand => InputMessages.Command, _ => 0,
+            };
+        return m;
+    }
+
+    // Leaving the window (Alt+Tab, a click elsewhere) lets go of everything held, so no key or
+    // button stays down on the Mac.
+    protected override void OnDeactivate(EventArgs e)
+    {
+        base.OnDeactivate(e);
+        foreach (var key in keysDown.Keys.ToList()) { ushort hid = keysDown[key]; keysDown.Remove(key); Send(InputMessages.Key(hid, false, Modifiers())); }
+        var f = lastPointer.X < 0 ? (0.5, 0.5) : lastPointer;
+        if (leftDown) { leftDown = false; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftUp, f.Item1, f.Item2)); }
+        if (rightDown) { rightDown = false; Send(InputMessages.PointerEvent(InputMessages.Pointer.RightUp, f.Item1, f.Item2)); }
+    }
+
+    private async Task WriteInputAsync(SessionClient session, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var message in outgoing.Reader.ReadAllAsync(ct))
+                await session.SendAsync(message, ct);
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException) { }
     }
 
     private void FullScreen(bool on)
@@ -86,7 +222,8 @@ sealed class ViewerForm : Form
                 g.InterpolationMode = scale >= 1 ? InterpolationMode.NearestNeighbor : InterpolationMode.Bilinear;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
                 g.CompositingMode = CompositingMode.SourceCopy;
-                g.DrawImage(front, new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h));
+                pictureRect = new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+                g.DrawImage(front, pictureRect);
             }
             else
             {
@@ -157,6 +294,8 @@ sealed class ViewerForm : Form
         Status($"Connected to {mac.Name}. Waiting for the picture…");
         var clock = Stopwatch.StartNew();
         _ = PingAsync(session, clock, ct);
+        _ = WriteInputAsync(session, ct);
+        connected = true;
         HevcDecoder? decoder = null;
         ParameterSets? ps = null;
         bool asked = false, keyed = false;
@@ -215,7 +354,7 @@ sealed class ViewerForm : Form
         }
         catch (OperationCanceledException) { }
         catch (Exception e) { Status($"The session ended: {e.Message}"); }
-        finally { decoder?.Dispose(); }
+        finally { connected = false; decoder?.Dispose(); }
     }
 
     // The newest picture to the back bitmap, sampled down to about the window's size, then swapped

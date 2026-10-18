@@ -1,4 +1,5 @@
-// The live viewer: the paired Mac's Desktop in a window, as it streams. View only, no input yet.
+// The live viewer: the paired Mac's Desktop in a window, as it streams, with the mouse and keys
+// sent to the Mac (left Ctrl is ⌘, right Ctrl ⌃, Alt ⌥; F11 toggles full screen).
 //
 //   Sill.Viewer [--identity <dir>] [--host <address>:<port>]
 //
