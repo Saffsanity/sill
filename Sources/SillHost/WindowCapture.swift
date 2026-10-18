@@ -25,6 +25,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let config = SCStreamConfiguration()
         config.width = width
         config.height = height
+        // A 1× display can supply fewer native pixels than the requested capture size (for
+        // example Retina quality at 2×). The default only scales down, leaving the window in
+        // the top-left corner of a larger black frame. Scale up as well so the encoded frame
+        // and the client's normalized input coordinates cover the same complete window.
+        config.scalesToFit = true
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 5   // headroom: a wedged encoder may keep one buffer forever
