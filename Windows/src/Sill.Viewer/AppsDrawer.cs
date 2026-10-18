@@ -181,7 +181,7 @@ sealed class AppsDrawer : Control
 
         var f = FieldRect;
         Palette.FillRounded(g, Palette.Control, f, S(FieldRadius));
-        TextRenderer.DrawText(g, "", glyphFont, Rectangle.Round(new RectangleF(f.X, f.Y, S(40), f.Height)), Palette.Muted,
+        TextRenderer.DrawText(g, "\uE721", glyphFont, Rectangle.Round(new RectangleF(f.X, f.Y, S(40), f.Height)), Palette.Muted,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
         var list = new RectangleF(0, ListTop, Width, Height - ListTop - S(Inset) / 2);

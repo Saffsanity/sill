@@ -8,13 +8,13 @@ namespace Sill.Viewer;
 /// <c>TopBar</c> at its regular <c>BarMetrics</c>): Apps on the left, then a thumbnail for each Mac
 /// window (104×66, the app's icon as a badge, the streamed one in an accent halo; click streams it,
 /// right-click closes, minimizes or makes it full screen), and on the right Spaces (the Mac's
-/// gestures, which the iPad does with three fingers, as a menu) and Desktop. One control drawn by
+/// gestures, which the iPad does with three fingers, as a menu), Desktop and Settings. One control drawn by
 /// hand: it never takes keyboard focus, so keys keep going to the Mac. The strip scrolls with the
 /// wheel or a drag and fades where it continues.
 /// </summary>
 sealed class MacBar : Control
 {
-    public event Action? AppsClicked, DesktopClicked;
+    public event Action? AppsClicked, DesktopClicked, SettingsClicked;
     public event Action<uint>? WindowClicked;
     public event Action<uint, string>? WindowCommand;
     public event Action<string>? GestureClicked;
@@ -23,12 +23,12 @@ sealed class MacBar : Control
     private const float BarHeight = 86, EdgePad = 22, Gap = 12, ButtonSize = 66, ButtonRadius = 16,
         ThumbWidth = 104, ThumbHeight = 66, ThumbRadius = 10, ThumbSpacing = 16, ThumbPad = 10, Badge = 24, Fade = 28;
 
-    private enum Part { None, Apps, Spaces, Desktop, Thumb }
+    private enum Part { None, Apps, Spaces, Desktop, Settings, Thumb }
     private readonly record struct Hit(Part Part, uint Window = 0);
 
     private IReadOnlyList<WindowInfo> windows = [];
     private uint? activeWindow;
-    private bool desktopActive, gesturesAvailable, appsOpen;
+    private bool desktopActive, gesturesAvailable, appsOpen, settingsOpen;
     private readonly Dictionary<uint, Image> thumbnails = [];
     private readonly Dictionary<string, Image> icons = [];
     private float scroll;   // the strip's offset, in pixels
@@ -86,6 +86,9 @@ sealed class MacBar : Control
     /// <summary>Whether the Apps drawer is showing (its button is lit while it is).</summary>
     public bool AppsOpen { get => appsOpen; set { appsOpen = value; Invalidate(); } }
 
+    /// <summary>Whether the Settings panel is showing (its button is lit while it is).</summary>
+    public bool SettingsOpen { get => settingsOpen; set { settingsOpen = value; Invalidate(); } }
+
     /// <summary>Kind 2: the windows, in the host's order, and what streams.</summary>
     public void SetWindows(IReadOnlyList<WindowInfo> windows, uint? activeWindow, bool desktopActive, bool gestures)
     {
@@ -123,7 +126,8 @@ sealed class MacBar : Control
 
     private float ButtonTop => (Height - S(ButtonSize)) / 2;
     private RectangleF AppsRect => new(S(EdgePad), ButtonTop, S(ButtonSize), S(ButtonSize));
-    private RectangleF DesktopRect => new(Width - S(EdgePad) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
+    private RectangleF SettingsRect => new(Width - S(EdgePad) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
+    private RectangleF DesktopRect => new(SettingsRect.X - S(Gap) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
     private RectangleF SpacesRect => new(DesktopRect.X - S(Gap) - S(ButtonSize), ButtonTop, S(ButtonSize), S(ButtonSize));
     private RectangleF StripRect
     {
@@ -150,6 +154,7 @@ sealed class MacBar : Control
     private Hit HitAt(Point p)
     {
         if (AppsRect.Contains(p)) return new(Part.Apps);
+        if (SettingsRect.Contains(p)) return new(Part.Settings);
         if (DesktopRect.Contains(p)) return new(Part.Desktop);
         if (SpacesRect.Contains(p)) return new(Part.Spaces);
         if (StripRect.Contains(p))
@@ -167,9 +172,10 @@ sealed class MacBar : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        DrawButton(g, AppsRect, "", "Apps", appsOpen, new(Part.Apps), enabled: true);
-        DrawButton(g, SpacesRect, "", "Spaces", false, new(Part.Spaces), gesturesAvailable);
-        DrawButton(g, DesktopRect, "", "Desktop", desktopActive, new(Part.Desktop), enabled: true);
+        DrawButton(g, AppsRect, "\uE721", "Apps", appsOpen, new(Part.Apps), enabled: true);
+        DrawButton(g, SpacesRect, "\uE7C4", "Spaces", false, new(Part.Spaces), gesturesAvailable);
+        DrawButton(g, DesktopRect, "\uE7F4", "Desktop", desktopActive, new(Part.Desktop), enabled: true);
+        DrawButton(g, SettingsRect, "\uE713", "Settings", settingsOpen, new(Part.Settings), enabled: true);
 
         var strip = StripRect;
         var state = g.Save();
@@ -331,6 +337,7 @@ sealed class MacBar : Control
         {
             case Part.Apps: AppsClicked?.Invoke(); break;
             case Part.Desktop: DesktopClicked?.Invoke(); break;
+            case Part.Settings: SettingsClicked?.Invoke(); break;
             case Part.Spaces when gesturesAvailable: SpacesMenu().Show(this, Point.Round(new PointF(SpacesRect.X, SpacesRect.Bottom + S(6)))); break;
             case Part.Thumb: WindowClicked?.Invoke(hit.Window); break;
         }
@@ -379,6 +386,7 @@ sealed class MacBar : Control
         {
             Part.Apps => "Your Mac's apps: open one",
             Part.Desktop => "Stream the whole Desktop",
+            Part.Settings => "Quality, resolution, frame rate…",
             Part.Spaces => gesturesAvailable ? "Mission Control, the Spaces, Show Desktop" : "This Mac doesn't take gestures (update Sill on it)",
             Part.Thumb => windows.FirstOrDefault(w => w.Id == hover.Window) is { } w
                 ? (string.IsNullOrEmpty(w.Title) ? w.AppName : $"{w.AppName} — {w.Title}") : null,
@@ -388,7 +396,7 @@ sealed class MacBar : Control
         tipText = text;
         var r = hover.Part switch
         {
-            Part.Apps => AppsRect, Part.Desktop => DesktopRect, Part.Spaces => SpacesRect,
+            Part.Apps => AppsRect, Part.Desktop => DesktopRect, Part.Spaces => SpacesRect, Part.Settings => SettingsRect,
             _ => ThumbRect(hover.Window) ?? RectangleF.Empty,
         };
         tips.Show(text, this, (int)r.X, (int)(r.Bottom + S(10)), 4000);
