@@ -39,6 +39,7 @@ sealed class ViewerForm : Form
     // Once-a-second figures for the title.
     private int framesIn, framesDecoded, picturesShown; private long bytesIn; private double decodeMs, worstDecodeMs, drawMs; private double? rtt;
     private string size = "";
+    private volatile bool pictured;   // this session has shown a picture: the title gives figures, not the status
     private TimeSpan cpuAtLastTitle;
 
     // The GPU path: one device for the viewer's life, a renderer on the panel made by the first
@@ -466,7 +467,7 @@ sealed class ViewerForm : Form
             var cpuNow = Process.GetCurrentProcess().TotalProcessorTime;
             double cpu = (cpuNow - cpuAtLastTitle).TotalSeconds * 100;   // the timer ticks once a second
             cpuAtLastTitle = cpuNow;
-            figures = framesIn == 0 && picturesShown == 0 ? status
+            figures = !pictured ? status
                 : $"{size} · {decodePath} · {picturesShown} shown, {framesIn} received ({bytesIn * 8 / 1_000_000.0:0.0} Mbps) · decode {decodeMs / Math.Max(framesDecoded, 1):0.0} ms (worst {worstDecodeMs:0})"
                   + (drawMs > 0 ? $" · draw {drawMs / Math.Max(picturesShown, 1):0.0} ms" : "")
                   + $" · CPU {cpu:0}%"
@@ -585,6 +586,7 @@ sealed class ViewerForm : Form
         _ = WriteInputAsync(session, ct);
         connected = true;
         endReason = null;
+        pictured = false;
         ParameterSets? ps = null;
         HevcSps? sps = null;
         bool keyed = false;
@@ -691,6 +693,7 @@ sealed class ViewerForm : Form
         finally
         {
             connected = false;
+            pictured = false;
             jobs = null;
             video.Writer.TryComplete();
             try { await videoThread; } catch (Exception e) { Log($"Video thread: {e.Message}"); }
@@ -823,6 +826,7 @@ sealed class ViewerForm : Form
         renderer.Draw(picture, (sps.Left, sps.Top, width, height));
         pictureWidth = width; pictureHeight = height;
         lock (gate) { picturesShown++; drawMs += Stopwatch.GetElapsedTime(t0).TotalMilliseconds; }
+        pictured = true;
         if (!gpuShowing)
         {
             gpuShowing = true;
@@ -863,6 +867,7 @@ sealed class ViewerForm : Form
             (front, back) = (back, front);
             picturesShown++;
         }
+        pictured = true;
         paintPending = true;
         Interlocked.Exchange(ref shownAt, Stopwatch.GetTimestamp());
         BeginInvoke(Invalidate);
