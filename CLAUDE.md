@@ -6106,3 +6106,17 @@ device keeps working with Macs from the first public build on, or each says why
 - License: Apache-2.0, LICENSE since PR #15, kept when the repository went
   public on 2026-09-26 (paid plan is gone, so no GPL/CLA needed).
 - v1 out of scope: hole punching, multi-window, layout customization, audio.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under `.scratch/`, one directory per feature. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Windows client spike
+
+C# in `Windows/`; its decisions, tickets and status are in `Windows/PROGRESS.md`. Read it first.

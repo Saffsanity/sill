@@ -13,16 +13,17 @@
 # time in all. docs/release-checklist.md, "Releasing from GitHub Actions", has the details.
 name: CI
 
-# A change that touches only documents, the website or the README's screenshots starts no run.
+# A change that touches only documents, the website, the README's screenshots or the Windows
+# client (Windows/, which windows.yml builds) starts no run.
 # (Should this job ever become a required check, such a pull request would wait for it: drop
 # paths-ignore then.) The rest of design/ is not left out: Tests/checks/dmg-layout reads
 # design/DMGBackground.svg (the disk image's window).
 on:
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE', 'Windows/**', '.github/workflows/windows.yml']
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE', 'Windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
     inputs:
       mutants:

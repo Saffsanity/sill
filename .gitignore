@@ -21,3 +21,6 @@ design/reel/
 
 # Python's bytecode caches (Tests/checks/module.py, which its checks' mutants.py import).
 __pycache__/
+
+# Local working notes: the wayfinder maps and tickets (docs/agents/issue-tracker.md).
+.scratch/

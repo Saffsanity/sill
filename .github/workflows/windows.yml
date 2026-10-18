@@ -1,0 +1,55 @@
+# The Windows client spike (Windows/, .scratch's windows-integration map): build and test the
+# .NET solution on a Windows runner whenever Windows/ or this file changes, and by hand.
+#
+# Nothing here signs anything or uses a secret. Free for a public repository; for a private one,
+# Windows minutes count twice against the included minutes.
+name: Windows
+
+on:
+  pull_request:
+    paths: ['Windows/**', '.github/workflows/windows.yml']
+  push:
+    branches: [main]
+    paths: ['Windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Windows
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # .NET 10 from Microsoft's own install script (no third-party action: the repository's
+      # Actions allow-list takes selected actions pinned by commit). global.json picks the SDK.
+      - name: Install the .NET SDK
+        run: |
+          Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile "$env:RUNNER_TEMP/dotnet-install.ps1"
+          & "$env:RUNNER_TEMP/dotnet-install.ps1" -JsonFile global.json -InstallDir "$env:RUNNER_TEMP/dotnet"
+          "$env:RUNNER_TEMP/dotnet" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "DOTNET_ROOT=$env:RUNNER_TEMP/dotnet" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Show the SDK
+        run: dotnet --info
+
+      - name: Build
+        run: dotnet build Sill.Windows.slnx -c Release
+
+      - name: Test
+        run: dotnet test Sill.Windows.slnx -c Release --no-build
