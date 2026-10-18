@@ -16,6 +16,7 @@ on: a push so the Windows CI job runs (ticket 01). Next: ticket 04, the session.
 | `5d4acda` | The .NET skeleton, its CI job, this file, the agent-skills setup (`docs/agents/`, CLAUDE.md) |
 | `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
 | `d3a00b3` | Ticket 03's pure half: `Identity.cs`, `Pairing.cs`, `PairLink.cs`, `PairMessages.cs`, `SafeText.cs`, 57 tests |
+| `5033f42` | Ticket 03's TLS half (`DeviceIdentity`, `SillTls`, `PairingClient`, `Sill.Spike pair`), ticket 02's answer |
 
 ## Where things are
 

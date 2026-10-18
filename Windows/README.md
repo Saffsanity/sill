@@ -57,7 +57,7 @@ TLS 1.3, so the TLS checks pass only on Windows.
 With `SillHost --pairing` running on the Mac (it prints a code and a `sill://pair` link):
 
 ```
-dotnet run --project Windows/src/Sill.Spike -- pair --host <Mac's address>:<port> --code 1234 5678 9012
+dotnet run --project Windows/src/Sill.Spike -- pair --host <Mac's address>:<port> --code "1234 5678 9012"
 dotnet run --project Windows/src/Sill.Spike -- pair --link "sill://pair?…" [--host <Mac's address>:<port>]
 ```
 
