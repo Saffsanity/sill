@@ -25,6 +25,11 @@ static class SessionCommand
         string? saveDir = opts.GetValueOrDefault("save"), pngPath = opts.GetValueOrDefault("png");
         if (pngPath is not null && !OperatingSystem.IsWindows()) return Spike.Usage("--png decodes with Media Foundation: Windows only.");
         byte[]? firstKeyframe = null;
+        bool decodeAll = opts.ContainsKey("decode") && OperatingSystem.IsWindows();
+        var decodeTimes = new List<double>();
+        int pictures = 0;
+        bool keyed = false;   // nothing decodes before the first keyframe
+        Sill.Media.HevcDecoder? decoder = null;
 
         using var identity = DeviceIdentity.LoadOrCreate(dir);
         Console.WriteLine($"Connecting to {mac.Name} at {host}:{port}, pinned to {mac.Fingerprint[..10]}…");
@@ -88,6 +93,14 @@ static class SessionCommand
                         parameterSets = ParameterSets.Parse(payload);
                         if (parameterSets is null) { Console.WriteLine($"[{Now():0.00}s] Parameter sets: malformed ({payload.Length} B)."); break; }
                         stats.ParameterSets++;
+                        if (decodeAll && OperatingSystem.IsWindows()
+                            && parameterSets.Sets.Select(x => HevcSps.Parse(x)).FirstOrDefault(x => x is not null) is { } sps
+                            && (decoder is null || decoder.Sps != sps))
+                        {
+                            decoder?.Dispose();
+                            decoder = new Sill.Media.HevcDecoder(sps);
+                            keyed = false;
+                        }
                         Console.WriteLine($"[{Now():0.00}s] Parameter sets, {payload.Length} B: NAL length {parameterSets.NalUnitHeaderLength}, "
                             + string.Join(", ", parameterSets.Sets.Select(s => $"{AccessUnit.NalName(AccessUnit.NalType(s))} {s.Length} B")));
                         break;
@@ -103,9 +116,16 @@ static class SessionCommand
                             Console.WriteLine($"[{Now():0.00}s] {(h.IsKeyframe ? "Keyframe" : "Frame")} {stats.Frames}: {payload.Length:N0} B, {units}"
                                 + (parameterSets is null ? " (before any parameter sets)" : ""));
                         }
+                        if (decoder is not null && nals is not null && parameterSets is not null && (keyed || h.IsKeyframe) && OperatingSystem.IsWindows())
+                        {
+                            keyed = true;
+                            var t0 = Stopwatch.GetTimestamp();
+                            if (decoder.Push(AnnexB.Build(h.IsKeyframe ? parameterSets : null, payload, nals)) is not null) pictures++;
+                            decodeTimes.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                        }
                         if (firstKeyframe is null && h.IsKeyframe && parameterSets is not null && nals is not null)
                         {
-                            firstKeyframe = DecodeCommand.AnnexB(parameterSets, payload, nals);
+                            firstKeyframe = AnnexB.Build(parameterSets, payload, nals);
                             if (saveDir is not null) Save(saveDir, parameterSets, payload, firstKeyframe);
                         }
                         break;
@@ -135,6 +155,13 @@ static class SessionCommand
 
         Console.WriteLine();
         Console.WriteLine(stats.Summary(Now()));
+        if (decodeTimes.Count > 0)
+        {
+            decodeTimes.Sort();
+            Console.WriteLine($"Decoded {decodeTimes.Count} frames to {pictures} pictures: median {decodeTimes[decodeTimes.Count / 2]:0.0} ms, "
+                + $"95th {decodeTimes[(int)(decodeTimes.Count * 0.95)]:0.0} ms, worst {decodeTimes[^1]:0.0} ms a frame.");
+        }
+        if (OperatingSystem.IsWindows()) decoder?.Dispose();
         if (pngPath is not null && firstKeyframe is not null && OperatingSystem.IsWindows())
             return DecodeCommand.ToPng(firstKeyframe, pngPath);
         return stats.Keyframes > 0 ? 0 : 1;

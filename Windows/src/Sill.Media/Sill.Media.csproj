@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windows' media APIs for the spike and the viewer: Media Foundation's HEVC decoder and the
+       picture conversion it needs. Builds on any OS; runs only on Windows. -->
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sill.Protocol\Sill.Protocol.csproj" />
+  </ItemGroup>
+</Project>

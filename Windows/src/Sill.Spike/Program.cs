@@ -4,7 +4,7 @@
 //
 //   Sill.Spike pair --host <address>:<port> --code <12 digits>
 //   Sill.Spike pair --link '<sill://pair?…>' [--host <address>:<port>]
-//   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>]
+//   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>] [--decode 1]
 //   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png>
 //
 // Options: --identity <dir> (default %LOCALAPPDATA%\Sill\spike), --name <device name>.

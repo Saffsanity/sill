@@ -16,7 +16,9 @@ CI waits for a push. Ticket 05's decoder is done: Media Foundation's HEVC decode
 first keyframe into a PNG on the PC, and on a colour test card it is closer to the source (49.9 dB
 PSNR) than ffmpeg's decode. Ticket 06 ran against the real screen: the PC paired over Wi-Fi with
 `SillHost --pairing` capturing the Mac's 4K display and wrote a sharp 3840×2160 PNG of it. The spike's
-goal is met; next is a live viewer (beyond the spike's tickets).
+goal is met. Beyond the tickets: `Sill.Viewer`, a live window on the Mac's Desktop (view only),
+runs on the PC from `%USERPROFILE%\SillViewer\Sill.Viewer.exe` (the desktop's `Sill Viewer.cmd`),
+decoding in software at about 30 fps for 4K. Next: GPU decoding (Direct3D) and input.
 
 | Commit | What |
 |---|---|
@@ -147,6 +149,25 @@ distribution, input, menus, gestures, clipboard.
   task in the console session: 1 decoder, 0 hardware); the GPUs reach HEVC through HEVC Video
   Extensions' MFT given a Direct3D device (DXVA), which the spike does not set up.
 
+- 2026-10-18: the live viewer (Jericho: "how do I see the screen on windows?", then "go"). The decoder
+  moved to `src/Sill.Media` (Windows' media APIs, a library both apps use) and became a stream:
+  `HevcDecoder` takes each access unit and returns the newest NV12 picture (low-latency mode,
+  `CODECAPI_AVLowLatencyMode`; its output buffer reused, not 12 MB per 4K picture); `DecodeOne`
+  is ticket 05's path. `Bgra.FromNv12` converts in 16.16 fixed point with rows in parallel and
+  samples every Nth pixel when the window is smaller than the picture. `AnnexB` (Build, Nals) moved
+  to `Sill.Protocol`. `src/Sill.Viewer` (WinForms, `net10.0-windows`, `EnableWindowsTargeting` so the
+  solution builds on the Mac): connects to the Mac in `mac.json` (or `--host`), asks for the Desktop,
+  decodes every frame on its reader, converts and draws only when the last picture has been painted
+  (a slow paint drops pictures, never queues them), letterboxed; double-click or F11 for full screen,
+  Esc to leave it; the title has the size, pictures shown and received each second, the bitrate, the
+  decode time and the round trip. `Sill.Spike session --decode 1` decodes every frame headless and
+  prints the times. Measured on the PC against the real 4K screen: software decoding takes a median
+  33.6 ms a frame (95th 63 ms, worst 73), 150 frames to 149 pictures, so about 30 fps at most at 4K;
+  the viewer, launched in the console session by a scheduled task, showed the Mac's screen live
+  ("3840×2160 · 14 shown, 14 received … decode 12 ms … rtt 8 ms" on a still screen). Learned: an
+  apphost `.exe` can't find a .NET installed in the user's folder ("You must install .NET", left
+  waiting in a dialog), so the viewer is published self-contained and single-file (116 MB).
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -186,12 +207,13 @@ distribution, input, menus, gestures, clipboard.
 
 ## Next
 
-- Ticket 06: the full path on the real Mac. `SillHost --pairing` capturing the real screen needs
-  Screen Recording for whatever runs it (Q11), and it shares the hardware encoder with Sill.app
-  (CLAUDE.md's operational rule: not while a device streams from Sill.app). Pair the PC by code
-  and by link, `session --png`, view the PNG; compare frame sizes with `sillclient.py` on the same
-  host; write it up in the map's Decisions-so-far and the ticket's Answer.
-- On the PC's desktop (not over SSH): `Sill.Probe.exe` again for the hardware HEVC decoder count.
+- GPU decoding: give the HEVC MFT a Direct3D 11 device (`MFT_MESSAGE_SET_D3D_MANAGER` with an
+  `IMFDXGIDeviceManager`) so the RTX 3050 or the Intel GPU decodes, and draw the NV12 texture with
+  Direct3D instead of converting on the CPU; the target is 60 fps at 4K. Decode on its own thread so
+  the reader keeps draining the socket.
+- Input: the pointer, clicks, scrolling and keys to the Mac (kind 8, `Input.swift`), then the window
+  list and picking windows.
 - Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
+- The `sillclient.py` comparison on the real-capture host (ticket 06's leftover).
 - Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
   hiding it needs the validation before the client's flight, which SslStream doesn't offer).

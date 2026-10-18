@@ -17,6 +17,9 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
   pairing over it (`PairingClient`), and the session (`Session.cs`: `SessionClient`, the hello,
   parameter sets, access units), and the picture's portable parts (`HevcSps`, `Nv12`, `Png`). The Swift side is the reference:
   `Sources/StreamProtocol/`.
+- `src/Sill.Media` — Windows' media APIs (runs only on Windows): `HevcDecoder` (Media Foundation's
+  HEVC decoder as a stream) and `Bgra` (fast NV12 to BGRA for drawing).
+- `src/Sill.Viewer` — a live window on the paired Mac's Desktop (WinForms, view only).
 - `src/Sill.Spike` — the console app: `pair`, `session`, `decode` (Media Foundation's HEVC decoder to a PNG; Windows only).
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
   (mutual, P-256), Media Foundation's HEVC decoders, and with `--host addr:port` a handshake
@@ -100,3 +103,17 @@ The first decodes the session's first keyframe after the session; the second a k
 with `--save`. Both print the decoder used, the coded and shown sizes, the colour range and matrix.
 To try colour without capturing the screen, give the test host a picture:
 `SILL_TEST_PATTERN=picture:<png> SillHost --synthetic --pairing`.
+
+## The live viewer
+
+After pairing (`Sill.Spike pair`), on the PC:
+
+```
+dotnet publish Windows/src/Sill.Viewer -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o <dir>
+<dir>\Sill.Viewer.exe [--identity <dir>] [--host <address>:<port>]
+```
+
+Self-contained, because an apphost can't find a .NET installed only in the user's folder. It shows
+the Mac's Desktop as it streams; double-click or F11 for full screen, Esc to leave it. The title
+has the size, pictures shown and received each second, the bitrate, the decode time and the round
+trip. Decoding is in software for now: about 30 fps at 4K (`Sill.Spike session --decode 1` measures it).

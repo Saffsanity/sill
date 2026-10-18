@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Sill.Media/Sill.Media.csproj" />
     <Project Path="src/Sill.Probe/Sill.Probe.csproj" />
     <Project Path="src/Sill.Protocol/Sill.Protocol.csproj" />
     <Project Path="src/Sill.Spike/Sill.Spike.csproj" />
+    <Project Path="src/Sill.Viewer/Sill.Viewer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Sill.Protocol.Tests/Sill.Protocol.Tests.csproj" />
