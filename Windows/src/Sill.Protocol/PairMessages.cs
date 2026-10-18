@@ -75,7 +75,8 @@ public sealed class PairingExchange
             macFingerprint, deviceFingerprint);
 
     /// <summary>The link's path. The TLS session must already have pinned the Mac to
-    /// <c>link.Fingerprint</c> (the device's certificate is never sent to another key).</summary>
+    /// <c>link.Fingerprint</c>, so no proof goes to another key. (SChannel's TLS 1.3 sends the
+    /// device's certificate before the pin is judged; the iOS device's verify block runs first.)</summary>
     public static PairingExchange ForLink(PairLink link, byte[] deviceFingerprint) =>
         new(PairRequest.Qr, link.Secret, link.Fingerprint, deviceFingerprint);
 

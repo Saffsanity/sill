@@ -12,9 +12,11 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
 
 - `src/Sill.Protocol` — the wire format, portable (no Windows API): the 14-byte header,
   and pairing's pure parts (the typed code, the proofs, the `sill://pair` link, kinds 19 and
-  20, the Mac ID and SPKI fingerprint); the session's messages next. The Swift side is the reference:
+  20, the Mac ID and SPKI fingerprint), the device's key (`DeviceIdentity`), the TLS
+  connection to a Mac (`SillTls`: TLS 1.3, one ALPN, trust by the Mac's SPKI SHA-256) and one
+  pairing over it (`PairingClient`); the session's messages next. The Swift side is the reference:
   `Sources/StreamProtocol/`.
-- `src/Sill.Spike` — the console app (pairing, session, decode to PNG, as the tickets land).
+- `src/Sill.Spike` — the console app: `pair` now; the session and decode to PNG as the tickets land.
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
   (mutual, P-256), Media Foundation's HEVC decoders, and with `--host addr:port` a handshake
   to a Mac's door. `artifacts/` (gitignored) holds single-file builds of it.
@@ -49,3 +51,22 @@ dotnet publish Windows/src/Sill.Probe -c Release -r win-x64 --self-contained \
 (its port is in its log). It writes `probe-report.txt` beside where it ran. The `.exe` is
 unsigned, so SmartScreen may ask first ("More info", "Run anyway"). .NET on macOS has no
 TLS 1.3, so the TLS checks pass only on Windows.
+
+## Pairing from the PC
+
+With `SillHost --pairing` running on the Mac (it prints a code and a `sill://pair` link):
+
+```
+dotnet run --project Windows/src/Sill.Spike -- pair --host <Mac's address>:<port> --code 1234 5678 9012
+dotnet run --project Windows/src/Sill.Spike -- pair --link "sill://pair?…" [--host <Mac's address>:<port>]
+```
+
+The code goes in one argument (quote it if it has spaces). The device's key is made on first use
+in `%LOCALAPPDATA%\Sill\spike\device.p12` (`--identity <dir>` for another), and a pairing saves
+the Mac in `mac.json` beside it. Exit status: 0 paired, 1 refused, 2 usage, 3 connection or TLS.
+The TLS tests (`WindowsFact`) run only on Windows.
+
+To test from a PC without opening a port on the Mac, keep the host on loopback and forward it
+through SSH: `SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1
+SillHost --synthetic --pairing`, then `ssh -R 47455:127.0.0.1:<its port> <pc>` and pair with
+`--host 127.0.0.1:47455` on the PC.

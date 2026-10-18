@@ -5,10 +5,11 @@ commit as the work it describes (the status line, the ticket's row, a dated log 
 
 ## Status (2026-10-18)
 
-Tickets 01 and 02 are built and committed on `windows-spike`, which has not been pushed. Waiting
-on: `probe-report.txt` from the PC (ticket 02), and a push so the Windows CI job runs (ticket 01).
-Ticket 03's PC-independent half is done (2026-10-18): the code, the proofs, the link, kinds 19 and
-20, in `Sill.Protocol`, checked against the plan's vectors. Its TLS half waits for ticket 02.
+Tickets 01 to 03 are built and committed on `windows-spike`, which has not been pushed. Ticket 02
+is answered from the PC (`msi`, reached over SSH: `~/fleet/hosts/msi.md`): Windows 11 25H2, build
+26200, SChannel does TLS 1.3 with ALPN, HEVC Video Extensions is installed. Ticket 03 is done: the
+spike pairs with `SillHost --pairing` by typed code and by link, and a wrong code is refused. Waiting
+on: a push so the Windows CI job runs (ticket 01). Next: ticket 04, the session.
 
 | Commit | What |
 |---|---|
@@ -43,7 +44,7 @@ first keyframe's decoded frame to a PNG. Windows as client only.
 | 7 | Success | One decoded frame to a PNG from the first keyframe |
 | 8 | Tracker | Local markdown under `.scratch/`, gitignored |
 | 9 | Location | `Windows/` at the repo root, its own solution and CI job |
-| 10 | Windows PC | HEVC Video Extensions installed, Windows 11 or 10 22H2 (build number to record) |
+| 10 | Windows PC | HEVC Video Extensions installed, Windows 11 or 10 22H2: `msi`, Windows 11 25H2 build 26200.9457 |
 | 11 | Mac capture | Screen Recording granted to Terminal, then `SillHost --pairing` |
 
 Out of scope: the Windows host, a Mac client, discovery, camera QR, signing and
@@ -54,8 +55,8 @@ distribution, input, menus, gestures, clipboard.
 | # | Ticket | Type | Blocked by | Status |
 |---|---|---|---|---|
 | 01 | Windows solution skeleton and CI job | task | none | claimed: done locally, CI not run (needs a push) |
-| 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | claimed: probe built, waiting for the PC's report |
-| 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | claimed: pure half done; the TLS half waits for 02 |
+| 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | done (decoding a frame moved to 05) |
+| 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | done |
 | 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | open |
 | 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | open |
 | 06 | Conformance run with the Mac side | task | 05 | open |
@@ -90,18 +91,44 @@ distribution, input, menus, gestures, clipboard.
   the ADR criteria (`docs/agents/domain.md`). Not decided yet.
 - Glossary terms (Door, pairing code, pairing link, `sill/1`, `sill-pair/1`, SPKI pin): added
   lazily when a ticket first needs them settled.
-- The PC's Windows build number (decision 10): ticket 02's report gives it.
+
+- 2026-10-18: ticket 02 answered on the PC (`msi`, over SSH; the .NET 10.0.402 SDK installed in
+  the user's folder with `dotnet-install.ps1`, the branch copied as a git bundle). 67 tests pass
+  there. The probe: Windows 11 Home 25H2, build 26200.9457, x64; TLS 1.3 with `sill-pair/1` on
+  loopback (mutual P-256) and to `SillHost --synthetic --pairing` on the Mac, whose key matched its
+  own link's `k`. The host stayed on loopback (`SILL_TEST_LOOPBACK`), reached through an SSH reverse
+  forward (`ssh -R 47455:127.0.0.1:<port> msi`), so no port opened on the Mac. HEVC Video
+  Extensions 2.5.33 is installed and the PC has Intel UHD and an RTX 3050, yet Media Foundation
+  listed 1 HEVC decoder, 0 in hardware: probably because SSH is not the console's session; ticket
+  05 counts again from the desktop.
+
+- 2026-10-18: ticket 03's TLS half. `DeviceIdentity` (a P-256 key in a self-signed certificate,
+  `device.p12` in a directory, loaded through PKCS #12 because SChannel can't use an in-memory key),
+  `SillTls.ConnectAsync` (TLS 1.3, one ALPN, the device's certificate, trust by the Mac's SPKI
+  SHA-256 in the validation callback: any P-256 key on the typed path, the link's `k` on the link's;
+  `PinMismatchException`), `PairingClient` (one kind 19, one kind 20 within 15 s, judged by
+  `PairingExchange`), and `Sill.Spike pair` (`--code` with `--host`, or `--link` with an optional
+  `--host`; saves the Mac in `mac.json` for ticket 04). Six new tests, five of them TLS against a
+  stand-in Mac on loopback that run only on Windows (`WindowsFact`): 73 pass on the PC, 68 with 5
+  skipped on the Mac. Live on the PC against `SillHost --synthetic --pairing` (through the reverse
+  forward): a wrong code refused ("4 tries left", the host's "a wrong code … (4 tries left)"), the
+  right code then refused `busy` until the host's spacing after a wrong code ran out, then paired
+  ("Paired MSI (Windows) … with the code"), and a second identity paired by link ("… with the QR
+  code"); each checked proof_M and the Mac ID, and the saved fingerprint is the link's `k`.
+  Found: SChannel's TLS 1.3 sends the device's certificate before .NET's validation callback judges
+  the Mac's key, so a Mac the link does not name learns the device's public key (nothing else: no
+  proof, no request). iOS's verify block runs before its certificate goes out. A test pins this down
+  (`ALinkToAnotherKeySendsNothing`). Fixed on the way: the console's code page turned the Mac's
+  typographic words into `?`; the spike now writes UTF-8.
+
 
 ## Next
 
-- Ticket 02: run `Sill.Probe.exe` on the PC (README, "The probe on the PC"), once alone and
-  once with `--host` against `SillHost --pairing`, and paste `probe-report.txt` into the
-  ticket. Its decode check only counts decoders; decoding a real frame is ticket 05.
 - Push `windows-spike` when ready (only with the go-ahead), so the Windows CI job runs and ticket
   01 can close.
-- Then ticket 03's TLS half, once the probe says SChannel does TLS 1.3 with ALPN: a device key
-  (ECDSA P-256) and a self-signed certificate (`CertificateRequest`), `SslStream` with ALPN
-  `sill-pair/1` and that certificate, the Mac's key read in the validation callback (pinned to
-  the link's `k`, or any P-256 key on the typed path), then `PairingExchange` over it; a console
-  command in `Sill.Spike`; checked on the PC against `SillHost --pairing` by code, by link, and
-  with a wrong code. Only testable on Windows (.NET on macOS has no TLS 1.3).
+- Ticket 04: the session (`sill/1`) to the paired Mac from `mac.json`, pinned to its saved key:
+  the hello (kind 23) first inside TLS, then the window list, a Desktop pick and the frames' headers
+  parsed. Test on the PC as above (`SillHost --synthetic --pairing` on loopback, the reverse
+  forward), pairing first in the same host run, since `--pairing` makes a throwaway identity.
+- Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
+  hiding it needs the validation before the client's flight, which SslStream doesn't offer).
