@@ -14,9 +14,10 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
   and pairing's pure parts (the typed code, the proofs, the `sill://pair` link, kinds 19 and
   20, the Mac ID and SPKI fingerprint), the device's key (`DeviceIdentity`), the TLS
   connection to a Mac (`SillTls`: TLS 1.3, one ALPN, trust by the Mac's SPKI SHA-256) and one
-  pairing over it (`PairingClient`); the session's messages next. The Swift side is the reference:
+  pairing over it (`PairingClient`), and the session (`Session.cs`: `SessionClient`, the hello,
+  parameter sets, access units). The Swift side is the reference:
   `Sources/StreamProtocol/`.
-- `src/Sill.Spike` — the console app: `pair` now; the session and decode to PNG as the tickets land.
+- `src/Sill.Spike` — the console app: `pair`, `session`; decode to PNG next.
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
   (mutual, P-256), Media Foundation's HEVC decoders, and with `--host addr:port` a handshake
   to a Mac's door. `artifacts/` (gitignored) holds single-file builds of it.
@@ -70,3 +71,18 @@ To test from a PC without opening a port on the Mac, keep the host on loopback a
 through SSH: `SILL_TEST_LOOPBACK=1 SILL_TEST_SOFTWARE_ENCODER=1 SILL_TEST_NO_ROUTER=1
 SillHost --synthetic --pairing`, then `ssh -R 47455:127.0.0.1:<its port> <pc>` and pair with
 `--host 127.0.0.1:47455` on the PC.
+
+## A session from the PC
+
+After `pair`, with the same host still running (`SillHost --pairing` makes a new key each run):
+
+```
+dotnet run --project Windows/src/Sill.Spike -- session [--seconds 10] [--host <address>:<port>] [--save <dir>]
+```
+
+It dials the Mac in `mac.json` pinned to its key, says hello, asks for the Desktop, and logs the
+parameter sets, each keyframe and one line a second. `--save <dir>` writes the first keyframe as
+`parameter-sets.bin`, `first-keyframe.bin` and `first-keyframe.h265` (Annex B: `ffmpeg -i
+first-keyframe.h265 frame.png` decodes it). To compare, `Scripts/sillclient.py <port> 8 desktop
+--tls --identity=<dir> --stats` after `--pair-code`; it needs a Python with TLS 1.3
+(`/opt/homebrew/bin/python3`, not the Mac's `/usr/bin/python3`).

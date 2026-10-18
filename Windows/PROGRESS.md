@@ -5,11 +5,14 @@ commit as the work it describes (the status line, the ticket's row, a dated log 
 
 ## Status (2026-10-18)
 
-Tickets 01 to 03 are built and committed on `windows-spike`, which has not been pushed. Ticket 02
+Tickets 01 to 04 are built and committed on `windows-spike`, which stays local for now (Jericho,
+2026-10-18: no push). Ticket 02
 is answered from the PC (`msi`, reached over SSH: `~/fleet/hosts/msi.md`): Windows 11 25H2, build
 26200, SChannel does TLS 1.3 with ALPN, HEVC Video Extensions is installed. Ticket 03 is done: the
-spike pairs with `SillHost --pairing` by typed code and by link, and a wrong code is refused. Waiting
-on: a push so the Windows CI job runs (ticket 01). Next: ticket 04, the session.
+spike pairs with `SillHost --pairing` by typed code and by link, and a wrong code is refused.
+Ticket 04 is done: a session to the paired Mac gets the parameter sets and keyframes, its counts
+equal to `sillclient.py`'s on the same host, and the saved keyframe decodes (ffmpeg). Ticket 01's
+CI waits for a push. Next: ticket 05, decoding that keyframe with Media Foundation.
 
 | Commit | What |
 |---|---|
@@ -58,7 +61,7 @@ distribution, input, menus, gestures, clipboard.
 | 01 | Windows solution skeleton and CI job | task | none | claimed: done locally, CI not run (needs a push) |
 | 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | done (decoding a frame moved to 05) |
 | 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | done |
-| 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | open |
+| 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | done |
 | 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | open |
 | 06 | Conformance run with the Mac side | task | 05 | open |
 
@@ -85,6 +88,27 @@ distribution, input, menus, gestures, clipboard.
   match exactly; a link made with Python as `PairLink.url` escapes it parses. 67 tests pass on the
   Mac. Simplification: a link's `a` addresses are kept as text, as sillclient.py does (the Swift
   address parser isn't ported; the spike dials a typed address).
+
+- 2026-10-18: ticket 04. `Session.cs` in `Sill.Protocol`: `SessionClient` (TLS with `sill/1`
+  pinned to the saved key, the hello sent before anything else, reads with the Swift caps: frames
+  32 MiB, the rest 4 MiB, every kind returned), `Hello`, `Goodbye`, the parts of `WindowList` the
+  spike reads, `ParameterSets` (parse and encode), `AccessUnit` (the length-prefixed NAL units and
+  their types), the Desktop pick (`{"desktop":{}}`) and pings. `Sill.Spike session` dials the Mac
+  in `mac.json` (or `--host`), asks for the Desktop when the Mac says nothing streams (as the iOS
+  device does), pings once a second and sends ClientStats (frame age -1: the clocks differ), logs
+  the parameter sets, each keyframe, the first frames and one line a second, and with `--save` writes
+  the first keyframe as `parameter-sets.bin`, `first-keyframe.bin` and Annex B `first-keyframe.h265`.
+  11 new tests (2 TLS, Windows only): 84 pass on the PC, 77 with 7 skipped on the Mac. Live on the PC
+  against `SillHost --synthetic --pairing` (loopback, the reverse forward), pairing then the session
+  in one host run: the hello logged by the host ("MSI (Windows), Sill 0.1 (spike), protocol 1"), the
+  Desktop 0.25 s after the first window list, parameter sets of 73 B (VPS 23, SPS 34, PPS 8, NAL
+  length 4), a 1.2 KB IDR keyframe at once and every 4 s, about 57 fps with no malformed unit, the
+  host's `net.sent` each second equal to the PC's count, the PC's ClientStats in the host's log.
+  Beside `sillclient.py` on the same stream for 8 s: 465 frames and 61 KB against its 462 and 61 KB,
+  the same 73 B parameter sets, the same other kinds. `ffprobe` reads the saved keyframe as HEVC
+  1512×948 and `ffmpeg` decodes it to the test pattern. Learned: `sillclient.py` needs a Python
+  with TLS 1.3 (the Mac's /usr/bin/python3 3.9 is LibreSSL: "Unsupported protocol version 0x304");
+  `/opt/homebrew/bin/python3` has it.
 
 ## Open questions
 
@@ -125,11 +149,10 @@ distribution, input, menus, gestures, clipboard.
 
 ## Next
 
-- Push `windows-spike` when ready (only with the go-ahead), so the Windows CI job runs and ticket
-  01 can close.
-- Ticket 04: the session (`sill/1`) to the paired Mac from `mac.json`, pinned to its saved key:
-  the hello (kind 23) first inside TLS, then the window list, a Desktop pick and the frames' headers
-  parsed. Test on the PC as above (`SillHost --synthetic --pairing` on loopback, the reverse
-  forward), pairing first in the same host run, since `--pairing` makes a throwaway identity.
+- Ticket 05: decode the saved keyframe (`first-keyframe.h265`, or the session's first keyframe
+  live) with Media Foundation's HEVC decoder (HEVC Video Extensions: the MFT takes Annex B
+  input) and write one PNG. Count the hardware decoders again from the PC's desktop (the probe ran
+  over SSH and saw none). The saved file is a known-good input: ffmpeg decodes it on the Mac.
+- Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
 - Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
   hiding it needs the validation before the client's flight, which SslStream doesn't offer).

@@ -1,13 +1,17 @@
 // The Windows client spike (.scratch/windows-integration/map.md): pair with a Mac running
 // `SillHost --pairing`, open a session, and write the first keyframe's decoded frame to a PNG.
-// Ticket 03 adds pairing; tickets 04 and 05 the session and the decoder.
+// Ticket 03 added pairing, ticket 04 the session; ticket 05 the decoder.
 //
 //   Sill.Spike pair --host <address>:<port> --code <12 digits>
 //   Sill.Spike pair --link '<sill://pair?…>' [--host <address>:<port>]
+//   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>]
 //
 // Options: --identity <dir> (default %LOCALAPPDATA%\Sill\spike), --name <device name>.
-// A pairing saves the Mac in <dir>\mac.json for the session (ticket 04).
-// Exit: 0 paired, 1 refused or unproven, 2 usage, 3 connection or TLS failure.
+// A pairing saves the Mac in <dir>\mac.json; a session dials it (or --host), pinned to its key,
+// asks for the Desktop and logs what arrives; --save writes the first keyframe's parameter sets
+// and access unit for ticket 05.
+// Exit: 0 paired (or a session that got a keyframe), 1 refused, unproven or no keyframe,
+// 2 usage, 3 connection or TLS failure.
 
 using System.Text.Json;
 using Sill.Protocol;
@@ -21,12 +25,19 @@ static class Spike
         // The Mac's words carry typographic quotes, ellipses and no-break spaces; a console on
         // its OEM code page (cmd, an SSH session) would print them as ?.
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        if (args.Length == 0 || args[0] != "pair") return Usage("Sill.Spike pair (--code <digits> --host <address>:<port> | --link <url> [--host <address>:<port>])");
+        if (args.Length == 0 || args[0] is not ("pair" or "session"))
+            return Usage("Sill.Spike pair (--code <digits> --host <address>:<port> | --link <url> [--host <address>:<port>])\n"
+                       + "Sill.Spike session [--seconds <n>] [--host <address>:<port>] [--save <dir>]");
         var opts = Options(args[1..]);
         if (opts is null) return Usage("Every option takes a value.");
         string dir = opts.GetValueOrDefault("identity")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sill", "spike");
         string name = opts.GetValueOrDefault("name") ?? Environment.MachineName;
+        return args[0] == "pair" ? await PairAsync(opts, dir, name) : await SessionCommand.RunAsync(opts, dir, name);
+    }
+
+    private static async Task<int> PairAsync(Dictionary<string, string> opts, string dir, string name)
+    {
         string? code = opts.GetValueOrDefault("code"), url = opts.GetValueOrDefault("link"), hostArg = opts.GetValueOrDefault("host");
         if ((code is null) == (url is null)) return Usage("Give --code or --link, one of them.");
 
@@ -94,7 +105,7 @@ static class Spike
     /// <summary>The Mac as a pairing leaves it, for the session (ticket 04).</summary>
     public sealed record SavedMac(string Fingerprint, string MacId, string Name, string RecognitionKey, string Host, int Port, DateTimeOffset PairedAt);
 
-    private static Dictionary<string, string>? Options(string[] args)
+    internal static Dictionary<string, string>? Options(string[] args)
     {
         var d = new Dictionary<string, string>();
         for (int i = 0; i < args.Length; i++)
@@ -106,7 +117,7 @@ static class Spike
     }
 
     // "192.168.1.5:7455", "[fe80::1%12]:7455", "mac.local:7455": the last colon splits.
-    private static bool SplitHost(string text, out string host, out int port)
+    internal static bool SplitHost(string text, out string host, out int port)
     {
         host = ""; port = 0;
         int colon = text.LastIndexOf(':');
@@ -115,7 +126,7 @@ static class Spike
         return host.Length > 0;
     }
 
-    private static int Usage(string message)
+    internal static int Usage(string message)
     {
         Console.Error.WriteLine(message);
         return 2;
