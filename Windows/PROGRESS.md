@@ -14,7 +14,9 @@ Ticket 04 is done: a session to the paired Mac gets the parameter sets and keyfr
 equal to `sillclient.py`'s on the same host, and the saved keyframe decodes (ffmpeg). Ticket 01's
 CI waits for a push. Ticket 05's decoder is done: Media Foundation's HEVC decoder turns the session's
 first keyframe into a PNG on the PC, and on a colour test card it is closer to the source (49.9 dB
-PSNR) than ffmpeg's decode. Left for ticket 06: the same from a real capture of the Mac's screen.
+PSNR) than ffmpeg's decode. Ticket 06 ran against the real screen: the PC paired over Wi-Fi with
+`SillHost --pairing` capturing the Mac's 4K display and wrote a sharp 3840×2160 PNG of it. The spike's
+goal is met; next is a live viewer (beyond the spike's tickets).
 
 | Commit | What |
 |---|---|
@@ -66,8 +68,8 @@ distribution, input, menus, gestures, clipboard.
 | 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | done (decoding a frame moved to 05) |
 | 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | done |
 | 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | done |
-| 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | done on the test pattern; a real window is 06's run |
-| 06 | Conformance run with the Mac side | task | 05 | open |
+| 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | done |
+| 06 | Conformance run with the Mac side | task | 05 | done (sillclient.py's comparison on the real host still owed) |
 
 ## Log
 
@@ -130,6 +132,20 @@ distribution, input, menus, gestures, clipboard.
   (r 47.7, g 55.0, b 49.6) and ffmpeg's decode of the same keyframe 27.4 dB (ffmpeg converts this
   untagged stream with another matrix). Still open: the probe saw no hardware decoder over SSH; count
   again from the PC's desktop.
+
+- 2026-10-18: ticket 06 on the real Mac. `SillHost --pairing` capturing the screen needs a launcher
+  macOS lets record it: started from the agent's shell (T3 Code), ScreenCaptureKit delivered nothing
+  and dropped the stream after ~3 s (SCStreamErrorDomain -3805, ReplayKit's daemon connection
+  interrupted; `CGPreflightScreenCaptureAccess` said granted), twice; started by Jericho from
+  Ghostty it streamed. Over Wi-Fi (the PC at 192.168.100.9, the Mac at 192.168.100.185; the Mac's
+  Tailscale address took no TCP from the PC, unexplained): pairing by code (the agent's run) and by
+  link (Jericho's), proofs checked; the session's hello logged by the host; the Desktop at 3840×2160
+  (parameter sets 80 B: VPS 24, SPS 41, PPS 7), a 74 KB keyframe (SEI, IDR_N_LP), ~18 frames a
+  second while the screen was mostly still; the PC decoded the keyframe in software in 241 ms and the
+  PNG shows the screen sharply (44.2 dB from ffmpeg's decode of the same keyframe). Hardware: Media
+  Foundation lists no hardware HEVC decoder on the PC from its desktop session either (a scheduled
+  task in the console session: 1 decoder, 0 hardware); the GPUs reach HEVC through HEVC Video
+  Extensions' MFT given a Direct3D device (DXVA), which the spike does not set up.
 
 ## Open questions
 
