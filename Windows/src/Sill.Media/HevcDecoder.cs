@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Sill.Protocol;
+using static Sill.Media.Com;
 
 namespace Sill.Media;
 
@@ -9,6 +10,8 @@ namespace Sill.Media;
 /// access unit in (Annex B: start codes, the parameter sets before a keyframe), NV12 pictures out.
 /// Low-latency mode is asked for, so a picture comes out for each access unit as it goes in.
 /// One thread at a time; the picture <see cref="Push"/> returns is valid until the next call.
+/// Given a <see cref="GpuDevice"/>, the decoder decodes on the GPU (DXVA) instead and
+/// <see cref="PushGpu"/> returns NV12 textures that never come back to the CPU.
 /// </summary>
 /// <remarks>
 /// COM is called through each interface's vtable by slot number (the order of methods in
@@ -25,6 +28,10 @@ public sealed unsafe class HevcDecoder : IDisposable
 
     public string Name { get; }
     public HevcSps Sps { get; }
+    /// <summary>The GPU decodes (a D3D manager was taken); else Media Foundation's software path.</summary>
+    public bool OnGpu => gpu is not null;
+
+    private readonly GpuDevice? gpu;
 
     private IntPtr transform;
     private byte[] nv12 = [];
@@ -32,15 +39,18 @@ public sealed unsafe class HevcDecoder : IDisposable
 
     /// <param name="sps">The stream's SPS: the coded size goes on the input type (without it HEVC
     /// Video Extensions refuses NV12 output with MF_E_ATTRIBUTENOTFOUND).</param>
-    public HevcDecoder(HevcSps sps, Action<string>? log = null)
+    /// <param name="gpu">Decode on this device's GPU; the decoder refuses (throws) when it can't.</param>
+    public HevcDecoder(HevcSps sps, Action<string>? log = null, GpuDevice? gpu = null)
     {
         Sps = sps;
+        this.gpu = gpu;
         Check(CoInitializeEx(IntPtr.Zero, 0 /* COINIT_MULTITHREADED */), "CoInitializeEx", allow: unchecked((int)0x80010106) /* RPC_E_CHANGED_MODE */);
         Check(MFStartup(0x00020070, 0), "MFStartup");
         IntPtr inType = IntPtr.Zero;
         try
         {
             (transform, Name) = CreateDecoder(log);
+            if (gpu is not null) TakeGpu(gpu);
 
             // CODECAPI_AVLowLatencyMode: one picture out per access unit in, no reordering wait.
             IntPtr attributes;
@@ -76,20 +86,36 @@ public sealed unsafe class HevcDecoder : IDisposable
     /// <summary>One access unit in; the newest picture that came out, or null if none did yet.</summary>
     public Picture? Push(byte[] annexB)
     {
+        if (gpu is not null) throw new InvalidOperationException("A GPU decoder's pictures come from PushGpu.");
+        return Feed(annexB, Read, _ => { });
+    }
+
+    /// <summary>One access unit in; the newest picture the GPU decoded (the caller disposes it), or null.</summary>
+    public GpuPicture? PushGpu(byte[] annexB)
+    {
+        if (gpu is null) throw new InvalidOperationException("A software decoder's pictures come from Push.");
+        return Feed(annexB, ReadGpu, p => p.Dispose());
+    }
+
+    private T? Feed<T>(byte[] annexB, Func<IntPtr, T> read, Action<T> discard) where T : class
+    {
         IntPtr sample = MakeSample(annexB, time, cleanPoint: false);
         time += 166_667;   // 1/60 s in 100 ns: the decoder needs increasing times, not real ones
         try
         {
-            Picture? latest = null;
+            T? latest = null;
             int hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, uint, int>)Slot(transform, 24))(transform, 0, sample, 0);
             if (hr == MF_E_NOTACCEPTING)
             {
                 // Full: take its pictures out, then it takes this one.
-                latest = Pull();
+                latest = Pull(read, discard);
                 hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, uint, int>)Slot(transform, 24))(transform, 0, sample, 0);
             }
             Check(hr, "ProcessInput");
-            return Pull() ?? latest;
+            var now = Pull(read, discard);
+            if (now is null) return latest;
+            if (latest is not null) discard(latest);
+            return now;
         }
         finally { Release(sample); }
     }
@@ -99,7 +125,15 @@ public sealed unsafe class HevcDecoder : IDisposable
     {
         Message(0x10000002, "END_OF_STREAM");
         Message(0x1, "COMMAND_DRAIN");
-        return Pull();
+        return Pull(Read, _ => { });
+    }
+
+    /// <summary>The end of the stream on the GPU: the newest picture the decoder still holds.</summary>
+    public GpuPicture? DrainGpu()
+    {
+        Message(0x10000002, "END_OF_STREAM");
+        Message(0x1, "COMMAND_DRAIN");
+        return Pull<GpuPicture>(ReadGpu, p => p.Dispose());
     }
 
     /// <summary>One keyframe (parameter sets included) to one picture, as ticket 05 does it.</summary>
@@ -112,9 +146,9 @@ public sealed unsafe class HevcDecoder : IDisposable
     }
 
     // Every picture ready now; the last is kept (latency beats completeness).
-    private Picture? Pull()
+    private T? Pull<T>(Func<IntPtr, T> read, Action<T> discard) where T : class
     {
-        Picture? latest = null;
+        T? latest = null;
         for (int changes = 0; changes < 8;)
         {
             var info = default(OutputStreamInfo);
@@ -128,14 +162,75 @@ public sealed unsafe class HevcDecoder : IDisposable
             if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) return latest;
             if (hr == MF_E_TRANSFORM_STREAM_CHANGE) { ChooseNv12(transform); changes++; continue; }
             Check(hr, "ProcessOutput");
-            try { latest = Read(buffer.Sample); }
+            try
+            {
+                var picture = read(buffer.Sample);
+                if (latest is not null) discard(latest);
+                latest = picture;
+            }
             finally { Release(buffer.Sample); }
         }
         throw new InvalidOperationException("The decoder kept changing its output type.");
     }
 
-    private void Message(uint message, string what) =>
-        Check(((delegate* unmanaged[Stdcall]<IntPtr, uint, nuint, int>)Slot(transform, 23))(transform, message, 0), what);
+    private void Message(uint message, string what, nuint param = 0) =>
+        Check(((delegate* unmanaged[Stdcall]<IntPtr, uint, nuint, int>)Slot(transform, 23))(transform, message, param), what);
+
+    // The device manager, before any media type: from then on the decoder decodes with DXVA and
+    // hands out samples whose buffers are slices of a Direct3D 11 texture array.
+    private void TakeGpu(GpuDevice device)
+    {
+        IntPtr attributes;
+        Check(((delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int>)Slot(transform, 8))(transform, &attributes), "GetAttributes");
+        try
+        {
+            if (GetUInt32(attributes, MF_SA_D3D11_AWARE) is not (> 0))
+                throw new NotSupportedException($"{Name} does not take a Direct3D 11 device.");
+        }
+        finally { Release(attributes); }
+        Message(0x2 /* MFT_MESSAGE_SET_D3D_MANAGER */, "SET_D3D_MANAGER", (nuint)device.Manager);
+    }
+
+    // The sample's texture and slice, the sample kept (its texture goes back to the decoder's pool
+    // when the picture is disposed).
+    private GpuPicture ReadGpu(IntPtr sample)
+    {
+        var (_, _, _, fullRange, bt601) = OutputFormat();
+        IntPtr buffer;
+        Check(((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slot(sample, 40))(sample, 0, &buffer), "GetBufferByIndex");
+        IntPtr dxgi;
+        try { dxgi = Query(buffer, IID_IMFDXGIBuffer); }
+        catch (COMException e) { Release(buffer); throw new NotSupportedException("The decoder's picture is not on the GPU.", e); }
+        Release(buffer);
+        try
+        {
+            IntPtr texture; uint slice;
+            Guid iid = VideoRenderer.IID_ID3D11Texture2D;
+            Check(((delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int>)Slot(dxgi, 3))(dxgi, &iid, &texture), "GetResource");
+            Check(((delegate* unmanaged[Stdcall]<IntPtr, uint*, int>)Slot(dxgi, 4))(dxgi, &slice), "GetSubresourceIndex");
+            uint* desc = stackalloc uint[11];
+            ((delegate* unmanaged[Stdcall]<IntPtr, uint*, void>)Slot(texture, 10))(texture, desc);
+            AddRef(sample);
+            return new GpuPicture(sample, texture, slice, (int)desc[0], (int)desc[1], fullRange, bt601);
+        }
+        finally { Release(dxgi); }
+    }
+
+    private (int Width, int Height, int Stride, bool FullRange, bool Bt601) OutputFormat()
+    {
+        IntPtr type;
+        Check(((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slot(transform, 18))(transform, 0, &type), "GetOutputCurrentType");
+        try
+        {
+            ulong size = GetUInt64(type, MF_MT_FRAME_SIZE) ?? throw new InvalidDataException("The output type has no frame size.");
+            int width = (int)(size >> 32), height = (int)(size & 0xFFFFFFFF);
+            int stride = (int?)GetUInt32(type, MF_MT_DEFAULT_STRIDE) is { } s && s > 0 ? s : width;
+            return (width, height, stride,
+                GetUInt32(type, MF_MT_VIDEO_NOMINAL_RANGE) == 1,   // MFNominalRange_0_255
+                GetUInt32(type, MF_MT_YUV_MATRIX) == 2);           // MFVideoTransferMatrix_BT601
+        }
+        finally { Release(type); }
+    }
 
     // The first synchronous HEVC decoder Media Foundation lists, sorted by merit. Hardware MFTs are
     // asynchronous (an event model left out here), so they are not asked for.
@@ -193,18 +288,7 @@ public sealed unsafe class HevcDecoder : IDisposable
 
     private Picture Read(IntPtr sample)
     {
-        IntPtr type;
-        Check(((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slot(transform, 18))(transform, 0, &type), "GetOutputCurrentType");
-        int width, height, stride; bool fullRange, bt601;
-        try
-        {
-            ulong size = GetUInt64(type, MF_MT_FRAME_SIZE) ?? throw new InvalidDataException("The output type has no frame size.");
-            width = (int)(size >> 32); height = (int)(size & 0xFFFFFFFF);
-            stride = (int?)GetUInt32(type, MF_MT_DEFAULT_STRIDE) is { } s && s > 0 ? s : width;
-            fullRange = GetUInt32(type, MF_MT_VIDEO_NOMINAL_RANGE) == 1;   // MFNominalRange_0_255
-            bt601 = GetUInt32(type, MF_MT_YUV_MATRIX) == 2;                // MFVideoTransferMatrix_BT601
-        }
-        finally { Release(type); }
+        var (width, height, stride, fullRange, bt601) = OutputFormat();
 
         IntPtr buffer;
         Check(((delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int>)Slot(sample, 41))(sample, &buffer), "ConvertToContiguousBuffer");
@@ -289,16 +373,6 @@ public sealed unsafe class HevcDecoder : IDisposable
         return ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, ulong*, int>)Slot(attributes, 8))(attributes, &key, &value) < 0 ? null : value;
     }
 
-    // ---- COM plumbing ----
-
-    private static void* Slot(IntPtr obj, int slot) => (*(void***)obj)[slot];
-    private static void Release(IntPtr obj) => ((delegate* unmanaged[Stdcall]<IntPtr, uint>)Slot(obj, 2))(obj);
-
-    private static void Check(int hr, string what, int? allow = null)
-    {
-        if (hr < 0 && hr != allow) throw new COMException($"{what} failed (0x{hr:X8})", hr);
-    }
-
     [StructLayout(LayoutKind.Sequential)] private struct RegisterTypeInfo { public Guid Major; public Guid Sub; }
     [StructLayout(LayoutKind.Sequential)] private struct OutputStreamInfo { public uint Flags; public uint Size; public uint Alignment; }
     [StructLayout(LayoutKind.Sequential)] private struct OutputDataBuffer { public uint StreamId; public IntPtr Sample; public uint Status; public IntPtr Events; }
@@ -321,6 +395,8 @@ public sealed unsafe class HevcDecoder : IDisposable
     private static readonly Guid MFSampleExtension_CleanPoint = new("9cdf01d8-a0f0-43ba-b077-eaa06cbd728a");
     private static readonly Guid MFT_FRIENDLY_NAME_Attribute = new("314ffbae-5b41-4c95-9c19-4e7d586face3");
     private static readonly Guid CODECAPI_AVLowLatencyMode = new("9c27891a-ed7a-40e1-88e8-b22727a024ee");
+    private static readonly Guid MF_SA_D3D11_AWARE = new("206b4fc8-fcf9-4c51-afe3-9764369e33a0");
+    private static readonly Guid IID_IMFDXGIBuffer = new("e7174cfa-1c9e-48b1-8866-626226bfc258");
     private static readonly Guid IID_IMFTransform = new("bf94c121-5b05-4e6f-8000-ba598961414d");
 
     [DllImport("ole32.dll")] private static extern int CoInitializeEx(IntPtr reserved, uint coInit);

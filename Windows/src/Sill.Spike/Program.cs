@@ -5,8 +5,8 @@
 //   Sill.Spike pair --host <address>:<port> --code <12 digits>
 //   Sill.Spike pair --link '<sill://pair?…>' [--host <address>:<port>]
 //   Sill.Spike pair --ask 1 --host <address>:<port>   (Sill.app opens its code window; type the code here)
-//   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>] [--decode 1]
-//   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png>
+//   Sill.Spike session [--seconds 10] [--host <address>:<port>] [--save <dir>] [--png <file>] [--decode 1 [--gpu 1] [--adapter N]]
+//   Sill.Spike decode --input <first-keyframe.h265> --out <frame.png> [--gpu 1 [--adapter N] [--compare 1]]
 //
 // Options: --identity <dir> (default %LOCALAPPDATA%\Sill\spike), --name <device name>.
 // A pairing saves the Mac in <dir>\mac.json; a session dials it (or --host), pinned to its key,

@@ -18,7 +18,10 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
   parameter sets, access units), and the picture's portable parts (`HevcSps`, `Nv12`, `Png`). The Swift side is the reference:
   `Sources/StreamProtocol/`.
 - `src/Sill.Media` — Windows' media APIs (runs only on Windows): `HevcDecoder` (Media Foundation's
-  HEVC decoder as a stream) and `Bgra` (fast NV12 to BGRA for drawing).
+  HEVC decoder as a stream, in software or, given a `GpuDevice`, on the GPU), `GpuDevice` (a
+  Direct3D 11 device with video support and Media Foundation's device manager), `VideoRenderer`
+  (a swap chain on a window, the GPU's video processor from the decoder's NV12 texture to it) and
+  `Bgra` (fast NV12 to BGRA for the software path).
 - `src/Sill.Viewer` — a live window on the paired Mac's Desktop (WinForms, view only).
 - `src/Sill.Spike` — the console app: `pair`, `session`, `decode` (Media Foundation's HEVC decoder to a PNG; Windows only).
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
@@ -121,7 +124,22 @@ per Mac window (click to stream it, right-click to close, minimize or make it fu
 Mission Control, App Exposé, the Spaces, Show Desktop and Launchpad. F11 toggles full screen. The Mac's host needs Accessibility (System Settings › Privacy &
 Security › Accessibility, for the app that started it) or the Mac drops the input. The title
 has the size, pictures shown and received each second, the bitrate, the decode time and the round
-trip. Decoding is in software for now: about 30 fps at 4K (`Sill.Spike session --decode 1` measures it).
+trip, which path decodes (`GPU (…)` or `software`), the decode and draw times and the viewer's CPU
+(100% is one core); `viewer.log` beside the key has the same line each second.
+
+It decodes and draws on the GPU: Media Foundation's HEVC decoder given a Direct3D 11 device (DXVA),
+the picture drawn from its texture by the GPU's video processor into a swap chain, never copied
+back to the CPU. `--decoder software` keeps everything on the CPU (the old path); `--adapter N` picks
+DXGI's Nth GPU instead of Windows' default (on the test laptop the Intel UHD drives the display and
+the RTX 3050 is the other). If the GPU path can't start, or fails mid-stream (a driver update, a
+lost device), the viewer reconnects in software and the title says so. TEST ONLY:
+`SILL_TEST_GPU_FAIL_AFTER=N` fails it after N pictures.
+
+To measure decoding without a window: `Sill.Spike session --decode 1` (software) and `--decode 1
+--gpu 1 [--adapter N]` (each frame timed until the GPU has finished it); both print the median,
+95th and worst decode time and the CPU used. `Sill.Spike decode --input <keyframe.h265> --out
+<png> --gpu 1 --compare 1` decodes a keyframe on the GPU, copies it back and compares it with the
+software decoder's picture.
 
 ## With Sill.app (Wi-Fi and Tailscale)
 

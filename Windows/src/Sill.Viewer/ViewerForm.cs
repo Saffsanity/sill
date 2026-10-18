@@ -10,10 +10,12 @@ using Sill.Protocol;
 namespace Sill.Viewer;
 
 /// <summary>
-/// The Mac's Desktop, live. A worker reads the session (the spike's <see cref="SessionClient"/>),
-/// feeds every frame to the decoder (each one is needed: later frames refer to it), and converts
-/// the newest picture to a bitmap only when the window has drawn the last one, so a slow paint
-/// drops pictures rather than queueing them. Mouse and keys go to the Mac (kind 8): left Ctrl is
+/// The Mac's Desktop, live. A worker reads the session (the spike's <see cref="SessionClient"/>)
+/// and hands every frame to a video thread of the session's (each one is needed: later frames
+/// refer to it). That thread decodes on the GPU (Direct3D 11) and draws the texture into
+/// <see cref="VideoPanel"/>'s swap chain; without a GPU path, or once it fails, it decodes in
+/// software and converts the newest picture to a bitmap only when the window has drawn the last
+/// one, so a slow paint drops pictures rather than queueing them. Mouse and keys go to the Mac (kind 8): left Ctrl is
 /// ⌘, right Ctrl ⌃, Alt ⌥; Alt+Tab is the Mac's ⌘Tab and the Windows key alone its Spotlight (a
 /// low-level hook takes both from Windows while this window is in front). The bar on top is the
 /// iPad's: Apps, the Desktop, the windows, and the Mac's gestures. F11 toggles full screen.
@@ -24,6 +26,7 @@ sealed class ViewerForm : Form
 
     private readonly string dir;
     private readonly IReadOnlyList<string> hostOverrides;
+    private readonly ViewerOptions options;
     private readonly CancellationTokenSource stop = new();
     private readonly Lock gate = new();
     private Bitmap? front, back;
@@ -34,8 +37,22 @@ sealed class ViewerForm : Form
     private string macName = "Mac";
 
     // Once-a-second figures for the title.
-    private int framesIn, picturesShown; private long bytesIn; private double decodeMs, worstDecodeMs; private double? rtt;
+    private int framesIn, framesDecoded, picturesShown; private long bytesIn; private double decodeMs, worstDecodeMs, drawMs; private double? rtt;
     private string size = "";
+    private TimeSpan cpuAtLastTitle;
+
+    // The GPU path: one device for the viewer's life, a renderer on the panel made by the first
+    // session's video thread. Once the GPU path fails it stays off until the viewer restarts.
+    private readonly VideoPanel panel = new();
+    private GpuDevice? gpu;
+    private VideoRenderer? renderer;
+    private volatile bool gpuFailed, gpuShowing;
+    private volatile int pictureWidth, pictureHeight;   // the shown picture's size, for the mouse
+    private volatile int panelWidth = 1, panelHeight = 1;
+    private IntPtr panelHandle;
+    private volatile string decodePath = "";
+    private Channel<VideoJob>? jobs;   // this session's, for a redraw after a resize
+    private volatile string? endReason;   // why the video thread ended the session, if it did
 
     // Input: one writer keeps kind 8 in the order it was made; the picture's place in the window
     // turns a mouse position into the frame fraction the host expects.
@@ -55,9 +72,9 @@ sealed class ViewerForm : Form
     private long askedAt;   // when the Desktop was last asked for
     private bool cmdTab, winDown, winUsed;
 
-    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides)
+    public ViewerForm(string dir, IReadOnlyList<string> hostOverrides, ViewerOptions options)
     {
-        this.dir = dir; this.hostOverrides = hostOverrides;
+        this.dir = dir; this.hostOverrides = hostOverrides; this.options = options;
         Text = "Sill Viewer";
         BackColor = Color.Black;
         ClientSize = new Size(1280, 800);
@@ -67,6 +84,9 @@ sealed class ViewerForm : Form
 
         Controls.Add(drawer);
         Controls.Add(bar);
+        Controls.Add(panel);
+        panel.SendToBack();   // under the bar and the drawer
+        panel.Visible = false;
         bar.AppsClicked += () => drawer.Toggle();
         bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
         bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
@@ -88,6 +108,21 @@ sealed class ViewerForm : Form
     {
         base.OnShown(e);
         Resized();
+        panelHandle = panel.Handle;
+        if (options.Decoder != "software")
+        {
+            try
+            {
+                gpu = new GpuDevice(options.Adapter);
+                Log($"GPU: {gpu.AdapterName}.");
+            }
+            catch (Exception ex)
+            {
+                gpuFailed = true;
+                Log($"No GPU path ({ex.Message}): decoding in software.");
+            }
+        }
+        else gpuFailed = true;
         try { hook = new KeyboardHook(SystemKey); }
         catch (Exception ex) { Log($"No keyboard hook ({ex.Message}): Alt+Tab and the Windows key stay Windows'."); }
         _ = Task.Run(() => RunAsync(stop.Token));
@@ -97,7 +132,14 @@ sealed class ViewerForm : Form
     }
 
     protected override void OnResize(EventArgs e) { base.OnResize(e); Resized(); Invalidate(); }
-    private void Resized() { var v = VideoArea; clientWidth = Math.Max(1, v.Width); clientHeight = Math.Max(1, v.Height); }
+    private void Resized()
+    {
+        var v = VideoArea;
+        clientWidth = Math.Max(1, v.Width); clientHeight = Math.Max(1, v.Height);
+        panel.Bounds = v;
+        panelWidth = Math.Max(1, panel.ClientSize.Width); panelHeight = Math.Max(1, panel.ClientSize.Height);
+        jobs?.Writer.TryWrite(VideoJob.Redraw);   // a still screen sends nothing: draw the last picture at the new size
+    }
 
     protected override void OnFormClosing(FormClosingEventArgs e) { hook?.Dispose(); stop.Cancel(); base.OnFormClosing(e); }
 
@@ -169,6 +211,12 @@ sealed class ViewerForm : Form
     private (double X, double Y) Fraction(Point p)
     {
         var r = pictureRect;
+        if (gpuShowing && pictureWidth > 0)
+        {
+            var v = VideoArea;
+            var (x, y, w, h) = Letterbox.Fit(pictureWidth, pictureHeight, v.Width, v.Height);
+            r = new Rectangle(v.X + x, v.Y + y, w, h);
+        }
         if (r.Width <= 0 || r.Height <= 0) return (0.5, 0.5);
         return (Math.Clamp((p.X - r.X + 0.5) / r.Width, 0, 1), Math.Clamp((p.Y - r.Y + 0.5) / r.Height, 0, 1));
     }
@@ -334,10 +382,18 @@ sealed class ViewerForm : Form
         string figures;
         lock (gate)
         {
+            var cpuNow = Process.GetCurrentProcess().TotalProcessorTime;
+            double cpu = (cpuNow - cpuAtLastTitle).TotalSeconds * 100;   // the timer ticks once a second
+            cpuAtLastTitle = cpuNow;
             figures = framesIn == 0 && picturesShown == 0 ? status
-                : $"{size} · {picturesShown} shown, {framesIn} received ({bytesIn * 8 / 1_000_000.0:0.0} Mbps) · decode {decodeMs / Math.Max(framesIn, 1):0} ms (worst {worstDecodeMs:0})"
+                : $"{size} · {decodePath} · {picturesShown} shown, {framesIn} received ({bytesIn * 8 / 1_000_000.0:0.0} Mbps) · decode {decodeMs / Math.Max(framesDecoded, 1):0.0} ms (worst {worstDecodeMs:0})"
+                  + (drawMs > 0 ? $" · draw {drawMs / Math.Max(picturesShown, 1):0.0} ms" : "")
+                  + $" · CPU {cpu:0}%"
                   + (rtt is { } r ? $" · rtt {r * 1000:0} ms" : "");
-            framesIn = picturesShown = 0; bytesIn = 0; decodeMs = worstDecodeMs = 0; rtt = null;
+            if (framesIn > 0 || picturesShown > 0)
+                Log($"second: {size} {decodePath}, {picturesShown} shown, {framesIn} received, decode {decodeMs / Math.Max(framesDecoded, 1):0.0} ms (worst {worstDecodeMs:0}), "
+                    + $"draw {drawMs / Math.Max(picturesShown, 1):0.0} ms, CPU {cpu:0}%");
+            framesIn = framesDecoded = picturesShown = 0; bytesIn = 0; decodeMs = worstDecodeMs = drawMs = 0; rtt = null;
         }
         Text = $"{macName} — {figures}";
     }
@@ -446,11 +502,18 @@ sealed class ViewerForm : Form
         _ = PingAsync(session, clock, ct);
         _ = WriteInputAsync(session, ct);
         connected = true;
-        HevcDecoder? decoder = null;
+        endReason = null;
         ParameterSets? ps = null;
+        HevcSps? sps = null;
         bool keyed = false;
         nothingStreams = false;
-        int pictures = 0;
+        // Decoding and drawing run on a thread of their own, so the reader keeps draining the
+        // socket; a few frames of slack, then the reader waits (as it did when it decoded itself),
+        // which backs the Mac off rather than queueing late pictures here.
+        var video = Channel.CreateBounded<VideoJob>(new BoundedChannelOptions(8) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+        jobs = video;
+        var videoThread = Task.Factory.StartNew(() => VideoLoop(video.Reader, clock, sessionStop), CancellationToken.None,
+            TaskCreationOptions.LongRunning, TaskScheduler.Default);
         try
         {
             int logged = 0;
@@ -478,33 +541,27 @@ sealed class ViewerForm : Form
                         break;
                     case SessionKinds.ParameterSets:
                         var next = ParameterSets.Parse(payload);
-                        var sps = next?.Sets.Select(s => HevcSps.Parse(s)).FirstOrDefault(s => s is not null);
-                        if (next is null || sps is null) break;
+                        var nextSps = next?.Sets.Select(s => HevcSps.Parse(s)).FirstOrDefault(s => s is not null);
+                        if (next is null || nextSps is null) break;
                         ps = next;
-                        // A new size (a pick, a resolution change) needs a decoder made for it.
-                        if (decoder is null || decoder.Sps != sps)
+                        // A new size (a pick, a resolution change): the video thread makes a decoder
+                        // for it, and nothing decodes before its first keyframe.
+                        if (sps != nextSps)
                         {
-                            decoder?.Dispose();
-                            decoder = new HevcDecoder(sps);
-                            Log($"Decoder {decoder.Name} for {sps.Width}×{sps.Height} (coded {sps.CodedWidth}×{sps.CodedHeight}).");
                             keyed = false;
-                            lock (gate) size = $"{sps.Width}×{sps.Height}";
+                            lock (gate) size = $"{nextSps!.Width}×{nextSps.Height}";
                         }
+                        sps = nextSps;
                         break;
                     case SessionKinds.Frame:
                         lock (gate) { framesIn++; bytesIn += payload.Length; }
-                        if (decoder is null || ps is null) break;
+                        if (sps is null || ps is null) break;
                         if (!keyed && !h.IsKeyframe) break;   // nothing decodes before a keyframe
                         keyed = true;
                         var nals = AccessUnit.Nals(payload, ps.NalUnitHeaderLength);
                         if (nals is null) break;
-                        var t0 = clock.Elapsed.TotalMilliseconds;
-                        var picture = decoder.Push(AnnexB.Build(h.IsKeyframe ? ps : null, payload, nals));
-                        double took = clock.Elapsed.TotalMilliseconds - t0;
-                        lock (gate) { decodeMs += took; worstDecodeMs = Math.Max(worstDecodeMs, took); }
-                        if (picture is not null && pictures++ == 0) Log($"First picture after {clock.Elapsed.TotalSeconds:0.00} s ({took:0} ms to decode).");
-                        if (picture is not null && (!paintPending || Stopwatch.GetElapsedTime(Interlocked.Read(ref shownAt)).TotalMilliseconds > 500))
-                            Show(picture, decoder.Sps);
+                        if (videoThread.IsCompleted) { await videoThread; throw new InvalidOperationException("The video thread stopped."); }
+                        await video.Writer.WriteAsync(new VideoJob(AnnexB.Build(h.IsKeyframe ? ps : null, payload, nals), sps), ct);
                         break;
                     case SessionKinds.Thumbnail:
                         if (ImageBlobs.Thumbnail(payload) is { } thumb && LoadImage(thumb.Jpeg) is { } thumbImage)
@@ -530,11 +587,152 @@ sealed class ViewerForm : Form
             }
             Status($"{mac.Name} closed the session. Reconnecting…");
         }
-        catch (OperationCanceledException) when (!stopping.IsCancellationRequested) { Status($"Lost {mac.Name} (nothing for 10 s). Reconnecting…"); }
+        catch (OperationCanceledException) when (!stopping.IsCancellationRequested)
+        {
+            Status(endReason ?? $"Lost {mac.Name} (nothing for 10 s). Reconnecting…");
+        }
         catch (OperationCanceledException) { }
         catch (Exception e) { Log(e.ToString()); Status($"The session ended: {e.Message} Reconnecting…"); }
-        finally { connected = false; paintPending = false; decoder?.Dispose(); }
+        finally
+        {
+            connected = false;
+            jobs = null;
+            video.Writer.TryComplete();
+            try { await videoThread; } catch (Exception e) { Log($"Video thread: {e.Message}"); }
+            paintPending = false;
+        }
         return true;
+    }
+
+    /// <summary>A frame for the video thread (Annex B, the SPS it belongs to), or a redraw.</summary>
+    private sealed record VideoJob(byte[]? AnnexB, HevcSps? Sps)
+    {
+        public static readonly VideoJob Redraw = new(null, null);
+    }
+
+    // The session's video thread: decodes every frame in order (each is needed, later frames refer
+    // to it) and draws the newest picture. On the GPU: decode to a texture, the video processor
+    // into the panel's swap chain, present. In software: as before, a bitmap the form paints. A GPU
+    // failure ends the session; the next one decodes in software (a fresh keyframe at connect).
+    private void VideoLoop(ChannelReader<VideoJob> reader, Stopwatch clock, CancellationTokenSource sessionStop)
+    {
+        HevcDecoder? decoder = null;
+        GpuPicture? last = null;
+        int pictures = 0, gpuPictures = 0;
+        int failAfter = int.TryParse(Environment.GetEnvironmentVariable("SILL_TEST_GPU_FAIL_AFTER"), out int n) ? n : -1;
+        try
+        {
+            while (reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
+            {
+                if (!reader.TryRead(out var job)) continue;
+                try
+                {
+                    if (job.AnnexB is null)
+                    {
+                        if (last is not null && decoder is not null) Draw(last, decoder.Sps);
+                        continue;
+                    }
+                    var sps = job.Sps!;
+                    if (decoder is null || decoder.Sps != sps)
+                    {
+                        last?.Dispose(); last = null;
+                        renderer?.ClearInputViews();
+                        decoder?.Dispose(); decoder = null;
+                        decoder = MakeDecoder(sps);
+                    }
+                    var t0 = clock.Elapsed.TotalMilliseconds;
+                    if (decoder.OnGpu)
+                    {
+                        var picture = decoder.PushGpu(job.AnnexB);
+                        Decoded(clock.Elapsed.TotalMilliseconds - t0);
+                        if (picture is null) continue;
+                        if (failAfter >= 0 && ++gpuPictures > failAfter)
+                        {
+                            picture.Dispose();
+                            throw new COMException("SILL_TEST_GPU_FAIL_AFTER: a device lost, as a test", unchecked((int)0x887A0005));
+                        }
+                        last?.Dispose();
+                        last = picture;
+                        if (pictures++ == 0) Log($"First picture after {clock.Elapsed.TotalSeconds:0.00} s (GPU).");
+                        Draw(picture, sps);
+                    }
+                    else
+                    {
+                        var picture = decoder.Push(job.AnnexB);
+                        double took = clock.Elapsed.TotalMilliseconds - t0;
+                        Decoded(took);
+                        if (picture is not null && pictures++ == 0) Log($"First picture after {clock.Elapsed.TotalSeconds:0.00} s ({took:0} ms to decode, software).");
+                        if (picture is not null && (!paintPending || Stopwatch.GetElapsedTime(Interlocked.Read(ref shownAt)).TotalMilliseconds > 500))
+                            Show(picture, sps);
+                    }
+                }
+                catch (Exception e) when (decoder?.OnGpu == true)
+                {
+                    gpuFailed = true;
+                    Log($"GPU path failed: {e}");
+                    endReason = $"The GPU path failed ({e.Message}); reconnecting with software decoding…";
+                    BeginInvoke(() => { panel.Visible = false; gpuShowing = false; Invalidate(); });
+                    sessionStop.Cancel();
+                    return;
+                }
+            }
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Log($"Video thread ended: {e}");
+            endReason = $"Decoding failed ({e.Message}). Reconnecting…";
+            sessionStop.Cancel();
+        }
+        finally
+        {
+            last?.Dispose();
+            decoder?.Dispose();
+        }
+    }
+
+    private HevcDecoder MakeDecoder(HevcSps sps)
+    {
+        if (gpu is not null && !gpuFailed)
+        {
+            try
+            {
+                var onGpu = new HevcDecoder(sps, null, gpu);
+                decodePath = $"GPU ({gpu.AdapterName})";
+                Log($"Decoder {onGpu.Name} on the GPU ({gpu.AdapterName}) for {sps.Width}×{sps.Height} (coded {sps.CodedWidth}×{sps.CodedHeight}).");
+                return onGpu;
+            }
+            catch (Exception e)
+            {
+                gpuFailed = true;
+                Log($"The GPU decoder refused ({e.Message}): decoding in software.");
+            }
+        }
+        var decoder = new HevcDecoder(sps);
+        decodePath = "software";
+        Log($"Decoder {decoder.Name} in software for {sps.Width}×{sps.Height} (coded {sps.CodedWidth}×{sps.CodedHeight}).");
+        return decoder;
+    }
+
+    private void Decoded(double ms)
+    {
+        lock (gate) { framesDecoded++; decodeMs += ms; worstDecodeMs = Math.Max(worstDecodeMs, ms); }
+    }
+
+    // On the video thread: the picture into the panel's swap chain, letterboxed.
+    private void Draw(GpuPicture picture, HevcSps sps)
+    {
+        var t0 = Stopwatch.GetTimestamp();
+        renderer ??= new VideoRenderer(gpu!, panelHandle, panelWidth, panelHeight);
+        renderer.Resize(panelWidth, panelHeight);
+        int width = Math.Min(sps.Width, picture.Width - sps.Left), height = Math.Min(sps.Height, picture.Height - sps.Top);
+        renderer.Draw(picture, (sps.Left, sps.Top, width, height));
+        pictureWidth = width; pictureHeight = height;
+        lock (gate) { picturesShown++; drawMs += Stopwatch.GetElapsedTime(t0).TotalMilliseconds; }
+        if (!gpuShowing)
+        {
+            gpuShowing = true;
+            BeginInvoke(() => { panel.Visible = true; });
+        }
     }
 
     // A JPEG or PNG from the Mac as a bitmap of its own (Image.FromStream keeps its stream).

@@ -30,6 +30,16 @@ static class SessionCommand
         int pictures = 0;
         bool keyed = false;   // nothing decodes before the first keyframe
         Sill.Media.HevcDecoder? decoder = null;
+        // --gpu 1: decode on the GPU (Direct3D 11, DXVA) and time each frame until the GPU has
+        // finished it; --adapter N picks DXGI's Nth adapter (0 drives the display).
+        Sill.Media.GpuDevice? gpu = null;
+        if (decodeAll && opts.ContainsKey("gpu") && OperatingSystem.IsWindows())
+        {
+            int? adapter = opts.GetValueOrDefault("adapter") is { } a && int.TryParse(a, out int n) ? n : null;
+            gpu = new Sill.Media.GpuDevice(adapter);
+            Console.WriteLine($"Decoding on the GPU: {gpu.AdapterName}.");
+        }
+        var cpuAtStart = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
 
         using var identity = DeviceIdentity.LoadOrCreate(dir);
         Console.WriteLine($"Connecting to {mac.Name} at {host}:{port}, pinned to {mac.Fingerprint[..10]}…");
@@ -98,7 +108,7 @@ static class SessionCommand
                             && (decoder is null || decoder.Sps != sps))
                         {
                             decoder?.Dispose();
-                            decoder = new Sill.Media.HevcDecoder(sps);
+                            decoder = new Sill.Media.HevcDecoder(sps, gpu: gpu);
                             keyed = false;
                         }
                         Console.WriteLine($"[{Now():0.00}s] Parameter sets, {payload.Length} B: NAL length {parameterSets.NalUnitHeaderLength}, "
@@ -120,7 +130,14 @@ static class SessionCommand
                         {
                             keyed = true;
                             var t0 = Stopwatch.GetTimestamp();
-                            if (decoder.Push(AnnexB.Build(h.IsKeyframe ? parameterSets : null, payload, nals)) is not null) pictures++;
+                            var unit = AnnexB.Build(h.IsKeyframe ? parameterSets : null, payload, nals);
+                            if (gpu is not null)
+                            {
+                                using var picture = decoder.PushGpu(unit);
+                                gpu.WaitForIdle();
+                                if (picture is not null) pictures++;
+                            }
+                            else if (decoder.Push(unit) is not null) pictures++;
                             decodeTimes.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
                         }
                         if (firstKeyframe is null && h.IsKeyframe && parameterSets is not null && nals is not null)
@@ -159,9 +176,12 @@ static class SessionCommand
         {
             decodeTimes.Sort();
             Console.WriteLine($"Decoded {decodeTimes.Count} frames to {pictures} pictures: median {decodeTimes[decodeTimes.Count / 2]:0.0} ms, "
-                + $"95th {decodeTimes[(int)(decodeTimes.Count * 0.95)]:0.0} ms, worst {decodeTimes[^1]:0.0} ms a frame.");
+                + $"95th {decodeTimes[(int)(decodeTimes.Count * 0.95)]:0.0} ms, worst {decodeTimes[^1]:0.0} ms a frame"
+                + $" ({(gpu is null ? "software" : "GPU: " + gpu.AdapterName)}).");
+            double cpu = (System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime - cpuAtStart).TotalSeconds;
+            Console.WriteLine($"CPU: {cpu:0.0} s in {Now():0.0} s, {cpu / Now() * 100:0}% of one core.");
         }
-        if (OperatingSystem.IsWindows()) decoder?.Dispose();
+        if (OperatingSystem.IsWindows()) { decoder?.Dispose(); gpu?.Dispose(); }
         if (pngPath is not null && firstKeyframe is not null && OperatingSystem.IsWindows())
             return DecodeCommand.ToPng(firstKeyframe, pngPath);
         return stats.Keyframes > 0 ? 0 : 1;

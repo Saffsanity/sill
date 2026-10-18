@@ -104,3 +104,15 @@ public static class Png
         return crc;
     }
 }
+
+/// <summary>Where a picture lands in a window when its shape is kept: centred, bars on the sides
+/// or above and below (the viewer's drawing and its mouse both use it).</summary>
+public static class Letterbox
+{
+    public static (int X, int Y, int Width, int Height) Fit(int pictureWidth, int pictureHeight, int areaWidth, int areaHeight)
+    {
+        double scale = Math.Min((double)areaWidth / pictureWidth, (double)areaHeight / pictureHeight);
+        int w = Math.Max(1, (int)(pictureWidth * scale)), h = Math.Max(1, (int)(pictureHeight * scale));
+        return ((areaWidth - w) / 2, (areaHeight - h) / 2, w, h);
+    }
+}
