@@ -22,7 +22,9 @@ static class SessionCommand
         string host = mac.Host; int port = mac.Port;
         if (opts.GetValueOrDefault("host") is { } hostArg && !Spike.SplitHost(hostArg, out host, out port))
             return Spike.Usage("--host takes <address>:<port>.");
-        string? saveDir = opts.GetValueOrDefault("save");
+        string? saveDir = opts.GetValueOrDefault("save"), pngPath = opts.GetValueOrDefault("png");
+        if (pngPath is not null && !OperatingSystem.IsWindows()) return Spike.Usage("--png decodes with Media Foundation: Windows only.");
+        byte[]? firstKeyframe = null;
 
         using var identity = DeviceIdentity.LoadOrCreate(dir);
         Console.WriteLine($"Connecting to {mac.Name} at {host}:{port}, pinned to {mac.Fingerprint[..10]}…");
@@ -49,7 +51,7 @@ static class SessionCommand
         var pinging = PingAsync(session, stats, name, Now, ticker.Token);
 
         ParameterSets? parameterSets = null;
-        bool asked = false, saved = saveDir is null;
+        bool asked = false;
         string? lastActive = null;
         try
         {
@@ -101,10 +103,10 @@ static class SessionCommand
                             Console.WriteLine($"[{Now():0.00}s] {(h.IsKeyframe ? "Keyframe" : "Frame")} {stats.Frames}: {payload.Length:N0} B, {units}"
                                 + (parameterSets is null ? " (before any parameter sets)" : ""));
                         }
-                        if (!saved && h.IsKeyframe && parameterSets is not null && nals is not null)
+                        if (firstKeyframe is null && h.IsKeyframe && parameterSets is not null && nals is not null)
                         {
-                            saved = true;
-                            Save(saveDir!, parameterSets, payload, nals);
+                            firstKeyframe = DecodeCommand.AnnexB(parameterSets, payload, nals);
+                            if (saveDir is not null) Save(saveDir, parameterSets, payload, firstKeyframe);
                         }
                         break;
                     case SessionKinds.Pong:
@@ -133,6 +135,8 @@ static class SessionCommand
 
         Console.WriteLine();
         Console.WriteLine(stats.Summary(Now()));
+        if (pngPath is not null && firstKeyframe is not null && OperatingSystem.IsWindows())
+            return DecodeCommand.ToPng(firstKeyframe, pngPath);
         return stats.Keyframes > 0 ? 0 : 1;
     }
 
@@ -163,15 +167,12 @@ static class SessionCommand
     // What ticket 05 decodes: the kind 0 and kind 1 payloads as they came, and the same access
     // unit as an Annex B elementary stream (start codes, the parameter sets first), which any
     // HEVC tool reads (ffprobe, ffmpeg -i first-keyframe.h265 frame.png).
-    private static void Save(string dir, ParameterSets ps, byte[] frame, List<(int Offset, int Length)> nals)
+    private static void Save(string dir, ParameterSets ps, byte[] frame, byte[] annexB)
     {
         Directory.CreateDirectory(dir);
         File.WriteAllBytes(Path.Combine(dir, "parameter-sets.bin"), ps.Encode());
         File.WriteAllBytes(Path.Combine(dir, "first-keyframe.bin"), frame);
-        byte[] startCode = [0, 0, 0, 1];
-        using var annexB = File.Create(Path.Combine(dir, "first-keyframe.h265"));
-        foreach (var set in ps.Sets) { annexB.Write(startCode); annexB.Write(set); }
-        foreach (var (offset, length) in nals) { annexB.Write(startCode); annexB.Write(frame, offset, length); }
+        File.WriteAllBytes(Path.Combine(dir, "first-keyframe.h265"), annexB);
         Console.WriteLine($"Saved the first keyframe to {Path.GetFullPath(dir)} (parameter-sets.bin, first-keyframe.bin, first-keyframe.h265).");
     }
 

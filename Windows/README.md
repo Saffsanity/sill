@@ -15,9 +15,9 @@ spike for .NET's TLS (SslStream), crypto and Media Foundation access on Windows.
   20, the Mac ID and SPKI fingerprint), the device's key (`DeviceIdentity`), the TLS
   connection to a Mac (`SillTls`: TLS 1.3, one ALPN, trust by the Mac's SPKI SHA-256) and one
   pairing over it (`PairingClient`), and the session (`Session.cs`: `SessionClient`, the hello,
-  parameter sets, access units). The Swift side is the reference:
+  parameter sets, access units), and the picture's portable parts (`HevcSps`, `Nv12`, `Png`). The Swift side is the reference:
   `Sources/StreamProtocol/`.
-- `src/Sill.Spike` — the console app: `pair`, `session`; decode to PNG next.
+- `src/Sill.Spike` — the console app: `pair`, `session`, `decode` (Media Foundation's HEVC decoder to a PNG; Windows only).
 - `src/Sill.Probe` — ticket 02's probe, run on the PC: the OS build, TLS 1.3 with ALPN
   (mutual, P-256), Media Foundation's HEVC decoders, and with `--host addr:port` a handshake
   to a Mac's door. `artifacts/` (gitignored) holds single-file builds of it.
@@ -86,3 +86,17 @@ parameter sets, each keyframe and one line a second. `--save <dir>` writes the f
 first-keyframe.h265 frame.png` decodes it). To compare, `Scripts/sillclient.py <port> 8 desktop
 --tls --identity=<dir> --stats` after `--pair-code`; it needs a Python with TLS 1.3
 (`/opt/homebrew/bin/python3`, not the Mac's `/usr/bin/python3`).
+
+## One frame to a PNG
+
+On the PC (HEVC Video Extensions installed):
+
+```
+dotnet run --project Windows/src/Sill.Spike -- session --seconds 3 --png frame.png
+dotnet run --project Windows/src/Sill.Spike -- decode --input <dir>/first-keyframe.h265 --out frame.png
+```
+
+The first decodes the session's first keyframe after the session; the second a keyframe saved
+with `--save`. Both print the decoder used, the coded and shown sizes, the colour range and matrix.
+To try colour without capturing the screen, give the test host a picture:
+`SILL_TEST_PATTERN=picture:<png> SillHost --synthetic --pairing`.

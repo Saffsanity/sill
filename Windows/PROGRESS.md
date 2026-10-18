@@ -5,14 +5,16 @@ commit as the work it describes (the status line, the ticket's row, a dated log 
 
 ## Status (2026-10-18)
 
-Tickets 01 to 04 are built and committed on `windows-spike`, which stays local for now (Jericho,
+Tickets 01 to 05 are built and committed on `windows-spike`, which stays local for now (Jericho,
 2026-10-18: no push). Ticket 02
 is answered from the PC (`msi`, reached over SSH: `~/fleet/hosts/msi.md`): Windows 11 25H2, build
 26200, SChannel does TLS 1.3 with ALPN, HEVC Video Extensions is installed. Ticket 03 is done: the
 spike pairs with `SillHost --pairing` by typed code and by link, and a wrong code is refused.
 Ticket 04 is done: a session to the paired Mac gets the parameter sets and keyframes, its counts
 equal to `sillclient.py`'s on the same host, and the saved keyframe decodes (ffmpeg). Ticket 01's
-CI waits for a push. Next: ticket 05, decoding that keyframe with Media Foundation.
+CI waits for a push. Ticket 05's decoder is done: Media Foundation's HEVC decoder turns the session's
+first keyframe into a PNG on the PC, and on a colour test card it is closer to the source (49.9 dB
+PSNR) than ffmpeg's decode. Left for ticket 06: the same from a real capture of the Mac's screen.
 
 | Commit | What |
 |---|---|
@@ -63,7 +65,7 @@ distribution, input, menus, gestures, clipboard.
 | 02 | Confirm the Windows facts (build, HEVC, TLS 1.3 + ALPN, decode) | research | none | done (decoding a frame moved to 05) |
 | 03 | Pairing client over TLS (`sill-pair/1`) | prototype | 01, 02 | done |
 | 04 | Session connection and frame parsing (`sill/1`) | prototype | 03 | done |
-| 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | open |
+| 05 | Decode one frame to a PNG (Media Foundation) | prototype | 04 | done on the test pattern; a real window is 06's run |
 | 06 | Conformance run with the Mac side | task | 05 | open |
 
 ## Log
@@ -111,6 +113,23 @@ distribution, input, menus, gestures, clipboard.
   with TLS 1.3 (the Mac's /usr/bin/python3 3.9 is LibreSSL: "Unsupported protocol version 0x304");
   `/opt/homebrew/bin/python3` has it.
 
+- 2026-10-18: ticket 05. `HevcDecoder` (Sill.Spike, Windows only): the first synchronous HEVC decoder
+  MFT Media Foundation lists (`HEVCVideoExtension`, from HEVC Video Extensions), called through its
+  vtables by slot (no interop package), fed one Annex B sample (the parameter sets, then the
+  keyframe), drained, NV12 out. It needs the frame size on the input type: without it NV12 output is
+  refused with MF_E_ATTRIBUTENOTFOUND (0xC00D36E6), so `HevcSps` (Sill.Protocol) reads the coded size
+  and conformance window from the SPS (1512×952 coded, 1512×948 shown). The decoder then reports a
+  stream change once and takes NV12 again. `Nv12.ToRgb` (BT.709 or 601, full or video range, as
+  the output type says: full range, BT.709 here; cropped to the shown size) and `Png.Encode` (one
+  IDAT, CRC-32, ZLibStream) are portable and tested. `Sill.Spike decode --input <file.h265> --out
+  <png>`, and `session --png <file>` decodes the session's first keyframe. 12 new tests: 96 pass on the
+  PC, 89 with 7 skipped on the Mac. On the PC: the saved test-pattern keyframe decoded in 56 ms,
+  pixel for pixel ffmpeg's PNG; live, with `SILL_TEST_PATTERN=picture:` showing ffmpeg's `testsrc2`
+  card, a 72.7 KB keyframe decoded in 173 ms; against the card itself the PC's PNG is 49.9 dB PSNR
+  (r 47.7, g 55.0, b 49.6) and ffmpeg's decode of the same keyframe 27.4 dB (ffmpeg converts this
+  untagged stream with another matrix). Still open: the probe saw no hardware decoder over SSH; count
+  again from the PC's desktop.
+
 ## Open questions
 
 - Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
@@ -150,10 +169,12 @@ distribution, input, menus, gestures, clipboard.
 
 ## Next
 
-- Ticket 05: decode the saved keyframe (`first-keyframe.h265`, or the session's first keyframe
-  live) with Media Foundation's HEVC decoder (HEVC Video Extensions: the MFT takes Annex B
-  input) and write one PNG. Count the hardware decoders again from the PC's desktop (the probe ran
-  over SSH and saw none). The saved file is a known-good input: ffmpeg decodes it on the Mac.
+- Ticket 06: the full path on the real Mac. `SillHost --pairing` capturing the real screen needs
+  Screen Recording for whatever runs it (Q11), and it shares the hardware encoder with Sill.app
+  (CLAUDE.md's operational rule: not while a device streams from Sill.app). Pair the PC by code
+  and by link, `session --png`, view the PNG; compare frame sizes with `sillclient.py` on the same
+  host; write it up in the map's Decisions-so-far and the ticket's Answer.
+- On the PC's desktop (not over SSH): `Sill.Probe.exe` again for the hardware HEVC decoder count.
 - Push `windows-spike` only when Jericho says so; then the Windows CI job runs and ticket 01 closes.
 - Decide whether the device certificate going to an unpinned key on Windows matters (it is public;
   hiding it needs the validation before the client's flight, which SslStream doesn't offer).
