@@ -1,7 +1,19 @@
 # Windows client spike: progress
 
 Read this first when picking up the Windows work. Keep it current: update it in the same
-commit as the work it describes.
+commit as the work it describes (the status line, the ticket's row, a dated log entry, Next).
+
+## Status (2026-10-18)
+
+Tickets 01 and 02 are built and committed on `windows-spike`, which has not been pushed. Waiting
+on: `probe-report.txt` from the PC (ticket 02), and a push so the Windows CI job runs (ticket 01).
+Ticket 03 is next once 02 is answered. Its PC-independent parts (the Damm check digit, the
+PBKDF2 key, the HMAC proofs) could start before then.
+
+| Commit | What |
+|---|---|
+| `5d4acda` | The .NET skeleton, its CI job, this file, the agent-skills setup (`docs/agents/`, CLAUDE.md) |
+| `82a4924` | Ticket 02's probe, `src/Sill.Probe`, and its README section |
 
 ## Where things are
 
@@ -60,9 +72,22 @@ distribution, input, menus, gestures, clipboard.
   security protocol is not supported"). Single-file `win-x64` and `win-arm64` builds in
   `Windows/artifacts/`. The Windows CI job runs it too (informational).
 
+- 2026-10-18: this file gained the status section and the open questions.
+
+## Open questions
+
+- Should an ADR record the C# exception to the Swift-only rule? Only if it meets all three of
+  the ADR criteria (`docs/agents/domain.md`). Not decided yet.
+- Glossary terms (Door, pairing code, pairing link, `sill/1`, `sill-pair/1`, SPKI pin): added
+  lazily when a ticket first needs them settled.
+- The PC's Windows build number (decision 10): ticket 02's report gives it.
+
 ## Next
 
 - Ticket 02: run `Sill.Probe.exe` on the PC (README, "The probe on the PC"), once alone and
   once with `--host` against `SillHost --pairing`, and paste `probe-report.txt` into the
   ticket. Its decode check only counts decoders; decoding a real frame is ticket 05.
-- Push `windows-spike` when ready, so the Windows CI job runs and ticket 01 can close.
+- Push `windows-spike` when ready (only with the go-ahead), so the Windows CI job runs and ticket
+  01 can close.
+- Then ticket 03: the pairing client over `sill-pair/1` (one kind 19 request, one kind 20 answer),
+  checked against `SillHost --pairing` and the Swift `Pairing.swift`.
