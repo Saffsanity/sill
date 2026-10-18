@@ -47,6 +47,10 @@ struct HostSettingsPanel: View {
     /// Whether the switch is offered here, the stream screen's say (`largerPictureOffered`): only on an
     /// iPhone without a hinge whose picture it makes larger.
     @Environment(\.largerPictureOffered) private var offersLargerPicture
+    /// This iPad's Immersive switch (docs/immersive-plan.md): off unless turned on, read by the stream
+    /// screen, never sent; offered on an iPad only (`immersiveOffered`).
+    @AppStorage(StreamClient.immersiveKey) private var immersive = false
+    @Environment(\.immersiveOffered) private var offersImmersive
     /// This device's switch for the clipboard (docs/clipboard-plan.md): on unless turned off, read by
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
@@ -485,6 +489,15 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        if offersImmersive {
+            Rows {
+                Toggle(isOn: $immersive) {
+                    Text("Immersive").foregroundStyle(Palette.text)
+                }
+                .rowFrame()
+            }
+            Footnote(text: Self.immersiveFooter)
+        }
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -530,6 +543,8 @@ struct HostSettingsPanel: View {
     /// it gives up, where windows come from instead, that the Mac fits a window to the taller picture
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
+    static let immersiveFooter = "With a hardware keyboard attached and the iPad held sideways, the picture fills the whole screen and the bar hides. Press Control-Option-Command-B, or swipe down from the top edge, to show it; Exit in the bar turns Immersive off. A change here applies when you close Settings."
+
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
@@ -889,5 +904,18 @@ extension EnvironmentValues {
     var largerPictureOffered: Bool {
         get { self[LargerPictureOfferedKey.self] }
         set { self[LargerPictureOfferedKey.self] = newValue }
+    }
+}
+
+/// Whether the Settings panel offers Immersive (This iPad; docs/immersive-plan.md): the stream screen's
+/// say, true on an iPad, false on every iPhone.
+private struct ImmersiveOfferedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var immersiveOffered: Bool {
+        get { self[ImmersiveOfferedKey.self] }
+        set { self[ImmersiveOfferedKey.self] = newValue }
     }
 }

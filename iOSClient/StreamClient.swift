@@ -3311,6 +3311,10 @@ final class StreamClient: ObservableObject {
     /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window
     /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
     static let largerPictureKey = "Sill.largerPicture"
+    /// This iPad's Immersive switch (docs/immersive-plan.md): off unless turned on. The device's own
+    /// preference, never sent to the Mac; the stream screen reads it with a hardware keyboard, the
+    /// iPad's turn and what streams (`ImmersivePolicy.applies`).
+    static let immersiveKey = "Sill.immersive"
 
     /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
     /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
