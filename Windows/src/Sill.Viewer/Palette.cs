@@ -87,6 +87,9 @@ static class Palette
         public override Color MenuItemSelected => ControlHover;
         public override Color MenuItemSelectedGradientBegin => ControlHover;
         public override Color MenuItemSelectedGradientEnd => ControlHover;
+        public override Color CheckBackground => ControlOpen;
+        public override Color CheckSelectedBackground => ControlOpen;
+        public override Color CheckPressedBackground => ControlOpen;
         public override Color SeparatorDark => Control;
         public override Color SeparatorLight => Control;
         public override Color ImageMarginGradientBegin => Bar;

@@ -81,6 +81,18 @@ sealed class ViewerForm : Form
     private readonly MacBar bar = new();
     private readonly AppsDrawer drawer = new();
     private readonly StatusCard card = new();
+
+    // The Settings panel (kinds 16 and 17): the Mac's settings with this PC's picks over them, on
+    // the UI thread; a note for a pick the Mac refused or never answered.
+    private readonly SettingsPanel settings = new();
+    private readonly SettingsLedger ledger = new();
+    private readonly Stopwatch settingsClock = Stopwatch.StartNew();
+    private int settingsToken;
+    private string settingsNote = "";
+    private double noteUntil;
+    private volatile bool preferSoftware;
+    private double lastRtt;
+    private CancellationTokenSource? currentSession;
     private KeyboardHook? hook;
     private volatile bool desktopActive, nothingStreams;
     private long askedAt;   // when the Desktop was last asked for
@@ -98,11 +110,37 @@ sealed class ViewerForm : Form
 
         Controls.Add(drawer);
         Controls.Add(card);
+        Controls.Add(settings);
         Controls.Add(bar);
         Controls.Add(panel);
         panel.SendToBack();   // under the bar and the drawer
         panel.Visible = false;
-        bar.AppsClicked += () => { drawer.Toggle(); bar.AppsOpen = drawer.Visible; };
+        bar.AppsClicked += () => { CloseSettings(); drawer.Toggle(); bar.AppsOpen = drawer.Visible; };
+        bar.SettingsClicked += () =>
+        {
+            if (settings.Visible) { CloseSettings(); return; }
+            drawer.Close();
+            RefreshSettings();
+            settings.Visible = true;
+            settings.BringToFront();
+            bar.SettingsOpen = true;
+        };
+        settings.Done += CloseSettings;
+        settings.Pick += change =>
+        {
+            if (ledger.Pick(change, ++settingsToken, settingsClock.Elapsed.TotalSeconds) is { } send) Send(send.Encode());
+            RefreshSettings();
+        };
+        settings.SoftwareDecoding += software =>
+        {
+            if (software == preferSoftware) return;
+            preferSoftware = software;
+            Log($"Decoding: {(software ? "software" : "GPU")}, chosen in Settings; reconnecting.");
+            endReason = software ? "Switching to software decoding…" : "Switching to GPU decoding…";
+            try { currentSession?.Cancel(); }   // the next session decodes the chosen way (a fresh keyframe at connect)
+            catch (ObjectDisposedException) { }  // between sessions: the next one does anyway
+            RefreshSettings();
+        };
         bar.DesktopClicked += () => Send(SessionMessages.SelectDesktop());
         bar.WindowClicked += id => Send(SessionMessages.SelectWindow(id));
         bar.WindowCommand += (id, action) => Send(SessionMessages.WindowCommand(id, action));
@@ -149,7 +187,7 @@ sealed class ViewerForm : Form
         catch (Exception ex) { Log($"No keyboard hook ({ex.Message}): Alt+Tab and the Windows key stay Windows'."); }
         _ = Task.Run(() => RunAsync(stop.Token));
         var timer = new System.Windows.Forms.Timer { Interval = 1000 };
-        timer.Tick += (_, _) => { UpdateTitle(); PlaceCard(); };
+        timer.Tick += (_, _) => { UpdateTitle(); PlaceCard(); SettingsTick(); };
         timer.Start();
     }
 
@@ -164,6 +202,7 @@ sealed class ViewerForm : Form
         float s = DeviceDpi / 96f;
         drawer.Bounds = new Rectangle((int)(22 * s), v.Y + (int)(8 * s), Math.Min(drawer.CardPixels, Math.Max(1, v.Width - (int)(44 * s))),
             Math.Max(1, v.Height - (int)(22 * s)));
+        PlaceSettings();
         panelWidth = Math.Max(1, panel.ClientSize.Width); panelHeight = Math.Max(1, panel.ClientSize.Height);
         jobs?.Writer.TryWrite(VideoJob.Redraw);   // a still screen sends nothing: draw the last picture at the new size
     }
@@ -267,6 +306,7 @@ sealed class ViewerForm : Form
         base.OnMouseDown(e);
         // A click beside the open drawer closes it and clicks nothing on the Mac, as a tap does on the iPad.
         if (drawer.Visible) { drawer.Close(); return; }
+        if (settings.Visible) { CloseSettings(); return; }
         var f = Fraction(e.Location);
         Send(InputMessages.PointerEvent(InputMessages.Pointer.Move, f.X, f.Y));
         if (e.Button == MouseButtons.Left) { leftDown = true; Send(InputMessages.PointerEvent(InputMessages.Pointer.LeftDown, f.X, f.Y)); }
@@ -489,6 +529,50 @@ sealed class ViewerForm : Form
         BeginInvoke(() => { card.Set(macName, text, busy); PlaceCard(); Invalidate(); UpdateTitle(); });
     }
 
+    // ---- the Settings panel ----
+
+    private void RefreshSettings()
+    {
+        bool gpuUsable = gpu is not null && !gpuFailed;
+        settings.Show(ledger, macName, settingsNote, gpuUsable, gpu?.AdapterName ?? "", preferSoftware || !gpuUsable);
+        PlaceSettings();
+    }
+
+    // Hanging under the bar on the right, as the iPad's: 22 pt in, 8 under, as tall as it needs.
+    private void PlaceSettings()
+    {
+        var v = VideoArea;
+        float s = DeviceDpi / 96f;
+        int width = Math.Min(settings.CardPixels, Math.Max(1, v.Width - (int)(44 * s)));
+        int height = Math.Max(1, Math.Min(settings.ContentHeight, v.Height - (int)(22 * s)));
+        settings.Bounds = new Rectangle(v.Right - (int)(22 * s) - width, v.Y + (int)(8 * s), width, height);
+    }
+
+    private void CloseSettings()
+    {
+        if (!settings.Visible) return;
+        settings.Visible = false;
+        bar.SettingsOpen = false;
+        Focus();
+    }
+
+    private void Note(string text)
+    {
+        settingsNote = text;
+        noteUntil = settingsClock.Elapsed.TotalSeconds + 4;
+    }
+
+    // Once a second: a pick the Mac hasn't answered in max(4 s, 4 round trips) goes back, as on the
+    // iPad, and an old note goes.
+    private void SettingsTick()
+    {
+        double now = settingsClock.Elapsed.TotalSeconds;
+        bool changed = false;
+        if (ledger.Expire(now, Math.Max(4, 4 * lastRtt))) { Note($"{macName} didn’t answer. Try again."); changed = true; }
+        if (settingsNote.Length > 0 && now > noteUntil) { settingsNote = ""; changed = true; }
+        if (changed || settings.Visible) RefreshSettings();
+    }
+
     /// <summary>Why a dial failed, in a few words for the card (the log keeps the whole error).</summary>
     private static string Reason(Exception e)
     {
@@ -616,6 +700,8 @@ sealed class ViewerForm : Form
         _ = WriteInputAsync(session, ct);
         connected = true;
         endReason = null;
+        currentSession = sessionStop;
+        BeginInvoke(() => { ledger.Reset(); RefreshSettings(); });   // a new connection's settings come with it
         pictured = false;
         ParameterSets? ps = null;
         HevcSps? sps = null;
@@ -689,6 +775,14 @@ sealed class ViewerForm : Form
                         if (ImageBlobs.Icon(payload) is { } icon && LoadImage(icon.Png) is { } iconImage)
                             BeginInvoke(() => { bar.SetIcon(icon.BundleId, new Bitmap(iconImage)); drawer.SetIcon(icon.BundleId, iconImage); });
                         break;
+                    case HostSettingsKinds.HostSettings:
+                        if (SessionMessages.Decode<HostSettingsState>(payload) is { } hostSettings)
+                            BeginInvoke(() =>
+                            {
+                                if (ledger.Receive(hostSettings).Count > 0) Note($"{macName} kept its setting.");
+                                RefreshSettings();
+                            });
+                        break;
                     case SessionKinds.CursorShape:
                         if (ImageBlobs.Cursor(payload) is { } shape)
                             BeginInvoke(() =>
@@ -705,6 +799,7 @@ sealed class ViewerForm : Form
                     case SessionKinds.Pong:
                         double sent = SessionMessages.PongTime(payload);
                         lock (gate) rtt = Math.Max(rtt ?? 0, clock.Elapsed.TotalSeconds - sent);
+                        lastRtt = clock.Elapsed.TotalSeconds - sent;
                         break;
                     case SessionKinds.Goodbye:
                         var bye = SessionMessages.Decode<Goodbye>(payload);
@@ -822,7 +917,7 @@ sealed class ViewerForm : Form
 
     private HevcDecoder MakeDecoder(HevcSps sps)
     {
-        if (gpu is not null && !gpuFailed)
+        if (gpu is not null && !gpuFailed && !preferSoftware)
         {
             try
             {
@@ -839,6 +934,8 @@ sealed class ViewerForm : Form
         }
         var decoder = new HevcDecoder(sps);
         decodePath = "software";
+        // The form paints software pictures: the GPU's panel, if it showed, would cover them.
+        if (gpuShowing) { gpuShowing = false; BeginInvoke(() => { panel.Visible = false; Invalidate(); }); }
         Log($"Decoder {decoder.Name} in software for {sps.Width}×{sps.Height} (coded {sps.CodedWidth}×{sps.CodedHeight}).");
         return decoder;
     }
