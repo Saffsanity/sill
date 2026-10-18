@@ -64,6 +64,18 @@ sealed class ViewerForm : Form
     private long lastMoveTicks;
     private (double X, double Y) lastPointer = (-1, -1);
 
+    // The Mac's cursor (kind 14), on the UI thread.
+    private MacCursor? macCursor;
+
+    private void SetMacCursor(MacCursor? next)
+    {
+        var old = macCursor;
+        macCursor = next;
+        if (PictureRect().Contains(PointToClient(MousePosition)))
+            System.Windows.Forms.Cursor.Current = next?.Cursor ?? Cursors.Default;   // now, not at the next move
+        old?.Dispose();
+    }
+
     // The iPad's bar and Apps drawer, and what they show.
     private readonly MacBar bar = new();
     private readonly AppsDrawer drawer = new();
@@ -214,15 +226,18 @@ sealed class ViewerForm : Form
 
     private void Send(byte[] message) { if (connected) outgoing.Writer.TryWrite(message); }
 
+    /// <summary>Where the Mac's picture is in the window, on either path.</summary>
+    private Rectangle PictureRect()
+    {
+        if (!gpuShowing || pictureWidth <= 0) return pictureRect;
+        var v = VideoArea;
+        var (x, y, w, h) = Letterbox.Fit(pictureWidth, pictureHeight, v.Width, v.Height);
+        return new Rectangle(v.X + x, v.Y + y, w, h);
+    }
+
     private (double X, double Y) Fraction(Point p)
     {
-        var r = pictureRect;
-        if (gpuShowing && pictureWidth > 0)
-        {
-            var v = VideoArea;
-            var (x, y, w, h) = Letterbox.Fit(pictureWidth, pictureHeight, v.Width, v.Height);
-            r = new Rectangle(v.X + x, v.Y + y, w, h);
-        }
+        var r = PictureRect();
         if (r.Width <= 0 || r.Height <= 0) return (0.5, 0.5);
         return (Math.Clamp((p.X - r.X + 0.5) / r.Width, 0, 1), Math.Clamp((p.Y - r.Y + 0.5) / r.Height, 0, 1));
     }
@@ -317,6 +332,15 @@ sealed class ViewerForm : Form
             int delta = (short)((long)m.WParam >> 16);
             var f = Fraction(PointToClient(new Point((short)(long)m.LParam, (short)((long)m.LParam >> 16))));
             Glide(-delta / 120.0 * NotchFraction, 0, f);   // tilted right: content moves left
+            m.Result = 1;
+            return;
+        }
+        // The cursor over the picture: Windows asks this window with the video panel named (the
+        // panel lets the mouse through to here), which WinForms leaves to Windows' arrow.
+        const int WM_SETCURSOR = 0x0020, HTCLIENT = 1;
+        if (m.Msg == WM_SETCURSOR && ((int)m.LParam & 0xFFFF) == HTCLIENT && (m.WParam == Handle || m.WParam == panelHandle))
+        {
+            System.Windows.Forms.Cursor.Current = macCursor is not null && PictureRect().Contains(PointToClient(MousePosition)) ? macCursor.Cursor : Cursors.Default;
             m.Result = 1;
             return;
         }
@@ -620,6 +644,15 @@ sealed class ViewerForm : Form
                     case SessionKinds.AppIcon:
                         if (ImageBlobs.Icon(payload) is { } icon && LoadImage(icon.Png) is { } iconImage)
                             BeginInvoke(() => { bar.SetIcon(icon.BundleId, new Bitmap(iconImage)); drawer.SetIcon(icon.BundleId, iconImage); });
+                        break;
+                    case SessionKinds.CursorShape:
+                        if (ImageBlobs.Cursor(payload) is { } shape)
+                            BeginInvoke(() =>
+                            {
+                                var made = MacCursor.Create(shape.Png, shape.HotX, shape.HotY, shape.Width, shape.Height, DeviceDpi);
+                                Log($"Mac cursor: {shape.Width}×{shape.Height} pt, hotspot {shape.HotX},{shape.HotY}" + (made is null ? ": the image didn't load" : ""));
+                                SetMacCursor(made);
+                            });
                         break;
                     case SessionKinds.AppList:
                         if (SessionMessages.Decode<List<AppInfo>>(payload) is { } apps)

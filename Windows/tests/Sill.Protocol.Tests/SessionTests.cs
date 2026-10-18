@@ -223,3 +223,25 @@ public class SwitcherTests
         Assert.Equal(("TextEdit", "com.apple.TextEdit"), (apps[0].Name, apps[0].BundleId));
     }
 }
+
+public class CursorBlobTests
+{
+    [Fact]
+    public void ReadsSwiftsCursorShapeBlob()
+    {
+        // CursorShapeBlob.encode(hotspot: (4, 5), size: (17, 23), png): four Float32 big endian, then the PNG.
+        byte[] blob = [0x40, 0x80, 0, 0, 0x40, 0xA0, 0, 0, 0x41, 0x88, 0, 0, 0x41, 0xB8, 0, 0, 0x89, 0x50, 0x4E, 0x47];
+        var c = ImageBlobs.Cursor(blob)!.Value;
+        Assert.Equal((4f, 5f, 17f, 23f), (c.HotX, c.HotY, c.Width, c.Height));
+        Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, c.Png);
+    }
+
+    [Fact]
+    public void RefusesShortOrNonsenseBlobs()
+    {
+        Assert.Null(ImageBlobs.Cursor(new byte[16]));
+        Assert.Null(ImageBlobs.Cursor(new byte[20]));   // a zero size
+        byte[] nan = [0x7F, 0xC0, 0, 0, 0, 0, 0, 0, 0x41, 0x88, 0, 0, 0x41, 0xB8, 0, 0, 1];
+        Assert.Null(ImageBlobs.Cursor(nan));
+    }
+}

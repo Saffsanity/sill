@@ -11,7 +11,7 @@ public static class SessionKinds
 {
     public const byte ParameterSets = 0, Frame = 1, WindowList = 2, Thumbnail = 3, AppIcon = 4, AppList = 5,
         SelectSource = 6, LaunchApp = 7, WindowCommand = 15, Gesture = 28, Viewport = 9,
-        Ping = 10, Pong = 11, ClientStats = 12, Tick = 13, HostSettings = 16, MacInfo = 18, Goodbye = 22, Hello = 23;
+        Ping = 10, Pong = 11, ClientStats = 12, Tick = 13, CursorShape = 14, HostSettings = 16, MacInfo = 18, Goodbye = 22, Hello = 23;
 
     /// <summary>What a header from the Mac may announce (StreamMessage.swift's caps): frames
     /// 32 MiB, anything else 4 MiB. A reader refuses more and closes.</summary>
@@ -267,5 +267,17 @@ public static class ImageBlobs
         int len = BinaryPrimitives.ReadUInt16BigEndian(d);
         if (d.Length <= 2 + len) return null;
         return (Encoding.UTF8.GetString(d.Slice(2, len)), d[(2 + len)..].ToArray());
+    }
+
+    /// <summary>Kind 14, the Mac's cursor (Viewport.swift's <c>CursorShapeBlob</c>): its hotspot
+    /// and size in Mac points, four Float32 big endian, then a PNG (usually at 2×). Null for a
+    /// blob too short, or a size that is not a positive, finite number.</summary>
+    public static (float HotX, float HotY, float Width, float Height, byte[] Png)? Cursor(ReadOnlySpan<byte> d)
+    {
+        if (d.Length <= 16) return null;
+        float hx = BinaryPrimitives.ReadSingleBigEndian(d), hy = BinaryPrimitives.ReadSingleBigEndian(d[4..]),
+            w = BinaryPrimitives.ReadSingleBigEndian(d[8..]), h = BinaryPrimitives.ReadSingleBigEndian(d[12..]);
+        if (!(w > 0 && h > 0 && float.IsFinite(w) && float.IsFinite(h) && float.IsFinite(hx) && float.IsFinite(hy))) return null;
+        return (hx, hy, w, h, d[16..].ToArray());
     }
 }
