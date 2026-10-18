@@ -91,6 +91,17 @@ sealed class ViewerForm : Form
     private string settingsNote = "";
     private double noteUntil;
     private volatile bool preferSoftware;
+    private readonly WindowPlacement? placement;
+    private Rectangle normalBounds;   // the last bounds of a normal window (not maximized, not full screen)
+
+    // RestoreBounds of a borderless window leaves the frame out, so a size kept through full screen
+    // would shrink by a frame each time: the normal bounds are kept as they happen instead.
+    private void NoteNormalBounds()
+    {
+        if (WindowState == FormWindowState.Normal && FormBorderStyle != FormBorderStyle.None) normalBounds = Bounds;
+    }
+
+    protected override void OnMove(EventArgs e) { base.OnMove(e); NoteNormalBounds(); }
     private double lastRtt;
     private CancellationTokenSource? currentSession;
     private KeyboardHook? hook;
@@ -104,6 +115,11 @@ sealed class ViewerForm : Form
         Text = "Sill Viewer";
         BackColor = Palette.Panel;
         ClientSize = new Size(1280, 800);
+        // Where it was left (window.json beside the key), if that is still on a screen.
+        placement = WindowPlacement.Load(Path.Combine(dir, "window.json"));
+        StartPosition = FormStartPosition.Manual;
+        Bounds = WindowPlacement.Fit(placement, Screen.AllScreens.Select(s => s.WorkingArea).ToList(), Size);
+        preferSoftware = options.Decoder == "software" || (options.Decoder == "auto" && placement?.SoftwareDecoding == true);
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Opaque, true);
         KeyPreview = true;
@@ -167,6 +183,8 @@ sealed class ViewerForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        if (placement?.FullScreen == true) FullScreen(true);
+        else if (placement?.Maximized == true) WindowState = FormWindowState.Maximized;
         Resized();
         panelHandle = panel.Handle;
         if (options.Decoder != "software")
@@ -191,7 +209,7 @@ sealed class ViewerForm : Form
         timer.Start();
     }
 
-    protected override void OnResize(EventArgs e) { base.OnResize(e); Resized(); Invalidate(); }
+    protected override void OnResize(EventArgs e) { base.OnResize(e); NoteNormalBounds(); Resized(); Invalidate(); }
     private void Resized()
     {
         var v = VideoArea;
@@ -207,7 +225,16 @@ sealed class ViewerForm : Form
         jobs?.Writer.TryWrite(VideoJob.Redraw);   // a still screen sends nothing: draw the last picture at the new size
     }
 
-    protected override void OnFormClosing(FormClosingEventArgs e) { hook?.Dispose(); stop.Cancel(); base.OnFormClosing(e); }
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        // As it is left: the normal bounds (a maximized or full-screen window's are its RestoreBounds),
+        // maximized, full screen, and how it decodes.
+        bool full = FormBorderStyle == FormBorderStyle.None;
+        var normal = normalBounds.IsEmpty ? Bounds : normalBounds;
+        new WindowPlacement(normal.X, normal.Y, normal.Width, normal.Height, WindowState == FormWindowState.Maximized && !full, full, preferSoftware)
+            .Save(Path.Combine(dir, "window.json"));
+        hook?.Dispose(); stop.Cancel(); base.OnFormClosing(e);
+    }
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
 
@@ -471,8 +498,11 @@ sealed class ViewerForm : Form
 
     private void FullScreen(bool on)
     {
+        var normal = normalBounds;
         FormBorderStyle = on ? FormBorderStyle.None : FormBorderStyle.Sizable;
         WindowState = on ? FormWindowState.Maximized : FormWindowState.Normal;
+        // Windows' own restore size was taken without the frame: the remembered one, frame and all.
+        if (!on && !normal.IsEmpty) Bounds = normal;
     }
 
     protected override void OnPaint(PaintEventArgs e)
