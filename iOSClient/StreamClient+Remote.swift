@@ -74,10 +74,10 @@ enum PairingProblem: Equatable {
         case .wrongCode(let left):
             // A no-break space keeps the count with its word when the line wraps ("4 / tries left").
             return "That code didn’t work. Check the code on your Mac. \(left)\u{00A0}tr\(left == 1 ? "y" : "ies") left."
-        case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair iPhone or iPad… first."
+        case .notPairing(let mac): return "\(mac) isn’t pairing right now. On your Mac, choose Pair a Device… first."
         case .stopped(let mac):
-            return "\(mac) stopped pairing after too many wrong codes. Choose Pair iPhone or iPad… on your Mac for a new code."
-        case .expired: return "This code expired. Choose Pair iPhone or iPad… on your Mac for a new one."
+            return "\(mac) stopped pairing after too many wrong codes. Choose Pair a Device… on your Mac for a new code."
+        case .expired: return "This code expired. Choose Pair a Device… on your Mac for a new one."
         case .proofFailed(let host):
             return "Pairing didn’t finish: the Mac at \(host) couldn’t show it knows the code. Pair from the same network as your Mac, or scan the code instead."
         case .nothingAnswered(let host): return "Nothing answered at \(host). Check the address, and that Sill is open on your Mac."

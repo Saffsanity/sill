@@ -122,7 +122,7 @@ struct AddMacCard: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Text(typed ? "Type the address and code that Sill shows on your Mac."
-                       : "On your Mac, choose Pair iPhone or iPad… in the Sill menu, then point this \(device) at the code.")
+                       : "On your Mac, choose Pair a Device… in the Sill menu, then point this \(device) at the code.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.text)
                 .fixedSize(horizontal: false, vertical: true)

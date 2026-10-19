@@ -1,0 +1,82 @@
+# The clients that are not Swift (clients/, docs/clients-plan.md): the shared Kotlin core and the
+# Android app. On pull requests and pushes to main that touch them, the wire they speak
+# (Sources/StreamProtocol) or the iOS app their design comes from (iOSClient), and by hand. Nothing here signs or uses a secret.
+#
+# - core: the core's tests (the model Mac end to end) and the wire against the Mac's own Swift
+#   types (clients/wire-vectors: vectors regenerated from Sources/StreamProtocol must match the
+#   committed ones, and Swift decodes what the Kotlin core writes), and the design layer against
+#   the iOS app (clients/design: Tokens.kt and ui-vectors.json regenerated from iOSClient's Swift
+#   must match the committed ones, and the core's words must still be the iOS app's).
+# - android: the Android app's JVM tests (the fold mapping, the layouts), Android lint (the core
+#   included) and the debug APK.
+#
+# Cost: free for a public repository; Linux minutes otherwise (about 10 minutes each).
+name: Clients
+
+on:
+  pull_request:
+    paths: ['clients/**', 'Sources/StreamProtocol/**', 'iOSClient/**', '.github/workflows/clients.yml']
+  push:
+    branches: [main]
+    paths: ['clients/**', 'Sources/StreamProtocol/**', 'iOSClient/**', '.github/workflows/clients.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: clients-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: The core's tests
+        working-directory: clients
+        run: |
+          # python-zeroconf lets MdnsTest read this core's queries with another implementation.
+          python3 -m pip install --quiet --user 'zeroconf==0.151.5' || echo "zeroconf not installed: that cross-check skips"
+          ./gradlew --no-daemon :core:test
+
+      - name: The wire and the design against the Mac's and the iOS app's Swift
+        run: |
+          command -v swiftc >/dev/null || { echo "no Swift toolchain on this runner"; exit 1; }
+          swiftc --version
+          clients/wire-vectors/generate.sh --verify
+          clients/wire-vectors/generate.sh --check
+          clients/design/generate.sh --verify
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Use Java 21
+        run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      - name: Lint and build the APK
+        working-directory: clients
+        run: |
+          [ -n "${ANDROID_HOME:-}" ] || { echo "no Android SDK on this runner"; exit 1; }
+          ./gradlew --no-daemon :android:testDebugUnitTest :android:lintDebug :android:assembleDebug
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sill-android-debug
+          path: clients/android/build/outputs/apk/debug/android-debug.apk
+          retention-days: 14

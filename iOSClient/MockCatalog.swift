@@ -508,7 +508,7 @@ enum MockCatalog {
         case homecode        // the home card's typed path, empty
         case homecodeerror   // the typed path after a wrong code: "That code didn’t work… 4 tries left."
         case homelocked      // the Mac is locked (a Wired row over the cable): "Unlock Mac mini, then tap it again."
-        case homeopenonmac   // the Mac showed no code by itself: "…choose Pair iPhone or iPad… in the Sill menu…"
+        case homeopenonmac   // the Mac showed no code by itself: "…choose Pair a Device… in the Sill menu…"
         case homerevoked     // the Mac removed this device: its row reads Not paired
         case homecabledone   // paired over the cable, the session on its way: "Paired with Mac mini over the cable."
         case homeolder       // a tap on an Update Sill row: "Mac mini runs an older Sill…"
@@ -606,7 +606,7 @@ enum MockCatalog {
                           minimumVersion: "1.2", reconnect: false)
                 // A reason this build does not know ("pairingRequired" is pairing at home's own now).
                 : Goodbye(reason: "pairAgain",
-                          message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair iPhone or iPad…, then scan its code with this \(StreamClient.deviceWord).",
+                          message: "Mac mini now lets in only the devices it has paired with. On the Mac, choose Pair a Device…, then scan its code with this \(StreamClient.deviceWord).",
                           reconnect: false)
             let outcome = GoodbyePolicy.outcome(goodbye, mac: "Mac mini", device: StreamClient.deviceWord, saved: false)
             client.status = outcome.text

@@ -7,10 +7,10 @@ S = "iOSClient/SavedMacs.swift"
 W = "Sources/SillHost/PairingWindow.swift"
 M = [
     ("the card's closed words say a tap is enough (as before the review)", F,
-     "            \"That code no longer works. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"That code no longer works. On the Mac, choose Pair a Device\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
      "            \"That code no longer works. Tap \\(mac) for a new one.\""),
     ("the card's stopped words say a tap is enough (as before the review)", F,
-     "            \"\\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
+     "            \"\\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair a Device\\u{2026} in the Sill menu, then tap \\(mac) again.\"",
      "            \"\\(mac) stopped pairing after too many wrong codes. Tap \\(mac) for a new code.\""),
     ("an expired window quiets again", W, "case .cancelled, .stopped: return true\n        case .used, .expired, .withdrawn, .none: return false",
      "case .cancelled, .stopped, .expired: return true\n        case .used, .withdrawn, .none: return false"),

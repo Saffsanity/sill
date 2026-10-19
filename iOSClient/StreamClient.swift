@@ -3312,6 +3312,11 @@ final class StreamClient: ObservableObject {
     /// does (`PhonePortraitLayout.largerPicture(switchOn:streaming:)`).
     static let largerPictureKey = "Sill.largerPicture"
 
+    /// This device's Keep Screen On (the Settings panel's This iPad group): on unless turned off. While
+    /// it is on and a stream screen shows, iOS's idle timer is off (`ScreenAwake`), so a stream only
+    /// watched never dims or locks. The device's own preference, never sent to the Mac.
+    static let keepScreenOnKey = "Sill.keepScreenOn"
+
     /// A three- or four-finger gesture a surface decided (TrackpadGestures, StrokeObserver), to the
     /// Mac as kind 28, which turns it into its own shortcut (docs/trackpad-gestures-plan.md §6.3):
     /// only while this device's switch is on and the Mac says it takes gestures. While a window

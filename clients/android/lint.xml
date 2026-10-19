@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Checks turned down on purpose, each for its reason. -->
+<lint>
+    <!-- English only for now, inline as the iOS app's strings are; resources come with a first translation. -->
+    <issue id="SetTextI18n" severity="ignore" />
+    <!-- KeyInputView is made in code only, never inflated from XML. -->
+    <issue id="ViewConstructor" severity="ignore" />
+    <!-- The square icon is the iOS app's; an adaptive icon (foreground and background) is a design task, docs/clients-plan.md. -->
+    <issue id="IconLauncherShape" severity="ignore" />
+</lint>

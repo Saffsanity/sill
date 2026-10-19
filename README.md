@@ -11,6 +11,9 @@ with Direct Wireless Connection when they share no network, or through your
 own VPN, such as Tailscale, with Remote Access. There is no account and no
 server in between.
 
+More systems are in development in this repository
+([below](#other-systems-in-development)).
+
 **[getsill.app](https://getsill.app)** ·
 [Download for Mac](https://getsill.app/download) ·
 [Support](https://getsill.app/support) ·
@@ -80,6 +83,11 @@ Sill has layouts of its own.
   Sill sends what you copied on your device to your Mac's clipboard, where you
   press ⌘V. Sill never reads your device's clipboard by itself, and copies a
   password manager marks as concealed stay on your Mac.
+- **Keep Screen On** (in this repository, not in a release yet), in the
+  settings panel's This iPhone or This iPad group and on by default, keeps
+  your device's screen from dimming or locking while it shows your Mac, so a
+  window you only watch stays in view. Turn it off and Auto-Lock works as it
+  does everywhere else.
 - **On iPhone Duo**, Sill follows the hinge: open it flat and your Mac fills
   the inner display; half open, the picture is above the fold with a trackpad
   and keys below; closed, Sill runs on the cover display. Nothing you touch
@@ -137,6 +145,27 @@ network, over the cable and over Direct Wireless Connection are not encrypted,
 and anything that reaches your Mac there can connect without pairing: update
 it.
 
+## Other systems (in development)
+
+Sill on more systems, in `clients/` and not released yet. None of it has run
+on a real device or against a real Mac, so treat it as a preview:
+[docs/clients-plan.md](docs/clients-plan.md) says what was checked, how, and
+the steps still to try on devices. These are written in Kotlin, around one
+shared core that speaks Sill's protocol, where the Mac and iPhone and iPad apps
+are Swift.
+
+- **Sill for Android** is a client of your Mac, like the iPhone and iPad app:
+  phones, tablets and foldables on Android 10 or later. It pairs with your Mac
+  the same way (scan the code, or type its 12 digits), streams a window or the
+  Desktop decoded by the phone's own HEVC decoder, and takes touch, the
+  on-screen trackpad and keys, a hardware keyboard (Ctrl as ⌘), Aa, the Apps
+  drawer, the Settings panel, the Mac's menus and Keep Screen On. Its screens
+  are drawn from the iPhone and iPad app's own design. On a foldable it reads
+  the fold as Sill does on iPhone Duo: half open, the picture above the fold
+  with the trackpad and keys below; open flat, the whole inner screen. It is
+  checked at the Galaxy Z Fold 8's 4:3 inner screen and other Folds, Flips,
+  Pixel Folds and Razrs. It uses only Android's own APIs.
+
 ## Tips
 
 Sill is free, with no ads, no tracking and no subscription. If it is useful to
@@ -184,6 +213,17 @@ The iPhone and iPad app:
    Mac. The first time, a Sill for Mac built from this repository asks you to
    pair: scan the code it shows, or connect the device with a USB cable.
 
+The Android client ([above](#other-systems-in-development)) builds with
+Gradle in `clients/`: a JDK 17 or later, and the Android SDK (`ANDROID_HOME`).
+`./gradlew test` runs its tests and the shared core's, with no device;
+[docs/clients-plan.md](docs/clients-plan.md) has every check, and
+[docs/ui-parity.md](docs/ui-parity.md) how its screens follow the iPhone and
+iPad app's.
+
+```
+cd clients && ./gradlew :android:assembleDebug
+```
+
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest: every command-line
 flag, the test tools and the simulator harness, permissions and how to reset
 them, Remote Access, troubleshooting and releases.
@@ -193,7 +233,8 @@ them, Remote Access, troubleshooting and releases.
 Issues are welcome: bug reports, questions and ideas. For a pull request, keep
 to the conventions and decisions in [CLAUDE.md](CLAUDE.md): Swift and Apple
 frameworks only, no third-party dependencies, nothing that needs a server, and
-latency before picture quality. Open an issue before starting anything large.
+latency before picture quality. `clients/` is the exception that
+docs/BRIEF.md records: Kotlin, with only each platform's own APIs. Open an issue before starting anything large.
 Before a pull request, `Tests/checks/run-all.sh` runs the same pure checks as
 CI, in about five minutes and with no device.
 Contributions are accepted under the project's license. Please report a

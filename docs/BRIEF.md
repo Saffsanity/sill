@@ -55,6 +55,11 @@ grid.
   Companion needs Screen Recording + Accessibility permissions.
 - License: Apache-2.0, final since the repository went public on 2026-09-26
   (LICENSE).
+- Android (2026-10-18, docs/clients-plan.md): a client of the Mac, never a
+  host. One Kotlin/JVM core (`clients/core`) speaks the wire, as StreamProtocol
+  does for the Mac and the iPad, checked against vectors the real Swift types
+  write; the app uses MediaCodec and platform APIs alone, no third-party
+  dependency. The Mac and iPad side is unchanged: Swift, Apple frameworks only.
 
 ## UI (mockups on the design canvas)
 

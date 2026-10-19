@@ -41,8 +41,8 @@ body:
   - type: input
     id: device
     attributes:
-      label: Your iPhone or iPad and its iOS or iPadOS
-      placeholder: iPad mini (A17 Pro), iPadOS 26.1
+      label: Your device and its system
+      placeholder: iPad mini (A17 Pro), iPadOS 26.1; or Pixel 9, Android 16
     validations:
       required: true
   - type: input
@@ -50,8 +50,8 @@ body:
     attributes:
       label: The Sill app's version
       description: >-
-        Settings › General › iPhone Storage (or iPad Storage) › Sill shows it. Sill's log on your
-        Mac names it too, on its "Client hello" line.
+        Settings › General › iPhone Storage (or iPad Storage) › Sill shows it; on Android, Settings ›
+        Apps › Sill. Sill's log on your Mac names it too, on its "Client hello" line.
   - type: dropdown
     id: route
     attributes:

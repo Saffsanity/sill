@@ -139,7 +139,7 @@ private struct GeneralPane: View {
             Section {
                 Toggle("Direct wireless connection", isOn: $settings.config.directWireless)
             } footer: {
-                Footnote("Lets your iPhone and iPad connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off.")
+                Footnote("Lets your devices connect when they’re near this Mac, even without a shared Wi\u{2011}Fi network, the way AirDrop does. While it’s on, this Mac’s Wi\u{2011}Fi keeps stepping away from your network, so streaming over Wi\u{2011}Fi can stutter. Anyone nearby with Sill can find this Mac; only devices you paired can connect, unless Require pairing is off.")
             }
             // The clipboard both ways (HostClipboard): at once, no restart. Each device has its own
             // switch too. macOS's answer is read with the permissions (once a second while this pane
@@ -395,12 +395,12 @@ private struct PermissionsPane: View {
             Section {
                 PermissionRow(title: "Screen Recording", allowed: permissions.screenRecording,
                               // Not "on this network": a device connected over Direct Wireless shares none.
-                              explanation: "Lets Sill capture the windows you pick on your iPhone or iPad. Nothing is recorded or saved; frames go straight to your devices.",
+                              explanation: "Lets Sill capture the windows you pick on your devices. Nothing is recorded or saved; frames go straight to your devices.",
                               button: model.settings.askedScreenRecording ? "Open System Settings…" : "Allow…") {
                     permissions.requestScreenRecording()
                 }
                 PermissionRow(title: "Accessibility", allowed: permissions.accessibility,
-                              explanation: "Lets your iPhone or iPad click, scroll and type on this Mac, and lets Sill move and size the window it streams.",
+                              explanation: "Lets your devices click, scroll and type on this Mac, and lets Sill move and size the window it streams.",
                               button: model.settings.askedAccessibility ? "Open System Settings…" : "Allow…") {
                     permissions.requestAccessibility()
                 }
@@ -420,13 +420,13 @@ private struct PermissionsPane: View {
                         Button("Open Local Network…") { permissions.openPrivacyPane("Privacy_LocalNetwork") }
                     } label: {
                         Text("Local Network")
-                        Text("If your iPhone or iPad can’t find this Mac, allow Sill in Privacy & Security › Local Network.")
+                        Text("If a device can’t find this Mac, allow Sill in Privacy & Security › Local Network.")
                     }
                 }
             }
             if permissions.allGranted {
                 Section {
-                    Label("You’re all set. Open Sill on your iPhone or iPad.", systemImage: "checkmark.seal.fill")
+                    Label("You’re all set. Open Sill on your device.", systemImage: "checkmark.seal.fill")
                 }
             }
         }

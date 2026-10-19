@@ -170,7 +170,7 @@ for close in closes { for byThisProof in [true, false] {
     quietAll += 1
     let reason = PairingWindow.closedReason(close, stoppedByThisProof: byThisProof)
     let words = cardWords(reason)
-    let menuFirst = words.contains("choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again")
+    let menuFirst = words.contains("choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again")
     if AskLimits.quiets(close) ? menuFirst : (menuFirst || words.hasSuffix("for a new one.")) { quietHonest += 1 }
     else { print("  \(close) (\(byThisProof)): \(reason) → \(words)") }
 } }

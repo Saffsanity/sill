@@ -137,6 +137,9 @@ struct StreamScreen: View {
     /// The DEBUG harness's stand-in for the camera (the simulator has none); nil on a device.
     private var scannerOverride: CodeScanner.Mode? = nil
     @Environment(\.scenePhase) private var scenePhase
+    /// Keep Screen On (the Settings panel's This iPad group), and this screen's claim on it.
+    @AppStorage(StreamClient.keepScreenOnKey) private var keepScreenOn = true
+    @State private var awakeID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The stream panel's size in points, reported by whichever layout is showing.
     @State private var panelSize: CGSize = .zero
@@ -349,6 +352,7 @@ struct StreamScreen: View {
             // A fresh connection starts on the Desktop (the client asks for it as soon as the host
             // reports nothing streaming), so the drawer stays closed until the user opens it.
             sendViewport()
+            ScreenAwake.set(awakeID, on: keepScreenOn)
             // A link that came in before this connection did waits here now.
             if client.pendingLink != nil { openLinkOverlay() }
             #if DEBUG
@@ -404,7 +408,10 @@ struct StreamScreen: View {
         .onDisappear {
             tourWait?.cancel()
             tourWait = nil
+            ScreenAwake.set(awakeID, on: false)
         }
+        // Keep Screen On: iOS's idle timer off while this stream screen shows and the switch is on.
+        .onChange(of: keepScreenOn, initial: true) { _, on in ScreenAwake.set(awakeID, on: on) }
     }
 
     // MARK: The link's line
@@ -2113,5 +2120,19 @@ extension PhonePortraitLayout.Streaming {
         case .desktop: self = .desktop
         case .window: self = .window
         }
+    }
+}
+
+/// Keep Screen On: iOS's idle timer is off while any stream screen, in any of Sill's windows, shows
+/// with the switch on (`StreamClient.keepScreenOnKey`), as a video player's is while it plays, so a
+/// stream only watched never dims or locks; every screen that goes away gives its claim back. The
+/// idle timer is the app's alone, and iOS ignores it while Sill is in the background.
+@MainActor enum ScreenAwake {
+    private static var claims = Set<UUID>()
+
+    static func set(_ id: UUID, on: Bool) {
+        if on { claims.insert(id) } else { claims.remove(id) }
+        let off = !claims.isEmpty
+        if UIApplication.shared.isIdleTimerDisabled != off { UIApplication.shared.isIdleTimerDisabled = off }
     }
 }

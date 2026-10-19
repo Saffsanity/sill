@@ -391,14 +391,14 @@ check("copy: Pairing with Mac mini…, …over the cable…", C.pairing(mac: min
       && C.pairing(mac: mini, cable: true) == "Pairing with Mac mini over the cable\u{2026}")
 check("copy: Paired with Mac mini over the cable.", C.pairedOverCable(mac: mini) == "Paired with Mac mini over the cable.")
 check("copy: Mac mini is showing a code. Point this iPad at it.", C.showing(mac: mini, device: "iPad") == "Mac mini is showing a code. Point this iPad at it.")
-check("copy: openOnMac", C.openOnMac(mac: mini) == "Mac mini didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again.")
+check("copy: openOnMac", C.openOnMac(mac: mini) == "Mac mini didn\u{2019}t show a code. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again.")
 check("copy: locked", C.locked(mac: mini) == "Unlock Mac mini, then tap it again.")
 check("copy: removed", C.removed(mac: mini, device: "iPad") == "Mac mini removed this iPad. Tap it to pair again."
       && C.removed(mac: mini, device: "iPhone") == "Mac mini removed this iPhone. Tap it to pair again.")
 check("copy: pairingRequired", C.pairingRequired(mac: mini, device: "iPad") == "Mac mini now asks devices to pair. Tap it to pair this iPad.")
-check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+check("copy: the home card's errors", C.stopped(mac: mini) == "Mac mini stopped pairing after too many wrong codes. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again."
       && C.expired(mac: mini) == "That code expired. Tap Mac mini for a new one."
-      && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again."
+      && C.closed(mac: mini) == "That code no longer works. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again."
       && C.proofFailed(mac: mini) == "Pairing didn\u{2019}t finish: Mac mini couldn\u{2019}t show it knows the code. Tap it to try again.")
 
 // A refused proof at home (the security review, 2026-09-27): kind 20's reason → the card's words.
@@ -421,7 +421,7 @@ func refusalWords(_ r: R) -> String {
     }
 }
 check("refusal: stopped and closed send the person to the Sill menu before a tap",
-      [R.stopped, .closed].allSatisfy { refusalWords($0).contains("choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap Mac mini again") })
+      [R.stopped, .closed].allSatisfy { refusalWords($0).contains("choose Pair a Device\u{2026} in the Sill menu, then tap Mac mini again") })
 check("refusal: expired, and only expired, says a tap alone gets a new code",
       refusalWords(.expired).hasSuffix("Tap Mac mini for a new one.") && ![R.stopped, .closed].contains { refusalWords($0).contains("for a new") })
 check("copy: no answer", C.noAnswer(mac: mini) == "Mac mini didn\u{2019}t answer. Check that Sill is open on it, then tap it again.")
@@ -483,7 +483,7 @@ check("overlay: a code is said to show only when the Mac answered shown",
 check("overlay: \"Mac mini is showing a code now.\" for shown", P.overlayLine(.shown, mac: mini, device: "iPad") == "Mac mini is showing a code now.")
 check("overlay: no code by itself (openOnMac, refused, a second busy, an ok it does not take): the Mac's menu",
       [P.AskAnswer.openOnMac, .refused, .busy(2), .invalid, .pairedOverCable].allSatisfy {
-          P.overlayLine($0, mac: mini, device: "iPad") == "Mac mini didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+          P.overlayLine($0, mac: mini, device: "iPad") == "Mac mini didn\u{2019}t show a code by itself. On the Mac, choose Pair a Device\u{2026} in the Sill menu."
       })
 check("overlay: locked: \"Unlock Mac mini, then choose Pair This iPad… again.\"",
       P.overlayLine(.locked, mac: mini, device: "iPad") == "Unlock Mac mini, then choose Pair This iPad\u{2026} again.")

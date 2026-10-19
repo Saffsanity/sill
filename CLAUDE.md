@@ -8,6 +8,75 @@ Formerly winstream; the folder still carries the old name.
 
 ## Current step
 
+**Keep Screen On, Sill.app's device words and the review (2026-10-19, on `client-android`).**
+Noah: "Android/IOS: app should have an option to keep the phone awake": Keep Screen On in the
+Settings panel's This device group, on by default (`Sill.keepScreenOn`; iOS's idle timer through
+`ScreenAwake` in StreamScreen.swift, Android's `FLAG_KEEP_SCREEN_ON`; docs/ui-parity.md). Then
+"hosts should no longer mention only iPads and iPhones": Sill.app says "device" where it meant any
+(the menu's and Settings › Devices' "Pair a Device…", the window "Pair a Device", "A Device Needs
+Sill Updated", the footnotes, ClipboardPolicy.macFootnote), keeping "iPhone or iPad" where only one
+can (the USB cable's pairing); the iOS app's and the core's pairing words name the new item, and the
+checks that hold them changed with them. A device on this build facing Sill for Mac 0.5.1 is told
+"Pair a Device…", which that menu does not have. From the code review of 2026-10-19, in this
+branch: the core's remote dial uses the first connection that is ready (1.3 s against 10.0 s);
+Android lets held keys go on focus loss and sends ⇧Return, ⇧Tab and ⌥Delete as keys
+(`HardwareKeys`). docs/clients-plan.md's decision 11: a client's binary is never released on a
+`v*` tag or as the latest release (Sill.app's update check, the download link, release.yml). README
+gains "Other systems (in development)"; SECURITY.md and the issue forms name Android.
+**Untested, for Noah:** Keep Screen On on an iPhone, an iPad and an Android phone.
+
+**UI parity and foldables (2026-10-18, on `android-client`; docs/ui-parity.md).** The request: the
+Android, Windows and Linux apps at "1:1 visual and functional parity" with the Apple ones, reusing
+their tokens, and "all foldable phones, including the new 4:3 Z Fold 8". Nothing under iOSClient/,
+Sources/ or Package.swift changed: the iOS app is the source of truth, read by tools.
+- `clients/design/generate.sh` (CI: `--verify`): `Tokens.kt` from the iOS Swift (palette, metrics,
+  literal sizes, curves), `ui-vectors.json` from PhonePortraitLayout, HostSettingsLedger and
+  DuoPosture compiled with swiftc, and `check_copy.py` (the core's words still the iOS app's).
+- `core/ui`: StreamLayout, StreamUi, SettingsLedger, PadTracker, KeyRow, DuoPosture/FoldInfo,
+  Symbols, Copy; a settings change's token comes from the session alone.
+- Android: every screen drawn from it, Android's insets, gesture exclusion, 48 dp targets, Back;
+  foldables through the system's window extensions by reflection (no AndroidX), else the hinge
+  sensor, mapped to the iOS app's FoldInfo (no fold: the iPad's inferred rule).
+- Verified: core and Android JVM tests, lint, the APK, `generate.sh --verify`. **Untested:** any
+  device or emulator (no KVM here): docs/ui-parity.md's F1–F6, F1 first (does a Fold 8 report its fold).
+
+**The Android client (2026-10-18, branch `android-client` from main; docs/clients-plan.md has the
+design, the decisions, every check and what only devices can show).** The request: "add full
+support for Windows and Android" with no regressions on the Apple platforms, then each system on
+its own, Android first (the Windows client and the Windows and Linux hosts follow in their own
+changes). Sill has no platform layer (the host is ScreenCaptureKit, VideoToolbox, Accessibility and
+Network.framework end to end), so Android is a **client of the Mac** over **one Kotlin/JVM core**
+(`clients/`, a Gradle build). Nothing under Sources/, iOSClient/, Package.swift, Scripts/ or Tests/
+changed. ci.yml only gained `clients/**` in paths-ignore, and clients.yml builds the clients.
+- `clients/core` (standard library only): the wire field for field (`Payloads`, `StreamMessage`,
+  `Json` written out), SafeText, SillVersion, the address parser (inet_* written out), pairing
+  crypto, the hand-built certificate, recognition tags, pairing links, kind 18's signature, TLS 1.3
+  with the pin as the whole of trust (one ALPN, SNI "sill", a fresh context per dial: no
+  resumption), one-shot mDNS from an ephemeral port, the session (hello first, the Mac's caps, ping
+  0.25 s, liveness max(6 s, 4 × rtt), stats, auto-Desktop, keyframe gating, 8 ms move coalescing),
+  pairing (ask then code, link, Add a Mac by address), saved Macs, GoodbyePolicy, the redial
+  schedule, `SillClient` (what the app is a view over), key maps, `TouchGestures`, `HevcSps`,
+  `ReplayingRouter`. Test fixtures: `ModelHost` (a model of the Mac's TLS door, TEST ONLY) and
+  `HevcSample`.
+- `clients/android`: platform APIs only (no AndroidX), minSdk 29, MediaCodec on a SurfaceView, the
+  key sealed by an Android Keystore key, `sill://pair` links behind a confirmation.
+- Wire vectors from the Mac's own code: `clients/wire-vectors/generate.sh` compiles
+  Sources/StreamProtocol with swiftc (on Linux too: 13 files as they are, Remote.swift without its
+  signing) into `vectors.json`. `--verify` checks by content, `--check` has Swift decode Kotlin's
+  encodings. **A change to a StreamProtocol payload regenerates vectors.json and updates
+  Payloads.kt in the same commit** (clients.yml fails otherwise).
+- Verified on Linux (docs/clients-plan.md, "How it was checked"): the 57 payloads both ways
+  against the Swift types; SafeText on every scalar (only Unicode 15.1/16.0's 5,812 new ones
+  differ); the pairing vectors; openssl on the certificate, kind 18's signature and TLS both ways;
+  52 core tests, 20 full runs in a row clean (repetition found two real bugs: a fast refusal's
+  timer race and a refused key read as a lost link), the whole client against the model Mac; a
+  live python-zeroconf responder found; Android debug and release builds, lint clean with
+  checkDependencies.
+- **Untested, for Noah:** everything against a real Mac and on a real Android device
+  (docs/clients-plan.md's A1–A6; A1 first: that Sill.app's Network.framework takes Android's client
+  certificate). clients.yml has not run on GitHub yet. Not built: the Mac's menus and gestures in
+  the UI, an adaptive icon, a foreground service, a signed release.
+
 **The clipboard both ways (2026-10-14, branch `clipboard` from main at 985a733; issue #64; PR #78;
 the plan, its open questions with the default taken for each, the results and the review's fixes are
 in `docs/clipboard-plan.md`).** Noah: work on the clipboard (after #67/#68, #69, #59, #57, #58), text
@@ -5469,6 +5538,13 @@ good.
   active keyboards) must add its category and reason there before the next
   upload. New files need their four pbxproj entries by hand.
   Swift 5 language mode.
+- `clients/` — the Android client (docs/clients-plan.md): a Gradle build (`gradlew`, Gradle
+  8.14.3 pinned by checksum) of `core` (the shared Kotlin core: the wire, pairing, TLS, mDNS, the
+  session, `SillClient`; test fixtures `ModelHost` and `HevcSample`) and `android` (included only
+  with an Android SDK). `clients/wire-vectors/` makes the fixtures: `generate.sh`
+  (vectors.json from Sources/StreamProtocol by swiftc; `--verify`, `--check`), `same_vectors.py`,
+  `strip_remote.py`, `mdns_fixture.py` (python-zeroconf), `hevc_sample.sh` (libx265).
+  `.github/workflows/clients.yml` runs them and builds the APK.
 - `docs/BRIEF.md` — product decisions, competition, scope, risks.
 - `docs/DEVELOPMENT.md` — building, running and testing from source; the
   README's developer material until 2026-09-25, so a plan's "README" means a
@@ -5621,6 +5697,9 @@ Scripts/release-ios.sh                  # the iOS app for App Store Connect: arc
 Scripts/release-ios.sh --bump --upload  # Noah: the next build to TestFlight (docs/release-checklist.md, TestFlight; --privacy-report, --print-version)
 Scripts/make-dmg.sh --sign - .build/Sill.app .build/Sill.dmg   # the download's disk image of any build, ad hoc (release.sh makes the real one)
 python3 -m http.server 8000 --directory site   # the website at http://localhost:8000
+cd clients && ./gradlew :core:test      # the Android client's core against the model Mac (JDK 17+; docs/clients-plan.md)
+cd clients && ./gradlew :android:lintDebug :android:assembleDebug   # the APK (an Android SDK in ANDROID_HOME)
+clients/wire-vectors/generate.sh --verify && clients/wire-vectors/generate.sh --check   # the Kotlin wire against the Mac's Swift types
 Scripts/encoder-check/run.sh            # the encoder checks that never touch an encoder (safe while Sill.app streams)
 Scripts/menu-check/run.sh               # the menus' reader and mirror against Scripts/menufixture.swift, no host, no encoder (needs Accessibility)
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
@@ -6093,7 +6172,9 @@ device keeps working with Macs from the first public build on, or each says why
 ## Conventions
 
 - Swift, Apple frameworks only. No third-party dependencies unless a decision
-  in `docs/BRIEF.md` says so. Zero operating costs is a hard rule.
+  in `docs/BRIEF.md` says so. Zero operating costs is a hard rule. `clients/`
+  (Android) is Kotlin: the core uses the standard library alone, the Android app
+  platform APIs.
 - Threading in the spike is by hand: capture queue → VT callback thread →
   network queue. Keep it explicit and commented rather than reaching for actors
   until the design settles.
