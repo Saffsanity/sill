@@ -158,3 +158,27 @@ Sill.Viewer.exe --identity <dir> --host <Wi-Fi address>:7455 --host <Tailscale n
 ```
 
 The addresses are tried in order, so one shortcut works at home and away.
+
+## Security notes
+
+**The device's certificate goes out before the Mac's key is judged (accepted, 2026-10-19).** In TLS
+1.3 the client's certificate travels in its last handshake flight, encrypted to the server. SChannel
+sends it there and only then hands the Mac's certificate to .NET's validation callback
+(`SillTls.ConnectAsync`, `RemoteCertificateValidationCallback`), so a Mac the device has not pinned
+(a link naming another key, an impostor at a saved address) learns this PC's certificate before the
+handshake is refused. The test `ALinkToAnotherKeySendsNothing` pins this down: the stand-in Mac sees
+the device's fingerprint and nothing else. Accepted, because:
+
+- What it learns is a public key and the certificate's fixed fields (subject `CN=Sill for Windows`,
+  a random serial, validity from the day before the key was made). A public key is not a secret: it
+  proves nothing to anyone without the private key, which never leaves `device.p12`.
+- The key is Sill's alone, made by Sill for this purpose (`DeviceIdentity`), so it links this PC to
+  nothing outside Sill. At most an impostor can recognise the same PC trying it again.
+- Nothing else is sent. The handshake fails in the callback, before any kind 19, hello or input: the
+  Mac must prove the pinned key (TLS 1.3's CertificateVerify, signed with its private key) before the
+  first byte of `sill/1` or `sill-pair/1`. On the typed code's path the pin is open, and the
+  pairing proofs bind both keys, as on iOS.
+- On the iPhone and iPad (`RemoteTLS.options`, `sec_protocol_options_set_verify_block`) Network.framework
+  calls the verify block when the Mac's certificate arrives, so a refused Mac never gets the device's
+  certificate. That order is not available from .NET's SslStream on SChannel; another TLS stack
+  (a bundled OpenSSL, say) would buy it at the cost of a dependency, for a key that is already public.
