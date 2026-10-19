@@ -5575,6 +5575,19 @@ good.
   pans); `run.sh build`, `run.sh UDID keys SPEC`, `run.sh UDID point SCRIPT`;
   only a booted simulator of your own, by UDID (its README has what it showed:
   after its keys UIKit there counts a hardware keyboard for good).
+- `Tests/devicerig/` — TEST ONLY: an XCUITest rig for the Sill installed on a
+  physical iPad or iPhone (`DeviceRig.xcodeproj`: one UI testing bundle and no
+  host app, `XCUIApplication(bundleIdentifier:)`, public XCTest API only;
+  `DeviceRigUITests/DeviceRig.swift`), run from a script of steps: taps, holds
+  of a given length, a finger's drags and flicks, a pinch, the iPad's pointer,
+  typed text and keys, screenshots, `find`, the accessibility tree; `run.sh
+  build`, `run.sh UDID 'SCRIPT' [Sill's launch arguments]` (a booted simulator
+  of your own too), its shots and trees out of the result bundle through
+  `xcresulttool export attachments`. `lanrelay.py` (TEST ONLY) relays the USB
+  cable's address to a loopback synthetic host, prints what the device sends
+  (each scroll's sign and count) and drops a window's pick, a light's press
+  and an app's launch. A device asks its owner for Touch ID or Face ID before
+  XCTest may drive it (its README).
 
 ## Build and run
 
@@ -5621,6 +5634,7 @@ Scripts/menu-check/run.sh               # the menus' reader and mirror against S
 Scripts/restore-probe/run.sh            # TEST ONLY: a window Sill sized goes back, against a window of its own (needs Accessibility, Screen Recording, an unlocked screen)
 Tests/duorig/run.sh UDID pose book && Tests/duorig/run.sh UDID shot book book.png   # TEST ONLY: fold and photograph an iPhone Duo simulator (laptop, flat-portrait, flat-landscape, closed-upright, closed-side)
 Tests/keyrig/run.sh UDID keys 29,04,e3:down,1a,e3:up && Tests/keyrig/run.sh UDID point 'move 300,200|wheel -3'   # TEST ONLY: Esc, a and ⌘W from a hardware keyboard, then a wheel's notch, inside a simulator of your own
+Tests/devicerig/run.sh UDID 'launch; wait 4; shot first; drag 560,300 560,500 0.1; hold 156,79 1.5; shot lights; terminate' -SillConnect 169.254.x.y:PORT   # TEST ONLY: drive Sill on a device (a loopback synthetic host behind Tests/devicerig/lanrelay.py on the cable's address); the device's owner allows UI Automation with Touch ID or Face ID first
 SILL_TEST_ENCODER_RECYCLE=0 swift run -c release SillHost   # =0 keeps every hardware session, =1 replaces one in the slow state, as by default (A/B on the real Desktop: --synthetic moves every frame and never reaches the slow state)
 Scripts/encoder-check/verify-hardware.sh harness   # USES THE HARDWARE ENCODER; skips each run while a device is connected
 ```

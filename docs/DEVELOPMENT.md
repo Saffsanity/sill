@@ -1104,6 +1104,28 @@ the host prints what each key would post. Only on a simulator of your own:
 after its keys, UIKit there counts a hardware keyboard for good. Its README
 has what it showed.
 
+### The device rig
+
+`Tests/devicerig/run.sh UDID 'launch; wait 4; drag 560,300 560,500 0.1; hold
+156,79 1.5; shot lights; terminate' -SillConnect ADDRESS:PORT` drives the Sill
+installed on a physical iPad or iPhone with XCUITest (TEST ONLY: a UI testing
+bundle with no host app, which finds Sill by its bundle identifier and never
+builds or installs it): taps, holds of a given length, a finger's drags and
+flicks, a pinch, the iPad's pointer, typed text and keys, screenshots
+(`shots/NAME.png`, exported from the result bundle) and the accessibility tree.
+`run.sh build` builds the runner; a booted simulator of your own takes a script
+too. A device asks its owner for Touch ID or Face ID ("Enable UI Automation")
+before XCTest may drive it; unanswered, a run ends after 60 s with "Timed out
+while enabling automation mode". To stream from a synthetic host on this
+Mac, which posts nothing, `Tests/devicerig/lanrelay.py --listen
+169.254.x.y:0 --to 127.0.0.1:PORT` relays the USB cable's address (the
+interface with a 169.254 address) to the host's loopback port; it prints what
+the device sends, a scroll's sign and count included, and drops a window's
+pick, a light's press and an app's launch, which would act on this Mac's real
+windows and apps. Its README has the steps, the console (devicectl's
+`--console`, then a script that starts with `activate`), what it showed and its
+limits.
+
 ## Measuring latency
 
 Each connected device reports what it sees every second, and the host logs
@@ -1331,7 +1353,8 @@ record field by field.
 - `Tests/checks/`: the pure checks (above). `Tests/touchrig/`: the touch rig
   (above). `Tests/duorig/`: folds and turns the iPhone Duo simulator (TEST
   ONLY, above). `Tests/keyrig/`: a hardware keyboard and mouse for the
-  simulator (TEST ONLY, above). `.github/`: the CI, release and TestFlight workflows, and the
+  simulator (TEST ONLY, above). `Tests/devicerig/`: Sill on a device driven by
+  XCUITest, and a relay to a test host on the cable (TEST ONLY, above). `.github/`: the CI, release and TestFlight workflows, and the
   Sponsor button.
 - `site/`: the website, plain HTML for GitHub Pages: home, download, privacy
   policy, terms of service and support, with the App Store badge
