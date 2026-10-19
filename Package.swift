@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Sill",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    platforms: [.macOS(.v14), .iOS(.v16)],
     products: [
         .library(name: "StreamProtocol", targets: ["StreamProtocol"]),
         // The CLI keeps the product name SillHost, so `swift run -c release SillHost …` and

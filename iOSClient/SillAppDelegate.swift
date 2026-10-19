@@ -13,6 +13,7 @@ final class SillAppDelegate: UIResponder, UIApplicationDelegate {
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
         guard builder.system == .main else { return }
+        #if compiler(>=6.2)
         guard MacMenuHub.hasMenuBar, #available(iOS 26.0, *) else {
             #if DEBUG
             print("menubar: built: nothing inserted (not an iPad on iPadOS 26)")
@@ -20,9 +21,15 @@ final class SillAppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
         MacMenuBar.build(builder)
+        #else
+        #if DEBUG
+        print("menubar: built: nothing inserted (this SDK has no iPadOS 26 menu bar)")
+        #endif
+        #endif
     }
 }
 
+#if compiler(>=6.2)
 /// Where the Mac's menus go in the iPad's menu bar, and how (docs/menu-bar-plan.md §7.4, Q1).
 ///
 /// Every insertion is one `insertElements` call with all the Mac's menus in their order, next to an
@@ -147,3 +154,4 @@ enum MacMenuBar {
     }
     #endif
 }
+#endif

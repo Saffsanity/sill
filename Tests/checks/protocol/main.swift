@@ -212,7 +212,7 @@ let der2 = SelfSignedCertificate.make(key: key)!
 check("certificate: rebuilt from the same key, a new serial and CN, the same fingerprint",
       der2 != der && SPKI.fingerprint(of: SecCertificateCreateWithData(nil, der2 as CFData)!) == SPKI.fingerprint(of: key))
 let identity = RemoteIdentity(privateKey: key)
-check("RemoteIdentity: SecIdentityCreate and sec_identity_create accept it", identity != nil)
+check("RemoteIdentity: the certificate and key make a TLS identity", identity != nil)
 check("RemoteIdentity: fingerprint is the SPKI hash of the public point",
       identity?.fingerprint == SPKI.fingerprint(point: RemoteKey.publicPoint(key)!))
 check("SPKI DER is 91 bytes", SPKI.der(point: RemoteKey.publicPoint(key)!).count == 91)

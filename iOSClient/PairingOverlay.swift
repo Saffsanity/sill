@@ -82,8 +82,8 @@ struct PairingOverlay: View {
         }
         // The Mac's answer to that ask, spoken: VoiceOver's focus is on the title, and a line that
         // says no code is showing, or why, must be heard.
-        .onChange(of: client.overlayAskLine) { _, line in
-            if let line, line != DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac) { AccessibilityNotification.Announcement(line).post() }
+        .sillOnChange(of: client.overlayAskLine) { _, line in
+            if let line, line != DiscoveryPolicy.HomeCopy.overlayAsking(mac: mac) { SillAccessibility.announce(line) }
         }
         .task(id: client.pairing) {
             // Paired: says so, then fades after a second; the stream never stopped.
@@ -176,7 +176,7 @@ struct PairingOverlay: View {
             PairingField(prompt: "0000 0000 0000", label: "Code", text: $code, keyboard: PairingField.codeKeyboard, submit: .go, monospaced: true)
                 .focused($codeFocused)
                 .onSubmit(pairTyped)
-                .onChange(of: code) { _, typed in
+                .sillOnChange(of: code) { _, typed in
                     let grouped = PairingField.grouped(typed)
                     if grouped != typed { code = grouped }
                 }
@@ -216,7 +216,7 @@ struct PairingOverlay: View {
             Label("Paired with \(name).", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.text)
-                .onAppear { AccessibilityNotification.Announcement("Paired with \(name).").post() }
+                .onAppear { SillAccessibility.announce("Paired with \(name).") }
         case .failed(let p):
             ProblemLine(text: p.text)
         case .idle:
