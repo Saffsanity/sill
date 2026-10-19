@@ -351,22 +351,10 @@ final class WindowCatalog {
     /// Sorted by display name, first bundle ID wins. Thread-safe (FileManager + Bundle only).
     nonisolated private static func findInstalledApps() -> [(name: String, bundleID: String, path: String)] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let dirs = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities",
-                    home.appendingPathComponent("Applications").path]
-        var seen: Set<String> = []
-        var apps: [(name: String, bundleID: String, path: String)] = []
-        for dir in dirs {
-            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            for name in names where name.hasSuffix(".app") {
-                let url = URL(fileURLWithPath: dir).appendingPathComponent(name)
-                guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !seen.contains(id) else { continue }
-                seen.insert(id)
-                var display = FileManager.default.displayName(atPath: url.path)
-                if display.hasSuffix(".app") { display.removeLast(4) }
-                apps.append((display, id, url.path))
-            }
-        }
-        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // Both Utilities folders are read twice, as a folder inside /Applications or /System/Applications
+        // and as given: harmless, since the first bundle with an ID wins and the second read finds the same ones.
+        return InstalledApps.find(in: ["/Applications", "/Applications/Utilities", "/System/Applications",
+                                       "/System/Applications/Utilities", home.appendingPathComponent("Applications").path])
     }
 
     // MARK: Image encoding (thread-safe)
