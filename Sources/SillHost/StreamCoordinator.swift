@@ -878,6 +878,17 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            if source == .desktop, let pick = Wire.decode(DesktopPick.self, from: message.payload), let displayID = pick.display {
+                let res = catalog.pickDesktop(displayID)
+                if res.found, res.changed, active == .desktop {
+                    if switching {
+                        pickArrivedWhileSwitching = .desktop
+                    } else {
+                        await select(.desktop)
+                    }
+                    return
+                }
+            }
             // A window picked comes forward on the Mac, which closes a view a gesture opened; the
             // Desktop picked (as a device does before a gesture made over a window) leaves it.
             if case .window = source { gestureChords.forget() }
@@ -2319,10 +2330,13 @@ package final class StreamCoordinator {
     // MARK: Catalog to clients
 
     private func listMessage() -> StreamMessage {
-        StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
-                      payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
-                                                      hostVersion: hostVersion, protocol: SillProtocol.current,
-                                                      gestures: TrackpadGesture.generation, clipboard: clipboard.advertised)))
+        let displays = catalog.displayInfos
+        return StreamMessage(kind: .windowList, timestamp: Date().timeIntervalSince1970, isKeyframe: false,
+                             payload: Wire.encode(WindowList(macName: macName, windows: catalog.infos, active: active, launchID: launchID,
+                                                             hostVersion: hostVersion, protocol: SillProtocol.current,
+                                                             gestures: TrackpadGesture.generation, clipboard: clipboard.advertised,
+                                                             displays: displays.isEmpty ? nil : displays,
+                                                             desktopDisplay: catalog.display?.displayID)))
     }
 
     private func broadcastList() { server.broadcast(listMessage()) }

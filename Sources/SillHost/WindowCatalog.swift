@@ -18,6 +18,8 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    private var lastDisplayInfos: [DisplayInfo] = []
+    private var lastDisplayID: CGDirectDisplayID?
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -82,6 +84,32 @@ final class WindowCatalog {
     /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
     /// exists, so pick by ID. Off by default: the default path keeps `displays.first`.
     var preferMainDisplay = false
+    /// The display a device picked for the Desktop (#91); nil, or gone, falls back to the main display.
+    var desktopDisplayID: CGDirectDisplayID?
+    /// This Mac's own displays (never Sill's virtual ones), sorted with the main display first.
+    private(set) var realDisplays: [SCDisplay] = []
+    static func isSills(_ id: CGDirectDisplayID) -> Bool { CGDisplayVendorNumber(id) == VirtualStage.vendorID }
+
+    /// Selects `id` as the display Desktop mode streams (#91). Returns `(found, changed)`.
+    @discardableResult
+    func pickDesktop(_ id: CGDirectDisplayID) -> (found: Bool, changed: Bool) {
+        guard let d = realDisplays.first(where: { $0.displayID == id }) else { return (false, false) }
+        let changed = display?.displayID != id
+        desktopDisplayID = id
+        display = d
+        return (true, changed)
+    }
+
+    /// The displays as a device sees them (#91): their names (NSScreen's), sizes in points, and
+    /// which one is the main display.
+    var displayInfos: [DisplayInfo] {
+        realDisplays.map { d in
+            let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == d.displayID }
+            let b = CGDisplayBounds(d.displayID)
+            return DisplayInfo(id: d.displayID, name: screen?.localizedName ?? "Display \(d.displayID)",
+                               width: b.width, height: b.height, main: d.displayID == CGMainDisplayID() ? true : nil)
+        }
+    }
 
     /// `--virtual-display`: the window the coordinator has moved onto the virtual display. Set right
     /// after a successful placement, cleared on release. If ScreenCaptureKit stops treating it as
@@ -242,9 +270,15 @@ final class WindowCatalog {
         guard seq > appliedSeq else { return }      // a newer refresh already landed; don't go backwards
         appliedSeq = seq
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        let mainID = CGMainDisplayID()
+        realDisplays = content.displays
+            .filter { !Self.isSills($0.displayID) }
+            .sorted { a, b in
+                if (a.displayID == mainID) != (b.displayID == mainID) { return a.displayID == mainID }
+                return a.displayID < b.displayID
+            }
+        display = realDisplays.first { $0.displayID == desktopDisplayID }
+            ?? realDisplays.first ?? content.displays.first
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop
@@ -268,8 +302,12 @@ final class WindowCatalog {
         windows = ordered
         Stats.shared.windowCount = ordered.count
         for w in ordered { announceIconIfNeeded(for: w.owningApplication) }
-        if newInfos != infos {
+        let newDisplays = displayInfos
+        let newDisplayID = display?.displayID
+        if newInfos != infos || newDisplays != lastDisplayInfos || newDisplayID != lastDisplayID {
             infos = newInfos
+            lastDisplayInfos = newDisplays
+            lastDisplayID = newDisplayID
             onWindowsChanged?(newInfos)
         }
     }

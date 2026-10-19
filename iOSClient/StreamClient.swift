@@ -220,6 +220,13 @@ final class StreamClient: ObservableObject {
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
     @Published var windows: [WindowInfo] = []          // front to back, in the host's order
+    /// The Mac's own displays (`WindowList.displays`, #91), and which one the Desktop streams now.
+    @Published var displays: [DisplayInfo] = []
+    @Published var desktopDisplay: UInt32?
+    /// What the Desktop button shows and what a tap on it picks (#91).
+    var desktopButtonState: DesktopDisplays.ButtonState {
+        DesktopDisplays.button(displays: displays, current: desktopDisplay, desktopActive: active == .desktop)
+    }
     /// The device's own arrangement of the bar (press, hold and drag), persisted per Mac. Windows
     /// the user has not arranged follow in the host's order.
     @Published private(set) var windowOrder: [UInt32] = []
@@ -3150,6 +3157,8 @@ final class StreamClient: ObservableObject {
         self.status = status
         macName = ""
         windows = []
+        displays = []
+        desktopDisplay = nil
         active = .none
         thumbnails = [:]
         icons = [:]
@@ -3177,6 +3186,23 @@ final class StreamClient: ObservableObject {
     func select(_ source: StreamSource) {
         noteAction()
         request(source)
+    }
+
+    /// Tapping the Desktop button (#91): selects the Desktop, and when the Mac has two or more
+    /// displays and the Desktop is already streaming, moves to the next display in order.
+    func tapDesktop() {
+        noteAction()
+        let next = desktopButtonState.nextDisplay
+        choicesSent += 1
+        send(.selectSource, Wire.encode(DesktopPick(display: next)))
+        #if DEBUG
+        if connection == nil {
+            DispatchQueue.main.async {
+                self.active = .desktop
+                if let next { self.desktopDisplay = next }
+            }
+        }
+        #endif
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -3657,6 +3683,8 @@ final class StreamClient: ObservableObject {
                 if self.macName != list.macName { self.macName = list.macName; self.loadWindowOrder() }
                 let previous = self.active
                 self.windows = list.windows
+                self.displays = list.displays ?? []
+                self.desktopDisplay = list.desktopDisplay
                 self.active = list.active
                 // Forget thumbnails for windows that are gone.
                 let live = Set(list.windows.map(\.id))

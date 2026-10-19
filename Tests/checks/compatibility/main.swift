@@ -187,6 +187,36 @@ let clipboardMessage = StreamMessage(kind: .clipboard, timestamp: 1, isKeyframe:
 check(StreamMessage.parseHeader(clipboardMessage)?.kind == .clipboard && clipboardMessage.count == StreamMessage.headerLength + Wire.encode(clip).count,
       "the clipboard's header parses, then the JSON")
 
+// Multi-display Desktop cycling (#91): DisplayInfo, WindowList.displays and desktopDisplay,
+// DesktopPick, and DesktopDisplays (pure).
+let d1 = DisplayInfo(id: 1, name: "Built-in Retina Display", width: 1512, height: 982, main: true)
+let d2 = DisplayInfo(id: 2, name: "Studio Display", width: 2560, height: 1440)
+let multiList = WindowList(macName: "MacBook Pro", windows: [], active: .desktop, launchID: "L",
+                           displays: [d1, d2], desktopDisplay: 1)
+check(Wire.decode(WindowList.self, from: Wire.encode(multiList)).map { $0.displays == [d1, d2] && $0.desktopDisplay == 1 } == true,
+      "WindowList.displays and desktopDisplay round-trip")
+check(decodedOld?.displays == nil && decodedOld?.desktopDisplay == nil, "an older host's list decodes with displays and desktopDisplay nil")
+let pickMain = DesktopPick(display: nil), pickTwo = DesktopPick(display: 2)
+check(json(pickMain) == #"{"desktop":{}}"# && json(pickTwo) == #"{"desktop":{},"display":2}"#,
+      "DesktopPick encodes as a StreamSource.desktop payload with optional display: \(json(pickTwo))")
+check(Wire.decode(StreamSource.self, from: Wire.encode(pickTwo)) == .desktop,
+      "an older host decodes DesktopPick(display: 2) as StreamSource.desktop")
+check(Wire.decode(DesktopPick.self, from: Wire.encode(StreamSource.desktop)) == DesktopPick(display: nil)
+      && Wire.decode(DesktopPick.self, from: Wire.encode(pickTwo)) == DesktopPick(display: 2)
+      && Wire.decode(DesktopPick.self, from: Wire.encode(StreamSource.window(9))) == nil,
+      "DesktopPick decodes only .desktop payloads, with or without display")
+check(DesktopDisplays.button(displays: [], current: nil, desktopActive: true).label == "Desktop"
+      && DesktopDisplays.button(displays: [d1], current: 1, desktopActive: true) == .init(label: "Desktop", accessibilityLabel: "Show the full Mac desktop", nextDisplay: nil),
+      "with 0 or 1 display: plain Desktop button, as today")
+check(DesktopDisplays.button(displays: [d1, d2], current: 1, desktopActive: false)
+      == .init(label: "Desktop 1", accessibilityLabel: "Show Built-in Retina Display (1 of 2)", nextDisplay: 1),
+      "with 2 displays while a window streams: Desktop 1, a tap shows display 1")
+check(DesktopDisplays.button(displays: [d1, d2], current: 1, desktopActive: true)
+      == .init(label: "Desktop 1", accessibilityLabel: "Built-in Retina Display (1 of 2), showing now. Tap for Studio Display.", nextDisplay: 2)
+      && DesktopDisplays.button(displays: [d1, d2], current: 2, desktopActive: true)
+      == .init(label: "Desktop 2", accessibilityLabel: "Studio Display (2 of 2), showing now. Tap for Built-in Retina Display.", nextDisplay: 1),
+      "while Desktop streams with 2 displays: shows which display is active and a tap moves to the next")
+
 // For H4: what cb0ec55's StreamProtocol must read.
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : nil
 if let out {
