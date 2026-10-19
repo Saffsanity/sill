@@ -75,10 +75,10 @@
   <p>Over a USB cable, your Mac shows as Wired. Tap it, and the device pairs by itself, with no code, while your Mac is unlocked.</p>
   <p>If it doesn’t work:</p>
   <ul>
-    <li><strong>Your Mac didn’t show a code.</strong> Choose Pair iPhone or iPad… in the Sill menu on your Mac, then tap your Mac again. After you click Cancel in that window, or after five wrong codes, your Mac waits 10 minutes before it opens the window for that device by itself again.</li>
+    <li><strong>Your Mac didn’t show a code.</strong> Choose Pair a Device… (Pair iPhone or iPad… in Sill for Mac 0.5.1 and earlier) in the Sill menu on your Mac, then tap your Mac again. After you click Cancel in that window, or after five wrong codes, your Mac waits 10 minutes before it opens the window for that device by itself again.</li>
     <li><strong>Your iPhone or iPad asks you to unlock your Mac.</strong> Your Mac pairs a device only while it’s unlocked.</li>
     <li><strong>Your iPhone or iPad says Update Sill beside your Mac.</strong> Your Mac has Sill for Mac 0.3.1 or earlier, from before pairing at home. Update it: <a href="download.html">download the newest version</a>, or choose the item in the Sill menu that says a newer version is available.</li>
-    <li><strong>The Sill menu on your Mac says An iPhone or iPad Needs Sill Updated.</strong> An iPhone or iPad with an older Sill tried to connect. Update Sill on it.</li>
+    <li><strong>The Sill menu on your Mac says A Device Needs Sill Updated</strong> (An iPhone or iPad Needs Sill Updated in Sill for Mac 0.5.1 and earlier). A device with an older Sill tried to connect. Update Sill on it.</li>
     <li><strong>Your iPhone or iPad says your Mac removed it.</strong> It was removed in Sill’s Settings › Devices on your Mac. Tap your Mac to pair it again.</li>
   </ul>
   <p>Sill’s Settings › Devices on your Mac lists the devices you paired. Remove one you no longer use, or have lost. Leave Require pairing on: with it off, any device on your network, and any app on your Mac, can see and control your Mac without pairing.</p>
@@ -97,7 +97,7 @@
   <p>Remote Access lets you use your Mac away from home, through your own VPN, such as Tailscale, or through a port you forward on your router. Only devices you paired can connect this way, and the connection is encrypted. Away from home, Sill starts at a lower quality that a slower connection can carry, and your iPhone or iPad tells you when the connection can’t keep up. When you get home, the session moves to your network by itself.</p>
   <ol>
     <li>On your Mac, choose Remote Access… in the Sill menu and turn on Remote Access. For a port you forward on your router instead of a VPN, also turn on Allow connections from the internet there, and forward the port it names.</li>
-    <li>Pair each iPhone or iPad once, at home (above), and connect it to your Mac at home once while Remote Access is on: that is how it learns where to find your Mac from other networks. A device that has never connected at home: on your Mac, choose Pair iPhone or iPad… in the Sill menu, then on your device, tap Add a Mac… and point it at the code.</li>
+    <li>Pair each iPhone or iPad once, at home (above), and connect it to your Mac at home once while Remote Access is on: that is how it learns where to find your Mac from other networks. A device that has never connected at home: on your Mac, choose Pair a Device… (Pair iPhone or iPad… in Sill for Mac 0.5.1 and earlier) in the Sill menu, then on your device, tap Add a Host… (Add a Mac… in Sill 0.5.1 for iPhone and iPad and earlier) and point it at the code.</li>
     <li>Away from home, turn on your VPN on your device and tap your Mac.</li>
   </ol>
   <p>If it doesn’t connect:</p>
@@ -145,6 +145,11 @@
     <li>The Desktop keeps the usual layout, with the thumbnails: your Mac’s screen keeps its shape, so a taller picture would only add black below it.</li>
     <li>On iPhone Duo, Larger Picture isn’t there: the cover display keeps its layout. With Display Zoom on, some iPhones have no room for a larger picture, and it isn’t there either.</li>
   </ul>
+
+  <!-- Other systems: in development in the repository, with no download yet; rewrite each part when that system has a release. -->
+  <h2 id="other-systems">Sill for Android, Windows or Linux</h2>
+  <p>Sill for Android, Sill for Windows, and a Windows or Linux PC as the host are in development in Sill’s <a href="https://github.com/Saffsanity/sill">source code</a> and not released yet, so there is no download for them. If you build one from source and something goes wrong, report it on <a href="https://github.com/Saffsanity/sill/issues">GitHub</a> and say that it is a build from source, which system it runs on and what it connected to. Email support covers the released apps.</p>
+  <!-- /Other systems -->
 
   <h2 id="log">Sending a log</h2>
   <p>A log helps with problems that aren’t listed here. On your Mac, choose Show Log… in the Sill menu, or open the Sill folder in Library/Logs in your home folder. The log lists your window names, device names and network addresses, never what you copy, so read it before you send it.</p>

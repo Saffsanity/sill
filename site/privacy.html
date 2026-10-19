@@ -31,11 +31,14 @@
 
 <main>
   <h1>Privacy Policy</h1>
-  <p class="muted">Last updated October 14, 2026</p>
+  <p class="muted">Last updated October 19, 2026</p>
 
   <p class="lede">Sill collects nothing. There is no account and no server: your screen, what you type and what you copy travel only between your own devices, and Sill never sends anything about you to the developer.</p>
 
   <p>This policy covers the Sill app for iPhone and iPad and Sill for Mac.</p>
+  <!-- Other systems: in development in the repository, with no download yet; rewrite each part when that system has a release. -->
+  <p>Sill for Android, Sill for Windows and the Windows and Linux hosts are in development and not released. When one is, this policy will cover it: built as they are now, they collect nothing either, send nothing to the developer, talk only to your own devices, and send each other no more than what is listed below for the iPhone and iPad app and Sill for Mac (<a href="#other-systems">what each keeps</a>).</p>
+  <!-- /Other systems -->
 
   <h2>The short version</h2>
   <ul>
@@ -124,6 +127,15 @@
     <li>A log of what Sill did, in the Library/Logs/Sill folder in your home folder. It includes window and app names, the menu items and three-finger gestures chosen from a device, which devices share the clipboard, device names and network addresses, never what you copy. It stays on your Mac unless you send it to someone, and Sill keeps at most two log files of 10 MB each.</li>
     <li>In your Mac’s keychain, in a part that only Sill can read and that is never synced or moved to another Mac: its keys, the devices you paired (each one’s name, model and key, when and how it paired, and for one that connected over a USB cable the code made from its serial number) and whether pairing is required. With Sill’s settings: when each device last connected, and how.</li>
   </ul>
+
+  <!-- Other systems: in development in the repository, with no download yet; rewrite each part when that system has a release. -->
+  <h3 id="other-systems">In the apps in development</h3>
+  <ul>
+    <li>Sill for Android keeps, in its own app storage, the same things as the iPhone and iPad app, and its pairing key sealed by a key in the Android Keystore that never leaves the device. It asks for no permission but network access: you scan a pairing code with your camera app, which hands Sill the link, and Sill asks you before it pairs.</li>
+    <li>Sill for Windows keeps its settings, the Mac computers you paired and its pairing key in one file in your user account’s application data folder (Sill, under AppData), which only your account and the system can read.</li>
+    <li>A Windows or Linux PC as the host keeps its keys, the devices you paired and its settings in one file in your user account’s settings folder (Sill Host, under AppData on Windows; .config/sill-host on Linux, readable by you alone), with a log beside it like Sill for Mac’s.</li>
+  </ul>
+  <!-- /Other systems -->
 
   <h2>Permissions</h2>
   <h3>On your Mac</h3>

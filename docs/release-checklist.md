@@ -135,6 +135,16 @@ serves the root or `/docs`, never `/site`. So:
   privacy.html's log line ("which devices share the clipboard", true of the builds out too, as "what
   you copy" in its lede and "never what you copy" in both log lines are). The release that ships it
   deletes the markers in `site/` and keeps the words.
+- The systems in development (Android, Windows, the Windows and Linux hosts) are between
+  `<!-- Other systems` and `<!-- /Other systems -->` on every page: they say each is in
+  development with no download, which holds until one is released, so a republish keeps them. The
+  release of one rewrites its part (its download, its store link, what its privacy section keeps)
+  and never publishes it as `v*` or the latest release (docs/clients-plan.md, decision 11, on the
+  branch that adds the clients). The Mac's menu items appear under both names, "Pair a Device… (Pair
+  iPhone or iPad… in Sill for Mac 0.5.1 and earlier)" and "A Device Needs Sill Updated (An iPhone or
+  iPad Needs Sill Updated …)", and the device's button as "Add a Host… (Add a Mac… in Sill 0.5.1 for
+  iPhone and iPad and earlier)": a release with the new names may drop the old ones once most
+  devices and Macs have it.
 - Once sill is public, it can serve the site itself: `git subtree push --prefix site origin gh-pages`,
   then Settings › Pages › gh-pages, / (root). Retire sill-site then.
 
