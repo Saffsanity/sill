@@ -25,7 +25,10 @@ public class GpuDecodeTests
         var sps = AnnexB.Nals(annexB).Select(n => HevcSps.Parse(n)).First(x => x is not null)!;
         HevcDecoder.Picture software;
         try { software = HevcDecoder.DecodeOne(annexB, sps).Picture; }
-        catch (InvalidOperationException) { return; }   // no HEVC decoder here
+        // No HEVC decoder here, or no Media Foundation at all (a Windows Server runner without its
+        // Media Foundation feature: MFStartup fails, or mfplat.dll is missing).
+        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException
+                                  or DllNotFoundException) { return; }
 
         GpuDevice gpu;
         try { gpu = new GpuDevice(); }
