@@ -503,5 +503,15 @@ do {
     check(pad3.cursor == pt(0.50, 0.40), "rest: another device driving on, the finger's move goes on from its latest position")
 }
 
+// MARK: Trackpad speed (#86)
+
+check(TrackpadSpeed.defaultsKey == "Sill.trackpadSpeed" && TrackpadSpeed.stored(nil) == .normal
+      && TrackpadSpeed.stored("") == .normal && TrackpadSpeed.stored("turbo") == .normal,
+      "TrackpadSpeed: default is Normal, unknown falls back to Normal")
+check(TrackpadSpeed.allCases.map(\.travel) == [0.625, 0.9375, 1.25, 1.75, 2.25]
+      && TrackpadSpeed.allCases.map(\.title) == ["Slowest", "Slow", "Normal", "Fast", "Fastest"]
+      && TrackpadSpeed.allCases.allSatisfy { TrackpadSpeed.stored($0.rawValue) == $0 },
+      "TrackpadSpeed: five ascending speeds, Normal is 1.25 frames per swipe")
+
 print("\(checks) checks, \(failures) failed")
 exit(failures == 0 ? 0 : 1)
