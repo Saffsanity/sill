@@ -390,7 +390,7 @@ public enum ClipboardPolicy {
         // Sill for Mac's Settings › General, under Share clipboard with devices.
         /// Its footnote (found in review: it said a password manager's copies stay, where only those it
         /// marks as concealed do, and "theirs here" read as if a device's copies came by themselves).
-        public static let macFootnote = "Text you copy here can be pasted on a connected iPhone or iPad, and text sent from one with Paste becomes this Mac’s. Copies a password manager marks as concealed stay on this Mac."
+        public static let macFootnote = "Text you copy here can be pasted on a connected device, and text sent from one with Paste becomes this Mac’s. Copies a password manager marks as concealed stay on this Mac."
         /// Under it while macOS does not allow every read (MacAccess): why what is copied here stays.
         public static func macAccessWarning(_ access: MacAccess) -> String? {
             switch access {

@@ -17,12 +17,13 @@ name: CI
 # (Should this job ever become a required check, such a pull request would wait for it: drop
 # paths-ignore then.) The rest of design/ is not left out: Tests/checks/dmg-layout reads
 # design/DMGBackground.svg (the disk image's window).
+# clients/ (Windows and Android, Kotlin) is built by clients.yml and never by this job.
 on:
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE', 'clients/**']
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE']
+    paths-ignore: ['**.md', 'docs/**', 'site/**', 'design/screenshots/**', 'LICENSE', 'clients/**']
   workflow_dispatch:
     inputs:
       mutants:

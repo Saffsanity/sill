@@ -316,7 +316,7 @@ package final class RemoteAccess {
 
     // MARK: Pairing
 
-    /// Opens a pairing window (5 minutes, one device) and offers it: Pair iPhone or iPad… on the
+    /// Opens a pairing window (5 minutes, one device) and offers it: Pair a Device… on the
     /// Mac, the CLI's own window, or kind 21 on a plain home door (`requestedBy`). Opening again
     /// while one is open keeps the same code and offers it again (the app brings its window
     /// forward, the CLI prints the code again); when a device opened that one by asking, it
@@ -494,7 +494,7 @@ package final class RemoteAccess {
                 try store?.savePaired(next)
                 paired = next
             } catch {
-                print("Pairing: couldn’t note which iPhone or iPad \(next[i].displayName) runs on (\(error)).")
+                print("Pairing: couldn’t note which device \(next[i].displayName) runs on (\(error)).")
             }
         }
         publish()

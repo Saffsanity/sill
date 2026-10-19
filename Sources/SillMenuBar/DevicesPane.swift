@@ -22,7 +22,7 @@ struct LiveDevicesPane: View {
 
 /// The Devices pane (docs/home-pairing-plan.md §6.1): Require pairing, and the devices paired with
 /// this Mac at home and from afar (one trust list), each with how it paired and how it last
-/// connected, Remove, rename and Pair iPhone or iPad…. Values in, actions out, so the previews can
+/// connected, Remove, rename and Pair a Device…. Values in, actions out, so the previews can
 /// draw every state. Errors show inline, never in alerts.
 struct DevicesPane: View {
     struct Actions {
@@ -67,7 +67,7 @@ struct DevicesPane: View {
                 }
             } footer: {
                 if requirePairing {
-                    Footnote("Each iPhone or iPad pairs once: over the USB cable by itself, or on Wi\u{2011}Fi with a code this Mac shows when the device asks. Everything devices send and receive is encrypted.")
+                    Footnote("Each device pairs once: an iPhone or iPad over the USB cable by itself, any device on Wi\u{2011}Fi with a code this Mac shows when the device asks. Everything devices send and receive is encrypted.")
                 } else {
                     Label("Any device on your network (or nearby, with Direct Wireless Connection on) and any app on this Mac can see and control it without pairing. Connections are still encrypted.",
                           systemImage: "exclamationmark.triangle.fill")
@@ -110,7 +110,7 @@ struct DevicesPane: View {
                                 },
                                 rename: { actions.rename(device.id, $0) })
             }
-            Button("Pair iPhone or iPad…") { actions.pair() }
+            Button("Pair a Device…") { actions.pair() }
                 .disabled(unavailable != nil)
         } header: {
             Text("Paired Devices")

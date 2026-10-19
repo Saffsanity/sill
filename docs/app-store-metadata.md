@@ -786,14 +786,14 @@ Safe:
 - The UI names in the review notes and the shot list match the code: the
   connect screen, the bars (Apps, Keyboard, Desktop, Settings), the panel, the
   Mac's Permissions pane and menu, and on remote-access "Add a Mac…",
-  "Remote Access…", "Pair iPhone or iPad…" and "Enter Code Instead".
+  "Remote Access…", "Pair a Device…" and "Enter Code Instead".
 - No em-dashes in this file; its only email address is support@getsill.app.
 - Pairing at home (PR #37, 2026-09-27): the description, the review notes,
   the export compliance, the privacy answers, the demo video and the
   screenshot steps describe it, since every connection at home is TLS with
   pairing from then on and a Release build never connects to an older Sill for
   Mac. The names in them match the code: "Not paired" (the row), "Enter Code
-  Instead" (the home card, as Add a Mac…'s), "Pair iPhone or iPad…" and
+  Instead" (the home card, as Add a Mac…'s), "Pair a Device…" and
   Settings › Devices (the Mac), and an ask from the Mac itself (the simulator)
   gets no window by itself (`DoorPolicy.ask`).
 

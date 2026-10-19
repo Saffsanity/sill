@@ -159,7 +159,7 @@ public struct PairResult: Codable, Sendable {
     public var recognitionKey: String?
     /// Not ok: "code", "closed", "expired", "stopped" or "busy". After an ask at the home door also
     /// "shown" (the window shows a code now: scan it or type it), "openOnMac" (the Mac showed none
-    /// by itself: choose Pair iPhone or iPad… on the Mac) or "locked" (the Mac is locked).
+    /// by itself: choose Pair a Device… on the Mac) or "locked" (the Mac is locked).
     public var reason: String?
     /// With "code": the wrong proofs the window still takes.
     public var triesLeft: Int?

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The Mac's doors, at home and away (TLS, never cleartext HTTP), and the multicast DNS queries
+         that find it on the network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:name=".SillApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Sill">
+
+        <!-- The fold, on foldables: the platform's window extensions, else the older sidecar (FoldReader;
+             optional, read by reflection, nothing from AndroidX). -->
+        <uses-library android:name="androidx.window.extensions" android:required="false" />
+        <uses-library android:name="androidx.window.sidecar" android:required="false" />
+
+        <activity
+            android:name=".ConnectActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The Mac's pairing QR code, scanned with the camera app: always confirmed before it pairs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sill" android:host="pair" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".StreamActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
+            android:exported="false"
+            android:windowSoftInputMode="adjustNothing" />
+    </application>
+</manifest>

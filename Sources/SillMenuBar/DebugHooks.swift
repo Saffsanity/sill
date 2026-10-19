@@ -22,7 +22,7 @@ import StreamProtocol
 ///                                              SILL_TEST_REMOTE_DIR)
 ///     -requirePairing YES|NO                   Require pairing at launch, saved in the identity
 ///                                              store as the Devices pane saves it
-///     -SillPairAfter <s>                       open a pairing window (Pair iPhone or iPad…) s
+///     -SillPairAfter <s>                       open a pairing window (Pair a Device…) s
 ///                                              seconds after launch. With --synthetic and
 ///                                              SILL_TEST_REMOTE_DIR the link and the code are
 ///                                              also left there as pairing.url and pairing.code

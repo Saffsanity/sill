@@ -12,5 +12,5 @@ body:
   - type: input
     id: devices
     attributes:
-      label: Your Mac and your iPhone or iPad
+      label: Your Mac and your device
       description: Optional, when the idea is about one of them.

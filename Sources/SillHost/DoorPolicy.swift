@@ -201,7 +201,7 @@ enum DoorPolicy {
     // MARK: An older Sill, for the menu
 
     /// How many plain tries (a handshake that failed with -9836 at the home door) one source makes
-    /// within `olderSillSpan` before the menu says "An iPhone or iPad Needs Sill Updated". An older
+    /// within `olderSillSpan` before the menu says "A Device Needs Sill Updated". An older
     /// Sill tries again and again (a tap, then its reconnect every 2 to 10 s), while a TLS 1.2 client
     /// (a scanner, an old TLS library), which fails the same way, usually tries once: the menu waits
     /// for the third (the security review, 2026-09-27). The minute's summary counts every one.

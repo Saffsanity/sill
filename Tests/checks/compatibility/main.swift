@@ -127,7 +127,7 @@ check(Wire.decode(Goodbye.self, from: Data(#"{"reason":"quit"}"#.utf8)) == Goodb
 check(Wire.decode(Goodbye.self, from: Data(#"{"message":"x"}"#.utf8)) == nil, "no reason: no goodbye")
 // A reason from a later host ("pairingRequired", this example until pairing at home made it a reason
 // the device knows, is Goodbye.pairingRequired now).
-let later = #"{"reason":"pairAgain","message":"Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.","reconnect":false}"#
+let later = #"{"reason":"pairAgain","message":"Pair this iPad with Mac mini again: choose Pair a Device… on the Mac.","reconnect":false}"#
 check(Wire.decode(Goodbye.self, from: Data(later.utf8))?.reason == "pairAgain", "a later reason decodes")
 check(Goodbye.pairingRequired == "pairingRequired" && Goodbye.update == "update", "pairing at home's reason and the update notice's, as their devices read them")
 // The window list with and without the new keys.

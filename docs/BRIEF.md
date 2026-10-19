@@ -55,6 +55,14 @@ grid.
   Companion needs Screen Recording + Accessibility permissions.
 - License: Apache-2.0, final since the repository went public on 2026-09-26
   (LICENSE).
+- Windows and Android (2026-10-18, docs/clients-plan.md): both as clients of the
+  Mac, never hosts. One Kotlin/JVM core (`clients/core`) speaks the wire, as
+  StreamProtocol does for the Mac and the iPad, checked against vectors the real
+  Swift types write. The Windows client decodes HEVC with FFmpeg (LGPL, through
+  bytedeco's prebuilt libraries): Windows has no HEVC decoder without the Store's
+  paid extension. That is the one third-party runtime dependency, Windows only.
+  Android uses MediaCodec and platform APIs alone. The Mac and iPad side is
+  unchanged: Swift, Apple frameworks only.
 
 ## UI (mockups on the design canvas)
 

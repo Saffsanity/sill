@@ -12,7 +12,7 @@ final class PairingWindowState {
     var offer: RemoteAccess.PairingOffer?
 }
 
-/// "Pair iPhone or iPad" (docs/remote-access-plan.md §6.2, docs/home-pairing-plan.md §6.3): a
+/// "Pair a Device" (docs/remote-access-plan.md §6.2, docs/home-pairing-plan.md §6.3): a
 /// standalone window, not a sheet, because a device near the Mac can open it (its ask, or Pair This
 /// iPad…) while Settings is closed. One instance: opening it again brings it forward with the same
 /// code. Closing it cancels the pairing window, and the code dies with it.
@@ -34,7 +34,7 @@ final class PairDeviceWindowController: NSWindowController, NSWindowDelegate {
         self.model = model
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 600), styleMask: [.titled, .closable],
                               backing: .buffered, defer: true)
-        window.title = "Pair iPhone or iPad"
+        window.title = "Pair a Device"
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
         window.sharingType = .none
@@ -182,7 +182,7 @@ struct PairDeviceView: View {
                         .font(.headline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("In Sill on your iPhone or iPad, tap this Mac, or tap Add a Mac… when you’re away, then point it at this code.")
+                Text("In Sill on your device, tap this Mac, or tap Add a Mac… when you’re away, then scan this code or type the one below.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             QRCodeView(text: offer.url, spent: isSpent)

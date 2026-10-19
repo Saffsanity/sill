@@ -1256,7 +1256,7 @@ enum DiscoveryPolicy {
         case pairedOverCable
         /// The Mac shows its code now: the home card, to scan it or type it.
         case shown
-        /// The Mac showed no code by itself: choose Pair iPhone or iPad… on the Mac.
+        /// The Mac showed no code by itself: choose Pair a Device… on the Mac.
         case openOnMac
         /// The Mac is locked.
         case locked
@@ -1415,7 +1415,7 @@ enum DiscoveryPolicy {
         }
         /// Pair This iPad…'s errors over a stream at home, where no row can be tapped: the Mac
         /// could not prove it knows the code; nothing answered the pairing connection. (A refused
-        /// code says what the remote path's does: choose Pair iPhone or iPad… on the Mac.)
+        /// code says what the remote path's does: choose Pair a Device… on the Mac.)
         static func proofFailedOverStream(mac: String) -> String {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code."
         }
@@ -1426,13 +1426,13 @@ enum DiscoveryPolicy {
         static func overlayAsking(mac: String) -> String { "Asking \(mac) for a code\u{2026}" }
         static func overlayShowing(mac: String) -> String { "\(mac) is showing a code now." }
         static func overlayOpenOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu."
+            "\(mac) didn\u{2019}t show a code by itself. On the Mac, choose Pair a Device\u{2026} in the Sill menu."
         }
         static func overlayLocked(mac: String, device: String) -> String {
             "Unlock \(mac), then choose Pair This \(device)\u{2026} again."
         }
         static func openOnMac(mac: String) -> String {
-            "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "\(mac) didn\u{2019}t show a code. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func locked(mac: String) -> String { "Unlock \(mac), then tap it again." }
         static func removed(mac: String, device: String) -> String { "\(mac) removed this \(device). Tap it to pair again." }
@@ -1447,11 +1447,11 @@ enum DiscoveryPolicy {
         /// or a closed code the Mac keeps this device quiet (a cancel on the Mac, a stop), so the
         /// words send the person to its menu first; after an expiry a tap is enough.
         static func stopped(mac: String) -> String {
-            "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "\(mac) stopped pairing after too many wrong codes. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func expired(mac: String) -> String { "That code expired. Tap \(mac) for a new one." }
         static func closed(mac: String) -> String {
-            "That code no longer works. On the Mac, choose Pair iPhone or iPad\u{2026} in the Sill menu, then tap \(mac) again."
+            "That code no longer works. On the Mac, choose Pair a Device\u{2026} in the Sill menu, then tap \(mac) again."
         }
         static func proofFailed(mac: String) -> String {
             "Pairing didn\u{2019}t finish: \(mac) couldn\u{2019}t show it knows the code. Tap it to try again."

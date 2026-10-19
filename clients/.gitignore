@@ -1,0 +1,7 @@
+# Gradle's own state and every module's outputs.
+.gradle/
+.kotlin/
+build/
+local.properties
+*.hprof
+hs_err_pid*.log

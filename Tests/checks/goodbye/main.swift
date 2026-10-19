@@ -39,8 +39,8 @@ check(out(g("pairingRequired", "x", reconnect: true), device: "iPhone") == O(tex
                                                                           reconnect: false, remoteAllowed: false, isNotice: false),
       "pairingRequired keeps its rule")
 // A reason this build does not know: the Mac's words, a reconnect only when asked.
-let later = g("pairAgain", "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false)
-check(out(later, saved: true) == O(text: "Pair this iPad with Mac mini again: choose Pair iPhone or iPad… on the Mac.", reconnect: false, remoteAllowed: true, isNotice: true), "a later reason, reconnect false")
+let later = g("pairAgain", "Pair this iPad with Mac mini again: choose Pair a Device… on the Mac.", reconnect: false)
+check(out(later, saved: true) == O(text: "Pair this iPad with Mac mini again: choose Pair a Device… on the Mac.", reconnect: false, remoteAllowed: true, isNotice: true), "a later reason, reconnect false")
 check(out(g("later", "Back soon.", reconnect: true), saved: true) == O(text: "Back soon.", reconnect: true, remoteAllowed: true, isNotice: true), "a later reason, reconnect true")
 check(out(g("later", "Back soon.")).reconnect == false, "reconnect nil is false")
 check(out(g("later")).text == "Mac mini closed the connection. Tap it to try again.", "no message, no reconnect")
