@@ -36,6 +36,7 @@ final class RemoteServer {
 
     // On `queue`.
     private var listener: NWListener?
+    private var quicListener: NWListener?
     private var wanted = false
     private var port = HostConfig.defaultRemotePort
     private var retryItem: DispatchWorkItem?
@@ -80,6 +81,8 @@ final class RemoteServer {
         retryItem?.cancel(); retryItem = nil
         listener?.cancel()
         listener = nil
+        quicListener?.cancel()
+        quicListener = nil
     }
 
     private func startListener() {
@@ -114,6 +117,7 @@ final class RemoteServer {
             case .ready:
                 let bound = Int(l.port?.rawValue ?? 0)
                 reportedFailure = false
+                startQUICListener(on: bound)
                 print("Remote access: listening on port \(bound) (TLS, paired devices only; \(trust.snapshot.paired.count) paired).")
                 onListener?(.listening(bound))
             case .failed(let e):
@@ -131,6 +135,36 @@ final class RemoteServer {
             }
         }
         l.start(queue: queue)
+    }
+
+    /// Runs a QUIC listener on the same UDP port `bound` beside the TCP listener, admitted by the
+    /// same `Door`.
+    private func startQUICListener(on bound: Int) {
+        quicListener?.cancel()
+        quicListener = nil
+        guard let p = NWEndpoint.Port(rawValue: UInt16(bound)) else { return }
+        let params = RemoteTLS.quicParameters(quic: door.quicOptions())
+        let ql: NWListener
+        do {
+            if server.loopbackOnly {
+                StreamServer.bindToLoopback(params, port: p)
+                ql = try NWListener(using: params)
+            } else {
+                ql = try NWListener(using: params, on: p)
+            }
+        } catch {
+            return
+        }
+        quicListener = ql
+        RemoteTLS.attachQUICGroups(ql, queue: queue) { [weak self, weak ql] c in
+            guard let self, let ql, ql === self.quicListener else { c.cancel(); return }
+            self.door.accept(c)
+        }
+        ql.stateUpdateHandler = { [weak self, weak ql] state in
+            guard let self, let ql, ql === self.quicListener else { return }
+            if case .failed = state { ql.cancel(); self.quicListener = nil }
+        }
+        ql.start(queue: queue)
     }
 
     /// Never another port by itself: saved addresses depend on this one. Retried every 30 s and

@@ -18,6 +18,11 @@ import StreamProtocol
 /// pairing path from afar). Plain TCP remains only for a plain door, which only a DEBUG build ever
 /// dials (DiscoveryPolicy.homeDial).
 enum DeviceTLS {
+    /// The transport this device dials with: TCP by default; QUIC when `Sill.transport` is `quic`.
+    static var preferredTransport: RemoteTLS.Transport {
+        RemoteTLS.Transport.stored(UserDefaults.standard.string(forKey: RemoteTLS.Transport.defaultsKey))
+    }
+
     /// The TLS options of one connection: `alpn` is `sill/1` for a session, `sill-pair/1` for
     /// pairing; `pin` the Mac's key, or nil for any P-256 key (a key of another kind matches
     /// nothing). RemoteConnector's dials from afar use them too. `onPinRefused` runs on `queue`
@@ -30,27 +35,60 @@ enum DeviceTLS {
     /// `alsoAccept`: other saved Macs' keys that may answer in the pin's place at this address
     /// (RemoteDialPolicy.successors: a Mac set up again, whose newer record this device holds too);
     /// the caller reads which key completed the handshake off the ready connection.
-    static func options(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
-                        alsoAccept: [Data] = [], onPinRefused: (() -> Void)? = nil) -> NWProtocolTLS.Options {
-        RemoteTLS.options(identity: identity.tls, role: .client(alpn: alpn), verify: { fp in
+    private static func verifyClosure(pin: Data?, alsoAccept: [Data],
+                                      onPinRefused: (() -> Void)?) -> (Data?) -> Bool {
+        { fp in
             guard let pin else { return fp != nil }
             if let fp, fp != pin, alsoAccept.contains(fp) { return true }
             guard fp == pin else { onPinRefused?(); return false }
             return true
-        }, queue: queue)
+        }
+    }
+
+    static func options(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
+                        alsoAccept: [Data] = [], onPinRefused: (() -> Void)? = nil) -> NWProtocolTLS.Options {
+        RemoteTLS.options(identity: identity.tls, role: .client(alpn: alpn),
+                          verify: verifyClosure(pin: pin, alsoAccept: alsoAccept, onPinRefused: onPinRefused), queue: queue)
+    }
+
+    static func quicOptions(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
+                            alsoAccept: [Data] = [], onPinRefused: (() -> Void)? = nil) -> NWProtocolQUIC.Options {
+        RemoteTLS.quicOptions(identity: identity.tls, role: .client(alpn: alpn),
+                              verify: verifyClosure(pin: pin, alsoAccept: alsoAccept, onPinRefused: onPinRefused), queue: queue)
+    }
+
+    /// Parameters for a remote dial (`RemoteConnector`): TCP by default, or QUIC when `transport`
+    /// says so.
+    static func remote(identity: RemoteIdentity, alpn: String, pin: Data?, queue: DispatchQueue,
+                       alsoAccept: [Data] = [], transport: RemoteTLS.Transport = preferredTransport) -> NWParameters {
+        if transport == .quic {
+            let quic = quicOptions(identity: identity, alpn: alpn, pin: pin, queue: queue, alsoAccept: alsoAccept)
+            return RemoteTLS.quicParameters(quic: quic)
+        }
+        let tls = options(identity: identity, alpn: alpn, pin: pin, queue: queue, alsoAccept: alsoAccept)
+        return RemoteTLS.parameters(tls: tls, dialing: true)
     }
 
     /// A connection to a Mac's home door: those TLS options over the device's home TCP (no Nagle;
-    /// a connect timeout for a pairing dial), the video service class, and peer-to-peer (AWDL) only
-    /// for a Direct row (RemoteTLS.parameters). `ipv6Only` for the ask's dial over a row's wired
-    /// interface: the cable counts only over IPv6 link-local, at both ends.
+    /// a connect timeout for a pairing dial), or QUIC when `transport` is `.quic`, the video service
+    /// class, and peer-to-peer (AWDL) only for a Direct row (RemoteTLS.parameters). `ipv6Only` for
+    /// the ask's dial over a row's wired interface: the cable counts only over IPv6 link-local, at
+    /// both ends.
     static func home(identity: RemoteIdentity, alpn: String, pin: Data?, peerToPeer: Bool, queue: DispatchQueue,
-                     ipv6Only: Bool = false, connectTimeout: Int? = nil, onPinRefused: (() -> Void)? = nil) -> NWParameters {
-        let tcp = NWProtocolTCP.Options()
-        tcp.noDelay = true
-        if let connectTimeout { tcp.connectionTimeout = connectTimeout }
-        let params = RemoteTLS.parameters(tls: options(identity: identity, alpn: alpn, pin: pin, queue: queue, onPinRefused: onPinRefused),
+                     ipv6Only: Bool = false, connectTimeout: Int? = nil,
+                     transport: RemoteTLS.Transport = preferredTransport,
+                     onPinRefused: (() -> Void)? = nil) -> NWParameters {
+        let params: NWParameters
+        if transport == .quic {
+            let quic = quicOptions(identity: identity, alpn: alpn, pin: pin, queue: queue, onPinRefused: onPinRefused)
+            params = RemoteTLS.quicParameters(quic: quic, peerToPeer: peerToPeer)
+        } else {
+            let tcp = NWProtocolTCP.Options()
+            tcp.noDelay = true
+            if let connectTimeout { tcp.connectionTimeout = connectTimeout }
+            params = RemoteTLS.parameters(tls: options(identity: identity, alpn: alpn, pin: pin, queue: queue, onPinRefused: onPinRefused),
                                           tcp: tcp, peerToPeer: peerToPeer)
+        }
         if ipv6Only, let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options { ip.version = .v6 }
         return params
     }

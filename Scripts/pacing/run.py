@@ -77,10 +77,14 @@ try:
                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     rport = wait_for(follow(relay, relay_out), r"listening on 127\.0\.0\.1:(\d+)", "relay")
     with open(path("device.txt"), "w") as dev_out:
-        dev = start([sys.executable, os.path.join(HERE, "device.py"), str(rport), "--seconds", str(seconds)] + dev_args,
-                    stdout=dev_out, stderr=subprocess.STDOUT, text=True)
+        if "--quic" in dev_args:
+            dev_cmd = [binary, "--device", str(rport), "--seconds", str(seconds)] + dev_args
+        else:
+            dev_cmd = [sys.executable, os.path.join(HERE, "device.py"), str(rport), "--seconds", str(seconds)] + dev_args
+        dev = start(dev_cmd, stdout=dev_out, stderr=subprocess.STDOUT, text=True)
         dev.wait(timeout=seconds + 60)
-    time.sleep(1.5)
+    if "--quic" not in dev_args:
+        time.sleep(1.5)
 finally:
     stop_all()
 print(f"run {name}: {RUNS}")
