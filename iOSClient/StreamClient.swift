@@ -3306,6 +3306,12 @@ final class StreamClient: ObservableObject {
         return defaults.object(forKey: gesturesKey) == nil || defaults.bool(forKey: gesturesKey)
     }
 
+    /// This device's switch for Aim Without Clicking (the Settings panel's This iPad group): off unless
+    /// turned on. On, a trackpad stroke that moved the pointer neither taps nor presses and holds
+    /// (TrackpadSurface's `clickSlop`); off, every short stroke can click as before. Never sent.
+    static let aimWithoutClickingKey = "Sill.aimWithoutClicking"
+    static var aimWithoutClicking: Bool { UserDefaults.standard.bool(forKey: aimWithoutClickingKey) }
+
     /// This device's switch for Larger Picture (the Settings panel's This iPhone group; issue #58,
     /// docs/larger-picture-plan.md): off unless turned on. The device's own preference, never sent to
     /// the Mac; the stream screen reads it with what streams (`active`): it acts only while a window

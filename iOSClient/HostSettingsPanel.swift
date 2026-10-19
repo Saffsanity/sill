@@ -41,6 +41,9 @@ struct HostSettingsPanel: View {
     /// This device's switch for three-finger gestures (docs/trackpad-gestures-plan.md §8): on unless
     /// turned off, read by `StreamClient.sendGesture` at each gesture, never sent.
     @AppStorage(StreamClient.gesturesKey) private var gesturesOn = true
+    /// This device's switch for Aim Without Clicking: off unless turned on, read by the trackpad at
+    /// each tap and press and hold, never sent.
+    @AppStorage(StreamClient.aimWithoutClickingKey) private var aimWithoutClicking = false
     /// This device's switch for Larger Picture (docs/larger-picture-plan.md): off unless turned on,
     /// read by the stream screen, never sent.
     @AppStorage(StreamClient.largerPictureKey) private var largerPicture = false
@@ -505,6 +508,15 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, mac: mac, device: device))
         }
+        Rows {
+            Toggle(isOn: $aimWithoutClicking) {
+                Text("Aim Without Clicking").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: aimWithoutClicking
+            ? "On the trackpad, moving the pointer and lifting never clicks. Tap without moving to click; hold still, then drag, to drag."
+            : "On the trackpad, a short stroke can click as it lifts, and resting on a spot presses the button.")
         Rows {
             Toggle(isOn: $gesturesOn) {
                 Text("Three-Finger Gestures").foregroundStyle(Palette.text)

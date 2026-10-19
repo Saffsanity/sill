@@ -168,6 +168,14 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     /// enough to feel instant, big enough that a clean tap clicks without nudging the pointer
     /// first. Past it the whole distance from touch-down counts, so no travel is lost to it.
     private static let trackSlop: CGFloat = 2
+    /// How far a finger may travel from where it landed and still tap or press and hold. Past it the
+    /// stroke was aiming the pointer: lifting it, or pausing on a link mid-aim, clicks nothing.
+    private static let clickSlop: CGFloat = 6
+    /// Where the tracked finger landed, and whether it has since gone past `clickSlop`.
+    private var trackStart: CGPoint = .zero
+    private var strokeAimed = false
+    /// This stroke was aiming and Settings' Aim Without Clicking is on: no tap, no press and hold.
+    private var aimingClicksNothing: Bool { strokeAimed && StreamClient.aimWithoutClicking }
     /// Where the tracked finger was at the last move turned into pointer motion (its touch-down
     /// point until it clears the slop), in this view's points.
     private var trackLast: CGPoint = .zero
@@ -310,9 +318,12 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
             trackSuspended = false
             trackLive = false
             trackLast = tracker.location(in: self)
+            trackStart = trackLast
+            strokeAimed = false
         case .changed:
             guard trackerDriving else { return }
             let location = tracker.location(in: self)
+            if hypot(location.x - trackStart.x, location.y - trackStart.y) > Self.clickSlop { strokeAimed = true }
             if !trackLive {
                 guard hypot(location.x - trackLast.x, location.y - trackLast.y) > Self.trackSlop else { return }
                 trackLive = true
@@ -469,7 +480,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleTap() {
-        guard !strokes.silent else { return }
+        guard !strokes.silent, !aimingClicksNothing else { return }
         click(down: .leftDown, up: .leftUp)
     }
 
@@ -483,6 +494,7 @@ final class TrackpadSurface: UIView, UIGestureRecognizerDelegate {
         guard !strokes.silent else { return }
         switch gesture.state {
         case .began:
+            guard !aimingClicksNothing else { return }   // the finger was aiming: no button goes down
             dragging = true
             // Firmer than a click: the button is now held down.
             clickHaptic.impactOccurred(intensity: 1.0)
